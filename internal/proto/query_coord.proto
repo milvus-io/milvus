@@ -636,3 +636,27 @@ message DeleteRequest {
   repeated uint64 timestamps = 7; 
   DataScope scope = 8;
 }
+
+message SegmentTarget {
+  int64 ID = 1;
+  data.SegmentLevel level = 2; 
+}
+
+message PartitionTarget {
+  int64 partitionID = 1;
+  repeated SegmentTarget segments = 2;
+}
+
+message ChannelTarget {
+  string channelName = 1;
+  repeated int64 dropped_segmentIDs = 2;
+  repeated int64 growing_segmentIDs = 3;
+  repeated PartitionTarget partition_targets = 4;
+  msg.MsgPosition seek_position = 5;
+}
+
+message CollectionTarget {
+  int64 collectionID = 1;
+  repeated ChannelTarget Channel_targets = 2;
+  int64 version = 3;
+}

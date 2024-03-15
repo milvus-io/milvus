@@ -20,6 +20,59 @@ func (_m *QueryCoordCatalog) EXPECT() *QueryCoordCatalog_Expecter {
 	return &QueryCoordCatalog_Expecter{mock: &_m.Mock}
 }
 
+// GetCollectionTargets provides a mock function with given fields:
+func (_m *QueryCoordCatalog) GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error) {
+	ret := _m.Called()
+
+	var r0 map[int64]*querypb.CollectionTarget
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (map[int64]*querypb.CollectionTarget, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() map[int64]*querypb.CollectionTarget); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]*querypb.CollectionTarget)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// QueryCoordCatalog_GetCollectionTargets_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionTargets'
+type QueryCoordCatalog_GetCollectionTargets_Call struct {
+	*mock.Call
+}
+
+// GetCollectionTargets is a helper method to define mock.On call
+func (_e *QueryCoordCatalog_Expecter) GetCollectionTargets() *QueryCoordCatalog_GetCollectionTargets_Call {
+	return &QueryCoordCatalog_GetCollectionTargets_Call{Call: _e.mock.On("GetCollectionTargets")}
+}
+
+func (_c *QueryCoordCatalog_GetCollectionTargets_Call) Run(run func()) *QueryCoordCatalog_GetCollectionTargets_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *QueryCoordCatalog_GetCollectionTargets_Call) Return(_a0 map[int64]*querypb.CollectionTarget, _a1 error) *QueryCoordCatalog_GetCollectionTargets_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *QueryCoordCatalog_GetCollectionTargets_Call) RunAndReturn(run func() (map[int64]*querypb.CollectionTarget, error)) *QueryCoordCatalog_GetCollectionTargets_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollections provides a mock function with given fields:
 func (_m *QueryCoordCatalog) GetCollections() ([]*querypb.CollectionLoadInfo, error) {
 	ret := _m.Called()
@@ -416,6 +469,48 @@ func (_c *QueryCoordCatalog_ReleaseReplicas_Call) RunAndReturn(run func(int64) e
 	return _c
 }
 
+// RemoveCollectionTarget provides a mock function with given fields: collectionID
+func (_m *QueryCoordCatalog) RemoveCollectionTarget(collectionID int64) error {
+	ret := _m.Called(collectionID)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(int64) error); ok {
+		r0 = rf(collectionID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// QueryCoordCatalog_RemoveCollectionTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveCollectionTarget'
+type QueryCoordCatalog_RemoveCollectionTarget_Call struct {
+	*mock.Call
+}
+
+// RemoveCollectionTarget is a helper method to define mock.On call
+//   - collectionID int64
+func (_e *QueryCoordCatalog_Expecter) RemoveCollectionTarget(collectionID interface{}) *QueryCoordCatalog_RemoveCollectionTarget_Call {
+	return &QueryCoordCatalog_RemoveCollectionTarget_Call{Call: _e.mock.On("RemoveCollectionTarget", collectionID)}
+}
+
+func (_c *QueryCoordCatalog_RemoveCollectionTarget_Call) Run(run func(collectionID int64)) *QueryCoordCatalog_RemoveCollectionTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *QueryCoordCatalog_RemoveCollectionTarget_Call) Return(_a0 error) *QueryCoordCatalog_RemoveCollectionTarget_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *QueryCoordCatalog_RemoveCollectionTarget_Call) RunAndReturn(run func(int64) error) *QueryCoordCatalog_RemoveCollectionTarget_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveResourceGroup provides a mock function with given fields: rgName
 func (_m *QueryCoordCatalog) RemoveResourceGroup(rgName string) error {
 	ret := _m.Called(rgName)
@@ -511,6 +606,48 @@ func (_c *QueryCoordCatalog_SaveCollection_Call) Return(_a0 error) *QueryCoordCa
 }
 
 func (_c *QueryCoordCatalog_SaveCollection_Call) RunAndReturn(run func(*querypb.CollectionLoadInfo, ...*querypb.PartitionLoadInfo) error) *QueryCoordCatalog_SaveCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveCollectionTarget provides a mock function with given fields: target
+func (_m *QueryCoordCatalog) SaveCollectionTarget(target *querypb.CollectionTarget) error {
+	ret := _m.Called(target)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*querypb.CollectionTarget) error); ok {
+		r0 = rf(target)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// QueryCoordCatalog_SaveCollectionTarget_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCollectionTarget'
+type QueryCoordCatalog_SaveCollectionTarget_Call struct {
+	*mock.Call
+}
+
+// SaveCollectionTarget is a helper method to define mock.On call
+//   - target *querypb.CollectionTarget
+func (_e *QueryCoordCatalog_Expecter) SaveCollectionTarget(target interface{}) *QueryCoordCatalog_SaveCollectionTarget_Call {
+	return &QueryCoordCatalog_SaveCollectionTarget_Call{Call: _e.mock.On("SaveCollectionTarget", target)}
+}
+
+func (_c *QueryCoordCatalog_SaveCollectionTarget_Call) Run(run func(target *querypb.CollectionTarget)) *QueryCoordCatalog_SaveCollectionTarget_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*querypb.CollectionTarget))
+	})
+	return _c
+}
+
+func (_c *QueryCoordCatalog_SaveCollectionTarget_Call) Return(_a0 error) *QueryCoordCatalog_SaveCollectionTarget_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *QueryCoordCatalog_SaveCollectionTarget_Call) RunAndReturn(run func(*querypb.CollectionTarget) error) *QueryCoordCatalog_SaveCollectionTarget_Call {
 	_c.Call.Return(run)
 	return _c
 }
