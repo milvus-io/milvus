@@ -181,3 +181,50 @@ func TestRetryErrorParam(t *testing.T) {
 		assert.Equal(t, 3, runTimes)
 	}
 }
+
+func TestHandle(t *testing.T) {
+	// test context done
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	err := Handle(ctx, func() (bool, error) {
+		return false, nil
+	}, Attempts(5))
+	assert.ErrorIs(t, err, context.Canceled)
+
+	fakeErr := errors.New("mock retry error")
+	// test return error and retry
+	counter := 0
+	err = Handle(context.Background(), func() (bool, error) {
+		counter++
+		if counter < 3 {
+			return true, fakeErr
+		}
+		return false, nil
+	}, Attempts(10))
+	assert.NoError(t, err)
+
+	// test ctx done before return retry success
+	counter = 0
+	ctx1, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	err = Handle(ctx1, func() (bool, error) {
+		counter++
+		if counter < 5 {
+			return true, fakeErr
+		}
+		return false, nil
+	}, Attempts(10))
+	assert.ErrorIs(t, err, fakeErr)
+
+	// test return error and not retry
+	err = Handle(context.Background(), func() (bool, error) {
+		return false, fakeErr
+	}, Attempts(10))
+	assert.ErrorIs(t, err, fakeErr)
+
+	// test return nil
+	err = Handle(context.Background(), func() (bool, error) {
+		return false, nil
+	}, Attempts(10))
+	assert.NoError(t, err)
+}
