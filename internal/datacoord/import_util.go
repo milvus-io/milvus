@@ -247,6 +247,45 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 	return fileGroups
 }
 
+func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) {
+	if !Params.QuotaConfig.DiskProtectionEnabled.GetAsBool() {
+		return 0, nil
+	}
+
+	var (
+		requestedTotal       int64
+		requestedCollections = make(map[int64]int64)
+	)
+	for _, j := range imeta.GetJobBy() {
+		requested := j.GetRequestedDiskSize()
+		requestedTotal += requested
+		requestedCollections[j.GetCollectionID()] += requested
+	}
+
+	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
+	totalUsage, collectionsUsage := meta.GetCollectionBinlogSize()
+
+	tasks := imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
+	files := make([]*datapb.ImportFileStats, 0)
+	for _, task := range tasks {
+		files = append(files, task.GetFileStats()...)
+	}
+	requestSize := lo.SumBy(files, func(file *datapb.ImportFileStats) int64 {
+		return file.GetTotalMemorySize()
+	})
+
+	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
+	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
+		return 0, err
+	}
+	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
+	colID := job.GetCollectionID()
+	if float64(collectionsUsage[colID]+requestedCollections[colID]+requestSize) > collectionDiskQuota {
+		return 0, err
+	}
+	return requestSize, nil
+}
+
 func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
 	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(PreImportTaskType))
 	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
