@@ -1,5 +1,48 @@
 package httpserver
 
+import (
+	"time"
+
+	"github.com/milvus-io/milvus/pkg/util/metric"
+)
+
+// v2
+const (
+	// --- category ---
+	CollectionCategory = "/collections/"
+	EntityCategory     = "/entities/"
+	PartitionCategory  = "/partitions/"
+	UserCategory       = "/users/"
+	RoleCategory       = "/roles/"
+	IndexCategory      = "/indexes/"
+	AliasCategory      = "/aliases/"
+
+	ListAction      = "list"
+	HasAction       = "has"
+	DescribeAction  = "describe"
+	CreateAction    = "create"
+	DropAction      = "drop"
+	StatsAction     = "get_stats"
+	LoadStateAction = "get_load_state"
+	RenameAction    = "rename"
+	LoadAction      = "load"
+	ReleaseAction   = "release"
+	QueryAction     = "query"
+	GetAction       = "get"
+	DeleteAction    = "delete"
+	InsertAction    = "insert"
+	UpsertAction    = "upsert"
+	SearchAction    = "search"
+
+	UpdatePasswordAction  = "update_password"
+	GrantRoleAction       = "grant_role"
+	RevokeRoleAction      = "revoke_role"
+	GrantPrivilegeAction  = "grant_privilege"
+	RevokePrivilegeAction = "revoke_privilege"
+	AlterAction           = "alter"
+	GetProgressAction     = "get_progress"
+)
+
 const (
 	ContextUsername               = "username"
 	VectorCollectionsPath         = "/vector/collections"
@@ -19,30 +62,60 @@ const (
 	EnableAutoID  = true
 	DisableAutoID = false
 
-	HTTPCollectionName   = "collectionName"
-	HTTPDbName           = "dbName"
-	DefaultDbName        = "default"
-	DefaultIndexName     = "vector_idx"
-	DefaultOutputFields  = "*"
-	HTTPHeaderAllowInt64 = "Accept-Type-Allow-Int64"
-	HTTPReturnCode       = "code"
-	HTTPReturnMessage    = "message"
-	HTTPReturnData       = "data"
+	HTTPCollectionName       = "collectionName"
+	HTTPCollectionID         = "collectionID"
+	HTTPDbName               = "dbName"
+	HTTPPartitionName        = "partitionName"
+	HTTPPartitionNames       = "partitionNames"
+	HTTPUserName             = "userName"
+	HTTPRoleName             = "roleName"
+	HTTPIndexName            = "indexName"
+	HTTPIndexField           = "fieldName"
+	HTTPAliasName            = "aliasName"
+	HTTPRequestData          = "data"
+	DefaultDbName            = "default"
+	DefaultIndexName         = "vector_idx"
+	DefaultAliasName         = "the_alias"
+	DefaultOutputFields      = "*"
+	HTTPHeaderAllowInt64     = "Accept-Type-Allow-Int64"
+	HTTPHeaderRequestTimeout = "Request-Timeout"
+	HTTPDefaultTimeout       = 30 * time.Second
+	HTTPReturnCode           = "code"
+	HTTPReturnMessage        = "message"
+	HTTPReturnData           = "data"
+	HTTPReturnLoadState      = "loadState"
+	HTTPReturnLoadProgress   = "loadProgress"
+
+	HTTPReturnHas = "has"
 
 	HTTPReturnFieldName         = "name"
+	HTTPReturnFieldID           = "id"
 	HTTPReturnFieldType         = "type"
 	HTTPReturnFieldPrimaryKey   = "primaryKey"
 	HTTPReturnFieldPartitionKey = "partitionKey"
 	HTTPReturnFieldAutoID       = "autoId"
+	HTTPReturnFieldElementType  = "elementType"
 	HTTPReturnDescription       = "description"
 
-	HTTPIndexName             = "indexName"
-	HTTPIndexField            = "fieldName"
-	HTTPReturnIndexMetricType = "metricType"
+	HTTPReturnIndexMetricType  = "metricType"
+	HTTPReturnIndexType        = "indexType"
+	HTTPReturnIndexTotalRows   = "totalRows"
+	HTTPReturnIndexPendingRows = "pendingRows"
+	HTTPReturnIndexIndexedRows = "indexedRows"
+	HTTPReturnIndexState       = "indexState"
+	HTTPReturnIndexFailReason  = "failReason"
 
 	HTTPReturnDistance = "distance"
 
-	DefaultMetricType       = "L2"
+	HTTPReturnRowCount = "rowCount"
+
+	HTTPReturnObjectType = "objectType"
+	HTTPReturnObjectName = "objectName"
+	HTTPReturnPrivilege  = "privilege"
+	HTTPReturnGrantor    = "grantor"
+	HTTPReturnDbName     = "dbName"
+
+	DefaultMetricType       = metric.COSINE
 	DefaultPrimaryFieldName = "id"
 	DefaultVectorFieldName  = "vector"
 
@@ -57,5 +130,6 @@ const (
 	ParamLimit        = "limit"
 	ParamRadius       = "radius"
 	ParamRangeFilter  = "range_filter"
+	ParamGroupByField = "group_by_field"
 	BoundedTimestamp  = 2
 )

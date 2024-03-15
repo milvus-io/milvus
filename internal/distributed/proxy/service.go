@@ -171,6 +171,25 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	ginHandler := gin.New()
 	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
+		Formatter: func(param gin.LogFormatterParams) string {
+			if param.Latency > time.Minute {
+				param.Latency = param.Latency.Truncate(time.Second)
+			}
+			traceID, ok := param.Keys["traceID"]
+			if !ok {
+				traceID = ""
+			}
+			return fmt.Sprintf("[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
+				param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
+				param.Path,
+				traceID,
+				param.StatusCode,
+				param.Latency,
+				param.ClientIP,
+				param.Method,
+				param.ErrorMessage,
+			)
+		},
 	})
 	ginHandler.Use(ginLogger, gin.Recovery())
 	ginHandler.Use(func(c *gin.Context) {
@@ -200,6 +219,8 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	}
 	app := ginHandler.Group("/v1")
 	httpserver.NewHandlersV1(s.proxy).RegisterRoutesToV1(app)
+	appV2 := ginHandler.Group("/v2/vectordb")
+	httpserver.NewHandlersV2(s.proxy).RegisterRoutesToV2(appV2)
 	s.httpServer = &http.Server{Handler: ginHandler, ReadHeaderTimeout: time.Second}
 	errChan <- nil
 	if err := s.httpServer.Serve(s.httpListener); err != nil && err != cmux.ErrServerClosed {
