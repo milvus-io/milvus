@@ -653,7 +653,9 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 		}
 
 		for segmentID := range segmentsInTarget {
-			if _, exist := leader.Segments[segmentID]; !exist {
+			_, exist := leader.Segments[segmentID]
+			l0WithWrongLocation := exist && leader.Segments[segmentID].GetNodeID() != leader.ID
+			if !exist || l0WithWrongLocation {
 				return false
 			}
 		}

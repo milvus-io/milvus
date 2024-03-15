@@ -22,6 +22,7 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -121,8 +122,11 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 	ret := make([]task.Task, 0)
 	dist = utils.FindMaxVersionSegments(dist)
 	for _, s := range dist {
-		existInTarget := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst) != nil
-		if !existInTarget {
+		segment := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
+		existInTarget := segment != nil
+		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
+		// should set l0 segment location to delegator. l0 segment should be reload in delegator
+		if !existInTarget || isL0Segment {
 			continue
 		}
 
@@ -166,8 +170,10 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 
 	for sid, s := range leaderView.Segments {
 		_, ok := distMap[sid]
-		existInTarget := c.target.GetSealedSegment(leaderView.CollectionID, sid, meta.CurrentTargetFirst) != nil
-		if ok || existInTarget {
+		segment := c.target.GetSealedSegment(leaderView.CollectionID, sid, meta.CurrentTargetFirst)
+		existInTarget := segment != nil
+		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
+		if ok || existInTarget || isL0Segment {
 			continue
 		}
 		log.Debug("leader checker append a segment to remove",
