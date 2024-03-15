@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -527,4 +528,47 @@ func (mgr *TargetManager) IsNextTargetExist(collectionID int64) bool {
 	newChannels := mgr.GetDmChannelsByCollection(collectionID, NextTarget)
 
 	return len(newChannels) > 0
+}
+
+func (mgr *TargetManager) SaveCurrentTarget(catalog metastore.QueryCoordCatalog) {
+	mgr.rwMutex.Lock()
+	defer mgr.rwMutex.Unlock()
+	if mgr.current != nil {
+		for id, target := range mgr.current.collectionTargetMap {
+			if err := catalog.SaveCollectionTarget(target.toPbMsg()); err != nil {
+				log.Warn("failed to save current target for collection", zap.Int64("collectionID", id), zap.Error(err))
+			} else {
+				log.Warn("succeed to save current target for collection", zap.Int64("collectionID", id))
+			}
+		}
+	}
+}
+
+func (mgr *TargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
+	mgr.rwMutex.Lock()
+	defer mgr.rwMutex.Unlock()
+
+	targets, err := catalog.GetCollectionTargets()
+	if err != nil {
+		log.Warn("failed to recover collection target from etcd", zap.Error(err))
+		return err
+	}
+
+	for _, t := range targets {
+		newTarget := FromPbCollectionTarget(t)
+		mgr.current.updateCollectionTarget(t.GetCollectionID(), newTarget)
+		log.Info("recover current target for collection",
+			zap.Int64("collectionID", t.GetCollectionID()),
+			zap.Strings("channels", newTarget.GetAllDmChannelNames()),
+			zap.Int("segmentNum", len(newTarget.GetAllSegmentIDs())),
+		)
+
+		// clear target info in meta store
+		err := catalog.RemoveCollectionTarget(t.GetCollectionID())
+		if err != nil {
+			log.Warn("failed to clear collection target from etcd", zap.Error(err))
+		}
+	}
+
+	return nil
 }

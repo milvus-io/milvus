@@ -271,6 +271,10 @@ func (s *Server) start() error {
 	return s.queryCoord.Start()
 }
 
+func (s *Server) GetQueryCoord() types.QueryCoordComponent {
+	return s.queryCoord
+}
+
 // Stop stops QueryCoord's grpc service.
 func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().QueryCoordGrpcServerCfg
