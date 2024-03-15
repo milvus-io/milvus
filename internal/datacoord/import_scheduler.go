@@ -268,6 +268,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		if info.GetImportedRows() <= segment.GetNumOfRows() {
 			continue // rows not changed, no need to update
 		}
+		diff := info.GetImportedRows() - segment.GetNumOfRows()
 		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
 		err = s.meta.UpdateSegmentsInfo(op)
 		if err != nil {
@@ -276,7 +277,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		}
 		metrics.DataCoordBulkVectors.WithLabelValues(
 			strconv.FormatInt(task.GetCollectionID(), 10),
-		).Add(float64(info.GetImportedRows() - segment.GetNumOfRows()))
+		).Add(float64(diff))
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
