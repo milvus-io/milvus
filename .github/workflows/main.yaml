@@ -258,6 +258,7 @@ jobs:
         uses: codecov/codecov-action@v3.1.1
         id: upload_cov
         with:
+          flags: core
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-20.04-unittests
@@ -267,6 +268,7 @@ jobs:
         uses: codecov/codecov-action@v3.1.1
         id: retry_upload_cov
         with:
+          flags: core
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-20.04-unittests

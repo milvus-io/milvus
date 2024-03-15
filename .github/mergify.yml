@@ -1,6 +1,7 @@
 shared:
   - &source_code_files files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
   - &no_source_code_files -files~=^(?=.*((\.(go|h|cpp)|go.sum|go.mod|CMakeLists.txt|conanfile\.*))).*$
+  - &client_source_code_files files~=^(?!client\/.*).*$
 
 pull_request_rules:
   - name: Add needs-dco label when DCO check failed
@@ -47,6 +48,7 @@ pull_request_rules:
       - 'status-success=cpu-e2e'
       - 'status-success=codecov/patch'
       - 'status-success=codecov/project'
+      
     actions:
       label:
         add:
@@ -60,6 +62,21 @@ pull_request_rules:
       - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
       - 'status-success=codecov/patch'
+      - 'status-success=codecov/project'
+    actions:
+      label:
+        add:
+          - ci-passed
+
+  - name: Test passed for milvus client changed
+    conditions:
+      - or:
+        - base=master
+        - base=sql_beta
+        - base~=^2(\.\d+){1,2}$
+      - *client_source_code_files
+      - 'status-success=Test milvusclient'
+      - 'status-success=codecov/path'
       - 'status-success=codecov/project'
     actions:
       label:

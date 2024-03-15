@@ -1,0 +1,47 @@
+name: Test milvusclient
+
+# Workflow is triggered on push or pull request to milvus client.
+on:
+  push:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'client/**' 
+  pull_request:
+    # file paths to consider in the event. Optional; defaults to all.
+    paths:
+      - 'client/**'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+jobs:
+  Test:
+    name: Unittest AMD64 Ubuntu latest 
+    # The type of runner that the job will run on
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: [18.04]
+    env:
+      UBUNTU: ${{ matrix.ubuntu }}
+    steps:
+      # Checks-out your repository under $GITHUB_WORKSPACE, so your job can access it
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
+      # Runs a single command using the runners shell
+      - name: Run MilvusClient Unittest
+        run: make test-client
+      - name: Upload coverage to Codecov
+        if: github.repository == 'milvus-io/milvus'
+        uses: codecov/codecov-action@v3.1.1
+        with:
+          flags: client
+          token: ${{ secrets.CODECOV_TOKEN }} 
+          file: ./client/go_coverage.txt
+          name: ubuntu-${{ matrix.ubuntu }}-milvusclient-unittests
+

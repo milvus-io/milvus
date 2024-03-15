@@ -12,15 +12,45 @@ coverage:
   range: "70...100"
 
   status:
-    project:
-      default:
+    project: off
+      #      default:
+      #  target: 77%
+      #  threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
+    patch: off
+      #      default:
+      #  target: 80%   #target of patch diff
+      #  threshold: 0%
+      #  if_ci_failed: error #success, failure, error, ignore
+
+flag_management:
+  default_rules: # the rules that will be followed for any flag added, generally
+    statuses:
+      - type: project
         target: 77%
-        threshold: 0% #Allow the coverage to drop by threshold%, and posting a success status.
-    patch:
-      default:
-        target: 80%   #target of patch diff
+        threshold: 0%
+      - type: patch
+        target: 80%
         threshold: 0%
         if_ci_failed: error #success, failure, error, ignore
+
+  individual_flags: # exceptions to the default rules above, stated flag by flag
+    - name: core
+      paths: 
+      - internal
+      - pkg
+      statuses:
+        - type: project
+          target: 77%
+        - type: patch
+          target: 80%
+    - name: client
+      paths: 
+      - client
+      statuses:
+      - type: project
+        target: 77%
+      - type: patch
+        target: 80%
 
 comment:
   layout: "reach, diff, flags, files"
