@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"path"
 	"sort"
 	"time"
@@ -424,13 +423,13 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 	}
 
 	insertPrefix := importFile.GetPaths()[0]
-	ok, err := cm.Exist(ctx, insertPrefix)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		return nil, fmt.Errorf("insert binlog prefix does not exist, path=%s", insertPrefix)
-	}
+	//ok, err := cm.Exist(ctx, insertPrefix)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if !ok {
+	//	return nil, fmt.Errorf("insert binlog prefix does not exist, path=%s", insertPrefix)
+	//}
 	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, false)
 	if err != nil {
 		return nil, err
@@ -443,14 +442,14 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return segmentImportFiles, nil
 	}
 	deltaPrefix := importFile.GetPaths()[1]
-	ok, err = cm.Exist(ctx, deltaPrefix)
-	if err != nil {
-		return nil, err
-	}
-	if !ok {
-		log.Warn("delta binlog prefix does not exist", zap.String("path", deltaPrefix))
-		return segmentImportFiles, nil
-	}
+	//ok, err = cm.Exist(ctx, deltaPrefix)
+	//if err != nil {
+	//	return nil, err
+	//}
+	//if !ok {
+	//	log.Warn("delta binlog prefix does not exist", zap.String("path", deltaPrefix))
+	//	return segmentImportFiles, nil
+	//}
 	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
 	if err != nil {
 		return nil, err
