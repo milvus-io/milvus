@@ -266,15 +266,16 @@ class TestCollectionSearchInvalid(TestcaseBase):
         method: search with invalid field type
         expected: raise exception and report the error
         """
+        if get_invalid_fields_type is None:
+            pytest.skip("None is legal")
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid field
         invalid_search_field = get_invalid_fields_type
         log.info("test_search_param_invalid_field_type: searching with invalid field: %s"
                  % invalid_search_field)
-        error1 = {"err_code": 65535, "err_msg": "collection not loaded"}
-        error2 = {"err_code": 1, "err_msg": f"`anns_field` value {get_invalid_fields_type} is illegal"}
-        error = error2 if get_invalid_fields_type in [[], 1, [1, "2", 3], (1,), {1: 1}] else error1
+        collection_w.load()
+        error = {"err_code": 1, "err_msg": f"`anns_field` value {get_invalid_fields_type} is illegal"}
         collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res, check_items=error)
@@ -3327,10 +3328,8 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
-                                                                      is_all_data_type=True,
-                                                                      auto_id=auto_id,
-                                                                      dim=dim,
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb, is_all_data_type=True,
+                                                                      auto_id=auto_id, dim=dim,
                                                                       enable_dynamic_field=enable_dynamic_field)[0:4]
         # 2. search
         log.info("test_search_expression_all_data_type: Searching collection %s" %
@@ -10232,6 +10231,11 @@ class TestSearchGroupBy(TestcaseBase):
                                                     is_all_data_type=True, with_json=True, )[0]
         _index = {"index_type": "HNSW", "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
+
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        index_param = {"index_type": "FLAT", "metric_type": "COSINE", "params": {"nlist": 100}}
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, index_param)
         collection_w.load()
 
         search_params = {"metric_type": metric, "params": {"ef": 128}}

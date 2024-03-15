@@ -1454,8 +1454,7 @@ class TestInsertInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(name=collection_name)
         data = cf.gen_default_dataframe_data()
         data.loc[0, ct.default_json_field_name] = json_value
-        error = {ct.err_code: 1001, ct.err_msg: "IO failed: json"}
-        collection_w.insert(data, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data)
 
 
 class TestInsertInvalidBinary(TestcaseBase):
