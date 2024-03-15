@@ -4533,7 +4533,6 @@ class TestCollectionMmap(TestcaseBase):
         assert pro["mmap.enabled"] == 'True'
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue: #30800")
     def test_load_mmap_collection(self):
         """
         target: after loading, enable mmap for the collection
@@ -4542,17 +4541,17 @@ class TestCollectionMmap(TestcaseBase):
         3. enable mmap on collection
         expected: raise exception
         """
-        self._connect()
         c_name = cf.gen_unique_str(prefix)
-        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=default_schema)
+        collection_w = self.init_collection_wrap(c_name, schema=default_schema)
         collection_w.insert(cf.gen_default_list_data())
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index,
                                   index_name=ct.default_index_name)
         collection_w.set_properties({'mmap.enabled': True})
-        pro = collection_w.describe().get("properties")
+        pro = collection_w.describe()[0].get("properties")
         assert pro["mmap.enabled"] == 'True'
         collection_w.load()
         collection_w.set_properties({'mmap.enabled': True},
+                                    check_task=CheckTasks.err_res,
                                     check_items={ct.err_code: 104,
                                     ct.err_msg: f"collection already loaded"})
 
