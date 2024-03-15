@@ -19,6 +19,7 @@ package accesslog
 import (
 	"context"
 	"fmt"
+	"os"
 	"path"
 	"strings"
 	"sync"
@@ -39,6 +40,7 @@ type config struct {
 	accessKeyID       string
 	secretAccessKeyID string
 	useSSL            bool
+	sslCACert         string
 	createBucket      bool
 	useIAM            bool
 	iamEndpoint       string
@@ -78,6 +80,7 @@ func NewMinioHandler(ctx context.Context, cfg *paramtable.MinioConfig, rootPath 
 		accessKeyID:       cfg.AccessKeyID.GetValue(),
 		secretAccessKeyID: cfg.SecretAccessKey.GetValue(),
 		useSSL:            cfg.UseSSL.GetAsBool(),
+		sslCACert:         cfg.SslCACert.GetValue(),
 		createBucket:      true,
 		useIAM:            cfg.UseIAM.GetAsBool(),
 		iamEndpoint:       cfg.IAMEndpoint.GetValue(),
@@ -104,6 +107,14 @@ func newMinioClient(ctx context.Context, cfg config) (*minio.Client, error) {
 	} else {
 		creds = credentials.NewStaticV4(cfg.accessKeyID, cfg.secretAccessKeyID, "")
 	}
+
+	if cfg.useSSL && len(cfg.sslCACert) > 0 {
+		err := os.Setenv("SSL_CERT_FILE", cfg.sslCACert)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	minioClient, err := minio.New(cfg.address, &minio.Options{
 		Creds:  creds,
 		Secure: cfg.useSSL,
