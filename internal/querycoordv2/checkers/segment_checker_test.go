@@ -226,7 +226,7 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 
 	// release duplicate l0 segment
-	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
+	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 2, 100, "test-insert-channel"))
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 1)
 	suite.Len(tasks[0].Actions(), 1)
