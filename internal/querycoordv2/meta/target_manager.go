@@ -564,7 +564,10 @@ func (mgr *TargetManager) Recover(catalog metastore.QueryCoordCatalog) error {
 		)
 
 		// clear target info in meta store
-		catalog.RemoveCollectionTarget(t.GetCollectionID())
+		err := catalog.RemoveCollectionTarget(t.GetCollectionID())
+		if err != nil {
+			log.Warn("failed to clear collection target from etcd", zap.Error(err))
+		}
 	}
 
 	return nil

@@ -8,7 +8,9 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/klauspost/compress/zstd"
+	"github.com/pingcap/log"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -261,17 +263,19 @@ func (s Catalog) RemoveCollectionTarget(collectionID int64) error {
 }
 
 func (s Catalog) GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error) {
-	_, values, err := s.cli.LoadWithPrefix(CollectionTargetPrefix)
+	keys, values, err := s.cli.LoadWithPrefix(CollectionTargetPrefix)
 	if err != nil {
 		return nil, err
 	}
 	ret := make(map[int64]*querypb.CollectionTarget)
-	for _, v := range values {
+	for i, v := range values {
 		var decompressed bytes.Buffer
 		compressor.ZstdDecompress(bytes.NewReader([]byte(v)), io.Writer(&decompressed))
 		target := &querypb.CollectionTarget{}
 		if err := proto.Unmarshal(decompressed.Bytes(), target); err != nil {
-			return nil, err
+			// recover target from meta is a optimize policy, skip when failure happens
+			log.Warn("failed to unmarshal collection target", zap.String("key", keys[i]), zap.Error(err))
+			continue
 		}
 		ret[target.GetCollectionID()] = target
 	}
