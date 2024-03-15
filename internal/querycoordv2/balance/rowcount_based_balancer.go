@@ -162,26 +162,28 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 	log := log.Ctx(context.TODO()).WithRateGroup("qcv2.RowCountBasedBalancer", 1, 60).With(
 		zap.Int64("collectionID", replica.GetCollectionID()),
 		zap.Int64("replicaID", replica.GetCollectionID()),
-		zap.String("resourceGroup", replica.Replica.GetResourceGroup()),
+		zap.String("resourceGroup", replica.GetResourceGroup()),
 	)
-	nodes := replica.GetNodes()
-	if len(nodes) < 2 {
+	if replica.NodesCount() < 2 {
 		return nil, nil
 	}
-	outboundNodes := b.meta.ResourceManager.CheckOutboundNodes(replica)
 
 	onlineNodes := make([]int64, 0)
 	offlineNodes := make([]int64, 0)
 
+	// outboundNode is offline in current replica.
+	if replica.OutboundNodesCount() > 0 {
+		// if node is stop or transfer to other rg
+		log.RatedInfo(10, "meet outbound node, try to move out all segment/channel", zap.Int64s("node", replica.GetOutboundNodes()))
+		offlineNodes = append(offlineNodes, replica.GetOutboundNodes()...)
+	}
+
+	nodes := replica.GetNodes()
 	for _, nid := range nodes {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue
 		} else if isStopping {
-			offlineNodes = append(offlineNodes, nid)
-		} else if outboundNodes.Contain(nid) {
-			// if node is stop or transfer to other rg
-			log.RatedInfo(10, "meet outbound node, try to move out all segment/channel", zap.Int64("node", nid))
 			offlineNodes = append(offlineNodes, nid)
 		} else {
 			onlineNodes = append(onlineNodes, nid)
@@ -231,7 +233,7 @@ func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, on
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
 				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
-		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes, false)
+		plans := b.AssignSegment(replica.GetCollectionID(), segments, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -299,7 +301,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 		return nil
 	}
 
-	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, nodesWithLessRow, false)
+	segmentPlans := b.AssignSegment(replica.GetCollectionID(), segmentsToMove, nodesWithLessRow, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica

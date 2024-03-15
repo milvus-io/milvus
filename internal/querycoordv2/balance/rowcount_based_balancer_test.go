@@ -835,6 +835,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			suite.NoError(err)
 			err = balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
 			suite.NoError(err)
+			utils.RecoverAllCollection(balancer.meta)
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
 			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)

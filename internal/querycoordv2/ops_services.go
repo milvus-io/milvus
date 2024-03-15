@@ -276,9 +276,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
 		if req.GetToAllNodes() {
-			outboundNodes := s.meta.ResourceManager.CheckOutboundNodes(replica)
-			availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool { return !outboundNodes.Contain(node) })
-			dstNodeSet.Insert(availableNodes...)
+			dstNodeSet.Insert(replica.GetNodes()...)
 		} else {
 			// check whether dstNode is healthy
 			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {
@@ -350,9 +348,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
 		if req.GetToAllNodes() {
-			outboundNodes := s.meta.ResourceManager.CheckOutboundNodes(replica)
-			availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool { return !outboundNodes.Contain(node) })
-			dstNodeSet.Insert(availableNodes...)
+			dstNodeSet.Insert(replica.GetNodes()...)
 		} else {
 			// check whether dstNode is healthy
 			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {

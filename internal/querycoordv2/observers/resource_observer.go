@@ -105,9 +105,10 @@ func (ob *ResourceObserver) checkResourceGroup() {
 						zap.Error(err),
 					)
 				}
-
-				utils.AddNodesToCollectionsInRG(ob.meta, rgName, nodes...)
 			}
 		}
+	}
+	if enableRGAutoRecover {
+		utils.RecoverAllCollection(ob.meta)
 	}
 }
