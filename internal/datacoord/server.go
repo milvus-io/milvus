@@ -1126,9 +1126,6 @@ func (s *Server) Stop() error {
 	s.cluster.Close()
 	logutil.Logger(s.ctx).Info("datacoord cluster stopped")
 
-	s.stopServerLoop()
-	logutil.Logger(s.ctx).Info("datacoord serverloop stopped")
-
 	if s.session != nil {
 		s.session.Stop()
 	}
@@ -1136,6 +1133,9 @@ func (s *Server) Stop() error {
 	if s.icSession != nil {
 		s.icSession.Stop()
 	}
+
+	s.stopServerLoop()
+	logutil.Logger(s.ctx).Info("datacoord serverloop stopped")
 	logutil.Logger(s.ctx).Warn("datacoord stop successful")
 
 	return nil

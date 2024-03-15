@@ -57,7 +57,7 @@ import (
 
 type Server struct {
 	datanode    types.DataNodeComponent
-	wg          sync.WaitGroup
+	grpcWG      sync.WaitGroup
 	grpcErrChan chan error
 	grpcServer  *grpc.Server
 	ctx         context.Context
@@ -97,7 +97,7 @@ func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error)
 
 func (s *Server) startGrpc() error {
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
-	s.wg.Add(1)
+	s.grpcWG.Add(1)
 	go s.startGrpcLoop(Params.Port.GetAsInt())
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
@@ -106,7 +106,7 @@ func (s *Server) startGrpc() error {
 
 // startGrpcLoop starts the grep loop of datanode component.
 func (s *Server) startGrpcLoop(grpcPort int) {
-	defer s.wg.Done()
+	defer s.grpcWG.Done()
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -202,24 +202,26 @@ func (s *Server) Run() error {
 func (s *Server) Stop() (err error) {
 	Params := &paramtable.Get().DataNodeGrpcServerCfg
 	logger := log.With(zap.String("address", Params.GetAddress()))
-	logger.Info("Datanode stopping")
+	logger.Info("datanode stopping")
 	defer func() {
-		logger.Info("Datanode stopped", zap.Error(err))
+		logger.Info("datanode stopped", zap.Error(err))
 	}()
 
-	s.cancel()
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
+	s.grpcWG.Wait()
 
+	logger.Info("internal server[datanode] start to stop")
 	err = s.datanode.Stop()
 	if err != nil {
+		log.Error("failed to close datanode", zap.Error(err))
 		return err
 	}
-	s.wg.Wait()
+	s.cancel()
 	return nil
 }
 
