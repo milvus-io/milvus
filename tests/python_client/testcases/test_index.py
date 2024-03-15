@@ -1907,7 +1907,7 @@ class TestIndexDiskann(TestcaseBase):
                                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dim", [1, 32768])
+    @pytest.mark.parametrize("dim", [ct.min_dim, ct.max_dim])
     def test_create_index_diskann_with_max_min_dim(self, dim):
         """
         target: test create index with diskann
@@ -2258,7 +2258,7 @@ class TestScaNNIndex(TestcaseBase):
                                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("dim", [1, 127])
+    @pytest.mark.parametrize("dim", [3, 127])
     def test_create_scann_index_dim_invalid(self, dim):
         """
         target: test create scann index invalid

@@ -425,7 +425,7 @@ class FieldDataSparseVectorImpl
     }
 
  private:
-    int64_t vec_dim_;
+    int64_t vec_dim_ = 0;
 };
 
 class FieldDataArrayImpl : public FieldDataImpl<Array, true> {

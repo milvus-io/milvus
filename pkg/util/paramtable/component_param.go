@@ -91,6 +91,8 @@ type ComponentParam struct {
 	IndexNodeGrpcClientCfg  GrpcClientConfig
 
 	IntegrationTestCfg integrationTestConfig
+
+	RuntimeConfig runtimeConfig
 }
 
 // Init initialize once
@@ -1478,6 +1480,7 @@ type queryCoordConfig struct {
 	CheckAutoBalanceConfigInterval ParamItem `refreshable:"false"`
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
+	EnableStoppingBalance          ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1945,6 +1948,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.EnableStoppingBalance = ParamItem{
+		Key:          "queryCoord.enableStoppingBalance",
+		Version:      "2.3.13",
+		DefaultValue: "true",
+		Doc:          "whether enable stopping balance",
+		Export:       true,
+	}
+	p.EnableStoppingBalance.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1963,7 +1975,7 @@ type queryNodeConfig struct {
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
-	InterimIndexBuildParallelRate ParamItem `refreshable:"true"`
+	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -3531,6 +3543,13 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+}
+
+type runtimeConfig struct {
+	CreateTime RuntimeParamItem
+	UpdateTime RuntimeParamItem
+	Role       RuntimeParamItem
+	NodeID     RuntimeParamItem
 }
 
 type integrationTestConfig struct {

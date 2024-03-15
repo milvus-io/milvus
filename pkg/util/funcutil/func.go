@@ -146,7 +146,7 @@ func CheckCtxValid(ctx context.Context) bool {
 func GetVecFieldIDs(schema *schemapb.CollectionSchema) []int64 {
 	var vecFieldIDs []int64
 	for _, field := range schema.Fields {
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_Float16Vector {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_Float16Vector || field.DataType == schemapb.DataType_SparseFloatVector {
 			vecFieldIDs = append(vecFieldIDs, field.FieldID)
 		}
 	}
@@ -335,6 +335,8 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 			if err != nil {
 				return 0, err
 			}
+		case *schemapb.VectorField_SparseFloatVector:
+			fieldNumRows = uint64(len(vectorField.GetSparseFloatVector().GetContents()))
 		default:
 			return 0, fmt.Errorf("%s is not supported now", vectorFieldType)
 		}

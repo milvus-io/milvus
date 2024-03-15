@@ -209,7 +209,11 @@ func (suite *ServerSuite) TestNodeUp() {
 	}, 5*time.Second, time.Second)
 
 	// mock unhealthy node
-	suite.server.nodeMgr.Add(session.NewNodeInfo(1001, "localhost"))
+	suite.server.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1001,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 
 	node2 := mocks.NewMockQueryNode(suite.T(), suite.server.etcdCli, 101)
 	node2.EXPECT().GetDataDistribution(mock.Anything, mock.Anything).Return(&querypb.GetDataDistributionResponse{Status: merr.Success()}, nil).Maybe()

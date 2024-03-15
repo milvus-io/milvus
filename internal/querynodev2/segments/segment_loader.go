@@ -133,10 +133,10 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 		return nil, nil
 	}
 	// Filter out loaded & loading segments
-	infos := loader.prepare(segmentType, segments...)
+	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
 
-	log.With(
+	log = log.With(
 		zap.Int64s("requestSegments", lo.Map(segments, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 		zap.Int64s("preparedSegments", lo.Map(infos, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 	)
@@ -559,10 +559,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, nil
 	}
 	// Filter out loaded & loading segments
-	infos := loader.prepare(segmentType, segments...)
+	infos := loader.prepare(ctx, segmentType, segments...)
 	defer loader.unregister(infos...)
 
-	log.With(
+	log = log.With(
 		zap.Int64s("requestSegments", lo.Map(segments, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 		zap.Int64s("preparedSegments", lo.Map(infos, func(s *querypb.SegmentLoadInfo, _ int) int64 { return s.GetSegmentID() })),
 	)
@@ -694,7 +694,10 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	return result, nil
 }
 
-func (loader *segmentLoader) prepare(segmentType SegmentType, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
+func (loader *segmentLoader) prepare(ctx context.Context, segmentType SegmentType, segments ...*querypb.SegmentLoadInfo) []*querypb.SegmentLoadInfo {
+	log := log.Ctx(ctx).With(
+		zap.Stringer("segmentType", segmentType),
+	)
 	loader.mut.Lock()
 	defer loader.mut.Unlock()
 
@@ -707,7 +710,8 @@ func (loader *segmentLoader) prepare(segmentType SegmentType, segments ...*query
 			infos = append(infos, segment)
 			loader.loadingSegments.Insert(segment.GetSegmentID(), newLoadResult())
 		} else {
-			log.Info("skip loaded/loading segment", zap.Int64("segmentID", segment.GetSegmentID()),
+			log.Info("skip loaded/loading segment",
+				zap.Int64("segmentID", segment.GetSegmentID()),
 				zap.Bool("isLoaded", len(loader.manager.Segment.GetBy(WithType(segmentType), WithID(segment.GetSegmentID()))) > 0),
 				zap.Bool("isLoading", loader.loadingSegments.Contain(segment.GetSegmentID())),
 			)
@@ -1004,7 +1008,7 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 				}
 			}
 		}
-		if err := loadSealedSegmentFields(ctx, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
+		if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
 			return err
 		}
 		// https://github.com/milvus-io/milvus/23654
@@ -1060,11 +1064,20 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result, storage.DefaultStatsType
 }
 
-func loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64, opts ...loadOption) error {
+func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64, opts ...loadOption) error {
+	options := newLoadOptions()
+	for _, opt := range opts {
+		opt(options)
+	}
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
+		opts := opts
 		fieldBinLog := field
 		fieldID := field.FieldID
+		mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
+		if mmapEnabled && options.LoadStatus == LoadStatusInMemory {
+			opts = append(opts, WithLoadStatus(LoadStatusMapped))
+		}
 		runningGroup.Go(func() error {
 			return segment.LoadFieldData(ctx,
 				fieldID,
@@ -1502,7 +1515,7 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 
 	// Filter out LOADING segments only
 	// use None to avoid loaded check
-	infos := loader.prepare(commonpb.SegmentState_SegmentStateNone, loadInfo)
+	infos := loader.prepare(ctx, commonpb.SegmentState_SegmentStateNone, loadInfo)
 	defer loader.unregister(infos...)
 
 	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {

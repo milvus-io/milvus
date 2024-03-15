@@ -57,7 +57,7 @@ class TypedOffsetOrderedMapTest : public testing::Test {
 };
 
 using TypeOfPks = testing::Types<int64_t, std::string>;
-TYPED_TEST_CASE_P(TypedOffsetOrderedMapTest);
+TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest);
 
 TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     std::vector<int64_t> offsets;
@@ -110,5 +110,5 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     ASSERT_EQ(0, offsets.size());
 }
 
-REGISTER_TYPED_TEST_CASE_P(TypedOffsetOrderedMapTest, find_first);
-INSTANTIATE_TYPED_TEST_CASE_P(Prefix, TypedOffsetOrderedMapTest, TypeOfPks);
+REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest, find_first);
+INSTANTIATE_TYPED_TEST_SUITE_P(Prefix, TypedOffsetOrderedMapTest, TypeOfPks);

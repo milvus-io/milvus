@@ -89,8 +89,16 @@ func (suite *CheckerControllerSuite) TestBasic() {
 	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
 	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
 

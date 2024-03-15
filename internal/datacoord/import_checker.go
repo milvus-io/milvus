@@ -268,12 +268,6 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		return
 	}
 	for _, segmentID := range unfinished {
-		err = AddImportSegment(c.cluster, c.meta, segmentID)
-		if err != nil {
-			log.Warn("add import segment failed", zap.Int64("jobID", job.GetJobID()),
-				zap.Int64("collectionID", job.GetCollectionID()), zap.Error(err))
-			return
-		}
 		c.buildIndexCh <- segmentID // accelerate index building
 		channelCP := c.meta.GetChannelCheckpoint(channels[segmentID])
 		if channelCP == nil {
@@ -290,7 +284,8 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		}
 	}
 
-	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
+	completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
+	err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed), UpdateJobCompleteTime(completeTime))
 	if err != nil {
 		log.Warn("failed to update job state to Completed", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
 	}

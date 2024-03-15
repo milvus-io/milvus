@@ -233,6 +233,86 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 	}, 10*time.Second, 1*time.Second)
 }
 
+func (s *BalanceTestSuit) TestNodeDown() {
+	ctx := context.Background()
+
+	// disable compact
+	s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
+		Base:    commonpbutil.NewMsgBase(),
+		Command: datapb.GcCommand_Pause,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "duration", Value: "3600"},
+		},
+	})
+	defer s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
+		Base:    commonpbutil.NewMsgBase(),
+		Command: datapb.GcCommand_Resume,
+	})
+
+	// disable balance channel
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key, "false")
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.EnableStoppingBalance.Key, "false")
+
+	// init collection with 3 channel, each channel has 15 segment, each segment has 2000 row
+	// and load it with 2 replicas on 2 nodes.
+	name := "test_balance_" + funcutil.GenRandomStr()
+	s.initCollection(name, 1, 2, 15, 2000)
+
+	// then we add 2 query node, after balance happens, expected each node have 1 channel and 2 segments
+	qn1 := s.Cluster.AddQueryNode()
+	qn2 := s.Cluster.AddQueryNode()
+
+	// check segment num on new query node
+	s.Eventually(func() bool {
+		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
+		return len(resp.Channels) == 0 && len(resp.Segments) == 10
+	}, 30*time.Second, 1*time.Second)
+
+	s.Eventually(func() bool {
+		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
+		return len(resp.Channels) == 0 && len(resp.Segments) == 10
+	}, 30*time.Second, 1*time.Second)
+
+	// then we force stop qn1 and resume balance channel, let balance channel and load segment happens concurrently on qn2
+	paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key)
+	time.Sleep(1 * time.Second)
+	qn1.Stop()
+
+	info, err := s.Cluster.Proxy.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		Base:           commonpbutil.NewMsgBase(),
+		CollectionName: name,
+	})
+	s.NoError(err)
+	s.True(merr.Ok(info.GetStatus()))
+	collectionID := info.GetCollectionID()
+
+	// expected channel and segment concurrent move to qn2
+	s.Eventually(func() bool {
+		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
+		return len(resp.Channels) == 1 && len(resp.Segments) == 15
+	}, 30*time.Second, 1*time.Second)
+
+	// expect all delegator will recover to healthy
+	s.Eventually(func() bool {
+		resp, err := s.Cluster.QueryCoord.GetShardLeaders(ctx, &querypb.GetShardLeadersRequest{
+			Base:         commonpbutil.NewMsgBase(),
+			CollectionID: collectionID,
+		})
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		return len(resp.Shards) == 2
+	}, 30*time.Second, 1*time.Second)
+}
+
 func TestBalance(t *testing.T) {
 	suite.Run(t, new(BalanceTestSuit))
 }

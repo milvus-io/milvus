@@ -745,8 +745,10 @@ func (s *Server) Stop() (err error) {
 
 	s.wg.Wait()
 
+	logger.Info("internal server[proxy] start to stop")
 	err = s.proxy.Stop()
 	if err != nil {
+		log.Error("failed to close proxy", zap.Error(err))
 		return err
 	}
 

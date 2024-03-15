@@ -218,7 +218,7 @@ func (suite *QueryNodeSuite) TestStop() {
 
 	suite.node.manager = segments.NewManager()
 
-	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64)
+	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
 	collection := segments.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
 	segment, err := segments.NewSegment(
 		context.Background(),

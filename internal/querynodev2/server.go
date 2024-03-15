@@ -216,6 +216,10 @@ func (node *QueryNode) InitSegcore() error {
 	C.InitCpuNum(cCPUNum)
 
 	knowhereBuildPoolSize := uint32(float32(paramtable.Get().QueryNodeCfg.InterimIndexBuildParallelRate.GetAsFloat()) * float32(hardware.GetCPUNum()))
+	if knowhereBuildPoolSize < uint32(1) {
+		knowhereBuildPoolSize = uint32(1)
+	}
+	log.Info("set up knowhere build pool size", zap.Uint32("pool_size", knowhereBuildPoolSize))
 	cKnowhereBuildPoolSize := C.uint32_t(knowhereBuildPoolSize)
 	C.SegcoreSetKnowhereBuildThreadPoolNum(cKnowhereBuildPoolSize)
 
@@ -472,8 +476,7 @@ func (node *QueryNode) Stop() error {
 		if node.pipelineManager != nil {
 			node.pipelineManager.Close()
 		}
-		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the pipeline
-		node.cancel()
+
 		if node.session != nil {
 			node.session.Stop()
 		}
@@ -485,6 +488,9 @@ func (node *QueryNode) Stop() error {
 		}
 
 		node.CloseSegcore()
+
+		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the pipeline
+		node.cancel()
 	})
 	return nil
 }

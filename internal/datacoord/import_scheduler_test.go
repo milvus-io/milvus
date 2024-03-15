@@ -21,7 +21,6 @@ import (
 	"math"
 	"testing"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -29,8 +28,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type ImportSchedulerSuite struct {
@@ -71,57 +68,6 @@ func (s *ImportSchedulerSuite) SetupTest() {
 	s.imeta, err = NewImportMeta(s.catalog)
 	s.NoError(err)
 	s.scheduler = NewImportScheduler(s.meta, s.cluster, s.alloc, s.imeta).(*importScheduler)
-}
-
-func (s *ImportSchedulerSuite) TestCheckErr() {
-	s.catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
-	s.catalog.EXPECT().SavePreImportTask(mock.Anything).Return(nil)
-
-	var job ImportJob = &importJob{
-		ImportJob: &datapb.ImportJob{
-			JobID:        0,
-			CollectionID: s.collectionID,
-			TimeoutTs:    math.MaxUint64,
-			Schema:       &schemapb.CollectionSchema{},
-			State:        internalpb.ImportJobState_Pending,
-		},
-	}
-	err := s.imeta.AddJob(job)
-	s.NoError(err)
-	var task ImportTask = &preImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:        0,
-			TaskID:       1,
-			CollectionID: s.collectionID,
-			State:        datapb.ImportTaskStateV2_InProgress,
-		},
-	}
-	err = s.imeta.AddTask(task)
-	s.NoError(err)
-
-	// checkErr and update state
-	s.scheduler.checkErr(task, merr.ErrNodeNotFound)
-	task = s.imeta.GetTask(task.GetTaskID())
-	s.Equal(datapb.ImportTaskStateV2_Pending, task.GetState())
-
-	s.scheduler.checkErr(task, errors.New("mock err"))
-	job = s.imeta.GetJob(job.GetJobID())
-	s.Equal(internalpb.ImportJobState_Failed, job.GetState())
-
-	// update state failed
-	err = s.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
-	s.NoError(err)
-	err = s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_None))
-	s.NoError(err)
-	s.catalog.ExpectedCalls = nil
-	s.catalog.EXPECT().SaveImportJob(mock.Anything).Return(errors.New("mock err"))
-	s.catalog.EXPECT().SavePreImportTask(mock.Anything).Return(errors.New("mock err"))
-
-	s.scheduler.checkErr(task, merr.ErrNodeNotFound)
-	s.Equal(datapb.ImportTaskStateV2_None, s.imeta.GetTask(task.GetTaskID()).GetState())
-
-	s.scheduler.checkErr(task, errors.New("mock err"))
-	s.Equal(internalpb.ImportJobState_Pending, s.imeta.GetJob(job.GetJobID()).GetState())
 }
 
 func (s *ImportSchedulerSuite) TestProcessPreImport() {

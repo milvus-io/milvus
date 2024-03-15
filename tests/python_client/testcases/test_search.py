@@ -340,7 +340,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                                     "[expected=COSINE][actual=L2]"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("issue #29020")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -2223,6 +2222,8 @@ class TestCollectionSearch(TestcaseBase):
         method: test search after different index and corresponding search params
         expected: search successfully with limit(topK)
         """
+        if index == "DISKANN":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/30793")
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
@@ -4558,6 +4559,53 @@ class TestCollectionSearch(TestcaseBase):
         res2 = collection_w.search(vector, default_search_field, search_params, limit * 2)[0]
         for i in range(default_nq):
             assert res1[i].ids == res2[i].ids[:limit]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("metrics", ct.binary_metrics[:2])
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT", "HNSW"])
+    @pytest.mark.parametrize("dim", [32768, 65536, ct.max_binary_vector_dim-8, ct.max_binary_vector_dim])
+    def test_binary_indexed_large_dim_vectors_search(self, metrics, index, dim):
+        """
+        target: binary vector large dim search
+        method: binary vector large dim search
+        expected: search success
+        """
+        # 1. create a collection and insert data
+        collection_w = self.init_collection_general(prefix, dim=dim, is_binary=True, is_index=False)[0]
+        data = cf.gen_default_binary_dataframe_data(nb=200, dim=dim)[0]
+        collection_w.insert(data)
+
+        # 2. create index and load
+        params = {"M": 48, "efConstruction": 500} if index == "HNSW" else {"nlist": 128}
+        default_index = {"index_type": index, "metric_type": metrics, "params": params}
+        collection_w.create_index(binary_field_name, default_index)
+        collection_w.load()
+
+        # 3. search with output field vector
+        search_params = cf.gen_search_param(index, metrics)
+        binary_vectors = cf.gen_binary_vectors(1, dim)[1]
+        for search_param in search_params:
+            res = collection_w.search(binary_vectors, binary_field_name,
+                                      search_param, 2, default_search_exp,
+                                      output_fields=[binary_field_name])[0]
+
+            # 4. check the result vectors should be equal to the inserted
+            assert res[0][0].entity.binary_vector == data[binary_field_name][res[0][0].id]
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("dim", [ct.max_binary_vector_dim + 1, ct.max_binary_vector_dim + 8])
+    def test_binary_indexed_over_max_dim(self, dim):
+        """
+        target: tests exceeding the maximum binary vector dimension
+        method: tests exceeding the maximum binary vector dimension
+        expected: raise exception
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        binary_schema = cf.gen_default_binary_collection_schema(dim=dim)
+        self.collection_wrap.init_collection(c_name, schema=binary_schema,
+                                             check_task=CheckTasks.err_res,
+                                             check_items={"err_code": 65535, "err_msg": f"invalid dimension {dim}."})
 
 
 class TestSearchBase(TestcaseBase):
@@ -10342,7 +10390,6 @@ class TestSearchGroupBy(TestcaseBase):
         pass
 
 
-@pytest.mark.skip(reason="debug")
 class TestCollectionHybridSearchValid(TestcaseBase):
     """ Test case of search interface """
 

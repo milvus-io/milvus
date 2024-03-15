@@ -84,10 +84,26 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	suite.meta.ResourceManager.AddResourceGroup("rg1")
 	suite.meta.ResourceManager.AddResourceGroup("rg2")
-	suite.nodeMgr.Add(session.NewNodeInfo(1, "localhost:8080"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost:8080"))
-	suite.nodeMgr.Add(session.NewNodeInfo(3, "localhost:8080"))
-	suite.nodeMgr.Add(session.NewNodeInfo(4, "localhost:8080"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost:8080",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost:8080",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3,
+		Address:  "localhost:8080",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   4,
+		Address:  "localhost:8080",
+		Hostname: "localhost",
+	}))
 	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
 	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg1", 1)
 	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)

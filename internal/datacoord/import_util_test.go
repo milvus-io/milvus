@@ -23,6 +23,7 @@ import (
 	"path"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
@@ -215,29 +216,6 @@ func TestImportUtil_RegroupImportFiles(t *testing.T) {
 	assert.Equal(t, fileNum, total)
 }
 
-func TestImportUtil_AddImportSegment(t *testing.T) {
-	cluster := NewMockCluster(t)
-	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
-
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-
-	meta, err := newMeta(context.TODO(), catalog, nil)
-	assert.NoError(t, err)
-	segment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 1, IsImporting: true},
-	}
-	err = meta.AddSegment(context.Background(), segment)
-	assert.NoError(t, err)
-
-	err = AddImportSegment(cluster, meta, segment.GetID())
-	assert.NoError(t, err)
-}
-
 func TestImportUtil_DropImportTask(t *testing.T) {
 	cluster := NewMockCluster(t)
 	cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)
@@ -284,6 +262,7 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 
 	ctx := context.Background()
 	cm := mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, mock.Anything).Return(true, nil)
 	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
 	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
 
@@ -302,6 +281,32 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 			assert.True(t, segmentID == "435978159261483008" || segmentID == "435978159261483009")
 		}
 	}
+
+	// test failure
+	mockErr := errors.New("mock err")
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, mockErr)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(false, nil)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+	cm.EXPECT().Exist(mock.Anything, deltaPrefix).Return(true, mockErr)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.Error(t, err)
+
+	cm = mocks2.NewChunkManager(t)
+	cm.EXPECT().Exist(mock.Anything, insertPrefix).Return(true, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+	cm.EXPECT().Exist(mock.Anything, deltaPrefix).Return(false, nil)
+	_, err = ListBinlogsAndGroupBySegment(ctx, cm, file)
+	assert.NoError(t, err)
 }
 
 func TestImportUtil_GetImportProgress(t *testing.T) {
@@ -448,7 +453,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// failed state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed), UpdateJobReason(mockErr))
 	assert.NoError(t, err)
-	progress, state, reason := GetImportProgress(job.GetJobID(), imeta, meta)
+	progress, state, reason := GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
 	assert.Equal(t, mockErr, reason)
@@ -456,7 +461,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// pending state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
 	assert.NoError(t, err)
-	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
+	progress, state, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Pending, state)
 	assert.Equal(t, "", reason)
@@ -464,7 +469,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// preImporting state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_PreImporting))
 	assert.NoError(t, err)
-	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
+	progress, state, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10+40), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -472,7 +477,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// importing state, segmentImportedRows/totalRows = 0.5
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Importing))
 	assert.NoError(t, err)
-	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
+	progress, state, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10+40+40*0.5), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -494,7 +499,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 	err = meta.UpdateSegmentsInfo(UpdateImportedRows(22, 100))
 	assert.NoError(t, err)
-	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
+	progress, state, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(float32(10+40+40+10*2/6)), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -508,7 +513,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	assert.NoError(t, err)
 	err = meta.UpdateSegmentsInfo(UpdateIsImporting(22, false))
 	assert.NoError(t, err)
-	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
+	progress, state, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(10+40+40+10), progress)
 	assert.Equal(t, internalpb.ImportJobState_Importing, state)
 	assert.Equal(t, "", reason)
@@ -516,7 +521,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	// completed state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Completed))
 	assert.NoError(t, err)
-	progress, state, reason = GetImportProgress(job.GetJobID(), imeta, meta)
+	progress, state, reason = GetJobProgress(job.GetJobID(), imeta, meta)
 	assert.Equal(t, int64(100), progress)
 	assert.Equal(t, internalpb.ImportJobState_Completed, state)
 	assert.Equal(t, "", reason)

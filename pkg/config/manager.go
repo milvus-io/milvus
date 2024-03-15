@@ -84,16 +84,36 @@ type Manager struct {
 	keySourceMap  *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
 	overlays      *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
 	forbiddenKeys *typeutil.ConcurrentSet[string]
+	configCache   *typeutil.ConcurrentMap[string, interface{}]
 }
 
 func NewManager() *Manager {
-	return &Manager{
+	manager := &Manager{
 		Dispatcher:    NewEventDispatcher(),
 		sources:       typeutil.NewConcurrentMap[string, Source](),
 		keySourceMap:  typeutil.NewConcurrentMap[string, string](),
 		overlays:      typeutil.NewConcurrentMap[string, string](),
 		forbiddenKeys: typeutil.NewConcurrentSet[string](),
+		configCache:   typeutil.NewConcurrentMap[string, interface{}](),
 	}
+	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
+		keyToRemove := strings.NewReplacer("/", ".").Replace(event.Key)
+		manager.configCache.Remove(keyToRemove)
+	})
+	manager.Dispatcher.RegisterForKeyPrefix("", resetConfigCacheFunc)
+	return manager
+}
+
+func (m *Manager) GetCachedValue(key string) (interface{}, bool) {
+	return m.configCache.Get(key)
+}
+
+func (m *Manager) SetCachedValue(key string, value interface{}) {
+	m.configCache.Insert(key, value)
+}
+
+func (m *Manager) EvictCachedValue(key string) {
+	m.configCache.Remove(key)
 }
 
 func (m *Manager) GetConfig(key string) (string, error) {
@@ -137,12 +157,28 @@ func (m *Manager) GetConfigs() map[string]string {
 func (m *Manager) GetBy(filters ...Filter) map[string]string {
 	matchedConfig := make(map[string]string)
 
-	for key, value := range m.GetConfigs() {
+	m.keySourceMap.Range(func(key, value string) bool {
 		newkey, ok := filterate(key, filters...)
-		if ok {
-			matchedConfig[newkey] = value
+		if !ok {
+			return true
 		}
-	}
+		sValue, err := m.GetConfig(key)
+		if err != nil {
+			return true
+		}
+
+		matchedConfig[newkey] = sValue
+		return true
+	})
+
+	m.overlays.Range(func(key, value string) bool {
+		newkey, ok := filterate(key, filters...)
+		if !ok {
+			return true
+		}
+		matchedConfig[newkey] = value
+		return true
+	})
 
 	return matchedConfig
 }

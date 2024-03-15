@@ -23,13 +23,24 @@
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 
-TEST(Expr, AlwaysTrue) {
+class ExprAlwaysTrueTest : public ::testing::TestWithParam<milvus::DataType> {};
+
+INSTANTIATE_TEST_SUITE_P(
+    ExprAlwaysTrueParameters,
+    ExprAlwaysTrueTest,
+    ::testing::Values(milvus::DataType::VECTOR_FLOAT,
+                      milvus::DataType::VECTOR_SPARSE_FLOAT));
+
+TEST_P(ExprAlwaysTrueTest, AlwaysTrue) {
     using namespace milvus;
     using namespace milvus::query;
     using namespace milvus::segcore;
+    auto data_type = GetParam();
+    auto metric_type = data_type == DataType::VECTOR_FLOAT
+                           ? knowhere::metric::L2
+                           : knowhere::metric::IP;
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField(
-        "fakevec", DataType::VECTOR_FLOAT, 16, knowhere::metric::L2);
+    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto i64_fid = schema->AddDebugField("age", DataType::INT64);
     schema->set_primary_field_id(i64_fid);
 

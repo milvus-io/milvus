@@ -772,7 +772,7 @@ func (c *Core) revokeSession() {
 	if c.session != nil {
 		// wait at most one second to revoke
 		c.session.Stop()
-		log.Info("revoke rootcoord session")
+		log.Info("rootcoord session stop")
 	}
 }
 
@@ -784,12 +784,13 @@ func (c *Core) Stop() error {
 	if c.proxyWatcher != nil {
 		c.proxyWatcher.Stop()
 	}
-	c.cancelIfNotNil()
 	if c.quotaCenter != nil {
 		c.quotaCenter.stop()
 	}
-	c.wg.Wait()
+
 	c.revokeSession()
+	c.cancelIfNotNil()
+	c.wg.Wait()
 	return nil
 }
 

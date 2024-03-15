@@ -53,7 +53,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(CollectionCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getCollectionDetails)))))
 	router.POST(CollectionCategory+StatsAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getCollectionStats)))))
 	router.POST(CollectionCategory+LoadStateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getCollectionLoadState)))))
-	router.POST(CollectionCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createCollection)))))
+	router.POST(CollectionCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionReq{AutoID: DisableAutoID} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createCollection)))))
 	router.POST(CollectionCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropCollection)))))
 	router.POST(CollectionCategory+RenameAction, timeoutMiddleware(wrapperPost(func() any { return &RenameCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.renameCollection)))))
 	router.POST(CollectionCategory+LoadAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.loadCollection)))))
@@ -130,7 +130,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	router.POST(AliasCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &AliasReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropAlias)))))
 	router.POST(AliasCategory+AlterAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.alterAlias)))))
 
-	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listImportJob)))))
+	router.POST(ImportJobCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listImportJob)))))
 	router.POST(ImportJobCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &ImportReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createImportJob)))))
 	router.POST(ImportJobCategory+GetProgressAction, timeoutMiddleware(wrapperPost(func() any { return &JobIDReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.getImportJobProcess)))))
 }
@@ -359,12 +359,15 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	}
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
 		HTTPCollectionName:    coll.CollectionName,
+		HTTPCollectionID:      coll.CollectionID,
 		HTTPReturnDescription: coll.Schema.Description,
 		HTTPReturnFieldAutoID: autoID,
-		"fields":              printFields(coll.Schema.Fields),
+		"fields":              printFieldsV2(coll.Schema.Fields),
 		"indexes":             indexDesc,
 		"load":                collLoadState,
 		"shardsNum":           coll.ShardsNum,
+		"partitionsNum":       coll.NumPartitions,
+		"consistencyLevel":    coll.ConsistencyLevel,
 		"enableDynamicField":  coll.Schema.EnableDynamicField,
 	}})
 	return resp, nil
@@ -738,7 +741,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 					fieldName = field.Name
 					vectorField = field
 				} else {
-					return nil, errors.New("search without annsFields, but already found multiple vector fields: [" + fieldName + ", " + field.Name + "]")
+					return nil, errors.New("search without annsField, but already found multiple vector fields: [" + fieldName + ", " + field.Name + ",,,]")
 				}
 			}
 		}
@@ -861,6 +864,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		DbName:         dbName,
 		CollectionName: httpReq.CollectionName,
 		Requests:       []*milvuspb.SearchRequest{},
+		OutputFields:   httpReq.OutputFields,
 	}
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
@@ -937,6 +941,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	var schema []byte
 	var err error
 	fieldNames := map[string]bool{}
+	partitionsNum := int64(-1)
 	if httpReq.Schema.Fields == nil || len(httpReq.Schema.Fields) == 0 {
 		if httpReq.Dimension == 0 {
 			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
@@ -949,15 +954,20 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			return nil, err
 		}
 		idDataType := schemapb.DataType_Int64
+		idParams := []*commonpb.KeyValuePair{}
 		switch httpReq.IDType {
-		case "Varchar":
+		case "VarChar", "Varchar":
 			idDataType = schemapb.DataType_VarChar
-		case "":
+			idParams = append(idParams, &commonpb.KeyValuePair{
+				Key:   common.MaxLengthKey,
+				Value: httpReq.Params["max_length"],
+			})
+			httpReq.IDType = "VarChar"
+		case "", "Int64", "int64":
 			httpReq.IDType = "Int64"
-		case "Int64":
 		default:
 			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
-				"idType can only be [Int64, Varchar](case sensitive), default: Int64")
+				"idType can only be [Int64, VarChar], default: Int64")
 			log.Ctx(ctx).Warn("high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
 			c.AbortWithStatusJSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
@@ -966,21 +976,25 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			return nil, err
 		}
 		if len(httpReq.PrimaryFieldName) == 0 {
-			httpReq.PrimaryFieldName = PrimaryFieldName
+			httpReq.PrimaryFieldName = DefaultPrimaryFieldName
 		}
 		if len(httpReq.VectorFieldName) == 0 {
-			httpReq.VectorFieldName = VectorFieldName
+			httpReq.VectorFieldName = DefaultVectorFieldName
+		}
+		enableDynamic := EnableDynamic
+		if en, err := strconv.ParseBool(httpReq.Params["enableDynamicField"]); err == nil {
+			enableDynamic = en
 		}
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
-			Name:   httpReq.CollectionName,
-			AutoID: EnableAutoID,
+			Name: httpReq.CollectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
 					FieldID:      common.StartOfUserFieldID,
 					Name:         httpReq.PrimaryFieldName,
 					IsPrimaryKey: true,
 					DataType:     idDataType,
-					AutoID:       EnableAutoID,
+					AutoID:       httpReq.AutoID,
+					TypeParams:   idParams,
 				},
 				{
 					FieldID:      common.StartOfUserFieldID + 1,
@@ -996,7 +1010,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 					AutoID: DisableAutoID,
 				},
 			},
-			EnableDynamicField: EnableDynamic,
+			EnableDynamicField: enableDynamic,
 		})
 	} else {
 		collSchema := schemapb.CollectionSchema{
@@ -1037,6 +1051,12 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if field.IsPrimary {
 				fieldSchema.AutoID = httpReq.Schema.AutoId
 			}
+			if field.IsPartitionKey {
+				partitionsNum = int64(64)
+				if partitions, err := strconv.ParseInt(httpReq.Params["partitionsNum"], 10, 64); err == nil {
+					partitionsNum = partitions
+				}
+			}
 			for key, fieldParam := range field.ElementTypeParams {
 				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: fieldParam})
 			}
@@ -1053,12 +1073,30 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		})
 		return nil, err
 	}
+	shardsNum := int32(ShardNumDefault)
+	if shards, err := strconv.ParseInt(httpReq.Params["shardsNum"], 10, 64); err == nil {
+		shardsNum = int32(shards)
+	}
+	consistencyLevel := commonpb.ConsistencyLevel_Bounded
+	if level, ok := commonpb.ConsistencyLevel_value[httpReq.Params["consistencyLevel"]]; ok {
+		consistencyLevel = commonpb.ConsistencyLevel(level)
+	}
 	req := &milvuspb.CreateCollectionRequest{
 		DbName:           dbName,
 		CollectionName:   httpReq.CollectionName,
 		Schema:           schema,
-		ShardsNum:        ShardNumDefault,
-		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+		ShardsNum:        shardsNum,
+		ConsistencyLevel: consistencyLevel,
+		Properties:       []*commonpb.KeyValuePair{},
+	}
+	if partitionsNum > 0 {
+		req.NumPartitions = partitionsNum
+	}
+	if _, ok := httpReq.Params["ttlSeconds"]; ok {
+		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
+			Key:   common.CollectionTTLConfigKey,
+			Value: httpReq.Params["ttlSeconds"],
+		})
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateCollection(reqCtx, req.(*milvuspb.CreateCollectionRequest))
@@ -1073,8 +1111,8 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
 			CollectionName: httpReq.CollectionName,
-			FieldName:      VectorFieldName,
-			IndexName:      VectorFieldName,
+			FieldName:      DefaultVectorFieldName,
+			IndexName:      DefaultVectorFieldName,
 			ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: httpReq.MetricType}},
 		}
 		statusResponse, err := wrapperProxy(ctx, c, createIndexReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
@@ -1102,6 +1140,9 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				FieldName:      indexParam.FieldName,
 				IndexName:      indexParam.IndexName,
 				ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: indexParam.MetricType}},
+			}
+			for key, value := range indexParam.IndexConfig {
+				createIndexReq.ExtraParams = append(createIndexReq.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: value})
 			}
 			statusResponse, err := wrapperProxy(ctx, c, createIndexReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 				return h.proxy.CreateIndex(ctx, req.(*milvuspb.CreateIndexRequest))
@@ -1642,28 +1683,34 @@ func (h *HandlersV2) alterAlias(ctx context.Context, c *gin.Context, anyReq any,
 }
 
 func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
-	collectionGetter := anyReq.(requestutil.CollectionNameGetter)
+	var collectionName string
+	if collectionGetter, ok := anyReq.(requestutil.CollectionNameGetter); ok {
+		collectionName = collectionGetter.GetCollectionName()
+	}
 	req := &internalpb.ListImportsRequest{
 		DbName:         dbName,
-		CollectionName: collectionGetter.GetCollectionName(),
+		CollectionName: collectionName,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
 	if err == nil {
-		returnData := make([]map[string]interface{}, 0)
+		returnData := make(map[string]interface{})
+		records := make([]map[string]interface{}, 0)
 		response := resp.(*internalpb.ListImportsResponse)
 		for i, jobID := range response.GetJobIDs() {
 			jobDetail := make(map[string]interface{})
-			jobDetail["jobID"] = jobID
+			jobDetail["jobId"] = jobID
+			jobDetail["collectionName"] = response.GetCollectionNames()[i]
 			jobDetail["state"] = response.GetStates()[i].String()
 			jobDetail["progress"] = response.GetProgresses()[i]
 			reason := response.GetReasons()[i]
 			if reason != "" {
 				jobDetail["reason"] = reason
 			}
-			returnData = append(returnData, jobDetail)
+			records = append(records, jobDetail)
 		}
+		returnData["records"] = records
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
 	return resp, err
@@ -1690,7 +1737,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 	})
 	if err == nil {
 		returnData := make(map[string]interface{})
-		returnData["jobID"] = resp.(*internalpb.ImportResponse).GetJobID()
+		returnData["jobId"] = resp.(*internalpb.ImportResponse).GetJobID()
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
 	return resp, err
@@ -1708,13 +1755,28 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 	if err == nil {
 		response := resp.(*internalpb.GetImportProgressResponse)
 		returnData := make(map[string]interface{})
-		returnData["jobID"] = jobIDGetter.GetJobID()
+		returnData["jobId"] = jobIDGetter.GetJobID()
+		returnData["collectionName"] = response.GetCollectionName()
 		returnData["state"] = response.GetState().String()
 		returnData["progress"] = response.GetProgress()
 		reason := response.GetReason()
 		if reason != "" {
 			returnData["reason"] = reason
 		}
+		details := make([]map[string]interface{}, 0)
+		for _, taskProgress := range response.GetTaskProgresses() {
+			detail := make(map[string]interface{})
+			detail["fileName"] = taskProgress.GetFileName()
+			detail["fileSize"] = taskProgress.GetFileSize()
+			detail["progress"] = taskProgress.GetProgress()
+			detail["completeTime"] = taskProgress.GetCompleteTime()
+			reason = taskProgress.GetReason()
+			if reason != "" {
+				detail["reason"] = reason
+			}
+			details = append(details, detail)
+		}
+		returnData["details"] = details
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}
 	return resp, err

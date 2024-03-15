@@ -195,7 +195,11 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
 
-	suite.nodeMgr.Add(session.NewNodeInfo(2, "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.nodeMgr.Stopping(2)
 
 	tasks := suite.checker.Check(context.TODO())

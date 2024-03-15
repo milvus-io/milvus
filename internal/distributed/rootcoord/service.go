@@ -61,7 +61,7 @@ type Server struct {
 	grpcServer  *grpc.Server
 	grpcErrChan chan error
 
-	wg sync.WaitGroup
+	grpcWG sync.WaitGroup
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -234,7 +234,7 @@ func (s *Server) init() error {
 }
 
 func (s *Server) startGrpc(port int) error {
-	s.wg.Add(1)
+	s.grpcWG.Add(1)
 	go s.startGrpcLoop(port)
 	// wait for grpc server loop start
 	err := <-s.grpcErrChan
@@ -242,7 +242,7 @@ func (s *Server) startGrpc(port int) error {
 }
 
 func (s *Server) startGrpcLoop(port int) {
-	defer s.wg.Done()
+	defer s.grpcWG.Done()
 	Params := &paramtable.Get().RootCoordGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -330,11 +330,10 @@ func (s *Server) Stop() (err error) {
 		defer s.tikvCli.Close()
 	}
 
-	s.cancel()
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
-	s.wg.Wait()
+	s.grpcWG.Wait()
 
 	if s.dataCoord != nil {
 		if err := s.dataCoord.Close(); err != nil {
@@ -347,10 +346,13 @@ func (s *Server) Stop() (err error) {
 		}
 	}
 	if s.rootCoord != nil {
+		logger.Info("internal server[rootCoord] start to stop")
 		if err := s.rootCoord.Stop(); err != nil {
-			log.Error("Failed to close close rootCoord", zap.Error(err))
+			log.Error("Failed to close rootCoord", zap.Error(err))
 		}
 	}
+
+	s.cancel()
 	return nil
 }
 

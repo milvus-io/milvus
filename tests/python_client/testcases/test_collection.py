@@ -841,7 +841,7 @@ class TestCollectionParams(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         float_vec_field = cf.gen_float_vec_field(dim=dim)
         schema = cf.gen_collection_schema(fields=[cf.gen_int64_field(is_primary=True), float_vec_field])
-        error = {ct.err_code: 1, ct.err_msg: "invalid dimension: {}. should be in range 1 ~ 32768".format(dim)}
+        error = {ct.err_code: 65535, ct.err_msg: "invalid dimension: {}.".format(dim)}
         self.collection_wrap.init_collection(c_name, schema=schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1711,7 +1711,7 @@ class TestCollectionCountBinary(TestcaseBase):
         expected: check error message successfully
         """
         self._connect()
-        dim = 2
+        dim = ct.min_dim
         c_schema = cf.gen_default_binary_collection_schema(auto_id=auto_id, dim=dim)
         collection_w = self.init_collection_wrap(schema=c_schema,
                                                  check_task=CheckTasks.err_res,
@@ -4336,7 +4336,7 @@ class TestCollectionMultipleVectorValid(TestcaseBase):
         """
         self._connect()
         c_name = cf.gen_unique_str(prefix)
-        another_dim = 2
+        another_dim = ct.min_dim
         schema = cf.gen_default_collection_schema(primary_field=primary_key, auto_id=auto_id, dim=ct.max_dim,
                                                   enable_dynamic_field=enable_dynamic_field,
                                                   multiple_dim_array=[another_dim])

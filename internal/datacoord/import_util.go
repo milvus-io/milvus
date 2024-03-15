@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sort"
 	"time"
@@ -30,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -247,31 +247,15 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 	return fileGroups
 }
 
-func AddImportSegment(cluster Cluster, meta *meta, segmentID int64) error {
-	segment := meta.GetSegment(segmentID)
-	req := &datapb.AddImportSegmentRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		SegmentId:    segment.GetID(),
-		ChannelName:  segment.GetInsertChannel(),
-		CollectionId: segment.GetCollectionID(),
-		PartitionId:  segment.GetPartitionID(),
-		RowNum:       segment.GetNumOfRows(),
-		StatsLog:     segment.GetStatslogs(),
-	}
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	_, err := cluster.AddImportSegment(ctx, req)
-	return err
-}
-
 func getPendingProgress(jobID int64, imeta ImportMeta) float32 {
 	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(PreImportTaskType))
 	preImportingFiles := lo.SumBy(tasks, func(task ImportTask) int {
 		return len(task.GetFileStats())
 	})
 	totalFiles := len(imeta.GetJob(jobID).GetFiles())
+	if totalFiles == 0 {
+		return 1
+	}
 	return float32(preImportingFiles) / float32(totalFiles)
 }
 
@@ -280,6 +264,9 @@ func getPreImportingProgress(jobID int64, imeta ImportMeta) float32 {
 	completedTasks := lo.Filter(tasks, func(task ImportTask, _ int) bool {
 		return task.GetState() == datapb.ImportTaskStateV2_Completed
 	})
+	if len(tasks) == 0 {
+		return 1
+	}
 	return float32(len(completedTasks)) / float32(len(tasks))
 }
 
@@ -297,7 +284,10 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 		segmentIDs = append(segmentIDs, task.(*importTask).GetSegmentIDs()...)
 	}
 	importedRows = meta.GetSegmentsTotalCurrentRows(segmentIDs)
-	importingProgress := float32(importedRows) / float32(totalRows)
+	var importingProgress float32 = 1
+	if totalRows != 0 {
+		importingProgress = float32(importedRows) / float32(totalRows)
+	}
 
 	var (
 		unsetIsImportingSegment int64
@@ -317,11 +307,14 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 			}
 		}
 	}
-	completedProgress := float32(unsetIsImportingSegment) / float32(totalSegment)
+	var completedProgress float32 = 1
+	if totalSegment != 0 {
+		completedProgress = float32(unsetIsImportingSegment) / float32(totalSegment)
+	}
 	return importingProgress*0.8 + completedProgress*0.2
 }
 
-func GetImportProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, string) {
+func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, string) {
 	job := imeta.GetJob(jobID)
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
@@ -345,6 +338,31 @@ func GetImportProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, intern
 	return 0, internalpb.ImportJobState_None, "unknown import job state"
 }
 
+func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
+	progresses := make([]*internalpb.ImportTaskProgress, 0)
+	tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+	for _, task := range tasks {
+		totalRows := lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
+			return file.GetTotalRows()
+		})
+		importedRows := meta.GetSegmentsTotalCurrentRows(task.(*importTask).GetSegmentIDs())
+		progress := int64(100)
+		if totalRows != 0 {
+			progress = int64(float32(importedRows) / float32(totalRows) * 100)
+		}
+		for _, fileStat := range task.GetFileStats() {
+			progresses = append(progresses, &internalpb.ImportTaskProgress{
+				FileName:     fileStat.GetImportFile().String(),
+				FileSize:     fileStat.GetFileSize(),
+				Reason:       task.GetReason(),
+				Progress:     progress,
+				CompleteTime: task.(*importTask).GetCompleteTime(),
+			})
+		}
+	}
+	return progresses
+}
+
 func DropImportTask(task ImportTask, cluster Cluster, tm ImportMeta) error {
 	if task.GetNodeID() == NullNodeID {
 		return nil
@@ -366,7 +384,15 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
 
-	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, importFile.GetPaths()[0], false)
+	insertPrefix := importFile.GetPaths()[0]
+	ok, err := cm.Exist(ctx, insertPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, fmt.Errorf("insert binlog prefix does not exist, path=%s", insertPrefix)
+	}
+	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, false)
 	if err != nil {
 		return nil, err
 	}
@@ -377,7 +403,16 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 	if len(importFile.GetPaths()) < 2 {
 		return segmentImportFiles, nil
 	}
-	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), importFile.GetPaths()[1], false)
+	deltaPrefix := importFile.GetPaths()[1]
+	ok, err = cm.Exist(ctx, deltaPrefix)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		log.Warn("delta binlog prefix does not exist", zap.String("path", deltaPrefix))
+		return segmentImportFiles, nil
+	}
+	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
 	if err != nil {
 		return nil, err
 	}

@@ -170,10 +170,21 @@ func (suite *JobSuite) SetupTest() {
 	suite.scheduler.Start()
 	meta.GlobalFailedLoadCache = meta.NewFailedLoadCache()
 
-	suite.nodeMgr.Add(session.NewNodeInfo(1000, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(2000, "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(3000, "localhost"))
-
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1000,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2000,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   3000,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 1000)
 	suite.NoError(err)
 	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 2000)

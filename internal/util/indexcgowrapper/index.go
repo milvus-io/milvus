@@ -49,6 +49,7 @@ type CgoIndex struct {
 	close    bool
 }
 
+// used only in test
 // TODO: use proto.Marshal instead of proto.MarshalTextString for better compatibility.
 func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]string) (CodecIndex, error) {
 	protoTypeParams := &indexcgopb.TypeParams{
@@ -123,6 +124,8 @@ func CreateIndexV2(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIn
 	return index, nil
 }
 
+// TODO: this seems to be used only for test. We should mark the method
+// name with ForTest, or maybe move to test file.
 func (index *CgoIndex) Build(dataset *Dataset) error {
 	switch dataset.DType {
 	case schemapb.DataType_None:
@@ -174,6 +177,12 @@ func (index *CgoIndex) buildBFloat16VecIndex(dataset *Dataset) error {
 	vectors := dataset.Data[keyRawArr].([]byte)
 	status := C.BuildBFloat16VecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (*C.uint8_t)(&vectors[0]))
 	return HandleCStatus(&status, "failed to build bfloat16 vector index")
+}
+
+func (index *CgoIndex) buildSparseFloatVecIndex(dataset *Dataset) error {
+	vectors := dataset.Data[keyRawArr].([]byte)
+	status := C.BuildSparseFloatVecIndex(index.indexPtr, (C.int64_t)(len(vectors)), (C.int64_t)(0), (*C.uint8_t)(&vectors[0]))
+	return HandleCStatus(&status, "failed to build sparse float vector index")
 }
 
 func (index *CgoIndex) buildBinaryVecIndex(dataset *Dataset) error {

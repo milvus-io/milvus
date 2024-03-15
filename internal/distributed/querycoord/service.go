@@ -57,7 +57,7 @@ import (
 
 // Server is the grpc server of QueryCoord.
 type Server struct {
-	wg         sync.WaitGroup
+	grpcWG     sync.WaitGroup
 	loopCtx    context.Context
 	loopCancel context.CancelFunc
 	grpcServer *grpc.Server
@@ -147,7 +147,7 @@ func (s *Server) init() error {
 		log.Info("Connected to tikv. Using tikv as metadata storage.")
 	}
 
-	s.wg.Add(1)
+	s.grpcWG.Add(1)
 	go s.startGrpcLoop(rpcParams.Port.GetAsInt())
 	// wait for grpc server loop start
 	err = <-s.grpcErrChan
@@ -204,7 +204,7 @@ func (s *Server) init() error {
 }
 
 func (s *Server) startGrpcLoop(grpcPort int) {
-	defer s.wg.Done()
+	defer s.grpcWG.Done()
 	Params := &paramtable.Get().QueryCoordGrpcServerCfg
 	kaep := keepalive.EnforcementPolicy{
 		MinTime:             5 * time.Second, // If a client pings more than once every 5 seconds, terminate the connection
@@ -283,11 +283,18 @@ func (s *Server) Stop() (err error) {
 	if s.etcdCli != nil {
 		defer s.etcdCli.Close()
 	}
-	s.loopCancel()
+
 	if s.grpcServer != nil {
 		utils.GracefulStopGRPCServer(s.grpcServer)
 	}
-	return s.queryCoord.Stop()
+	s.grpcWG.Wait()
+
+	logger.Info("internal server[queryCoord] start to stop")
+	if err := s.queryCoord.Stop(); err != nil {
+		log.Error("failed to close queryCoord", zap.Error(err))
+	}
+	s.loopCancel()
+	return nil
 }
 
 // SetRootCoord sets root coordinator's client

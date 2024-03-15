@@ -1774,9 +1774,8 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	log := log.With(zap.Int64("collection", in.GetCollectionID()),
 		zap.Int64s("partitions", in.GetPartitionIDs()),
-		zap.Strings("channels", in.GetChannelNames()),
-		zap.Any("files", in.GetFiles()))
-	log.Info("receive import request")
+		zap.Strings("channels", in.GetChannelNames()))
+	log.Info("receive import request", zap.Any("files", in.GetFiles()))
 
 	var timeoutTs uint64 = math.MaxUint64
 	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV("timeout", in.GetOptions())
@@ -1801,10 +1800,17 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 		for _, importFile := range in.GetFiles() {
 			segmentPrefixes, err := ListBinlogsAndGroupBySegment(ctx, s.meta.chunkManager, importFile)
 			if err != nil {
-				resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("list binlogs and group by segment failed, err=%w", err)))
+				resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("list binlogs failed, err=%s", err)))
 				return resp, nil
 			}
 			files = append(files, segmentPrefixes...)
+		}
+		files = lo.Filter(files, func(file *internalpb.ImportFile, _ int) bool {
+			return len(file.GetPaths()) > 0
+		})
+		if len(files) == 0 {
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no binlog to import, import_prefix=%s", in.GetFiles())))
+			return resp, nil
 		}
 	}
 
@@ -1820,16 +1826,17 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 
 	job := &importJob{
 		ImportJob: &datapb.ImportJob{
-			JobID:        idStart,
-			CollectionID: in.GetCollectionID(),
-			PartitionIDs: in.GetPartitionIDs(),
-			Vchannels:    in.GetChannelNames(),
-			Schema:       in.GetSchema(),
-			TimeoutTs:    timeoutTs,
-			CleanupTs:    math.MaxUint64,
-			State:        internalpb.ImportJobState_Pending,
-			Files:        files,
-			Options:      in.GetOptions(),
+			JobID:          idStart,
+			CollectionID:   in.GetCollectionID(),
+			CollectionName: in.GetCollectionName(),
+			PartitionIDs:   in.GetPartitionIDs(),
+			Vchannels:      in.GetChannelNames(),
+			Schema:         in.GetSchema(),
+			TimeoutTs:      timeoutTs,
+			CleanupTs:      math.MaxUint64,
+			State:          internalpb.ImportJobState_Pending,
+			Files:          files,
+			Options:        in.GetOptions(),
 		},
 	}
 	err = s.importMeta.AddJob(job)
@@ -1839,7 +1846,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	}
 
 	resp.JobID = fmt.Sprint(job.GetJobID())
-	log.Info("add import job done", zap.Int64("jobID", job.GetJobID()))
+	log.Info("add import job done", zap.Int64("jobID", job.GetJobID()), zap.Any("files", files))
 	return resp, nil
 }
 
@@ -1859,10 +1866,14 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse job id failed, err=%w", err)))
 		return resp, nil
 	}
-	progress, state, reason := GetImportProgress(jobID, s.importMeta, s.meta)
+	job := s.importMeta.GetJob(jobID)
+	progress, state, reason := GetJobProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
+	resp.CollectionName = job.GetCollectionName()
+	resp.CompleteTime = job.GetCompleteTime()
+	resp.TaskProgresses = GetTaskProgresses(jobID, s.importMeta, s.meta)
 	log.Info("GetImportProgress done", zap.Any("resp", resp))
 	return resp, nil
 }
@@ -1890,11 +1901,12 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, reason := GetImportProgress(job.GetJobID(), s.importMeta, s.meta)
+		progress, state, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)
 		resp.Progresses = append(resp.Progresses, progress)
+		resp.CollectionNames = append(resp.CollectionNames, job.GetCollectionName())
 	}
 	return resp, nil
 }

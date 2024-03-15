@@ -150,7 +150,7 @@ func (e *executor) PreImport(task Task) {
 		}
 		defer reader.Close()
 		start := time.Now()
-		err = e.readFileStat(reader, task, i)
+		err = e.readFileStat(reader, task, i, file)
 		if err != nil {
 			e.handleErr(task, err, "preimport failed")
 			return err
@@ -180,7 +180,12 @@ func (e *executor) PreImport(task Task) {
 		WrapLogFields(task, zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))...)
 }
 
-func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
+func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int, file *internalpb.ImportFile) error {
+	fileSize, err := GetFileSize(file, e.cm)
+	if err != nil {
+		return err
+	}
+
 	totalRows := 0
 	totalSize := 0
 	hashedStats := make(map[string]*datapb.PartitionImportStats)
@@ -209,6 +214,7 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 	}
 
 	stat := &datapb.ImportFileStats{
+		FileSize:        fileSize,
 		TotalRows:       int64(totalRows),
 		TotalMemorySize: int64(totalSize),
 		HashedStats:     hashedStats,
@@ -312,6 +318,9 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future
 	for channelIdx, datas := range hashedData {
 		channel := task.GetVchannels()[channelIdx]
 		for partitionIdx, data := range datas {
+			if data.GetRowNum() == 0 {
+				continue
+			}
 			partitionID := task.GetPartitionIDs()[partitionIdx]
 			size := data.GetMemorySize()
 			segmentID := PickSegment(task, segmentImportedSizes, channel, partitionID, size)

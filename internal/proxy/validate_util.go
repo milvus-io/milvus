@@ -1,6 +1,7 @@
 package proxy
 
 import (
+	"encoding/json"
 	"fmt"
 	"math"
 	"reflect"
@@ -82,6 +83,10 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			}
 		case schemapb.DataType_BinaryVector:
 			if err := v.checkBinaryVectorFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_SparseFloatVector:
+			if err := v.checkSparseFloatFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		case schemapb.DataType_VarChar:
@@ -204,6 +209,13 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
 			}
+
+		case schemapb.DataType_SparseFloatVector:
+			n := uint64(len(field.GetVectors().GetSparseFloatVector().Contents))
+			if n != numRows {
+				return errNumRowsMismatch(field.GetFieldName(), n)
+			}
+
 		default:
 			// error won't happen here.
 			n, err := funcutil.GetNumRowOfFieldData(field)
@@ -325,6 +337,19 @@ func (v *validateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fie
 	return nil
 }
 
+func (v *validateUtil) checkSparseFloatFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	if field.GetVectors() == nil || field.GetVectors().GetSparseFloatVector() == nil {
+		msg := fmt.Sprintf("sparse float field '%v' is illegal, nil SparseFloatVector", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need sparse float array", "got nil", msg)
+	}
+	sparseRows := field.GetVectors().GetSparseFloatVector().GetContents()
+	if sparseRows == nil {
+		msg := fmt.Sprintf("sparse float field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need sparse float array", "got nil", msg)
+	}
+	return typeutil.ValidateSparseFloatRows(sparseRows...)
+}
+
 func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	strArr := field.GetScalars().GetStringData().GetData()
 	if strArr == nil && fieldSchema.GetDefaultValue() == nil {
@@ -369,6 +394,19 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 		}
 	}
 
+	if fieldSchema.GetIsDynamic() {
+		var jsonMap map[string]interface{}
+		for _, data := range jsonArray {
+			err := json.Unmarshal(data, &jsonMap)
+			if err != nil {
+				log.Warn("insert invalid JSON data, milvus only support json map without nesting",
+					zap.ByteString("data", data),
+					zap.Error(err),
+				)
+				return merr.WrapErrIoFailedReason(err.Error())
+			}
+		}
+	}
 	return nil
 }
 

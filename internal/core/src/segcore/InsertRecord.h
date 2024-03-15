@@ -552,7 +552,7 @@ struct InsertRecord {
         return ptr;
     }
 
-    // append a column of scalar type
+    // append a column of scalar or sparse float vector type
     template <typename Type>
     void
     append_field_data(FieldId field_id, int64_t size_per_chunk) {

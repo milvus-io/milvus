@@ -84,7 +84,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
-	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64)
+	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 	indexMeta := GenTestIndexMeta(suite.collectionID, suite.schema)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
@@ -665,7 +665,7 @@ func (suite *SegmentLoaderDetailSuite) SetupSuite() {
 	suite.partitionID = rand.Int63()
 	suite.segmentID = rand.Int63()
 	suite.segmentNum = 5
-	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64)
+	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 }
 
 func (suite *SegmentLoaderDetailSuite) SetupTest() {
@@ -684,7 +684,7 @@ func (suite *SegmentLoaderDetailSuite) SetupTest() {
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
-	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64)
+	schema := GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 
 	indexMeta := GenTestIndexMeta(suite.collectionID, schema)
 	loadMeta := &querypb.LoadMetaInfo{
@@ -714,7 +714,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			return nil
 		})
 		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
-		infos = suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
@@ -742,7 +742,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 
 			return nil
 		})
-		infos = suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
@@ -760,7 +760,7 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		suite.segmentManager.EXPECT().GetWithType(suite.segmentID, SegmentTypeSealed).RunAndReturn(func(segmentID int64, segmentType commonpb.SegmentState) Segment {
 			return nil
 		})
-		suite.loader.prepare(SegmentTypeSealed, &querypb.SegmentLoadInfo{
+		suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
 			SegmentID:    suite.segmentID,
 			PartitionID:  suite.partitionID,
 			CollectionID: suite.collectionID,
@@ -853,7 +853,7 @@ func (suite *SegmentLoaderV2Suite) SetupTest() {
 	initcore.InitRemoteChunkManager(paramtable.Get())
 
 	// Data
-	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64)
+	suite.schema = GenTestCollectionSchema("test", schemapb.DataType_Int64, false)
 	indexMeta := GenTestIndexMeta(suite.collectionID, suite.schema)
 	loadMeta := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,

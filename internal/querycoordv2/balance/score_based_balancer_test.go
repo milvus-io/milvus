@@ -222,7 +222,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 				balancer.dist.SegmentDistManager.Update(node, s...)
 			}
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
@@ -253,7 +257,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegmentWithGrowing() {
 	}
 
 	for _, node := range lo.Keys(distributions) {
-		nodeInfo := session.NewNodeInfo(node, "127.0.0.1:0")
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+		})
 		nodeInfo.UpdateStats(session.WithSegmentCnt(20))
 		nodeInfo.SetState(session.NodeStateNormal)
 		suite.balancer.nodeManager.Add(nodeInfo)
@@ -365,7 +373,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 
 			// 3. set up nodes info and resourceManager for balancer
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
@@ -474,7 +486,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 
 	// 3. set up nodes info and resourceManager for balancer
 	for i := range balanceCase.nodes {
-		nodeInfo := session.NewNodeInfo(balanceCase.nodes[i], "127.0.0.1:0")
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   balanceCase.nodes[i],
+			Address:  "127.0.0.1:0",
+			Hostname: "localhost",
+		})
 		nodeInfo.SetState(balanceCase.states[i])
 		suite.balancer.nodeManager.Add(nodeInfo)
 		suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, balanceCase.nodes[i])
@@ -618,7 +634,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 
 			// 3. set up nodes info and resourceManager for balancer
 			for i := range c.nodes {
-				nodeInfo := session.NewNodeInfo(c.nodes[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodes[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
@@ -734,7 +754,10 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 			// 3. set up nodes info and resourceManager for balancer
 			for _, nodes := range c.replicaWithNodes {
 				for i := range nodes {
-					nodeInfo := session.NewNodeInfo(nodes[i], "127.0.0.1:0")
+					nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+						NodeID:  nodes[i],
+						Address: "127.0.0.1:0",
+					})
 					nodeInfo.UpdateStats(session.WithChannelCnt(len(c.channelDist[nodes[i]])))
 					nodeInfo.SetState(c.states[i])
 					suite.balancer.nodeManager.Add(nodeInfo)

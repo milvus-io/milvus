@@ -98,8 +98,13 @@ class VectorDiskAnnIndex : public VectorIndex {
     std::vector<uint8_t>
     GetVector(const DatasetPtr dataset) const override;
 
-    void
-    CleanLocalData() override;
+    std::unique_ptr<const knowhere::sparse::SparseRow<float>[]>
+    GetSparseVector(const DatasetPtr dataset) const override {
+        PanicInfo(ErrorCode::Unsupported,
+                  "get sparse vector not supported for disk index");
+    }
+
+    void CleanLocalData() override;
 
     knowhere::expected<
         std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>

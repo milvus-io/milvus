@@ -516,7 +516,7 @@ func (ex *Executor) removeDistribution(task *LeaderTask, step int) error {
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
 			commonpbutil.WithMsgID(task.ID()),
 		),
 		CollectionID: task.collectionID,
@@ -524,24 +524,24 @@ func (ex *Executor) removeDistribution(task *LeaderTask, step int) error {
 		ReplicaID:    task.ReplicaID(),
 		Actions: []*querypb.SyncAction{
 			{
-				Type:      querypb.SyncType_Set,
+				Type:      querypb.SyncType_Remove,
 				SegmentID: action.SegmentID(),
+				NodeID:    action.Node(),
 			},
 		},
 	}
 
 	startTs := time.Now()
-	log.Info("Sync Distribution...")
+	log.Info("Remove Distribution...")
 	status, err := ex.cluster.SyncDistribution(task.Context(), task.leaderID, req)
-	// status, err := ex.cluster.LoadSegments(task.Context(), leaderID, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
-		log.Warn("failed to sync distribution", zap.Error(err))
+		log.Warn("failed to remove distribution", zap.Error(err))
 		return err
 	}
 
 	elapsed := time.Since(startTs)
-	log.Info("sync distribution done", zap.Duration("elapsed", elapsed))
+	log.Info("remove distribution done", zap.Duration("elapsed", elapsed))
 
 	return nil
 }

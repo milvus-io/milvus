@@ -54,10 +54,12 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	m.ResourceManager.AddResourceGroup("rg1")
 	m.ResourceManager.AddResourceGroup("rg2")
 	m.ResourceManager.AddResourceGroup("rg3")
-
 	for i := 1; i < 10; i++ {
-		nodeMgr.Add(session.NewNodeInfo(int64(i), "localhost"))
-
+		nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 		if i%3 == 0 {
 			m.ResourceManager.AssignNode("rg1", int64(i))
 		}
