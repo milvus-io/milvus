@@ -436,6 +436,7 @@ func genStorageConfig() *indexpb.StorageConfig {
 		RootPath:        params.MinioCfg.RootPath.GetValue(),
 		IAMEndpoint:     params.MinioCfg.IAMEndpoint.GetValue(),
 		UseSSL:          params.MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:       params.MinioCfg.SslCACert.GetValue(),
 		UseIAM:          params.MinioCfg.UseIAM.GetAsBool(),
 	}
 }

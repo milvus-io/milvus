@@ -44,6 +44,7 @@ func newRemoteChunkManager(ctx context.Context, cloudProvider string, bucketName
 		AccessKeyID(Params.MinioCfg.AccessKeyID.GetValue()),
 		SecretAccessKeyID(Params.MinioCfg.SecretAccessKey.GetValue()),
 		UseSSL(Params.MinioCfg.UseSSL.GetAsBool()),
+		SslCACert(Params.MinioCfg.SslCACert.GetValue()),
 		BucketName(bucketName),
 		UseIAM(Params.MinioCfg.UseIAM.GetAsBool()),
 		CloudProvider(cloudProvider),
