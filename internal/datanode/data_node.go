@@ -88,8 +88,9 @@ type DataNode struct {
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
 	flowgraphManager FlowgraphManager
-	eventManagerMap  *typeutil.ConcurrentMap[string, *channelEventManager]
-	channelManager   ChannelManager
+
+	eventManager   *EventManager
+	channelManager ChannelManager
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
@@ -142,7 +143,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
-		eventManagerMap:  typeutil.NewConcurrentMap[string, *channelEventManager](),
+		eventManager:     NewEventManager(),
 		flowgraphManager: newFlowgraphManager(),
 		clearSignal:      make(chan string, 100),
 
@@ -428,10 +429,7 @@ func (node *DataNode) Stop() error {
 		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
 
-		node.eventManagerMap.Range(func(_ string, m *channelEventManager) bool {
-			m.Close()
-			return true
-		})
+		node.eventManager.CloseAll()
 
 		if node.writeBufferManager != nil {
 			node.writeBufferManager.Stop()

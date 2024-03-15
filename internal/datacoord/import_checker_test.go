@@ -180,8 +180,6 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 	}
 	sm := s.checker.sm.(*MockManager)
 	sm.EXPECT().FlushImportSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	cluster := s.checker.cluster.(*MockCluster)
-	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)

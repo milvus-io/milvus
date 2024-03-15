@@ -780,23 +780,30 @@ func checkRangeSearchParams(str string, metricType string) error {
 		log.Info("json Unmarshal fail when checkRangeSearchParams")
 		return err
 	}
-	_, ok := data[radiusKey]
+	radius, ok := data[radiusKey]
 	// will not do range search, no need to check
 	if !ok {
 		return nil
 	}
+	if radius == nil {
+		return merr.WrapErrParameterInvalidMsg("pass invalid type for radius")
+	}
 	var params rangeSearchParams
-	err = json.Unmarshal(*data[radiusKey], &params.radius)
+	err = json.Unmarshal(*radius, &params.radius)
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("must pass numpy type for radius")
 	}
 
-	_, ok = data[rangeFilterKey]
+	rangeFilter, ok := data[rangeFilterKey]
 	// not pass range_filter, no need to check
 	if !ok {
 		return nil
 	}
-	err = json.Unmarshal(*data[rangeFilterKey], &params.rangeFilter)
+
+	if rangeFilter == nil {
+		return merr.WrapErrParameterInvalidMsg("pass invalid type for range_filter")
+	}
+	err = json.Unmarshal(*rangeFilter, &params.rangeFilter)
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("must pass numpy type for range_filter")
 	}

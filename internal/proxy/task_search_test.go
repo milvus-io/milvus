@@ -2089,6 +2089,18 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 	t.Run("check range search params", func(t *testing.T) {
 		normalParam := getValidSearchParams()
 
+		invalidTypeRadius := getBaseParamsForRangeSearchL2()
+		invalidTypeRadius = append(invalidTypeRadius, &commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"nprobe": 10, "radius": null}`,
+		})
+
+		invalidTypeFilter := getBaseParamsForRangeSearchL2()
+		invalidTypeFilter = append(invalidTypeFilter, &commonpb.KeyValuePair{
+			Key:   SearchParamsKey,
+			Value: `{"nprobe": 10, "radius": 10, "range_filter": null}`,
+		})
+
 		normalParamWithNoFilter := getBaseParamsForRangeSearchL2()
 		normalParamWithNoFilter = append(normalParamWithNoFilter, &commonpb.KeyValuePair{
 			Key:   SearchParamsKey,
@@ -2169,6 +2181,8 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			description string
 			validParams []*commonpb.KeyValuePair
 		}{
+			{"invalidTypeRadius", invalidTypeRadius},
+			{"invalidTypeFilter", invalidTypeFilter},
 			{"wrongTypeRadius", wrongTypeRadius},
 			{"wrongTypeFilter", wrongTypeFilter},
 		}

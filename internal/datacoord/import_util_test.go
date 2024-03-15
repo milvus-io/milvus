@@ -290,29 +290,6 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 }
 
-func TestImportUtil_AddImportSegment(t *testing.T) {
-	cluster := NewMockCluster(t)
-	cluster.EXPECT().AddImportSegment(mock.Anything, mock.Anything).Return(nil, nil)
-
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
-	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
-
-	meta, err := newMeta(context.TODO(), catalog, nil)
-	assert.NoError(t, err)
-	segment := &SegmentInfo{
-		SegmentInfo: &datapb.SegmentInfo{ID: 1, IsImporting: true},
-	}
-	err = meta.AddSegment(context.Background(), segment)
-	assert.NoError(t, err)
-
-	err = AddImportSegment(cluster, meta, segment.GetID())
-	assert.NoError(t, err)
-}
-
 func TestImportUtil_DropImportTask(t *testing.T) {
 	cluster := NewMockCluster(t)
 	cluster.EXPECT().DropImport(mock.Anything, mock.Anything).Return(nil)

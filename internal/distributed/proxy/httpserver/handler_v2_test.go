@@ -415,13 +415,14 @@ func TestCreateCollection(t *testing.T) {
 		errCode:     1100, // ErrParameterInvalid
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
-		path:        path,
-		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar"}`),
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": "256", "enableDynamicField": "false", "shardsNum": "2", "consistencyLevel": "Strong", "ttlSeconds": "3600"}}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "unknown"}`),
-		errMsg:      "idType can only be [Int64, Varchar](case sensitive), default: Int64: invalid parameter[expected=Int64, Varchar][actual=unknown]",
+		errMsg:      "idType can only be [Int64, VarChar], default: Int64: invalid parameter[expected=Int64, Varchar][actual=unknown]",
 		errCode:     1100, // ErrParameterInvalid
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
@@ -438,9 +439,10 @@ func TestCreateCollection(t *testing.T) {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
                 {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": false, "elementTypeParams": {}},
+                {"fieldName": "partition_field", "dataType": "VarChar", "isPartitionKey": true, "elementTypeParams": {"max_length": "256"}},
                 {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
             ]
-        }}`),
+        }, "params": {"partitionsNum": "32"}}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
@@ -1200,7 +1202,7 @@ func TestSearchV2(t *testing.T) {
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
-		errMsg:      "can only accept json format request, error: search without annsFields, but already found multiple vector fields: [book_intro, binaryVector]",
+		errMsg:      "can only accept json format request, error: search without annsField, but already found multiple vector fields: [book_intro, binaryVector,,,]",
 		errCode:     1801,
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
