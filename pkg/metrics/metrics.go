@@ -99,7 +99,6 @@ const (
 	lockType                 = "lock_type"
 	lockOp                   = "lock_op"
 	loadTypeName             = "load_type"
-	importIdLableName        = "import_job_id"
 
 	// entities label
 	LoadedLabel         = "loaded"

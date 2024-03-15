@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 const (
@@ -290,10 +289,8 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 			return
 		}
 		metrics.DataCoordBulkVectors.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
 			strconv.FormatInt(task.GetCollectionID(), 10),
-			strconv.FormatInt(task.GetJobID(), 10),
-		).Add(info.GetImportedRows() - segment.GetNumOfRows())
+		).Add(float64(info.GetImportedRows() - segment.GetNumOfRows()))
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {

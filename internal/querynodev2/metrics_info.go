@@ -157,14 +157,11 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 func getCollectionMetrics(node *QueryNode) (*metricsinfo.QueryNodeCollectionMetrics, error) {
 	allSegments := node.manager.Segment.GetBy()
 	ret := &metricsinfo.QueryNodeCollectionMetrics{
-		Collections: make(map[int64]int64),
+		CollectionRows: make(map[int64]int64),
 	}
 	for _, segment := range allSegments {
 		collectionID := segment.Collection()
-		if _, ok := ret.Collections[collectionID]; !ok {
-			ret.Collections[collectionID] = 0
-		}
-		ret.Collections[collectionID] += segment.RowNum()
+		ret.CollectionRows[collectionID] += segment.RowNum()
 	}
 	return ret, nil
 }

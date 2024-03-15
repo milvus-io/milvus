@@ -95,7 +95,7 @@ type QueryNodeConfiguration struct {
 }
 
 type QueryNodeCollectionMetrics struct {
-	Collections map[int64]int64
+	CollectionRows map[int64]int64
 }
 
 // QueryNodeInfos implements ComponentInfos

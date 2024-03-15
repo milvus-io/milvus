@@ -23,6 +23,7 @@ import (
 	"os"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -2674,7 +2675,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if float64(span.Milliseconds()) >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsFloat()*1000 {
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Int64("nq", qt.SearchRequest.GetNq()), zap.Duration("duration", span))
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -2818,7 +2819,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if float64(span.Milliseconds()) >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsFloat()*1000 {
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(rpcSlow(method), zap.Duration("duration", span))
 			metrics.ProxySlowQueryCount.WithLabelValues(
 				strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -3077,7 +3078,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 
 	defer func() {
 		span := tr.ElapseSpan()
-		if float64(span.Milliseconds()) >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsFloat()*1000 {
+		if span >= paramtable.Get().ProxyCfg.SlowQuerySpanInSeconds.GetAsDuration(time.Second) {
 			log.Info(
 				rpcSlow(method),
 				zap.String("expr", request.Expr),

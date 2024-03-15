@@ -179,10 +179,7 @@ func (q *QuotaCenter) clearMetrics() {
 }
 
 func updateNumEntitiesLoaded(current map[int64]int64, qn *metricsinfo.QueryNodeCollectionMetrics) map[int64]int64 {
-	for collectionID, rowNum := range qn.Collections {
-		if _, ok := current[collectionID]; !ok {
-			current[collectionID] = 0
-		}
+	for collectionID, rowNum := range qn.CollectionRows {
 		current[collectionID] += rowNum
 	}
 	return current
@@ -223,6 +220,7 @@ func (q *QuotaCenter) reportDataCoordCollectionMetrics(dc *metricsinfo.DataCoord
 					zap.Int64("collection", collectionID),
 					zap.Int64("field", indexInfo.FieldID),
 				)
+				continue
 			}
 			field := fields[indexInfo.FieldID]
 			metrics.RootCoordIndexedNumEntities.WithLabelValues(
@@ -273,6 +271,7 @@ func (q *QuotaCenter) syncMetrics() error {
 			}
 		}
 		q.readableCollections = collections.Collect()
+		q.reportNumEntitiesLoaded(numEntitiesLoaded)
 		return nil
 	})
 	// get Data cluster metrics
@@ -330,8 +329,6 @@ func (q *QuotaCenter) syncMetrics() error {
 	if err != nil {
 		return err
 	}
-
-	q.reportNumEntitiesLoaded(numEntitiesLoaded)
 
 	for oldDN := range oldDataNodes {
 		metrics.RootCoordTtDelay.DeleteLabelValues(typeutil.DataNodeRole, strconv.FormatInt(oldDN, 10))
