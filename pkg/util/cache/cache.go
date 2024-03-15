@@ -2,9 +2,9 @@ package cache
 
 import (
 	"container/list"
-	"errors"
 	"sync"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 )
 
@@ -199,11 +199,11 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 		}
 		value, ok := c.loader(key)
 		if ok {
-			if item, err := c.setAndPin(key, value); err != nil {
+			item, err := c.setAndPin(key, value)
+			if err != nil {
 				return nil, err
-			} else {
-				return item, nil
 			}
+			return item, nil
 		}
 	}
 
