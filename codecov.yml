@@ -1,6 +1,6 @@
 # Configuration File for CodeCov
 codecov:
-  require_ci_to_pass: no
+  require_ci_to_pass: false 
   notify:
     require_ci_to_pass: no
     wait_for_ci: false
@@ -32,7 +32,6 @@ flag_management:
         target: 80%
         threshold: 0%
         if_ci_failed: error #success, failure, error, ignore
-
   individual_flags: # exceptions to the default rules above, stated flag by flag
     - name: core
       paths: 
@@ -52,6 +51,12 @@ flag_management:
       - type: patch
         target: 80%
 
+flags:
+  nightly:
+    joined: false
+  unittests:
+    joined: false
+
 comment:
   layout: "reach, diff, flags, files"
   behavior: default
@@ -69,6 +74,4 @@ ignore:
   - "**/*.proto"
   - "internal/metastore/db/dbmodel/mocks/.*"
   - "**/mock_*.go"
-
-
 

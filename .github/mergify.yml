@@ -61,8 +61,8 @@ pull_request_rules:
       # - 'status-success=Code Checker MacOS 12'
       - 'status-success=Code Checker CentOS 7'
       - 'status-success=cpu-e2e'
-      - 'status-success=codecov/patch'
-      - 'status-success=codecov/project'
+      - 'status-success=codecov/patch/core'
+      - 'status-success=codecov/project/core'
     actions:
       label:
         add:
@@ -76,8 +76,8 @@ pull_request_rules:
         - base~=^2(\.\d+){1,2}$
       - *client_source_code_files
       - 'status-success=Test milvusclient'
-      - 'status-success=codecov/path'
-      - 'status-success=codecov/project'
+      - 'status-success=codecov/patch/client'
+      - 'status-success=codecov/project/client'
     actions:
       label:
         add:
