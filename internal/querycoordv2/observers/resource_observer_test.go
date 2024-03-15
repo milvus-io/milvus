@@ -80,7 +80,11 @@ func (suite *ResourceObserverSuite) SetupTest() {
 
 	suite.store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
 	for i := 0; i < 10; i++ {
-		suite.nodeMgr.Add(session.NewNodeInfo(int64(i), "localhost"))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 		suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(i))
 	}
 }
@@ -110,10 +114,26 @@ func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 		typeutil.NewUniqueSet(),
 	))
 	suite.meta.ResourceManager.AddResourceGroup("rg")
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(100), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(101), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(102), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(103), "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(100),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(101),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(102),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(103),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.meta.ResourceManager.AssignNode("rg", 100)
 	suite.meta.ResourceManager.AssignNode("rg", 101)
 	suite.meta.ResourceManager.AssignNode("rg", 102)
@@ -139,7 +159,11 @@ func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 func (suite *ResourceObserverSuite) TestRecoverResourceGroupFailed() {
 	suite.meta.ResourceManager.AddResourceGroup("rg")
 	for i := 100; i < 200; i++ {
-		suite.nodeMgr.Add(session.NewNodeInfo(int64(i), "localhost"))
+		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
 		suite.meta.ResourceManager.AssignNode("rg", int64(i))
 		suite.meta.ResourceManager.HandleNodeDown(int64(i))
 	}
@@ -177,10 +201,26 @@ func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
 
 	suite.store.EXPECT().SaveReplica(mock.Anything).Return(errors.New("store error"))
 	suite.meta.ResourceManager.AddResourceGroup("rg")
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(100), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(101), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(102), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(103), "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(100),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(101),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(102),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(103),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.meta.ResourceManager.AssignNode("rg", 100)
 	suite.meta.ResourceManager.AssignNode("rg", 101)
 	suite.meta.ResourceManager.AssignNode("rg", 102)

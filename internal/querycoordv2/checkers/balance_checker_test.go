@@ -88,8 +88,16 @@ func (suite *BalanceCheckerTestSuite) TearDownTest() {
 func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 	// set up nodes info
 	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID1), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID2), "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID1),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID2),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID1))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID2))
 
@@ -157,8 +165,16 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 	// set up nodes info
 	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID1), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID2), "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID1),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID2),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID1))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID2))
 
@@ -212,8 +228,16 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	// set up nodes info, stopping node1
 	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID1), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID2), "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID1),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   int64(nodeID2),
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.nodeMgr.Stopping(int64(nodeID1))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID1))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID2))
@@ -276,8 +300,14 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	// set up nodes info, stopping node1
 	nodeID1, nodeID2 := 1, 2
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID1), "localhost"))
-	suite.nodeMgr.Add(session.NewNodeInfo(int64(nodeID2), "localhost"))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  int64(nodeID1),
+		Address: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  int64(nodeID2),
+		Address: "localhost",
+	}))
 	suite.nodeMgr.Stopping(int64(nodeID1))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID1))
 	suite.checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(nodeID2))

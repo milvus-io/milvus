@@ -39,7 +39,11 @@ func (suite *UtilTestSuite) SetupTest() {
 
 func (suite *UtilTestSuite) setNodeAvailable(nodes ...int64) {
 	for _, node := range nodes {
-		nodeInfo := session.NewNodeInfo(node, "")
+		nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   node,
+			Address:  "",
+			Hostname: "localhost",
+		})
 		nodeInfo.SetLastHeartbeat(time.Now())
 		suite.nodeMgr.Add(nodeInfo)
 	}

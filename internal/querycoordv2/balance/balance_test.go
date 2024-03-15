@@ -85,7 +85,11 @@ func (suite *BalanceTestSuite) TestAssignBalance() {
 		suite.Run(c.name, func() {
 			suite.SetupTest()
 			for i := range c.nodeIDs {
-				nodeInfo := session.NewNodeInfo(c.nodeIDs[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodeIDs[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.SetState(c.states[i])
 				suite.roundRobinBalancer.nodeManager.Add(nodeInfo)
@@ -145,7 +149,11 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 		suite.Run(c.name, func() {
 			suite.SetupTest()
 			for i := range c.nodeIDs {
-				nodeInfo := session.NewNodeInfo(c.nodeIDs[i], "127.0.0.1:0")
+				nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
+					NodeID:   c.nodeIDs[i],
+					Address:  "127.0.0.1:0",
+					Hostname: "localhost",
+				})
 				nodeInfo.UpdateStats(session.WithChannelCnt(c.channelCnts[i]))
 				nodeInfo.SetState(c.states[i])
 				suite.roundRobinBalancer.nodeManager.Add(nodeInfo)
