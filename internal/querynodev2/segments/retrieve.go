@@ -52,10 +52,10 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	retriever := func(s Segment) error {
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 		result, err := s.Retrieve(ctx, plan)
+		resultCh <- result
 		if err != nil {
 			return err
 		}
-		resultCh <- result
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil

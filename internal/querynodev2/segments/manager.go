@@ -172,7 +172,7 @@ func NewManager() *Manager {
 		Segment:    segMgr,
 	}
 
-	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithCapacityScavenger(cacheMaxItemNum).WithLoader(func(key int64) (Segment, bool) {
+	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithCapacity(cacheMaxItemNum).WithLoader(func(key int64) (Segment, bool) {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segMgr.mu.RLock()
 		defer segMgr.mu.RUnlock()

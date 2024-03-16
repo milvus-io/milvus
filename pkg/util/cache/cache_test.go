@@ -14,7 +14,7 @@ func TestLRUCache(t *testing.T) {
 
 	t.Run("test loader", func(t *testing.T) {
 		size := 10
-		cache := cacheBuilder.WithCapacityScavenger(int64(size)).Build()
+		cache := cacheBuilder.WithCapacity(int64(size)).Build()
 
 		for i := 0; i < size; i++ {
 			err := cache.Do(i, func(v int) error {
@@ -28,7 +28,7 @@ func TestLRUCache(t *testing.T) {
 	t.Run("test finalizer", func(t *testing.T) {
 		size := 10
 		finalizeSeq := make([]int, 0)
-		cache := cacheBuilder.WithCapacityScavenger(int64(size)).WithFinalizer(func(key, value int) error {
+		cache := cacheBuilder.WithCapacity(int64(size)).WithFinalizer(func(key, value int) error {
 			finalizeSeq = append(finalizeSeq, key)
 			return nil
 		}).Build()

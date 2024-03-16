@@ -53,10 +53,10 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		// record search time
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
 		searchResult, err := s.Search(ctx, searchReq)
+		resultCh <- searchResult
 		if err != nil {
 			return err
 		}
-		resultCh <- searchResult
 		// update metrics
 		elapsed := tr.ElapseSpan().Milliseconds()
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),

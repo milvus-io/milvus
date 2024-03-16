@@ -132,7 +132,7 @@ func (b *CacheBuilder[K, V]) WithLazyScavenger(weight func(K) int64, capacity in
 	return b
 }
 
-func (b *CacheBuilder[K, V]) WithCapacityScavenger(capacity int64) *CacheBuilder[K, V] {
+func (b *CacheBuilder[K, V]) WithCapacity(capacity int64) *CacheBuilder[K, V] {
 	b.scavenger = NewLazyScavenger(
 		func(key K) int64 {
 			return 1
