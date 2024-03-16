@@ -361,7 +361,12 @@ func deserializeCell(col arrow.Array, dataType schemapb.DataType, i int) (interf
 			return nil, false
 		}
 		return arrow.Float32Traits.CastFromBytes(arr.Value(i)), true
-
+	case schemapb.DataType_SparseFloatVector:
+		arr, ok := col.(*array.Binary)
+		if !ok {
+			return nil, false
+		}
+		return arr.Value(i), true
 	default:
 		panic(fmt.Sprintf("unsupported type %s", dataType))
 	}
