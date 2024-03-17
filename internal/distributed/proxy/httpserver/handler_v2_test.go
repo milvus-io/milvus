@@ -420,6 +420,13 @@ func TestCreateCollection(t *testing.T) {
 			`"params": {"max_length": "256", "enableDynamicField": "false", "shardsNum": "2", "consistencyLevel": "Strong", "ttlSeconds": "3600"}}`),
 	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": "256", "enableDynamicField": "false", "shardsNum": "2", "consistencyLevel": "unknown", "ttlSeconds": "3600"}}`),
+		errMsg:  "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded: invalid parameter[expected=Strong, Session, Bounded, Eventually, Customized][actual=unknown]",
+		errCode: 1100, // ErrParameterInvalid
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
 		path:        path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "unknown"}`),
 		errMsg:      "idType can only be [Int64, VarChar], default: Int64: invalid parameter[expected=Int64, Varchar][actual=unknown]",
@@ -697,6 +704,9 @@ func TestMethodGet(t *testing.T) {
 				},
 			},
 		},
+	}, nil).Once()
+	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{
+		Status: &StatusSuccess,
 	}, nil).Once()
 	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{
 		Status:  &StatusSuccess,
