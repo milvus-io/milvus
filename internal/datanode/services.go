@@ -778,9 +778,6 @@ func saveSegmentFunc(node *DataNode, req *datapb.ImportTaskRequest, res *rootcoo
 			})
 			// Only retrying when DataCoord is unhealthy or err != nil, otherwise return immediately.
 			if err != nil {
-				if errors.Is(err, merr.ErrServiceNotReady) {
-					return retry.Unrecoverable(err)
-				}
 				return err
 			}
 			return nil

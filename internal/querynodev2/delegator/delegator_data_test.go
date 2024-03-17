@@ -361,6 +361,73 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	}, 10)
 
 	s.False(s.delegator.distribution.Serviceable())
+
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(nil)
+	// reload, refresh the state
+	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     1000,
+				CollectionID:  s.collectionID,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			},
+		},
+		Version: 1,
+	})
+	s.Require().NoError(err)
+	s.True(s.delegator.distribution.Serviceable())
+	// Test normal errors with retry and fail
+	worker1.ExpectedCalls = nil
+	worker1.EXPECT().Delete(mock.Anything, mock.Anything).Return(merr.ErrSegcore)
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
+			Timestamps:  []uint64{10},
+			RowCount:    1,
+		},
+	}, 10)
+	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
+
+	// refresh
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(nil)
+	// reload, refresh the state
+	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     1000,
+				CollectionID:  s.collectionID,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			},
+		},
+		Version: 2,
+	})
+	s.Require().NoError(err)
+	s.True(s.delegator.distribution.Serviceable())
+
+	s.delegator.Close()
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
+			Timestamps:  []uint64{10},
+			RowCount:    1,
+		},
+	}, 10)
+	s.Require().NoError(err)
+	s.False(s.delegator.distribution.Serviceable())
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
