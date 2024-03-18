@@ -61,6 +61,26 @@ func init() {
 func getWatchInfo(info *testInfo) *datapb.ChannelWatchInfo {
 	return &datapb.ChannelWatchInfo{
 		Vchan: getVchanInfo(info),
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+				},
+				{
+					FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		},
 	}
 }
 
@@ -157,10 +177,12 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	node.allocator = allocator.NewMockAllocator(t)
 
 	for _, test := range tests {
 		t.Run(test.description, func(t *testing.T) {
 			node.factory = test.inMsgFactory
+			defer node.tryToReleaseFlowgraph(test.chanName)
 			ds, err := newServiceWithEtcdTickler(
 				ctx,
 				node,
@@ -181,6 +203,39 @@ func TestDataSyncService_newDataSyncService(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDataSyncService_newDataSyncService_DuplicatedChannel(t *testing.T) {
+	ctx := context.Background()
+
+	test := &testInfo{
+		true, false, &mockMsgStreamFactory{true, true},
+		1, "by-dev-rootcoord-dml-test_v1",
+		1, 1, "by-dev-rootcoord-dml-test_v1", 0,
+		1, 2, "by-dev-rootcoord-dml-test_v1", 0,
+		"add un-flushed and flushed segments",
+	}
+	cm := storage.NewLocalChunkManager(storage.RootPath(dataSyncServiceTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
+	watchInfo := getWatchInfo(test)
+
+	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	node.allocator = allocator.NewMockAllocator(t)
+	node.factory = test.inMsgFactory
+	metacache := metacache.NewMockMetaCache(t)
+	metacache.EXPECT().Collection().Return(test.collID)
+	metacache.EXPECT().Schema().Return(watchInfo.GetSchema())
+	node.writeBufferManager.Register(test.chanName, metacache, nil, writebuffer.WithIDAllocator(allocator.NewMockAllocator(t)))
+	ds, err := newServiceWithEtcdTickler(
+		ctx,
+		node,
+		watchInfo,
+		genTestTickler(),
+	)
+
+	assert.Error(t, err)
+	assert.Nil(t, ds)
 }
 
 func genBytes() (rawData []byte) {
