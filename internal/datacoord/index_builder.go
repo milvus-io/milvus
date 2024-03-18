@@ -255,7 +255,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			return true
 		}
 		indexParams := ib.meta.indexMeta.GetIndexParams(meta.CollectionID, meta.IndexID)
-		indexType := getIndexType(indexParams)
+		indexType := GetIndexType(indexParams)
 		if isFlatIndex(indexType) || meta.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 			log.Ctx(ib.ctx).Info("segment does not need index really", zap.Int64("buildID", buildID),
 				zap.Int64("segmentID", meta.SegmentID), zap.Int64("num rows", meta.NumRows))
@@ -333,7 +333,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 
 		fieldID := ib.meta.indexMeta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
 		binlogIDs := getBinLogIds(segment, fieldID)
-		if isDiskANNIndex(getIndexType(indexParams)) {
+		if isDiskANNIndex(GetIndexType(indexParams)) {
 			var err error
 			indexParams, err = indexparams.UpdateDiskIndexBuildParams(Params, indexParams)
 			if err != nil {
