@@ -42,6 +42,9 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 	return func(job ImportJob) {
 		job.(*importJob).ImportJob.State = state
 		if state == internalpb.ImportJobState_Completed || state == internalpb.ImportJobState_Failed {
+			// releases requested disk resource
+			job.(*importJob).ImportJob.RequestedDiskSize = 0
+			// set cleanup ts
 			dur := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 			cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
 			job.(*importJob).ImportJob.CleanupTs = cleanupTs
@@ -52,6 +55,12 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 func UpdateJobReason(reason string) UpdateJobAction {
 	return func(job ImportJob) {
 		job.(*importJob).ImportJob.Reason = reason
+	}
+}
+
+func UpdateRequestedDiskSize(requestSize int64) UpdateJobAction {
+	return func(job ImportJob) {
+		job.(*importJob).ImportJob.RequestedDiskSize = requestSize
 	}
 }
 
@@ -72,6 +81,7 @@ type ImportJob interface {
 	GetCleanupTs() uint64
 	GetState() internalpb.ImportJobState
 	GetReason() string
+	GetRequestedDiskSize() int64
 	GetCompleteTime() string
 	GetFiles() []*internalpb.ImportFile
 	GetOptions() []*commonpb.KeyValuePair

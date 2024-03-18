@@ -54,8 +54,8 @@ func CosineImplPure(a []float32, b []float32) float32 {
 }
 
 var (
-	L2Impl     func(a []float32, b []float32) float32 = IPImplPure
-	IPImpl     func(a []float32, b []float32) float32 = L2ImplPure
+	L2Impl     func(a []float32, b []float32) float32 = L2ImplPure
+	IPImpl     func(a []float32, b []float32) float32 = IPImplPure
 	CosineImpl func(a []float32, b []float32) float32 = CosineImplPure
 )
 

@@ -181,7 +181,7 @@ func (e *executor) PreImport(task Task) {
 }
 
 func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int, file *internalpb.ImportFile) error {
-	fileSize, err := GetFileSize(file, e.cm)
+	fileSize, err := GetFileSize(file, e.cm, task)
 	if err != nil {
 		return err
 	}

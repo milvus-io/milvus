@@ -25,6 +25,7 @@ package segments
 import "C"
 
 import (
+	"fmt"
 	"sync"
 	"unsafe"
 
@@ -39,11 +40,14 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type CollectionManager interface {
+	List() []int64
 	Get(collectionID int64) *Collection
 	PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo)
 	Ref(collectionID int64, count uint32) bool
@@ -62,6 +66,13 @@ func NewCollectionManager() *collectionManager {
 	return &collectionManager{
 		collections: make(map[int64]*Collection),
 	}
+}
+
+func (m *collectionManager) List() []int64 {
+	m.mut.RLock()
+	defer m.mut.RUnlock()
+
+	return lo.Keys(m.collections)
 }
 
 func (m *collectionManager) Get(collectionID int64) *Collection {
@@ -109,6 +120,16 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 			log.Info("release collection due to ref count to 0", zap.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
+			metrics.QueryNodeEntitiesSize.DeleteLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				SegmentTypeSealed.String(),
+			)
+			metrics.QueryNodeEntitiesSize.DeleteLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				fmt.Sprint(collectionID),
+				SegmentTypeGrowing.String(),
+			)
 			return true
 		}
 		return false

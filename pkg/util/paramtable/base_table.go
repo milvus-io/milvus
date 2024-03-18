@@ -19,7 +19,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	config "github.com/milvus-io/milvus/pkg/config"
@@ -60,7 +59,9 @@ func globalConfigPrefixs() []string {
 	return []string{"metastore", "localStorage", "etcd", "tikv", "minio", "pulsar", "kafka", "rocksmq", "log", "grpc", "common", "quotaAndLimits"}
 }
 
-var defaultYaml = []string{"milvus.yaml"}
+// support read "milvus.yaml", "default.yaml", "user.yaml" as this order.
+// order: milvus.yaml < default.yaml < user.yaml, do not change the order below
+var defaultYaml = []string{"milvus.yaml", "default.yaml", "user.yaml"}
 
 // BaseTable the basics of paramtable
 type BaseTable struct {
@@ -152,10 +153,22 @@ func (bt *BaseTable) init() {
 
 func (bt *BaseTable) initConfigsFromLocal() {
 	refreshInterval := bt.config.refreshInterval
+	var files []string
+	for _, file := range bt.config.yamlFiles {
+		_, err := os.Stat(path.Join(bt.config.configDir, file))
+		// not found
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			log.Warn("failed to check file", zap.String("file", file), zap.Error(err))
+			panic(err)
+		}
+		files = append(files, path.Join(bt.config.configDir, file))
+	}
+
 	err := bt.mgr.AddSource(config.NewFileSource(&config.FileInfo{
-		Files: lo.Map(bt.config.yamlFiles, func(file string, _ int) string {
-			return path.Join(bt.config.configDir, file)
-		}),
+		Files:           files,
 		RefreshInterval: time.Duration(refreshInterval) * time.Second,
 	}))
 	if err != nil {

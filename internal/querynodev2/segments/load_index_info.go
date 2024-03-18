@@ -73,7 +73,7 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, indexInfo *que
 	indexPaths := indexInfo.IndexFilePaths
 
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
-	enableMmap := indexParams[common.MmapEnabledKey] == "true"
+	enableMmap := common.IsMmapEnabled(indexInfo.IndexParams...)
 	// as Knowhere reports error if encounter a unknown param, we need to delete it
 	delete(indexParams, common.MmapEnabledKey)
 

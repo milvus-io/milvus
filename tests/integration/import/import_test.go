@@ -37,11 +37,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
 type BulkInsertSuite struct {
 	integration.MiniClusterSuite
+
+	failed       bool
+	failedReason string
 
 	pkType   schemapb.DataType
 	autoID   bool
@@ -49,7 +53,9 @@ type BulkInsertSuite struct {
 }
 
 func (s *BulkInsertSuite) SetupTest() {
+	paramtable.Init()
 	s.MiniClusterSuite.SetupTest()
+	s.failed = false
 	s.fileType = importutilv2.Parquet
 	s.pkType = schemapb.DataType_Int64
 	s.autoID = false
@@ -124,6 +130,12 @@ func (s *BulkInsertSuite) run() {
 
 	jobID := importResp.GetJobID()
 	err = WaitForImportDone(ctx, c, jobID)
+	if s.failed {
+		s.T().Logf("expect failed import, err=%s", err)
+		s.Error(err)
+		s.Contains(err.Error(), s.failedReason)
+		return
+	}
 	s.NoError(err)
 
 	segments, err := c.MetaWatcher.ShowSegments()
@@ -252,6 +264,20 @@ func (s *BulkInsertSuite) TestZeroRowCount() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.Empty(segments)
+}
+
+func (s *BulkInsertSuite) TestDiskQuotaExceeded() {
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.DiskProtectionEnabled.Key, "true")
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.DiskQuota.Key, "100")
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.DiskProtectionEnabled.Key)
+	defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.DiskQuota.Key)
+	s.failed = false
+	s.run()
+
+	paramtable.Get().Save(paramtable.Get().QuotaConfig.DiskQuota.Key, "0.01")
+	s.failed = true
+	s.failedReason = "disk quota exceeded"
+	s.run()
 }
 
 func TestBulkInsert(t *testing.T) {

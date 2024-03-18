@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
 // CollectionTarget collection target is immutable,
@@ -36,6 +37,89 @@ func NewCollectionTarget(segments map[int64]*datapb.SegmentInfo, dmChannels map[
 		segments:   segments,
 		dmChannels: dmChannels,
 		version:    time.Now().UnixNano(),
+	}
+}
+
+func FromPbCollectionTarget(target *querypb.CollectionTarget) *CollectionTarget {
+	segments := make(map[int64]*datapb.SegmentInfo)
+	dmChannels := make(map[string]*DmChannel)
+
+	for _, t := range target.GetChannelTargets() {
+		for _, partition := range t.GetPartitionTargets() {
+			for _, segment := range partition.GetSegments() {
+				segments[segment.GetID()] = &datapb.SegmentInfo{
+					ID:            segment.GetID(),
+					Level:         segment.GetLevel(),
+					CollectionID:  target.GetCollectionID(),
+					PartitionID:   partition.GetPartitionID(),
+					InsertChannel: t.GetChannelName(),
+				}
+			}
+		}
+		dmChannels[t.GetChannelName()] = &DmChannel{
+			VchannelInfo: &datapb.VchannelInfo{
+				CollectionID:        target.GetCollectionID(),
+				ChannelName:         t.GetChannelName(),
+				SeekPosition:        t.GetSeekPosition(),
+				UnflushedSegmentIds: t.GetGrowingSegmentIDs(),
+				FlushedSegmentIds:   lo.Keys(segments),
+				DroppedSegmentIds:   t.GetDroppedSegmentIDs(),
+			},
+		}
+	}
+
+	return NewCollectionTarget(segments, dmChannels)
+}
+
+func (p *CollectionTarget) toPbMsg() *querypb.CollectionTarget {
+	if len(p.dmChannels) == 0 {
+		return &querypb.CollectionTarget{}
+	}
+
+	channelSegments := make(map[string][]*datapb.SegmentInfo)
+	for _, s := range p.segments {
+		if _, ok := channelSegments[s.GetInsertChannel()]; !ok {
+			channelSegments[s.GetInsertChannel()] = make([]*datapb.SegmentInfo, 0)
+		}
+		channelSegments[s.GetInsertChannel()] = append(channelSegments[s.GetInsertChannel()], s)
+	}
+
+	collectionID := int64(-1)
+	channelTargets := make(map[string]*querypb.ChannelTarget, 0)
+	for _, channel := range p.dmChannels {
+		collectionID = channel.GetCollectionID()
+		partitionTargets := make(map[int64]*querypb.PartitionTarget)
+		if infos, ok := channelSegments[channel.GetChannelName()]; ok {
+			for _, info := range infos {
+				partitionTarget, ok := partitionTargets[info.GetPartitionID()]
+				if !ok {
+					partitionTarget = &querypb.PartitionTarget{
+						PartitionID: info.PartitionID,
+						Segments:    make([]*querypb.SegmentTarget, 0),
+					}
+					partitionTargets[info.GetPartitionID()] = partitionTarget
+				}
+
+				partitionTarget.Segments = append(partitionTarget.Segments, &querypb.SegmentTarget{
+					ID:    info.GetID(),
+					Level: info.GetLevel(),
+				})
+			}
+		}
+
+		channelTargets[channel.GetChannelName()] = &querypb.ChannelTarget{
+			ChannelName:       channel.GetChannelName(),
+			SeekPosition:      channel.GetSeekPosition(),
+			GrowingSegmentIDs: channel.GetUnflushedSegmentIds(),
+			DroppedSegmentIDs: channel.GetDroppedSegmentIds(),
+			PartitionTargets:  lo.Values(partitionTargets),
+		}
+	}
+
+	return &querypb.CollectionTarget{
+		CollectionID:   collectionID,
+		ChannelTargets: lo.Values(channelTargets),
+		Version:        p.version,
 	}
 }
 
