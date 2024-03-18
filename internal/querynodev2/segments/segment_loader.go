@@ -1001,8 +1001,8 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 					zap.Int64("fieldID", fieldID),
 					zap.String("index", info.IndexInfo.GetIndexName()),
 				)
-				// for scalar index's raw data, only load to mmap not memory
-				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, WithLoadStatus(LoadStatusMapped)); err != nil {
+
+				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
 					log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 					return err
 				}
