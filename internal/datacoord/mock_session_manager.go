@@ -443,10 +443,14 @@ func (_c *MockSessionManager_FlushChannels_Call) RunAndReturn(run func(context.C
 }
 
 // GetCompactionPlansResults provides a mock function with given fields:
-func (_m *MockSessionManager) GetCompactionPlansResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult] {
+func (_m *MockSessionManager) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
 	ret := _m.Called()
 
 	var r0 map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)); ok {
+		return rf()
+	}
 	if rf, ok := ret.Get(0).(func() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]); ok {
 		r0 = rf()
 	} else {
@@ -455,7 +459,13 @@ func (_m *MockSessionManager) GetCompactionPlansResults() map[int64]*typeutil.Pa
 		}
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
 }
 
 // MockSessionManager_GetCompactionPlansResults_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCompactionPlansResults'
@@ -475,12 +485,12 @@ func (_c *MockSessionManager_GetCompactionPlansResults_Call) Run(run func()) *Mo
 	return _c
 }
 
-func (_c *MockSessionManager_GetCompactionPlansResults_Call) Return(_a0 map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]) *MockSessionManager_GetCompactionPlansResults_Call {
-	_c.Call.Return(_a0)
+func (_c *MockSessionManager_GetCompactionPlansResults_Call) Return(_a0 map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], _a1 error) *MockSessionManager_GetCompactionPlansResults_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockSessionManager_GetCompactionPlansResults_Call) RunAndReturn(run func() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]) *MockSessionManager_GetCompactionPlansResults_Call {
+func (_c *MockSessionManager_GetCompactionPlansResults_Call) RunAndReturn(run func() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)) *MockSessionManager_GetCompactionPlansResults_Call {
 	_c.Call.Return(run)
 	return _c
 }
