@@ -159,6 +159,20 @@ func IsFieldMmapEnabled(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	return false
 }
 
+func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
+	for _, field := range schema.GetFields() {
+		if field.GetFieldID() == fieldID {
+			for _, kv := range field.GetTypeParams() {
+				if kv.Key == MmapEnabledKey {
+					return true
+				}
+			}
+			return false
+		}
+	}
+	return false
+}
+
 func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
 	for _, kv := range kvs {
 		if kv.Key == LazyLoadEnableKey && strings.ToLower(kv.Value) == "true" {
