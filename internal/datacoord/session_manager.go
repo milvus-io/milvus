@@ -60,7 +60,7 @@ type SessionManager interface {
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
 	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
-	GetCompactionPlansResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]
+	GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)
 	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
 	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
 	AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
@@ -271,20 +271,19 @@ func (c *SessionManagerImpl) execImport(ctx context.Context, nodeID int64, itr *
 }
 
 // GetCompactionPlanResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
-func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult] {
-	wg := sync.WaitGroup{}
+func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
 	ctx := context.Background()
+	errorGroup, ctx := errgroup.WithContext(ctx)
 
 	plans := typeutil.NewConcurrentMap[int64, *typeutil.Pair[int64, *datapb.CompactionPlanResult]]()
 	c.sessions.RLock()
 	for nodeID, s := range c.sessions.data {
-		wg.Add(1)
-		go func(nodeID int64, s *Session) {
-			defer wg.Done()
+		nodeID, s := nodeID, s // https://golang.org/doc/faq#closures_and_goroutines
+		errorGroup.Go(func() error {
 			cli, err := s.GetOrCreateClient(ctx)
 			if err != nil {
 				log.Info("Cannot Create Client", zap.Int64("NodeID", nodeID))
-				return
+				return err
 			}
 			ctx, cancel := context.WithTimeout(ctx, Params.DataCoordCfg.CompactionRPCTimeout.GetAsDuration(time.Second))
 			defer cancel()
@@ -295,22 +294,25 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*typeutil.Pai
 				),
 			})
 
-			if err := merr.CheckRPCCall(resp, err); err != nil {
+			if err != nil || resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 				log.Info("Get State failed", zap.Error(err))
-				return
+				return err
 			}
 
 			for _, rst := range resp.GetResults() {
-				// for compatibility issue, before 2.3.4, resp has only logpath
-				// try to parse path and fill logid
 				binlog.CompressCompactionBinlogs(rst.GetSegments())
 				nodeRst := typeutil.NewPair(nodeID, rst)
 				plans.Insert(rst.PlanID, &nodeRst)
 			}
-		}(nodeID, s)
+			return nil
+		})
 	}
 	c.sessions.RUnlock()
-	wg.Wait()
+
+	// wait for all request done
+	if err := errorGroup.Wait(); err != nil {
+		return nil, err
+	}
 
 	rst := make(map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult])
 	plans.Range(func(planID int64, result *typeutil.Pair[int64, *datapb.CompactionPlanResult]) bool {
@@ -318,7 +320,7 @@ func (c *SessionManagerImpl) GetCompactionPlansResults() map[int64]*typeutil.Pai
 		return true
 	})
 
-	return rst
+	return rst, nil
 }
 
 func (c *SessionManagerImpl) FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error {
