@@ -652,9 +652,9 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 			return false
 		}
 
-		for segmentID := range segmentsInTarget {
+		for segmentID, s := range segmentsInTarget {
 			_, exist := leader.Segments[segmentID]
-			l0WithWrongLocation := exist && leader.Segments[segmentID].GetNodeID() != leader.ID
+			l0WithWrongLocation := exist && s.GetLevel() == datapb.SegmentLevel_L0 && leader.Segments[segmentID].GetNodeID() != leader.ID
 			if !exist || l0WithWrongLocation {
 				return false
 			}
