@@ -104,12 +104,15 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 
 	minTsafeChannel, minTsafe := node.tSafeManager.Min()
 
+	collections := node.manager.Collection.List()
+
 	var totalGrowingSize int64
 	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
 	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
-	for collection, segs := range growingGroupByCollection {
+	for _, collection := range collections {
+		segs := growingGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.MemSize()
 		})
@@ -122,18 +125,13 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	sealedGroupByCollection := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
 		return seg.Collection()
 	})
-	for collection, segs := range sealedGroupByCollection {
+	for _, collection := range collections {
+		segs := sealedGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.MemSize()
 		})
 		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
-	}
-
-	allSegments := node.manager.Segment.GetBy()
-	collections := typeutil.NewUniqueSet()
-	for _, segment := range allSegments {
-		collections.Insert(segment.Collection())
 	}
 
 	return &metricsinfo.QueryNodeQuotaMetrics{
@@ -149,7 +147,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		GrowingSegmentsSize: totalGrowingSize,
 		Effect: metricsinfo.NodeEffect{
 			NodeID:        node.GetNodeID(),
-			CollectionIDs: collections.Collect(),
+			CollectionIDs: collections,
 		},
 	}, nil
 }

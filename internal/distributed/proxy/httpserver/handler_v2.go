@@ -123,7 +123,7 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 	// todo cannot drop index before release it ?
 	router.POST(IndexCategory+DropAction, timeoutMiddleware(wrapperPost(func() any { return &IndexReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.dropIndex)))))
 
-	router.POST(AliasCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &DatabaseReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listAlias)))))
+	router.POST(AliasCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &OptionalCollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listAlias)))))
 	router.POST(AliasCategory+DescribeAction, timeoutMiddleware(wrapperPost(func() any { return &AliasReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.describeAlias)))))
 
 	router.POST(AliasCategory+CreateAction, timeoutMiddleware(wrapperPost(func() any { return &AliasCollectionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.createAlias)))))
@@ -357,18 +357,37 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	if err == nil {
 		indexDesc = printIndexes(indexResp.(*milvuspb.DescribeIndexResponse).IndexDescriptions)
 	}
+	var aliases []string
+	aliasReq := &milvuspb.ListAliasesRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	}
+	aliasResp, err := wrapperProxy(ctx, c, aliasReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+		return h.proxy.ListAliases(reqCtx, req.(*milvuspb.ListAliasesRequest))
+	})
+	if err == nil {
+		aliases = aliasResp.(*milvuspb.ListAliasesResponse).GetAliases()
+	}
+	if aliases == nil {
+		aliases = []string{}
+	}
+	if coll.Properties == nil {
+		coll.Properties = []*commonpb.KeyValuePair{}
+	}
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
 		HTTPCollectionName:    coll.CollectionName,
 		HTTPCollectionID:      coll.CollectionID,
 		HTTPReturnDescription: coll.Schema.Description,
 		HTTPReturnFieldAutoID: autoID,
 		"fields":              printFieldsV2(coll.Schema.Fields),
+		"aliases":             aliases,
 		"indexes":             indexDesc,
 		"load":                collLoadState,
 		"shardsNum":           coll.ShardsNum,
 		"partitionsNum":       coll.NumPartitions,
-		"consistencyLevel":    coll.ConsistencyLevel,
+		"consistencyLevel":    commonpb.ConsistencyLevel_name[int32(coll.ConsistencyLevel)],
 		"enableDynamicField":  coll.Schema.EnableDynamicField,
+		"properties":          coll.Properties,
 	}})
 	return resp, nil
 }
@@ -1080,6 +1099,17 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	consistencyLevel := commonpb.ConsistencyLevel_Bounded
 	if level, ok := commonpb.ConsistencyLevel_value[httpReq.Params["consistencyLevel"]]; ok {
 		consistencyLevel = commonpb.ConsistencyLevel(level)
+	} else {
+		if len(httpReq.Params["consistencyLevel"]) > 0 {
+			err := merr.WrapErrParameterInvalid("Strong, Session, Bounded, Eventually, Customized", httpReq.Params["consistencyLevel"],
+				"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
+			log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(err),
+				HTTPReturnMessage: err.Error(),
+			})
+			return nil, err
+		}
 	}
 	req := &milvuspb.CreateCollectionRequest{
 		DbName:           dbName,
@@ -1111,8 +1141,8 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		createIndexReq := &milvuspb.CreateIndexRequest{
 			DbName:         dbName,
 			CollectionName: httpReq.CollectionName,
-			FieldName:      DefaultVectorFieldName,
-			IndexName:      DefaultVectorFieldName,
+			FieldName:      httpReq.VectorFieldName,
+			IndexName:      httpReq.VectorFieldName,
 			ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: httpReq.MetricType}},
 		}
 		statusResponse, err := wrapperProxy(ctx, c, createIndexReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
@@ -1601,8 +1631,10 @@ func (h *HandlersV2) dropIndex(ctx context.Context, c *gin.Context, anyReq any, 
 }
 
 func (h *HandlersV2) listAlias(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
+	collectionGetter, _ := anyReq.(requestutil.CollectionNameGetter)
 	req := &milvuspb.ListAliasesRequest{
-		DbName: dbName,
+		DbName:         dbName,
+		CollectionName: collectionGetter.GetCollectionName(),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListAliases(reqCtx, req.(*milvuspb.ListAliasesRequest))

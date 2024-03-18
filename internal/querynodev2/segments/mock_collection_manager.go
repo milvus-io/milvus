@@ -67,6 +67,49 @@ func (_c *MockCollectionManager_Get_Call) RunAndReturn(run func(int64) *Collecti
 	return _c
 }
 
+// List provides a mock function with given fields:
+func (_m *MockCollectionManager) List() []int64 {
+	ret := _m.Called()
+
+	var r0 []int64
+	if rf, ok := ret.Get(0).(func() []int64); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockCollectionManager_List_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'List'
+type MockCollectionManager_List_Call struct {
+	*mock.Call
+}
+
+// List is a helper method to define mock.On call
+func (_e *MockCollectionManager_Expecter) List() *MockCollectionManager_List_Call {
+	return &MockCollectionManager_List_Call{Call: _e.mock.On("List")}
+}
+
+func (_c *MockCollectionManager_List_Call) Run(run func()) *MockCollectionManager_List_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCollectionManager_List_Call) Return(_a0 []int64) *MockCollectionManager_List_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCollectionManager_List_Call) RunAndReturn(run func() []int64) *MockCollectionManager_List_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // PutOrRef provides a mock function with given fields: collectionID, schema, meta, loadMeta
 func (_m *MockCollectionManager) PutOrRef(collectionID int64, schema *schemapb.CollectionSchema, meta *segcorepb.CollectionIndexMeta, loadMeta *querypb.LoadMetaInfo) {
 	_m.Called(collectionID, schema, meta, loadMeta)

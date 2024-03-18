@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func generateTestData(num int) ([]*Blob, error) {
@@ -46,6 +47,7 @@ func generateTestData(num int) ([]*Blob, error) {
 		{FieldID: 103, Name: "binaryVector", DataType: schemapb.DataType_BinaryVector},
 		{FieldID: 104, Name: "float16Vector", DataType: schemapb.DataType_Float16Vector},
 		{FieldID: 105, Name: "bf16Vector", DataType: schemapb.DataType_BFloat16Vector},
+		{FieldID: 106, Name: "sparseFloatVector", DataType: schemapb.DataType_SparseFloatVector},
 	}}
 	insertCodec := NewInsertCodecWithSchema(&etcdpb.CollectionMeta{ID: 1, Schema: schema})
 
@@ -70,6 +72,7 @@ func generateTestData(num int) ([]*Blob, error) {
 
 		field104 []byte
 		field105 []byte
+		field106 [][]byte
 	)
 
 	for i := 1; i <= num; i++ {
@@ -108,6 +111,8 @@ func generateTestData(num int) ([]*Blob, error) {
 		}
 		field104 = append(field104, f104...)
 		field105 = append(field105, f104...)
+
+		field106 = append(field106, testutils.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4}))
 	}
 
 	data := &InsertData{Data: map[FieldID]FieldData{
@@ -141,6 +146,12 @@ func generateTestData(num int) ([]*Blob, error) {
 			Data: field105,
 			Dim:  4,
 		},
+		106: &SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim:      28433,
+				Contents: field106,
+			},
+		},
 	}}
 
 	blobs, err := insertCodec.Serialize(1, 1, data)
@@ -158,6 +169,8 @@ func assertTestData(t *testing.T, i int, value *Value) {
 	for j := range f104 {
 		f104[j] = byte(i)
 	}
+
+	f106 := testutils.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4})
 
 	assert.EqualValues(t, &Value{
 		int64(i),
@@ -183,6 +196,7 @@ func assertTestData(t *testing.T, i int, value *Value) {
 			103: []byte{0xff},
 			104: f104,
 			105: f104,
+			106: f106,
 		},
 	}, value)
 }

@@ -1088,7 +1088,7 @@ class TestQueryParams(TestcaseBase):
         assert len(res) == len(filter_ids)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("op", [">", "<=", "+ 1 =="])
+    @pytest.mark.parametrize("op", [">", "<=", "==", "!="])
     def test_query_expr_invalid_array_length(self, op):
         """
         target: test query with expression using array_length
@@ -1108,10 +1108,8 @@ class TestQueryParams(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
         collection_w.load()
         expression = f"array_length({ct.default_float_array_field_name}) {op} 51"
-        collection_w.query(expression, check_task=CheckTasks.err_res,
-                           check_items={ct.err_code: 1100,
-                                        ct.err_msg: "cannot parse expression: %s, error %s "
-                                                    "is not supported" % (expression, op)})
+        res = collection_w.query(expression)[0]
+        assert len(res) >= 0
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_query_expr_empty_without_limit(self):
@@ -1986,6 +1984,142 @@ class TestQueryParams(TestcaseBase):
         t.join()
         assert [res1[i][default_float_field_name] for i in range(upsert_nb)] == \
                [res2[i][default_float_field_name] for i in range(upsert_nb)]
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_mmap_query_expr_empty_pk_string(self):
+        """
+        target: turn on mmap to test queries using empty expression
+        method: enable mmap to query for empty expressions with restrictions.
+        expected: return the first K results in order
+        """
+        # 1. initialize with data
+        collection_w, _, _, insert_ids = \
+            self.init_collection_general(prefix, True, is_index=False, primary_field=ct.default_string_field_name)[0:4]
+
+        collection_w.set_properties({'mmap.enabled': True})
+
+        # string field is sorted by lexicographical order
+        exp_ids, res = ['0', '1', '10', '100', '1000', '1001', '1002', '1003', '1004', '1005'], []
+        for ids in exp_ids:
+            res.append({ct.default_string_field_name: ids})
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_index")
+        collection_w.load()
+        # 2. query with limit
+        collection_w.query("", limit=ct.default_limit,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+        # 3. query with limit + offset
+        res = res[5:]
+        collection_w.query("", limit=5, offset=5,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_enable_mmap_query_with_expression(self, get_normal_expr, enable_dynamic_field):
+        """
+        target: turn on mmap use different expr queries
+        method: turn on mmap and query with different expr
+        expected: verify query result
+        """
+        # 1. initialize with data
+        nb = 1000
+        collection_w, _vectors, _, insert_ids = self.init_collection_general(prefix, True, nb, is_index=False,
+                                                                             enable_dynamic_field=enable_dynamic_field)[0:4]
+
+        # enable mmap
+        collection_w.set_properties({'mmap.enabled': True})
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_index")
+        collection_w.alter_index("query_expr_index", {'mmap.enabled': True})
+        collection_w.load()
+        # filter result with expression in collection
+        _vectors = _vectors[0]
+        expr = get_normal_expr
+        expression = expr.replace("&&", "and").replace("||", "or")
+        filter_ids = []
+        for i, _id in enumerate(insert_ids):
+            if enable_dynamic_field:
+                int64 = _vectors[i][ct.default_int64_field_name]
+                float = _vectors[i][ct.default_float_field_name]
+            else:
+                int64 = _vectors.int64[i]
+                float = _vectors.float[i]
+            if not expression or eval(expression):
+                filter_ids.append(_id)
+
+        # query and verify result
+        res = collection_w.query(expr=expression)[0]
+        query_ids = set(map(lambda x: x[ct.default_int64_field_name], res))
+        assert query_ids == set(filter_ids)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_mmap_query_string_field_not_primary_is_empty(self):
+        """
+        target: enable mmap, use string expr to test query, string field is not the main field
+        method: create collection , string field is primary
+                enable mmap
+                collection load and insert empty data with string field
+                collection query uses string expr in string field
+        expected: query successfully
+        """
+        # 1.  create a collection
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=False, is_index=False)[0:2]
+
+        nb = 3000
+        df = cf.gen_default_list_data(nb)
+        df[2] = ["" for _ in range(nb)]
+
+        collection_w.insert(df)
+        assert collection_w.num_entities == nb
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="index_query")
+        collection_w.set_properties({'mmap.enabled': True})
+        collection_w.alter_index("index_query", {'mmap.enabled': True})
+
+        collection_w.load()
+
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+
+        expr = "varchar == \"\""
+        res, _ = collection_w.query(expr, output_fields=output_fields)
+
+        assert len(res) == nb
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("expression", cf.gen_normal_string_expressions([default_string_field_name]))
+    def test_mmap_query_string_is_primary(self, expression):
+        """
+        target: test query with output field only primary field
+        method: specify string primary field as output field
+        expected: return string primary field
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True, is_index=False,
+                                                             primary_field=ct.default_string_field_name)[0:2]
+        collection_w.set_properties({'mmap.enabled': True})
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_index")
+        collection_w.load()
+        res, _ = collection_w.query(expression, output_fields=[ct.default_string_field_name])
+        assert res[0].keys() == {ct.default_string_field_name}
+
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_mmap_query_string_expr_with_prefixes(self):
+        """
+        target: test query with prefix string expression
+        method: specify string is primary field, use prefix string expr
+        expected: verify query successfully
+        """
+        collection_w, vectors = self.init_collection_general(prefix, insert_data=True,is_index=False,
+                                                             primary_field=ct.default_string_field_name)[0:2]
+
+        collection_w.create_index(ct.default_float_vec_field_name, default_index_params, index_name="query_expr_pre_index")
+        collection_w.set_properties({'mmap.enabled': True})
+        collection_w.alter_index("query_expr_pre_index", {'mmap.enabled': True})
+
+        collection_w.load()
+        res = vectors[0].iloc[:1, :3].to_dict('records')
+        expression = 'varchar like "0%"'
+        output_fields = [default_int_field_name, default_float_field_name, default_string_field_name]
+        collection_w.query(expression, output_fields=output_fields,
+                           check_task=CheckTasks.check_query_results, check_items={exp_res: res})
 
 
 class TestQueryOperation(TestcaseBase):
