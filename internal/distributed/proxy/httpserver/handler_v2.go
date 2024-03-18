@@ -1728,7 +1728,16 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		err := checkAuthorization(ctx, c, &milvuspb.ListImportsAuthPlaceholder{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
 	if err == nil {
@@ -1769,7 +1778,17 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}),
 		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		err := checkAuthorization(ctx, c, &milvuspb.ImportAuthPlaceholder{
+			DbName:         dbName,
+			CollectionName: collectionGetter.GetCollectionName(),
+			PartitionName:  partitionGetter.GetPartitionName(),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {
@@ -1786,7 +1805,15 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		DbName: dbName,
 		JobID:  jobIDGetter.GetJobID(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		err := checkAuthorization(ctx, c, &milvuspb.GetImportProgressAuthPlaceholder{
+			DbName: dbName,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
 	if err == nil {
