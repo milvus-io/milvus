@@ -547,9 +547,6 @@ func (mgr *TargetManager) GetCollectionTargetVersion(collectionID int64, scope T
 	mgr.rwMutex.RLock()
 	defer mgr.rwMutex.RUnlock()
 
-	mgr.rwMutex.RLock()
-	defer mgr.rwMutex.RUnlock()
-
 	targets := mgr.getCollectionTarget(scope, collectionID)
 	for _, t := range targets {
 		if t.GetTargetVersion() > 0 {
