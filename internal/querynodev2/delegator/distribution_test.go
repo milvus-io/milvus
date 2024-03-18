@@ -640,6 +640,7 @@ func (s *DistributionSuite) TestAddOfflines() {
 					SegmentID: 3,
 				},
 			},
+			offlines:    []int64{4},
 			serviceable: true,
 		},
 	}
@@ -652,6 +653,18 @@ func (s *DistributionSuite) TestAddOfflines() {
 			s.dist.AddDistributions(tc.input...)
 			s.dist.AddOfflines(tc.offlines...)
 			s.Equal(tc.serviceable, s.dist.Serviceable())
+
+			// current := s.dist.current.Load()
+			for _, offline := range tc.offlines {
+				// current.
+				s.dist.mut.RLock()
+				entry, ok := s.dist.sealedSegments[offline]
+				s.dist.mut.RUnlock()
+				if ok {
+					s.EqualValues(-1, entry.NodeID)
+					s.EqualValues(unreadableTargetVersion, entry.Version)
+				}
+			}
 		})
 	}
 }

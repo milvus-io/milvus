@@ -236,10 +236,15 @@ func (d *distribution) AddOfflines(segmentIDs ...int64) {
 
 	updated := false
 	for _, segmentID := range segmentIDs {
-		_, ok := d.sealedSegments[segmentID]
+		entry, ok := d.sealedSegments[segmentID]
 		if !ok {
 			continue
 		}
+		// FIXME: remove offlie logic later
+		// mark segment distribution as offline, set verion to unreadable
+		entry.NodeID = wildcardNodeID
+		entry.Version = unreadableTargetVersion
+		d.sealedSegments[segmentID] = entry
 		updated = true
 		d.offlines.Insert(segmentID)
 	}
