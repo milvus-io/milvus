@@ -350,7 +350,11 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		resendTTCh = make(chan resendTTMsg, 100)
 	)
 
-	node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker, config.serverID)), writebuffer.WithIDAllocator(node.allocator))
+	err := node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker, config.serverID)), writebuffer.WithIDAllocator(node.allocator))
+	if err != nil {
+		log.Warn("failed to register channel buffer", zap.Error(err))
+		return nil, err
+	}
 	ctx, cancel := context.WithCancel(node.ctx)
 	ds := &dataSyncService{
 		ctx:        ctx,
