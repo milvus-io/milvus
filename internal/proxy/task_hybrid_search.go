@@ -246,10 +246,12 @@ func (t *hybridSearchTask) hybridSearchShard(ctx context.Context, nodeID int64, 
 	result, err = qn.HybridSearch(ctx, req)
 	if err != nil {
 		log.Warn("QueryNode hybrid search return error", zap.Error(err))
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.request.GetCollectionName())
 		return err
 	}
 	if result.GetStatus().GetErrorCode() == commonpb.ErrorCode_NotShardLeader {
 		log.Warn("QueryNode is not shardLeader")
+		globalMetaCache.DeprecateShardCache(t.request.GetDbName(), t.request.GetCollectionName())
 		return errInvalidShardLeaders
 	}
 	if result.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
