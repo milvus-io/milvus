@@ -55,6 +55,8 @@ type LBPolicySuite struct {
 
 	collectionName string
 	collectionID   int64
+
+	shardList []*querypb.ShardLeadersList
 }
 
 func (s *LBPolicySuite) SetupSuite() {
@@ -68,20 +70,21 @@ func (s *LBPolicySuite) SetupTest() {
 	qc := mocks.NewMockQueryCoordClient(s.T())
 	qc.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(&successStatus, nil)
 
+	s.shardList = []*querypb.ShardLeadersList{
+		{
+			ChannelName: s.channels[0],
+			NodeIds:     s.nodes,
+			NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
+		},
+		{
+			ChannelName: s.channels[1],
+			NodeIds:     s.nodes,
+			NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
+		},
+	}
 	qc.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).Return(&querypb.GetShardLeadersResponse{
 		Status: &successStatus,
-		Shards: []*querypb.ShardLeadersList{
-			{
-				ChannelName: s.channels[0],
-				NodeIds:     s.nodes,
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
-			},
-			{
-				ChannelName: s.channels[1],
-				NodeIds:     s.nodes,
-				NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002", "localhost:9003", "localhost:9004"},
-			},
-		},
+		Shards: s.shardList,
 	}, nil).Maybe()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
 		Status:       merr.Success(),
@@ -236,6 +239,20 @@ func (s *LBPolicySuite) TestSelectNode() {
 func (s *LBPolicySuite) TestExecuteWithRetry() {
 	ctx := context.Background()
 
+	cacheBak := globalMetaCache
+	defer func() { globalMetaCache = cacheBak }()
+	mockCache := NewMockCache(s.T())
+	globalMetaCache = mockCache
+
+	shard2QueryNodes := make(map[string][]nodeInfo)
+	for _, leaders := range s.shardList {
+		qns := make([]nodeInfo, len(leaders.GetNodeIds()))
+		for j := range qns {
+			qns[j] = nodeInfo{leaders.GetNodeIds()[j], leaders.GetNodeAddrs()[j]}
+		}
+		shard2QueryNodes[leaders.GetChannelName()] = qns
+	}
+
 	// test execute success
 	s.lbBalancer.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
@@ -256,6 +273,9 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.NoError(err)
 
 	// test select node failed, expected error
+	mockCache.ExpectedCalls = nil
+	mockCache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything)
+	mockCache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(shard2QueryNodes, nil)
 	s.lbBalancer.ExpectedCalls = nil
 	s.lbBalancer.EXPECT().SelectNode(mock.Anything, mock.Anything, mock.Anything).Return(-1, merr.ErrNodeNotAvailable)
 	err = s.lbPolicy.ExecuteWithRetry(ctx, ChannelWorkload{
@@ -273,6 +293,9 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.ErrorIs(err, merr.ErrNodeNotAvailable)
 
 	// test get client failed, and retry failed, expected success
+	mockCache.ExpectedCalls = nil
+	mockCache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything)
+	mockCache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(shard2QueryNodes, nil)
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(nil, errors.New("fake error")).Times(1)
 	s.lbBalancer.ExpectedCalls = nil
@@ -311,6 +334,9 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.NoError(err)
 
 	// test exec failed, then retry success
+	mockCache.ExpectedCalls = nil
+	mockCache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything)
+	mockCache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(shard2QueryNodes, nil)
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.ExpectedCalls = nil
@@ -336,6 +362,9 @@ func (s *LBPolicySuite) TestExecuteWithRetry() {
 	s.NoError(err)
 
 	// test exec timeout
+	mockCache.ExpectedCalls = nil
+	mockCache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything)
+	mockCache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(shard2QueryNodes, nil)
 	s.mgr.ExpectedCalls = nil
 	s.mgr.EXPECT().GetClient(mock.Anything, mock.Anything).Return(s.qn, nil)
 	s.lbBalancer.EXPECT().CancelWorkload(mock.Anything, mock.Anything)
