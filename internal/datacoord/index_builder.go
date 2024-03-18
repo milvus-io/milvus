@@ -205,7 +205,7 @@ func (ib *indexBuilder) run() {
 	}
 }
 
-func getBinLogIds(segment *SegmentInfo, fieldID int64) []int64 {
+func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
 	binlogIDs := make([]int64, 0)
 	for _, fieldBinLog := range segment.GetBinlogs() {
 		if fieldBinLog.GetFieldID() == fieldID {
@@ -299,7 +299,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 						FieldID:   partitionKeyField.FieldID,
 						FieldName: partitionKeyField.Name,
 						FieldType: int32(partitionKeyField.DataType),
-						DataIds:   getBinLogIds(segment, partitionKeyField.FieldID),
+						DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
 					})
 				}
 			}
@@ -333,7 +333,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		}
 
 		fieldID := ib.meta.indexMeta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
-		binlogIDs := getBinLogIds(segment, fieldID)
+		binlogIDs := getBinLogIDs(segment, fieldID)
 		if isDiskANNIndex(GetIndexType(indexParams)) {
 			var err error
 			indexParams, err = indexparams.UpdateDiskIndexBuildParams(Params, indexParams)

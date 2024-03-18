@@ -139,10 +139,10 @@ func (s *Server) getSystemInfoMetrics(
 	return resp, nil
 }
 
-func (s *Server) getCollectionStorageMetrics() (*milvuspb.GetMetricsResponse, error) {
+func (s *Server) getCollectionStorageMetrics(ctx context.Context) (*milvuspb.GetMetricsResponse, error) {
 	coordTopology := metricsinfo.DataCoordTopology{
 		Cluster: metricsinfo.DataClusterTopology{
-			Self: s.getDataCoordMetrics(),
+			Self: s.getDataCoordMetrics(ctx),
 		},
 		Connections: metricsinfo.ConnTopology{
 			Name:                metricsinfo.ConstructComponentName(typeutil.DataCoordRole, paramtable.GetNodeID()),

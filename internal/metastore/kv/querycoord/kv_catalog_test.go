@@ -125,16 +125,16 @@ func (suite *CatalogTestSuite) TestPartition() {
 }
 
 func (suite *CatalogTestSuite) TestReleaseManyPartitions() {
-	partitionIds := make([]int64, 0)
+	partitionIDs := make([]int64, 0)
 	for i := 1; i <= 150; i++ {
 		suite.catalog.SavePartition(&querypb.PartitionLoadInfo{
 			CollectionID: 1,
 			PartitionID:  int64(i),
 		})
-		partitionIds = append(partitionIds, int64(i))
+		partitionIDs = append(partitionIDs, int64(i))
 	}
 
-	err := suite.catalog.ReleasePartition(1, partitionIds...)
+	err := suite.catalog.ReleasePartition(1, partitionIDs...)
 	suite.NoError(err)
 	partitions, err := suite.catalog.GetPartitions()
 	suite.NoError(err)

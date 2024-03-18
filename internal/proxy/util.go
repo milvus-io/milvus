@@ -685,15 +685,15 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 				},
 			}
 		case schemapb.DataType_VarChar:
-			strIds := make([]string, len(data))
+			strIDs := make([]string, len(data))
 			for i, v := range data {
-				strIds[i] = strconv.FormatInt(v, 10)
+				strIDs[i] = strconv.FormatInt(v, 10)
 			}
 			fieldData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strIds,
+							Data: strIDs,
 						},
 					},
 				},

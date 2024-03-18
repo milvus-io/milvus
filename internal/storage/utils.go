@@ -163,7 +163,7 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 	}
 
 	tss := data.Data[common.TimeStampField].(*Int64FieldData)
-	rowIds := data.Data[common.RowIDField].(*Int64FieldData)
+	rowIDs := data.Data[common.RowIDField].(*Int64FieldData)
 
 	ls := fieldDataList{}
 	for fieldID := range data.Data {
@@ -175,8 +175,8 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 		ls.datas = append(ls.datas, data.Data[fieldID])
 	}
 
-	// checkNumRows(tss, rowIds, ls.datas...) // don't work
-	all := []FieldData{tss, rowIds}
+	// checkNumRows(tss, rowIDs, ls.datas...) // don't work
+	all := []FieldData{tss, rowIDs}
 	all = append(all, ls.datas...)
 	if !checkNumRows(all...) {
 		return nil, nil, nil,
@@ -209,7 +209,7 @@ func TransferColumnBasedInsertDataToRowBased(data *InsertData) (
 		utss[i] = uint64(tss.Data[i])
 	}
 
-	return utss, rowIds.Data, rows, nil
+	return utss, rowIDs.Data, rows, nil
 }
 
 ///////////////////////////////////////////////////////////////////////////////////////////

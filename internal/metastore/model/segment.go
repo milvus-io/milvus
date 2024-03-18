@@ -16,6 +16,6 @@ type Segment struct {
 	CreatedByCompaction bool
 	SegmentState        commonpb.SegmentState
 	// IndexInfos          []*SegmentIndex
-	ReplicaIds []int64
-	NodeIds    []int64
+	ReplicaIDs []int64
+	NodeIDs    []int64
 }

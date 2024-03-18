@@ -625,7 +625,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	numOfRow := len(rowIDs)
 	cOffset := C.int64_t(offset)
 	cNumOfRows := C.int64_t(numOfRow)
-	cEntityIdsPtr := (*C.int64_t)(&(rowIDs)[0])
+	cEntityIDsPtr := (*C.int64_t)(&(rowIDs)[0])
 	cTimestampsPtr := (*C.uint64_t)(&(timestamps)[0])
 
 	var status C.CStatus
@@ -634,7 +634,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 		status = C.Insert(s.ptr,
 			cOffset,
 			cNumOfRows,
-			cEntityIdsPtr,
+			cEntityIDsPtr,
 			cTimestampsPtr,
 			(*C.uint8_t)(unsafe.Pointer(&insertRecordBlob[0])),
 			(C.uint64_t)(len(insertRecordBlob)),

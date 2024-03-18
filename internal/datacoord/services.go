@@ -1031,7 +1031,7 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 
 		return metrics, nil
 	} else if metricType == metricsinfo.CollectionStorageMetrics {
-		metrics, err := s.getCollectionStorageMetrics()
+		metrics, err := s.getCollectionStorageMetrics(ctx)
 		if err != nil {
 			log.Warn("DataCoord GetMetrics CollectionStorage failed", zap.Int64("nodeID", paramtable.GetNodeID()), zap.Error(err))
 			return &milvuspb.GetMetricsResponse{

@@ -125,10 +125,10 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 	_, _, _, err = TransferColumnBasedInsertDataToRowBased(data)
 	assert.Error(t, err)
 
-	rowIdsF := &Int64FieldData{
+	rowIDsF := &Int64FieldData{
 		Data: []int64{1, 2, 3, 4},
 	}
-	data.Data[common.RowIDField] = rowIdsF
+	data.Data[common.RowIDField] = rowIDsF
 
 	// row num mismatch
 	_, _, _, err = TransferColumnBasedInsertDataToRowBased(data)
@@ -193,10 +193,10 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 	data.Data[111] = f11
 	data.Data[112] = f12
 
-	utss, rowIds, rows, err := TransferColumnBasedInsertDataToRowBased(data)
+	utss, rowIDs, rows, err := TransferColumnBasedInsertDataToRowBased(data)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []uint64{1, 2, 3}, utss)
-	assert.ElementsMatch(t, []int64{1, 2, 3}, rowIds)
+	assert.ElementsMatch(t, []int64{1, 2, 3}, rowIDs)
 	assert.Equal(t, 3, len(rows))
 	// b := []byte("1")[0]
 	if common.Endian == binary.LittleEndian {

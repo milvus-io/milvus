@@ -236,8 +236,8 @@ func TestLastExpireReset(t *testing.T) {
 	assert.Equal(t, expire1, segment1.GetLastExpireTime())
 	assert.Equal(t, expire2, segment2.GetLastExpireTime())
 	assert.True(t, segment3.GetLastExpireTime() > expire3)
-	flushableSegIds, _ := newSegmentManager.GetFlushableSegments(context.Background(), channelName, expire3)
-	assert.ElementsMatch(t, []UniqueID{segmentID1, segmentID2}, flushableSegIds) // segment1 and segment2 can be flushed
+	flushableSegIDs, _ := newSegmentManager.GetFlushableSegments(context.Background(), channelName, expire3)
+	assert.ElementsMatch(t, []UniqueID{segmentID1, segmentID2}, flushableSegIDs) // segment1 and segment2 can be flushed
 	newAlloc, err := newSegmentManager.AllocSegment(context.Background(), collID, 0, channelName, 2000)
 	assert.Nil(t, err)
 	assert.Equal(t, segmentID3, newAlloc[0].SegmentID) // segment3 still can be used to allocate

@@ -468,11 +468,12 @@ func NewReportChanExtension() *ReportChanExtension {
 	}
 }
 
-func (r *ReportChanExtension) Report(info any) {
+func (r *ReportChanExtension) Report(info any) int {
 	select {
 	case r.reportChan <- info:
 	default:
 	}
+	return 1
 }
 
 func (r *ReportChanExtension) GetReportChan() <-chan any {

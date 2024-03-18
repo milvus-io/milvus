@@ -191,20 +191,7 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	}
 	go searchCheckReport()
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
-
 	err = merr.CheckRPCCall(searchResult, err)
-	s.NoError(err)
-
-	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
-		CollectionName: collectionName,
-	})
-	err = merr.CheckRPCCall(status, err)
-	s.NoError(err)
-
-	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
-		CollectionName: collectionName,
-	})
-	err = merr.CheckRPCCall(status, err)
 	s.NoError(err)
 
 	queryCheckReport := func() {
@@ -273,6 +260,18 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	}
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, deleteResult.GetStatus().GetErrorCode())
+
+	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(status, err)
+	s.NoError(err)
+
+	status, err = c.Proxy.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+		CollectionName: collectionName,
+	})
+	err = merr.CheckRPCCall(status, err)
+	s.NoError(err)
 
 	log.Info("TestHelloMilvus succeed")
 }

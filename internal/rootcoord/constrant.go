@@ -48,10 +48,10 @@ func checkGeneralCapacity(ctx context.Context, newColNum int,
 
 	var generalNum int64 = 0
 	collectionsMap := core.meta.ListAllAvailCollections(ctx)
-	for dbId, collectionIds := range collectionsMap {
+	for dbId, collectionIDs := range collectionsMap {
 		db, err := core.meta.GetDatabaseByID(ctx, dbId, ts)
 		if err == nil {
-			for _, collectionId := range collectionIds {
+			for _, collectionId := range collectionIDs {
 				collection, err := core.meta.GetCollectionByID(ctx, db.Name, collectionId, ts, true)
 				if err == nil {
 					partNum := int64(collection.GetPartitionNum(false))
