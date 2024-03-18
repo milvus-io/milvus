@@ -145,6 +145,9 @@ func (s *ErrSuite) TestWrap() {
 	// alias related
 	s.ErrorIs(WrapErrAliasNotFound("alias", "failed to get collection id"), ErrAliasNotFound)
 	s.ErrorIs(WrapErrCollectionIDOfAliasNotFound(1000, "failed to get collection id"), ErrCollectionIDOfAliasNotFound)
+
+	// Search/Query related
+	s.ErrorIs(WrapErrInconsistentRequery("unknown"), ErrInconsistentRequery)
 }
 
 func (s *ErrSuite) TestOldCode() {
