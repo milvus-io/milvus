@@ -145,7 +145,11 @@ func (c *compactionPlanHandler) checkResult() {
 		log.Warn("fail to check result", zap.Error(err))
 		return
 	}
-	_ = c.updateCompaction(ts)
+	err = c.updateCompaction(ts)
+	if err != nil {
+		log.Warn("fail to update compaction", zap.Error(err))
+		return
+	}
 }
 
 func (c *compactionPlanHandler) GetCurrentTS() (Timestamp, error) {
@@ -522,7 +526,12 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	//  for DC might add new task while GetCompactionState.
 	executingTasks := c.getTasksByState(executing)
 	timeoutTasks := c.getTasksByState(timeout)
-	planStates := c.sessions.GetCompactionPlansResults()
+	planStates, err := c.sessions.GetCompactionPlansResults()
+	if err != nil {
+		// if there is a data node alive but we failed to get info,
+		log.Warn("failed to get compaction plans from all nodes", zap.Error(err))
+		return err
+	}
 	cachedPlans := []int64{}
 
 	// TODO reduce the lock range
