@@ -941,3 +941,11 @@ func WrapErrImportFailed(msg ...string) error {
 	}
 	return err
 }
+
+func WrapErrInconsistentRequery(msg ...string) error {
+	err := error(ErrInconsistentRequery)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
