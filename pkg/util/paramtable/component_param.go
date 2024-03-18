@@ -2817,7 +2817,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.CompactionCheckIntervalInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.check.interval",
 		Version:      "2.0.0",
-		DefaultValue: "10",
+		DefaultValue: "3",
 	}
 	p.CompactionCheckIntervalInSeconds.Init(base.mgr)
 
