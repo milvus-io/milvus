@@ -161,6 +161,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 			if lastErr != nil {
 				return lastErr
 			}
+			globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
 			return err
 		}
 
@@ -173,6 +174,8 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 
 			// cancel work load which assign to the target node
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
+
+			globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
 			lastErr = errors.Wrapf(err, "failed to get delegator %d for channel %s", targetNode, workload.channel)
 			return lastErr
 		}
@@ -184,6 +187,7 @@ func (lb *LBPolicyImpl) ExecuteWithRetry(ctx context.Context, workload ChannelWo
 				zap.Error(err))
 			excludeNodes.Insert(targetNode)
 			lb.balancer.CancelWorkload(targetNode, workload.nq)
+			globalMetaCache.DeprecateShardCache(workload.db, workload.collectionName)
 
 			lastErr = errors.Wrapf(err, "failed to search/query delegator %d for channel %s", targetNode, workload.channel)
 			return lastErr
