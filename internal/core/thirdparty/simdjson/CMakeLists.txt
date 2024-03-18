@@ -13,7 +13,7 @@
 
 FetchContent_Declare(
     simdjson
-    GIT_REPOSITORY https://github.com/simdjson/simdjson.git
-    GIT_TAG        v3.1.7
+    URL https://github.com/simdjson/simdjson/archive/refs/tags/v3.1.7.tar.gz
+    URL_HASH MD5=1b0d75ad32179c77f84f4a09d4214057
 )
 FetchContent_MakeAvailable(simdjson)

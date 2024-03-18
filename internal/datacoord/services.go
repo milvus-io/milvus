@@ -1808,9 +1808,10 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			return len(file.GetPaths()) > 0
 		})
 		if len(files) == 0 {
-			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no binlog to import, import_prefix=%s", in.GetFiles())))
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg(fmt.Sprintf("no binlog to import, input=%s", in.GetFiles())))
 			return resp, nil
 		}
+		log.Info("list binlogs prefixes for import", zap.Any("binlog_prefixes", files))
 	}
 
 	idStart, _, err := s.allocator.allocN(int64(len(files)) + 1)
