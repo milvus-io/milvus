@@ -218,15 +218,28 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// Segment which exist on next target, but not on dist
 	for segmentID, segment := range nextTargetMap {
-		leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica,
-			segment.GetInsertChannel(),
-		)
-		node, ok := distMap[segmentID]
-		if !ok ||
+		node, existInDist := distMap[segmentID]
+		l0WithWrongLocation := false
+		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
 			// the L0 segments have to been in the same node as the channel watched
-			leader != nil &&
-				segment.GetLevel() == datapb.SegmentLevel_L0 &&
-				node != leader.ID {
+			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
+			l0WithWrongLocation = leader != nil && node != leader.ID
+		}
+		if !existInDist || l0WithWrongLocation {
+			toLoad = append(toLoad, segment)
+		}
+	}
+
+	// l0 Segment which exist on current target, but not on dist
+	for segmentID, segment := range currentTargetMap {
+		node, existInDist := distMap[segmentID]
+		l0WithWrongLocation := false
+		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
+			// the L0 segments have to been in the same node as the channel watched
+			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
+			l0WithWrongLocation = leader != nil && node != leader.ID
+		}
+		if !existInDist || l0WithWrongLocation {
 			toLoad = append(toLoad, segment)
 		}
 	}
@@ -235,7 +248,6 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	for _, segment := range dist {
 		_, existOnCurrent := currentTargetMap[segment.GetID()]
 		_, existOnNext := nextTargetMap[segment.GetID()]
-
 		if !existOnNext && !existOnCurrent {
 			toRelease = append(toRelease, segment)
 		}
