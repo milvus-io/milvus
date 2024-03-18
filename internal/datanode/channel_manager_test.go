@@ -22,8 +22,11 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -41,6 +44,7 @@ type ChannelManagerSuite struct {
 func (s *ChannelManagerSuite) SetupTest() {
 	ctx := context.Background()
 	s.node = newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	s.node.allocator = allocator.NewMockAllocator(s.T())
 	s.manager = NewChannelManager(s.node)
 }
 
@@ -51,6 +55,26 @@ func getWatchInfoByOpID(opID UniqueID, channel string, state datapb.ChannelWatch
 		Vchan: &datapb.VchannelInfo{
 			CollectionID: 1,
 			ChannelName:  channel,
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+				},
+				{
+					FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
 		},
 	}
 }

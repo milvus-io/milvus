@@ -30,10 +30,12 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -92,6 +94,26 @@ func TestWatchChannel(t *testing.T) {
 		info := &datapb.ChannelWatchInfo{
 			State: datapb.ChannelWatchState_ToWatch,
 			Vchan: vchan,
+			Schema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
 		}
 		val, err := proto.Marshal(info)
 		assert.NoError(t, err)
@@ -162,6 +184,26 @@ func TestWatchChannel(t *testing.T) {
 		info := &datapb.ChannelWatchInfo{
 			State: datapb.ChannelWatchState_ToRelease,
 			Vchan: vchan,
+			Schema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
 		}
 		val, err := proto.Marshal(info)
 		assert.NoError(t, err)
@@ -195,6 +237,26 @@ func TestWatchChannel(t *testing.T) {
 		info := datapb.ChannelWatchInfo{
 			Vchan: nil,
 			State: datapb.ChannelWatchState_Uncomplete,
+			Schema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
 		}
 		bs, err := proto.Marshal(&info)
 		assert.NoError(t, err)
@@ -225,6 +287,26 @@ func TestWatchChannel(t *testing.T) {
 		info = datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{ChannelName: ch},
 			State: datapb.ChannelWatchState_Uncomplete,
+			Schema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
 		}
 		bs, err = proto.Marshal(&info)
 		assert.NoError(t, err)
@@ -268,6 +350,26 @@ func TestWatchChannel(t *testing.T) {
 		info := datapb.ChannelWatchInfo{
 			Vchan: &datapb.VchannelInfo{ChannelName: ch},
 			State: datapb.ChannelWatchState_Uncomplete,
+			Schema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
 		}
 		bs, err := proto.Marshal(&info)
 		assert.NoError(t, err)
@@ -289,6 +391,26 @@ func TestWatchChannel(t *testing.T) {
 				UnflushedSegmentIds: []int64{1},
 			},
 			State: datapb.ChannelWatchState_Uncomplete,
+			Schema: &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			},
 		}
 		bs, err := proto.Marshal(&info)
 		assert.NoError(t, err)
@@ -448,6 +570,26 @@ func TestEventTickler(t *testing.T) {
 	tickler := newEtcdTickler(0, path.Join(etcdPrefix, channelName), &datapb.ChannelWatchInfo{
 		Vchan: &datapb.VchannelInfo{
 			ChannelName: channelName,
+		},
+		Schema: &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+				},
+				{
+					FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
 		},
 	}, kv, 100*time.Millisecond)
 	defer tickler.stop()
