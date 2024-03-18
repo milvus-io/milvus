@@ -22,10 +22,14 @@ import (
 	"strconv"
 	"unsafe"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -82,6 +86,7 @@ const (
 	DefaultSearchCacheBudgetGBRatio = 0.10
 	DefaultLoadNumThreadRatio       = 8.0
 	DefaultBeamWidthRatio           = 4.0
+	DefaultHighPerfCompressRatio    = 0.5
 )
 
 func NewBigDataExtraParamsFromJSON(jsonStr string) (*BigDataIndexExtraParams, error) {
@@ -364,4 +369,29 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 		}
 	}
 	return nil
+}
+
+func UpdateInterimIndexCompressRatio(params *paramtable.ComponentParam, compressRatio float64) (float64, error) {
+	if params.AutoIndexConfig.Enable.GetAsBool() {
+		indexParamsMap := make(map[string]string)
+		for k, v := range params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
+			indexParamsMap[k] = v
+		}
+		indexType, exist := indexParamsMap[common.IndexTypeKey]
+		if !exist {
+			return 0.0, fmt.Errorf("index type not exist in autoindex config")
+		}
+		if indexType != indexparamcheck.IndexDISKANN {
+			log.Info("update interim index of high perf index with ", zap.Any("compress ratio", DefaultHighPerfCompressRatio))
+			return DefaultHighPerfCompressRatio, nil
+		}
+		extraParams, err := NewBigDataExtraParamsFromMap(indexParamsMap)
+		if err != nil {
+			return 0.0, fmt.Errorf("can't not get autoindex config")
+		}
+		newCompressRatio := extraParams.SearchCacheBudgetGBRatio + extraParams.PQCodeBudgetGBRatio
+		log.Info("update interim index of big data index with ", zap.Any("compress ratio", newCompressRatio))
+		return newCompressRatio, nil
+	}
+	return compressRatio, nil
 }

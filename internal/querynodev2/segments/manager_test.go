@@ -2,6 +2,7 @@ package segments
 
 import (
 	"context"
+	"path/filepath"
 	"testing"
 
 	"github.com/samber/lo"
@@ -11,7 +12,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ManagerSuite struct {
@@ -37,6 +40,8 @@ func (s *ManagerSuite) SetupSuite() {
 	s.channels = []string{"dml1", "dml2", "dml3", "dml4"}
 	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed, SegmentTypeSealed}
 	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
 }
 
 func (s *ManagerSuite) SetupTest() {

@@ -30,6 +30,9 @@ SegcoreSetNlist(const int64_t);
 void
 SegcoreSetNprobe(const int64_t);
 
+void
+SegcoreSetVecCompressRatio(const float value);
+
 // return value must be freed by the caller
 char*
 SegcoreSetSimdType(const char*);

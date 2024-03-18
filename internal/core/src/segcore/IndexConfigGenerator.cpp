@@ -13,11 +13,16 @@
 #include "log/Log.h"
 
 namespace milvus::segcore {
+namespace {
+static constexpr float kHnswDefaultCompressRatio = 0.5;
+}
+
 VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
                                const FieldIndexMeta& index_meta_,
                                const SegcoreConfig& config,
                                const SegmentType& segment_type)
     : max_index_row_count_(max_index_row_cout), config_(config) {
+    // todo: intermin index config only support vector_float for now, add more data type in future
     origin_index_type_ = index_meta_.GetIndexType();
     metric_type_ = index_meta_.GeMetricType();
     // Currently for dense vector index, if the segment is growing, we use IVFCC
@@ -29,13 +34,15 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
     // But for sparse vector index(INDEX_SPARSE_INVERTED_INDEX and
     // INDEX_SPARSE_WAND), those index themselves can be used as the temp index
     // type, so we can avoid the extra step of "releast temp and load".
-
+    auto vec_compress_ratio = config.get_vec_compress_ratio();
+    LOG_INFO("VecIndexConfig: use vector compress ratio :{}",
+             vec_compress_ratio);
     if (origin_index_type_ ==
             knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
         origin_index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND) {
         index_type_ = origin_index_type_;
     } else {
-        index_type_ = support_index_types.at(segment_type);
+        SetDenseVecIndexType(vec_compress_ratio);
     }
     build_params_[knowhere::meta::METRIC_TYPE] = metric_type_;
     build_params_[knowhere::indexparam::NLIST] =
@@ -46,6 +53,11 @@ VecIndexConfig::VecIndexConfig(const int64_t max_index_row_cout,
         std::to_string(config_.get_nprobe());
     // note for sparse vector index: drop_ratio_build is not allowed for growing
     // segment index.
+    auto code_size_res = GetVecCodeSize(vec_compress_ratio);
+    if (code_size_res.has_value()) {
+        build_params_[knowhere::indexparam::CODE_SIZE] =
+            std::to_string(code_size_res.value());
+    }
     LOG_INFO(
         "VecIndexConfig: origin_index_type={}, index_type={}, metric_type={}",
         origin_index_type_,
@@ -98,4 +110,49 @@ VecIndexConfig::GetSearchConf(const SearchInfo& searchInfo) {
     return searchParam;
 }
 
+std::optional<uint32_t>
+VecIndexConfig::GetVecCodeSize(float vec_compress_ratio) {
+    if (vec_compress_ratio >= 1.0)
+        return std::nullopt;
+    auto vec_component_size =
+        uint32_t(vec_compress_ratio * 32);  // assume data type is float32
+    if (vec_component_size <= 4) {
+        return 4;
+    } else if (vec_component_size <= 6) {
+        return 6;
+    } else if (vec_component_size <= 8) {
+        return 8;
+    } else {
+        return 16;
+    }
+}
+
+void
+VecIndexConfig::SetDenseVecIndexType(float vec_compress_ratio) {
+    if (vec_compress_ratio >= 1.0) {
+        index_type_ = knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC;
+    } else {
+        index_type_ = knowhere::IndexEnum::INDEX_FAISS_IVFSQ_CC;
+    }
+}
+
+uint64_t
+VecIndexConfig::EstimateBuildBinlogIndexMemoryInBytes(uint32_t row_data_size,
+                                                      float build_expand_rate) {
+    if (origin_index_type_ == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
+        max_index_row_count_ < GetBuildThreshold()) {
+        // not build binlog index
+        return row_data_size;
+    }
+    auto build_mem = row_data_size * build_expand_rate;
+    if (GetIndexType() == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
+        build_mem += row_data_size;
+    } else {
+        auto vec_compress_ratio = config_.get_vec_compress_ratio();
+        auto code_size =
+            GetVecCodeSize(vec_compress_ratio).value_or(8 * sizeof(float));
+        build_mem += row_data_size * ((float)code_size / (8 * sizeof(float)));
+    }
+    return build_mem;
+}
 }  // namespace milvus::segcore
