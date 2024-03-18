@@ -32,7 +32,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -73,7 +75,14 @@ func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, indexInfo *que
 	indexPaths := indexInfo.IndexFilePaths
 
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+
 	enableMmap := common.IsMmapEnabled(indexInfo.IndexParams...)
+	if !enableMmap {
+		_, ok := indexParams[common.MmapEnabledKey]
+		indexType := datacoord.GetIndexType(indexInfo.IndexParams)
+		indexSupportMmap := indexparamcheck.IsMmapSupported(indexType)
+		enableMmap = !ok && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool() && indexSupportMmap
+	}
 	// as Knowhere reports error if encounter a unknown param, we need to delete it
 	delete(indexParams, common.MmapEnabledKey)
 

@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus-storage/go/storage/options"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/storage"
 	typeutil_internal "github.com/milvus-io/milvus/internal/util/typeutil"
@@ -1074,7 +1075,8 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 		opts := opts
 		fieldBinLog := field
 		fieldID := field.FieldID
-		mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
+		mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
+			(!common.FieldHasMmapKey(collection.Schema(), fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
 		if mmapEnabled && options.LoadStatus == LoadStatusInMemory {
 			opts = append(opts, WithLoadStatus(LoadStatusMapped))
 		}

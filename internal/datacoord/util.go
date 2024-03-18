@@ -182,7 +182,7 @@ func getCollectionAutoCompactionEnabled(properties map[string]string) (bool, err
 	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool(), nil
 }
 
-func getIndexType(indexParams []*commonpb.KeyValuePair) string {
+func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 	for _, param := range indexParams {
 		if param.Key == common.IndexTypeKey {
 			return param.Value
