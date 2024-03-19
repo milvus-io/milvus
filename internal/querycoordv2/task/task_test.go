@@ -1697,6 +1697,101 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 	suite.Equal(2, task.step)
 }
 
+func (suite *TaskSuite) TestBalanceChannelWithL0SegmentTask() {
+	collectionID := int64(1)
+	partitionID := int64(1)
+	channel := "channel-1"
+	vchannel := &datapb.VchannelInfo{
+		CollectionID: collectionID,
+		ChannelName:  channel,
+	}
+
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            2,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+			Level:         datapb.SegmentLevel_L0,
+		},
+		{
+			ID:            3,
+			CollectionID:  collectionID,
+			PartitionID:   partitionID,
+			InsertChannel: channel,
+			Level:         datapb.SegmentLevel_L0,
+		},
+	}
+	suite.meta.PutCollection(utils.CreateTestCollection(collectionID, 1), utils.CreateTestPartition(collectionID, 1))
+	suite.broker.ExpectedCalls = nil
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segments, nil)
+	suite.target.UpdateCollectionNextTarget(collectionID)
+	suite.target.UpdateCollectionCurrentTarget(collectionID)
+	suite.target.UpdateCollectionNextTarget(collectionID)
+
+	suite.dist.LeaderViewManager.Update(2, &meta.LeaderView{
+		ID:           2,
+		CollectionID: collectionID,
+		Channel:      channel,
+		Segments: map[int64]*querypb.SegmentDist{
+			1: {NodeID: 2},
+			2: {NodeID: 2},
+			3: {NodeID: 2},
+		},
+	})
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: collectionID,
+		Channel:      channel,
+		Segments: map[int64]*querypb.SegmentDist{
+			1: {NodeID: 2},
+			2: {NodeID: 2},
+			3: {NodeID: 2},
+		},
+	})
+
+	task, err := NewChannelTask(context.Background(),
+		10*time.Second,
+		WrapIDSource(2),
+		collectionID,
+		1,
+		NewChannelAction(1, ActionTypeGrow, channel),
+		NewChannelAction(2, ActionTypeReduce, channel),
+	)
+	suite.NoError(err)
+
+	// l0 hasn't been loaded into delegator, block balance
+	suite.scheduler.preProcess(task)
+	suite.Equal(0, task.step)
+
+	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
+		ID:           1,
+		CollectionID: collectionID,
+		Channel:      channel,
+		Segments: map[int64]*querypb.SegmentDist{
+			1: {NodeID: 1},
+			2: {NodeID: 1},
+			3: {NodeID: 1},
+		},
+	})
+
+	// new delegator distribution updated, task step up
+	suite.scheduler.preProcess(task)
+	suite.Equal(1, task.step)
+
+	suite.dist.LeaderViewManager.Update(2)
+	// old delegator removed
+	suite.scheduler.preProcess(task)
+	suite.Equal(2, task.step)
+}
+
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
 }

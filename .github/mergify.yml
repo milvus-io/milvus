@@ -39,7 +39,7 @@ pull_request_rules:
       - or:
           - base=sql_beta
           - base=master
-          - base~=^2\.3(\.\d+){0,1}$
+          - base~=^2(\.\d+){1,2}$
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       # - 'status-success=Code Checker MacOS 12'
@@ -109,7 +109,7 @@ pull_request_rules:
       - or:
           - base=master
           - base=sql_beta
-          - base~=^2\.3(\.\d+){0,1}$
+          - base~=^2(\.\d+){1,2}$
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       # - 'status-success=Code Checker MacOS 12'
@@ -253,7 +253,7 @@ pull_request_rules:
       - or:
           - base=master
           - base=sql_beta
-          - base~=^2\.3(\.\d+){0,1}$
+          - base~=^2(\.\d+){1,2}$
       - title~=\[skip e2e\]
       - 'status-success=Code Checker AMD64 Ubuntu 20.04'
       - 'status-success=Build and test AMD64 Ubuntu 20.04'
@@ -299,7 +299,7 @@ pull_request_rules:
       - or:
           - base=master
           - base=sql_beta
-          - base~=^2\.3(\.\d+){0,1}$
+          - base~=^2(\.\d+){1,2}$
       - *source_code_files
       - or:
           - 'status-success!=Code Checker AMD64 Ubuntu 20.04'
@@ -357,7 +357,7 @@ pull_request_rules:
     conditions:
       - or:
           - base=master
-          - base~=^2\.3(\.\d+){0,1}$
+          - base~=^2(\.\d+){1,2}$
           - base=sql_beta
       - or:
           - 'check-failure=Code Checker AMD64 Ubuntu 20.04'
@@ -382,7 +382,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - or:
         - '-title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
         - body=^$
@@ -427,7 +427,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - 'title~=^(feat:|enhance:|fix:|test:|doc:|auto:|\[automated\])'
       - '-body=^$'
       - 'label=do-not-merge/invalid-pr-format'
@@ -440,7 +440,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - 'title~=^fix:'
     actions:
       label:
@@ -451,7 +451,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - 'title~=^feat:'
     actions:
       label:
@@ -462,7 +462,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - 'title~=^enhance:'
     actions:
       label:
@@ -473,7 +473,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - 'title~=^test:'
     actions:
       label:
@@ -484,7 +484,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - 'title~=^doc:'
     actions:
       label:

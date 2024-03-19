@@ -1056,6 +1056,8 @@ type proxyConfig struct {
 	MaxConnectionNum               ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1398,6 +1400,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.MaxConnectionNum.Init(base.mgr)
+
+	p.SlowQuerySpanInSeconds = ParamItem{
+		Key:          "proxy.slowQuerySpanInSeconds",
+		Version:      "2.3.11",
+		Doc:          "query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.",
+		DefaultValue: "5",
+		Export:       true,
+	}
+	p.SlowQuerySpanInSeconds.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1979,6 +1990,7 @@ type queryNodeConfig struct {
 	CacheEnabled     ParamItem `refreshable:"false"`
 	CacheMemoryLimit ParamItem `refreshable:"false"`
 	MmapDirPath      ParamItem `refreshable:"false"`
+	MmapEnabled      ParamItem `refreshable:"false"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -2199,6 +2211,14 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 	}
 	p.MmapDirPath.Init(base.mgr)
+
+	p.MmapEnabled = ParamItem{
+		Key:          "queryNode.mmapEnabled",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "Enable mmap for loading data",
+	}
+	p.MmapEnabled.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",
@@ -2549,6 +2569,7 @@ type dataCoordConfig struct {
 	GCMissingTolerance      ParamItem `refreshable:"false"`
 	GCDropTolerance         ParamItem `refreshable:"false"`
 	GCRemoveConcurrent      ParamItem `refreshable:"false"`
+	GCScanIntervalInHour    ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode          ParamItem `refreshable:"false"`
@@ -2807,7 +2828,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.CompactionCheckIntervalInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.check.interval",
 		Version:      "2.0.0",
-		DefaultValue: "10",
+		DefaultValue: "3",
 	}
 	p.CompactionCheckIntervalInSeconds.Init(base.mgr)
 
@@ -2912,6 +2933,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GCInterval.Init(base.mgr)
+
+	p.GCScanIntervalInHour = ParamItem{
+		Key:          "dataCoord.gc.scanInterval",
+		Version:      "2.4.0",
+		DefaultValue: "168", // hours, default 7 * 24 hours
+		Doc:          "garbage collection scan residue interval in hours",
+		Export:       true,
+	}
+	p.GCScanIntervalInHour.Init(base.mgr)
 
 	// Do not set this to incredible small value, make sure this to be more than 10 minutes at least
 	p.GCMissingTolerance = ParamItem{

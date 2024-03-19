@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -206,7 +207,28 @@ func TestDataNode(t *testing.T) {
 		}
 
 		for _, test := range testDataSyncs {
-			err = node.flowgraphManager.AddandStartWithEtcdTickler(node, &datapb.VchannelInfo{CollectionID: 1, ChannelName: test.dmChannelName}, nil, genTestTickler())
+			err = node.flowgraphManager.AddandStartWithEtcdTickler(node, &datapb.VchannelInfo{
+				CollectionID: 1, ChannelName: test.dmChannelName,
+			}, &schemapb.CollectionSchema{
+				Name: "test_collection",
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+					},
+					{
+						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+					},
+					{
+						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+						TypeParams: []*commonpb.KeyValuePair{
+							{Key: common.DimKey, Value: "128"},
+						},
+					},
+				},
+			}, genTestTickler())
 			assert.NoError(t, err)
 			vchanNameCh <- test.dmChannelName
 		}

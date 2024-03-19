@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
 const (
@@ -266,12 +268,16 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		if info.GetImportedRows() <= segment.GetNumOfRows() {
 			continue // rows not changed, no need to update
 		}
+		diff := info.GetImportedRows() - segment.GetNumOfRows()
 		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
 		err = s.meta.UpdateSegmentsInfo(op)
 		if err != nil {
 			log.Warn("update import segment rows failed", WrapTaskLog(task, zap.Error(err))...)
 			return
 		}
+		metrics.DataCoordBulkVectors.WithLabelValues(
+			strconv.FormatInt(task.GetCollectionID(), 10),
+		).Add(float64(diff))
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {

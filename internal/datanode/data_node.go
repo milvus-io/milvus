@@ -318,6 +318,7 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
 	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
 	node.flowgraphManager.RemoveFlowgraph(vChanName)
+	node.writeBufferManager.RemoveChannel(vChanName)
 }
 
 // BackGroundGC runs in background to release datanode resources
