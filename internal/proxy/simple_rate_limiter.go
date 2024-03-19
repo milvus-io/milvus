@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -126,7 +127,9 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 func isNotCollectionLevelLimitRequest(rt internalpb.RateType) bool {
 	// Most ddl is global level, only DDLFlush will be applied at collection
 	switch rt {
-	case internalpb.RateType_DDLCollection, internalpb.RateType_DDLPartition, internalpb.RateType_DDLIndex,
+	case internalpb.RateType_DDLCollection,
+		internalpb.RateType_DDLPartition,
+		internalpb.RateType_DDLIndex,
 		internalpb.RateType_DDLCompaction:
 		return true
 	default:
@@ -169,7 +172,7 @@ func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
 		return err
 	}
 
-	// TODO fubang: remove dropped database/collection/partition rate limiters
+	m.rateLimiter.ClearInvalidLimiterNode(rootLimiter)
 	return nil
 }
 
@@ -210,90 +213,103 @@ func initLimiter(rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[interna
 // Cluster rate limiter doesn't support to accumulate metrics dynamically, it only uses
 // configurations as limit values.
 func newClusterLimiter() *rlinternal.RateLimiterNode {
-	clusterRateLimiters := rlinternal.NewRateLimiterNode()
+	clusterRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Cluster)
 	clusterLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Cluster)
 	initLimiter(clusterRateLimiters, clusterLimiterConfigs)
 	return clusterRateLimiters
 }
 
 func newDatabaseLimiter() *rlinternal.RateLimiterNode {
-	dbRateLimiters := rlinternal.NewRateLimiterNode()
+	dbRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Database)
 	databaseLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Database)
 	initLimiter(dbRateLimiters, databaseLimiterConfigs)
 	return dbRateLimiters
 }
 
 func newCollectionLimiters() *rlinternal.RateLimiterNode {
-	collectionRateLimiters := rlinternal.NewRateLimiterNode()
+	collectionRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Collection)
 	collectionLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Collection)
 	initLimiter(collectionRateLimiters, collectionLimiterConfigs)
 	return collectionRateLimiters
 }
 
 func newPartitionLimiters() *rlinternal.RateLimiterNode {
-	partRateLimiters := rlinternal.NewRateLimiterNode()
+	partRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Partition)
 	collectionLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Partition)
 	initLimiter(partRateLimiters, collectionLimiterConfigs)
 	return partRateLimiters
 }
 
+func (m *SimpleLimiter) updateLimiterNode(req *proxypb.Limiter, node *rlinternal.RateLimiterNode, sourceID string) error {
+	curLimiters := node.GetLimiters()
+	for _, rate := range req.GetRates() {
+		limit, ok := curLimiters.Get(rate.GetRt())
+		if !ok {
+			return fmt.Errorf("unregister rateLimiter for rateType %s", rate.GetRt().String())
+		}
+		limit.SetLimit(ratelimitutil.Limit(rate.GetR()))
+		setRateGaugeByRateType(rate.GetRt(), paramtable.GetNodeID(), sourceID, rate.GetR())
+	}
+	quotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
+	states := req.GetStates()
+	codes := req.GetCodes()
+	for i, state := range states {
+		quotaStates.Insert(state, codes[i])
+	}
+	node.SetQuotaStates(quotaStates)
+	return nil
+}
+
 func (m *SimpleLimiter) updateRateLimiter(reqRootLimiterNode *proxypb.LimiterNode) error {
-	// TODO should update cluster and db?
-	// skip to update cluster rate limiters
+	reqClusterLimiter := reqRootLimiterNode.GetLimiter()
+	clusterLimiter := m.rateLimiter.GetRootLimiters()
+	err := m.updateLimiterNode(reqClusterLimiter, clusterLimiter, "cluster")
+	if err != nil {
+		log.Warn("update cluster rate limiters failed", zap.Error(err))
+		return err
+	}
+
+	getDBSourceID := func(dbID int64) string {
+		return fmt.Sprintf("db.%d", dbID)
+	}
+	getCollectionSourceID := func(collectionID int64) string {
+		return fmt.Sprintf("collection.%d", collectionID)
+	}
+	getPartitionSourceID := func(partitionID int64) string {
+		return fmt.Sprintf("partition.%d", partitionID)
+	}
 
 	for dbID, reqDBRateLimiters := range reqRootLimiterNode.GetChildren() {
 		// update database rate limiters
+		dbRateLimiters := m.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newDatabaseLimiter)
+		err := m.updateLimiterNode(reqDBRateLimiters.GetLimiter(), dbRateLimiters, getDBSourceID(dbID))
+		if err != nil {
+			log.Warn("update database rate limiters failed", zap.Error(err))
+			return err
+		}
 
 		// update collection rate limiters
 		for collectionID, reqCollectionRateLimiter := range reqDBRateLimiters.GetChildren() {
 			collectionRateLimiter := m.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
 				newDatabaseLimiter, newCollectionLimiters)
-			collectionQuotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
-
-			reqLimiter := reqCollectionRateLimiter.GetLimiter()
-			states := reqLimiter.GetStates()
-			codes := reqLimiter.GetCodes()
-
-			for _, r := range reqLimiter.GetRates() {
-				limit, ok := collectionRateLimiter.GetLimiters().Get(r.GetRt())
-				if !ok {
-					return fmt.Errorf("unregister rateLimiter for rateType %s", r.GetRt().String())
-				}
-				limit.SetLimit(ratelimitutil.Limit(r.GetR()))
-				setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), collectionID, r.GetR())
+			err := m.updateLimiterNode(reqCollectionRateLimiter.GetLimiter(), collectionRateLimiter,
+				getCollectionSourceID(collectionID))
+			if err != nil {
+				log.Warn("update collection rate limiters failed", zap.Error(err))
+				return err
 			}
-
-			// reset collection quota states
-			for i, state := range states {
-				collectionQuotaStates.Insert(state, codes[i])
-			}
-			collectionRateLimiter.SetQuotaStates(collectionQuotaStates)
 
 			// update partition rate limiters
 			for partitionID, reqPartitionRateLimiters := range reqCollectionRateLimiter.GetChildren() {
-				partitionQuotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
 				partitionRateLimiter := m.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partitionID,
 					newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
 
-				reqLimiter := reqPartitionRateLimiters.GetLimiter()
-				states := reqLimiter.GetStates()
-				codes := reqLimiter.GetCodes()
-
-				for _, r := range reqLimiter.GetRates() {
-					limit, ok := partitionRateLimiter.GetLimiters().Get(r.GetRt())
-					if !ok {
-						return fmt.Errorf("rateType %s not found within partition:%d rate limiter",
-							r.GetRt().String(), partitionRateLimiter.GetID())
-					}
-
-					limit.SetLimit(ratelimitutil.Limit(r.GetR()))
-					setRateGaugeByRateType(r.GetRt(), paramtable.GetNodeID(), collectionID, r.GetR())
+				err := m.updateLimiterNode(reqPartitionRateLimiters.GetLimiter(), partitionRateLimiter,
+					getPartitionSourceID(partitionID))
+				if err != nil {
+					log.Warn("update partition rate limiters failed", zap.Error(err))
+					return err
 				}
-
-				for i, state := range states {
-					partitionQuotaStates.Insert(state, codes[i])
-				}
-				partitionRateLimiter.SetQuotaStates(partitionQuotaStates)
 			}
 		}
 	}
@@ -302,85 +318,25 @@ func (m *SimpleLimiter) updateRateLimiter(reqRootLimiterNode *proxypb.LimiterNod
 }
 
 // setRateGaugeByRateType sets ProxyLimiterRate metrics.
-func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, collectionID int64, rate float64) {
+func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, sourceID string, rate float64) {
 	if ratelimitutil.Limit(rate) == ratelimitutil.Inf {
 		return
 	}
 	nodeIDStr := strconv.FormatInt(nodeID, 10)
-	collectionIDStr := strconv.FormatInt(collectionID, 10)
-	switch rateType {
-	case internalpb.RateType_DMLInsert:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.InsertLabel).Set(rate)
-	case internalpb.RateType_DMLUpsert:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.UpsertLabel).Set(rate)
-	case internalpb.RateType_DMLDelete:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.DeleteLabel).Set(rate)
-	case internalpb.RateType_DQLSearch:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.SearchLabel).Set(rate)
-	case internalpb.RateType_DQLQuery:
-		metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, collectionIDStr, metrics.QueryLabel).Set(rate)
-	}
+	metrics.ProxyLimiterRate.WithLabelValues(nodeIDStr, sourceID, rateType.String()).Set(rate)
 }
 
 func getDefaultLimiterConfig(scope internalpb.RateScope) map[internalpb.RateType]*paramtable.ParamItem {
-	quotaConfig := &Params.QuotaConfig
-	switch scope {
-	case internalpb.RateScope_Cluster:
-		return map[internalpb.RateType]*paramtable.ParamItem{
-			internalpb.RateType_DDLCollection: &quotaConfig.DDLCollectionRate,
-			internalpb.RateType_DDLPartition:  &quotaConfig.DDLPartitionRate,
-			internalpb.RateType_DDLIndex:      &quotaConfig.MaxIndexRate,
-			internalpb.RateType_DDLFlush:      &quotaConfig.MaxFlushRate,
-			internalpb.RateType_DDLCompaction: &quotaConfig.MaxCompactionRate,
-			internalpb.RateType_DMLInsert:     &quotaConfig.DMLMaxInsertRate,
-			internalpb.RateType_DMLUpsert:     &quotaConfig.DMLMaxUpsertRate,
-			internalpb.RateType_DMLDelete:     &quotaConfig.DMLMaxDeleteRate,
-			internalpb.RateType_DMLBulkLoad:   &quotaConfig.DMLMaxBulkLoadRate,
-			internalpb.RateType_DQLSearch:     &quotaConfig.DQLMaxSearchRate,
-			internalpb.RateType_DQLQuery:      &quotaConfig.DQLMaxQueryRate,
-		}
-	case internalpb.RateScope_Database:
-		return map[internalpb.RateType]*paramtable.ParamItem{
-			internalpb.RateType_DDLCollection: &quotaConfig.DDLCollectionRatePerDB,
-			internalpb.RateType_DDLPartition:  &quotaConfig.DDLPartitionRatePerDB,
-			internalpb.RateType_DDLIndex:      &quotaConfig.MaxIndexRatePerDB,
-			internalpb.RateType_DDLFlush:      &quotaConfig.MaxFlushRatePerDB,
-			internalpb.RateType_DDLCompaction: &quotaConfig.MaxCompactionRatePerDB,
-			internalpb.RateType_DMLInsert:     &quotaConfig.DMLMaxInsertRatePerDB,
-			internalpb.RateType_DMLUpsert:     &quotaConfig.DMLMaxUpsertRatePerDB,
-			internalpb.RateType_DMLDelete:     &quotaConfig.DMLMaxDeleteRatePerDB,
-			internalpb.RateType_DMLBulkLoad:   &quotaConfig.DMLMaxBulkLoadRatePerDB,
-			internalpb.RateType_DQLSearch:     &quotaConfig.DQLMaxSearchRatePerDB,
-			internalpb.RateType_DQLQuery:      &quotaConfig.DQLMaxQueryRatePerDB,
-		}
-	case internalpb.RateScope_Collection:
-		return map[internalpb.RateType]*paramtable.ParamItem{
-			internalpb.RateType_DMLInsert:   &quotaConfig.DMLMaxInsertRatePerCollection,
-			internalpb.RateType_DMLUpsert:   &quotaConfig.DMLMaxUpsertRatePerCollection,
-			internalpb.RateType_DMLDelete:   &quotaConfig.DMLMaxDeleteRatePerCollection,
-			internalpb.RateType_DMLBulkLoad: &quotaConfig.DMLMaxBulkLoadRatePerCollection,
-			internalpb.RateType_DQLSearch:   &quotaConfig.DQLMaxSearchRatePerCollection,
-			internalpb.RateType_DQLQuery:    &quotaConfig.DQLMaxQueryRatePerCollection,
-			internalpb.RateType_DDLFlush:    &quotaConfig.MaxFlushRatePerCollection,
-		}
-	case internalpb.RateScope_Partition:
-		return map[internalpb.RateType]*paramtable.ParamItem{
-			internalpb.RateType_DMLInsert:   &quotaConfig.DMLMaxInsertRatePerPartition,
-			internalpb.RateType_DMLUpsert:   &quotaConfig.DMLMaxUpsertRatePerPartition,
-			internalpb.RateType_DMLDelete:   &quotaConfig.DMLMaxDeleteRatePerPartition,
-			internalpb.RateType_DMLBulkLoad: &quotaConfig.DMLMaxBulkLoadRatePerPartition,
-			internalpb.RateType_DQLSearch:   &quotaConfig.DQLMaxSearchRatePerPartition,
-			internalpb.RateType_DQLQuery:    &quotaConfig.DQLMaxQueryRatePerPartition,
-		}
-	default:
-		panic("Unknown rate scope:" + scope.String())
-	}
+	return quota.GetQuotaConfigMap(scope, Params)
 }
 
 func IsDDLRequest(rt internalpb.RateType) bool {
 	switch rt {
-	case internalpb.RateType_DDLCollection, internalpb.RateType_DDLPartition, internalpb.RateType_DDLIndex,
-		internalpb.RateType_DDLFlush, internalpb.RateType_DDLCompaction:
+	case internalpb.RateType_DDLCollection,
+		internalpb.RateType_DDLPartition,
+		internalpb.RateType_DDLIndex,
+		internalpb.RateType_DDLFlush,
+		internalpb.RateType_DDLCompaction:
 		return true
 	default:
 		return false

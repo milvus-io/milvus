@@ -165,7 +165,9 @@ func getRequestInfo(req interface{}) (int64, map[int64][]int64, internalpb.RateT
 	case *milvuspb.ManualCompactionRequest:
 		dbName, _ := requestutil.GetDbNameFromRequest(req)
 		dbInfo, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), dbName.(string))
-		return dbInfo.dbID, map[int64][]int64{}, internalpb.RateType_DDLCompaction, 1, nil
+		return dbInfo.dbID, map[int64][]int64{
+			r.GetCollectionID(): {},
+		}, internalpb.RateType_DDLCompaction, 1, nil
 	default: // TODO: support more request
 		if req == nil {
 			return 0, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")

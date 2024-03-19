@@ -149,13 +149,15 @@ type quotaConfig struct {
 	DiskQuotaPerPartition                ParamItem `refreshable:"true"`
 
 	// limit reading
-	ForceDenyReading        ParamItem `refreshable:"true"`
-	QueueProtectionEnabled  ParamItem `refreshable:"true"`
-	NQInQueueThreshold      ParamItem `refreshable:"true"`
-	QueueLatencyThreshold   ParamItem `refreshable:"true"`
-	ResultProtectionEnabled ParamItem `refreshable:"true"`
-	MaxReadResultRate       ParamItem `refreshable:"true"`
-	CoolOffSpeed            ParamItem `refreshable:"true"`
+	ForceDenyReading               ParamItem `refreshable:"true"`
+	QueueProtectionEnabled         ParamItem `refreshable:"true"`
+	NQInQueueThreshold             ParamItem `refreshable:"true"`
+	QueueLatencyThreshold          ParamItem `refreshable:"true"`
+	ResultProtectionEnabled        ParamItem `refreshable:"true"`
+	MaxReadResultRate              ParamItem `refreshable:"true"`
+	MaxReadResultRatePerDB         ParamItem `refreshable:"true"`
+	MaxReadResultRatePerCollection ParamItem `refreshable:"true"`
+	CoolOffSpeed                   ParamItem `refreshable:"true"`
 }
 
 func (p *quotaConfig) init(base *BaseTable) {
@@ -1933,6 +1935,50 @@ MB/s, default no limit`,
 		Export: true,
 	}
 	p.MaxReadResultRate.Init(base.mgr)
+
+	p.MaxReadResultRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerDB",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.ResultProtectionEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
+			}
+			// [0, inf)
+			if rate < 0 {
+				return max
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MaxReadResultRatePerDB.Init(base.mgr)
+
+	p.MaxReadResultRatePerCollection = ParamItem{
+		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerCollection",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.ResultProtectionEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
+			}
+			// [0, inf)
+			if rate < 0 {
+				return max
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MaxReadResultRatePerCollection.Init(base.mgr)
 
 	const defaultSpeed = "0.9"
 	p.CoolOffSpeed = ParamItem{

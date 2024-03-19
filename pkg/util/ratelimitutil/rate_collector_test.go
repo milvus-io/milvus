@@ -36,7 +36,7 @@ func TestRateCollector(t *testing.T) {
 			ts100 = ts0.Add(time.Duration(100.0 * float64(time.Second)))
 		)
 
-		rc, err := newRateCollector(DefaultWindow, DefaultGranularity, ts0)
+		rc, err := newRateCollector(DefaultWindow, DefaultGranularity, ts0, false)
 		assert.NoError(t, err)
 		label := "mock_label"
 		rc.Register(label)
@@ -78,7 +78,7 @@ func TestRateCollector(t *testing.T) {
 			ts31 = ts0.Add(time.Duration(3.1 * float64(time.Second)))
 		)
 
-		rc, err := newRateCollector(DefaultWindow, DefaultGranularity, ts0)
+		rc, err := newRateCollector(DefaultWindow, DefaultGranularity, ts0, false)
 		assert.NoError(t, err)
 		label := "mock_label"
 		rc.Register(label)
@@ -105,7 +105,7 @@ func TestRateCollector(t *testing.T) {
 		start := tt.now()
 		end := start.Add(testPeriod * time.Second)
 
-		rc, err := newRateCollector(DefaultWindow, DefaultGranularity, start)
+		rc, err := newRateCollector(DefaultWindow, DefaultGranularity, start, false)
 		assert.NoError(t, err)
 		label := "mock_label"
 		rc.Register(label)

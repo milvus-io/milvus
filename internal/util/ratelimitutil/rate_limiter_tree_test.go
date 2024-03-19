@@ -29,8 +29,8 @@ import (
 )
 
 func TestRateLimiterNode_AddAndGetChild(t *testing.T) {
-	rln := NewRateLimiterNode()
-	child := NewRateLimiterNode()
+	rln := NewRateLimiterNode(internalpb.RateScope_Cluster)
+	child := NewRateLimiterNode(internalpb.RateScope_Cluster)
 
 	// Positive test case
 	rln.AddChild(1, child)
@@ -52,18 +52,18 @@ func TestTraverseRateLimiterTree(t *testing.T) {
 	quotaStates := typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode]()
 	quotaStates.Insert(milvuspb.QuotaState_DenyToWrite, commonpb.ErrorCode_ForceDeny)
 
-	root := NewRateLimiterNode()
+	root := NewRateLimiterNode(internalpb.RateScope_Cluster)
 	root.SetLimiters(limiters)
 	root.SetQuotaStates(quotaStates)
 
 	// Add a child to the root node
-	child := NewRateLimiterNode()
+	child := NewRateLimiterNode(internalpb.RateScope_Cluster)
 	child.SetLimiters(limiters)
 	child.SetQuotaStates(quotaStates)
 	root.AddChild(123, child)
 
 	// Add a child to the root node
-	child2 := NewRateLimiterNode()
+	child2 := NewRateLimiterNode(internalpb.RateScope_Cluster)
 	child2.SetLimiters(limiters)
 	child2.SetQuotaStates(quotaStates)
 	child.AddChild(123, child2)

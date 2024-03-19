@@ -50,7 +50,8 @@ type Limiter struct {
 	burst  float64
 	tokens float64
 	// last is the last time the limiter's tokens field was updated
-	last time.Time
+	last       time.Time
+	hasUpdated bool
 }
 
 // NewLimiter returns a new Limiter that allows events up to rate r.
@@ -63,8 +64,8 @@ func NewLimiter(r Limit, b float64) *Limiter {
 
 // Limit returns the maximum overall event rate.
 func (lim *Limiter) Limit() Limit {
-	lim.mu.Lock()
-	defer lim.mu.Unlock()
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
 	return lim.limit
 }
 
@@ -126,6 +127,7 @@ func (lim *Limiter) SetLimit(newLimit Limit) {
 		// use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
 		lim.burst = float64(newLimit)
 	}
+	lim.hasUpdated = true
 }
 
 // Cancel the AllowN operation and refund the tokens that have already been deducted by the limiter.
@@ -133,6 +135,12 @@ func (lim *Limiter) Cancel(n int) {
 	lim.mu.Lock()
 	defer lim.mu.Unlock()
 	lim.tokens += float64(n)
+}
+
+func (lim *Limiter) HasUpdated() bool {
+	lim.mu.RLock()
+	defer lim.mu.RUnlock()
+	return lim.hasUpdated
 }
 
 // advance calculates and returns an updated state for lim resulting from the passage of time.
