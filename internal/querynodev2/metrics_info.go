@@ -152,6 +152,18 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	}, nil
 }
 
+func getCollectionMetrics(node *QueryNode) (*metricsinfo.QueryNodeCollectionMetrics, error) {
+	allSegments := node.manager.Segment.GetBy()
+	ret := &metricsinfo.QueryNodeCollectionMetrics{
+		CollectionRows: make(map[int64]int64),
+	}
+	for _, segment := range allSegments {
+		collectionID := segment.Collection()
+		ret.CollectionRows[collectionID] += segment.RowNum()
+	}
+	return ret, nil
+}
+
 // getSystemInfoMetrics returns metrics info of QueryNode
 func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, node *QueryNode) (*milvuspb.GetMetricsResponse, error) {
 	usedMem := hardware.GetUsedMemoryCount()
@@ -161,7 +173,7 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 	if err != nil {
 		return &milvuspb.GetMetricsResponse{
 			Status:        merr.Status(err),
-			ComponentName: metricsinfo.ConstructComponentName(typeutil.DataNodeRole, node.GetNodeID()),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, node.GetNodeID()),
 		}, nil
 	}
 	hardwareInfos := metricsinfo.HardwareMetrics{
@@ -174,6 +186,14 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		DiskUsage:    hardware.GetDiskUsage(),
 	}
 	quotaMetrics.Hms = hardwareInfos
+
+	collectionMetrics, err := getCollectionMetrics(node)
+	if err != nil {
+		return &milvuspb.GetMetricsResponse{
+			Status:        merr.Status(err),
+			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryNodeRole, node.GetNodeID()),
+		}, nil
+	}
 
 	nodeInfos := metricsinfo.QueryNodeInfos{
 		BaseComponentInfos: metricsinfo.BaseComponentInfos{
@@ -188,7 +208,8 @@ func getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest, 
 		SystemConfigurations: metricsinfo.QueryNodeConfiguration{
 			SimdType: paramtable.Get().CommonCfg.SimdType.GetValue(),
 		},
-		QuotaMetrics: quotaMetrics,
+		QuotaMetrics:      quotaMetrics,
+		CollectionMetrics: collectionMetrics,
 	}
 	metricsinfo.FillDeployMetricsWithEnv(&nodeInfos.SystemInfo)
 
