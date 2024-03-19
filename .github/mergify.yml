@@ -440,7 +440,7 @@ pull_request_rules:
     conditions:
       - or:
         - base=master
-        - base~=^2\.3(\.\d+){0,1}$
+        - base~=^2(\.\d+){1,2}$
       - 'title~=^fix:'
     actions:
       label:
