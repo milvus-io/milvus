@@ -93,6 +93,7 @@ message DatabaseInfo {
   int64 id = 3;
   DatabaseState state = 4;
   uint64 created_time = 5;
+  repeated common.KeyValuePair properties = 6;
 }
 
 message SegmentIndexInfo {

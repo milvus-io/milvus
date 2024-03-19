@@ -2524,3 +2524,30 @@ func TestRBAC_Grant(t *testing.T) {
 		}
 	})
 }
+
+func TestCatalog_AlterDatabase(t *testing.T) {
+	kvmock := mocks.NewSnapShotKV(t)
+	c := &Catalog{Snapshot: kvmock}
+	db := model.NewDatabase(1, "db", pb.DatabaseState_DatabaseCreated)
+
+	kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	ctx := context.Background()
+
+	// test alter database success
+	newDB := db.Clone()
+	db.Properties = []*commonpb.KeyValuePair{
+		{
+			Key:   "key1",
+			Value: "value1",
+		},
+	}
+	err := c.AlterDatabase(ctx, newDB, typeutil.ZeroTimestamp)
+	assert.NoError(t, err)
+
+	// test alter database fail
+	mockErr := errors.New("access kv store error")
+	kvmock.ExpectedCalls = nil
+	kvmock.EXPECT().Save(mock.Anything, mock.Anything, mock.Anything).Return(mockErr)
+	err = c.AlterDatabase(ctx, newDB, typeutil.ZeroTimestamp)
+	assert.ErrorIs(t, err, mockErr)
+}

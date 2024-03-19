@@ -276,6 +276,23 @@ func (mt *MetaTable) createDatabasePrivate(ctx context.Context, db *model.Databa
 	return nil
 }
 
+func (mt *MetaTable) AlterDatabase(ctx context.Context, oldDB *model.Database, newDB *model.Database, ts typeutil.Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	if oldDB.Name != newDB.Name || oldDB.ID != newDB.ID || oldDB.State != newDB.State {
+		return fmt.Errorf("alter database name/id is not supported!")
+	}
+
+	ctx1 := contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	if err := mt.catalog.AlterDatabase(ctx1, newDB, ts); err != nil {
+		return err
+	}
+	mt.dbName2Meta[oldDB.Name] = newDB
+	log.Info("alter database finished", zap.String("dbName", oldDB.Name), zap.Uint64("ts", ts))
+	return nil
+}
+
 func (mt *MetaTable) DropDatabase(ctx context.Context, dbName string, ts typeutil.Timestamp) error {
 	mt.ddLock.Lock()
 	defer mt.ddLock.Unlock()
