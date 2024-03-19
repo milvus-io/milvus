@@ -209,10 +209,10 @@ func TestQuotaCenter(t *testing.T) {
 		err := quotaCenter.resetAllCurrentRates()
 		assert.NoError(t, err)
 
-		err = quotaCenter.forceDenyWritingCollection(commonpb.ErrorCode_ForceDeny, 4)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{4}, nil)
 		assert.Error(t, err)
 
-		err = quotaCenter.forceDenyWritingCollection(commonpb.ErrorCode_ForceDeny, 1, 2, 3)
+		err = quotaCenter.forceDenyWriting(commonpb.ErrorCode_ForceDeny, false, nil, []int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
 
 		for collectionID := range collectionIDToPartitionIDs {

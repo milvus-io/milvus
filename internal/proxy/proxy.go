@@ -197,7 +197,7 @@ func (node *Proxy) initSession() error {
 // initRateCollector creates and starts rateCollector in Proxy.
 func (node *Proxy) initRateCollector() error {
 	var err error
-	rateCol, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity)
+	rateCol, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity, true)
 	if err != nil {
 		return err
 	}

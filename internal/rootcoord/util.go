@@ -144,6 +144,10 @@ func getCollectionRateLimitConfigDefaultValue(configKey string) float64 {
 }
 
 func getCollectionRateLimitConfig(properties map[string]string, configKey string) float64 {
+	return getRateLimitConfig(properties, configKey, getCollectionRateLimitConfigDefaultValue(configKey))
+}
+
+func getRateLimitConfig(properties map[string]string, configKey string, configValue float64) float64 {
 	megaBytes2Bytes := func(v float64) float64 {
 		return v * 1024.0 * 1024.0
 	}
@@ -188,15 +192,15 @@ func getCollectionRateLimitConfig(properties map[string]string, configKey string
 			log.Warn("invalid configuration for collection dml rate",
 				zap.String("config item", configKey),
 				zap.String("config value", v))
-			return getCollectionRateLimitConfigDefaultValue(configKey)
+			return configValue
 		}
 
 		rateInBytes := toBytesIfNecessary(rate)
 		if rateInBytes < 0 {
-			return getCollectionRateLimitConfigDefaultValue(configKey)
+			return configValue
 		}
 		return rateInBytes
 	}
 
-	return getCollectionRateLimitConfigDefaultValue(configKey)
+	return configValue
 }

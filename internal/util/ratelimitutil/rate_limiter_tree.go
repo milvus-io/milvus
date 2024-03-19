@@ -23,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -42,13 +43,18 @@ type RateLimiterNode struct {
 	children *typeutil.ConcurrentMap[int64, *RateLimiterNode]
 }
 
-func NewRateLimiterNode() *RateLimiterNode {
+func NewRateLimiterNode(level internalpb.RateScope) *RateLimiterNode {
 	rln := &RateLimiterNode{
 		limiters:    typeutil.NewConcurrentMap[internalpb.RateType, *ratelimitutil.Limiter](),
 		quotaStates: typeutil.NewConcurrentMap[milvuspb.QuotaState, commonpb.ErrorCode](),
 		children:    typeutil.NewConcurrentMap[int64, *RateLimiterNode](),
+		level:       level,
 	}
 	return rln
+}
+
+func (rln *RateLimiterNode) Level() internalpb.RateScope {
+	return rln.level
 }
 
 // Limit returns true, the request will be rejected.
@@ -168,6 +174,56 @@ func NewRateLimiterTree(root *RateLimiterNode) *RateLimiterTree {
 // GetRootLimiters get root limiters
 func (m *RateLimiterTree) GetRootLimiters() *RateLimiterNode {
 	return m.root
+}
+
+func (m *RateLimiterTree) ClearInvalidLimiterNode(req *proxypb.LimiterNode) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	reqDBLimits := req.GetChildren()
+	removeDBLimits := make([]int64, 0)
+	m.GetRootLimiters().GetChildren().Range(func(key int64, _ *RateLimiterNode) bool {
+		if _, ok := reqDBLimits[key]; !ok {
+			removeDBLimits = append(removeDBLimits, key)
+		}
+		return true
+	})
+	for _, dbID := range removeDBLimits {
+		m.GetRootLimiters().GetChildren().Remove(dbID)
+	}
+
+	m.GetRootLimiters().GetChildren().Range(func(dbID int64, dbNode *RateLimiterNode) bool {
+		reqCollectionLimits := reqDBLimits[dbID].GetChildren()
+		removeCollectionLimits := make([]int64, 0)
+		dbNode.GetChildren().Range(func(key int64, _ *RateLimiterNode) bool {
+			if _, ok := reqCollectionLimits[key]; !ok {
+				removeCollectionLimits = append(removeCollectionLimits, key)
+			}
+			return true
+		})
+		for _, collectionID := range removeCollectionLimits {
+			dbNode.GetChildren().Remove(collectionID)
+		}
+		return true
+	})
+
+	m.GetRootLimiters().GetChildren().Range(func(dbID int64, dbNode *RateLimiterNode) bool {
+		dbNode.GetChildren().Range(func(collectionID int64, collectionNode *RateLimiterNode) bool {
+			reqPartitionLimits := reqDBLimits[dbID].GetChildren()[collectionID].GetChildren()
+			removePartitionLimits := make([]int64, 0)
+			collectionNode.GetChildren().Range(func(key int64, _ *RateLimiterNode) bool {
+				if _, ok := reqPartitionLimits[key]; !ok {
+					removePartitionLimits = append(removePartitionLimits, key)
+				}
+				return true
+			})
+			for _, partitionID := range removePartitionLimits {
+				collectionNode.GetChildren().Remove(partitionID)
+			}
+			return true
+		})
+		return true
+	})
 }
 
 func (m *RateLimiterTree) GetDatabaseLimiters(dbID int64) *RateLimiterNode {

@@ -49,7 +49,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 
 		simpleLimiter.rateLimiter.GetOrCreateCollectionLimiters(0, collectionID, newDatabaseLimiter,
 			func() *rlinternal.RateLimiterNode {
-				collectionRateLimiters := rlinternal.NewRateLimiterNode()
+				collectionRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Cluster)
 
 				for _, rt := range internalpb.RateType_value {
 					if IsDDLRequest(internalpb.RateType(rt)) {
@@ -99,7 +99,7 @@ func TestSimpleRateLimiter(t *testing.T) {
 		for i := 1; i <= 3; i++ {
 			simpleLimiter.rateLimiter.GetOrCreateCollectionLimiters(0, int64(i), newDatabaseLimiter,
 				func() *rlinternal.RateLimiterNode {
-					collectionRateLimiters := rlinternal.NewRateLimiterNode()
+					collectionRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Cluster)
 
 					for _, rt := range internalpb.RateType_value {
 						if IsDDLRequest(internalpb.RateType(rt)) {
@@ -279,7 +279,7 @@ func TestRateLimiter(t *testing.T) {
 
 		collectionRateLimiters := simpleLimiter.rateLimiter.GetOrCreateCollectionLimiters(0, int64(1), newDatabaseLimiter,
 			func() *rlinternal.RateLimiterNode {
-				collectionRateLimiters := rlinternal.NewRateLimiterNode()
+				collectionRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Cluster)
 				for _, rt := range internalpb.RateType_value {
 					collectionRateLimiters.GetLimiters().Insert(internalpb.RateType(rt),
 						ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
@@ -342,7 +342,7 @@ func TestRateLimiter(t *testing.T) {
 
 		collectionRateLimiters := simpleLimiter.rateLimiter.GetOrCreateCollectionLimiters(0, int64(1), newDatabaseLimiter,
 			func() *rlinternal.RateLimiterNode {
-				collectionRateLimiters := rlinternal.NewRateLimiterNode()
+				collectionRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Cluster)
 				for _, rt := range internalpb.RateType_value {
 					collectionRateLimiters.GetLimiters().Insert(internalpb.RateType(rt),
 						ratelimitutil.NewLimiter(ratelimitutil.Limit(1000), 1))
