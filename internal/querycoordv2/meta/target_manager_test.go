@@ -418,6 +418,10 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(collectionID, "channel-1", NextTarget), 4)
 	suite.Len(suite.mgr.GetGrowingSegmentsByChannel(collectionID, "channel-2", NextTarget), 1)
 	suite.Len(suite.mgr.GetDroppedSegmentsByChannel(collectionID, "channel-1", NextTarget), 3)
+	suite.Len(suite.mgr.GetGrowingSegmentsByCollection(collectionID, NextTarget), 5)
+	suite.Len(suite.mgr.GetSealedSegmentsByPartition(collectionID, 1, NextTarget), 2)
+	suite.NotNil(suite.mgr.GetSealedSegment(collectionID, 11, NextTarget))
+	suite.NotNil(suite.mgr.GetDmChannel(collectionID, "channel-1", NextTarget))
 }
 
 func (suite *TargetManagerSuite) TestGetTarget() {
@@ -425,7 +429,7 @@ func (suite *TargetManagerSuite) TestGetTarget() {
 		tag          string
 		mgr          *TargetManager
 		scope        TargetScope
-		expectTarget *CollectionTarget
+		expectTarget int
 	}
 
 	current := &CollectionTarget{}
@@ -439,7 +443,7 @@ func (suite *TargetManagerSuite) TestGetTarget() {
 		},
 		next: &target{
 			collectionTargetMap: map[int64]*CollectionTarget{
-				1000: current,
+				1000: next,
 			},
 		},
 	}
@@ -462,89 +466,90 @@ func (suite *TargetManagerSuite) TestGetTarget() {
 
 	cases := []testCase{
 		{
-			tag:          "both_scope_unknown",
-			mgr:          bothMgr,
-			scope:        -1,
-			expectTarget: nil,
+			tag:   "both_scope_unknown",
+			mgr:   bothMgr,
+			scope: -1,
+
+			expectTarget: 0,
 		},
 		{
 			tag:          "both_scope_current",
 			mgr:          bothMgr,
 			scope:        CurrentTarget,
-			expectTarget: current,
+			expectTarget: 1,
 		},
 		{
 			tag:          "both_scope_next",
 			mgr:          bothMgr,
 			scope:        NextTarget,
-			expectTarget: next,
+			expectTarget: 1,
 		},
 		{
 			tag:          "both_scope_current_first",
 			mgr:          bothMgr,
 			scope:        CurrentTargetFirst,
-			expectTarget: current,
+			expectTarget: 2,
 		},
 		{
 			tag:          "both_scope_next_first",
 			mgr:          bothMgr,
 			scope:        NextTargetFirst,
-			expectTarget: next,
+			expectTarget: 2,
 		},
 		{
 			tag:          "next_scope_current",
 			mgr:          nextMgr,
 			scope:        CurrentTarget,
-			expectTarget: nil,
+			expectTarget: 0,
 		},
 		{
 			tag:          "next_scope_next",
 			mgr:          nextMgr,
 			scope:        NextTarget,
-			expectTarget: next,
+			expectTarget: 1,
 		},
 		{
 			tag:          "next_scope_current_first",
 			mgr:          nextMgr,
 			scope:        CurrentTargetFirst,
-			expectTarget: next,
+			expectTarget: 1,
 		},
 		{
 			tag:          "next_scope_next_first",
 			mgr:          nextMgr,
 			scope:        NextTargetFirst,
-			expectTarget: next,
+			expectTarget: 1,
 		},
 		{
 			tag:          "current_scope_current",
 			mgr:          currentMgr,
 			scope:        CurrentTarget,
-			expectTarget: current,
+			expectTarget: 1,
 		},
 		{
 			tag:          "current_scope_next",
 			mgr:          currentMgr,
 			scope:        NextTarget,
-			expectTarget: nil,
+			expectTarget: 0,
 		},
 		{
 			tag:          "current_scope_current_first",
 			mgr:          currentMgr,
 			scope:        CurrentTargetFirst,
-			expectTarget: current,
+			expectTarget: 1,
 		},
 		{
 			tag:          "current_scope_next_first",
 			mgr:          currentMgr,
 			scope:        NextTargetFirst,
-			expectTarget: current,
+			expectTarget: 1,
 		},
 	}
 
 	for _, tc := range cases {
 		suite.Run(tc.tag, func() {
-			target := tc.mgr.getCollectionTarget(tc.scope, 1000)
-			suite.Equal(tc.expectTarget, target)
+			targets := tc.mgr.getCollectionTarget(tc.scope, 1000)
+			suite.Equal(tc.expectTarget, len(targets))
 		})
 	}
 }
