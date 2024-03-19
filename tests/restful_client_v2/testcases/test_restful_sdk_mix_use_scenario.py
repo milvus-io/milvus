@@ -15,8 +15,8 @@ class TestRestfulSdkCompatibility(TestBase):
 
     @pytest.mark.parametrize("dim", [128, 256])
     @pytest.mark.parametrize("enable_dynamic", [True, False])
-    @pytest.mark.parametrize("shard_num", [1, 2])
-    def test_collection_created_by_sdk_describe_by_restful(self, dim, enable_dynamic, shard_num):
+    @pytest.mark.parametrize("num_shards", [1, 2])
+    def test_collection_created_by_sdk_describe_by_restful(self, dim, enable_dynamic, num_shards):
         """
         """
         # 1. create collection by sdk
@@ -29,7 +29,7 @@ class TestRestfulSdkCompatibility(TestBase):
         ]
         default_schema = CollectionSchema(fields=default_fields, description="test collection",
                                           enable_dynamic_field=enable_dynamic)
-        collection = Collection(name=name, schema=default_schema, shards_num=shard_num)
+        collection = Collection(name=name, schema=default_schema, num_shards=num_shards)
         logger.info(collection.schema)
         # 2. use restful to get collection info
         client = self.collection_client
@@ -41,7 +41,7 @@ class TestRestfulSdkCompatibility(TestBase):
         assert rsp['data']['collectionName'] == name
         assert rsp['data']['enableDynamicField'] == enable_dynamic
         assert rsp['data']['load'] == "LoadStateNotLoad"
-        assert rsp['data']['shardsNum'] == shard_num
+        assert rsp['data']['shardsNum'] == num_shards
 
     @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
     @pytest.mark.parametrize("dim", [128])
@@ -131,6 +131,9 @@ class TestRestfulSdkCompatibility(TestBase):
             FieldSchema(name="int64", dtype=DataType.INT64, is_primary=True),
             FieldSchema(name="float", dtype=DataType.FLOAT),
             FieldSchema(name="varchar", dtype=DataType.VARCHAR, max_length=65535),
+            FieldSchema(name="json", dtype=DataType.JSON),
+            FieldSchema(name="int_array", dtype=DataType.ARRAY, element_type=DataType.INT64, max_capacity=1024),
+            FieldSchema(name="varchar_array", dtype=DataType.ARRAY, element_type=DataType.VARCHAR, max_capacity=1024, max_length=65535),
             FieldSchema(name="float_vector", dtype=DataType.FLOAT_VECTOR, dim=128)
         ]
         default_schema = CollectionSchema(fields=default_fields, description="test collection",
@@ -142,7 +145,13 @@ class TestRestfulSdkCompatibility(TestBase):
         collection.load()
         # insert data by restful
         data = [
-            {"int64": i, "float": i, "varchar": str(i), "float_vector": [random.random() for _ in range(dim)], "age": i}
+            {"int64": i,
+             "float": i,
+             "varchar": str(i),
+             "json": {f"key_{i}": f"value_{i}"},
+             "int_array": [random.randint(0, 100) for _ in range(10)],
+             "varchar_array": [str(i) for _ in range(10)],
+             "float_vector": [random.random() for _ in range(dim)], "age": i}
             for i in range(nb)
         ]
         client = self.vector_client
@@ -153,6 +162,7 @@ class TestRestfulSdkCompatibility(TestBase):
         rsp = client.vector_insert(payload)
         assert rsp['code'] == 200
         assert rsp['data']['insertCount'] == nb
+        assert len(rsp['data']["insertIds"]) == nb
 
     def test_collection_create_by_sdk_search_vector_by_restful(self):
         """
@@ -181,7 +191,7 @@ class TestRestfulSdkCompatibility(TestBase):
         client = self.vector_client
         payload = {
             "collectionName": name,
-            "vector": [random.random() for _ in range(dim)],
+            "data": [[random.random() for _ in range(dim)]],
             "limit": 10
         }
         # search data by restful
@@ -306,7 +316,7 @@ class TestRestfulSdkCompatibility(TestBase):
             pk_id_list.append(item["int64"])
         payload = {
             "collectionName": name,
-            "id": pk_id_list
+            "filter": f"int64 in {pk_id_list}"
         }
         # delete data by restful
         rsp = self.vector_client.vector_delete(payload)
