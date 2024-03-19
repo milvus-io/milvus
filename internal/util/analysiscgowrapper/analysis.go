@@ -14,32 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package analysiscgowrapper
 
-import (
-	"context"
-	"fmt"
+/*
+#cgo pkg-config: milvus_indexbuilder
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/storage"
-)
+#include <stdlib.h>	// free
+#include "indexbuilder/index_c.h"
+*/
+import "C"
 
-var (
-	errCancel      = fmt.Errorf("canceled")
-	diskUsageRatio = 4.0
-)
-
-type Blob = storage.Blob
-
-type task interface {
-	Ctx() context.Context
-	Name() string
-	Prepare(context.Context) error
-	LoadData(context.Context) error
-	BuildIndex(context.Context) error
-	SaveIndexFiles(context.Context) error
-	OnEnqueue(context.Context) error
-	SetState(state commonpb.IndexState, failReason string)
-	GetState() commonpb.IndexState
-	Reset()
+type CodecAnalysis interface {
+	Build() error
 }

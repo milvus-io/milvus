@@ -14,32 +14,35 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package analysiscgowrapper
+
+/*
+#cgo pkg-config: milvus_common milvus_storage
+
+#include <stdlib.h>	// free
+#include "common/binary_set_c.h"
+#include "storage/storage_c.h"
+*/
+import "C"
 
 import (
-	"context"
 	"fmt"
+	"unsafe"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-var (
-	errCancel      = fmt.Errorf("canceled")
-	diskUsageRatio = 4.0
-)
+// HandleCStatus deal with the error returned from CGO
+func HandleCStatus(status *C.CStatus, extraInfo string) error {
+	if status.error_code == 0 {
+		return nil
+	}
+	errorCode := int(status.error_code)
+	errorMsg := C.GoString(status.error_msg)
+	defer C.free(unsafe.Pointer(status.error_msg))
 
-type Blob = storage.Blob
-
-type task interface {
-	Ctx() context.Context
-	Name() string
-	Prepare(context.Context) error
-	LoadData(context.Context) error
-	BuildIndex(context.Context) error
-	SaveIndexFiles(context.Context) error
-	OnEnqueue(context.Context) error
-	SetState(state commonpb.IndexState, failReason string)
-	GetState() commonpb.IndexState
-	Reset()
+	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
+	log.Warn(logMsg)
+	return merr.WrapErrSegcore(int32(errorCode), logMsg)
 }

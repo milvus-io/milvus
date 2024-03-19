@@ -387,7 +387,7 @@ message QueryAnalysisResultRequest {
 message AnalysisResult {
     int64 taskID = 1;
     common.IndexState state = 2;
-    string partition_stats_file = 3;
+    string centroids_file = 3;
     map<int64, string> segment_offset_mapping_files = 4;
     string fail_reason = 5;
 }
