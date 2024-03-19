@@ -89,6 +89,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
+	router.POST(EntityCategory+HybridSearchAction, timeoutMiddleware(wrapperPost(func() any {
+		return &HybridSearchReq{
+			Limit: 100,
+		}
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listPartitions)))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasPartitions)))))
