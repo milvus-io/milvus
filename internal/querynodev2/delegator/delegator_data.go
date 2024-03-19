@@ -87,18 +87,22 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		if growing == nil {
 			var err error
+			// TODO: It's a wired implementation that growing segment have load info.
+			// we should separate the growing segment and sealed segment by type system.
 			growing, err = segments.NewSegment(
 				context.Background(),
 				sd.collection,
-				segmentID,
-				insertData.PartitionID,
-				sd.collectionID,
-				sd.vchannelName,
 				segments.SegmentTypeGrowing,
 				0,
-				insertData.StartPosition,
-				insertData.StartPosition,
-				datapb.SegmentLevel_L1,
+				&querypb.SegmentLoadInfo{
+					SegmentID:     segmentID,
+					PartitionID:   insertData.PartitionID,
+					CollectionID:  sd.collectionID,
+					InsertChannel: sd.vchannelName,
+					StartPosition: insertData.StartPosition,
+					DeltaPosition: insertData.StartPosition,
+					Level:         datapb.SegmentLevel_L1,
+				},
 			)
 			if err != nil {
 				log.Error("failed to create new segment",

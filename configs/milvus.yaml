@@ -249,6 +249,8 @@ proxy:
     serverMaxRecvSize: 67108864
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 67108864
+  # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
+  slowQuerySpanInSeconds: 5
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
@@ -440,6 +442,7 @@ dataCoord:
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
+    scanInterval: 168 #gc residual file scan interval in hours
     missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
     dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
   enableActiveStandby: false
