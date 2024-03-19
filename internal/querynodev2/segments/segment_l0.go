@@ -21,8 +21,8 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -41,14 +41,9 @@ type L0Segment struct {
 }
 
 func NewL0Segment(collection *Collection,
-	segmentID int64,
-	partitionID int64,
-	collectionID int64,
-	shard string,
 	segmentType SegmentType,
 	version int64,
-	startPosition *msgpb.MsgPosition,
-	deltaPosition *msgpb.MsgPosition,
+	loadInfo *querypb.SegmentLoadInfo,
 ) (Segment, error) {
 	/*
 		CSegmentInterface
@@ -56,13 +51,13 @@ func NewL0Segment(collection *Collection,
 	*/
 
 	log.Info("create L0 segment",
-		zap.Int64("collectionID", collectionID),
-		zap.Int64("partitionID", partitionID),
-		zap.Int64("segmentID", segmentID),
+		zap.Int64("collectionID", loadInfo.GetCollectionID()),
+		zap.Int64("partitionID", loadInfo.GetPartitionID()),
+		zap.Int64("segmentID", loadInfo.GetSegmentID()),
 		zap.String("segmentType", segmentType.String()))
 
 	segment := &L0Segment{
-		baseSegment: newBaseSegment(segmentID, partitionID, collectionID, shard, segmentType, datapb.SegmentLevel_L0, version, startPosition),
+		baseSegment: newBaseSegment(collection, segmentType, version, loadInfo),
 	}
 
 	// level 0 segments are always in memory
@@ -119,7 +114,7 @@ func (s *L0Segment) Indexes() []*IndexedFieldInfo {
 }
 
 func (s *L0Segment) Type() SegmentType {
-	return s.typ
+	return s.segmentType
 }
 
 func (s *L0Segment) Level() datapb.SegmentLevel {
