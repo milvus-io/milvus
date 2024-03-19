@@ -110,6 +110,16 @@ func (kc *Catalog) CreateDatabase(ctx context.Context, db *model.Database, ts ty
 	return kc.Snapshot.Save(key, string(v), ts)
 }
 
+func (kc *Catalog) AlterDatabase(ctx context.Context, newColl *model.Database, ts typeutil.Timestamp) error {
+	key := BuildDatabaseKey(newColl.ID)
+	dbInfo := model.MarshalDatabaseModel(newColl)
+	v, err := proto.Marshal(dbInfo)
+	if err != nil {
+		return err
+	}
+	return kc.Snapshot.Save(key, string(v), ts)
+}
+
 func (kc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Timestamp) error {
 	key := BuildDatabaseKey(dbID)
 	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{key}, ts)

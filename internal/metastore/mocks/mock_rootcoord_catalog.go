@@ -159,6 +159,50 @@ func (_c *RootCoordCatalog_AlterCredential_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// AlterDatabase provides a mock function with given fields: ctx, newDB, ts
+func (_m *RootCoordCatalog) AlterDatabase(ctx context.Context, newDB *model.Database, ts uint64) error {
+	ret := _m.Called(ctx, newDB, ts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Database, uint64) error); ok {
+		r0 = rf(ctx, newDB, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_AlterDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterDatabase'
+type RootCoordCatalog_AlterDatabase_Call struct {
+	*mock.Call
+}
+
+// AlterDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - newDB *model.Database
+//   - ts uint64
+func (_e *RootCoordCatalog_Expecter) AlterDatabase(ctx interface{}, newDB interface{}, ts interface{}) *RootCoordCatalog_AlterDatabase_Call {
+	return &RootCoordCatalog_AlterDatabase_Call{Call: _e.mock.On("AlterDatabase", ctx, newDB, ts)}
+}
+
+func (_c *RootCoordCatalog_AlterDatabase_Call) Run(run func(ctx context.Context, newDB *model.Database, ts uint64)) *RootCoordCatalog_AlterDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Database), args[2].(uint64))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterDatabase_Call) Return(_a0 error) *RootCoordCatalog_AlterDatabase_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_AlterDatabase_Call) RunAndReturn(run func(context.Context, *model.Database, uint64) error) *RootCoordCatalog_AlterDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterGrant provides a mock function with given fields: ctx, tenant, entity, operateType
 func (_m *RootCoordCatalog) AlterGrant(ctx context.Context, tenant string, entity *milvuspb.GrantEntity, operateType milvuspb.OperatePrivilegeType) error {
 	ret := _m.Called(ctx, tenant, entity, operateType)
