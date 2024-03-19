@@ -46,3 +46,14 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	log.Warn(logMsg)
 	return merr.WrapErrSegcore(int32(errorCode), logMsg)
 }
+
+func GetCentroidsFile() (string, error) {
+	var path unsafe.Pointer
+	return C.GoString((*C.char)(C.GetCentroidsFile(path))), nil
+}
+
+func GetSegmentOffsetMapping(segID int64) (string, error) {
+	var path unsafe.Pointer
+	cSegID := C.int64_t(segID)
+	return C.GoString((*C.char)(C.GetSegmentOffsetMapping(cSegID, path))), nil
+}

@@ -23,7 +23,69 @@ package analysiscgowrapper
 #include "indexbuilder/index_c.h"
 */
 import "C"
+import (
+	"context"
+)
 
 type CodecAnalysis interface {
-	Build() error
+	Delete() error
+	CleanLocalData() error
+	UpLoad(segmentIDs []int64) (string, map[int64]string, error)
+}
+
+func Analysis(ctx context.Context, analysisInfo *AnalysisInfo) (CodecAnalysis, error) {
+	var analysisPtr C.CAnalysis
+	status := C.Analysis(&analysisPtr, analysisInfo.cAnalysisInfo)
+	if err := HandleCStatus(&status, "failed to create index"); err != nil {
+		return nil, err
+	}
+
+	analysis := &CgoAnalysis{
+		analysisPtr: analysisPtr,
+		close:       false,
+	}
+
+	return analysis, nil
+}
+
+type CgoAnalysis struct {
+	analysisPtr C.CAnalysis
+	close       bool
+}
+
+func (ca *CgoAnalysis) Delete() error {
+	if ca.close {
+		return nil
+	}
+	status := C.DeleteAnalysis(ca.analysisPtr)
+	ca.close = true
+	return HandleCStatus(&status, "failed to delete analysis")
+}
+
+func (ca *CgoAnalysis) CleanLocalData() error {
+	status := C.CleanLocalData(ca.analysisPtr)
+	return HandleCStatus(&status, "failed to clean cached data on disk")
+}
+
+func (ca *CgoAnalysis) UpLoad(segmentIDs []int64) (string, map[int64]string, error) {
+	status := C.SerializeAnalysisAndUpLoad(ca.analysisPtr)
+	if err := HandleCStatus(&status, "failed to serialize index and upload index"); err != nil {
+		return "", nil, err
+	}
+
+	centroidsFile, err := GetCentroidsFile()
+	if err != nil {
+		return "", nil, err
+	}
+
+	segmentsOffsetMapping := make(map[int64]string)
+	for _, segID := range segmentIDs {
+		offsetMappingFile, err := GetSegmentOffsetMapping(segID)
+		if err != nil {
+			return "", nil, err
+		}
+		segmentsOffsetMapping[segID] = offsetMappingFile
+	}
+
+	return centroidsFile, segmentsOffsetMapping, nil
 }

@@ -41,3 +41,23 @@ struct BuildIndexInfo {
     int32_t index_engine_version;
     milvus::OptFieldT opt_fields;
 };
+
+struct AnalysisInfo {
+    int64_t collection_id;
+    int64_t partition_id;
+    std::vector<int64_t> segment_ids;
+    int64_t field_id;
+    milvus::DataType field_type;
+    int64_t task_id;
+    int64_t version;
+    std::vector<std::string> insert_files;
+    milvus::storage::StorageConfig storage_config;
+    milvus::Config config;
+    std::string field_name;
+    std::string centroids_store_path;
+    std::vector<std::string> segments_offset_mapping;
+    int64_t data_store_version;
+    int64_t dim;
+    int32_t index_engine_version;
+    milvus::OptFieldT opt_fields;
+};

@@ -19,18 +19,22 @@ package indexnode
 import (
 	"context"
 	"strconv"
+	"strings"
 	"time"
 
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/internal/util/analysiscgowrapper"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 type analysisTask struct {
@@ -42,9 +46,12 @@ type analysisTask struct {
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
 	node     *IndexNode
+	index    analysiscgowrapper.CodecAnalysis
 
-	startTime int64
-	endTime   int64
+	segmentIDs []int64
+	dataPaths  []string
+	startTime  int64
+	endTime    int64
 }
 
 func (at *analysisTask) Ctx() context.Context {
@@ -54,72 +61,120 @@ func (at *analysisTask) Name() string {
 	return at.ident
 }
 
-func (at *analysisTask) Prepare(context.Context) error {
+func (at *analysisTask) Prepare(ctx context.Context) error {
 	at.queueDur = at.tr.RecordSpan()
-	log.Ctx(ctx).Info("Begin to prepare indexBuildTask", zap.Int64("buildID", it.BuildID),
-		zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
-	typeParams := make(map[string]string)
-	indexParams := make(map[string]string)
+	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
+		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
+		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
+	log.Info("Begin to prepare analysis task")
 
-	if len(it.req.DataPaths) == 0 {
-		for _, id := range it.req.GetDataIds() {
-			path := metautil.BuildInsertLogPath(it.req.GetStorageConfig().RootPath, it.req.GetCollectionID(), it.req.GetPartitionID(), it.req.GetSegmentID(), it.req.GetFieldID(), id)
-			it.req.DataPaths = append(it.req.DataPaths, path)
+	at.segmentIDs = make([]int64, 0)
+	at.dataPaths = make([]string, 0)
+	for segID, stats := range at.req.GetSegmentStats() {
+		at.segmentIDs = append(at.segmentIDs, segID)
+		for _, id := range stats.GetLogIDs() {
+			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
+				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
+			at.dataPaths = append(at.dataPaths, path)
 		}
 	}
 
-	if it.req.OptionalScalarFields != nil {
-		for _, optFields := range it.req.GetOptionalScalarFields() {
-			if len(optFields.DataPaths) == 0 {
-				for _, id := range optFields.DataIds {
-					path := metautil.BuildInsertLogPath(it.req.GetStorageConfig().RootPath, it.req.GetCollectionID(), it.req.GetPartitionID(), it.req.GetSegmentID(), optFields.FieldID, id)
-					optFields.DataPaths = append(optFields.DataPaths, path)
-				}
-			}
-		}
-	}
-
-	// type params can be removed
-	for _, kvPair := range it.req.GetTypeParams() {
-		key, value := kvPair.GetKey(), kvPair.GetValue()
-		typeParams[key] = value
-		indexParams[key] = value
-	}
-
-	for _, kvPair := range it.req.GetIndexParams() {
-		key, value := kvPair.GetKey(), kvPair.GetValue()
-		// knowhere would report error if encountered the unknown key,
-		// so skip this
-		if key == common.MmapEnabledKey {
-			continue
-		}
-		indexParams[key] = value
-	}
-	it.newTypeParams = typeParams
-	it.newIndexParams = indexParams
-	it.statistic.IndexParams = it.req.GetIndexParams()
-	// ugly codes to get dimension
-	if dimStr, ok := typeParams[common.DimKey]; ok {
-		var err error
-		it.statistic.Dim, err = strconv.ParseInt(dimStr, 10, 64)
-		if err != nil {
-			log.Ctx(ctx).Error("parse dimesion failed", zap.Error(err))
-			// ignore error
-		}
-	}
-	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.BuildID),
-		zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
+	log.Info("Successfully prepare analysis task", zap.Int64s("segmentIDs", at.segmentIDs))
 	return nil
 }
 
-func (at *analysisTask) LoadData(context.Context) error {
-
+func (at *analysisTask) LoadData(ctx context.Context) error {
+	// Load data in segcore
+	return nil
 }
-func (at *analysisTask) BuildIndex(context.Context) error {
+func (at *analysisTask) BuildIndex(ctx context.Context) error {
+	var err error
+	var analysisInfo *analysiscgowrapper.AnalysisInfo
+	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
+		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
+		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 
+	log.Info("Begin to build analysis task")
+	analysisInfo, err = analysiscgowrapper.NewAnalysisInfo(at.req.GetStorageConfig())
+	defer analysiscgowrapper.DeleteAnalysisInfo(analysisInfo)
+	if err != nil {
+		log.Warn("create analysis info failed", zap.Error(err))
+		return err
+	}
+	err = analysisInfo.AppendFieldMetaInfo(at.req.GetCollectionID(), at.req.GetPartitionID(),
+		at.req.GetFieldID(), schemapb.DataType_FloatVector, "", 128)
+	if err != nil {
+		log.Warn("append field meta failed", zap.Error(err))
+		return err
+	}
+
+	err = analysisInfo.AppendAnalysisMetaInfo(at.req.GetTaskID(), at.req.GetVersion())
+	if err != nil {
+		log.Warn("append index meta failed", zap.Error(err))
+		return err
+	}
+
+	for _, path := range at.dataPaths {
+		err = analysisInfo.AppendInsertFile(path)
+		if err != nil {
+			log.Warn("append insert binlog path failed", zap.Error(err))
+			return err
+		}
+	}
+
+	at.index, err = analysiscgowrapper.Analysis(ctx, analysisInfo)
+	if err != nil {
+		if at.index != nil && at.index.CleanLocalData() != nil {
+			log.Error("failed to clean cached data on disk after analysis failed",
+				zap.Int64("buildID", at.req.GetTaskID()),
+				zap.Int64("index version", at.req.GetVersion()))
+		}
+		log.Error("failed to build index", zap.Error(err))
+		return err
+	}
+
+	analysisLatency := at.tr.RecordSpan()
+	log.Info("analysis done", zap.Int64("analysis cost", analysisLatency.Milliseconds()))
+	return nil
 }
-func (at *analysisTask) SaveIndexFiles(context.Context) error {
 
+func (at *analysisTask) SaveIndexFiles(ctx context.Context) error {
+	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
+		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
+		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
+	gcIndex := func() {
+		if err := at.index.Delete(); err != nil {
+			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
+		}
+	}
+	indexFilePath2Size, err := at.index.UpLoad()
+	if err != nil {
+		log.Error("failed to upload index", zap.Error(err))
+		gcIndex()
+		return err
+	}
+	//encodeIndexFileDur := at.tr.Record("index serialize and upload done")
+	//metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
+
+	// early release index for gc, and we can ensure that Delete is idempotent.
+	gcIndex()
+
+	saveFileKeys := make([]string, 0)
+	for filePath, fileSize := range indexFilePath2Size {
+		parts := strings.Split(filePath, "/")
+		fileKey := parts[len(parts)-1]
+		saveFileKeys = append(saveFileKeys, fileKey)
+	}
+
+	it.statistic.EndTime = time.Now().UnixMicro()
+	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic, it.currentIndexVersion)
+	log.Ctx(ctx).Debug("save index files done", zap.Strings("IndexFiles", saveFileKeys))
+	saveIndexFileDur := it.tr.RecordSpan()
+	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
+	it.tr.Elapse("index building all done")
+	log.Ctx(ctx).Info("Successfully save index files", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID),
+		zap.Int64("partition", it.partitionID), zap.Int64("SegmentId", it.segmentID))
+	return nil
 }
 
 func (at *analysisTask) OnEnqueue(ctx context.Context) error {

@@ -15,7 +15,9 @@ set(INDEXBUILDER_FILES
         index_c.cpp
         init_c.cpp
         ScalarIndexCreator.cpp
-        )
+        analysis_c.cpp
+        analysis_c.h
+)
 
 milvus_add_pkg_config("milvus_indexbuilder")
 add_library(milvus_indexbuilder SHARED ${INDEXBUILDER_FILES})
