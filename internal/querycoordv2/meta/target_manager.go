@@ -279,11 +279,13 @@ func (mgr *TargetManager) RemoveCollection(collectionID int64) {
 		zap.Int64("collectionID", collectionID))
 
 	current := mgr.current.getCollectionTarget(collectionID)
-	for channelName := range current.GetAllDmChannels() {
-		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.DeleteLabelValues(
-			fmt.Sprint(paramtable.GetNodeID()),
-			channelName,
-		)
+	if current != nil {
+		for channelName := range current.GetAllDmChannels() {
+			metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.DeleteLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				channelName,
+			)
+		}
 	}
 
 	mgr.current.removeCollectionTarget(collectionID)
