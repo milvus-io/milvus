@@ -236,7 +236,13 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		_, existOnCurrent := currentTargetMap[segment.GetID()]
 		_, existOnNext := nextTargetMap[segment.GetID()]
 
-		if !existOnNext && !existOnCurrent {
+		l0WithWrongLocation := false
+		if existOnCurrent {
+			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
+			l0WithWrongLocation = segment.GetLevel() == datapb.SegmentLevel_L0 && segment.Node != leader.ID
+		}
+
+		if !existOnNext && !existOnCurrent || l0WithWrongLocation {
 			toRelease = append(toRelease, segment)
 		}
 	}
