@@ -20,6 +20,7 @@ import (
 	"strings"
 
 	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -52,16 +53,14 @@ func Init(opts ...Option) (*Manager, error) {
 	return sourceManager, nil
 }
 
-var (
-	formatedKeys = typeutil.NewConcurrentMap[string, string]()
-)
+var formattedKeys = typeutil.NewConcurrentMap[string, string]()
 
 func formatKey(key string) string {
-	cached, ok := formatedKeys.Get(key)
+	cached, ok := formattedKeys.Get(key)
 	if ok {
 		return cached
 	}
 	result := strings.NewReplacer("/", "", "_", "", ".", "").Replace(strings.ToLower(key))
-	formatedKeys.Insert(key, result)
+	formattedKeys.Insert(key, result)
 	return result
 }
