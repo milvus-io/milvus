@@ -93,13 +93,13 @@ var (
 		})
 
 	// RootCoordNumOfCollections counts the number of collections.
-	RootCoordNumOfCollections = prometheus.NewGauge(
+	RootCoordNumOfCollections = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "collection_num",
 			Help:      "number of collections",
-		})
+		}, []string{dbName})
 
 	// RootCoordNumOfPartitions counts the number of partitions per collection.
 	RootCoordNumOfPartitions = prometheus.NewGaugeVec(
@@ -219,4 +219,10 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordQuotaStates)
 	registry.MustRegister(RootCoordRateLimitRatio)
 	registry.MustRegister(RootCoordDDLReqLatencyInQueue)
+}
+
+func CleanupRootCoordDBMetrics(dbName string) {
+	RootCoordNumOfCollections.Delete(prometheus.Labels{
+		dbName: dbName,
+	})
 }

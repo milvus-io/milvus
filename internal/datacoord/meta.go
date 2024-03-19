@@ -84,6 +84,7 @@ type collectionInfo struct {
 	StartPositions []*commonpb.KeyDataPair
 	Properties     map[string]string
 	CreatedAt      Timestamp
+	DatabaseName   string
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -199,6 +200,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		Partitions:     coll.Partitions,
 		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
 		Properties:     clonedProperties,
+		DatabaseName:   coll.DatabaseName,
 	}
 
 	return cloneColl
@@ -272,9 +274,14 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
 		}
 	}
-	for collection, statesRows := range collectionRowsNum {
+	for collectionID, statesRows := range collectionRowsNum {
 		for state, rows := range statesRows {
-			metrics.DataCoordNumStoredRows.WithLabelValues(fmt.Sprint(collection), state.String()).Set(float64(rows))
+			coll, ok := m.collections[collectionID]
+			if ok {
+				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), state.String()).Set(float64(rows))
+			} else {
+				log.Warn("not found database name", zap.Int64("collectionID", collectionID))
+			}
 		}
 	}
 	return total, collectionBinlogSize

@@ -137,11 +137,10 @@ func (mt *MetaTable) reload() error {
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
-	collectionNum := int64(0)
 	partitionNum := int64(0)
 
-	metrics.RootCoordNumOfCollections.Set(float64(0))
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(0))
+	metrics.RootCoordNumOfCollections.Reset()
+	metrics.RootCoordNumOfPartitions.Reset()
 
 	// recover databases.
 	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
@@ -177,6 +176,7 @@ func (mt *MetaTable) reload() error {
 		if err != nil {
 			return err
 		}
+		collectionNum := int64(0)
 		for _, collection := range collections {
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
@@ -185,9 +185,12 @@ func (mt *MetaTable) reload() error {
 				partitionNum += int64(collection.GetPartitionNum(true))
 			}
 		}
-	}
 
-	log.Info("recover collections from db", zap.Int64("collection_num", collectionNum), zap.Int64("partition_num", partitionNum))
+		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
+		log.Info("collections recovered from db", zap.String("db_name", dbName),
+			zap.Int64("collection_num", collectionNum),
+			zap.Int64("partition_num", partitionNum))
+	}
 
 	// recover aliases from db namespace
 	for dbName, db := range mt.dbName2Meta {
@@ -201,7 +204,6 @@ func (mt *MetaTable) reload() error {
 		}
 	}
 
-	metrics.RootCoordNumOfCollections.Add(float64(collectionNum))
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 	log.Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -237,7 +239,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 		mt.aliases.insert(util.DefaultDBName, alias.Name, alias.CollectionID)
 	}
 
-	metrics.RootCoordNumOfCollections.Add(float64(collectionNum))
+	metrics.RootCoordNumOfCollections.WithLabelValues(util.DefaultDBName).Add(float64(collectionNum))
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 	return nil
 }
@@ -402,12 +404,17 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 	}
 	mt.collID2Meta[collectionID] = clone
 
+	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
+	if err != nil {
+		return fmt.Errorf("dbID not found for collection:%d", collectionID)
+	}
+
 	switch state {
 	case pb.CollectionState_CollectionCreated:
-		metrics.RootCoordNumOfCollections.Inc()
+		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Inc()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(coll.GetPartitionNum(true)))
 	default:
-		metrics.RootCoordNumOfCollections.Dec()
+		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(coll.GetPartitionNum(true)))
 	}
 

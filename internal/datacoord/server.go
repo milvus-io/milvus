@@ -1201,6 +1201,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		StartPositions: resp.GetStartPositions(),
 		Properties:     properties,
 		CreatedAt:      resp.GetCreatedTimestamp(),
+		DatabaseName:   resp.GetDbName(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil
