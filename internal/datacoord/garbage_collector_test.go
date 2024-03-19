@@ -67,6 +67,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -83,6 +84,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 			cli:              nil,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -119,6 +121,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -136,6 +139,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -161,6 +165,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -189,6 +194,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
 		})
@@ -205,6 +211,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: 0,
 			dropTolerance:    0,
 		})
@@ -226,6 +233,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: 0,
 			dropTolerance:    0,
 		})
@@ -1480,6 +1488,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 			cli:              s.cli,
 			enabled:          false,
 			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 24 * 7,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -1501,6 +1510,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 			cli:              s.cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -1525,6 +1535,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 			cli:              s.cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
@@ -1552,6 +1563,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 			cli:              s.cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
