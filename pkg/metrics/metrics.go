@@ -103,6 +103,8 @@ const (
 	// entities label
 	LoadedLabel         = "loaded"
 	NumEntitiesAllLabel = "all"
+
+	taskTypeLabel = "task_type"
 )
 
 var (

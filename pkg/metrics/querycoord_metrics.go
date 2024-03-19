@@ -26,10 +26,16 @@ const (
 	SegmentGrowTaskLabel   = "segment_grow"
 	SegmentReduceTaskLabel = "segment_reduce"
 	SegmentMoveTaskLabel   = "segment_move"
+	SegmentUpdateTaskLabel = "segment_update"
 
 	ChannelGrowTaskLabel   = "channel_grow"
 	ChannelReduceTaskLabel = "channel_reduce"
 	ChannelMoveTaskLabel   = "channel_move"
+
+	LeaderGrowTaskLabel   = "leader_grow"
+	LeaderReduceTaskLabel = "leader_reduce"
+
+	UnknownTaskLabel = "unknown"
 
 	QueryCoordTaskType = "querycoord_task_type"
 )
@@ -115,6 +121,15 @@ var (
 			nodeIDLabelName,
 			channelNameLabelName,
 		})
+
+	QueryCoordTaskLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "task_latency",
+			Help:      "latency of all kind of task in query coord scheduler scheduler",
+			Buckets:   longTaskBuckets,
+		}, []string{taskTypeLabel})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -128,4 +143,5 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordTaskNum)
 	registry.MustRegister(QueryCoordNumQueryNodes)
 	registry.MustRegister(QueryCoordCurrentTargetCheckpointUnixSeconds)
+	registry.MustRegister(QueryCoordTaskLatency)
 }

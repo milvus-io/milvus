@@ -279,6 +279,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 
 	scheduler.updateTaskMetrics()
 	log.Ctx(task.Context()).Info("task added", zap.String("task", task.String()))
+	task.RecordStartTs()
 	return nil
 }
 
@@ -795,6 +796,44 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	scheduler.updateTaskMetrics()
 	log.Info("task removed")
+	metrics.QueryCoordTaskLatency.WithLabelValues(scheduler.getTaskMetricsLabel(task)).Observe(float64(task.GetTaskLatency()))
+}
+
+func (scheduler *taskScheduler) getTaskMetricsLabel(task Task) string {
+	taskType := GetTaskType(task)
+	switch task.(type) {
+	case *SegmentTask:
+		switch taskType {
+		case TaskTypeGrow:
+			return metrics.SegmentGrowTaskLabel
+		case TaskTypeReduce:
+			return metrics.SegmentReduceTaskLabel
+		case TaskTypeMove:
+			return metrics.SegmentMoveTaskLabel
+		case TaskTypeUpdate:
+			return metrics.SegmentUpdateTaskLabel
+		}
+
+	case *ChannelTask:
+		switch taskType {
+		case TaskTypeGrow:
+			return metrics.ChannelGrowTaskLabel
+		case TaskTypeReduce:
+			return metrics.ChannelReduceTaskLabel
+		case TaskTypeMove:
+			return metrics.ChannelMoveTaskLabel
+		}
+
+	case *LeaderTask:
+		switch taskType {
+		case TaskTypeGrow:
+			return metrics.LeaderGrowTaskLabel
+		case TaskTypeReduce:
+			return metrics.LeaderReduceTaskLabel
+		}
+	}
+
+	return metrics.UnknownTaskLabel
 }
 
 func (scheduler *taskScheduler) checkStale(task Task) error {
