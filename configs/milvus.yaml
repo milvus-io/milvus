@@ -251,6 +251,8 @@ proxy:
     serverMaxRecvSize: 67108864
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 67108864
+  # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
+  slowQuerySpanInSeconds: 5
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
