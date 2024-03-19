@@ -230,22 +230,6 @@ func (m *GrpcRootCoordClient) GetMetrics(ctx context.Context, in *milvuspb.GetMe
 	return &milvuspb.GetMetricsResponse{}, m.Err
 }
 
-func (m *GrpcRootCoordClient) Import(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-	return &milvuspb.ImportResponse{}, m.Err
-}
-
-func (m *GrpcRootCoordClient) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest, opts ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error) {
-	return &milvuspb.GetImportStateResponse{}, m.Err
-}
-
-func (m *GrpcRootCoordClient) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest, opts ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error) {
-	return &milvuspb.ListImportTasksResponse{}, m.Err
-}
-
-func (m *GrpcRootCoordClient) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, m.Err
-}
-
 func (m *GrpcRootCoordClient) CreateCredential(ctx context.Context, in *internalpb.CredentialInfo, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

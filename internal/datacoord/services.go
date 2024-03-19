@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"strconv"
 	"time"
 
@@ -41,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -66,35 +64,13 @@ func (s *Server) GetStatisticsChannel(ctx context.Context, req *internalpb.GetSt
 	}, nil
 }
 
-func (s *Server) flushForImport(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
-	err := s.segmentManager.FlushImportSegments(ctx, req.GetCollectionID(), req.GetSegmentIDs())
-	if err != nil {
-		return &datapb.FlushResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	// To expedite the process of index building.
-	for _, segmentID := range req.GetSegmentIDs() {
-		select {
-		case s.buildIndexCh <- segmentID:
-		default:
-		}
-	}
-	log.Info("flush for import done", zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()))
-	return &datapb.FlushResponse{
-		Status: merr.Success(),
-	}, nil
-}
-
 // Flush notify segment to flush
 // this api only guarantees all the segments requested is sealed
 // these segments will be flushed only after the Flush policy is fulfilled
 func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.FlushResponse, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("dbID", req.GetDbID()),
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.Bool("isImporting", req.GetIsImport()))
+		zap.Int64("collectionID", req.GetCollectionID()))
 	log.Info("receive flush request")
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "DataCoord-Flush")
 	defer sp.End()
@@ -103,10 +79,6 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		return &datapb.FlushResponse{
 			Status: merr.Status(err),
 		}, nil
-	}
-
-	if req.GetIsImport() {
-		return s.flushForImport(ctx, req)
 	}
 
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
@@ -207,8 +179,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			zap.Int64("partitionID", r.GetPartitionID()),
 			zap.String("channelName", r.GetChannelName()),
 			zap.Uint32("count", r.GetCount()),
-			zap.Bool("isImport", r.GetIsImport()),
-			zap.Int64("import task ID", r.GetImportTaskID()),
 			zap.String("segment level", r.GetLevel().String()),
 		)
 
@@ -222,25 +192,12 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 		// Add the channel to cluster for watching.
 		s.cluster.Watch(ctx, r.ChannelName, r.CollectionID)
 
-		segmentAllocations := make([]*Allocation, 0)
-		if r.GetIsImport() {
-			// Have segment manager allocate and return the segment allocation info.
-			segAlloc, err := s.segmentManager.allocSegmentForImport(ctx,
-				r.GetCollectionID(), r.GetPartitionID(), r.GetChannelName(), int64(r.GetCount()), r.GetImportTaskID())
-			if err != nil {
-				log.Warn("failed to alloc segment for import", zap.Any("request", r), zap.Error(err))
-				continue
-			}
-			segmentAllocations = append(segmentAllocations, segAlloc)
-		} else {
-			// Have segment manager allocate and return the segment allocation info.
-			segAlloc, err := s.segmentManager.AllocSegment(ctx,
-				r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
-			if err != nil {
-				log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
-				continue
-			}
-			segmentAllocations = append(segmentAllocations, segAlloc...)
+		// Have segment manager allocate and return the segment allocation info.
+		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
+			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
+		if err != nil {
+			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
+			continue
 		}
 
 		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segmentAllocations))
@@ -477,13 +434,11 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	log.Info("receive SaveBinlogPaths request",
 		zap.Bool("isFlush", req.GetFlushed()),
 		zap.Bool("isDropped", req.GetDropped()),
-		zap.Bool("isImport", req.GetImporting()),
 		zap.Any("checkpoints", req.GetCheckPoints()))
 
 	// for compatibility issue , if len(channelName) not exist, skip the check
-	// No need to check import channel--node matching in data import case.
 	// Also avoid to handle segment not found error if not the owner of shard
-	if !req.GetImporting() && len(channelName) != 0 {
+	if len(channelName) != 0 {
 		if !s.channelManager.Match(nodeID, channelName) {
 			err := merr.WrapErrChannelNotFound(channelName, fmt.Sprintf("for node %d", nodeID))
 			log.Warn("node is not matched with channel", zap.String("channel", channelName), zap.Error(err))
@@ -538,7 +493,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 	operators = append(operators,
 		UpdateBinlogsOperator(req.GetSegmentID(), req.GetField2BinlogPaths(), req.GetField2StatslogPaths(), req.GetDeltalogs()),
 		UpdateStartPosition(req.GetStartPositions()),
-		UpdateCheckPointOperator(req.GetSegmentID(), req.GetImporting(), req.GetCheckPoints()),
+		UpdateCheckPointOperator(req.GetSegmentID(), req.GetCheckPoints()),
 	)
 
 	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
@@ -569,7 +524,7 @@ func (s *Server) SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPath
 		s.flushCh <- req.SegmentID
 
 		// notify compaction
-		if !req.Importing && paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
+		if paramtable.Get().DataCoordCfg.EnableCompaction.GetAsBool() {
 			err := s.compactionTrigger.triggerSingleCompaction(req.GetCollectionID(), req.GetPartitionID(),
 				req.GetSegmentID(), req.GetChannel(), false)
 			if err != nil {
@@ -1406,48 +1361,6 @@ func (s *Server) GetFlushAllState(ctx context.Context, req *milvuspb.GetFlushAll
 	return resp, nil
 }
 
-// Import distributes the import tasks to DataNodes.
-// It returns a failed status if no DataNode is available or if any error occurs.
-func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	log := log.Ctx(ctx)
-	log.Info("DataCoord receives import request", zap.Any("req", req))
-	resp := &datapb.ImportTaskResponse{
-		Status: merr.Success(),
-	}
-
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return &datapb.ImportTaskResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	nodes := s.sessionManager.GetSessionIDs()
-	if len(nodes) == 0 {
-		log.Warn("import failed as all DataNodes are offline")
-		resp.Status = merr.Status(merr.WrapErrNodeLackAny("no live DataNode"))
-		return resp, nil
-	}
-	log.Info("available DataNodes are", zap.Int64s("nodeIDs", nodes))
-
-	avaNodes := getDiff(nodes, req.GetWorkingNodes())
-	if len(avaNodes) > 0 {
-		// If there exists available DataNodes, pick one at random.
-		resp.DatanodeId = avaNodes[rand.Intn(len(avaNodes))]
-		log.Info("picking a free DataNode",
-			zap.Any("all DataNodes", nodes),
-			zap.Int64("picking free DataNode with ID", resp.GetDatanodeId()))
-		s.cluster.Import(s.ctx, resp.GetDatanodeId(), req)
-	} else {
-		// No DataNode is available, reject the import request.
-		msg := "all DataNodes are busy working on data import, the task has been rejected and wait for idle DataNode"
-		log.Info(msg, zap.Int64("taskID", req.GetImportTask().GetTaskId()))
-		resp.Status = merr.Status(merr.WrapErrNodeLackAny("no available DataNode"))
-		return resp, nil
-	}
-
-	return resp, nil
-}
-
 // UpdateSegmentStatistics updates a segment's stats.
 func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -1570,75 +1483,6 @@ func getDiff(base, remove []int64) []int64 {
 		}
 	}
 	return diff
-}
-
-// SaveImportSegment saves the segment binlog paths and puts this segment to its belonging DataNode as a flushed segment.
-func (s *Server) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.GetCollectionId()),
-		zap.Int64("segmentID", req.GetSegmentId()),
-		zap.Int64("partitionID", req.GetPartitionId()),
-		zap.String("channelName", req.GetChannelName()),
-		zap.Int64("# of rows", req.GetRowNum()),
-	)
-	log.Info("DataCoord putting segment to the right DataNode and saving binlog path")
-	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-	_, err := s.cluster.AddImportSegment(ctx,
-		&datapb.AddImportSegmentRequest{
-			Base: commonpbutil.NewMsgBase(
-				commonpbutil.WithTimeStamp(req.GetBase().GetTimestamp()),
-				commonpbutil.WithSourceID(paramtable.GetNodeID()),
-			),
-			SegmentId:    req.GetSegmentId(),
-			ChannelName:  req.GetChannelName(),
-			CollectionId: req.GetCollectionId(),
-			PartitionId:  req.GetPartitionId(),
-			RowNum:       req.GetRowNum(),
-			StatsLog:     req.GetSaveBinlogPathReq().GetField2StatslogPaths(),
-		})
-	if err != nil {
-		return merr.Status(err), nil
-	}
-
-	// Fill in position message ID by channel checkpoint.
-	channelCP := s.meta.GetChannelCheckpoint(req.GetChannelName())
-	if channelCP == nil {
-		log.Warn("SaveImportSegment get nil channel checkpoint")
-		return merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("nil checkpoint when saving import segment, segmentID=%d, channel=%s",
-			req.GetSegmentId(), req.GetChannelName()))), nil
-	}
-	req.SaveBinlogPathReq.StartPositions[0].StartPosition.MsgID = channelCP.GetMsgID()
-	req.SaveBinlogPathReq.CheckPoints[0].Position.MsgID = channelCP.GetMsgID()
-
-	// Start saving bin log paths.
-	rsp, err := s.SaveBinlogPaths(context.Background(), req.GetSaveBinlogPathReq())
-	if err := VerifyResponse(rsp, err); err != nil {
-		log.Error("failed to SaveBinlogPaths", zap.Error(err))
-		return merr.Status(err), nil
-	}
-	return merr.Success(), nil
-}
-
-// UnsetIsImportingState unsets the isImporting states of the given segments.
-// An error status will be returned and error will be logged, if we failed to update *all* segments.
-func (s *Server) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-	log := log.Ctx(ctx)
-	log.Info("unsetting isImport state of segments",
-		zap.Int64s("segments", req.GetSegmentIds()))
-	var reportErr error
-	for _, segID := range req.GetSegmentIds() {
-		if err := s.meta.UnsetIsImporting(segID); err != nil {
-			// Fail-open.
-			log.Error("failed to unset segment is importing state",
-				zap.Int64("segmentID", segID),
-			)
-			reportErr = err
-		}
-	}
-
-	return merr.Status(reportErr), nil
 }
 
 // MarkSegmentsDropped marks the given segments as `Dropped`.

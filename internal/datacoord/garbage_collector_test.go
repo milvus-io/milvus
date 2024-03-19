@@ -150,7 +150,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("hit, no gc", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch", false)
+		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Flushed
 		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
 		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
@@ -176,7 +176,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("dropped gc one", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch", false)
+		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().Add(-time.Hour).UnixNano())
 		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}

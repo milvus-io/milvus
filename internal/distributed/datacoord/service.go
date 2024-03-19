@@ -395,11 +395,6 @@ func (s *Server) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStat
 	return s.dataCoord.SetSegmentState(ctx, req)
 }
 
-// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (s *Server) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	return s.dataCoord.Import(ctx, req)
-}
-
 // UpdateSegmentStatistics is the dataCoord service caller of UpdateSegmentStatistics.
 func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) (*commonpb.Status, error) {
 	return s.dataCoord.UpdateSegmentStatistics(ctx, req)
@@ -408,17 +403,6 @@ func (s *Server) UpdateSegmentStatistics(ctx context.Context, req *datapb.Update
 // UpdateChannelCheckpoint updates channel checkpoint in dataCoord.
 func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.UpdateChannelCheckpointRequest) (*commonpb.Status, error) {
 	return s.dataCoord.UpdateChannelCheckpoint(ctx, req)
-}
-
-// SaveImportSegment saves the import segment binlog paths data and then looks for the right DataNode to add the
-// segment to that DataNode.
-func (s *Server) SaveImportSegment(ctx context.Context, request *datapb.SaveImportSegmentRequest) (*commonpb.Status, error) {
-	return s.dataCoord.SaveImportSegment(ctx, request)
-}
-
-// UnsetIsImportingState is the distributed caller of UnsetIsImportingState.
-func (s *Server) UnsetIsImportingState(ctx context.Context, request *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-	return s.dataCoord.UnsetIsImportingState(ctx, request)
 }
 
 // MarkSegmentsDropped is the distributed caller of MarkSegmentsDropped.

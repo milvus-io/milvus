@@ -51,7 +51,7 @@ type Allocator_GenerateTSO_Call struct {
 }
 
 // GenerateTSO is a helper method to define mock.On call
-//   - count uint32
+//  - count uint32
 func (_e *Allocator_Expecter) GenerateTSO(count interface{}) *Allocator_GenerateTSO_Call {
 	return &Allocator_GenerateTSO_Call{Call: _e.mock.On("GenerateTSO", count)}
 }
@@ -207,7 +207,7 @@ type Allocator_SetTSO_Call struct {
 }
 
 // SetTSO is a helper method to define mock.On call
-//   - _a0 uint64
+//  - _a0 uint64
 func (_e *Allocator_Expecter) SetTSO(_a0 interface{}) *Allocator_SetTSO_Call {
 	return &Allocator_SetTSO_Call{Call: _e.mock.On("SetTSO", _a0)}
 }
