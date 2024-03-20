@@ -697,7 +697,7 @@ func (c *Core) startInternal() error {
 }
 
 func (c *Core) startServerLoop() {
-	c.wg.Add(6)
+	c.wg.Add(3)
 	go c.startTimeTickLoop()
 	go c.tsLoop()
 	go c.chanTimeTick.startWatch(&c.wg)
