@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -29,8 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -87,6 +91,13 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
 		zap.Int64("version", newTarget.GetTargetVersion()),
 	)
+	for channelName, dmlChannel := range newTarget.dmChannels {
+		ts, _ := tsoutil.ParseTS(dmlChannel.GetSeekPosition().GetTimestamp())
+		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.WithLabelValues(
+			fmt.Sprint(paramtable.GetNodeID()),
+			channelName,
+		).Set(float64(ts.Unix()))
+	}
 	return true
 }
 
@@ -266,6 +277,16 @@ func (mgr *TargetManager) RemoveCollection(collectionID int64) {
 	defer mgr.rwMutex.Unlock()
 	log.Info("remove collection from targets",
 		zap.Int64("collectionID", collectionID))
+
+	current := mgr.current.getCollectionTarget(collectionID)
+	if current != nil {
+		for channelName := range current.GetAllDmChannels() {
+			metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.DeleteLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				channelName,
+			)
+		}
+	}
 
 	mgr.current.removeCollectionTarget(collectionID)
 	mgr.next.removeCollectionTarget(collectionID)
