@@ -15,7 +15,7 @@ ARG TARGETARCH
 
 RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
     autoconf automake golang python3 python3-pip perl-FindBin texinfo \
-    pkg-config libuuid-devel libaio perl-IPC-Cmd libasan && \
+    pkg-config libuuid-devel libaio perl-IPC-Cmd libasan openblas-devel && \
     rm -rf /var/cache/yum/*
 
 RUN pip3 install conan==1.61.0
