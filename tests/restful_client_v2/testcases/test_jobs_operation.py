@@ -1058,10 +1058,10 @@ class TestCreateImportJobAdvance(TestBase):
                 "collectionName": name,
             }
             rsp = self.import_job_client.list_import_jobs(payload)
-            assert job_id in [job["jobId"] for job in rsp['data']]
+            assert job_id in [job["jobId"] for job in rsp['data']["records"]]
         rsp = self.import_job_client.list_import_jobs(payload)
         # get import job progress
-        for job in rsp['data']:
+        for job in rsp['data']["records"]:
             job_id = job['jobId']
             finished = False
             t0 = time.time()
