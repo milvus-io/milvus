@@ -13,6 +13,7 @@ import pytest
 from base.testbase import TestBase
 from uuid import uuid4
 
+
 @pytest.mark.L1
 class TestCreateImportJob(TestBase):
 
@@ -1437,7 +1438,7 @@ class TestCreateImportJobNegative(TestBase):
         assert rsp["code"] == 200
 
 
-@pytest.mark.L0
+@pytest.mark.L1
 class TestListImportJob(TestBase):
 
     def test_list_job_e2e(self):
@@ -1510,7 +1511,7 @@ class TestListImportJob(TestBase):
                 logger.error(f"list import job failed: {e}")
 
 
-@pytest.mark.L0
+@pytest.mark.L1
 class TestGetImportJobProgress(TestBase):
 
     def test_list_job_e2e(self):
@@ -1582,7 +1583,8 @@ class TestGetImportJobProgress(TestBase):
             except Exception as e:
                 logger.error(f"get import job progress failed: {e}")
 
-@pytest.mark.L0
+
+@pytest.mark.L1
 class TestGetImportJobProgressNegative(TestBase):
 
     def test_list_job_with_invalid_job_id(self):
