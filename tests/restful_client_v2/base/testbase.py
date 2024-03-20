@@ -27,6 +27,7 @@ class Base:
     collection_client = None
     partition_client = None
     index_client = None
+    alias_client = None
     user_client = None
     role_client = None
     import_job_client = None
@@ -49,7 +50,7 @@ class TestBase(Base):
                 logger.error(e)
 
     @pytest.fixture(scope="function", autouse=True)
-    def init_client(self, endpoint, token, minio_host):
+    def init_client(self, endpoint, token, minio_host, bucket_name, root_path):
         self.endpoint = f"{endpoint}"
         self.api_key = f"{token}"
         self.invalid_api_key = "invalid_token"
@@ -61,14 +62,14 @@ class TestBase(Base):
         self.user_client = UserClient(self.endpoint, self.api_key)
         self.role_client = RoleClient(self.endpoint, self.api_key)
         self.import_job_client = ImportJobClient(self.endpoint, self.api_key)
-        self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", "milvus-bucket")
+        self.storage_client = StorageClient(f"{minio_host}:9000", "minioadmin", "minioadmin", bucket_name, root_path)
         if token is None:
             self.vector_client.api_key = None
             self.collection_client.api_key = None
             self.partition_client.api_key = None
         connections.connect(uri=endpoint, token=token)
 
-    def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000):
+    def init_collection(self, collection_name, pk_field="id", metric_type="L2", dim=128, nb=100, batch_size=1000, return_insert_id=False):
         # create collection
         schema_payload = {
             "collectionName": collection_name,
@@ -85,6 +86,7 @@ class TestBase(Base):
         batch = nb // batch_size
         remainder = nb % batch_size
         data = []
+        insert_ids = []
         for i in range(batch):
             nb = batch_size
             data = get_data_by_payload(schema_payload, nb)
@@ -96,6 +98,8 @@ class TestBase(Base):
             logger.debug(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
             assert rsp['code'] == 200
+            if return_insert_id:
+                insert_ids.extend(rsp['data']['insertIds'])
         # insert remainder data
         if remainder:
             nb = remainder
@@ -106,6 +110,10 @@ class TestBase(Base):
             }
             rsp = self.vector_client.vector_insert(payload)
             assert rsp['code'] == 200
+            if return_insert_id:
+                insert_ids.extend(rsp['data']['insertIds'])
+        if return_insert_id:
+            return schema_payload, data, insert_ids
 
         return schema_payload, data
 
@@ -131,5 +139,7 @@ class TestBase(Base):
 
     def update_database(self, db_name="default"):
         self.create_database(db_name=db_name)
+        db.using_database(db_name=db_name)
         self.collection_client.db_name = db_name
         self.vector_client.db_name = db_name
+        self.import_job_client.db_name = db_name

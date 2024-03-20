@@ -5,7 +5,7 @@ import uuid
 from utils.util_log import test_log as logger
 from minio import Minio
 from minio.error import S3Error
-
+from minio.commonconfig import REPLACE, CopySource
 
 def logger_request_response(response, url, tt, headers, data, str_data, str_response, method):
     if len(data) > 2000:
@@ -136,7 +136,59 @@ class VectorClient(Requests):
 
         return response.json()
 
-    def vector_query(self, payload, db_name="default", timeout=10):
+    def vector_advanced_search(self, payload, db_name="default", timeout=10):
+        time.sleep(1)
+        url = f'{self.endpoint}/v2/vectordb/entities/advanced_search'
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        rsp = response.json()
+        if "data" in rsp and len(rsp["data"]) == 0:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if len(rsp["data"]) > 0:
+                    break
+                time.sleep(1)
+            else:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if "data" in rsp and len(rsp["data"]) == 0:
+                    logger.info(f"after {timeout}s, still no data")
+
+        return response.json()
+
+    def vector_hybrid_search(self, payload, db_name="default", timeout=10):
+        time.sleep(1)
+        url = f'{self.endpoint}/v2/vectordb/entities/hybrid_search'
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        rsp = response.json()
+        if "data" in rsp and len(rsp["data"]) == 0:
+            t0 = time.time()
+            while time.time() - t0 < timeout:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if len(rsp["data"]) > 0:
+                    break
+                time.sleep(1)
+            else:
+                response = self.post(url, headers=self.update_headers(), data=payload)
+                rsp = response.json()
+                if "data" in rsp and len(rsp["data"]) == 0:
+                    logger.info(f"after {timeout}s, still no data")
+
+        return response.json()
+
+
+
+    def vector_query(self, payload, db_name="default", timeout=5):
         time.sleep(1)
         url = f'{self.endpoint}/v2/vectordb/entities/query'
         if self.db_name is not None:
@@ -527,6 +579,7 @@ class RoleClient(Requests):
         self.api_key = token
         self.db_name = None
         self.headers = self.update_headers()
+        self.role_names = []
 
     def update_headers(self):
         headers = {
@@ -546,6 +599,8 @@ class RoleClient(Requests):
         url = f'{self.endpoint}/v2/vectordb/roles/create'
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
+        if res["code"] == 200:
+            self.role_names.append(payload["roleName"])
         return res
 
     def role_describe(self, role_name):
@@ -706,36 +761,63 @@ class ImportJobClient(Requests):
         return headers
 
     def list_import_jobs(self, payload, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
         payload["dbName"] = db_name
-        data = payload
+        if db_name is None:
+            payload.pop("dbName")
         url = f'{self.endpoint}/v2/vectordb/jobs/import/list'
-        response = self.post(url, headers=self.update_headers(), data=data)
-        res = response.json()
-        return res
-
-    def create_import_jobs(self, payload):
-        url = f'{self.endpoint}/v2/vectordb/jobs/import/create'
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
-    def get_import_job_progress(self, task_id):
+    def create_import_jobs(self, payload, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
+        url = f'{self.endpoint}/v2/vectordb/jobs/import/create'
+        payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        res = response.json()
+        return res
+
+    def get_import_job_progress(self, job_id, db_name="default"):
+        if self.db_name is not None:
+            db_name = self.db_name
         payload = {
-            "taskID": task_id
+            "dbName": db_name,
+            "jobID": job_id
         }
+        if db_name is None:
+            payload.pop("dbName")
+        if job_id is None:
+            payload.pop("jobID")
         url = f'{self.endpoint}/v2/vectordb/jobs/import/get_progress'
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
+    def wait_import_job_completed(self, job_id):
+        finished = False
+        t0 = time.time()
+        rsp = self.get_import_job_progress(job_id)
+        while not finished:
+            rsp = self.get_import_job_progress(job_id)
+            if rsp['data']['state'] == "Completed":
+                finished = True
+            time.sleep(5)
+            if time.time() - t0 > 120:
+                break
+        return rsp, finished
+
 
 class StorageClient():
 
-    def __init__(self, endpoint, access_key, secret_key, bucket_name):
+    def __init__(self, endpoint, access_key, secret_key, bucket_name, root_path="file"):
         self.endpoint = endpoint
         self.access_key = access_key
         self.secret_key = secret_key
         self.bucket_name = bucket_name
+        self.root_path = root_path
         self.client = Minio(
             self.endpoint,
             access_key=access_key,
@@ -748,3 +830,37 @@ class StorageClient():
             self.client.fput_object(self.bucket_name, object_name, file_path)
         except S3Error as exc:
             logger.error("fail to copy files to minio", exc)
+
+    def copy_file(self, src_bucket, src_object, dst_bucket, dst_object):
+        try:
+            # if dst bucket not exist, create it
+            if not self.client.bucket_exists(dst_bucket):
+                self.client.make_bucket(dst_bucket)
+            self.client.copy_object(dst_bucket, dst_object, CopySource(src_bucket, src_object))
+        except S3Error as exc:
+            logger.error("fail to copy files to minio", exc)
+
+    def get_collection_binlog(self, collection_id):
+        dir_list = [
+            "delta_log",
+            "insert_log"
+        ]
+        binlog_list = []
+        # list objects dir/collection_id in bucket
+        for dir in dir_list:
+            prefix = f"{self.root_path}/{dir}/{collection_id}/"
+            objects = self.client.list_objects(self.bucket_name, prefix=prefix)
+            for obj in objects:
+                binlog_list.append(f"{self.bucket_name}/{obj.object_name}")
+        print(binlog_list)
+        return binlog_list
+
+
+if __name__ == "__main__":
+    sc = StorageClient(
+        endpoint="10.104.19.57:9000",
+        access_key="minioadmin",
+        secret_key="minioadmin",
+        bucket_name="milvus-bucket"
+    )
+    sc.get_collection_binlog("448305293023730313")
