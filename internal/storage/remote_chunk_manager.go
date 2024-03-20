@@ -21,7 +21,6 @@ import (
 	"context"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -50,7 +50,7 @@ type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
 	StatObject(ctx context.Context, bucketName, objectName string) (int64, error)
-	ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error)
+	ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) <-chan ObjectPathHolder
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
 }
 
@@ -200,31 +200,62 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 	return data, nil
 }
 
-func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
-	var el error
-	var objectsValues [][]byte
-	for _, key := range keys {
-		objectValue, err := mcm.Read(ctx, key)
-		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", key))
+func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) <-chan ObjectDataHolder {
+	objectDataHolder := make(chan ObjectDataHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(objectDataHolder)
+		for _, key := range keys {
+			content, err := mcm.Read(ctx, key)
+			if err != nil {
+				objectDataHolder <- ObjectDataHolder{
+					Path: key,
+					Err:  err,
+				}
+				continue
+			}
+			objectDataHolder <- ObjectDataHolder{
+				Path: key,
+				Data: content,
+			}
 		}
-		objectsValues = append(objectsValues, objectValue)
-	}
+	}()
 
-	return objectsValues, el
+	return objectDataHolder
 }
 
-func (mcm *RemoteChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	objectsKeys, _, err := mcm.ListWithPrefix(ctx, prefix, true)
-	if err != nil {
-		return nil, nil, err
-	}
-	objectsValues, err := mcm.MultiRead(ctx, objectsKeys)
-	if err != nil {
-		return nil, nil, err
-	}
+func (mcm *RemoteChunkManager) ReadWithPrefix(ctx context.Context, prefix string) <-chan ObjectDataHolder {
+	objectDataHolder := make(chan ObjectDataHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(objectDataHolder)
+		objectPathHolder := mcm.ListWithPrefix(ctx, prefix, true)
+		for objectPath := range objectPathHolder {
+			if objectPath.Err != nil {
+				objectDataHolder <- ObjectDataHolder{
+					Path: objectPath.Path,
+					Err:  objectPath.Err,
+				}
+				continue
+			}
+			if objectPath.ISDir {
+				log.Info("skip directory", zap.String("path", objectPath.Path))
+				continue
+			}
+			content, err := mcm.Read(ctx, objectPath.Path)
+			if err != nil {
+				objectDataHolder <- ObjectDataHolder{
+					Path: objectPath.Path,
+					Err:  err,
+				}
+				return
+			}
+			objectDataHolder <- ObjectDataHolder{
+				Path: objectPath.Path,
+				Data: content,
+			}
+		}
+	}()
 
-	return objectsKeys, objectsValues, nil
+	return objectDataHolder
 }
 
 func (mcm *RemoteChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
@@ -278,29 +309,29 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
-	removeKeys, _, err := mcm.listObjects(ctx, mcm.bucketName, prefix, true)
-	if err != nil {
-		return err
-	}
-	i := 0
+	objectPathHolder := mcm.listObjects(ctx, mcm.bucketName, prefix, true)
 	maxGoroutine := 10
-	for i < len(removeKeys) {
-		runningGroup, groupCtx := errgroup.WithContext(ctx)
-		for j := 0; j < maxGoroutine && i < len(removeKeys); j++ {
-			key := removeKeys[i]
-			runningGroup.Go(func() error {
-				err := mcm.removeObject(groupCtx, mcm.bucketName, key)
-				if err != nil {
-					log.Warn("failed to remove object", zap.String("path", key), zap.Error(err))
-					return err
-				}
+	runningGroup, groupCtx := errgroup.WithContext(ctx)
+	for j := 0; j < maxGoroutine; j++ {
+		runningGroup.Go(func() error {
+			pathHolder, ok := <-objectPathHolder
+			if !ok {
 				return nil
-			})
-			i++
-		}
-		if err := runningGroup.Wait(); err != nil {
-			return err
-		}
+			}
+			if pathHolder.Err != nil {
+				return pathHolder.Err
+			}
+			key := pathHolder.Path
+			err := mcm.removeObject(groupCtx, mcm.bucketName, key)
+			if err != nil {
+				log.Warn("failed to remove object", zap.String("path", key), zap.Error(err))
+				return err
+			}
+			return nil
+		})
+	}
+	if err := runningGroup.Wait(); err != nil {
+		return err
 	}
 	return nil
 }
@@ -310,7 +341,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 // say minio has followinng objects: [a, ab, a/b, ab/c]
 // calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
 // If caller needs all objects without level limitation, `recursive` shall be true.
-func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
+func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) <-chan ObjectPathHolder {
 	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
 	// if minio has lots of objects under the provided path
 	// recursive = true may timeout during the recursive browsing the objects.
@@ -367,20 +398,15 @@ func (mcm *RemoteChunkManager) getObjectSize(ctx context.Context, bucketName, ob
 	return info, err
 }
 
-func (mcm *RemoteChunkManager) listObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
+func (mcm *RemoteChunkManager) listObjects(ctx context.Context, bucketName string, prefix string, recursive bool) <-chan ObjectPathHolder {
 	start := timerecord.NewTimeRecorder("listObjects")
 
-	blobNames, lastModifiedTime, err := mcm.client.ListObjects(ctx, bucketName, prefix, recursive)
+	objectPathHolder := mcm.client.ListObjects(ctx, bucketName, prefix, recursive)
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.TotalLabel).Inc()
-	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).
-			Observe(float64(start.ElapseSpan().Milliseconds()))
-		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
-	} else {
-		log.Warn("failed to list with prefix", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(err))
-		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.FailLabel).Inc()
-	}
-	return blobNames, lastModifiedTime, err
+	metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).
+		Observe(float64(start.ElapseSpan().Milliseconds()))
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
+	return objectPathHolder
 }
 
 func (mcm *RemoteChunkManager) removeObject(ctx context.Context, bucketName, objectName string) error {

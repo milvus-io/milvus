@@ -206,25 +206,32 @@ func GetInsertDataRowCount(data *storage.InsertData, schema *schemapb.Collection
 
 func GetFileSize(file *internalpb.ImportFile, cm storage.ChunkManager, task Task) (int64, error) {
 	paths := file.GetPaths()
-	if importutilv2.IsBackup(task.GetOptions()) {
-		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-		defer cancel()
-		paths = make([]string, 0)
-		for _, prefix := range file.GetPaths() {
-			binlogs, _, err := cm.ListWithPrefix(ctx, prefix, true)
-			if err != nil {
-				return 0, err
-			}
-			paths = append(paths, binlogs...)
-		}
-	}
-
 	fn := func(path string) (int64, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 		defer cancel()
 		return cm.Size(ctx, path)
 	}
 	var totalSize int64 = 0
+
+	if importutilv2.IsBackup(task.GetOptions()) {
+		ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+		defer cancel()
+		for _, prefix := range file.GetPaths() {
+			objectPathHolderChan := cm.ListWithPrefix(ctx, prefix, true)
+			for objectPathHolder := range objectPathHolderChan {
+				if objectPathHolder.Err != nil {
+					return 0, objectPathHolder.Err
+				}
+				size, err := fn(objectPathHolder.Path)
+				if err != nil {
+					return 0, err
+				}
+				totalSize += size
+			}
+		}
+		return totalSize, nil
+	}
+
 	for _, path := range paths {
 		size, err := fn(path)
 		if err != nil {

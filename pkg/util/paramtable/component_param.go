@@ -246,6 +246,7 @@ type commonConfig struct {
 	TraceLogMode          ParamItem `refreshable:"true"`
 	BloomFilterSize       ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive ParamItem `refreshable:"true"`
+	PullObjectBatchSize   ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -726,6 +727,14 @@ like the old password verification when updating the credential`,
 		Doc:          "max false positive rate for bloom filter",
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
+
+	p.PullObjectBatchSize = ParamItem{
+		Key:          "common.pullObjectBatchSize",
+		Version:      "2.4.1",
+		DefaultValue: "10",
+		Doc:          "the batch size when pulling objects from the object store",
+	}
+	p.PullObjectBatchSize.Init(base.mgr)
 }
 
 type gpuConfig struct {

@@ -23,7 +23,6 @@ import (
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -33,8 +32,11 @@ import (
 	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/internal/storage/tencent"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
+
+var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
 type MinioObjectStorage struct {
 	*minio.Client
@@ -188,43 +190,50 @@ func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bu
 	return info.Size, checkObjectStorageError(objectName, err)
 }
 
-func (minioObjectStorage *MinioObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
-	var objectsKeys []string
-	var modTimes []time.Time
-	tasks := list.New()
-	tasks.PushBack(prefix)
-	for tasks.Len() > 0 {
-		e := tasks.Front()
-		pre := e.Value.(string)
-		tasks.Remove(e)
+func (minioObjectStorage *MinioObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) <-chan ObjectPathHolder {
+	pathHolderChan := make(chan ObjectPathHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(pathHolderChan)
 
-		res := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
-			Prefix:    pre,
-			Recursive: false,
-		})
+		tasks := list.New()
+		tasks.PushBack(prefix)
+		for tasks.Len() > 0 {
+			e := tasks.Front()
+			pre := e.Value.(string)
+			tasks.Remove(e)
 
-		objects := map[string]time.Time{}
-		for object := range res {
-			if object.Err != nil {
-				log.Warn("failed to list with prefix", zap.String("bucket", bucketName), zap.String("prefix", prefix), zap.Error(object.Err))
-				return []string{}, []time.Time{}, object.Err
-			}
-			objects[object.Key] = object.LastModified
-		}
-		for object, lastModified := range objects {
-			// with tailing "/", object is a "directory"
-			if strings.HasSuffix(object, "/") && recursive {
-				// enqueue when recursive is true
-				if object != pre {
-					tasks.PushBack(object)
+			res := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
+				Prefix:    pre,
+				Recursive: false,
+			})
+
+			for object := range res {
+				if object.Err != nil {
+					log.Warn("failed to list with prefix", zap.String("bucket", bucketName), zap.String("prefix", prefix), zap.Error(object.Err))
+					pathHolderChan <- ObjectPathHolder{
+						Path: prefix,
+						Err:  object.Err,
+					}
+					return
 				}
-				continue
+				isDir := strings.HasSuffix(object.Key, "/")
+				if isDir && recursive {
+					// enqueue when recursive is true
+					if object.Key != pre {
+						tasks.PushBack(object.Key)
+					}
+					continue
+				}
+				pathHolderChan <- ObjectPathHolder{
+					Path:    object.Key,
+					ModTime: object.LastModified,
+					ISDir:   isDir,
+				}
 			}
-			objectsKeys = append(objectsKeys, object)
-			modTimes = append(modTimes, lastModified)
 		}
-	}
-	return objectsKeys, modTimes, nil
+	}()
+
+	return pathHolderChan
 }
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {

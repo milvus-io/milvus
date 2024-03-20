@@ -131,19 +131,31 @@ func (c *mockChunkmgr) Reader(ctx context.Context, filePath string) (storage.Fil
 	return nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
-	// TODO
-	return nil, errNotImplErr
+func (c *mockChunkmgr) MultiRead(ctx context.Context, filePaths []string) <-chan storage.ObjectDataHolder {
+	dataHolderChan := make(chan storage.ObjectDataHolder, 1)
+	dataHolderChan <- storage.ObjectDataHolder{
+		Err: errNotImplErr,
+	}
+	close(dataHolderChan)
+	return dataHolderChan
 }
 
-func (c *mockChunkmgr) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	// TODO
-	return nil, nil, errNotImplErr
+func (c *mockChunkmgr) ReadWithPrefix(ctx context.Context, prefix string) <-chan storage.ObjectDataHolder {
+	dataHolderChan := make(chan storage.ObjectDataHolder, 1)
+	dataHolderChan <- storage.ObjectDataHolder{
+		Err: errNotImplErr,
+	}
+	close(dataHolderChan)
+	return dataHolderChan
 }
 
-func (c *mockChunkmgr) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	// TODO
-	return nil, nil, errNotImplErr
+func (c *mockChunkmgr) ListWithPrefix(ctx context.Context, prefix string, recursive bool) <-chan storage.ObjectPathHolder {
+	pathHolderChan := make(chan storage.ObjectPathHolder, 1)
+	pathHolderChan <- storage.ObjectPathHolder{
+		Err: errNotImplErr,
+	}
+	close(pathHolderChan)
+	return pathHolderChan
 }
 
 func (c *mockChunkmgr) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {

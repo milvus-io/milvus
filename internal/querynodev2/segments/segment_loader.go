@@ -1174,15 +1174,19 @@ func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int6
 	}
 
 	startTs := time.Now()
-	values, err := loader.cm.MultiRead(ctx, binlogPaths)
-	if err != nil {
-		return err
-	}
-	blobs := []*storage.Blob{}
-	for i := 0; i < len(values); i++ {
-		blobs = append(blobs, &storage.Blob{Value: values[i]})
+	objectDataHolderChan := loader.cm.MultiRead(ctx, binlogPaths)
+	var blobs []*storage.Blob
+	for objectDataHolder := range objectDataHolderChan {
+		if objectDataHolder.Err != nil {
+			log.Warn("failed to load stats log",
+				zap.String("binlogPath", objectDataHolder.Path),
+				zap.Error(objectDataHolder.Err))
+			return objectDataHolder.Err
+		}
+		blobs = append(blobs, &storage.Blob{Value: objectDataHolder.Data})
 	}
 
+	var err error
 	var stats []*storage.PrimaryKeyStats
 	if logType == storage.CompoundStatsType {
 		stats, err = storage.DeserializeStatsList(blobs[0])

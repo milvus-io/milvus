@@ -31,6 +31,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // LocalChunkManager is responsible for read and write local file.
@@ -120,66 +121,121 @@ func (lcm *LocalChunkManager) Read(ctx context.Context, filePath string) ([]byte
 }
 
 // MultiRead reads the local storage data if exists.
-func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
-	results := make([][]byte, len(filePaths))
-	var el error
-	for i, filePath := range filePaths {
-		content, err := lcm.Read(ctx, filePath)
-		if err != nil {
-			el = merr.Combine(el, errors.Wrapf(err, "failed to read %s", filePath))
-		}
-		results[i] = content
-	}
-	return results, el
-}
-
-func (lcm *LocalChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	var filePaths []string
-	var modTimes []time.Time
-	if recursive {
-		dir := filepath.Dir(prefix)
-		err := filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
-			if strings.HasPrefix(filePath, prefix) && !f.IsDir() {
-				filePaths = append(filePaths, filePath)
-			}
-			return nil
-		})
-		if err != nil {
-			return nil, nil, err
-		}
+func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string) <-chan ObjectDataHolder {
+	dataHolderChan := make(chan ObjectDataHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(dataHolderChan)
 		for _, filePath := range filePaths {
-			modTime, err2 := lcm.getModTime(filePath)
-			if err2 != nil {
-				return filePaths, nil, err2
+			content, err := lcm.Read(ctx, filePath)
+			if err != nil {
+				dataHolderChan <- ObjectDataHolder{
+					Path: filePath,
+					Err:  err,
+				}
+				continue
 			}
-			modTimes = append(modTimes, modTime)
+			dataHolderChan <- ObjectDataHolder{
+				Path: filePath,
+				Data: content,
+			}
 		}
-		return filePaths, modTimes, nil
-	}
+	}()
 
-	globPaths, err := filepath.Glob(prefix + "*")
-	if err != nil {
-		return nil, nil, err
-	}
-	filePaths = append(filePaths, globPaths...)
-	for _, filePath := range filePaths {
-		modTime, err2 := lcm.getModTime(filePath)
-		if err2 != nil {
-			return filePaths, nil, err2
-		}
-		modTimes = append(modTimes, modTime)
-	}
-
-	return filePaths, modTimes, nil
+	return dataHolderChan
 }
 
-func (lcm *LocalChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	filePaths, _, err := lcm.ListWithPrefix(ctx, prefix, true)
-	if err != nil {
-		return nil, nil, err
-	}
-	result, err := lcm.MultiRead(ctx, filePaths)
-	return filePaths, result, err
+func (lcm *LocalChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) <-chan ObjectPathHolder {
+	pathHolderChan := make(chan ObjectPathHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(pathHolderChan)
+		if recursive {
+			dir := filepath.Dir(prefix)
+			err := filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
+				if strings.HasPrefix(filePath, prefix) && !f.IsDir() {
+					_, modTime, err2 := lcm.getModTime(filePath)
+					if err2 != nil {
+						log.Warn("get mod time failed", zap.String("path", filePath), zap.Error(err2))
+						return err2
+					}
+					pathHolderChan <- ObjectPathHolder{
+						Path:    filePath,
+						ModTime: modTime,
+					}
+				}
+				return nil
+			})
+			if err != nil {
+				log.Warn("walk dir failed", zap.String("prefix", prefix), zap.Error(err))
+				pathHolderChan <- ObjectPathHolder{
+					Err: err,
+				}
+			}
+			return
+		}
+
+		globPaths, err := filepath.Glob(prefix + "*")
+		if err != nil {
+			log.Warn("glob failed", zap.String("prefix", prefix), zap.Error(err))
+			pathHolderChan <- ObjectPathHolder{
+				Err: err,
+			}
+			return
+		}
+		for _, filePath := range globPaths {
+			isDir, modTime, err2 := lcm.getModTime(filePath)
+			if err2 != nil {
+				log.Warn("get mod time failed", zap.String("path", filePath), zap.Error(err2))
+				pathHolderChan <- ObjectPathHolder{
+					Path: filePath,
+					Err:  err2,
+				}
+				return
+			}
+			pathHolderChan <- ObjectPathHolder{
+				Path:    filePath,
+				ModTime: modTime,
+				ISDir:   isDir,
+			}
+		}
+		return
+	}()
+	return pathHolderChan
+}
+
+func (lcm *LocalChunkManager) ReadWithPrefix(ctx context.Context, prefix string) <-chan ObjectDataHolder {
+	dataHolderChan := make(chan ObjectDataHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(dataHolderChan)
+		pathHolderChan := lcm.ListWithPrefix(ctx, prefix, false)
+		for pathHolder := range pathHolderChan {
+			if pathHolder.Err != nil {
+				dataHolderChan <- ObjectDataHolder{
+					Path: pathHolder.Path,
+					Err:  pathHolder.Err,
+				}
+				return
+			}
+			if pathHolder.ISDir {
+				log.Info("skip dir", zap.String("path", pathHolder.Path))
+				continue
+			}
+			content, err := lcm.Read(ctx, pathHolder.Path)
+			if err != nil {
+				log.Warn("read file failed", zap.String("path", pathHolder.Path), zap.Error(err))
+				dataHolderChan <- ObjectDataHolder{
+					Path: pathHolder.Path,
+					Err:  err,
+				}
+				return
+			}
+			dataHolderChan <- ObjectDataHolder{
+				Path: pathHolder.Path,
+				Data: content,
+			}
+		}
+	}()
+
+	return dataHolderChan
 }
 
 // ReadAt reads specific position data of local storage if exists.
@@ -247,15 +303,21 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 		return merr.WrapErrParameterInvalidMsg(errMsg)
 	}
 
-	filePaths, _, err := lcm.ListWithPrefix(ctx, prefix, true)
-	if err != nil {
-		return err
+	objectPathHolder := lcm.ListWithPrefix(ctx, prefix, true)
+	for pathHolder := range objectPathHolder {
+		if pathHolder.Err != nil {
+			return pathHolder.Err
+		}
+		err := lcm.Remove(ctx, pathHolder.Path)
+		if err != nil {
+			return err
+		}
 	}
 
-	return lcm.MultiRemove(ctx, filePaths)
+	return nil
 }
 
-func (lcm *LocalChunkManager) getModTime(filepath string) (time.Time, error) {
+func (lcm *LocalChunkManager) getModTime(filepath string) (bool, time.Time, error) {
 	fi, err := os.Stat(filepath)
 	if err != nil {
 		log.Warn("stat fileinfo error",
@@ -263,10 +325,10 @@ func (lcm *LocalChunkManager) getModTime(filepath string) (time.Time, error) {
 			zap.Error(err),
 		)
 		if os.IsNotExist(err) {
-			return time.Time{}, merr.WrapErrIoKeyNotFound(filepath)
+			return false, time.Time{}, merr.WrapErrIoKeyNotFound(filepath)
 		}
-		return time.Time{}, merr.WrapErrIoFailed(filepath, err)
+		return false, time.Time{}, merr.WrapErrIoFailed(filepath, err)
 	}
 
-	return fi.ModTime(), nil
+	return fi.IsDir(), fi.ModTime(), nil
 }

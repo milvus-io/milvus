@@ -110,10 +110,8 @@ func TestLocalCM(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(localPath, testLoadRoot, test.prefix))
-				assert.NoError(t, err)
-				assert.Equal(t, len(test.expectedValue), len(gotk))
-				assert.Equal(t, len(test.expectedValue), len(gotv))
+				objectDataHolderChan := testCM.ReadWithPrefix(ctx, path.Join(localPath, testLoadRoot, test.prefix))
+				_, gotv := CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(test.expectedValue))
 				assert.ElementsMatch(t, test.expectedValue, gotv)
 			})
 		}
@@ -135,12 +133,12 @@ func TestLocalCM(t *testing.T) {
 					test.multiKeys[i] = path.Join(localPath, testLoadRoot, test.multiKeys[i])
 				}
 				if test.isvalid {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.NoError(t, err)
+					objectDataHolderChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				} else {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.Error(t, err)
+					objectDataHolderChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, objectDataHolderChan, true, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				}
 			})
@@ -271,8 +269,8 @@ func TestLocalCM(t *testing.T) {
 			path.Join(localPath, testRemoveRoot, "mkey_3"),
 		}
 
-		lv, err := testCM.MultiRead(ctx, multiRemoveTest)
-		require.Nil(t, err)
+		objectDataHolderChan := testCM.MultiRead(ctx, multiRemoveTest)
+		_, lv := CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(multiRemoveTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.MultiRemove(ctx, multiRemoveTest)
@@ -291,8 +289,8 @@ func TestLocalCM(t *testing.T) {
 		}
 		removePrefix := path.Join(localPath, testRemoveRoot, "key_prefix")
 
-		lv, err = testCM.MultiRead(ctx, removeWithPrefixTest)
-		require.NoError(t, err)
+		objectDataHolderChan = testCM.MultiRead(ctx, removeWithPrefixTest)
+		_, lv = CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(removeWithPrefixTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.RemoveWithPrefix(ctx, removePrefix)
@@ -386,7 +384,7 @@ func TestLocalCM(t *testing.T) {
 		assert.Nil(t, reader)
 		assert.Error(t, err)
 
-		_, err = testCM.getModTime(key)
+		_, _, err = testCM.getModTime(key)
 		assert.Error(t, err)
 
 		err = testCM.Write(ctx, key, value)
@@ -447,10 +445,8 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/a/b
 		//   localPath/testPrefix/a/c
 		pathPrefix := path.Join(localPath, testPrefix, "a")
-		dirs, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(dirs))
-		assert.Equal(t, 2, len(m))
+		objectPathHolderChan := testCM.ListWithPrefix(ctx, pathPrefix, true)
+		dirs := CheckObjectPathHolderChan(t, objectPathHolderChan, false, 2)
 		assert.Contains(t, dirs, key1)
 		assert.Contains(t, dirs, key2)
 
@@ -459,10 +455,8 @@ func TestLocalCM(t *testing.T) {
 		assert.NoError(t, err)
 
 		// no file returned
-		dirs, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(dirs))
-		assert.Equal(t, 0, len(m))
+		objectPathHolderChan = testCM.ListWithPrefix(ctx, pathPrefix, true)
+		_ = CheckObjectPathHolderChan(t, objectPathHolderChan, false, 0)
 	})
 
 	t.Run("test ListWithPrefix", func(t *testing.T) {
@@ -499,10 +493,8 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abd
 		//   localPath/testPrefix/bcd
 		testPrefix1 := path.Join(localPath, testPrefix)
-		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix1+"/", false)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(dirs))
-		assert.Equal(t, 3, len(mods))
+		pathHolderChan := testCM.ListWithPrefix(ctx, testPrefix1+"/", false)
+		dirs := CheckObjectPathHolderChan(t, pathHolderChan, false, 3)
 		assert.Contains(t, dirs, filepath.Dir(key1))
 		assert.Contains(t, dirs, key3)
 		assert.Contains(t, dirs, key4)
@@ -513,10 +505,8 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abc/deg
 		//   localPath/testPrefix/abd
 		//   localPath/testPrefix/bcd
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1+"/", true)
-		assert.NoError(t, err)
-		assert.Equal(t, 4, len(dirs))
-		assert.Equal(t, 4, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix1+"/", true)
+		dirs = CheckObjectPathHolderChan(t, pathHolderChan, false, 4)
 		assert.Contains(t, dirs, key1)
 		assert.Contains(t, dirs, key2)
 		assert.Contains(t, dirs, key3)
@@ -527,10 +517,8 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abc
 		//   localPath/testPrefix/abd
 		testPrefix2 := path.Join(localPath, testPrefix, "a")
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
-		assert.NoError(t, err)
-		assert.Equal(t, 2, len(dirs))
-		assert.Equal(t, 2, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix2, false)
+		dirs = CheckObjectPathHolderChan(t, pathHolderChan, false, 2)
 		assert.Contains(t, dirs, filepath.Dir(key1))
 		assert.Contains(t, dirs, key3)
 
@@ -539,10 +527,8 @@ func TestLocalCM(t *testing.T) {
 		//   localPath/testPrefix/abc/def
 		//   localPath/testPrefix/abc/deg
 		//   localPath/testPrefix/abd
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(dirs))
-		assert.Equal(t, 3, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix2, true)
+		dirs = CheckObjectPathHolderChan(t, pathHolderChan, false, 3)
 		assert.Contains(t, dirs, key1)
 		assert.Contains(t, dirs, key2)
 		assert.Contains(t, dirs, key3)
@@ -555,36 +541,28 @@ func TestLocalCM(t *testing.T) {
 		// non-recursive find localPath/testPrefix
 		// return:
 		//   localPath/testPrefix
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, false)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(dirs))
-		assert.Equal(t, 1, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix1, false)
+		dirs = CheckObjectPathHolderChan(t, pathHolderChan, false, 1)
 		assert.Contains(t, dirs, filepath.Dir(key4))
 
 		// recursive find localPath/testPrefix
 		// return:
 		//   localPath/testPrefix/bcd
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(dirs))
-		assert.Equal(t, 1, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix1, true)
+		dirs = CheckObjectPathHolderChan(t, pathHolderChan, false, 1)
 		assert.Contains(t, dirs, key4)
 
 		// non-recursive find localPath/testPrefix/a*
 		// return:
 		//   localPath/testPrefix/abc
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, false)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(dirs))
-		assert.Equal(t, 1, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix2, false)
+		dirs = CheckObjectPathHolderChan(t, pathHolderChan, false, 1)
 		assert.Contains(t, dirs, filepath.Dir(key1))
 
 		// recursive find localPath/testPrefix/a*
 		// no file returned
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix2, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(dirs))
-		assert.Equal(t, 0, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix2, true)
+		_ = CheckObjectPathHolderChan(t, pathHolderChan, false, 0)
 
 		// remove the folder localPath/testPrefix
 		// the file localPath/testPrefix/bcd is removed, but the folder testPrefix still exist
@@ -593,18 +571,14 @@ func TestLocalCM(t *testing.T) {
 
 		// recursive find localPath/testPrefix
 		// no file returned
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(dirs))
-		assert.Equal(t, 0, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix1, true)
+		_ = CheckObjectPathHolderChan(t, pathHolderChan, false, 0)
 
 		// recursive find localPath/testPrefix
 		// return
 		//   localPath/testPrefix
-		dirs, mods, err = testCM.ListWithPrefix(ctx, testPrefix1, false)
-		assert.NoError(t, err)
-		assert.Equal(t, 1, len(dirs))
-		assert.Equal(t, 1, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix1, false)
+		dirs = CheckObjectPathHolderChan(t, pathHolderChan, false, 1)
 		assert.Contains(t, dirs, filepath.Dir(key4))
 	})
 }

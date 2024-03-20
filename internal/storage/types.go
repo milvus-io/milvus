@@ -41,6 +41,19 @@ type FileReader interface {
 	io.Seeker
 }
 
+type ObjectPathHolder struct {
+	Path    string
+	ISDir   bool
+	ModTime time.Time
+	Err     error
+}
+
+type ObjectDataHolder struct {
+	Path string
+	Data []byte
+	Err  error
+}
+
 // ChunkManager is to manager chunks.
 // Include Read, Write, Remove chunks.
 type ChunkManager interface {
@@ -61,10 +74,10 @@ type ChunkManager interface {
 	// Reader return a reader for @filePath
 	Reader(ctx context.Context, filePath string) (FileReader, error)
 	// MultiRead reads @filePath and returns content.
-	MultiRead(ctx context.Context, filePaths []string) ([][]byte, error)
-	ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error)
+	MultiRead(ctx context.Context, filePaths []string) <-chan ObjectDataHolder
+	ListWithPrefix(ctx context.Context, prefix string, recursive bool) <-chan ObjectPathHolder
 	// ReadWithPrefix reads files with same @prefix and returns contents.
-	ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error)
+	ReadWithPrefix(ctx context.Context, prefix string) <-chan ObjectDataHolder
 	Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error)
 	// ReadAt reads @filePath by offset @off, content stored in @p, return @n as the number of bytes read.
 	// if all bytes are read, @err is io.EOF.

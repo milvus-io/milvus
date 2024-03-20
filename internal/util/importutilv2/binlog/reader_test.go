@@ -333,8 +333,8 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	originalInsertData := createInsertData(suite.T(), schema, suite.numRows)
 	insertLogs := lo.Flatten(lo.Values(insertBinlogs))
 
-	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(insertLogs, nil, nil)
-	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(deltaLogs, nil, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(GetObjectPathHolderChan(insertLogs))
+	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(GetObjectPathHolderChan(deltaLogs))
 	for fieldID, paths := range insertBinlogs {
 		field := typeutil.GetField(schema, fieldID)
 		suite.NotNil(field)
@@ -393,6 +393,17 @@ OUTER:
 			}
 		}
 	}
+}
+
+func GetObjectPathHolderChan(paths []string) <-chan storage.ObjectPathHolder {
+	ch := make(chan storage.ObjectPathHolder, len(paths))
+	defer close(ch)
+	for _, path := range paths {
+		ch <- storage.ObjectPathHolder{
+			Path: path,
+		}
+	}
+	return ch
 }
 
 func (suite *ReaderSuite) TestReadScalarFields() {

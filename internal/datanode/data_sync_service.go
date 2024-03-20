@@ -288,16 +288,19 @@ func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *s
 	}
 
 	// read historical PK filter
-	values, err := chunkManager.MultiRead(ctx, bloomFilterFiles)
-	if err != nil {
-		log.Warn("failed to load bloom filter files", zap.Error(err))
-		return nil, err
-	}
+	objectDataPathHolderChan := chunkManager.MultiRead(ctx, bloomFilterFiles)
 	blobs := make([]*Blob, 0)
-	for i := 0; i < len(values); i++ {
-		blobs = append(blobs, &Blob{Value: values[i]})
+	for objectDataHolder := range objectDataPathHolderChan {
+		if objectDataHolder.Err != nil {
+			log.Warn("failed to load bloom filter files",
+				zap.String("logPath", objectDataHolder.Path),
+				zap.Error(objectDataHolder.Err))
+			return nil, objectDataHolder.Err
+		}
+		blobs = append(blobs, &Blob{Value: objectDataHolder.Data})
 	}
 
+	var err error
 	var stats []*storage.PrimaryKeyStats
 	if logType == storage.CompoundStatsType {
 		stats, err = storage.DeserializeStatsList(blobs[0])

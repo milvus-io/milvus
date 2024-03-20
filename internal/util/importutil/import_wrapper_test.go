@@ -26,7 +26,6 @@ import (
 	"path"
 	"strconv"
 	"testing"
-	"time"
 
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/cockroachdb/errors"
@@ -95,25 +94,35 @@ func (mc *MockChunkManager) Read(ctx context.Context, filePath string) ([]byte, 
 	return val, nil
 }
 
-func (mc *MockChunkManager) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
-	return nil, nil
+func (mc *MockChunkManager) MultiRead(ctx context.Context, filePaths []string) <-chan storage.ObjectDataHolder {
+	return nil
 }
 
-func (mc *MockChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
+func (mc *MockChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) <-chan storage.ObjectPathHolder {
 	if mc.listErr != nil {
-		return nil, nil, mc.listErr
+		result := make(chan storage.ObjectPathHolder, 1)
+		result <- storage.ObjectPathHolder{
+			Path: prefix,
+			Err:  mc.listErr,
+		}
+		close(result)
+		return result
 	}
 
-	result, ok := mc.listResult[prefix]
-	if ok {
-		return result, nil, nil
+	result := mc.listResult[prefix]
+	resultChan := make(chan storage.ObjectPathHolder, len(result))
+	defer close(resultChan)
+	for _, filePath := range result {
+		resultChan <- storage.ObjectPathHolder{
+			Path: filePath,
+		}
 	}
 
-	return nil, nil, nil
+	return resultChan
 }
 
-func (mc *MockChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	return nil, nil, nil
+func (mc *MockChunkManager) ReadWithPrefix(ctx context.Context, prefix string) <-chan storage.ObjectDataHolder {
+	return nil
 }
 
 func (mc *MockChunkManager) ReadAt(ctx context.Context, filePath string, off int64, length int64) ([]byte, error) {

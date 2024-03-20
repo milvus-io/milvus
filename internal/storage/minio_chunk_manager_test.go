@@ -169,10 +169,8 @@ func TestMinIOCM(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
-				assert.NoError(t, err)
-				assert.Equal(t, len(test.expectedValue), len(gotk))
-				assert.Equal(t, len(test.expectedValue), len(gotv))
+				objectDataHolderChan := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
+				_, gotv := CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(test.expectedValue))
 				assert.ElementsMatch(t, test.expectedValue, gotv)
 			})
 		}
@@ -194,12 +192,12 @@ func TestMinIOCM(t *testing.T) {
 					test.multiKeys[i] = path.Join(testLoadRoot, test.multiKeys[i])
 				}
 				if test.isvalid {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.NoError(t, err)
+					objectDataHolderChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				} else {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.Error(t, err)
+					objectDataHolderChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, objectDataHolderChan, true, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				}
 			})
@@ -293,8 +291,8 @@ func TestMinIOCM(t *testing.T) {
 			path.Join(testRemoveRoot, "mkey_3"),
 		}
 
-		lv, err := testCM.MultiRead(ctx, multiRemoveTest)
-		require.NoError(t, err)
+		objectDataHolderChan := testCM.MultiRead(ctx, multiRemoveTest)
+		_, lv := CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(multiRemoveTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.MultiRemove(ctx, multiRemoveTest)
@@ -313,8 +311,8 @@ func TestMinIOCM(t *testing.T) {
 		}
 		removePrefix := path.Join(testRemoveRoot, "key_prefix")
 
-		lv, err = testCM.MultiRead(ctx, removeWithPrefixTest)
-		require.NoError(t, err)
+		objectDataHolderChan = testCM.MultiRead(ctx, removeWithPrefixTest)
+		_, lv = CheckObjectDataHolderChan(t, objectDataHolderChan, false, len(removeWithPrefixTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.RemoveWithPrefix(ctx, removePrefix)
@@ -471,10 +469,8 @@ func TestMinIOCM(t *testing.T) {
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, len(r), 2)
-		assert.Equal(t, len(m), 2)
+		objectPathHolderChan := testCM.ListWithPrefix(ctx, pathPrefix, true)
+		CheckObjectPathHolderChan(t, objectPathHolderChan, false, 2)
 
 		key = path.Join(testPrefix, "b", "b", "b")
 		err = testCM.Write(ctx, key, value)
@@ -487,27 +483,21 @@ func TestMinIOCM(t *testing.T) {
 		key = path.Join(testPrefix, "bc", "a", "b")
 		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix+"/", true)
-		assert.NoError(t, err)
-		assert.Equal(t, 5, len(dirs))
-		assert.Equal(t, 5, len(mods))
+		objectPathHolderChan = testCM.ListWithPrefix(ctx, testPrefix+"/", true)
+		CheckObjectPathHolderChan(t, objectPathHolderChan, false, 5)
 
-		dirs, mods, err = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(dirs))
-		assert.Equal(t, 3, len(mods))
+		objectPathHolderChan = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
+		CheckObjectPathHolderChan(t, objectPathHolderChan, false, 3)
 
 		testCM.RemoveWithPrefix(ctx, testPrefix)
-		r, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(r))
-		assert.Equal(t, 0, len(m))
+		objectPathHolderChan = testCM.ListWithPrefix(ctx, pathPrefix, true)
+		CheckObjectPathHolderChan(t, objectPathHolderChan, false, 0)
 
 		// test wrong prefix
 		b := make([]byte, 2048)
 		pathWrong := path.Join(testPrefix, string(b))
-		_, _, err = testCM.ListWithPrefix(ctx, pathWrong, true)
-		assert.Error(t, err)
+		objectPathHolderChan = testCM.ListWithPrefix(ctx, pathWrong, true)
+		CheckObjectPathHolderChan(t, objectPathHolderChan, true, 0)
 	})
 
 	t.Run("test NoSuchKey", func(t *testing.T) {

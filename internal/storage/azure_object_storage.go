@@ -30,10 +30,15 @@ import (
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/blockblob"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/container"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/service"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
+
+var _ ObjectStorage = (*AzureObjectStorage)(nil)
 
 type AzureObjectStorage struct {
 	*service.Client
@@ -197,43 +202,62 @@ func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bu
 	return *info.ContentLength, nil
 }
 
-func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
-	var objectsKeys []string
-	var modTimes []time.Time
-	if recursive {
-		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
-			Prefix: &prefix,
-		})
-		if pager.More() {
-			pageResp, err := pager.NextPage(context.Background())
-			if err != nil {
-				return []string{}, []time.Time{}, checkObjectStorageError(prefix, err)
+func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) <-chan ObjectPathHolder {
+	pathHolder := make(chan ObjectPathHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(pathHolder)
+		if recursive {
+			pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
+				Prefix: &prefix,
+			})
+			for pager.More() {
+				pageResp, err := pager.NextPage(ctx)
+				if err != nil {
+					log.Warn("ListObjects failed", zap.String("bucketName", bucketName), zap.String("prefix", prefix), zap.Error(err))
+					pathHolder <- ObjectPathHolder{
+						Path: prefix,
+						Err:  checkObjectStorageError(prefix, err),
+					}
+					return
+				}
+				for _, blobItem := range pageResp.Segment.BlobItems {
+					pathHolder <- ObjectPathHolder{
+						Path:    *blobItem.Name,
+						ModTime: *blobItem.Properties.LastModified,
+					}
+				}
 			}
-			for _, blob := range pageResp.Segment.BlobItems {
-				objectsKeys = append(objectsKeys, *blob.Name)
-				modTimes = append(modTimes, *blob.Properties.LastModified)
-			}
+			return
 		}
-	} else {
 		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsHierarchyPager("/", &container.ListBlobsHierarchyOptions{
 			Prefix: &prefix,
 		})
-		if pager.More() {
+		for pager.More() {
 			pageResp, err := pager.NextPage(context.Background())
 			if err != nil {
-				return []string{}, []time.Time{}, checkObjectStorageError(prefix, err)
+				log.Warn("ListObjects failed", zap.String("bucketName", bucketName), zap.String("prefix", prefix), zap.Error(err))
+				pathHolder <- ObjectPathHolder{
+					Path: prefix,
+					Err:  checkObjectStorageError(prefix, err),
+				}
+				return
 			}
 			for _, blob := range pageResp.Segment.BlobItems {
-				objectsKeys = append(objectsKeys, *blob.Name)
-				modTimes = append(modTimes, *blob.Properties.LastModified)
+				pathHolder <- ObjectPathHolder{
+					Path:    *blob.Name,
+					ModTime: *blob.Properties.LastModified,
+				}
 			}
 			for _, blob := range pageResp.Segment.BlobPrefixes {
-				objectsKeys = append(objectsKeys, *blob.Name)
-				modTimes = append(modTimes, time.Now())
+				pathHolder <- ObjectPathHolder{
+					Path:    *blob.Name,
+					ModTime: time.Now(),
+					ISDir:   true,
+				}
 			}
 		}
-	}
-	return objectsKeys, modTimes, nil
+	}()
+	return pathHolder
 }
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {

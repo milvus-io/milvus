@@ -726,7 +726,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
+		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(GetObjectPathHolderChan([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}))
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		gc := newGarbageCollector(
@@ -742,7 +742,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 	t.Run("list fail", func(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("error"))
+		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(GetObjectPathHolderErrChan(errors.New("error")))
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
@@ -756,7 +756,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
+		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(GetObjectPathHolderChan([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}))
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
@@ -771,7 +771,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
+		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(GetObjectPathHolderChan([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}))
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("error"))
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
@@ -1586,4 +1586,25 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 func TestGarbageCollector(t *testing.T) {
 	suite.Run(t, new(GarbageCollectorSuite))
+}
+
+func GetObjectPathHolderChan(paths []string) <-chan storage.ObjectPathHolder {
+	ch := make(chan storage.ObjectPathHolder, len(paths))
+	defer close(ch)
+	for _, path := range paths {
+		ch <- storage.ObjectPathHolder{
+			Path: path,
+		}
+	}
+	return ch
+}
+
+func GetObjectPathHolderErrChan(err error) <-chan storage.ObjectPathHolder {
+	ch := make(chan storage.ObjectPathHolder, 1)
+	defer close(ch)
+	ch <- storage.ObjectPathHolder{
+		Err: err,
+	}
+	return ch
+
 }

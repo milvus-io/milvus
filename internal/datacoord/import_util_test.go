@@ -336,8 +336,8 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 
 	ctx := context.Background()
 	cm := mocks2.NewChunkManager(t)
-	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
-	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
+	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(GetObjectPathHolderChan(segmentInsertPaths))
+	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(GetObjectPathHolderChan(segmentDeltaPaths))
 
 	file := &internalpb.ImportFile{
 		Id:    1,

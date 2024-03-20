@@ -81,16 +81,12 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if len(paths) < 2 {
 		return nil
 	}
-	deltaLogs, _, err := r.cm.ListWithPrefix(context.Background(), paths[1], true)
+	r.deleteData, err = r.readDelete(paths[1], tsStart, tsEnd)
 	if err != nil {
 		return err
 	}
-	if len(deltaLogs) == 0 {
+	if r.deleteData.Size() == 0 {
 		return nil
-	}
-	r.deleteData, err = r.readDelete(deltaLogs, tsStart, tsEnd)
-	if err != nil {
-		return err
 	}
 
 	deleteFilter, err := FilterWithDelete(r)
@@ -101,9 +97,15 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	return nil
 }
 
-func (r *reader) readDelete(deltaLogs []string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
+func (r *reader) readDelete(deltaPathPrefix string, tsStart, tsEnd uint64) (*storage.DeleteData, error) {
+	objectPathHolderChan := r.cm.ListWithPrefix(r.ctx, deltaPathPrefix, true)
+
 	deleteData := storage.NewDeleteData(nil, nil)
-	for _, path := range deltaLogs {
+	for objectPathHolder := range objectPathHolderChan {
+		if objectPathHolder.Err != nil {
+			return nil, objectPathHolder.Err
+		}
+		path := objectPathHolder.Path
 		reader, err := newBinlogReader(r.ctx, r.cm, path)
 		if err != nil {
 			return nil, err

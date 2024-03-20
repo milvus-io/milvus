@@ -390,15 +390,30 @@ func (mk *mockCm) Read(ctx context.Context, filePath string) ([]byte, error) {
 	return mk.ReadReturn, nil
 }
 
-func (mk *mockCm) MultiRead(ctx context.Context, filePaths []string) ([][]byte, error) {
+func (mk *mockCm) MultiRead(ctx context.Context, filePaths []string) <-chan storage.ObjectDataHolder {
+
 	if mk.MultiReadReturn != nil {
-		return mk.MultiReadReturn, nil
+		c := make(chan storage.ObjectDataHolder, len(mk.MultiReadReturn))
+		defer close(c)
+		for _, v := range mk.MultiReadReturn {
+			c <- storage.ObjectDataHolder{
+				Data: v,
+			}
+		}
+		return c
 	}
-	return [][]byte{[]byte("a")}, nil
+	c := make(chan storage.ObjectDataHolder, 1)
+	defer close(c)
+	c <- storage.ObjectDataHolder{
+		Data: []byte("a"),
+	}
+	return c
 }
 
-func (mk *mockCm) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	return nil, nil, nil
+func (mk *mockCm) ReadWithPrefix(ctx context.Context, prefix string) <-chan storage.ObjectDataHolder {
+	c := make(chan storage.ObjectDataHolder)
+	close(c)
+	return c
 }
 
 func (mk *mockCm) Remove(ctx context.Context, key string) error           { return nil }

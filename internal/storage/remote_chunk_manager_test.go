@@ -149,10 +149,8 @@ func TestMinioChunkManager(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
-				assert.NoError(t, err)
-				assert.Equal(t, len(test.expectedValue), len(gotk))
-				assert.Equal(t, len(test.expectedValue), len(gotv))
+				dataChan := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
+				_, gotv := CheckObjectDataHolderChan(t, dataChan, false, len(test.expectedValue))
 				assert.ElementsMatch(t, test.expectedValue, gotv)
 			})
 		}
@@ -174,12 +172,12 @@ func TestMinioChunkManager(t *testing.T) {
 					test.multiKeys[i] = path.Join(testLoadRoot, test.multiKeys[i])
 				}
 				if test.isvalid {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.NoError(t, err)
+					dataChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, dataChan, false, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				} else {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.Error(t, err)
+					dataChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, dataChan, true, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				}
 			})
@@ -277,8 +275,8 @@ func TestMinioChunkManager(t *testing.T) {
 			path.Join(testRemoveRoot, "mkey_3"),
 		}
 
-		lv, err := testCM.MultiRead(ctx, multiRemoveTest)
-		require.NoError(t, err)
+		dataChan := testCM.MultiRead(ctx, multiRemoveTest)
+		_, lv := CheckObjectDataHolderChan(t, dataChan, false, len(multiRemoveTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.MultiRemove(ctx, multiRemoveTest)
@@ -297,8 +295,8 @@ func TestMinioChunkManager(t *testing.T) {
 		}
 		removePrefix := path.Join(testRemoveRoot, "key_prefix")
 
-		lv, err = testCM.MultiRead(ctx, removeWithPrefixTest)
-		require.NoError(t, err)
+		dataChan = testCM.MultiRead(ctx, removeWithPrefixTest)
+		_, lv = CheckObjectDataHolderChan(t, dataChan, false, len(removeWithPrefixTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.RemoveWithPrefix(ctx, removePrefix)
@@ -455,10 +453,8 @@ func TestMinioChunkManager(t *testing.T) {
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, len(r), 2)
-		assert.Equal(t, len(m), 2)
+		pathHolderChan := testCM.ListWithPrefix(ctx, pathPrefix, true)
+		CheckObjectPathHolderChan(t, pathHolderChan, false, 2)
 
 		key = path.Join(testPrefix, "b", "b", "b")
 		err = testCM.Write(ctx, key, value)
@@ -471,27 +467,21 @@ func TestMinioChunkManager(t *testing.T) {
 		key = path.Join(testPrefix, "bc", "a", "b")
 		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix+"/", true)
-		assert.NoError(t, err)
-		assert.Equal(t, 5, len(dirs))
-		assert.Equal(t, 5, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, testPrefix+"/", true)
+		CheckObjectPathHolderChan(t, pathHolderChan, false, 5)
 
-		dirs, mods, err = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(dirs))
-		assert.Equal(t, 3, len(mods))
+		pathHolderChan = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
+		CheckObjectPathHolderChan(t, pathHolderChan, false, 3)
 
 		testCM.RemoveWithPrefix(ctx, testPrefix)
-		r, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(r))
-		assert.Equal(t, 0, len(m))
+		pathHolderChan = testCM.ListWithPrefix(ctx, pathPrefix, true)
+		CheckObjectPathHolderChan(t, pathHolderChan, false, 0)
 
 		// test wrong prefix
 		b := make([]byte, 2048)
 		pathWrong := path.Join(testPrefix, string(b))
-		_, _, err = testCM.ListWithPrefix(ctx, pathWrong, true)
-		assert.Error(t, err)
+		pathHolderChan = testCM.ListWithPrefix(ctx, pathWrong, true)
+		CheckObjectPathHolderChan(t, pathHolderChan, true, 1)
 	})
 
 	t.Run("test NoSuchKey", func(t *testing.T) {
@@ -603,10 +593,8 @@ func TestAzureChunkManager(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, gotv, err := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
-				assert.NoError(t, err)
-				assert.Equal(t, len(test.expectedValue), len(gotk))
-				assert.Equal(t, len(test.expectedValue), len(gotv))
+				dataChan := testCM.ReadWithPrefix(ctx, path.Join(testLoadRoot, test.prefix))
+				_, gotv := CheckObjectDataHolderChan(t, dataChan, false, len(test.expectedValue))
 				assert.ElementsMatch(t, test.expectedValue, gotv)
 			})
 		}
@@ -628,12 +616,12 @@ func TestAzureChunkManager(t *testing.T) {
 					test.multiKeys[i] = path.Join(testLoadRoot, test.multiKeys[i])
 				}
 				if test.isvalid {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.NoError(t, err)
+					dataChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, dataChan, false, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				} else {
-					got, err := testCM.MultiRead(ctx, test.multiKeys)
-					assert.Error(t, err)
+					dataChan := testCM.MultiRead(ctx, test.multiKeys)
+					_, got := CheckObjectDataHolderChan(t, dataChan, true, len(test.expectedValue))
 					assert.Equal(t, test.expectedValue, got)
 				}
 			})
@@ -731,8 +719,8 @@ func TestAzureChunkManager(t *testing.T) {
 			path.Join(testRemoveRoot, "mkey_3"),
 		}
 
-		lv, err := testCM.MultiRead(ctx, multiRemoveTest)
-		require.NoError(t, err)
+		dataChan := testCM.MultiRead(ctx, multiRemoveTest)
+		_, lv := CheckObjectDataHolderChan(t, dataChan, false, len(multiRemoveTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.MultiRemove(ctx, multiRemoveTest)
@@ -751,8 +739,8 @@ func TestAzureChunkManager(t *testing.T) {
 		}
 		removePrefix := path.Join(testRemoveRoot, "key_prefix")
 
-		lv, err = testCM.MultiRead(ctx, removeWithPrefixTest)
-		require.NoError(t, err)
+		dataChan = testCM.MultiRead(ctx, removeWithPrefixTest)
+		_, lv = CheckObjectDataHolderChan(t, dataChan, false, len(removeWithPrefixTest))
 		require.ElementsMatch(t, [][]byte{[]byte("111"), []byte("222"), []byte("333")}, lv)
 
 		err = testCM.RemoveWithPrefix(ctx, removePrefix)
@@ -909,10 +897,8 @@ func TestAzureChunkManager(t *testing.T) {
 		assert.NoError(t, err)
 
 		pathPrefix := path.Join(testPrefix, "a")
-		r, m, err := testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, len(r), 2)
-		assert.Equal(t, len(m), 2)
+		pathChan := testCM.ListWithPrefix(ctx, pathPrefix, true)
+		CheckObjectPathHolderChan(t, pathChan, false, 2)
 
 		key = path.Join(testPrefix, "b", "b", "b")
 		err = testCM.Write(ctx, key, value)
@@ -925,27 +911,21 @@ func TestAzureChunkManager(t *testing.T) {
 		key = path.Join(testPrefix, "bc", "a", "b")
 		err = testCM.Write(ctx, key, value)
 		assert.NoError(t, err)
-		dirs, mods, err := testCM.ListWithPrefix(ctx, testPrefix+"/", true)
-		assert.NoError(t, err)
-		assert.Equal(t, 5, len(dirs))
-		assert.Equal(t, 5, len(mods))
+		pathChan = testCM.ListWithPrefix(ctx, testPrefix+"/", true)
+		CheckObjectPathHolderChan(t, pathChan, false, 5)
 
-		dirs, mods, err = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
-		assert.NoError(t, err)
-		assert.Equal(t, 3, len(dirs))
-		assert.Equal(t, 3, len(mods))
+		pathChan = testCM.ListWithPrefix(ctx, path.Join(testPrefix, "b"), true)
+		CheckObjectPathHolderChan(t, pathChan, false, 3)
 
 		testCM.RemoveWithPrefix(ctx, testPrefix)
-		r, m, err = testCM.ListWithPrefix(ctx, pathPrefix, true)
-		assert.NoError(t, err)
-		assert.Equal(t, 0, len(r))
-		assert.Equal(t, 0, len(m))
+		pathChan = testCM.ListWithPrefix(ctx, pathPrefix, true)
+		CheckObjectPathHolderChan(t, pathChan, false, 0)
 
 		// test wrong prefix
 		b := make([]byte, 2048)
 		pathWrong := path.Join(testPrefix, string(b))
-		_, _, err = testCM.ListWithPrefix(ctx, pathWrong, true)
-		assert.Error(t, err)
+		pathChan = testCM.ListWithPrefix(ctx, pathWrong, true)
+		CheckObjectPathHolderChan(t, pathChan, true, 0)
 	})
 
 	t.Run("test NoSuchKey", func(t *testing.T) {
@@ -971,4 +951,46 @@ func TestAzureChunkManager(t *testing.T) {
 		assert.Error(t, err)
 		assert.True(t, errors.Is(err, merr.ErrIoKeyNotFound))
 	})
+}
+
+func CheckObjectPathHolderChan(t *testing.T, holderChan <-chan ObjectPathHolder, shouldErr bool, len int) []string {
+	l := 0
+	p := make([]string, 0)
+	existErr := false
+	for pathHolder := range holderChan {
+		if pathHolder.Err != nil {
+			existErr = true
+		}
+		if pathHolder.Err == nil {
+			l++
+		}
+		p = append(p, pathHolder.Path)
+	}
+	assert.Equal(t, shouldErr, existErr)
+	if !shouldErr {
+		assert.Equal(t, len, l)
+	}
+	return p
+}
+
+func CheckObjectDataHolderChan(t *testing.T, holderChan <-chan ObjectDataHolder, shouldErr bool, len int) ([]string, [][]byte) {
+	l := 0
+	p := make([]string, 0)
+	d := make([][]byte, 0)
+	existErr := false
+	for dataHolder := range holderChan {
+		if dataHolder.Err != nil {
+			existErr = true
+		}
+		if dataHolder.Err == nil {
+			l++
+		}
+		p = append(p, dataHolder.Path)
+		d = append(d, dataHolder.Data)
+	}
+	assert.Equal(t, shouldErr, existErr)
+	if !shouldErr {
+		assert.Equal(t, len, l)
+	}
+	return p, d
 }

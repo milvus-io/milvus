@@ -117,16 +117,14 @@ func NewBinlogParser(ctx context.Context,
 // insert logs and delta logs of a segment.
 func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoot string) ([]*SegmentFilesHolder, error) {
 	holders := make(map[int64]*SegmentFilesHolder)
-	// TODO add context
-	insertlogs, _, err := p.chunkManager.ListWithPrefix(context.TODO(), insertlogRoot, true)
-	if err != nil {
-		log.Warn("Binlog parser: list insert logs error", zap.Error(err))
-		return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to list insert logs with root path %s, error: %v", insertlogRoot, err))
-	}
-
+	insertLogPathHolderChan := p.chunkManager.ListWithPrefix(p.ctx, insertlogRoot, true)
 	// collect insert log paths
-	log.Info("Binlog parser: list insert logs", zap.Int("logsCount", len(insertlogs)))
-	for _, insertlog := range insertlogs {
+	for insertLogPathHolder := range insertLogPathHolderChan {
+		if insertLogPathHolder.Err != nil {
+			log.Warn("Binlog parser: list insert logs error", zap.Error(insertLogPathHolder.Err))
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to list insert logs with root path %s, error: %v", insertlogRoot, insertLogPathHolder.Err))
+		}
+		insertlog := insertLogPathHolder.Path
 		log.Info("Binlog parser: mapping insert log to segment", zap.String("insertlog", insertlog))
 		filePath := path.Base(insertlog)
 		// skip file with prefix '.', such as .success .DS_Store
@@ -164,6 +162,7 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 			holders[segmentID] = holder
 		}
 	}
+	log.Info("Binlog parser: list insert logs done")
 
 	// sort the insert log paths of each field by ascendent sequence
 	// there might be several insert logs under a field, for example:
@@ -182,15 +181,13 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 
 	// collect delta log paths
 	if len(deltalogRoot) > 0 {
-		// TODO add context
-		deltalogs, _, err := p.chunkManager.ListWithPrefix(context.TODO(), deltalogRoot, true)
-		if err != nil {
-			log.Warn("Binlog parser: failed to list delta logs", zap.Error(err))
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to list delta logs, error: %v", err))
-		}
-
-		log.Info("Binlog parser: list delta logs", zap.Int("logsCount", len(deltalogs)))
-		for _, deltalog := range deltalogs {
+		deltaLogPathHolderChan := p.chunkManager.ListWithPrefix(p.ctx, deltalogRoot, true)
+		for deltaLogPathHolder := range deltaLogPathHolderChan {
+			if deltaLogPathHolder.Err != nil {
+				log.Warn("Binlog parser: list delta logs error", zap.Error(deltaLogPathHolder.Err))
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("failed to list delta logs with root path %s, error: %v", deltalogRoot, deltaLogPathHolder.Err))
+			}
+			deltalog := deltaLogPathHolder.Path
 			log.Info("Binlog parser: mapping delta log to segment", zap.String("deltalog", deltalog))
 			segmentPath := path.Dir(deltalog)
 			segmentStrID := path.Base(segmentPath)
@@ -206,6 +203,7 @@ func (p *BinlogParser) constructSegmentHolders(insertlogRoot string, deltalogRoo
 				holder.deltaFiles = append(holder.deltaFiles, deltalog)
 			}
 		}
+		log.Info("Binlog parser: list delta logs done")
 	}
 
 	// since the map in golang is not sorted, we sort the segment id array to return holder list with ascending sequence

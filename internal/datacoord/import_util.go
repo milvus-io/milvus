@@ -422,35 +422,33 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
 	}
 
+	segmentImportFiles := make(map[string]*internalpb.ImportFile)
+
 	insertPrefix := importFile.GetPaths()[0]
-	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, false)
-	if err != nil {
-		return nil, err
+	segmentInsertPathHolderChan := cm.ListWithPrefix(ctx, insertPrefix, false)
+	for objectPathHolder := range segmentInsertPathHolderChan {
+		if objectPathHolder.Err != nil {
+			return nil, objectPathHolder.Err
+		}
+		segmentID := path.Base(objectPathHolder.Path)
+		segmentImportFiles[segmentID] = &internalpb.ImportFile{Paths: []string{objectPathHolder.Path}}
 	}
-	segmentImportFiles := lo.Map(segmentInsertPaths, func(segmentPath string, _ int) *internalpb.ImportFile {
-		return &internalpb.ImportFile{Paths: []string{segmentPath}}
-	})
 
 	if len(importFile.GetPaths()) < 2 {
-		return segmentImportFiles, nil
+		return lo.Values(segmentImportFiles), nil
 	}
 	deltaPrefix := importFile.GetPaths()[1]
-	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
-	if err != nil {
-		return nil, err
-	}
-	if len(segmentDeltaPaths) == 0 {
-		return segmentImportFiles, nil
-	}
-	deltaSegmentIDs := lo.KeyBy(segmentDeltaPaths, func(deltaPrefix string) string {
-		return path.Base(deltaPrefix)
-	})
-
-	for i := range segmentImportFiles {
-		segmentID := path.Base(segmentImportFiles[i].GetPaths()[0])
-		if deltaPrefix, ok := deltaSegmentIDs[segmentID]; ok {
-			segmentImportFiles[i].Paths = append(segmentImportFiles[i].Paths, deltaPrefix)
+	segmentDeltaPathHolderChan := cm.ListWithPrefix(ctx, deltaPrefix, false)
+	for objectPathHolder := range segmentDeltaPathHolderChan {
+		if objectPathHolder.Err != nil {
+			return nil, objectPathHolder.Err
 		}
+		segmentID := path.Base(objectPathHolder.Path)
+		importFileObj, ok := segmentImportFiles[segmentID]
+		if !ok {
+			continue
+		}
+		importFileObj.Paths = append(importFileObj.Paths, objectPathHolder.Path)
 	}
-	return segmentImportFiles, nil
+	return lo.Values(segmentImportFiles), nil
 }

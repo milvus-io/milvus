@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -210,31 +211,63 @@ func (mcm *MinioChunkManager) Read(ctx context.Context, filePath string) ([]byte
 	return data, nil
 }
 
-func (mcm *MinioChunkManager) MultiRead(ctx context.Context, keys []string) ([][]byte, error) {
-	errors := make([]error, 0)
-	var objectsValues [][]byte
-	for _, key := range keys {
-		objectValue, err := mcm.Read(ctx, key)
-		if err != nil {
-			errors = append(errors, err)
+func (mcm *MinioChunkManager) MultiRead(ctx context.Context, keys []string) <-chan ObjectDataHolder {
+	dataHolderChan := make(chan ObjectDataHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(dataHolderChan)
+		for _, key := range keys {
+			objectValue, err := mcm.Read(ctx, key)
+			if err != nil {
+				dataHolderChan <- ObjectDataHolder{
+					Path: key,
+					Err:  err,
+				}
+				continue
+			}
+			dataHolderChan <- ObjectDataHolder{
+				Path: key,
+				Data: objectValue,
+			}
 		}
-		objectsValues = append(objectsValues, objectValue)
-	}
+	}()
 
-	return objectsValues, merr.Combine(errors...)
+	return dataHolderChan
 }
 
-func (mcm *MinioChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	objectsKeys, _, err := mcm.ListWithPrefix(ctx, prefix, true)
-	if err != nil {
-		return nil, nil, err
-	}
-	objectsValues, err := mcm.MultiRead(ctx, objectsKeys)
-	if err != nil {
-		return nil, nil, err
-	}
+func (mcm *MinioChunkManager) ReadWithPrefix(ctx context.Context, prefix string) <-chan ObjectDataHolder {
+	dataHolderChan := make(chan ObjectDataHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
+	go func() {
+		defer close(dataHolderChan)
+		pathHolderChan := mcm.ListWithPrefix(ctx, prefix, true)
+		for pathHolder := range pathHolderChan {
+			if pathHolder.Err != nil {
+				dataHolderChan <- ObjectDataHolder{
+					Path: pathHolder.Path,
+					Err:  pathHolder.Err,
+				}
+				return
+			}
+			if pathHolder.ISDir {
+				log.Info("skip directory", zap.String("path", pathHolder.Path))
+				continue
+			}
+			objectsValue, err := mcm.Read(ctx, pathHolder.Path)
+			if err != nil {
+				log.Warn("failed to read object", zap.String("path", pathHolder.Path), zap.Error(err))
+				dataHolderChan <- ObjectDataHolder{
+					Path: pathHolder.Path,
+					Err:  err,
+				}
+				return
+			}
+			dataHolderChan <- ObjectDataHolder{
+				Path: pathHolder.Path,
+				Data: objectsValue,
+			}
+		}
+	}()
 
-	return objectsKeys, objectsValues, nil
+	return dataHolderChan
 }
 
 func (mcm *MinioChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
@@ -333,46 +366,53 @@ func (mcm *MinioChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 // say minio has followinng objects: [a, ab, a/b, ab/c]
 // calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
 // If caller needs all objects without level limitation, `recursive` shall be true.
-func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
-	// if minio has lots of objects under the provided path
-	// recursive = true may timeout during the recursive browsing the objects.
-	// See also: https://github.com/milvus-io/milvus/issues/19095
+func (mcm *MinioChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) <-chan ObjectPathHolder {
+	pathHolderChan := make(chan ObjectPathHolder, paramtable.Get().CommonCfg.PullObjectBatchSize.GetAsInt())
 
-	var objectsKeys []string
-	var modTimes []time.Time
+	go func() {
+		defer close(pathHolderChan)
 
-	tasks := list.New()
-	tasks.PushBack(prefix)
-	for tasks.Len() > 0 {
-		e := tasks.Front()
-		pre := e.Value.(string)
-		tasks.Remove(e)
+		tasks := list.New()
+		tasks.PushBack(prefix)
+		for tasks.Len() > 0 {
+			e := tasks.Front()
+			pre := e.Value.(string)
+			tasks.Remove(e)
 
-		// TODO add concurrent call if performance matters
-		// only return current level per call
-		objects := mcm.listMinioObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: pre, Recursive: false})
+			// TODO add concurrent call if performance matters
+			// only return current level per call
+			objects := mcm.listMinioObjects(ctx, mcm.bucketName, minio.ListObjectsOptions{Prefix: pre, Recursive: false})
 
-		for object := range objects {
-			if object.Err != nil {
-				log.Warn("failed to list with prefix", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(object.Err))
-				return nil, nil, object.Err
-			}
-
-			// with tailing "/", object is a "directory"
-			if strings.HasSuffix(object.Key, "/") && recursive {
-				// enqueue when recursive is true
-				if object.Key != pre {
-					tasks.PushBack(object.Key)
+			for object := range objects {
+				if object.Err != nil {
+					log.Warn("failed to list with prefix", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(object.Err))
+					pathHolderChan <- ObjectPathHolder{
+						Path: object.Key,
+						Err:  object.Err,
+					}
+					return
 				}
-				continue
-			}
-			objectsKeys = append(objectsKeys, object.Key)
-			modTimes = append(modTimes, object.LastModified)
-		}
-	}
 
-	return objectsKeys, modTimes, nil
+				// with tailing "/", object is a "directory"
+				isDir := strings.HasSuffix(object.Key, "/")
+				if isDir && recursive {
+					// enqueue when recursive is true
+					if object.Key != pre {
+						tasks.PushBack(object.Key)
+					}
+					// skip the directory, can't return
+					continue
+				}
+				pathHolderChan <- ObjectPathHolder{
+					Path:    object.Key,
+					ModTime: object.LastModified,
+					ISDir:   isDir,
+				}
+			}
+		}
+	}()
+
+	return pathHolderChan
 }
 
 // Learn from file.ReadFile
