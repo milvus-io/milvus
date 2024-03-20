@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"sort"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -272,9 +273,9 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 		delRecord, ok := delRecords[segmentEntry.SegmentID]
 		if ok {
 			log.Debug("delegator plan to applyDelete via worker")
-			err := retry.Do(ctx, func() error {
+			err := retry.Handle(ctx, func() (bool, error) {
 				if sd.Stopped() {
-					return retry.Unrecoverable(merr.WrapErrChannelNotAvailable(sd.vchannelName, "channel is unsubscribing"))
+					return false, merr.WrapErrChannelNotAvailable(sd.vchannelName, "channel is unsubscribing")
 				}
 
 				err := worker.Delete(ctx, &querypb.DeleteRequest{
@@ -289,17 +290,15 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 				})
 				if errors.Is(err, merr.ErrNodeNotFound) {
 					log.Warn("try to delete data on non-exist node")
-					return retry.Unrecoverable(err)
+					return false, err
 				} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 					log.Warn("try to delete data of released segment")
-					return nil
+					return false, nil
 				} else if err != nil {
-					log.Warn("worker failed to delete on segment",
-						zap.Error(err),
-					)
-					return err
+					log.Warn("worker failed to delete on segment", zap.Error(err))
+					return true, err
 				}
-				return nil
+				return false, nil
 			}, retry.Attempts(10))
 			if err != nil {
 				log.Warn("apply delete for segment failed, marking it offline")
@@ -712,6 +711,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 		return nil, err
 	}
 
+	ts = time.Now()
 	err = stream.Seek(context.TODO(), []*msgpb.MsgPosition{position})
 	if err != nil {
 		return nil, err
@@ -761,7 +761,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 			}
 		}
 	}
-
+	log.Info("successfully read delete from stream ", zap.Duration("time spent", time.Since(ts)))
 	return result, nil
 }
 
