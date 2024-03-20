@@ -145,6 +145,13 @@ func (q *QuotaCenter) run() {
 			log.Info("QuotaCenter exit")
 			return
 		case <-ticker.C:
+			// syncMetrics may cost several seconds when qc/dc is offline, and with golang's random select policy
+			// quotaCenter' Stop may block here for minutes. which also affect rootcood's stop
+			_, closed := <-q.stopChan
+			if closed {
+				log.Info("QuotaCenter exit")
+				return
+			}
 			err := q.syncMetrics()
 			if err != nil {
 				log.Warn("quotaCenter sync metrics failed", zap.Error(err))
