@@ -17,8 +17,6 @@
 package datacoord
 
 import (
-	"math"
-	"math/rand"
 	"sort"
 	"strconv"
 	"sync"
@@ -92,12 +90,12 @@ func (s *importScheduler) process() {
 	getNodeID := func(nodeSlots map[int64]int64) int64 {
 		var (
 			nodeID   int64 = NullNodeID
-			minSlots int64 = math.MaxInt64
+			maxSlots int64 = -1
 		)
 		for id, slots := range nodeSlots {
-			if slots > 0 && slots < minSlots {
+			if slots > 0 && slots > maxSlots {
 				nodeID = id
-				minSlots = slots
+				maxSlots = slots
 			}
 		}
 		if nodeID != NullNodeID {
@@ -143,11 +141,6 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 	nodeIDs := lo.Map(s.cluster.GetSessions(), func(s *Session, _ int) int64 {
 		return s.info.NodeID
 	})
-	if len(nodeIDs) > 2 {
-		// Utilize the "Power of Two Choices" algorithm for load balancing.
-		rand.Shuffle(len(nodeIDs), func(i, j int) { nodeIDs[i], nodeIDs[j] = nodeIDs[j], nodeIDs[i] })
-		nodeIDs = nodeIDs[:2]
-	}
 	nodeSlots := make(map[int64]int64)
 	mu := &sync.Mutex{}
 	wg := &sync.WaitGroup{}
