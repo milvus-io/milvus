@@ -66,7 +66,7 @@ spec:
   - emptyDir: {}
     name: docker-root
   - hostPath:
-      path: /tmp/krte/cache
+      path: /tmp/krte/cache2
       type: DirectoryOrCreate
     name: build-cache
   - hostPath:
