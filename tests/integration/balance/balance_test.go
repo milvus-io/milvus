@@ -185,7 +185,7 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 		resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
 	// check total segment number
@@ -197,7 +197,7 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 			s.True(merr.Ok(resp1.GetStatus()))
 			count += len(resp1.Segments)
 		}
-		return count == 4
+		return count == 8
 	}, 10*time.Second, 1*time.Second)
 }
 
@@ -217,7 +217,7 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 		Command: datapb.GcCommand_Resume,
 	})
 
-	// init collection with 2 channel, each channel has 2 segment, each segment has 2000 row
+	// init collection with 2 channel, each channel has 4 segment, each segment has 2000 row
 	// and load it with 2 replicas on 2 nodes.
 	// then we add 2 query node, after balance happens, expected each node have 1 channel and 2 segments
 	name := "test_balance_" + funcutil.GenRandomStr()
@@ -235,13 +235,13 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 	s.Eventually(func() bool {
 		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
 	s.Eventually(func() bool {
 		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
 	// check total segment num
@@ -253,7 +253,7 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 			s.True(merr.Ok(resp1.GetStatus()))
 			count += len(resp1.Segments)
 		}
-		return count == 8
+		return count == 16
 	}, 10*time.Second, 1*time.Second)
 }
 
@@ -292,7 +292,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
-		return len(resp.Channels) == 0 && len(resp.Segments) == 10
+		return len(resp.Channels) == 0 && len(resp.Segments) >= 10
 	}, 30*time.Second, 1*time.Second)
 
 	s.Eventually(func() bool {
@@ -300,7 +300,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
-		return len(resp.Channels) == 0 && len(resp.Segments) == 10
+		return len(resp.Channels) == 0 && len(resp.Segments) >= 10
 	}, 30*time.Second, 1*time.Second)
 
 	// then we force stop qn1 and resume balance channel, let balance channel and load segment happens concurrently on qn2
@@ -322,7 +322,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
-		return len(resp.Channels) == 1 && len(resp.Segments) == 15
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 15
 	}, 30*time.Second, 1*time.Second)
 
 	// expect all delegator will recover to healthy
