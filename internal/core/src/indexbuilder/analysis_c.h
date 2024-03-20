@@ -61,5 +61,14 @@ CStatus
 AppendInsertFilePath(CAnalysisInfo c_analysis_info, const char* file_path);
 
 CStatus
-SerializeAnalysisAndUpLoad(CAnalysis* res_analysis);
-}
+SerializeAnalysisAndUpLoad(CAnalysis analysis);
+
+CStatus
+GetCentroidsFile(const char* file);
+
+CStatus
+GetSegmentOffsetMapping(int64_t segment_id, const char* file);
+
+#ifdef __cplusplus
+};
+#endif

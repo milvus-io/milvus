@@ -204,7 +204,6 @@ func (i *IndexNode) storeAnalysisStatistic(
 	taskID UniqueID,
 	centroidsFile string,
 	segmentsOffsetMapping map[int64]string,
-	indexStoreVersion int64,
 ) {
 	key := taskKey{ClusterID: clusterID, BuildID: taskID}
 	i.stateLock.Lock()
@@ -212,7 +211,6 @@ func (i *IndexNode) storeAnalysisStatistic(
 	if info, ok := i.analysisTasks[key]; ok {
 		info.centroidsFile = centroidsFile
 		info.segmentsOffsetMapping = segmentsOffsetMapping
-		info.indexStoreVersion = indexStoreVersion
 		return
 	}
 }

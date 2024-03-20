@@ -158,12 +158,12 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 		err := am.FinishTask(1, &indexpb.AnalysisResult{
 			TaskID:                    1,
 			State:                     commonpb.IndexState_Finished,
-			PartitionStatsFile:        "a/b/c",
+			CentroidsFile:             "a/b/c",
 			SegmentOffsetMappingFiles: map[int64]string{1000: "1000/a", 1001: "1001/a", 1002: "1002/a", 1003: "1003/a"},
 		})
 		s.NoError(err)
 		s.Equal(commonpb.IndexState_Finished, am.GetTask(1).State)
-		s.Equal("a/b/c", am.GetTask(1).PartitionStatsFile)
+		s.Equal("a/b/c", am.GetTask(1).CentroidsFile)
 	})
 }
 
@@ -240,12 +240,12 @@ func (s *AnalysisMetaSuite) Test_failCase() {
 		err = am.FinishTask(1, &indexpb.AnalysisResult{
 			TaskID:                    1,
 			State:                     commonpb.IndexState_Finished,
-			PartitionStatsFile:        "a/b/c",
+			CentroidsFile:             "a/b/c",
 			SegmentOffsetMappingFiles: map[int64]string{1000: "1000/a", 1001: "1001/a", 1002: "1002/a", 1003: "1003/a"},
 		})
 		s.Error(err)
 		s.Equal(commonpb.IndexState_Unissued, am.GetTask(1).State)
-		s.Equal("", am.GetTask(1).PartitionStatsFile)
+		s.Equal("", am.GetTask(1).CentroidsFile)
 		s.Equal(0, len(am.GetTask(1).SegmentOffsetMappingFiles))
 	})
 }

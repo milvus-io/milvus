@@ -173,14 +173,14 @@ func (m *analysisMeta) FinishTask(taskID int64, result *indexpb.AnalysisResult) 
 	}
 
 	log.Info("finish task meta...", zap.Int64("taskID", taskID), zap.String("state", result.GetState().String()),
-		zap.String("partitionStatsFile", result.GetPartitionStatsFile()),
+		zap.String("centroidsFile", result.GetCentroidsFile()),
 		zap.Any("segmentOffsetMapping", result.GetSegmentOffsetMappingFiles()),
 		zap.String("failReason", result.GetFailReason()))
 
 	cloneT := model.CloneAnalysisTask(t)
 	cloneT.State = result.GetState()
 	cloneT.FailReason = result.GetFailReason()
-	cloneT.PartitionStatsFile = result.GetPartitionStatsFile()
+	cloneT.CentroidsFile = result.GetCentroidsFile()
 	cloneT.SegmentOffsetMappingFiles = result.GetSegmentOffsetMappingFiles()
 	return m.saveTask(cloneT)
 }

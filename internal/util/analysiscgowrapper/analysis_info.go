@@ -19,9 +19,10 @@ package analysiscgowrapper
 /*
 #cgo pkg-config: milvus_indexbuilder
 #include <stdlib.h>	// free
-#include "indexbuilder/index_c.h"
+#include "indexbuilder/analysis_c.h"
 */
 import "C"
+
 import (
 	"unsafe"
 
@@ -97,14 +98,14 @@ func (ai *AnalysisInfo) AppendAnalysisMetaInfo(taskID int64, version int64) erro
 	cTaskID := C.int64_t(taskID)
 	cVersion := C.int64_t(version)
 
-	status := C.AppendAnalysisMetaInfo(ai.cAnalysisInfo, cTaskID, cVersion)
+	status := C.AppendAnalysisInfo(ai.cAnalysisInfo, cTaskID, cVersion)
 	return HandleCStatus(&status, "appendAnalysisMetaInfo failed")
 }
 
 func (ai *AnalysisInfo) AppendSegmentID(segID int64) error {
 	cSegID := C.int64_t(segID)
 
-	status := C.AppendAnalysisSegmentID(ai.cAnalysisInfo, cSegID)
+	status := C.AppendSegmentID(ai.cAnalysisInfo, cSegID)
 	return HandleCStatus(&status, "appendAnalysisSegmentID failed")
 }
 

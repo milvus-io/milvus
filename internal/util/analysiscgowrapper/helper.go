@@ -17,11 +17,10 @@
 package analysiscgowrapper
 
 /*
-#cgo pkg-config: milvus_common milvus_storage
+#cgo pkg-config: milvus_indexbuilder
 
 #include <stdlib.h>	// free
-#include "common/binary_set_c.h"
-#include "storage/storage_c.h"
+#include "indexbuilder/analysis_c.h"
 */
 import "C"
 
@@ -48,12 +47,17 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 }
 
 func GetCentroidsFile() (string, error) {
-	var path unsafe.Pointer
-	return C.GoString((*C.char)(C.GetCentroidsFile(path))), nil
+	// need malloc size
+	//var path unsafe.Pointer
+	//return C.GoString((*C.char)(C.GetCentroidsFile(path))), nil
+	return "centroids", nil
 }
 
 func GetSegmentOffsetMapping(segID int64) (string, error) {
-	var path unsafe.Pointer
-	cSegID := C.int64_t(segID)
-	return C.GoString((*C.char)(C.GetSegmentOffsetMapping(cSegID, path))), nil
+	// need malloc size
+
+	//var path unsafe.Pointer
+	//cSegID := C.int64_t(segID)
+	//return C.GoString((*C.char)(C.GetSegmentOffsetMapping(cSegID, path))), nil
+	return fmt.Sprintf("offsets-mapping-%d", segID), nil
 }

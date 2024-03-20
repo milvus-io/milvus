@@ -20,9 +20,10 @@ package analysiscgowrapper
 #cgo pkg-config: milvus_indexbuilder
 
 #include <stdlib.h>	// free
-#include "indexbuilder/index_c.h"
+#include "indexbuilder/analysis_c.h"
 */
 import "C"
+
 import (
 	"context"
 )

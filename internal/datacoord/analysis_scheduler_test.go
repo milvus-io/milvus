@@ -171,9 +171,9 @@ func (s *AnalysisSchedulerSuite) Test_analysisScheduler() {
 			results := make(map[int64]*indexpb.AnalysisResult)
 			for _, taskID := range request.GetTaskIDs() {
 				results[taskID] = &indexpb.AnalysisResult{
-					TaskID:             taskID,
-					State:              commonpb.IndexState_Finished,
-					PartitionStatsFile: fmt.Sprintf("%d/stats_file", taskID),
+					TaskID:        taskID,
+					State:         commonpb.IndexState_Finished,
+					CentroidsFile: fmt.Sprintf("%d/stats_file", taskID),
 					SegmentOffsetMappingFiles: map[int64]string{
 						1000: "1000/offset_mapping",
 						1001: "1001/offset_mapping",
@@ -308,9 +308,9 @@ func (s *AnalysisSchedulerSuite) Test_failCase() {
 			results := make(map[int64]*indexpb.AnalysisResult)
 			for _, taskID := range request.GetTaskIDs() {
 				results[taskID] = &indexpb.AnalysisResult{
-					TaskID:             taskID,
-					State:              commonpb.IndexState_Finished,
-					PartitionStatsFile: fmt.Sprintf("%d/stats_file", taskID),
+					TaskID:        taskID,
+					State:         commonpb.IndexState_Finished,
+					CentroidsFile: fmt.Sprintf("%d/stats_file", taskID),
 					SegmentOffsetMappingFiles: map[int64]string{
 						1000: "1000/offset_mapping",
 						1001: "1001/offset_mapping",
@@ -403,9 +403,9 @@ func (s *AnalysisSchedulerSuite) Test_failCase() {
 			results := make(map[int64]*indexpb.AnalysisResult)
 			for _, taskID := range request.GetTaskIDs() {
 				results[taskID] = &indexpb.AnalysisResult{
-					TaskID:             taskID,
-					State:              commonpb.IndexState_Finished,
-					PartitionStatsFile: fmt.Sprintf("%d/stats_file", taskID),
+					TaskID:        taskID,
+					State:         commonpb.IndexState_Finished,
+					CentroidsFile: fmt.Sprintf("%d/stats_file", taskID),
 					SegmentOffsetMappingFiles: map[int64]string{
 						1000: "1000/offset_mapping",
 						1001: "1001/offset_mapping",

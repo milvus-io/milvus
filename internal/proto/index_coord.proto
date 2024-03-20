@@ -358,7 +358,7 @@ message AnalysisTask {
     int64 nodeID = 7;
     common.IndexState state = 8;
     string fail_reason = 9;
-    string partition_stats_file = 10;
+    string centroids_file = 10;
     map<int64, string> segment_offset_mapping_files = 11;
 }
 

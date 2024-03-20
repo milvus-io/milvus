@@ -32,7 +32,7 @@ type AnalysisTask struct {
 	NodeID                    int64
 	State                     commonpb.IndexState
 	FailReason                string
-	PartitionStatsFile        string
+	CentroidsFile             string
 	SegmentOffsetMappingFiles map[int64]string
 }
 
@@ -51,7 +51,7 @@ func UnmarshalAnalysisTask(info *indexpb.AnalysisTask) *AnalysisTask {
 		NodeID:                    info.GetNodeID(),
 		State:                     info.GetState(),
 		FailReason:                info.GetFailReason(),
-		PartitionStatsFile:        info.GetPartitionStatsFile(),
+		CentroidsFile:             info.GetCentroidsFile(),
 		SegmentOffsetMappingFiles: info.GetSegmentOffsetMappingFiles(),
 	}
 }
@@ -71,7 +71,7 @@ func MarshalAnalysisTask(t *AnalysisTask) *indexpb.AnalysisTask {
 		NodeID:                    t.NodeID,
 		State:                     t.State,
 		FailReason:                t.FailReason,
-		PartitionStatsFile:        t.PartitionStatsFile,
+		CentroidsFile:             t.CentroidsFile,
 		SegmentOffsetMappingFiles: t.SegmentOffsetMappingFiles,
 	}
 }
@@ -91,7 +91,7 @@ func CloneAnalysisTask(t *AnalysisTask) *AnalysisTask {
 		NodeID:                    t.NodeID,
 		State:                     t.State,
 		FailReason:                t.FailReason,
-		PartitionStatsFile:        t.PartitionStatsFile,
+		CentroidsFile:             t.CentroidsFile,
 		SegmentOffsetMappingFiles: t.SegmentOffsetMappingFiles,
 	}
 }

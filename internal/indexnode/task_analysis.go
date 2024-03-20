@@ -18,14 +18,9 @@ package indexnode
 
 import (
 	"context"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/milvus-io/milvus/internal/util/analysiscgowrapper"
-
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 
 	"go.uber.org/zap"
 
@@ -46,7 +41,7 @@ type analysisTask struct {
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
 	node     *IndexNode
-	index    analysiscgowrapper.CodecAnalysis
+	analysis analysiscgowrapper.CodecAnalysis
 
 	segmentIDs []int64
 	dataPaths  []string
@@ -122,9 +117,9 @@ func (at *analysisTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	at.index, err = analysiscgowrapper.Analysis(ctx, analysisInfo)
+	at.analysis, err = analysiscgowrapper.Analysis(ctx, analysisInfo)
 	if err != nil {
-		if at.index != nil && at.index.CleanLocalData() != nil {
+		if at.analysis != nil && at.analysis.CleanLocalData() != nil {
 			log.Error("failed to clean cached data on disk after analysis failed",
 				zap.Int64("buildID", at.req.GetTaskID()),
 				zap.Int64("index version", at.req.GetVersion()))
@@ -142,38 +137,29 @@ func (at *analysisTask) SaveIndexFiles(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
-	gcIndex := func() {
-		if err := at.index.Delete(); err != nil {
+	gc := func() {
+		if err := at.analysis.Delete(); err != nil {
 			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-	indexFilePath2Size, err := at.index.UpLoad()
+	centroidsFile, segmetsOffsetMapping, err := at.analysis.UpLoad(at.segmentIDs)
 	if err != nil {
 		log.Error("failed to upload index", zap.Error(err))
-		gcIndex()
+		gc()
 		return err
 	}
 	//encodeIndexFileDur := at.tr.Record("index serialize and upload done")
 	//metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
 
-	// early release index for gc, and we can ensure that Delete is idempotent.
-	gcIndex()
+	// early release analysis for gc, and we can ensure that Delete is idempotent.
+	gc()
 
-	saveFileKeys := make([]string, 0)
-	for filePath, fileSize := range indexFilePath2Size {
-		parts := strings.Split(filePath, "/")
-		fileKey := parts[len(parts)-1]
-		saveFileKeys = append(saveFileKeys, fileKey)
-	}
-
-	it.statistic.EndTime = time.Now().UnixMicro()
-	it.node.storeIndexFilesAndStatistic(it.ClusterID, it.BuildID, saveFileKeys, it.serializedSize, &it.statistic, it.currentIndexVersion)
-	log.Ctx(ctx).Debug("save index files done", zap.Strings("IndexFiles", saveFileKeys))
-	saveIndexFileDur := it.tr.RecordSpan()
-	metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
-	it.tr.Elapse("index building all done")
-	log.Ctx(ctx).Info("Successfully save index files", zap.Int64("buildID", it.BuildID), zap.Int64("Collection", it.collectionID),
-		zap.Int64("partition", it.partitionID), zap.Int64("SegmentId", it.segmentID))
+	at.endTime = time.Now().UnixMicro()
+	at.node.storeAnalysisStatistic(at.req.GetClusterID(), at.req.GetTaskID(), centroidsFile, segmetsOffsetMapping)
+	//saveIndexFileDur := at.tr.RecordSpan()
+	//metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
+	at.tr.Elapse("index building all done")
+	log.Info("Successfully save analysis files")
 	return nil
 }
 
