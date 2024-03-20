@@ -93,6 +93,9 @@ type Task interface {
 	IsFinished(dist *meta.DistributionManager) bool
 	SetReason(reason string)
 	String() string
+
+	RecordStartTs()
+	GetTaskLatency() int64
 }
 
 type baseTask struct {
@@ -117,6 +120,9 @@ type baseTask struct {
 
 	// span for tracing
 	span trace.Span
+
+	// startTs
+	startTs time.Time
 }
 
 func newBaseTask(ctx context.Context, source Source, collectionID, replicaID typeutil.UniqueID, shard string, taskTag string) *baseTask {
@@ -136,6 +142,7 @@ func newBaseTask(ctx context.Context, source Source, collectionID, replicaID typ
 		doneCh:   make(chan struct{}),
 		canceled: atomic.NewBool(false),
 		span:     span,
+		startTs:  time.Now(),
 	}
 }
 
@@ -189,6 +196,14 @@ func (task *baseTask) SetPriority(priority Priority) {
 
 func (task *baseTask) Index() string {
 	return fmt.Sprintf("[replica=%d]", task.replicaID)
+}
+
+func (task *baseTask) RecordStartTs() {
+	task.startTs = time.Now()
+}
+
+func (task *baseTask) GetTaskLatency() int64 {
+	return time.Since(task.startTs).Milliseconds()
 }
 
 func (task *baseTask) Err() error {
