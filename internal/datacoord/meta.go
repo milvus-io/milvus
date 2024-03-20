@@ -621,12 +621,12 @@ func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	}
 }
 
-// update binlogs in segmentInfo
-func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+// Add binlogs in segmentInfo
+func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
-			log.Warn("meta update: update binlog failed - segment not found",
+			log.Warn("meta update: add binlog failed - segment not found",
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
@@ -641,11 +641,11 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 	}
 }
 
-func ReplaceBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
-			log.Warn("meta update: replace binlog failed - segment not found",
+			log.Warn("meta update: update binlog failed - segment not found",
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
