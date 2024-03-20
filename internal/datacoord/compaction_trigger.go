@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -301,7 +302,8 @@ func (t *compactionTrigger) triggerCompaction() error {
 // triggerMajorCompaction trigger major compaction.
 func (t *compactionTrigger) triggerMajorCompaction() error {
 	for _, collection := range t.meta.GetClonedCollections() {
-		if support, _ := t.majorCompactionManager.getCollectionMajorCompactionKey(collection.Schema); support {
+		clusteringKeyField := clustering.GetClusteringKeyField(collection.Schema)
+		if clusteringKeyField != nil {
 			id, err := t.allocSignalID()
 			if err != nil {
 				return err
@@ -610,8 +612,8 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 		log.Warn("get collection info failed, skip handling compaction", zap.Error(err))
 		return err
 	}
-	support, clusteringKeyId := t.majorCompactionManager.getCollectionMajorCompactionKey(coll.Schema)
-	if !support {
+	clusteringKeyField := clustering.GetClusteringKeyField(coll.Schema)
+	if clusteringKeyField == nil {
 		err := merr.WrapErrMajorCompactionCollectionNotSupport(fmt.Sprint(signal.collectionID))
 		log.Debug(err.Error())
 		return err
@@ -650,7 +652,7 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 	majorCompactionJob := &MajorCompactionJob{
 		triggerID:       signal.id,
 		collectionID:    signal.collectionID,
-		clusteringKeyID: clusteringKeyId,
+		clusteringKeyID: clusteringKeyField.FieldID,
 		startTime:       ts,
 		state:           pipelining,
 		pipeliningPlans: make([]*datapb.CompactionPlan, 0),
@@ -686,7 +688,7 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 			}
 		}
 
-		plans := t.majorCompactionManager.generateMajorCompactionPlans(group.segments, clusteringKeyId, ct)
+		plans := t.majorCompactionManager.generateMajorCompactionPlans(group.segments, clusteringKeyField.FieldID, ct)
 		// mark all segments prepare for major compaction
 		// todo： for now, no need to set compacting = false, as they will be set after compaction done or failed
 		// however, if we split major compaction into multi sub compaction task and support retry fail sub task,
