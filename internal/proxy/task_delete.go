@@ -267,7 +267,7 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 
 	dr.partitionKeyMode = dr.schema.IsPartitionKeyCollection()
 	// get partitionIDs of delete
-	dr.partitionID = common.InvalidPartitionID
+	dr.partitionID = common.AllPartitionsID
 	if len(dr.req.PartitionName) > 0 {
 		if dr.partitionKeyMode {
 			return errors.New("not support manually specifying the partition names if partition key mode is used")

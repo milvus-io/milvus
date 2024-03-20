@@ -935,7 +935,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
 	s.Empty(pks)
 
-	delegator.level0Deletions[common.InvalidPartitionID] = allPartitionDeleteData
+	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
 	pks, _ = delegator.GetLevel0Deletions(partitionID)
 	s.Len(pks, 2)
 	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
@@ -956,7 +956,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
 	s.Empty(pks)
 
-	delegator.level0Deletions[common.InvalidPartitionID] = allPartitionDeleteData
+	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
 	pks, _ = delegator.GetLevel0Deletions(partitionID)
 	s.Len(pks, 2)
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
