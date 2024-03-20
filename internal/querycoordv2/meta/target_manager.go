@@ -266,6 +266,16 @@ func (mgr *TargetManager) RemoveCollection(collectionID int64) {
 	log.Info("remove collection from targets",
 		zap.Int64("collectionID", collectionID))
 
+	current := mgr.current.getCollectionTarget(collectionID)
+	if current != nil {
+		for channelName := range current.GetAllDmChannels() {
+			metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.DeleteLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				channelName,
+			)
+		}
+	}
+
 	mgr.current.removeCollectionTarget(collectionID)
 	mgr.next.removeCollectionTarget(collectionID)
 }
