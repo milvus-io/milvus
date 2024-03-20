@@ -15,6 +15,7 @@
 #include <malloc.h>
 #endif
 
+#include "analysis_c.h"
 #include "common/type_c.h"
 #include "type_c.h"
 #include "types.h"
@@ -112,7 +113,7 @@ DeleteAnalysis(CAnalysis analysis) {
 }
 
 CStatus
-CleanLocalData(CAnalysis analysis) {
+CleanAnalysisLocalData(CAnalysis analysis) {
     auto status = CStatus();
     try {
         AssertInfo(analysis, "failed to build analysis, passed index was null");
@@ -177,9 +178,9 @@ DeleteAnalysisInfo(CAnalysisInfo c_analysis_info) {
 }
 
 CStatus
-AppendFieldMetaInfo(CAnalysisInfo c_analysis_info,
-                    int64_t collection_id,
-                    int64_t partition_id,
+AppendAnalysisFieldMetaInfo(CAnalysisInfo c_analysis_info,
+                            int64_t collection_id,
+                            int64_t partition_id,
                     int64_t field_id,
                     const char* field_name,
                     enum CDataType field_type,
@@ -236,11 +237,14 @@ AppendSegmentID(CAnalysisInfo c_analysis_info, int64_t segment_id) {
 }
 
 CStatus
-AppendInsertFilePath(CAnalysisInfo c_analysis_info, const char* c_file_path) {
+AppendSegmentInsertFile(CAnalysisInfo c_analysis_info,
+                        int64_t segID,
+                        const char* c_file_path) {
     try {
         auto analysis_info = (AnalysisInfo*)c_analysis_info;
         std::string insert_file_path(c_file_path);
-        analysis_info->insert_files.emplace_back(insert_file_path);
+        analysis_info->insert_files[segID].emplace_back(insert_file_path);
+        //        analysis_info->insert_files.emplace_back(insert_file_path);
 
         auto status = CStatus();
         status.error_code = Success;

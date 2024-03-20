@@ -23,15 +23,15 @@ extern "C" {
 CStatus
 Analysis(CAnalysis* res_analysis, CAnalysisInfo c_analysis_info);
 
-CStatus
-CreateMajorCompaction(CAnalysis* res_analysis,
-                      CBuildIndexInfo c_build_index_info);
+//CStatus
+//CreateMajorCompaction(CAnalysis* res_analysis,
+//                      CBuildIndexInfo c_build_index_info);
 
 CStatus
 DeleteAnalysis(CAnalysis analysis);
 
 CStatus
-CleanLocalData(CAnalysis analysis);
+CleanAnalysisLocalData(CAnalysis analysis);
 
 CStatus
 NewAnalysisInfo(CAnalysisInfo* c_analysis_info,
@@ -41,13 +41,13 @@ void
 DeleteAnalysisInfo(CAnalysisInfo c_analysis_info);
 
 CStatus
-AppendFieldMetaInfo(CAnalysisInfo c_analysis_info,
-                    int64_t collection_id,
-                    int64_t partition_id,
-                    int64_t field_id,
-                    const char* field_name,
-                    enum CDataType field_type,
-                    int64_t dim);
+AppendAnalysisFieldMetaInfo(CAnalysisInfo c_analysis_info,
+                            int64_t collection_id,
+                            int64_t partition_id,
+                            int64_t field_id,
+                            const char* field_name,
+                            enum CDataType field_type,
+                            int64_t dim);
 
 CStatus
 AppendAnalysisInfo(CAnalysisInfo c_analysis_info,
@@ -58,7 +58,9 @@ CStatus
 AppendSegmentID(CAnalysisInfo c_analysis_info, int64_t segment_id);
 
 CStatus
-AppendInsertFilePath(CAnalysisInfo c_analysis_info, const char* file_path);
+AppendSegmentInsertFile(CAnalysisInfo c_analysis_info,
+                        int64_t segID,
+                        const char* file_path);
 
 CStatus
 SerializeAnalysisAndUpLoad(CAnalysis analysis);

@@ -17,6 +17,11 @@
 package analysiscgowrapper
 
 /*
+//libdir=/home/zc/work/milvus/internal/core/output/lib
+//includedir=/home/zc/work/milvus/internal/core/output/include
+//
+//Libs: -L${libdir} -lmilvus_indexbuilder
+//Cflags: -I${includedir
 #cgo pkg-config: milvus_indexbuilder
 
 #include <stdlib.h>	// free
@@ -64,7 +69,7 @@ func (ca *CgoAnalysis) Delete() error {
 }
 
 func (ca *CgoAnalysis) CleanLocalData() error {
-	status := C.CleanLocalData(ca.analysisPtr)
+	status := C.CleanAnalysisLocalData(ca.analysisPtr)
 	return HandleCStatus(&status, "failed to clean cached data on disk")
 }
 

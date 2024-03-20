@@ -50,7 +50,8 @@ struct AnalysisInfo {
     milvus::DataType field_type;
     int64_t task_id;
     int64_t version;
-    std::vector<std::string> insert_files;
+    std::unordered_map<int64_t, std::vector<std::string>> insert_files;
+    //    std::vector<std::string> insert_files;
     milvus::storage::StorageConfig storage_config;
     milvus::Config config;
     std::string field_name;

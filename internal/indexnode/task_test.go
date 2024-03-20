@@ -20,11 +20,11 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/mock"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
+
+	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 
 	"github.com/milvus-io/milvus/internal/storage"
-
-	"github.com/milvus-io/milvus/internal/mocks"
 
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
@@ -51,6 +51,7 @@ type IndexBuildTaskSuite struct {
 	collectionID int64
 	partitionID  int64
 	segmentID    int64
+	dataPath     string
 }
 
 func (suite *IndexBuildTaskSuite) SetupSuite() {
@@ -58,6 +59,7 @@ func (suite *IndexBuildTaskSuite) SetupSuite() {
 	suite.collectionID = 1000
 	suite.partitionID = 1001
 	suite.segmentID = 1002
+	suite.dataPath = suite.T().TempDir() + "/1000/1001/1002/3/1"
 }
 
 func (suite *IndexBuildTaskSuite) SetupTest() {
@@ -66,29 +68,37 @@ func (suite *IndexBuildTaskSuite) SetupTest() {
 		Description: "test",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			{FieldID: 1, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
-			{FieldID: 2, Name: "ts", DataType: schemapb.DataType_Int64},
-			{FieldID: 3, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "1"}}},
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "1"}}},
 		},
 	}
 }
 
 func (suite *IndexBuildTaskSuite) serializeData() ([]*storage.Blob, error) {
-	var insertCodec storage.InsertCodec
+	insertCodec := storage.NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
+		Schema: suite.schema,
+	})
 	return insertCodec.Serialize(suite.partitionID, suite.segmentID, &storage.InsertData{
 		Data: map[storage.FieldID]storage.FieldData{
-			3: &storage.FloatVectorFieldData{Data: []float32{1, 2, 3}, Dim: 1},
+			0:   &storage.Int64FieldData{Data: []int64{0, 1, 2}},
+			1:   &storage.Int64FieldData{Data: []int64{1, 2, 3}},
+			100: &storage.Int64FieldData{Data: []int64{0, 1, 2}},
+			101: &storage.Int64FieldData{Data: []int64{0, 1, 2}},
+			102: &storage.FloatVectorFieldData{Data: []float32{1, 2, 3}, Dim: 1},
 		},
 		Infos: []storage.BlobInfo{{3}},
 	})
 }
 
-func (suite *IndexBuildTaskSuite) TestBuildIndex() {
+func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	ctx, cancel := context.WithCancel(context.Background())
 	req := &indexpb.CreateJobRequest{
 		BuildID:      1,
 		IndexVersion: 1,
-		DataPaths:    []string{"1000/1001/1002/3/1"},
+		DataPaths:    []string{suite.dataPath},
 		IndexID:      0,
 		IndexName:    "",
 		IndexParams:  []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "FLAT"}, {Key: common.MetricTypeKey, Value: metric.L2}, {Key: common.DimKey, Value: "1"}},
@@ -106,10 +116,12 @@ func (suite *IndexBuildTaskSuite) TestBuildIndex() {
 		FieldType:    schemapb.DataType_FloatVector,
 	}
 
-	cm := mocks.NewChunkManager(suite.T())
+	cm, err := NewChunkMgrFactory().NewChunkManager(ctx, req.GetStorageConfig())
+	suite.NoError(err)
 	blobs, err := suite.serializeData()
 	suite.NoError(err)
-	cm.EXPECT().Read(mock.Anything, mock.Anything).Return(blobs[0].Value, nil)
+	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
+	suite.NoError(err)
 
 	t := &indexBuildTask{
 		ident:               "",
@@ -127,6 +139,75 @@ func (suite *IndexBuildTaskSuite) TestBuildIndex() {
 		fieldID:             req.GetFieldID(),
 		fieldName:           req.GetFieldName(),
 		fieldType:           req.GetFieldType(),
+		tr:                  timerecord.NewTimeRecorder("test-indexBuildTask"),
+		queueDur:            0,
+		statistic:           indexpb.JobInfo{},
+		node:                NewIndexNode(context.Background(), dependency.NewDefaultFactory(true)),
+	}
+
+	err = t.Prepare(context.Background())
+	suite.NoError(err)
+	err = t.BuildIndex(context.Background())
+	suite.NoError(err)
+	err = t.SaveIndexFiles(context.Background())
+	suite.NoError(err)
+}
+
+func (suite *IndexBuildTaskSuite) Test_BuildDISKANNIndex() {
+	ctx, cancel := context.WithCancel(context.Background())
+	req := &indexpb.CreateJobRequest{
+		BuildID:      1,
+		IndexVersion: 1,
+		DataPaths:    []string{suite.dataPath},
+		IndexID:      0,
+		IndexName:    "",
+		IndexParams: []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: "DISKANN"},
+			{Key: common.MetricTypeKey, Value: metric.L2},
+			{Key: indexparams.PQCodeBudgetRatioKey, Value: "0.125"},
+			{Key: indexparams.NumBuildThreadRatioKey, Value: "1.0"},
+			{Key: indexparams.SearchCacheBudgetRatioKey, Value: "0.10"},
+			{Key: indexparams.SearchCacheBudgetRatioKey, Value: "0.10"},
+			{Key: indexparams.NumLoadThreadRatioKey, Value: "8.0"},
+			{Key: indexparams.BeamWidthRatioKey, Value: "4.0"},
+		},
+		TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "1"}},
+		NumRows:    10,
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    "/tmp/milvus/data",
+			StorageType: "local",
+		},
+		CollectionID: 1,
+		PartitionID:  1,
+		SegmentID:    1,
+		FieldID:      3,
+		FieldName:    "vec",
+		FieldType:    schemapb.DataType_FloatVector,
+	}
+
+	cm, err := NewChunkMgrFactory().NewChunkManager(ctx, req.GetStorageConfig())
+	suite.NoError(err)
+	blobs, err := suite.serializeData()
+	suite.NoError(err)
+	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
+	suite.NoError(err)
+
+	t := &indexBuildTask{
+		ident:               "",
+		cancel:              cancel,
+		ctx:                 ctx,
+		cm:                  cm,
+		req:                 req,
+		currentIndexVersion: 0,
+		BuildID:             req.GetBuildID(),
+		nodeID:              1,
+		ClusterID:           req.GetClusterID(),
+		collectionID:        req.GetCollectionID(),
+		partitionID:         req.GetPartitionID(),
+		segmentID:           req.GetSegmentID(),
+		fieldID:             req.GetFieldID(),
+		fieldName:           req.GetFieldName(),
+		fieldType:           req.GetFieldType(),
+		tr:                  timerecord.NewTimeRecorder("test-indexBuildTask"),
 		queueDur:            0,
 		statistic:           indexpb.JobInfo{},
 		node:                NewIndexNode(context.Background(), dependency.NewDefaultFactory(true)),
@@ -251,4 +332,108 @@ func (suite *IndexBuildTaskV2Suite) TestBuildIndex() {
 
 func TestIndexBuildTaskV2Suite(t *testing.T) {
 	suite.Run(t, new(IndexBuildTaskV2Suite))
+}
+
+type AnalysisTaskSuite struct {
+	suite.Suite
+	schema       *schemapb.CollectionSchema
+	collectionID int64
+	partitionID  int64
+	segmentID    int64
+	fieldID      int64
+	taskID       int64
+	dataPath     string
+}
+
+func (suite *AnalysisTaskSuite) SetupSuite() {
+	paramtable.Init()
+	suite.collectionID = 1000
+	suite.partitionID = 1001
+	suite.segmentID = 1002
+	suite.fieldID = 102
+	suite.taskID = 1004
+	suite.dataPath = suite.T().TempDir() + "/1000/1001/1002/102/1"
+}
+
+func (suite *AnalysisTaskSuite) SetupTest() {
+	suite.schema = &schemapb.CollectionSchema{
+		Name:        "test",
+		Description: "test",
+		AutoID:      false,
+		Fields: []*schemapb.FieldSchema{
+			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{FieldID: 101, Name: "ts", DataType: schemapb.DataType_Int64},
+			{FieldID: 102, Name: "vec", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "1"}}},
+		},
+	}
+}
+
+func (suite *AnalysisTaskSuite) serializeData() ([]*storage.Blob, error) {
+	insertCodec := storage.NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
+		Schema: suite.schema,
+	})
+	return insertCodec.Serialize(suite.partitionID, suite.segmentID, &storage.InsertData{
+		Data: map[storage.FieldID]storage.FieldData{
+			0:   &storage.Int64FieldData{Data: []int64{0, 1, 2}},
+			1:   &storage.Int64FieldData{Data: []int64{1, 2, 3}},
+			100: &storage.Int64FieldData{Data: []int64{0, 1, 2}},
+			101: &storage.Int64FieldData{Data: []int64{0, 1, 2}},
+			102: &storage.FloatVectorFieldData{Data: []float32{1, 2, 3}, Dim: 1},
+		},
+		Infos: []storage.BlobInfo{{3}},
+	})
+}
+
+func (suite *AnalysisTaskSuite) TestBuildMemoryIndex() {
+	ctx, cancel := context.WithCancel(context.Background())
+	req := &indexpb.AnalysisRequest{
+		ClusterID:    "test",
+		TaskID:       1,
+		CollectionID: suite.collectionID,
+		PartitionID:  suite.partitionID,
+		FieldID:      suite.fieldID,
+		SegmentStats: map[int64]*indexpb.SegmentStats{
+			suite.segmentID: {
+				ID:      suite.segmentID,
+				NumRows: 1024,
+				LogIDs:  []int64{1},
+			},
+		},
+		Version: 0,
+		StorageConfig: &indexpb.StorageConfig{
+			RootPath:    "/tmp/milvus/data",
+			StorageType: "local",
+		},
+	}
+
+	cm, err := NewChunkMgrFactory().NewChunkManager(ctx, req.GetStorageConfig())
+	suite.NoError(err)
+	blobs, err := suite.serializeData()
+	suite.NoError(err)
+	err = cm.Write(ctx, suite.dataPath, blobs[0].Value)
+	suite.NoError(err)
+
+	t := &analysisTask{
+		ident:    "",
+		cancel:   cancel,
+		ctx:      ctx,
+		req:      req,
+		tr:       timerecord.NewTimeRecorder("test-indexBuildTask"),
+		queueDur: 0,
+		node:     NewIndexNode(context.Background(), dependency.NewDefaultFactory(true)),
+	}
+
+	err = t.Prepare(context.Background())
+	suite.NoError(err)
+	// TODO: implement in segcore
+	//err = t.BuildIndex(context.Background())
+	//suite.NoError(err)
+	//err = t.SaveIndexFiles(context.Background())
+	//suite.NoError(err)
+}
+
+func TestAnalysisTaskSuite(t *testing.T) {
+	suite.Run(t, new(AnalysisTaskSuite))
 }

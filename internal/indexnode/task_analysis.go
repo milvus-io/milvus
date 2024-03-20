@@ -44,7 +44,7 @@ type analysisTask struct {
 	analysis analysiscgowrapper.CodecAnalysis
 
 	segmentIDs []int64
-	dataPaths  []string
+	dataPaths  map[int64][]string
 	startTime  int64
 	endTime    int64
 }
@@ -64,17 +64,18 @@ func (at *analysisTask) Prepare(ctx context.Context) error {
 	log.Info("Begin to prepare analysis task")
 
 	at.segmentIDs = make([]int64, 0)
-	at.dataPaths = make([]string, 0)
+	at.dataPaths = make(map[int64][]string)
 	for segID, stats := range at.req.GetSegmentStats() {
 		at.segmentIDs = append(at.segmentIDs, segID)
+		at.dataPaths[segID] = make([]string, 0)
 		for _, id := range stats.GetLogIDs() {
 			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
 				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
-			at.dataPaths = append(at.dataPaths, path)
+			at.dataPaths[segID] = append(at.dataPaths[segID], path)
 		}
 	}
 
-	log.Info("Successfully prepare analysis task", zap.Int64s("segmentIDs", at.segmentIDs))
+	log.Info("Successfully prepare analysis task", zap.Any("dataPaths", at.dataPaths))
 	return nil
 }
 
@@ -96,25 +97,28 @@ func (at *analysisTask) BuildIndex(ctx context.Context) error {
 		log.Warn("create analysis info failed", zap.Error(err))
 		return err
 	}
-	err = analysisInfo.AppendFieldMetaInfo(at.req.GetCollectionID(), at.req.GetPartitionID(),
+	err = analysisInfo.AppendAnalysisFieldMetaInfo(at.req.GetCollectionID(), at.req.GetPartitionID(),
 		at.req.GetFieldID(), schemapb.DataType_FloatVector, "", 128)
 	if err != nil {
 		log.Warn("append field meta failed", zap.Error(err))
 		return err
 	}
 
-	err = analysisInfo.AppendAnalysisMetaInfo(at.req.GetTaskID(), at.req.GetVersion())
+	err = analysisInfo.AppendAnalysisInfo(at.req.GetTaskID(), at.req.GetVersion())
 	if err != nil {
 		log.Warn("append index meta failed", zap.Error(err))
 		return err
 	}
 
-	for _, path := range at.dataPaths {
-		err = analysisInfo.AppendInsertFile(path)
-		if err != nil {
-			log.Warn("append insert binlog path failed", zap.Error(err))
-			return err
+	for segID, paths := range at.dataPaths {
+		for _, path := range paths {
+			err = analysisInfo.AppendSegmentInsertFile(segID, path)
+			if err != nil {
+				log.Warn("append insert binlog path failed", zap.Error(err))
+				return err
+			}
 		}
+
 	}
 
 	at.analysis, err = analysiscgowrapper.Analysis(ctx, analysisInfo)

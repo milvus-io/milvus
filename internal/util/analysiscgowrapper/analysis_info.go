@@ -82,7 +82,7 @@ func DeleteAnalysisInfo(info *AnalysisInfo) {
 	C.DeleteAnalysisInfo(info.cAnalysisInfo)
 }
 
-func (ai *AnalysisInfo) AppendFieldMetaInfo(collectionID int64, partitionID int64, fieldID int64, fieldType schemapb.DataType, fieldName string, dim int64) error {
+func (ai *AnalysisInfo) AppendAnalysisFieldMetaInfo(collectionID int64, partitionID int64, fieldID int64, fieldType schemapb.DataType, fieldName string, dim int64) error {
 	cColID := C.int64_t(collectionID)
 	cParID := C.int64_t(partitionID)
 	cFieldID := C.int64_t(fieldID)
@@ -90,11 +90,11 @@ func (ai *AnalysisInfo) AppendFieldMetaInfo(collectionID int64, partitionID int6
 	cFieldName := C.CString(fieldName)
 	cDim := C.int64_t(dim)
 	defer C.free(unsafe.Pointer(cFieldName))
-	status := C.AppendFieldMetaInfo(ai.cAnalysisInfo, cColID, cParID, cFieldID, cFieldName, cintDType, cDim)
+	status := C.AppendAnalysisFieldMetaInfo(ai.cAnalysisInfo, cColID, cParID, cFieldID, cFieldName, cintDType, cDim)
 	return HandleCStatus(&status, "appendFieldMetaInfo failed")
 }
 
-func (ai *AnalysisInfo) AppendAnalysisMetaInfo(taskID int64, version int64) error {
+func (ai *AnalysisInfo) AppendAnalysisInfo(taskID int64, version int64) error {
 	cTaskID := C.int64_t(taskID)
 	cVersion := C.int64_t(version)
 
@@ -109,10 +109,11 @@ func (ai *AnalysisInfo) AppendSegmentID(segID int64) error {
 	return HandleCStatus(&status, "appendAnalysisSegmentID failed")
 }
 
-func (ai *AnalysisInfo) AppendInsertFile(filePath string) error {
+func (ai *AnalysisInfo) AppendSegmentInsertFile(segID int64, filePath string) error {
+	cSegID := C.int64_t(segID)
 	cInsertFilePath := C.CString(filePath)
 	defer C.free(unsafe.Pointer(cInsertFilePath))
 
-	status := C.AppendInsertFilePath(ai.cAnalysisInfo, cInsertFilePath)
+	status := C.AppendSegmentInsertFile(ai.cAnalysisInfo, cSegID, cInsertFilePath)
 	return HandleCStatus(&status, "appendInsertFile failed")
 }
