@@ -2,10 +2,12 @@ package cache
 
 import (
 	"container/list"
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
+	"golang.org/x/sync/singleflight"
 )
 
 var (
@@ -90,8 +92,9 @@ type Cache[K comparable, V any] interface {
 type lruCache[K comparable, V any] struct {
 	rwlock sync.RWMutex
 	// the value is *cacheItem[V]
-	items      map[K]*list.Element
-	accessList *list.List
+	items              map[K]*list.Element
+	accessList         *list.List
+	loaderSingleFlight singleflight.Group
 
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
@@ -152,11 +155,12 @@ func newLRUCache[K comparable, V any](
 	scavenger Scavenger[K],
 ) Cache[K, V] {
 	return &lruCache[K, V]{
-		items:      make(map[K]*list.Element),
-		accessList: list.New(),
-		loader:     loader,
-		finalizer:  finalizer,
-		scavenger:  scavenger,
+		items:              make(map[K]*list.Element),
+		accessList:         list.New(),
+		loaderSingleFlight: singleflight.Group{},
+		loader:             loader,
+		finalizer:          finalizer,
+		scavenger:          scavenger,
 	}
 }
 
@@ -167,43 +171,56 @@ func (c *lruCache[K, V]) Do(key K, doer func(V) error) error {
 		return err
 	}
 	defer item.Unpin()
+	return doer(item.Value())
+}
 
-	if err := doer(item.Value()); err != nil {
-		return err
+func (c *lruCache[K, V]) peek(key K) *cacheItem[K, V] {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+	e, ok := c.items[key]
+	if ok {
+		item := e.Value.(*cacheItem[K, V])
+		c.accessList.MoveToFront(e)
+		return item
 	}
 	return nil
 }
 
-// GetAndPin gets and pins the given key if it exists,
-// NOTE: remember to unpin this key or it will never be evicted
+// GetAndPin gets and pins the given key if it exists
 func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
-	c.rwlock.Lock()
-
-	iter, ok := c.items[key]
-	if ok {
-		item := iter.Value.(*cacheItem[K, V])
-		c.accessList.Remove(iter)
-		c.accessList.PushFront(item)
+	if item := c.peek(key); item != nil {
 		item.pinCount.Inc()
-
-		c.rwlock.Unlock()
 		return item, nil
 	}
 
-	c.rwlock.Unlock()
 	if c.loader != nil {
 		// Try scavenge if there is room. If not, fail fast.
-		//	Note that the test is not accurate since we are not holding the lock here.
+		//	Note that the test is not accurate since we are not locking `loader` here.
 		if _, ok := c.tryScavenge(key); !ok {
 			return nil, ErrNotEnoughSpace
 		}
-		value, ok := c.loader(key)
-		if ok {
+
+		strKey := fmt.Sprint(key)
+		item, err, _ := c.loaderSingleFlight.Do(strKey, func() (interface{}, error) {
+			if item := c.peek(key); item != nil {
+				item.pinCount.Inc()
+				return item, nil
+			}
+
+			value, ok := c.loader(key)
+			if !ok {
+				return nil, ErrNoSuchItem
+			}
+
 			item, err := c.setAndPin(key, value)
 			if err != nil {
 				return nil, err
 			}
 			return item, nil
+		})
+
+		if err == nil {
+			return item.(*cacheItem[K, V]), nil
 		}
 	}
 
@@ -211,10 +228,15 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 }
 
 func (c *lruCache[K, V]) tryScavenge(key K) ([]K, bool) {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+	return c.lockfreeTryScavenge(key)
+}
+
+func (c *lruCache[K, V]) lockfreeTryScavenge(key K) ([]K, bool) {
 	ok, collector := c.scavenger.Collect(key)
 	toEvict := make([]K, 0)
 	if !ok {
-		// Try evict to make room
 		done := false
 		for p := c.accessList.Back(); p != nil && !done; p = p.Prev() {
 			evictItem := p.Value.(*cacheItem[K, V])
@@ -228,6 +250,7 @@ func (c *lruCache[K, V]) tryScavenge(key K) ([]K, bool) {
 			return nil, false
 		}
 	} else {
+		// If no collection needed, give back the space.
 		c.scavenger.Throw(key)
 	}
 	return toEvict, true
@@ -241,40 +264,31 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 	item := newCacheItem[K, V](key, value)
 	item.pinCount.Inc()
 
-	// tryScavenge is done again since the previous call is not protected by lock,
-	//	thus the result is not accurate.
-	toEvict, ok := c.tryScavenge(key)
+	// tryScavenge is done again since the load call is lock free.
+	toEvict, ok := c.lockfreeTryScavenge(key)
+
 	if !ok {
-		item.pinCount.Dec()
+		if c.finalizer != nil {
+			c.finalizer(key, value)
+		}
 		return nil, ErrNotEnoughSpace
 	}
 
-	for _, key := range toEvict {
-		c.remove(key)
+	for _, ek := range toEvict {
+		e := c.items[ek]
+		delete(c.items, ek)
+		c.accessList.Remove(e)
+		c.scavenger.Throw(ek)
+
+		if c.finalizer != nil {
+			item := e.Value.(*cacheItem[K, V])
+			c.finalizer(ek, item.value)
+		}
 	}
 
-	c.add(item)
+	c.scavenger.Collect(key)
+	e := c.accessList.PushFront(item)
+	c.items[item.key] = e
+
 	return item, nil
-}
-
-func (c *lruCache[K, V]) add(item *cacheItem[K, V]) {
-	c.scavenger.Collect(item.key)
-	iter := c.accessList.PushFront(item)
-	c.items[item.key] = iter
-}
-
-func (c *lruCache[K, V]) remove(key K) {
-	iter, ok := c.items[key]
-	if !ok {
-		return
-	}
-
-	delete(c.items, key)
-	c.accessList.Remove(iter)
-	c.scavenger.Throw(key)
-
-	if c.finalizer != nil {
-		item := iter.Value.(*cacheItem[K, V])
-		c.finalizer(key, item.value)
-	}
 }
