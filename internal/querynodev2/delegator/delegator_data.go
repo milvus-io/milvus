@@ -481,7 +481,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 func (sd *shardDelegator) GetLevel0Deletions(partitionID int64) ([]storage.PrimaryKey, []storage.Timestamp) {
 	sd.level0Mut.RLock()
 	deleteData, ok1 := sd.level0Deletions[partitionID]
-	allPartitionsDeleteData, ok2 := sd.level0Deletions[common.InvalidPartitionID]
+	allPartitionsDeleteData, ok2 := sd.level0Deletions[common.AllPartitionsID]
 	sd.level0Mut.RUnlock()
 	// we may need to merge the specified partition deletions and the all partitions deletions,
 	// so release the mutex as early as possible.
@@ -647,7 +647,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		deleteRecords := sd.deleteBuffer.ListAfter(position.GetTimestamp())
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
-				if record.PartitionID != common.InvalidPartitionID && candidate.Partition() != record.PartitionID {
+				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
 					continue
 				}
 				for i, pk := range record.DeleteData.Pks {
