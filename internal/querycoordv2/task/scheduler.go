@@ -796,7 +796,7 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	scheduler.updateTaskMetrics()
 	log.Info("task removed")
-	metrics.QueryCoordTaskLatency.WithLabelValues(scheduler.getTaskMetricsLabel(task)).Observe(float64(task.GetTaskLatency()))
+	metrics.QueryCoordTaskLatency.WithLabelValues(scheduler.getTaskMetricsLabel(task), fmt.Sprint(task.CollectionID()), task.Shard()).Observe(float64(task.GetTaskLatency()))
 }
 
 func (scheduler *taskScheduler) getTaskMetricsLabel(task Task) string {
