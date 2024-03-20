@@ -15,12 +15,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const defaultFilterRatio float64 = 0.5
@@ -40,14 +40,24 @@ func PruneSegments(ctx context.Context,
 	log := log.Ctx(ctx)
 	// 1. calculate filtered segments
 	filteredSegments := make(map[UniqueID]struct{}, 0)
-	clusteringKeyField := typeutil.GetClusteringKeyField(schema.Fields)
+	clusteringKeyField := clustering.GetClusteringKeyField(schema)
 	if clusteringKeyField == nil {
+		// no need to prune
 		return
 	}
+
+	var expr []byte
 	if searchReq != nil {
+		expr = searchReq.GetSerializedExprPlan()
+	} else {
+		expr = queryReq.GetSerializedExprPlan()
+	}
+
+	// currently we only prune based on one column
+	if typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
 		// parse searched vectors
 		var vectorsHolder commonpb.PlaceholderGroup
-		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
+		err := proto.Unmarshal(expr, &vectorsHolder)
 		if err != nil || len(vectorsHolder.GetPlaceholders()) == 0 {
 			return
 		}
@@ -61,14 +71,13 @@ func PruneSegments(ctx context.Context,
 		if err != nil {
 			return
 		}
-		for _, partID := range searchReq.GetPartitionIDs() {
-			partStats := partitionStats[partID]
+		for _, partStats := range partitionStats {
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
 		}
-	} else if queryReq != nil {
+	} else {
 		// 0. parse expr from plan
 		plan := planpb.PlanNode{}
-		err := proto.Unmarshal(queryReq.GetSerializedExprPlan(), &plan)
+		err := proto.Unmarshal(expr, &plan)
 		if err != nil {
 			log.Error("failed to unmarshall serialized expr from bytes, failed the operation")
 			return
@@ -82,8 +91,7 @@ func PruneSegments(ctx context.Context,
 		if matchALL || targetRanges == nil {
 			return
 		}
-		for _, partID := range queryReq.GetPartitionIDs() {
-			partStats := partitionStats[partID]
+		for _, partStats := range partitionStats {
 			FilterSegmentsOnScalarField(partStats, targetRanges, clusteringKeyField, filteredSegments)
 		}
 	}

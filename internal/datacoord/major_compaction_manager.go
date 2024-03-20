@@ -26,7 +26,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -314,37 +313,6 @@ func (t *MajorCompactionManager) dropMajorCompactionJob(job *MajorCompactionJob)
 func (t *MajorCompactionManager) saveMajorCompactionJob(job *MajorCompactionJob) error {
 	info := convertFromMajorCompactionJob(job)
 	return t.meta.SaveMajorCompactionInfo(info)
-}
-
-func (t *MajorCompactionManager) getCollectionMajorCompactionKey(collectionSchema *schemapb.CollectionSchema) (bool /*exist*/, int64 /*fieldID*/) {
-	var clusteringKeyId int64 = -1
-	var partitionKeyId int64 = -1
-	vectorFieldIds := make([]int64, 0)
-	for _, field := range collectionSchema.GetFields() {
-		if field.IsClusteringKey {
-			clusteringKeyId = field.FieldID
-		}
-		if field.IsPartitionKey {
-			partitionKeyId = field.FieldID
-		}
-		// todo support other vector type
-		// if typeutil.IsVectorType(field.GetDataType()) {
-		if field.DataType == schemapb.DataType_FloatVector {
-			vectorFieldIds = append(vectorFieldIds, field.FieldID)
-		}
-	}
-	var majorCompactionKey int64 = -1
-	if clusteringKeyId == -1 {
-		if Params.CommonCfg.UsePartitionKeyAsClusteringKey.GetAsBool() && partitionKeyId != -1 {
-			majorCompactionKey = partitionKeyId
-		} else if Params.CommonCfg.UseVectorAsClusteringKey.GetAsBool() && len(vectorFieldIds) == 1 {
-			majorCompactionKey = vectorFieldIds[0]
-		}
-	} else {
-		majorCompactionKey = clusteringKeyId
-	}
-
-	return majorCompactionKey != -1, majorCompactionKey
 }
 
 func triggerMajorCompactionPolicy(ctx context.Context, meta *meta, collectionID int64, partitionID int64, channel string, segments []*SegmentInfo) (bool, error) {
