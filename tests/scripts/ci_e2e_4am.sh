@@ -66,7 +66,7 @@ echo "prepare e2e test"
 install_pytest_requirements
 
 
-# Run restful test
+# Run restful test v1
 
 cd ${ROOT}/tests/restful_client
 
@@ -76,6 +76,18 @@ if [[ -n "${TEST_TIMEOUT:-}" ]]; then
                                      --html=${CI_LOG_PATH}/report_restful.html  --self-contained-html
 else
   pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -m L0 -n 6 \
+                                     --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
+fi
+
+# Run restful test v2
+cd ${ROOT}/tests/restful_client_v2
+
+if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+
+  timeout  "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
+                                     --html=${CI_LOG_PATH}/report_restful.html  --self-contained-html
+else
+  pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
                                      --html=${CI_LOG_PATH}/report_restful.html --self-contained-html
 fi
 

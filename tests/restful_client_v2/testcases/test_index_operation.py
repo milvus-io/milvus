@@ -242,7 +242,7 @@ class TestCreateIndex(TestBase):
             assert expected_index[i]['indexConfig']['index_type'] == actual_index[i]['indexType']
 
 
-@pytest.mark.L0
+@pytest.mark.L1
 class TestCreateIndexNegative(TestBase):
 
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
