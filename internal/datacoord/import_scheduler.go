@@ -88,13 +88,20 @@ func (s *importScheduler) Close() {
 
 func (s *importScheduler) process() {
 	getNodeID := func(nodeSlots map[int64]int64) int64 {
-		for nodeID, slots := range nodeSlots {
-			if slots > 0 {
-				nodeSlots[nodeID]--
-				return nodeID
+		var (
+			nodeID   int64 = NullNodeID
+			maxSlots int64 = -1
+		)
+		for id, slots := range nodeSlots {
+			if slots > 0 && slots > maxSlots {
+				nodeID = id
+				maxSlots = slots
 			}
 		}
-		return NullNodeID
+		if nodeID != NullNodeID {
+			nodeSlots[nodeID]--
+		}
+		return nodeID
 	}
 
 	jobs := s.imeta.GetJobBy()
