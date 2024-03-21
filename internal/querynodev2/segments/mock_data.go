@@ -638,6 +638,7 @@ func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath stri
 		storage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
 		storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
 		storage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		storage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
 		storage.BucketName(params.MinioCfg.BucketName.GetValue()),
 		storage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
 		storage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
@@ -994,6 +995,7 @@ func genStorageConfig() *indexpb.StorageConfig {
 		RootPath:        paramtable.Get().MinioCfg.RootPath.GetValue(),
 		IAMEndpoint:     paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
 		UseSSL:          paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:       paramtable.Get().MinioCfg.SslCACert.GetValue(),
 		UseIAM:          paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
 		StorageType:     paramtable.Get().CommonCfg.StorageType.GetValue(),
 	}

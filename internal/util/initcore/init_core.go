@@ -75,6 +75,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cIamEndPoint := C.CString(params.MinioCfg.IAMEndpoint.GetValue())
 	cLogLevel := C.CString(params.MinioCfg.LogLevel.GetValue())
 	cRegion := C.CString(params.MinioCfg.Region.GetValue())
+	cSslCACert := C.CString(params.MinioCfg.SslCACert.GetValue())
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -85,6 +86,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	defer C.free(unsafe.Pointer(cIamEndPoint))
 	defer C.free(unsafe.Pointer(cLogLevel))
 	defer C.free(unsafe.Pointer(cRegion))
+	defer C.free(unsafe.Pointer(cSslCACert))
 	storageConfig := C.CStorageConfig{
 		address:          cAddress,
 		bucket_name:      cBucketName,
@@ -95,6 +97,7 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 		cloud_provider:   cCloudProvider,
 		iam_endpoint:     cIamEndPoint,
 		useSSL:           C.bool(params.MinioCfg.UseSSL.GetAsBool()),
+		sslCACert:        cSslCACert,
 		useIAM:           C.bool(params.MinioCfg.UseIAM.GetAsBool()),
 		log_level:        cLogLevel,
 		region:           cRegion,
