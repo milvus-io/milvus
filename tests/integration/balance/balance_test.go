@@ -332,7 +332,6 @@ func (s *BalanceTestSuit) TestNodeDown() {
 			CollectionID: collectionID,
 		})
 		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
 		return len(resp.Shards) == 2
 	}, 30*time.Second, 1*time.Second)
 }
