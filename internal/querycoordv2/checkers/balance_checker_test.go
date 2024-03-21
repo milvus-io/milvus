@@ -286,10 +286,10 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	// checker check
 	segPlans, chanPlans := make([]balance.SegmentAssignPlan, 0), make([]balance.ChannelAssignPlan, 0)
 	mockPlan := balance.SegmentAssignPlan{
-		Segment:   utils.CreateTestSegment(1, 1, 1, 1, 1, "1"),
-		ReplicaID: 1,
-		From:      1,
-		To:        2,
+		Segment: utils.CreateTestSegment(1, 1, 1, 1, 1, "1"),
+		Replica: meta.NilReplica,
+		From:    1,
+		To:      2,
 	}
 	segPlans = append(segPlans, mockPlan)
 	suite.balancer.EXPECT().BalanceReplica(mock.Anything).Return(segPlans, chanPlans)

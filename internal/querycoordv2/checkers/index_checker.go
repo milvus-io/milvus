@@ -165,7 +165,7 @@ func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *met
 		params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 		c.ID(),
 		segment.GetCollectionID(),
-		replica.GetID(),
+		replica,
 		action,
 	)
 	if err != nil {
