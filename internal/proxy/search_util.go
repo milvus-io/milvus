@@ -111,6 +111,12 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 					log.Warn("failed to get partition ids", zap.Error(err))
 					return err
 				}
+
+				if t.enableMaterializedView {
+					if planPtr := plan.GetVectorAnns(); planPtr != nil {
+						planPtr.QueryInfo.MaterializedViewInvolved = true
+					}
+				}
 			}
 		}
 

@@ -2653,11 +2653,12 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: request,
-		tr:      timerecord.NewTimeRecorder("search"),
-		qc:      node.queryCoord,
-		node:    node,
-		lb:      node.lbPolicy,
+		request:                request,
+		tr:                     timerecord.NewTimeRecorder("search"),
+		qc:                     node.queryCoord,
+		node:                   node,
+		lb:                     node.lbPolicy,
+		enableMaterializedView: node.enableMaterializedView,
 	}
 
 	guaranteeTs := request.GuaranteeTimestamp

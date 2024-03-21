@@ -123,6 +123,9 @@ type Proxy struct {
 	// resource manager
 	resourceManager        resource.Manager
 	replicateStreamManager *ReplicateStreamManager
+
+	// materialized view
+	enableMaterializedView bool
 }
 
 // NewProxy returns a Proxy struct.
@@ -289,6 +292,8 @@ func (node *Proxy) Init() error {
 		return err
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
+
+	node.enableMaterializedView = Params.CommonCfg.EnableMaterializedView.GetAsBool()
 
 	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil
