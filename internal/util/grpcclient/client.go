@@ -464,29 +464,27 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	err := retry.Do(ctx, func() error {
+	err := retry.Handle(ctx, func() (bool, error) {
 		if wrapper == nil {
 			if ok := c.checkNodeSessionExist(ctx); !ok {
 				// if session doesn't exist, no need to reset connection for datanode/indexnode/querynode
-				return retry.Unrecoverable(merr.ErrNodeNotFound)
+				return false, merr.ErrNodeNotFound
 			}
 
 			err := errors.Wrap(clientErr, "empty grpc client")
 			log.Warn("grpc client is nil, maybe fail to get client in the retry state", zap.Error(err))
 			resetClientFunc()
-			return err
+			return true, err
 		}
+
 		wrapper.Pin()
 		var err error
 		ret, err = caller(wrapper.client)
 		wrapper.Unpin()
+
 		if err != nil {
 			var needRetry, needReset bool
 			needRetry, needReset, err = c.checkGrpcErr(ctx, err)
-			if !needRetry {
-				// stop retry
-				err = retry.Unrecoverable(err)
-			}
 			if needReset {
 				log.Warn("start to reset connection because of specific reasons", zap.Error(err))
 				resetClientFunc()
@@ -498,7 +496,7 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 					resetClientFunc()
 				}
 			}
-			return err
+			return needRetry, err
 		}
 		// reset counter
 		c.ctxCounter.Store(0)
@@ -512,19 +510,19 @@ func (c *ClientBase[T]) call(ctx context.Context, caller func(client T) (any, er
 		default:
 			// it will directly return the result
 			log.Warn("unknown return type", zap.Any("return", ret))
-			return nil
+			return false, nil
 		}
 
 		if status == nil {
 			log.Warn("status is nil, please fix it", zap.Stack("stack"))
-			return nil
+			return false, nil
 		}
 
 		err = merr.Error(status)
 		if err != nil && merr.IsRetryableErr(err) {
-			return err
+			return true, err
 		}
-		return nil
+		return false, nil
 	}, retry.Attempts(uint(c.MaxAttempts)),
 		// Because the previous InitialBackoff and MaxBackoff were float, and the unit was s.
 		// For compatibility, this is multiplied by 1000.
