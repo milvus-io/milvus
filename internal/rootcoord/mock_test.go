@@ -95,6 +95,11 @@ type mockMetaTable struct {
 	DropGrantFunc                    func(tenant string, role *milvuspb.RoleEntity) error
 	ListPolicyFunc                   func(tenant string) ([]string, error)
 	ListUserRoleFunc                 func(tenant string) ([]string, error)
+	DescribeDatabaseFunc             func(ctx context.Context, dbName string) (*model.Database, error)
+}
+
+func (m mockMetaTable) GetDatabaseByName(ctx context.Context, dbName string, ts Timestamp) (*model.Database, error) {
+	return m.DescribeDatabaseFunc(ctx, dbName)
 }
 
 func (m mockMetaTable) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
@@ -515,6 +520,9 @@ func withInvalidMeta() Opt {
 	}
 	meta.ListAliasesFunc = func(ctx context.Context, dbName, collectionName string, ts Timestamp) ([]string, error) {
 		return nil, errors.New("error mock ListAliases")
+	}
+	meta.DescribeDatabaseFunc = func(ctx context.Context, dbName string) (*model.Database, error) {
+		return nil, errors.New("error mock DescribeDatabase")
 	}
 	return withMeta(meta)
 }

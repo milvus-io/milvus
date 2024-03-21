@@ -58,6 +58,7 @@ message RefreshPolicyInfoCacheRequest {
   string opKey = 3;
 }
 
+// Deprecated: use ClusterLimiter instead it
 message CollectionRate {
   int64 collection = 1;
   repeated internal.Rate rates = 2;
@@ -65,9 +66,27 @@ message CollectionRate {
   repeated common.ErrorCode codes = 4;
 }
 
+message LimiterNode {
+  // self limiter information
+  Limiter limiter = 1;
+  // db id -> db limiter
+  // collection id -> collection limiter
+  // partition id -> partition limiter
+  map<int64, LimiterNode> children = 2;
+}
+
+message Limiter {
+  repeated internal.Rate rates = 1;
+  // we can use map to store quota states and error code, because key in map fields cannot be enum types
+  repeated milvus.QuotaState states = 2;
+  repeated common.ErrorCode codes = 3;
+}
+
 message SetRatesRequest {
   common.MsgBase base = 1;
+  // deprecated
   repeated CollectionRate rates = 2;
+  LimiterNode rootLimiter = 3;
 }
 
 message ListClientInfosRequest {

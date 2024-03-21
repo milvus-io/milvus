@@ -37,7 +37,7 @@ import (
 // If Limit function return true, the request will be rejected.
 // Otherwise, the request will pass. Limit also returns limit of limiter.
 type Limiter interface {
-	Check(collectionIDs []int64, rt internalpb.RateType, n int) error
+	Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error
 }
 
 // Component is the interface all services implement

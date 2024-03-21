@@ -38,7 +38,7 @@ type limiterMock struct {
 	quotaStateReasons []commonpb.ErrorCode
 }
 
-func (l *limiterMock) Check(collection []int64, rt internalpb.RateType, n int) error {
+func (l *limiterMock) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
 	if l.rate == 0 {
 		return merr.ErrServiceQuotaExceeded
 	}
@@ -56,114 +56,123 @@ func TestRateLimitInterceptor(t *testing.T) {
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(int64(0), nil)
+		mockCache.On("GetPartitionInfo",
+			mock.Anything, // context.Context
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+			mock.AnythingOfType("string"),
+		).Return(int64(0), nil)
 		globalMetaCache = mockCache
-		collection, rt, size, err := getRequestInfo(&milvuspb.InsertRequest{})
+		collection, partitions, rt, size, err := getRequestInfo(&milvuspb.InsertRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
+		assert.ElementsMatch(t, partitions, []int64{0})
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.UpsertRequest{})
+		collection, partitions, rt, size, err = getRequestInfo(&milvuspb.UpsertRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLUpsert, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
+		assert.ElementsMatch(t, partitions, []int64{0})
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DeleteRequest{})
+		collection, partitions, rt, size, err = getRequestInfo(&milvuspb.DeleteRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.DeleteRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLDelete, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
+		assert.ElementsMatch(t, partitions, []int64{0})
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ImportRequest{})
+		collection, partitions, rt, size, err = getRequestInfo(&milvuspb.ImportRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.ImportRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLBulkLoad, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
+		assert.ElementsMatch(t, partitions, []int64{0})
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.SearchRequest{Nq: 5})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.SearchRequest{Nq: 5})
 		assert.NoError(t, err)
 		assert.Equal(t, 5, size)
 		assert.Equal(t, internalpb.RateType_DQLSearch, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.QueryRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.QueryRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DQLQuery, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.CreateCollectionRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.CreateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.LoadCollectionRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ReleaseCollectionRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.ReleaseCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DropCollectionRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.DropCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.CreatePartitionRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.CreatePartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.LoadPartitionsRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.LoadPartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ReleasePartitionsRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.ReleasePartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DropPartitionRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.DropPartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.CreateIndexRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.CreateIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DropIndexRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.DropIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, collection, int64(0))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.FlushRequest{})
+		_, _, rt, size, err = getRequestInfo(&milvuspb.FlushRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLFlush, rt)
-		assert.Len(t, collection, 0)
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ManualCompactionRequest{})
+		collection, _, rt, size, err = getRequestInfo(&milvuspb.ManualCompactionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCompaction, rt)
-		assert.Len(t, collection, 0)
+		assert.Equal(t, collection, int64(0))
 	})
 
 	t.Run("test getFailedResponse", func(t *testing.T) {

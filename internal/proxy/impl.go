@@ -5092,7 +5092,7 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 		return resp, nil
 	}
 
-	err := node.multiRateLimiter.SetRates(request.GetRates())
+	err := node.simpleLimiter.SetRates(request.GetRootLimiter())
 	// TODO: set multiple rate limiter rates
 	if err != nil {
 		resp = merr.Status(err)
@@ -5162,7 +5162,7 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		}, nil
 	}
 
-	states, reasons := node.multiRateLimiter.GetQuotaStates()
+	states, reasons := node.simpleLimiter.GetQuotaStates()
 	return &milvuspb.CheckHealthResponse{
 		Status:      merr.Success(),
 		QuotaStates: states,

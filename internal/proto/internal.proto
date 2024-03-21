@@ -266,6 +266,13 @@ message ShowConfigurationsResponse {
   repeated common.KeyValuePair configuations = 2;
 }
 
+enum RateScope {
+  Cluster = 0;
+  Database = 1;
+  Collection = 2;
+  Partition = 3;
+}
+
 enum RateType {
   DDLCollection = 0;
   DDLPartition = 1;
