@@ -38,12 +38,14 @@ func newMinIOChunkManager(ctx context.Context, bucketName string, rootPath strin
 	accessKeyID := Params.MinioCfg.AccessKeyID.GetValue()
 	secretAccessKey := Params.MinioCfg.SecretAccessKey.GetValue()
 	useSSL := Params.MinioCfg.UseSSL.GetAsBool()
+	sslCACert := Params.MinioCfg.SslCACert.GetValue()
 	client, err := NewMinioChunkManager(ctx,
 		RootPath(rootPath),
 		Address(endPoint),
 		AccessKeyID(accessKeyID),
 		SecretAccessKeyID(secretAccessKey),
 		UseSSL(useSSL),
+		SslCACert(sslCACert),
 		BucketName(bucketName),
 		UseIAM(false),
 		CloudProvider("aws"),
@@ -69,11 +71,13 @@ func TestMinIOCMFail(t *testing.T) {
 	accessKeyID := Params.MinioCfg.AccessKeyID.GetValue()
 	secretAccessKey := Params.MinioCfg.SecretAccessKey.GetValue()
 	useSSL := Params.MinioCfg.UseSSL.GetAsBool()
+	sslCACert := Params.MinioCfg.SslCACert.GetValue()
 	client, err := NewMinioChunkManager(ctx,
 		Address("9.9.9.9:invalid"),
 		AccessKeyID(accessKeyID),
 		SecretAccessKeyID(secretAccessKey),
 		UseSSL(useSSL),
+		SslCACert(sslCACert),
 		BucketName("test"),
 		CreateBucket(true),
 	)

@@ -33,6 +33,8 @@ func TestMinioHandler_ConnectError(t *testing.T) {
 	params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	params.Save(params.MinioCfg.UseIAM.Key, "true")
 	params.Save(params.MinioCfg.Address.Key, "")
+	params.Save(params.MinioCfg.UseSSL.Key, "true")
+	params.Save(params.MinioCfg.SslCACert.Key, "/tmp/dummy.crt")
 
 	_, err := NewMinioHandler(
 		context.Background(),
