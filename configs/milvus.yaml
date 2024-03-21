@@ -68,7 +68,9 @@ minio:
   port: 9000 # Port of MinIO/S3
   accessKeyID: minioadmin # accessKeyID of MinIO/S3
   secretAccessKey: minioadmin # MinIO/S3 encryption string
-  useSSL: false # Access to MinIO/S3 with SSL
+  ssl:
+    enabled: false # Access to MinIO/S3 with SSL
+    tlsCACert: /path/to/public.crt # path to your CACert file, ignore when it is empty
   bucketName: a-bucket # Bucket name in MinIO/S3
   rootPath: files # The root path where the message is stored in MinIO/S3
   # Whether to useIAM role to access S3/GCS instead of access/secret keys

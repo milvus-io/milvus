@@ -30,6 +30,7 @@ func (m *chunkMgrFactory) NewChunkManager(ctx context.Context, config *indexpb.S
 		storage.AccessKeyID(config.GetAccessKeyID()),
 		storage.SecretAccessKeyID(config.GetSecretAccessKey()),
 		storage.UseSSL(config.GetUseSSL()),
+		storage.SslCACert(config.GetSslCACert()),
 		storage.BucketName(config.GetBucketName()),
 		storage.UseIAM(config.GetUseIAM()),
 		storage.CloudProvider(config.GetCloudProvider()),
