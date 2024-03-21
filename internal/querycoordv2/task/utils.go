@@ -180,11 +180,13 @@ func packReleaseSegmentRequest(task *SegmentTask, action *SegmentAction) *queryp
 	}
 }
 
-func packLoadMeta(loadType querypb.LoadType, collectionID int64, partitions ...int64) *querypb.LoadMetaInfo {
+func packLoadMeta(loadType querypb.LoadType, collectionID int64, databaseName string, resourceGroup string, partitions ...int64) *querypb.LoadMetaInfo {
 	return &querypb.LoadMetaInfo{
-		LoadType:     loadType,
-		CollectionID: collectionID,
-		PartitionIDs: partitions,
+		LoadType:      loadType,
+		CollectionID:  collectionID,
+		PartitionIDs:  partitions,
+		DbName:        databaseName,
+		ResourceGroup: resourceGroup,
 	}
 }
 

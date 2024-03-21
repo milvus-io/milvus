@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type RowCountBasedBalancerTestSuite struct {
@@ -136,7 +137,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestAssignSegment() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}
 			plans := balancer.AssignSegment(0, c.assignments, c.nodes)
-			suite.ElementsMatch(c.expectPlans, plans)
+			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, plans)
 		})
 	}
 }
@@ -168,7 +169,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				},
 			},
 			expectPlans: []SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2}, From: 2, To: 1, ReplicaID: 1},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2}, From: 2, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
@@ -248,7 +249,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			},
 			expectPlans: []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 		},
 		{
@@ -277,8 +278,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				},
 			},
 			expectPlans: []SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
@@ -298,7 +299,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			},
 			expectPlans: []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 2}, From: 2, To: 3, ReplicaID: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 2}, From: 2, To: 3, Replica: newReplicaDefaultRG(1)},
 			},
 		},
 		{
@@ -340,8 +341,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			},
 			expectPlans: []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 1}, From: 1, To: 2, ReplicaID: 1},
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 1}, From: 1, To: 3, ReplicaID: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 1}, From: 1, To: 2, Replica: newReplicaDefaultRG(1)},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v2"}, Node: 1}, From: 1, To: 3, Replica: newReplicaDefaultRG(1)},
 			},
 			multiple: true,
 		},
@@ -426,11 +427,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			if !c.multiple {
-				suite.ElementsMatch(c.expectChannelPlans, channelPlans)
-				suite.ElementsMatch(c.expectPlans, segmentPlans)
+				assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
+				assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
 			} else {
-				suite.Subset(c.expectPlans, segmentPlans)
-				suite.Subset(c.expectChannelPlans, channelPlans)
+				assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans, true)
+				assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans, true)
 			}
 
 			// clear distribution
@@ -527,8 +528,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				},
 			},
 			expectPlans: []SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
@@ -591,7 +592,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			},
 			expectPlans: []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 		},
 	}
@@ -635,8 +636,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
 			}
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
-			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
-			suite.ElementsMatch(c.expectPlans, segmentPlans)
+			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
+			assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
 		})
 	}
 }
@@ -681,7 +682,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			},
 			expectPlans: []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 		},
 		{
@@ -710,8 +711,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 				},
 			},
 			expectPlans: []SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, ReplicaID: 1},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 4, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 1, NumOfRows: 10}, Node: 3}, From: 3, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
@@ -780,8 +781,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			err = balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
 			suite.NoError(err)
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
-			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
-			suite.ElementsMatch(c.expectPlans, segmentPlans)
+			assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
+			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
 
 			// clean up distribution for next test
 			for node := range c.distributions {
@@ -829,7 +830,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnLoadingCollection() {
 			}
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			suite.Empty(channelPlans)
-			suite.ElementsMatch(c.expectPlans, segmentPlans)
+			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
 		})
 	}
 }
@@ -924,7 +925,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			},
 			expectPlans: []SegmentAssignPlan{},
 			expectChannelPlans: []ChannelAssignPlan{
-				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 2}, From: 2, To: 3, ReplicaID: 1},
+				{Channel: &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "v3"}, Node: 2}, From: 2, To: 3, Replica: newReplicaDefaultRG(1)},
 			},
 			enableBalanceChannel: true,
 		},
@@ -1013,11 +1014,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			defer Params.Reset(Params.QueryCoordCfg.AutoBalanceChannel.Key)
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			if !c.multiple {
-				suite.ElementsMatch(c.expectChannelPlans, channelPlans)
-				suite.ElementsMatch(c.expectPlans, segmentPlans)
+				assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
+				assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
 			} else {
-				suite.Subset(c.expectPlans, segmentPlans)
-				suite.Subset(c.expectChannelPlans, channelPlans)
+				assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans, true)
+				assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans, true)
 			}
 
 			// clear distribution
@@ -1160,4 +1161,102 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 
 func TestRowCountBasedBalancerSuite(t *testing.T) {
 	suite.Run(t, new(RowCountBasedBalancerTestSuite))
+}
+
+func newReplicaDefaultRG(replicaID int64) *meta.Replica {
+	return meta.NewReplica(
+		&querypb.Replica{
+			ID:            replicaID,
+			ResourceGroup: meta.DefaultResourceGroupName,
+		},
+		typeutil.NewUniqueSet(),
+	)
+}
+
+// remove it after resource group enhancement.
+func assertSegmentAssignPlanElementMatch(suite *suite.Suite, left []SegmentAssignPlan, right []SegmentAssignPlan, subset ...bool) {
+	suite.Equal(len(left), len(right))
+
+	type comparablePlan struct {
+		Segment   *meta.Segment
+		ReplicaID int64
+		From      int64
+		To        int64
+	}
+
+	leftPlan := make([]comparablePlan, 0)
+	for _, p := range left {
+		replicaID := int64(-1)
+		if p.Replica != nil {
+			replicaID = p.Replica.GetID()
+		}
+		leftPlan = append(leftPlan, comparablePlan{
+			Segment:   p.Segment,
+			ReplicaID: replicaID,
+			From:      p.From,
+			To:        p.To,
+		})
+	}
+
+	rightPlan := make([]comparablePlan, 0)
+	for _, p := range right {
+		replicaID := int64(-1)
+		if p.Replica != nil {
+			replicaID = p.Replica.GetID()
+		}
+		rightPlan = append(rightPlan, comparablePlan{
+			Segment:   p.Segment,
+			ReplicaID: replicaID,
+			From:      p.From,
+			To:        p.To,
+		})
+	}
+	if len(subset) > 0 && subset[0] {
+		suite.Subset(leftPlan, rightPlan)
+	} else {
+		suite.ElementsMatch(leftPlan, rightPlan)
+	}
+}
+
+// remove it after resource group enhancement.
+func assertChannelAssignPlanElementMatch(suite *suite.Suite, left []ChannelAssignPlan, right []ChannelAssignPlan, subset ...bool) {
+	type comparablePlan struct {
+		Channel   *meta.DmChannel
+		ReplicaID int64
+		From      int64
+		To        int64
+	}
+
+	leftPlan := make([]comparablePlan, 0)
+	for _, p := range left {
+		replicaID := int64(-1)
+		if p.Replica != nil {
+			replicaID = p.Replica.GetID()
+		}
+		leftPlan = append(leftPlan, comparablePlan{
+			Channel:   p.Channel,
+			ReplicaID: replicaID,
+			From:      p.From,
+			To:        p.To,
+		})
+	}
+
+	rightPlan := make([]comparablePlan, 0)
+	for _, p := range right {
+		replicaID := int64(-1)
+		if p.Replica != nil {
+			replicaID = p.Replica.GetID()
+		}
+		rightPlan = append(rightPlan, comparablePlan{
+			Channel:   p.Channel,
+			ReplicaID: replicaID,
+			From:      p.From,
+			To:        p.To,
+		})
+	}
+	if len(subset) > 0 && subset[0] {
+		suite.Subset(leftPlan, rightPlan)
+	} else {
+		suite.ElementsMatch(leftPlan, rightPlan)
+	}
 }
