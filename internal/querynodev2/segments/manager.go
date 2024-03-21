@@ -162,8 +162,6 @@ type Manager struct {
 
 func NewManager() *Manager {
 	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64()
-	cacheMaxItemNum := diskCap / segmentMaxSize
 
 	segMgr := NewSegmentManager()
 	sf := singleflight.Group{}
@@ -172,7 +170,9 @@ func NewManager() *Manager {
 		Segment:    segMgr,
 	}
 
-	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithCapacity(cacheMaxItemNum).WithLoader(func(key int64) (Segment, bool) {
+	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithLazyScavenger(func(key int64) int64 {
+		return int64(segMgr.sealedSegments[key].ResourceUsageEstimate().DiskSize)
+	}, diskCap).WithLoader(func(key int64) (Segment, bool) {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segMgr.mu.RLock()
 		defer segMgr.mu.RUnlock()
