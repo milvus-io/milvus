@@ -1,6 +1,6 @@
 from utils.utils import gen_unique_str
 from base.testbase import TestBase
-
+import pytest
 
 class TestRoleE2E(TestBase):
 
@@ -10,7 +10,7 @@ class TestRoleE2E(TestBase):
         all_roles = rsp['data']
         # delete all roles except default roles
         for role in all_roles:
-            if role.startswith("role"):
+            if role.startswith("role") and role in self.role_client.role_names:
                 payload = {
                     "roleName": role
                 }
@@ -26,6 +26,7 @@ class TestRoleE2E(TestBase):
                     self.role_client.role_revoke(payload)
                 self.role_client.role_drop(payload)
 
+    @pytest.mark.L1
     def test_role_e2e(self):
 
         # list role before create
@@ -41,6 +42,7 @@ class TestRoleE2E(TestBase):
         assert role_name in rsp['data']
         # describe role
         rsp = self.role_client.role_describe(role_name)
+        assert rsp['code'] == 200
         # grant privilege to role
         payload = {
             "roleName": role_name,
@@ -49,6 +51,7 @@ class TestRoleE2E(TestBase):
             "privilege": "CreateCollection"
         }
         rsp = self.role_client.role_grant(payload)
+        assert rsp['code'] == 200
         # describe role after grant
         rsp = self.role_client.role_describe(role_name)
         privileges = []
