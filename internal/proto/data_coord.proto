@@ -634,6 +634,7 @@ message AlterCollectionRequest {
   repeated int64 partitionIDs = 3;
   repeated common.KeyDataPair start_positions = 4;
   repeated common.KeyValuePair properties = 5;
+  int64  dbID = 6;
 }
 
 message GcConfirmRequest {

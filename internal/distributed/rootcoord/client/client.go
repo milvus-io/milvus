@@ -648,3 +648,8 @@ func (c *Client) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRe
 	}
 	return ret.(*milvuspb.ListDatabasesResponse), err
 }
+
+func (c *Client) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	// TODO implement me
+	panic("implement me")
+}
