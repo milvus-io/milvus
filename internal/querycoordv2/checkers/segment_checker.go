@@ -371,6 +371,9 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		// L0 segment can only be assign to shard leader's node
 		if isLevel0 {
 			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, shard)
+			if leader == nil {
+				continue
+			}
 			availableNodes = []int64{leader.ID}
 		}
 
