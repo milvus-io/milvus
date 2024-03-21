@@ -266,7 +266,7 @@ func GetNumRowsOfFloat16VectorField(f16Datas []byte, dim int64) (uint64, error) 
 	}
 	l := len(f16Datas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+		return 0, fmt.Errorf("the length(%d) of float16 data should divide the dim(%d)", l, dim)
 	}
 	return uint64((int64(l)) / dim / 2), nil
 }
@@ -277,7 +277,7 @@ func GetNumRowsOfBFloat16VectorField(bf16Datas []byte, dim int64) (uint64, error
 	}
 	l := len(bf16Datas)
 	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
+		return 0, fmt.Errorf("the length(%d) of bfloat data should divide the dim(%d)", l, dim)
 	}
 	return uint64((int64(l)) / dim / 2), nil
 }
