@@ -105,14 +105,16 @@ func (rln *RateLimiterNode) GetRateLimitError(rate float64) error {
 }
 
 func TraverseRateLimiterTree(root *RateLimiterNode, fn1 func(internalpb.RateType, *ratelimitutil.Limiter) bool,
-	fn2 func(state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool,
+	fn2 func(node *RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool,
 ) {
 	if fn1 != nil {
 		root.limiters.Range(fn1)
 	}
 
 	if fn2 != nil {
-		root.quotaStates.Range(fn2)
+		root.quotaStates.Range(func(state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+			return fn2(root, state, errCode)
+		})
 	}
 	root.GetChildren().Range(func(key int64, child *RateLimiterNode) bool {
 		TraverseRateLimiterTree(child, fn1, fn2)

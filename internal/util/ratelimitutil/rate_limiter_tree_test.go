@@ -77,7 +77,7 @@ func TestTraverseRateLimiterTree(t *testing.T) {
 
 	// Negative test case for fn2
 	var fn2Count int
-	fn2 := func(state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+	fn2 := func(node *RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
 		fn2Count++
 		return true
 	}

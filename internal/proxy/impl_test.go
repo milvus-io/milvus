@@ -989,6 +989,7 @@ func TestProxyDropDatabase(t *testing.T) {
 	ctx := context.Background()
 
 	node, err := NewProxy(ctx, factory)
+	node.initRateCollector()
 	assert.NoError(t, err)
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),

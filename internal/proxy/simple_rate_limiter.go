@@ -144,7 +144,7 @@ func (m *SimpleLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
 	serviceStates := make(map[milvuspb.QuotaState]typeutil.Set[commonpb.ErrorCode])
 
 	rlinternal.TraverseRateLimiterTree(m.rateLimiter.GetRootLimiters(), nil,
-		func(state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+		func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
 			if serviceStates[state] == nil {
 				serviceStates[state] = typeutil.NewSet[commonpb.ErrorCode]()
 			}

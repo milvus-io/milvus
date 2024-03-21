@@ -21,7 +21,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // describeCollectionTask describe collection request task
@@ -42,12 +41,6 @@ func (t *describeCollectionTask) Prepare(ctx context.Context) error {
 // Execute task execution
 func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 	coll, err := t.core.describeCollection(ctx, t.Req, t.allowUnavailable)
-	if err != nil {
-		return err
-	}
-
-	// It is necessary to get the database name while describing the collection with the collection id and empty db name.
-	db, err := t.core.meta.GetDatabaseByID(ctx, coll.DBID, typeutil.MaxTimestamp)
 	if err != nil {
 		return err
 	}

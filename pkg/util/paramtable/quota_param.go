@@ -220,7 +220,7 @@ seconds, (0 ~ 65536)`,
 	p.DDLCollectionRate.Init(base.mgr)
 
 	p.DDLCollectionRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.ddl.collectionRate.db",
+		Key:          "quotaAndLimits.ddl.db.collectionRate",
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
@@ -258,7 +258,7 @@ seconds, (0 ~ 65536)`,
 	p.DDLPartitionRate.Init(base.mgr)
 
 	p.DDLPartitionRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.ddl.partitionRate.db",
+		Key:          "quotaAndLimits.ddl.db.partitionRate",
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
@@ -304,7 +304,7 @@ seconds, (0 ~ 65536)`,
 	p.MaxIndexRate.Init(base.mgr)
 
 	p.MaxIndexRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.indexRate.max.db",
+		Key:          "quotaAndLimits.indexRate.db.max",
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {
@@ -350,7 +350,7 @@ seconds, (0 ~ 65536)`,
 	p.MaxFlushRate.Init(base.mgr)
 
 	p.MaxFlushRatePerDB = ParamItem{
-		Key:          "quotaAndLimits.flushRate.max.db",
+		Key:          "quotaAndLimits.flushRate.db.max",
 		Version:      "2.4.1",
 		DefaultValue: max,
 		Formatter: func(v string) string {

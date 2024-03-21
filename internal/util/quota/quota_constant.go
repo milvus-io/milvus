@@ -35,7 +35,7 @@ var (
 
 func initLimitConfigMaps(params *paramtable.ComponentParam) {
 	initOnce.Do(func() {
-		quotaConfig := params.QuotaConfig
+		quotaConfig := &params.QuotaConfig
 		limitConfigMap = map[internalpb.RateScope]map[internalpb.RateType]*paramtable.ParamItem{
 			internalpb.RateScope_Cluster: {
 				internalpb.RateType_DDLCollection: &quotaConfig.DDLCollectionRate,

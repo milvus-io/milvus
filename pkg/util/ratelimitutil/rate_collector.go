@@ -74,16 +74,14 @@ func newRateCollector(window time.Duration, granularity time.Duration, now time.
 }
 
 func (r *RateCollector) cleanDeprecateSubLabels() {
-	tick := time.Tick(r.window * 2)
-	for {
-		select {
-		case <-tick:
-			r.Lock()
-			for _, labelInfo := range r.deprecatedSubLabels {
-				r.removeSubLabel(labelInfo)
-			}
-			r.Unlock()
+	tick := time.NewTicker(r.window * 2)
+	defer tick.Stop()
+	for range tick.C {
+		r.Lock()
+		for _, labelInfo := range r.deprecatedSubLabels {
+			r.removeSubLabel(labelInfo)
 		}
+		r.Unlock()
 	}
 }
 
@@ -186,7 +184,10 @@ func GetCollectionFromSubLabel(label, fullLabel string) (string, bool) {
 func (r *RateCollector) DeregisterSubLabel(label, subLabel string) {
 	r.Lock()
 	defer r.Unlock()
-	r.deprecatedSubLabels = append(r.deprecatedSubLabels, lo.Tuple2[string, string]{label, subLabel})
+	r.deprecatedSubLabels = append(r.deprecatedSubLabels, lo.Tuple2[string, string]{
+		A: label,
+		B: subLabel,
+	})
 }
 
 // Add is shorthand for add(label, value, time.Now()).

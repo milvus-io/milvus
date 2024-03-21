@@ -167,7 +167,7 @@ var (
 			Help:      "The quota states of cluster",
 		}, []string{
 			"quota_states",
-			"db_name",
+			"name",
 		})
 
 	// RootCoordRateLimitRatio reflects the ratio of rate limit.

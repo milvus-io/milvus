@@ -166,7 +166,9 @@ type QuotaCenter struct {
 // TODO: merger the pr https://github.com/milvus-io/milvus/commit/dc2cdbe387938f3b196a44b4d158b48a0d3b0010#diff-b00b9ee1fd69c02df4ee5ef79f79f74c6f640e767aa5b01cf8b51e16ad61f5fd
 
 // NewQuotaCenter returns a new QuotaCenter.
-func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable) *QuotaCenter {
+func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord types.QueryCoordClient,
+	dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable,
+) *QuotaCenter {
 	ctx, cancel := context.WithCancel(context.TODO())
 	q := &QuotaCenter{
 		ctx:                  ctx,
@@ -195,6 +197,17 @@ func newParamLimiterFunc(rateScope internalpb.RateScope, opType opType) func() *
 		return initLimiter(func(rt internalpb.RateType) *ratelimitutil.Limiter {
 			limitVal := quota.GetQuotaValue(rateScope, rt, Params)
 			return ratelimitutil.NewLimiter(Limit(limitVal), 0)
+		}, rateScope, opType)
+	}
+}
+
+func newParamLimiterFuncWithLimitFunc(rateScope internalpb.RateScope,
+	opType opType,
+	limitFunc func(internalpb.RateType) Limit) func() *rlinternal.RateLimiterNode {
+	return func() *rlinternal.RateLimiterNode {
+		return initLimiter(func(rt internalpb.RateType) *ratelimitutil.Limiter {
+			limitVal := limitFunc(rt)
+			return ratelimitutil.NewLimiter(limitVal, 0)
 		}, rateScope, opType)
 	}
 }
@@ -314,6 +327,13 @@ func (q *QuotaCenter) clearMetrics() {
 	q.dbs = typeutil.NewConcurrentMap[string, int64]()
 }
 
+func updateNumEntitiesLoaded(current map[int64]int64, qn *metricsinfo.QueryNodeCollectionMetrics) map[int64]int64 {
+	for collectionID, rowNum := range qn.CollectionRows {
+		current[collectionID] += rowNum
+	}
+	return current
+}
+
 // collectMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
 func (q *QuotaCenter) collectMetrics() error {
 	oldDataNodes := typeutil.NewSet(lo.Keys(q.dataNodeMetrics)...)
@@ -342,11 +362,15 @@ func (q *QuotaCenter) collectMetrics() error {
 		}
 
 		collections := typeutil.NewUniqueSet()
+		numEntitiesLoaded := make(map[int64]int64)
 		for _, queryNodeMetric := range queryCoordTopology.Cluster.ConnectedNodes {
 			if queryNodeMetric.QuotaMetrics != nil {
 				oldQueryNodes.Remove(queryNodeMetric.ID)
 				q.queryNodeMetrics[queryNodeMetric.ID] = queryNodeMetric.QuotaMetrics
 				collections.Insert(queryNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
+			}
+			if queryNodeMetric.CollectionMetrics != nil {
+				numEntitiesLoaded = updateNumEntitiesLoaded(numEntitiesLoaded, queryNodeMetric.CollectionMetrics)
 			}
 		}
 
@@ -362,9 +386,13 @@ func (q *QuotaCenter) collectMetrics() error {
 				collIDToPartIDs = make(map[int64][]int64)
 				q.readableCollections[coll.DBID] = collIDToPartIDs
 			}
-			collIDToPartIDs[collectionID] = lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })
+			collIDToPartIDs[collectionID] = append(collIDToPartIDs[collectionID],
+				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
 			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(coll.Name, collectionID)
+			if numEntity, ok := numEntitiesLoaded[collectionID]; ok {
+				metrics.RootCoordNumEntities.WithLabelValues(coll.Name, metrics.LoadedLabel).Set(float64(numEntity))
+			}
 			return true
 		})
 
@@ -398,6 +426,11 @@ func (q *QuotaCenter) collectMetrics() error {
 		q.diskMu.Unlock()
 
 		q.writableCollections = make(map[int64]map[int64][]int64, 0)
+		var collectionMetrics map[int64]*metricsinfo.DataCoordCollectionInfo
+		cm := dataCoordTopology.Cluster.Self.CollectionMetrics
+		if cm != nil {
+			collectionMetrics = cm.Collections
+		}
 		collections.Range(func(collectionID int64) bool {
 			var coll *model.Collection
 			coll, err = q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
@@ -410,9 +443,31 @@ func (q *QuotaCenter) collectMetrics() error {
 				collIDToPartIDs = make(map[int64][]int64)
 				q.writableCollections[coll.DBID] = collIDToPartIDs
 			}
-			collIDToPartIDs[collectionID] = lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })
+			collIDToPartIDs[collectionID] = append(collIDToPartIDs[collectionID],
+				lo.Map(coll.Partitions, func(part *model.Partition, _ int) int64 { return part.PartitionID })...)
 			q.collectionIDToDBID.Insert(collectionID, coll.DBID)
 			q.collections.Insert(coll.Name, collectionID)
+			if collectionMetrics == nil {
+				return true
+			}
+			if datacoordCollectionMetric, ok := collectionMetrics[collectionID]; ok {
+				metrics.RootCoordNumEntities.WithLabelValues(coll.Name, metrics.TotalLabel).Set(float64(datacoordCollectionMetric.NumEntitiesTotal))
+				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
+				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
+					if _, ok := fields[indexInfo.FieldID]; !ok {
+						log.Warn("field id not found, ignore to report indexed num entities",
+							zap.Int64("collection", collectionID),
+							zap.Int64("field", indexInfo.FieldID),
+						)
+						continue
+					}
+					field := fields[indexInfo.FieldID]
+					metrics.RootCoordIndexedNumEntities.WithLabelValues(
+						coll.Name,
+						indexInfo.IndexName,
+						strconv.FormatBool(typeutil.IsVectorType(field.DataType))).Set(float64(indexInfo.NumEntitiesIndexed))
+				}
+			}
 			return true
 		})
 		return err
@@ -745,7 +800,8 @@ func (q *QuotaCenter) calculateReadRates() error {
 }
 
 func (q *QuotaCenter) coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed float64,
-	node *rlinternal.RateLimiterNode, mlog *log.MLogger) {
+	node *rlinternal.RateLimiterNode, mlog *log.MLogger,
+) {
 	limiter := node.GetLimiters()
 
 	v, ok := limiter.Get(internalpb.RateType_DQLSearch)
@@ -1084,16 +1140,25 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 	initLimiters := func(sourceCollections map[int64]map[int64][]int64) {
 		for dbID, collections := range sourceCollections {
 			for collectionID, partitionIDs := range collections {
+				getCollectionLimitVal := func(rateType internalpb.RateType) Limit {
+					limitVal, err := q.getCollectionMaxLimit(rateType, collectionID)
+					if err != nil {
+						log.Warn("QuotaCenter getCollectionMaxLimit failed", zap.Error(err))
+						return Limit(quota.GetQuotaValue(internalpb.RateScope_Collection, rateType, Params))
+					}
+					return limitVal
+				}
+
 				for _, partitionID := range partitionIDs {
 					q.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partitionID,
 						newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-						newParamLimiterFunc(internalpb.RateScope_Collection, allOps),
+						newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal),
 						newParamLimiterFunc(internalpb.RateScope_Partition, allOps))
 				}
 				if len(partitionIDs) == 0 {
 					q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
 						newParamLimiterFunc(internalpb.RateScope_Database, allOps),
-						newParamLimiterFunc(internalpb.RateScope_Collection, allOps))
+						newParamLimiterFuncWithLimitFunc(internalpb.RateScope_Collection, allOps, getCollectionLimitVal))
 				}
 			}
 			if len(collections) == 0 {
@@ -1104,17 +1169,6 @@ func (q *QuotaCenter) resetAllCurrentRates() error {
 	initLimiters(q.readableCollections)
 	initLimiters(q.writableCollections)
 	return nil
-}
-
-func (q *QuotaCenter) getOrCreateNewCollectionRateLimiter(dbID, collectionID int64) (*rlinternal.RateLimiterNode, error) {
-	return q.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
-		func() *rlinternal.RateLimiterNode {
-			return initInfLimiter(internalpb.RateScope_Database, allOps)
-		},
-		func() *rlinternal.RateLimiterNode {
-			return initInfLimiter(internalpb.RateScope_Collection, allOps)
-		},
-	), nil
 }
 
 func updateLimit(collectionLimiter *rlinternal.RateLimiterNode, rt internalpb.RateType, limit ratelimitutil.Limit) error {
@@ -1360,17 +1414,37 @@ func (q *QuotaCenter) sendRatesToProxy() error {
 
 // recordMetrics records metrics of quota states.
 func (q *QuotaCenter) recordMetrics() {
+	dbIDs := make(map[int64]string, q.dbs.Len())
+	collectionIDs := make(map[int64]string, q.collections.Len())
+	q.dbs.Range(func(name string, id int64) bool {
+		dbIDs[id] = name
+		return true
+	})
+	q.collections.Range(func(name string, id int64) bool {
+		collectionIDs[id] = name
+		return true
+	})
+
 	record := func(errorCode commonpb.ErrorCode) {
-		var hasException float64 = 0
 		rlinternal.TraverseRateLimiterTree(q.rateLimiter.GetRootLimiters(), nil,
-			func(state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
+			func(node *rlinternal.RateLimiterNode, state milvuspb.QuotaState, errCode commonpb.ErrorCode) bool {
 				if errCode == errorCode {
-					hasException = 1
+					var name string
+					switch node.Level() {
+					case internalpb.RateScope_Cluster:
+						name = "cluster"
+					case internalpb.RateScope_Database:
+						name = "db_" + dbIDs[node.GetID()]
+					case internalpb.RateScope_Collection:
+						name = "collection_" + collectionIDs[node.GetID()]
+					default:
+						return false
+					}
+					metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), name).Set(1.0)
 					return false
 				}
 				return true
 			})
-		metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(hasException)
 	}
 	record(commonpb.ErrorCode_MemoryQuotaExhausted)
 	record(commonpb.ErrorCode_DiskQuotaExhausted)
