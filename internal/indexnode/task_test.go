@@ -59,7 +59,7 @@ func (suite *IndexBuildTaskSuite) SetupSuite() {
 	suite.collectionID = 1000
 	suite.partitionID = 1001
 	suite.segmentID = 1002
-	suite.dataPath = suite.T().TempDir() + "/1000/1001/1002/3/1"
+	suite.dataPath = "/tmp/milvus/data/1000/1001/1002/3/1"
 }
 
 func (suite *IndexBuildTaskSuite) SetupTest() {
