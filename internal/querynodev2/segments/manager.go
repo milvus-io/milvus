@@ -171,38 +171,37 @@ func NewManager() *Manager {
 		Collection: NewCollectionManager(),
 		Segment:    segMgr,
 	}
-	manager.DiskCache = cache.NewLRUCache[int64, Segment](
-		int32(cacheMaxItemNum),
-		func(key int64) (Segment, bool) {
-			log.Debug("cache missed segment", zap.Int64("segmentID", key))
-			segMgr.mu.RLock()
-			defer segMgr.mu.RUnlock()
 
-			segment, ok := segMgr.sealedSegments[key]
-			if !ok {
-				// the segment has been released, just ignore it
-				return nil, false
-			}
+	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithCapacity(cacheMaxItemNum).WithLoader(func(key int64) (Segment, bool) {
+		log.Debug("cache missed segment", zap.Int64("segmentID", key))
+		segMgr.mu.RLock()
+		defer segMgr.mu.RUnlock()
 
-			info := segment.LoadInfo()
-			_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (interface{}, error) {
-				collection := manager.Collection.Get(segment.Collection())
-				if collection == nil {
-					return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
-				}
-				err := loadSealedSegmentFields(context.Background(), collection, segment.(*LocalSegment), info.BinlogPaths, info.GetNumOfRows(), WithLoadStatus(LoadStatusMapped))
-				return nil, err
-			})
-			if err != nil {
-				log.Warn("cache sealed segment failed", zap.Error(err))
-				return nil, false
+		segment, ok := segMgr.sealedSegments[key]
+		if !ok {
+			// the segment has been released, just ignore it
+			return nil, false
+		}
+
+		info := segment.LoadInfo()
+		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (interface{}, error) {
+			collection := manager.Collection.Get(segment.Collection())
+			if collection == nil {
+				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
-			return segment, true
-		},
-		func(key int64, segment Segment) {
-			log.Debug("evict segment from cache", zap.Int64("segmentID", key))
-			segment.Release(WithReleaseScope(ReleaseScopeData))
+			err := loadSealedSegmentFields(context.Background(), collection, segment.(*LocalSegment), info.BinlogPaths, info.GetNumOfRows(), WithLoadStatus(LoadStatusMapped))
+			return nil, err
 		})
+		if err != nil {
+			log.Warn("cache sealed segment failed", zap.Error(err))
+			return nil, false
+		}
+		return segment, true
+	}).WithFinalizer(func(key int64, segment Segment) error {
+		log.Debug("evict segment from cache", zap.Int64("segmentID", key))
+		segment.Release(WithReleaseScope(ReleaseScopeData))
+		return nil
+	}).Build()
 	return manager
 }
 

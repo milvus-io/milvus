@@ -49,29 +49,32 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		label = metrics.GrowingSegmentLabel
 	}
 
+	retriever := func(s Segment) error {
+		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
+		result, err := s.Retrieve(ctx, plan)
+		resultCh <- result
+		if err != nil {
+			return err
+		}
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return nil
+	}
+
 	for i, segment := range segments {
 		wg.Add(1)
 		go func(seg Segment, i int) {
 			defer wg.Done()
-			tr := timerecord.NewTimeRecorder("retrieveOnSegments")
-			if seg.LoadStatus() == LoadStatusMeta {
-				item, ok := mgr.DiskCache.GetAndPin(seg.ID())
-				if !ok {
-					errs[i] = merr.WrapErrSegmentNotLoaded(seg.ID())
-					return
-				}
-				defer item.Unpin()
-			}
 
-			result, err := seg.Retrieve(ctx, plan)
+			var err error
+			if seg.LoadStatus() == LoadStatusMeta {
+				err = mgr.DiskCache.Do(seg.ID(), retriever)
+			} else {
+				err = retriever(seg)
+			}
 			if err != nil {
 				errs[i] = err
-				return
 			}
-			errs[i] = nil
-			resultCh <- result
-			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		}(segment, i)
 	}
 	wg.Wait()
