@@ -104,6 +104,17 @@ var (
 			Name:      "querynode_num",
 			Help:      "number of QueryNodes managered by QueryCoord",
 		}, []string{})
+
+	QueryCoordCurrentTargetCheckpointUnixSeconds = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryCoordRole,
+			Name:      "current_target_checkpoint_unix_seconds",
+			Help:      "current target checkpoint timestamp in unix seconds",
+		}, []string{
+			nodeIDLabelName,
+			channelNameLabelName,
+		})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -116,4 +127,5 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordReleaseLatency)
 	registry.MustRegister(QueryCoordTaskNum)
 	registry.MustRegister(QueryCoordNumQueryNodes)
+	registry.MustRegister(QueryCoordCurrentTargetCheckpointUnixSeconds)
 }
