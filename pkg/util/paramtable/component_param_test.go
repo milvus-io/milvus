@@ -385,6 +385,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, Params.ImportScheduleInterval.GetAsDuration(time.Second))
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
 		assert.Equal(t, 120*time.Second, Params.ImportCheckIntervalLow.GetAsDuration(time.Second))
+		assert.Equal(t, 1024, Params.MaxFilesPerImportReq.GetAsInt())
 
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
@@ -440,6 +441,7 @@ func TestComponentParam(t *testing.T) {
 		maxConcurrentImportTaskNum := Params.MaxConcurrentImportTaskNum.GetAsInt()
 		t.Logf("maxConcurrentImportTaskNum: %d", maxConcurrentImportTaskNum)
 		assert.Equal(t, 16, maxConcurrentImportTaskNum)
+		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 	})

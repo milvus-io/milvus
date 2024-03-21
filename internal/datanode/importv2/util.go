@@ -232,6 +232,12 @@ func GetFileSize(file *internalpb.ImportFile, cm storage.ChunkManager, task Task
 		}
 		totalSize += size
 	}
+	maxSize := paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024
+	if totalSize > int64(maxSize) {
+		return 0, merr.WrapErrImportFailed(fmt.Sprintf(
+			"The import file size has reached the maximum limit allowed for importing, "+
+				"fileSize=%d, maxSize=%d", totalSize, int64(maxSize)))
+	}
 	return totalSize, nil
 }
 
