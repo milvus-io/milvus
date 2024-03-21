@@ -224,3 +224,26 @@ func Test_autoIndexConfig_panicIfNotValid(t *testing.T) {
 		assert.Equal(t, indexparamcheck.BinaryVectorDefaultMetricType, metricType)
 	})
 }
+
+func TestScalarAutoIndexParams_build(t *testing.T) {
+	var CParams ComponentParam
+	bt := NewBaseTable(SkipRemote(true))
+	CParams.Init(bt)
+
+	t.Run("parse scalar auto index param success", func(t *testing.T) {
+		var err error
+		map1 := map[string]any{
+			"numeric": "STL_SORT",
+			"varchar": "TRIE",
+			"bool":    "INVERTED",
+		}
+		var jsonStrBytes []byte
+		jsonStrBytes, err = json.Marshal(map1)
+		assert.NoError(t, err)
+		err = bt.Save(CParams.AutoIndexConfig.ScalarAutoIndexParams.Key, string(jsonStrBytes))
+		assert.NoError(t, err)
+		assert.Equal(t, "STL_SORT", CParams.AutoIndexConfig.ScalarNumericIndexType.GetValue())
+		assert.Equal(t, "TRIE", CParams.AutoIndexConfig.ScalarVarcharIndexType.GetValue())
+		assert.Equal(t, "INVERTED", CParams.AutoIndexConfig.ScalarBoolIndexType.GetValue())
+	})
+}
