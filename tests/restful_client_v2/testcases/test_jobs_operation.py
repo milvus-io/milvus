@@ -14,7 +14,7 @@ from base.testbase import TestBase
 from uuid import uuid4
 
 
-@pytest.mark.L1
+@pytest.mark.BulkInsert
 class TestCreateImportJob(TestBase):
 
     @pytest.mark.parametrize("insert_num", [5000])
@@ -668,7 +668,7 @@ class TestCreateImportJob(TestBase):
 
     @pytest.mark.parametrize("insert_round", [2])
     @pytest.mark.parametrize("auto_id", [True])
-    @pytest.mark.parametrize("is_partition_key", [False])
+    @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
