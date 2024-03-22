@@ -4168,43 +4168,94 @@ func TestDataCoord_UnsetIsImportingState(t *testing.T) {
 
 func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
-	mockPChannel := "fake-by-dev-rootcoord-dml-1"
 
-	t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
+	t.Run("UpdateChannelCheckpoint_Success", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
+		datanodeID := int64(1)
+
+		svr.channelManager.AddNode(datanodeID)
+		svr.channelManager.Watch(context.Background(), &channelMeta{Name: mockVChannel, CollectionID: 0})
+		// svr.channelManager.Watch
+		// channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
-				SourceID: paramtable.GetNodeID(),
+				SourceID: datanodeID,
 			},
 			VChannel: mockVChannel,
 			Position: &msgpb.MsgPosition{
-				ChannelName: mockPChannel,
+				ChannelName: mockVChannel,
 				Timestamp:   1000,
 				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 			},
 		}
 
 		resp, err := svr.UpdateChannelCheckpoint(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		cp := svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.NotNil(t, cp)
+		svr.meta.DropChannelCheckpoint(mockVChannel)
 
 		req = &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
-				SourceID: paramtable.GetNodeID(),
+				SourceID: datanodeID,
 			},
 			VChannel: mockVChannel,
 			ChannelCheckpoints: []*msgpb.MsgPosition{{
-				ChannelName: mockPChannel,
+				ChannelName: mockVChannel,
 				Timestamp:   1000,
 				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 			}},
 		}
 
 		resp, err = svr.UpdateChannelCheckpoint(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		cp = svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.NotNil(t, cp)
+	})
+
+	t.Run("UpdateChannelCheckpoint_NodeNotMatch", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		datanodeID := int64(1)
+
+		req := &datapb.UpdateChannelCheckpointRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: datanodeID,
+			},
+			VChannel: mockVChannel,
+			Position: &msgpb.MsgPosition{
+				ChannelName: mockVChannel,
+				Timestamp:   1000,
+				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			},
+		}
+
+		resp, err := svr.UpdateChannelCheckpoint(context.TODO(), req)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrChannelNotFound)
+		cp := svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.Nil(t, cp)
+
+		req = &datapb.UpdateChannelCheckpointRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: datanodeID,
+			},
+			VChannel: mockVChannel,
+			ChannelCheckpoints: []*msgpb.MsgPosition{{
+				ChannelName: mockVChannel,
+				Timestamp:   1000,
+				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			}},
+		}
+
+		resp, err = svr.UpdateChannelCheckpoint(context.TODO(), req)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		cp = svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.Nil(t, cp)
 	})
 }
 
