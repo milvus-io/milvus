@@ -309,10 +309,12 @@ message GetImportProgressRequest {
 message ImportTaskProgress {
   string file_name = 1;
   int64 file_size = 2;
-  string state = 3;
-  string reason = 4;
-  int64 progress = 5;
-  string complete_time = 6;
+  string reason = 3;
+  int64 progress = 4;
+  string complete_time = 5;
+  string state = 6;
+  int64 imported_rows = 7;
+  int64 total_rows = 8;
 }
 
 message GetImportProgressResponse {
@@ -323,6 +325,9 @@ message GetImportProgressResponse {
   string collection_name = 5;
   string complete_time = 6;
   repeated ImportTaskProgress task_progresses = 7;
+  int64 imported_rows = 8;
+  int64 total_rows = 9;
+  string start_time = 10;
 }
 
 message ListImportsRequestInternal {

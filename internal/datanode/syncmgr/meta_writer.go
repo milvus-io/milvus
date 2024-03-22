@@ -66,16 +66,16 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 			StartPosition: info.StartPosition(),
 		}
 	})
-	getBinlogNum := func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) }
+	//getBinlogNum := func(fBinlog *datapb.FieldBinlog) int { return len(fBinlog.GetBinlogs()) }
 	log.Info("SaveBinlogPath",
 		zap.Int64("SegmentID", pack.segmentID),
 		zap.Int64("CollectionID", pack.collectionID),
 		zap.Int64("ParitionID", pack.partitionID),
 		zap.Any("startPos", startPos),
 		zap.Any("checkPoints", checkPoints),
-		zap.Int("binlogNum", lo.SumBy(insertFieldBinlogs, getBinlogNum)),
-		zap.Int("statslogNum", lo.SumBy(statsFieldBinlogs, getBinlogNum)),
-		zap.Int("deltalogNum", lo.SumBy(deltaFieldBinlogs, getBinlogNum)),
+		zap.Any("binlogNum", insertFieldBinlogs),
+		zap.Any("statslogNum", statsFieldBinlogs),
+		zap.Any("deltalogNum", deltaFieldBinlogs),
 		zap.String("vChannelName", pack.channelName),
 	)
 
