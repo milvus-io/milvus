@@ -88,7 +88,7 @@ func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
 }
 
 type Cache[K comparable, V any] interface {
-	Do(key K, doer func(V) error) error
+	Do(key K, doer func(V) error) (bool, error)
 	DoWait(key K, timeout time.Duration, doer func(V) error) error
 }
 
@@ -184,13 +184,13 @@ func newLRUCache[K comparable, V any](
 }
 
 // Do picks up an item from cache and executes doer. The entry of interest is garented in the cache when doer is executing.
-func (c *lruCache[K, V]) Do(key K, doer func(V) error) error {
-	item, err := c.getAndPin(key)
+func (c *lruCache[K, V]) Do(key K, doer func(V) error) (bool, error) {
+	item, missing, err := c.getAndPin(key)
 	if err != nil {
-		return err
+		return missing, err
 	}
 	defer c.Unpin(key)
-	return doer(item.value)
+	return missing, doer(item.value)
 }
 
 func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error) error {
@@ -213,7 +213,7 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 	var ele *list.Element
 	start := time.Now()
 	for {
-		item, err := c.getAndPin(key)
+		item, _, err := c.getAndPin(key)
 		if err == nil {
 			if ele != nil {
 				c.rwlock.Lock()
@@ -277,16 +277,16 @@ func (c *lruCache[K, V]) peekAndPin(key K) *cacheItem[K, V] {
 }
 
 // GetAndPin gets and pins the given key if it exists
-func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
+func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], bool, error) {
 	if item := c.peekAndPin(key); item != nil {
-		return item, nil
+		return item, false, nil
 	}
 
 	if c.loader != nil {
 		// Try scavenge if there is room. If not, fail fast.
 		//	Note that the test is not accurate since we are not locking `loader` here.
 		if _, ok := c.tryScavenge(key); !ok {
-			return nil, ErrNotEnoughSpace
+			return nil, true, ErrNotEnoughSpace
 		}
 
 		strKey := fmt.Sprint(key)
@@ -308,12 +308,12 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 		})
 
 		if err == nil {
-			return item.(*cacheItem[K, V]), nil
+			return item.(*cacheItem[K, V]), true, nil
 		}
-		return nil, err
+		return nil, true, err
 	}
 
-	return nil, ErrNoSuchItem
+	return nil, true, ErrNoSuchItem
 }
 
 func (c *lruCache[K, V]) tryScavenge(key K) ([]K, bool) {

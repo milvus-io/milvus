@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -345,4 +346,33 @@ func mergeRequestCost(requestCosts []*internalpb.CostAggregation) *internalpb.Co
 func getIndexEngineVersion() (minimal, current int32) {
 	cMinimal, cCurrent := C.GetMinimalIndexVersion(), C.GetCurrentIndexVersion()
 	return int32(cMinimal), int32(cCurrent)
+}
+
+// getSegmentMetricLabel returns the label for segment metrics.
+func getSegmentMetricLabel(segment Segment) metricsutil.SegmentLabel {
+	return metricsutil.SegmentLabel{
+		SegmentID:     segment.ID(),
+		DatabaseName:  segment.DatabaseName(),
+		ResourceGroup: segment.ResourceGroup(),
+	}
+}
+
+// observeResourceEstimate records the resource usage of a segment.
+func observeResourceEstimate(segment Segment) {
+	estimate := segment.ResourceUsageEstimate()
+	rowNum := segment.RowNum()
+	metricsutil.NewResourceEstimateRecord(getSegmentMetricLabel(segment)).
+		WithMemUsage(estimate.MemorySize).
+		WithDiskUsage(estimate.DiskSize).
+		WithRowNum(uint64(rowNum)).
+		Finish(nil)
+}
+
+// clearResourceEstimate clears the resource usage of a segment.
+func clearResourceEstimate(segment Segment) {
+	metricsutil.NewResourceEstimateRecord(getSegmentMetricLabel(segment)).
+		WithMemUsage(0).
+		WithDiskUsage(0).
+		WithRowNum(0).
+		Finish(nil)
 }

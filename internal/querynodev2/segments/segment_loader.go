@@ -1064,7 +1064,12 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	).Add(float64(loadInfo.GetNumOfRows()))
 
 	log.Info("loading delta...")
-	return loader.LoadDeltaLogs(ctx, segment, loadInfo.Deltalogs)
+	if err := loader.LoadDeltaLogs(ctx, segment, loadInfo.Deltalogs); err != nil {
+		return err
+	}
+
+	observeResourceEstimate(segment)
+	return nil
 }
 
 func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) ([]string, storage.StatsLogType) {
