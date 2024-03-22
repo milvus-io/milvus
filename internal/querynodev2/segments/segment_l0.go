@@ -81,6 +81,8 @@ func (s *L0Segment) RowNum() int64 {
 }
 
 func (s *L0Segment) MemSize() int64 {
+	s.dataGuard.RLock()
+	defer s.dataGuard.RUnlock()
 	return lo.SumBy(s.pks, func(pk storage.PrimaryKey) int64 {
 		return pk.Size() + 8
 	})
