@@ -25,6 +25,7 @@ import (
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/file"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -41,6 +42,7 @@ type reader struct {
 	path string
 	r    *file.Reader
 
+	fileSize   *atomic.Int64
 	bufferSize int
 	count      int64
 
@@ -79,6 +81,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		ctx:        ctx,
 		cm:         cm,
 		schema:     schema,
+		fileSize:   atomic.NewInt64(0),
 		path:       path,
 		r:          r,
 		bufferSize: bufferSize,
@@ -120,7 +123,15 @@ OUTER:
 }
 
 func (r *reader) Size() (int64, error) {
-	return r.cm.Size(r.ctx, r.path)
+	if size := r.fileSize.Load(); size != 0 {
+		return size, nil
+	}
+	size, err := r.cm.Size(r.ctx, r.path)
+	if err != nil {
+		return 0, err
+	}
+	r.fileSize.Store(size)
+	return size, nil
 }
 
 func (r *reader) Close() {

@@ -24,6 +24,7 @@ import (
 	"math"
 
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -36,6 +37,7 @@ type reader struct {
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
+	fileSize   *atomic.Int64
 	deleteData *storage.DeleteData
 	insertLogs map[int64][]string // fieldID -> binlogs
 
@@ -52,9 +54,10 @@ func NewReader(ctx context.Context,
 ) (*reader, error) {
 	schema = typeutil.AppendSystemFields(schema)
 	r := &reader{
-		ctx:    ctx,
-		cm:     cm,
-		schema: schema,
+		ctx:      ctx,
+		cm:       cm,
+		schema:   schema,
+		fileSize: atomic.NewInt64(0),
 	}
 	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
@@ -203,7 +206,15 @@ OUTER:
 }
 
 func (r *reader) Size() (int64, error) {
-	return storage.GetFilesSize(r.ctx, lo.Flatten(lo.Values(r.insertLogs)), r.cm)
+	if size := r.fileSize.Load(); size != 0 {
+		return size, nil
+	}
+	size, err := storage.GetFilesSize(r.ctx, lo.Flatten(lo.Values(r.insertLogs)), r.cm)
+	if err != nil {
+		return 0, err
+	}
+	r.fileSize.Store(size)
+	return size, nil
 }
 
 func (r *reader) Close() {}

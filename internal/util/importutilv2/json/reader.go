@@ -23,6 +23,8 @@ import (
 	"io"
 	"strings"
 
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -40,6 +42,7 @@ type reader struct {
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
+	fileSize *atomic.Int64
 	filePath string
 	dec      *json.Decoder
 
@@ -63,6 +66,7 @@ func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.Co
 		ctx:        ctx,
 		cm:         cm,
 		schema:     schema,
+		fileSize:   atomic.NewInt64(0),
 		filePath:   path,
 		dec:        json.NewDecoder(r),
 		bufferSize: bufferSize,
@@ -165,7 +169,15 @@ func (j *reader) Read() (*storage.InsertData, error) {
 }
 
 func (j *reader) Size() (int64, error) {
-	return j.cm.Size(j.ctx, j.filePath)
+	if size := j.fileSize.Load(); size != 0 {
+		return size, nil
+	}
+	size, err := j.cm.Size(j.ctx, j.filePath)
+	if err != nil {
+		return 0, err
+	}
+	j.fileSize.Store(size)
+	return size, nil
 }
 
 func (j *reader) Close() {}
