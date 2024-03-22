@@ -342,9 +342,10 @@ func (suite *LookAsideBalancerSuite) TestGetClientFailed() {
 	suite.clientMgr.EXPECT().GetClient(mock.Anything, int64(2)).Return(nil, errors.New("shard client not found"))
 	failCounter := atomic.NewInt64(0)
 	suite.balancer.failedHeartBeatCounter.Insert(2, failCounter)
-	suite.Eventually(func() bool {
-		return failCounter.Load() == 0
-	}, 10*time.Second, 1*time.Second)
+
+	// slepp 10s, wait for checkNodeHealth execute for more than one round
+	time.Sleep(10 * time.Second)
+	suite.True(failCounter.Load() == 0)
 }
 
 func (suite *LookAsideBalancerSuite) TestNodeRecover() {
