@@ -104,6 +104,71 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	return retrieveResults, nil
 }
 
+const (
+	defaultStreamQueryConcurrency = 2
+)
+
+func retrieveSealedSegmentsStreamly(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
+	var (
+		resultCh = make(chan *segcorepb.RetrieveResults, len(segments))
+		errs     = make([]error, len(segments))
+		wg       sync.WaitGroup
+	)
+	label := metrics.SealedSegmentLabel
+
+	retriever := func(s Segment) error {
+		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
+		result, err := s.Retrieve(ctx, plan)
+		resultCh <- result
+		if err != nil {
+			return err
+		}
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
+		return nil
+	}
+
+	streamCredits := make(chan int, defaultStreamQueryConcurrency)
+	for i := 0; i < defaultStreamQueryConcurrency; i++ {
+		streamCredits <- i
+	}
+	for i, segment := range segments {
+		wg.Add(1)
+		go func(seg Segment, i int) {
+			defer wg.Done()
+			var err error
+			<-streamCredits
+			if seg.LoadStatus() == LoadStatusMeta {
+				err = mgr.DiskCache.Do(seg.ID(), retriever)
+			} else {
+				err = retriever(seg)
+			}
+			if err != nil {
+				errs[i] = err
+			}
+			defer func() {
+				streamCredits <- 1
+			}()
+		}(segment, i)
+	}
+	wg.Wait()
+	close(resultCh)
+	close(streamCredits)
+
+	for _, err := range errs {
+		if err != nil {
+			return nil, err
+		}
+	}
+
+	var retrieveResults []*segcorepb.RetrieveResults
+	for result := range resultCh {
+		retrieveResults = append(retrieveResults, result)
+	}
+
+	return retrieveResults, nil
+}
+
 func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
 	var (
 		errs = make([]error, len(segments))
@@ -171,8 +236,11 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	if err != nil {
 		return retrieveResults, retrieveSegments, err
 	}
-
-	retrieveResults, err = retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan)
+	if req.GetScope() == querypb.DataScope_Historical && paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() {
+		retrieveResults, err = retrieveSealedSegmentsStreamly(ctx, manager, retrieveSegments, SegType, plan)
+	} else {
+		retrieveResults, err = retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan)
+	}
 	return retrieveResults, retrieveSegments, err
 }
 

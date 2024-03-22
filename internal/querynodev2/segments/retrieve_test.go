@@ -163,6 +163,26 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 	suite.manager.Segment.Unpin(segments)
 }
 
+func (suite *RetrieveSuite) TestRetrieveSealedStreamly() {
+	plan, err := genSimpleRetrievePlan(suite.collection)
+	suite.NoError(err)
+
+	req := &querypb.QueryRequest{
+		Req: &internalpb.RetrieveRequest{
+			CollectionID: suite.collectionID,
+			PartitionIDs: []int64{suite.partitionID},
+		},
+		SegmentIDs: []int64{suite.sealed.ID()},
+		Scope:      querypb.DataScope_Historical,
+	}
+	key := paramtable.Get().QueryNodeCfg.UseStreamComputing.Key
+	paramtable.Get().Save(key, "true")
+	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
+	suite.NoError(err)
+	suite.Len(res[0].Offset, 3)
+	suite.manager.Segment.Unpin(segments)
+}
+
 func (suite *RetrieveSuite) TestRetrieveGrowing() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)

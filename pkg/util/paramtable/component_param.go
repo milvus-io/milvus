@@ -2027,6 +2027,7 @@ type queryNodeConfig struct {
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	UseStreamReduce                         ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2551,6 +2552,13 @@ user-task-polling:
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
+	p.UseStreamReduce = ParamItem{
+		Key:          "queryNode.useStreamReduce",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "use stream search mode when searching or querying",
+	}
+	p.UseStreamReduce.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
