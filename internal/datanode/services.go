@@ -352,18 +352,21 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 }
 
 func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("DataNode receives NotifyChannelOperation",
-		zap.Int("operation count", len(req.GetInfos())))
+	log := log.Ctx(ctx).With(zap.Int64("nodeID", node.GetNodeID()), zap.Int("operation count", len(req.GetInfos())))
+	log.Info("DataNode receives NotifyChannelOperation")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.NotifyChannelOperation failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
+		log.Warn("DataNode NotifyChannelOperation failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	for _, info := range req.GetInfos() {
 		err := node.channelManager.Submit(info)
 		if err != nil {
-			log.Warn("Submit error", zap.Error(err))
+			log.Warn("Submit error",
+				zap.String("channel", info.GetVchan().GetChannelName()),
+				zap.String("operation", info.GetState().String()),
+				zap.Error(err))
 			return merr.Status(err), nil
 		}
 	}

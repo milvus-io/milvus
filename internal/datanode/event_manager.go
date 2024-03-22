@@ -41,6 +41,7 @@ const retryWatchInterval = 20 * time.Second
 func (node *DataNode) startWatchChannelsAtBackground(ctx context.Context) {
 	node.stopWaiter.Add(1)
 	go node.StartWatchChannels(ctx)
+}
 
 // handleChannelEvt handles event from kv watch event
 func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {

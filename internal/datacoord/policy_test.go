@@ -53,13 +53,12 @@ type PolicySuite struct {
 	mockStore *MockRWChannelStore
 }
 
-func (s *PolicySuite) SetupTest() {
+func (s *PolicySuite) SetupSubTest() {
 	s.mockStore = NewMockRWChannelStore(s.T())
 }
 
 func (s *PolicySuite) TestBufferChannelAssignPolicy() {
 	s.Run("Test no channels in bufferID", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().GetBufferChannelInfo().Return(nil)
 
 		opSet := BufferChannelAssignPolicy(s.mockStore, 1)
@@ -67,7 +66,6 @@ func (s *PolicySuite) TestBufferChannelAssignPolicy() {
 	})
 
 	s.Run("Test channels remain in bufferID", func() {
-		s.SetupTest()
 		ch2Colls := map[string]int64{
 			"ch1": 1,
 			"ch2": 1,
@@ -104,7 +102,6 @@ func (s *PolicySuite) TestAvarageAssignPolicy() {
 	var testNodeID int64 = 9
 
 	s.Run("no balance after register", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().GetBufferChannelInfo().Return(nil)
 		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
 			{NodeID: testNodeID},
@@ -115,7 +112,6 @@ func (s *PolicySuite) TestAvarageAssignPolicy() {
 		s.Nil(balanceOp)
 	})
 	s.Run("balance bufferID channels after register", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().GetBufferChannelInfo().Return(
 			&NodeChannelInfo{NodeID: bufferID, Channels: getChannels(ch2Coll)},
 		)
@@ -141,7 +137,6 @@ func (s *PolicySuite) TestAvarageAssignPolicy() {
 	})
 
 	s.Run("balance after register", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().GetBufferChannelInfo().Return(nil)
 		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
 			{NodeID: 1, Channels: getChannels(ch2Coll)},
@@ -171,7 +166,6 @@ func (s *PolicySuite) TestAverageAssignPolicy() {
 	channels := getChannels(ch2Coll)
 
 	s.Run("no new channels", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(true)
 
 		opSet := AverageAssignPolicy(s.mockStore, channels)
@@ -179,7 +173,6 @@ func (s *PolicySuite) TestAverageAssignPolicy() {
 	})
 
 	s.Run("no datanodes", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(false)
 		s.mockStore.EXPECT().GetNodesChannels().Return(nil)
 		channels := getChannels(ch2Coll)
@@ -196,7 +189,6 @@ func (s *PolicySuite) TestAverageAssignPolicy() {
 
 	s.Run("one datanode", func() {
 		// Test three channels assigned one datanode
-		s.SetupTest()
 		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(false)
 		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
 			{NodeID: 1, Channels: getChannels(map[string]int64{"channel": 1})},
@@ -220,7 +212,6 @@ func (s *PolicySuite) TestAverageAssignPolicy() {
 
 	s.Run("three datanode", func() {
 		// Test three channels assigned evenly to three datanodes
-		s.SetupTest()
 		s.mockStore.EXPECT().HasChannel(mock.Anything).Return(false)
 		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
 			{NodeID: 1},
@@ -258,9 +249,8 @@ func (s *PolicySuite) TestAvgAssignUnregisteredChannels() {
 	}
 
 	s.Run("deregistering last node", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().GetNode(mock.Anything).Return(info)
-		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return(nil)
+		s.mockStore.EXPECT().GetNodesChannels().Return(nil)
 
 		opSet := AvgAssignUnregisteredChannels(s.mockStore, info.NodeID)
 		s.NotNil(opSet)
@@ -280,9 +270,8 @@ func (s *PolicySuite) TestAvgAssignUnregisteredChannels() {
 	})
 
 	s.Run("assign channels after deregistering", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().GetNode(mock.Anything).Return(info)
-		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return([]*NodeChannelInfo{
+		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
 			{NodeID: 100},
 		})
 
@@ -304,9 +293,8 @@ func (s *PolicySuite) TestAvgAssignUnregisteredChannels() {
 	})
 
 	s.Run("test average", func() {
-		s.SetupTest()
 		s.mockStore.EXPECT().GetNode(mock.Anything).Return(info)
-		s.mockStore.EXPECT().GetNodeChannelsBy(mock.Anything, mock.Anything).Return([]*NodeChannelInfo{
+		s.mockStore.EXPECT().GetNodesChannels().Return([]*NodeChannelInfo{
 			{NodeID: 100},
 			{NodeID: 101},
 			{NodeID: 102},
@@ -338,7 +326,6 @@ func (s *PolicySuite) TestAvgAssignUnregisteredChannels() {
 
 func (s *PolicySuite) TestAvgBalanceChannelPolicy() {
 	s.Run("test even distribution", func() {
-		s.SetupTest()
 		// even distribution should have not results
 		evenDist := []*NodeChannelInfo{
 			{100, []RWChannel{getChannel("ch1", 1), getChannel("ch2", 1)}},
@@ -350,7 +337,6 @@ func (s *PolicySuite) TestAvgBalanceChannelPolicy() {
 		s.Nil(opSet)
 	})
 	s.Run("test uneven with conservative effect", func() {
-		s.SetupTest()
 		// as we deem that the node having only one channel more than average as even, so there's no reallocation
 		// for this test case
 		// even distribution should have not results
@@ -363,7 +349,6 @@ func (s *PolicySuite) TestAvgBalanceChannelPolicy() {
 		s.Nil(opSet)
 	})
 	s.Run("test uneven with zero", func() {
-		s.SetupTest()
 		uneven := []*NodeChannelInfo{
 			{100, []RWChannel{getChannel("ch1", 1), getChannel("ch2", 1), getChannel("ch3", 1)}},
 			{NodeID: 101},
@@ -385,7 +370,6 @@ func (s *PolicySuite) TestAvgBalanceChannelPolicy() {
 
 func (s *PolicySuite) TestAvgReassignPolicy() {
 	s.Run("test only one node", func() {
-		s.SetupTest()
 		ch2Coll := map[string]int64{
 			"ch1": 1,
 			"ch2": 1,
@@ -403,7 +387,6 @@ func (s *PolicySuite) TestAvgReassignPolicy() {
 	s.Run("test zero average", func() {
 		// as we use ceil to calculate the wanted average number, there should be one reassign
 		// though the average num less than 1
-		s.SetupTest()
 		storedInfo := []*NodeChannelInfo{
 			{100, []RWChannel{getChannel("ch1", 1)}},
 			{NodeID: 102},
@@ -434,7 +417,6 @@ func (s *PolicySuite) TestAvgReassignPolicy() {
 		log.Info("test OpSet", zap.Any("opset", opSet))
 	})
 	s.Run("test reassign one to one", func() {
-		s.SetupTest()
 		storedInfo := []*NodeChannelInfo{
 			{NodeID: 100, Channels: []RWChannel{
 				getChannel("ch1", 1),
@@ -486,7 +468,7 @@ func TestAssignByCountPolicySuite(t *testing.T) {
 	suite.Run(t, new(AssignByCountPolicySuite))
 }
 
-func (s *AssignByCountPolicySuite) SetupTest() {
+func (s *AssignByCountPolicySuite) SetupSubTest() {
 	s.curCluster = []*NodeChannelInfo{
 		{NodeID: 1, Channels: []RWChannel{getChannel("ch-1", 1), getChannel("ch-2", 2)}},
 		{NodeID: 2, Channels: []RWChannel{getChannel("ch-3", 1), getChannel("ch-4", 4)}},

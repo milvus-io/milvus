@@ -289,7 +289,7 @@ func WithChannelName(channel string) ChannelSelector {
 	}
 }
 
-func WithCollectionID(collectionID int64) ChannelSelector {
+func WithCollectionIDV2(collectionID int64) ChannelSelector {
 	return func(ch *StateChannel) bool {
 		return ch.GetCollectionID() == collectionID
 	}

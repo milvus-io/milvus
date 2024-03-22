@@ -300,10 +300,15 @@ func (node *DataNode) Init() error {
 }
 
 // tryToReleaseFlowgraph tries to release a flowgraph
-func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
-	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
-	node.flowgraphManager.RemoveFlowgraph(vChanName)
-	node.writeBufferManager.RemoveChannel(vChanName)
+func (node *DataNode) tryToReleaseFlowgraph(channel string) {
+	log.Info("try to release flowgraph", zap.String("channel", channel))
+	if node.flowgraphManager != nil {
+		node.flowgraphManager.RemoveFlowgraph(channel)
+	}
+
+	if node.writeBufferManager != nil {
+		node.writeBufferManager.RemoveChannel(channel)
+	}
 }
 
 // BackGroundGC runs in background to release datanode resources

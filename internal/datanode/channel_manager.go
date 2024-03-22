@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lifetime"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -52,8 +53,7 @@ type ChannelManagerImpl struct {
 
 	releaseFunc releaseFunc
 
-	closeCh     chan struct{}
-	closeOnce   sync.Once
+	closeCh     lifetime.SafeChan
 	closeWaiter sync.WaitGroup
 }
 
@@ -68,7 +68,7 @@ func NewChannelManager(dn *DataNode) *ChannelManagerImpl {
 
 		releaseFunc: dn.flowgraphManager.RemoveFlowgraph,
 
-		closeCh: make(chan struct{}),
+		closeCh: lifetime.NewSafeChan(),
 	}
 
 	return &cm
@@ -130,14 +130,14 @@ func (m *ChannelManagerImpl) GetProgress(info *datapb.ChannelWatchInfo) *datapb.
 }
 
 func (m *ChannelManagerImpl) Close() {
-	m.closeOnce.Do(func() {
+	if m.opRunners != nil {
 		m.opRunners.Range(func(channel string, runner *opRunner) bool {
 			runner.Close()
 			return true
 		})
-		close(m.closeCh)
-		m.closeWaiter.Wait()
-	})
+	}
+	m.closeCh.Close()
+	m.closeWaiter.Wait()
 }
 
 func (m *ChannelManagerImpl) Start() {
@@ -149,7 +149,7 @@ func (m *ChannelManagerImpl) Start() {
 			select {
 			case opState := <-m.communicateCh:
 				m.handleOpState(opState)
-			case <-m.closeCh:
+			case <-m.closeCh.CloseCh():
 				log.Info("DataNode ChannelManager exit")
 				return
 			}
@@ -169,21 +169,19 @@ func (m *ChannelManagerImpl) handleOpState(opState *opState) {
 	case datapb.ChannelWatchState_WatchSuccess:
 		log.Info("Success to watch")
 		m.fgManager.AddFlowgraph(opState.fg)
-		m.finishOp(opState.opID, opState.channel)
 
 	case datapb.ChannelWatchState_WatchFailure:
 		log.Info("Fail to watch")
-		m.finishOp(opState.opID, opState.channel)
 
 	case datapb.ChannelWatchState_ReleaseSuccess:
 		log.Info("Success to release")
-		m.finishOp(opState.opID, opState.channel)
 
 	case datapb.ChannelWatchState_ReleaseFailure:
 		log.Info("Fail to release, add channel to abnormal lists")
 		m.abnormals.Insert(opState.opID, opState.channel)
-		m.finishOp(opState.opID, opState.channel)
 	}
+
+	m.finishOp(opState.opID, opState.channel)
 }
 
 func (m *ChannelManagerImpl) getOrCreateRunner(channel string) *opRunner {
@@ -215,9 +213,8 @@ type opRunner struct {
 	opsInQueue chan *datapb.ChannelWatchInfo
 	resultCh   chan *opState
 
-	closeWg   sync.WaitGroup
-	closeOnce sync.Once
-	closeCh   chan struct{}
+	closeCh lifetime.SafeChan
+	closeWg sync.WaitGroup
 }
 
 func NewOpRunner(channel string, dn *DataNode, f releaseFunc, resultCh chan *opState) *opRunner {
@@ -228,7 +225,7 @@ func NewOpRunner(channel string, dn *DataNode, f releaseFunc, resultCh chan *opS
 		opsInQueue:  make(chan *datapb.ChannelWatchInfo, 10),
 		allOps:      make(map[UniqueID]*opInfo),
 		resultCh:    resultCh,
-		closeCh:     make(chan struct{}),
+		closeCh:     lifetime.NewSafeChan(),
 	}
 }
 
@@ -240,7 +237,7 @@ func (r *opRunner) Start() {
 			select {
 			case info := <-r.opsInQueue:
 				r.NotifyState(r.Execute(info))
-			case <-r.closeCh:
+			case <-r.closeCh.CloseCh():
 				return
 			}
 		}
@@ -436,10 +433,8 @@ func (r *opRunner) Close() {
 	}
 	r.guard.Unlock()
 
-	r.closeOnce.Do(func() {
-		close(r.closeCh)
-		r.closeWg.Wait()
-	})
+	r.closeCh.Close()
+	r.closeWg.Wait()
 }
 
 type opState struct {

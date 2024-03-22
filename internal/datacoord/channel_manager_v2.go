@@ -369,7 +369,7 @@ func (m *ChannelManagerImplV2) GetNodeChannelsByCollectionID(collectionID int64)
 	nodeChs := make(map[UniqueID][]string)
 	nodeChannels := m.store.GetNodeChannelsBy(
 		WithoutBufferNode(),
-		WithCollectionID(collectionID))
+		WithCollectionIDV2(collectionID))
 	lo.ForEach(nodeChannels, func(info *NodeChannelInfo, _ int) {
 		nodeChs[info.NodeID] = lo.Map(info.Channels, func(ch RWChannel, _ int) string {
 			return ch.GetName()
@@ -385,7 +385,7 @@ func (m *ChannelManagerImplV2) GetChannelsByCollectionID(collectionID int64) []R
 
 	nodeChannels := m.store.GetNodeChannelsBy(
 		WithAllNodes(),
-		WithCollectionID(collectionID))
+		WithCollectionIDV2(collectionID))
 	lo.ForEach(nodeChannels, func(info *NodeChannelInfo, _ int) {
 		channels = append(channels, info.Channels...)
 	})

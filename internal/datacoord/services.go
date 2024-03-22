@@ -189,9 +189,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			log.Warn("cannot get collection schema", zap.Error(err))
 		}
 
-		// Add the channel to cluster for watching.
-		s.cluster.Watch(ctx, r.ChannelName, r.CollectionID)
-
 		// Have segment manager allocate and return the segment allocation info.
 		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))

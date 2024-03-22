@@ -1090,19 +1090,17 @@ func TestDropVirtualChannel(t *testing.T) {
 		svr.meta.AddSegment(context.TODO(), NewSegmentInfo(os))
 
 		ctx := context.Background()
-		// err := svr.channelManager.AddNode(0)
-		// require.Nil(t, err)
-		// err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		// require.Nil(t, err)
+		chanName := "ch1"
 		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Once()
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Twice()
+		mockChManager.EXPECT().Release(mock.Anything, chanName).Return(nil).Twice()
 		svr.channelManager = mockChManager
 
 		req := &datapb.DropVirtualChannelRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: uint64(time.Now().Unix()),
 			},
-			ChannelName: "ch1",
+			ChannelName: chanName,
 			Segments:    make([]*datapb.DropVirtualChannelSegment, 0, maxOperationsPerTxn),
 		}
 		for _, segment := range segments {
@@ -1166,9 +1164,6 @@ func TestDropVirtualChannel(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 
 		<-spyCh
-
-		// err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		// require.Nil(t, err)
 
 		// resend
 		resp, err = svr.DropVirtualChannel(ctx, req)
@@ -2211,14 +2206,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 			State:   commonpb.IndexState_Finished,
 		})
 		assert.NoError(t, err)
-
-		// err = svr.channelManager.AddNode(0)
-		// assert.NoError(t, err)
-		// err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "vchan1", CollectionID: 0})
-		// assert.NoError(t, err)
-		mockChManager := NewMockChannelManager(t)
-		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Once()
-		svr.channelManager = mockChManager
 
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)

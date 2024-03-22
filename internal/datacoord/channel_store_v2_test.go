@@ -175,14 +175,14 @@ func (s *StateChannelStoreSuite) TestGetNodeChannelsBy() {
 			"test WithChannelName ch1, collectionID 1", WithNodeIDs(100),
 			[]ChannelSelector{
 				WithChannelName("ch2"),
-				WithCollectionID(1),
+				WithCollectionIDV2(1),
 			},
 			map[int64][]string{100: {"ch2"}},
 		},
 		{
 			"test WithCollectionID 1", WithAllNodes(),
 			[]ChannelSelector{
-				WithCollectionID(1),
+				WithCollectionIDV2(1),
 			},
 			map[int64][]string{
 				bufferID: {"ch1"},
