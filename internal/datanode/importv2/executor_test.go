@@ -464,13 +464,10 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 		Paths: []string{"dummy.json"},
 	}
 
-	cm := mocks.NewChunkManager(s.T())
-	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
-	s.executor.cm = cm
-
 	var once sync.Once
 	data := createInsertData(s.T(), s.schema, s.numRows)
 	s.reader = importutilv2.NewMockReader(s.T())
+	s.reader.EXPECT().GetFileSize().Return(1024, nil)
 	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
 		var res *storage.InsertData
 		once.Do(func() {
@@ -492,7 +489,7 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	}
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
-	err := s.executor.readFileStat(s.reader, preimportTask, 0, importFile)
+	err := s.executor.readFileStat(s.reader, preimportTask, 0)
 	s.NoError(err)
 }
 

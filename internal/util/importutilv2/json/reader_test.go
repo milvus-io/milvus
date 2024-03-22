@@ -17,9 +17,13 @@
 package json
 
 import (
+	"context"
 	rand2 "crypto/rand"
 	"encoding/json"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/stretchr/testify/mock"
+	"io"
 	"math"
 	"math/rand"
 	"strconv"
@@ -246,8 +250,18 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 
 	jsonBytes, err := json.Marshal(rows)
 	suite.NoError(err)
-	r := strings.NewReader(string(jsonBytes))
-	reader, err := NewReader(r, schema, math.MaxInt)
+	type mockReader struct {
+		io.Reader
+		io.Closer
+		io.ReaderAt
+		io.Seeker
+	}
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+		return r, nil
+	})
+	reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
 	suite.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {

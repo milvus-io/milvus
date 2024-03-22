@@ -33,28 +33,36 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-type Reader struct {
-	reader *file.Reader
+type reader struct {
+	ctx    context.Context
+	cm     storage.ChunkManager
+	schema *schemapb.CollectionSchema
+
+	path string
+	r    *file.Reader
 
 	bufferSize int
 	count      int64
 
-	schema *schemapb.CollectionSchema
-	frs    map[int64]*FieldReader // fieldID -> FieldReader
+	frs map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader storage.FileReader, bufferSize int) (*Reader, error) {
-	reader, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
+func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int) (*reader, error) {
+	cmReader, err := cm.Reader(ctx, path)
+	if err != nil {
+		return nil, err
+	}
+	r, err := file.NewParquetReader(cmReader, file.WithReadProps(&parquet.ReaderProperties{
 		BufferSize:            int64(bufferSize),
 		BufferedStreamEnabled: true,
 	}))
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet reader failed, err=%v", err))
 	}
-	log.Info("create parquet reader done", zap.Int("row group num", reader.NumRowGroups()),
-		zap.Int64("num rows", reader.NumRows()))
+	log.Info("create parquet reader done", zap.Int("row group num", r.NumRowGroups()),
+		zap.Int64("num rows", r.NumRows()))
 
-	fileReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
+	fileReader, err := pqarrow.NewFileReader(r, pqarrow.ArrowReadProperties{}, memory.DefaultAllocator)
 	if err != nil {
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("new parquet file reader failed, err=%v", err))
 	}
@@ -67,16 +75,19 @@ func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, cmReader 
 	if err != nil {
 		return nil, err
 	}
-	return &Reader{
-		reader:     reader,
+	return &reader{
+		ctx:        ctx,
+		cm:         cm,
+		schema:     schema,
+		path:       path,
+		r:          r,
 		bufferSize: bufferSize,
 		count:      count,
-		schema:     schema,
 		frs:        crs,
 	}, nil
 }
 
-func (r *Reader) Read() (*storage.InsertData, error) {
+func (r *reader) Read() (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
@@ -108,11 +119,15 @@ OUTER:
 	return insertData, nil
 }
 
-func (r *Reader) Close() {
+func (r *reader) Size() (int64, error) {
+	return r.cm.Size(r.ctx, r.path)
+}
+
+func (r *reader) Close() {
 	for _, cr := range r.frs {
 		cr.Close()
 	}
-	err := r.reader.Close()
+	err := r.r.Close()
 	if err != nil {
 		log.Warn("close parquet reader failed", zap.Error(err))
 	}

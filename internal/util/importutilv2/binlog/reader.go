@@ -23,6 +23,8 @@ import (
 	"io"
 	"math"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -198,6 +200,10 @@ OUTER:
 		}
 	}
 	return result, nil
+}
+
+func (r *reader) Size() (int64, error) {
+	return storage.GetFilesSize(r.ctx, lo.Flatten(lo.Values(r.insertLogs)), r.cm)
 }
 
 func (r *reader) Close() {}
