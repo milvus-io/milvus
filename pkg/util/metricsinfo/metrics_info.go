@@ -94,11 +94,16 @@ type QueryNodeConfiguration struct {
 	SimdType string `json:"simd_type"`
 }
 
+type QueryNodeCollectionMetrics struct {
+	CollectionRows map[int64]int64
+}
+
 // QueryNodeInfos implements ComponentInfos
 type QueryNodeInfos struct {
 	BaseComponentInfos
-	SystemConfigurations QueryNodeConfiguration `json:"system_configurations"`
-	QuotaMetrics         *QueryNodeQuotaMetrics `json:"quota_metrics"`
+	SystemConfigurations QueryNodeConfiguration      `json:"system_configurations"`
+	QuotaMetrics         *QueryNodeQuotaMetrics      `json:"quota_metrics"`
+	CollectionMetrics    *QueryNodeCollectionMetrics `json:"collection_metrics"`
 }
 
 // QueryCoordConfiguration records the configuration of QueryCoord.
@@ -167,11 +172,27 @@ type DataCoordConfiguration struct {
 	SegmentMaxSize float64 `json:"segment_max_size"`
 }
 
+type DataCoordIndexInfo struct {
+	NumEntitiesIndexed int64
+	IndexName          string
+	FieldID            int64
+}
+
+type DataCoordCollectionInfo struct {
+	NumEntitiesTotal int64
+	IndexInfo        []*DataCoordIndexInfo
+}
+
+type DataCoordCollectionMetrics struct {
+	Collections map[int64]*DataCoordCollectionInfo
+}
+
 // DataCoordInfos implements ComponentInfos
 type DataCoordInfos struct {
 	BaseComponentInfos
-	SystemConfigurations DataCoordConfiguration `json:"system_configurations"`
-	QuotaMetrics         *DataCoordQuotaMetrics `json:"quota_metrics"`
+	SystemConfigurations DataCoordConfiguration      `json:"system_configurations"`
+	QuotaMetrics         *DataCoordQuotaMetrics      `json:"quota_metrics"`
+	CollectionMetrics    *DataCoordCollectionMetrics `json:"collection_metrics"`
 }
 
 // RootCoordConfiguration records the configuration of RootCoord.

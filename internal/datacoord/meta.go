@@ -247,10 +247,7 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 	return result
 }
 
-// GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
-func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
-	m.RLock()
-	defer m.RUnlock()
+func (m *meta) getNumRowsOfCollectionUnsafe(collectionID UniqueID) int64 {
 	var ret int64
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
@@ -259,6 +256,13 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 		}
 	}
 	return ret
+}
+
+// GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
+func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
+	m.RLock()
+	defer m.RUnlock()
+	return m.getNumRowsOfCollectionUnsafe(collectionID)
 }
 
 // GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
@@ -288,6 +292,16 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		}
 	}
 	return total, collectionBinlogSize
+}
+
+func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
+	m.RLock()
+	defer m.RUnlock()
+	ret := make(map[int64]int64, len(m.collections))
+	for collectionID := range m.collections {
+		ret[collectionID] = m.getNumRowsOfCollectionUnsafe(collectionID)
+	}
+	return ret
 }
 
 // AddSegment records segment info, persisting info into kv store
