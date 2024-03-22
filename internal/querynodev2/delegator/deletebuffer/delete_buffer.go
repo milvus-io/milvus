@@ -64,8 +64,7 @@ func (c *doubleCacheBuffer[T]) Put(entry T) {
 
 	err := c.head.Put(entry)
 	if errors.Is(err, errBufferFull) {
-		c.evict(entry.Timestamp())
-		c.head.Put(entry)
+		c.evict(entry.Timestamp(), entry)
 	}
 }
 
@@ -84,9 +83,14 @@ func (c *doubleCacheBuffer[T]) ListAfter(ts uint64) []T {
 }
 
 // evict sets head as tail and evicts tail.
-func (c *doubleCacheBuffer[T]) evict(newTs uint64) {
+func (c *doubleCacheBuffer[T]) evict(newTs uint64, entry T) {
 	c.tail = c.head
-	c.head = newDoubleCacheItem[T](newTs, c.maxSize/2)
+	c.head = &doubleCacheItem[T]{
+		headTs:  newTs,
+		maxSize: c.maxSize / 2,
+		size:    entry.Size(),
+		data:    []T{entry},
+	}
 	c.ts = c.tail.headTs
 }
 
