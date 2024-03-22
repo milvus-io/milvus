@@ -1522,7 +1522,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	s4 := &datapb.SegmentInfo{
 		ID:            4,
 		CollectionID:  0,
-		PartitionID:   common.InvalidPartitionID,
+		PartitionID:   common.AllPartitionsID,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Flushed,
 		StartPosition: &msgpb.MsgPosition{

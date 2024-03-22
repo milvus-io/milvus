@@ -231,7 +231,7 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 
 		partitionSet := typeutil.NewUniqueSet(chosenPartitionIDs...)
 		for _, segmentInfo := range segmentInfos {
-			if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.InvalidPartitionID {
+			if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
 				segments[segmentInfo.GetID()] = segmentInfo
 			}
 		}
