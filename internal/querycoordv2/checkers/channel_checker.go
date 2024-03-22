@@ -91,7 +91,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
-	channels := c.dist.ChannelDistManager.GetByFilter(nil)
+	channels := c.dist.ChannelDistManager.GetByFilter()
 	released := utils.FilterReleased(channels, collectionIDs)
 	releaseTasks := c.createChannelReduceTasks(ctx, released, meta.NilReplica)
 	task.SetReason("collection released", releaseTasks...)
