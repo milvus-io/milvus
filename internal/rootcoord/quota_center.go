@@ -19,7 +19,6 @@ package rootcoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"math"
 	"strconv"
 	"sync"
@@ -31,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/tso"
