@@ -370,13 +370,13 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	plans := make([]balance.SegmentAssignPlan, 0)
 	for shard, segments := range shardSegments {
 		// if channel is not subscribed yet, skip load segments
-		if len(c.dist.LeaderViewManager.GetLeadersByShard(shard)) == 0 {
+		leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, shard)
+		if leader == nil {
 			continue
 		}
 
 		// L0 segment can only be assign to shard leader's node
 		if isLevel0 {
-			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, shard)
 			availableNodes = []int64{leader.ID}
 		}
 
