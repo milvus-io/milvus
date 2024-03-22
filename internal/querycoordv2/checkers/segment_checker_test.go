@@ -225,18 +225,10 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 	suite.EqualValues(2, action.Node())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 
-	// release duplicate l0 segment
+	// won't release duplicate l0 segment, should be released with channel
 	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 2, 100, "test-insert-channel"))
 	tasks = checker.Check(context.TODO())
-	suite.Len(tasks, 1)
-	suite.Len(tasks[0].Actions(), 1)
-	action, ok = tasks[0].Actions()[0].(*task.SegmentAction)
-	suite.True(ok)
-	suite.EqualValues(1, tasks[0].ReplicaID())
-	suite.Equal(task.ActionTypeReduce, action.Type())
-	suite.EqualValues(1, action.SegmentID())
-	suite.EqualValues(1, action.Node())
-	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+	suite.Len(tasks, 0)
 }
 
 func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
