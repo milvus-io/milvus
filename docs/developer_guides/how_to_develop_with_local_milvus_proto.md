@@ -49,7 +49,7 @@ Back to milvus repo. Golang has provided a "convienient" way to use local repo i
 
 Whoola, your IDE shall now recognize the new TestObject definition now
 
-<img src"./figs/ide_with_newdef.png" width=550>
+<img src="./figs/ide_with_newdef.png" width=550>
 
 ## Update Milvus API
 
