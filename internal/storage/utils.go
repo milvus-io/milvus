@@ -38,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1246,4 +1247,18 @@ func Min(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath string) *ChunkManagerFactory {
+	return NewChunkManagerFactory("minio",
+		RootPath(rootPath),
+		Address(params.MinioCfg.Address.GetValue()),
+		AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
+		SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
+		UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		BucketName(params.MinioCfg.BucketName.GetValue()),
+		UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
+		CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
+		IAMEndpoint(params.MinioCfg.IAMEndpoint.GetValue()),
+		CreateBucket(true))
 }

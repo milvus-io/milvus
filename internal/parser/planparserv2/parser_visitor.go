@@ -42,13 +42,14 @@ func (v *ParserVisitor) translateIdentifier(identifier string) (*ExprWithType, e
 			Expr: &planpb.Expr_ColumnExpr{
 				ColumnExpr: &planpb.ColumnExpr{
 					Info: &planpb.ColumnInfo{
-						FieldId:        field.FieldID,
-						DataType:       field.DataType,
-						IsPrimaryKey:   field.IsPrimaryKey,
-						IsAutoID:       field.AutoID,
-						NestedPath:     nestedPath,
-						IsPartitionKey: field.IsPartitionKey,
-						ElementType:    field.GetElementType(),
+						FieldId:         field.FieldID,
+						DataType:        field.DataType,
+						IsPrimaryKey:    field.IsPrimaryKey,
+						IsAutoID:        field.AutoID,
+						NestedPath:      nestedPath,
+						IsPartitionKey:  field.IsPartitionKey,
+						IsClusteringKey: field.IsClusteringKey,
+						ElementType:     field.GetElementType(),
 					},
 				},
 			},
