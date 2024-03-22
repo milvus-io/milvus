@@ -978,6 +978,8 @@ type proxyConfig struct {
 	MaxConnectionNum               ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1279,6 +1281,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.SlowQuerySpanInSeconds = ParamItem{
+		Key:          "proxy.slowQuerySpanInSeconds",
+		Version:      "2.3.11",
+		Doc:          "query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.",
+		DefaultValue: "5",
+		Export:       true,
+	}
+	p.SlowQuerySpanInSeconds.Init(base.mgr)
 
 	p.ConnectionCheckIntervalSeconds = ParamItem{
 		Key:          "proxy.connectionCheckIntervalSeconds",
