@@ -4174,10 +4174,11 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		datanodeID := int64(1)
-		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(true)
 
-		svr.channelManager = channelManager
+		svr.channelManager.AddNode(datanodeID)
+		svr.channelManager.Watch(context.Background(), &channelMeta{Name: mockVChannel, CollectionID: 0})
+		// svr.channelManager.Watch
+		// channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
 				SourceID: datanodeID,
@@ -4220,10 +4221,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 		defer closeTestServer(t, svr)
 
 		datanodeID := int64(1)
-		channelManager := NewMockChannelManager(t)
-		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(false)
 
-		svr.channelManager = channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
 				SourceID: datanodeID,
