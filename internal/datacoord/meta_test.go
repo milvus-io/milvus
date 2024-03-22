@@ -412,13 +412,13 @@ func TestMeta_Basic(t *testing.T) {
 		// create seg0 for partition0, seg0/seg1 for partition1
 		segID0_0, err := mockAllocator.allocID(ctx)
 		assert.NoError(t, err)
-		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName, true)
+		segInfo0_0 := buildSegment(collID, partID0, segID0_0, channelName)
 		segID1_0, err := mockAllocator.allocID(ctx)
 		assert.NoError(t, err)
-		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName, false)
+		segInfo1_0 := buildSegment(collID, partID1, segID1_0, channelName)
 		segID1_1, err := mockAllocator.allocID(ctx)
 		assert.NoError(t, err)
-		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName, false)
+		segInfo1_1 := buildSegment(collID, partID1, segID1_1, channelName)
 
 		// check AddSegment
 		err = meta.AddSegment(context.TODO(), segInfo0_0)
@@ -467,28 +467,6 @@ func TestMeta_Basic(t *testing.T) {
 		info0_0 = meta.GetHealthySegment(segID0_0)
 		assert.NotNil(t, info0_0)
 		assert.EqualValues(t, commonpb.SegmentState_Flushed, info0_0.State)
-
-		info0_0 = meta.GetHealthySegment(segID0_0)
-		assert.NotNil(t, info0_0)
-		assert.Equal(t, true, info0_0.GetIsImporting())
-		err = meta.UnsetIsImporting(segID0_0)
-		assert.NoError(t, err)
-		info0_0 = meta.GetHealthySegment(segID0_0)
-		assert.NotNil(t, info0_0)
-		assert.Equal(t, false, info0_0.GetIsImporting())
-
-		// UnsetIsImporting on segment that does not exist.
-		err = meta.UnsetIsImporting(segID1_0)
-		assert.Error(t, err)
-
-		info1_1 := meta.GetHealthySegment(segID1_1)
-		assert.NotNil(t, info1_1)
-		assert.Equal(t, false, info1_1.GetIsImporting())
-		err = meta.UnsetIsImporting(segID1_1)
-		assert.NoError(t, err)
-		info1_1 = meta.GetHealthySegment(segID1_1)
-		assert.NotNil(t, info1_1)
-		assert.Equal(t, false, info1_1.GetIsImporting())
 	})
 
 	t.Run("Test segment with kv fails", func(t *testing.T) {
@@ -543,7 +521,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg1 with 100 rows
 		segID0, err := mockAllocator.allocID(ctx)
 		assert.NoError(t, err)
-		segInfo0 := buildSegment(collID, partID0, segID0, channelName, false)
+		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.NumOfRows = rowCount0
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
@@ -551,7 +529,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg2 with 300 rows
 		segID1, err := mockAllocator.allocID(ctx)
 		assert.NoError(t, err)
-		segInfo1 := buildSegment(collID, partID0, segID1, channelName, false)
+		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.NumOfRows = rowCount1
 		err = meta.AddSegment(context.TODO(), segInfo1)
 		assert.NoError(t, err)
@@ -609,7 +587,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg0 with size0
 		segID0, err := mockAllocator.allocID(ctx)
 		assert.NoError(t, err)
-		segInfo0 := buildSegment(collID, partID0, segID0, channelName, false)
+		segInfo0 := buildSegment(collID, partID0, segID0, channelName)
 		segInfo0.size.Store(size0)
 		err = meta.AddSegment(context.TODO(), segInfo0)
 		assert.NoError(t, err)
@@ -617,7 +595,7 @@ func TestMeta_Basic(t *testing.T) {
 		// add seg1 with size1
 		segID1, err := mockAllocator.allocID(ctx)
 		assert.NoError(t, err)
-		segInfo1 := buildSegment(collID, partID0, segID1, channelName, false)
+		segInfo1 := buildSegment(collID, partID0, segID1, channelName)
 		segInfo1.size.Store(size1)
 		err = meta.AddSegment(context.TODO(), segInfo1)
 		assert.NoError(t, err)
@@ -689,7 +667,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1)}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
-			UpdateCheckPointOperator(1, false, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
 		)
 		assert.NoError(t, err)
 
@@ -757,7 +735,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
-			UpdateCheckPointOperator(1, false, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
 		)
 		assert.NoError(t, err)
 
@@ -796,7 +774,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		assert.NoError(t, err)
 
 		err = meta.UpdateSegmentsInfo(
-			UpdateCheckPointOperator(1, false, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 2, NumOfRows: 10}}),
 		)
 
 		assert.NoError(t, err)
@@ -830,7 +808,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1)}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
-			UpdateCheckPointOperator(1, false, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
+			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
 		)
 
 		assert.Error(t, err)

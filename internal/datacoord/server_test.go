@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	grpcmock "github.com/milvus-io/milvus/internal/util/mock"
@@ -106,13 +105,6 @@ func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *mil
 		}, nil
 	}
 	return r.RootCoordClient.DescribeCollection(ctx, req)
-}
-
-func (r *mockRootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "something bad",
-	}, nil
 }
 
 // func TestGetComponentStates(t *testing.T) {
@@ -3037,109 +3029,6 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 }
 
-func TestDataCoord_Import(t *testing.T) {
-	storage.CheckBucketRetryAttempts = 2
-
-	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		svr.sessionManager.AddSession(&NodeInfo{
-			NodeID:  0,
-			Address: "localhost:8080",
-		})
-		err := svr.channelManager.AddNode(0)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(svr.ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		assert.NoError(t, err)
-
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("no free node", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-
-		err := svr.channelManager.AddNode(0)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(svr.ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		assert.NoError(t, err)
-
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-			WorkingNodes: []int64{0},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("no datanode available", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		Params.Save("minio.address", "minio:9000")
-		defer Params.Reset("minio.address")
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		closeTestServer(t, svr)
-
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-		})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
-
-	t.Run("test update segment stat", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("test update segment stat w/ closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		closeTestServer(t, svr)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
-	})
-}
-
 func TestDataCoord_SegmentStatistics(t *testing.T) {
 	t.Run("test update imported segment stat", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -3193,120 +3082,6 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 		assert.Equal(t, svr.meta.GetHealthySegment(100).currRows, int64(0))
 		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
 		closeTestServer(t, svr)
-	})
-}
-
-func TestDataCoord_SaveImportSegment(t *testing.T) {
-	t.Run("test add segment", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		svr.meta.AddCollection(&collectionInfo{
-			ID: 100,
-		})
-		seg := buildSegment(100, 100, 100, "ch1", false)
-		svr.meta.AddSegment(context.TODO(), seg)
-		svr.sessionManager.AddSession(&NodeInfo{
-			NodeID:  110,
-			Address: "localhost:8080",
-		})
-		err := svr.channelManager.AddNode(110)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 100})
-		assert.NoError(t, err)
-		err = svr.meta.UpdateChannelCheckpoint("ch1", &msgpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-			Timestamp:   1000,
-		})
-		assert.NoError(t, err)
-
-		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
-			SegmentId:    100,
-			ChannelName:  "ch1",
-			CollectionId: 100,
-			PartitionId:  100,
-			RowNum:       int64(1),
-			SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
-				Base: &commonpb.MsgBase{
-					SourceID: paramtable.GetNodeID(),
-				},
-				SegmentID:    100,
-				CollectionID: 100,
-				Importing:    true,
-				StartPositions: []*datapb.SegmentStartPosition{
-					{
-						StartPosition: &msgpb.MsgPosition{
-							ChannelName: "ch1",
-							Timestamp:   1,
-						},
-						SegmentID: 100,
-					},
-				},
-				CheckPoints: []*datapb.CheckPoint{
-					{
-						SegmentID: 100,
-						Position: &msgpb.MsgPosition{
-							ChannelName: "ch1",
-							Timestamp:   1,
-						},
-						NumOfRows: int64(1),
-					},
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-	})
-
-	t.Run("test add segment w/ bad channelName", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-
-		err := svr.channelManager.AddNode(110)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 100})
-		assert.NoError(t, err)
-
-		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
-			SegmentId:    100,
-			ChannelName:  "non-channel",
-			CollectionId: 100,
-			PartitionId:  100,
-			RowNum:       int64(1),
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-	})
-
-	t.Run("test add segment w/ closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		closeTestServer(t, svr)
-
-		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
-	})
-}
-
-func TestDataCoord_UnsetIsImportingState(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		seg := buildSegment(100, 100, 100, "ch1", false)
-		svr.meta.AddSegment(context.TODO(), seg)
-
-		status, err := svr.UnsetIsImportingState(context.Background(), &datapb.UnsetIsImportingStateRequest{
-			SegmentIds: []int64{100},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-
-		// Trying to unset state of a segment that does not exist.
-		status, err = svr.UnsetIsImportingState(context.Background(), &datapb.UnsetIsImportingStateRequest{
-			SegmentIds: []int64{999},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
 	})
 }
 

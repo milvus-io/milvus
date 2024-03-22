@@ -169,12 +169,11 @@ func newTestSchema() *schemapb.CollectionSchema {
 }
 
 type mockDataNodeClient struct {
-	id                   int64
-	state                commonpb.StateCode
-	ch                   chan interface{}
-	compactionStateResp  *datapb.CompactionStateResponse
-	addImportSegmentResp *datapb.AddImportSegmentResponse
-	compactionResp       *commonpb.Status
+	id                  int64
+	state               commonpb.StateCode
+	ch                  chan interface{}
+	compactionStateResp *datapb.CompactionStateResponse
+	compactionResp      *commonpb.Status
 }
 
 func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, error) {
@@ -182,9 +181,6 @@ func newMockDataNodeClient(id int64, ch chan interface{}) (*mockDataNodeClient, 
 		id:    id,
 		state: commonpb.StateCode_Initializing,
 		ch:    ch,
-		addImportSegmentResp: &datapb.AddImportSegmentResponse{
-			Status: merr.Success(),
-		},
 	}, nil
 }
 
@@ -285,14 +281,6 @@ func (c *mockDataNodeClient) Compaction(ctx context.Context, req *datapb.Compact
 
 func (c *mockDataNodeClient) GetCompactionState(ctx context.Context, req *datapb.CompactionStateRequest, opts ...grpc.CallOption) (*datapb.CompactionStateResponse, error) {
 	return c.compactionStateResp, nil
-}
-
-func (c *mockDataNodeClient) Import(ctx context.Context, in *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
-}
-
-func (c *mockDataNodeClient) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest, opts ...grpc.CallOption) (*datapb.AddImportSegmentResponse, error) {
-	return c.addImportSegmentResp, nil
 }
 
 func (c *mockDataNodeClient) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
@@ -596,24 +584,6 @@ func (m *mockRootCoordClient) GetMetrics(ctx context.Context, req *milvuspb.GetM
 		Response:      resp,
 		ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, nodeID),
 	}, nil
-}
-
-func (m *mockRootCoordClient) Import(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Check import task state from datanode
-func (m *mockRootCoordClient) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest, opts ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-// Returns id array of all import tasks
-func (m *mockRootCoordClient) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest, opts ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error) {
-	panic("not implemented") // TODO: Implement
-}
-
-func (m *mockRootCoordClient) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
 }
 
 type mockCompactionTrigger struct {

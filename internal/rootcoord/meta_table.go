@@ -75,10 +75,6 @@ type IMetaTable interface {
 	ListAliasesByID(collID UniqueID) []string
 
 	// TODO: better to accept ctx.
-	GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) // serve for bulk insert.
-	GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) // serve for bulk insert.
-
-	// TODO: better to accept ctx.
 	AddCredential(credInfo *internalpb.CredentialInfo) error
 	GetCredential(username string) (*internalpb.CredentialInfo, error)
 	DeleteCredential(username string) error
@@ -1162,74 +1158,6 @@ func (mt *MetaTable) ListAliasesByID(collID UniqueID) []string {
 	defer mt.ddLock.RUnlock()
 
 	return mt.listAliasesByID(collID)
-}
-
-// GetPartitionNameByID serve for bulk insert.
-func (mt *MetaTable) GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	coll, ok := mt.collID2Meta[collID]
-	if ok && coll.Available() && coll.CreateTime <= ts {
-		// cache hit.
-		for _, partition := range coll.Partitions {
-			if partition.Available() && partition.PartitionID == partitionID && partition.PartitionCreatedTimestamp <= ts {
-				// cache hit.
-				return partition.PartitionName, nil
-			}
-		}
-	}
-	// cache miss, get from catalog anyway.
-	coll, err := mt.catalog.GetCollectionByID(mt.ctx, coll.DBID, ts, collID)
-	if err != nil {
-		return "", err
-	}
-	if !coll.Available() {
-		return "", fmt.Errorf("collection not exist: %d", collID)
-	}
-	for _, partition := range coll.Partitions {
-		// no need to check time travel logic again, since catalog already did.
-		if partition.Available() && partition.PartitionID == partitionID {
-			return partition.PartitionName, nil
-		}
-	}
-	return "", merr.WrapErrPartitionNotFound(partitionID)
-}
-
-// GetPartitionByName serve for bulk insert.
-func (mt *MetaTable) GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	coll, ok := mt.collID2Meta[collID]
-	if ok && coll.Available() && coll.CreateTime <= ts {
-		// cache hit.
-		for _, partition := range coll.Partitions {
-			if partition.Available() && partition.PartitionName == partitionName && partition.PartitionCreatedTimestamp <= ts {
-				// cache hit.
-				return partition.PartitionID, nil
-			}
-		}
-	}
-	// cache miss, get from catalog anyway.
-	coll, err := mt.catalog.GetCollectionByID(mt.ctx, coll.DBID, ts, collID)
-	if err != nil {
-		return common.InvalidPartitionID, err
-	}
-	if !coll.Available() {
-		return common.InvalidPartitionID, merr.WrapErrCollectionNotFoundWithDB(coll.DBID, collID)
-	}
-	for _, partition := range coll.Partitions {
-		// no need to check time travel logic again, since catalog already did.
-		if partition.Available() && partition.PartitionName == partitionName {
-			return partition.PartitionID, nil
-		}
-	}
-
-	log.Error("partition ID not found for partition name", zap.String("partitionName", partitionName),
-		zap.Int64("collectionID", collID), zap.String("collectionName", coll.Name))
-	return common.InvalidPartitionID, fmt.Errorf("partition ID not found for partition name '%s' in collection '%s'",
-		partitionName, coll.Name)
 }
 
 // AddCredential add credential

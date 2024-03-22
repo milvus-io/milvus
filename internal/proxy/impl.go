@@ -42,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
-	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -4252,6 +4251,10 @@ func convertToV2GetImportRequest(req *milvuspb.GetImportStateRequest) *internalp
 }
 
 func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *milvuspb.GetImportStateResponse {
+	const (
+		failedReason    = "failed_reason"
+		progressPercent = "progress_percent"
+	)
 	if rsp.GetStatus().GetCode() != 0 {
 		return &milvuspb.GetImportStateResponse{
 			Status: rsp.GetStatus(),
@@ -4272,11 +4275,11 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 	}
 	infos := make([]*commonpb.KeyValuePair, 0)
 	infos = append(infos, &commonpb.KeyValuePair{
-		Key:   importutil.FailedReason,
+		Key:   failedReason,
 		Value: rsp.GetReason(),
 	})
 	infos = append(infos, &commonpb.KeyValuePair{
-		Key:   importutil.ProgressPercent,
+		Key:   progressPercent,
 		Value: strconv.FormatInt(rsp.GetProgress(), 10),
 	})
 	return &milvuspb.GetImportStateResponse{
