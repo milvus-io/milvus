@@ -1464,8 +1464,14 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Status(err), nil
 	}
 
+	nodeID := req.GetBase().GetSourceID()
 	// For compatibility with old client
 	if req.GetVChannel() != "" && req.GetPosition() != nil {
+		channel := req.GetVChannel()
+		if !s.channelManager.Match(nodeID, channel) {
+			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+			return merr.Status(merr.WrapErrChannelNotFound(channel, fmt.Sprintf("from node %d", nodeID))), nil
+		}
 		err := s.meta.UpdateChannelCheckpoint(req.GetVChannel(), req.GetPosition())
 		if err != nil {
 			log.Warn("failed to UpdateChannelCheckpoint", zap.String("vChannel", req.GetVChannel()), zap.Error(err))
@@ -1474,7 +1480,16 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 		return merr.Success(), nil
 	}
 
-	err := s.meta.UpdateChannelCheckpoints(req.GetChannelCheckpoints())
+	checkpoints := lo.Filter(req.GetChannelCheckpoints(), func(cp *msgpb.MsgPosition, _ int) bool {
+		channel := cp.GetChannelName()
+		matched := s.channelManager.Match(nodeID, channel)
+		if !matched {
+			log.Warn("node is not matched with channel", zap.String("channel", channel), zap.Int64("nodeID", nodeID))
+		}
+		return matched
+	})
+
+	err := s.meta.UpdateChannelCheckpoints(checkpoints)
 	if err != nil {
 		log.Warn("failed to update channel checkpoint", zap.Error(err))
 		return merr.Status(err), nil
