@@ -215,7 +215,6 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 			err = loader.LoadDelta(ctx, collectionID, segment.(*LocalSegment))
 		} else {
 			err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo, LoadStatusInMemory)
-
 		}
 		if err != nil {
 			log.Warn("load segment failed when load data into memory",

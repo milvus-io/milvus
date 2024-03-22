@@ -63,8 +63,8 @@ type MockBroker_AllocTimestamp_Call struct {
 }
 
 // AllocTimestamp is a helper method to define mock.On call
-//  - ctx context.Context
-//  - num uint32
+//   - ctx context.Context
+//   - num uint32
 func (_e *MockBroker_Expecter) AllocTimestamp(ctx interface{}, num interface{}) *MockBroker_AllocTimestamp_Call {
 	return &MockBroker_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", ctx, num)}
 }
@@ -125,8 +125,8 @@ type MockBroker_AssignSegmentID_Call struct {
 }
 
 // AssignSegmentID is a helper method to define mock.On call
-//  - ctx context.Context
-//  - reqs ...*datapb.SegmentIDRequest
+//   - ctx context.Context
+//   - reqs ...*datapb.SegmentIDRequest
 func (_e *MockBroker_Expecter) AssignSegmentID(ctx interface{}, reqs ...interface{}) *MockBroker_AssignSegmentID_Call {
 	return &MockBroker_AssignSegmentID_Call{Call: _e.mock.On("AssignSegmentID",
 		append([]interface{}{ctx}, reqs...)...)}
@@ -187,9 +187,9 @@ type MockBroker_DescribeCollection_Call struct {
 }
 
 // DescribeCollection is a helper method to define mock.On call
-//  - ctx context.Context
-//  - collectionID int64
-//  - ts uint64
+//   - ctx context.Context
+//   - collectionID int64
+//   - ts uint64
 func (_e *MockBroker_Expecter) DescribeCollection(ctx interface{}, collectionID interface{}, ts interface{}) *MockBroker_DescribeCollection_Call {
 	return &MockBroker_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", ctx, collectionID, ts)}
 }
@@ -243,8 +243,8 @@ type MockBroker_DropVirtualChannel_Call struct {
 }
 
 // DropVirtualChannel is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.DropVirtualChannelRequest
+//   - ctx context.Context
+//   - req *datapb.DropVirtualChannelRequest
 func (_e *MockBroker_Expecter) DropVirtualChannel(ctx interface{}, req interface{}) *MockBroker_DropVirtualChannel_Call {
 	return &MockBroker_DropVirtualChannel_Call{Call: _e.mock.On("DropVirtualChannel", ctx, req)}
 }
@@ -298,8 +298,8 @@ type MockBroker_GetSegmentInfo_Call struct {
 }
 
 // GetSegmentInfo is a helper method to define mock.On call
-//  - ctx context.Context
-//  - segmentIDs []int64
+//   - ctx context.Context
+//   - segmentIDs []int64
 func (_e *MockBroker_Expecter) GetSegmentInfo(ctx interface{}, segmentIDs interface{}) *MockBroker_GetSegmentInfo_Call {
 	return &MockBroker_GetSegmentInfo_Call{Call: _e.mock.On("GetSegmentInfo", ctx, segmentIDs)}
 }
@@ -341,8 +341,8 @@ type MockBroker_ReportTimeTick_Call struct {
 }
 
 // ReportTimeTick is a helper method to define mock.On call
-//  - ctx context.Context
-//  - msgs []*msgpb.DataNodeTtMsg
+//   - ctx context.Context
+//   - msgs []*msgpb.DataNodeTtMsg
 func (_e *MockBroker_Expecter) ReportTimeTick(ctx interface{}, msgs interface{}) *MockBroker_ReportTimeTick_Call {
 	return &MockBroker_ReportTimeTick_Call{Call: _e.mock.On("ReportTimeTick", ctx, msgs)}
 }
@@ -384,8 +384,8 @@ type MockBroker_SaveBinlogPaths_Call struct {
 }
 
 // SaveBinlogPaths is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.SaveBinlogPathsRequest
+//   - ctx context.Context
+//   - req *datapb.SaveBinlogPathsRequest
 func (_e *MockBroker_Expecter) SaveBinlogPaths(ctx interface{}, req interface{}) *MockBroker_SaveBinlogPaths_Call {
 	return &MockBroker_SaveBinlogPaths_Call{Call: _e.mock.On("SaveBinlogPaths", ctx, req)}
 }
@@ -439,9 +439,9 @@ type MockBroker_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//  - ctx context.Context
-//  - dbName string
-//  - collectionName string
+//   - ctx context.Context
+//   - dbName string
+//   - collectionName string
 func (_e *MockBroker_Expecter) ShowPartitions(ctx interface{}, dbName interface{}, collectionName interface{}) *MockBroker_ShowPartitions_Call {
 	return &MockBroker_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", ctx, dbName, collectionName)}
 }
@@ -483,8 +483,8 @@ type MockBroker_UpdateChannelCheckpoint_Call struct {
 }
 
 // UpdateChannelCheckpoint is a helper method to define mock.On call
-//  - ctx context.Context
-//  - channelCPs []*msgpb.MsgPosition
+//   - ctx context.Context
+//   - channelCPs []*msgpb.MsgPosition
 func (_e *MockBroker_Expecter) UpdateChannelCheckpoint(ctx interface{}, channelCPs interface{}) *MockBroker_UpdateChannelCheckpoint_Call {
 	return &MockBroker_UpdateChannelCheckpoint_Call{Call: _e.mock.On("UpdateChannelCheckpoint", ctx, channelCPs)}
 }
@@ -526,8 +526,8 @@ type MockBroker_UpdateSegmentStatistics_Call struct {
 }
 
 // UpdateSegmentStatistics is a helper method to define mock.On call
-//  - ctx context.Context
-//  - req *datapb.UpdateSegmentStatisticsRequest
+//   - ctx context.Context
+//   - req *datapb.UpdateSegmentStatisticsRequest
 func (_e *MockBroker_Expecter) UpdateSegmentStatistics(ctx interface{}, req interface{}) *MockBroker_UpdateSegmentStatistics_Call {
 	return &MockBroker_UpdateSegmentStatistics_Call{Call: _e.mock.On("UpdateSegmentStatistics", ctx, req)}
 }
