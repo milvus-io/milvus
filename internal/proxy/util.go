@@ -870,25 +870,7 @@ func ValidatePrivilege(entity string) error {
 }
 
 func GetCurUserFromContext(ctx context.Context) (string, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return "", fmt.Errorf("fail to get md from the context")
-	}
-	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
-	if !ok || len(authorization) < 1 {
-		return "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
-	}
-	token := authorization[0]
-	rawToken, err := crypto.Base64Decode(token)
-	if err != nil {
-		return "", fmt.Errorf("fail to decode the token, token: %s", token)
-	}
-	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
-	if len(secrets) < 2 {
-		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
-	}
-	username := secrets[0]
-	return username, nil
+	return contextutil.GetCurUserFromContext(ctx)
 }
 
 func GetCurDBNameFromContextOrDefault(ctx context.Context) string {

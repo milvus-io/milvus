@@ -2408,7 +2408,7 @@ func TestRBAC_Grant(t *testing.T) {
 			{true, &milvuspb.GrantEntity{
 				DbName: "*",
 				Role:   &milvuspb.RoleEntity{Name: "role1"},
-			}, "valid role and any dbName without object", 2},
+			}, "valid role and any dbName without object", 6},
 		}
 
 		for _, test := range tests {

@@ -2,12 +2,18 @@ package proxy
 
 import (
 	"context"
+	"fmt"
+	"strings"
+
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -205,7 +211,14 @@ func (ldt *listDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (ldt *listDatabaseTask) Execute(ctx context.Context) error {
 	var err error
-	ldt.result, err = ldt.rootCoord.ListDatabases(ctx, ldt.ListDatabasesRequest)
+	curUser, _ := GetCurUserFromContext(ldt.ctx)
+	if curUser != "" {
+		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeperator, curUser)
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authValue := crypto.Base64Encode(originValue)
+		ldt.ctx = metadata.AppendToOutgoingContext(ldt.ctx, authKey, authValue)
+	}
+	ldt.result, err = ldt.rootCoord.ListDatabases(ldt.ctx, ldt.ListDatabasesRequest)
 	return err
 }
 
