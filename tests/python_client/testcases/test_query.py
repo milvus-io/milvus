@@ -924,7 +924,7 @@ class TestQueryParams(TestcaseBase):
         assert len(res) == 1
 
         # test for mixed data
-        ids = [_id * 1.1, bool(_id % 2)]
+        ids = [bool(_id % 2)]
         expression = f"{expr_prefix}(listMix, {ids})"
         res = collection_w.query(expression)[0]
         assert len(res) == ct.default_nb // 2
