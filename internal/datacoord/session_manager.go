@@ -42,10 +42,7 @@ import (
 )
 
 const (
-	flushTimeout = 15 * time.Second
-	// TODO: evaluate and update import timeout.
-	importTimeout = 3 * time.Hour
-
+	flushTimeout      = 15 * time.Second
 	importTaskTimeout = 10 * time.Second
 )
 
@@ -59,11 +56,9 @@ type SessionManager interface {
 	FlushChannels(ctx context.Context, nodeID int64, req *datapb.FlushChannelsRequest) error
 	Compaction(ctx context.Context, nodeID int64, plan *datapb.CompactionPlan) error
 	SyncSegments(nodeID int64, req *datapb.SyncSegmentsRequest) error
-	Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)
 	GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error)
 	NotifyChannelOperation(ctx context.Context, nodeID int64, req *datapb.ChannelOperationsRequest) error
 	CheckChannelOperationProgress(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error)
-	AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
 	PreImport(nodeID int64, in *datapb.PreImportRequest) error
 	ImportV2(nodeID int64, in *datapb.ImportRequest) error
 	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
@@ -247,29 +242,6 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 	return nil
 }
 
-// Import is a grpc interface. It will send request to DataNode with provided `nodeID` asynchronously.
-func (c *SessionManagerImpl) Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
-	go c.execImport(ctx, nodeID, itr)
-}
-
-// execImport gets the corresponding DataNode with its ID and calls its Import method.
-func (c *SessionManagerImpl) execImport(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
-	cli, err := c.getClient(ctx, nodeID)
-	if err != nil {
-		log.Warn("failed to get client for import", zap.Int64("nodeID", nodeID), zap.Error(err))
-		return
-	}
-	ctx, cancel := context.WithTimeout(ctx, importTimeout)
-	defer cancel()
-	resp, err := cli.Import(ctx, itr)
-	if err := VerifyResponse(resp, err); err != nil {
-		log.Warn("failed to import", zap.Int64("node", nodeID), zap.Error(err))
-		return
-	}
-
-	log.Info("success to import", zap.Int64("node", nodeID), zap.Any("import task", itr))
-}
-
 // GetCompactionPlanResults returns map[planID]*pair[nodeID, *CompactionPlanResults]
 func (c *SessionManagerImpl) GetCompactionPlansResults() (map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult], error) {
 	ctx := context.Background()
@@ -382,25 +354,6 @@ func (c *SessionManagerImpl) CheckChannelOperationProgress(ctx context.Context, 
 	}
 
 	return resp, nil
-}
-
-func (c *SessionManagerImpl) AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	// Call DataNode to add the new segment to its own flow graph.
-	cli, err := c.getClient(ctx, nodeID)
-	if err != nil {
-		log.Error("failed to get DataNode client for SaveImportSegment",
-			zap.Int64("DataNode ID", nodeID),
-			zap.Error(err))
-		return nil, err
-	}
-
-	resp, err := cli.AddImportSegment(ctx, req)
-	if err := VerifyResponse(resp.GetStatus(), err); err != nil {
-		log.Error("failed to add segment", zap.Int64("nodeID", nodeID), zap.Error(err))
-		return nil, err
-	}
-	log.Info("succeed to add segment", zap.Int64("nodeID", nodeID), zap.Any("add segment req", req))
-	return resp, err
 }
 
 func (c *SessionManagerImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {

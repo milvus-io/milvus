@@ -328,47 +328,6 @@ func (s *dataCoordSuite) TestUpdateSegmentStatistics() {
 	})
 }
 
-func (s *dataCoordSuite) TestSaveImportSegment() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	segmentID := int64(1001)
-	collectionID := int64(100)
-
-	req := &datapb.SaveImportSegmentRequest{
-		SegmentId:    segmentID,
-		CollectionId: collectionID,
-	}
-
-	s.Run("normal_case", func() {
-		s.dc.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).
-			Run(func(_ context.Context, r *datapb.SaveImportSegmentRequest, _ ...grpc.CallOption) {
-				s.Equal(collectionID, req.GetCollectionId())
-				s.Equal(segmentID, req.GetSegmentId())
-			}).
-			Return(merr.Status(nil), nil)
-		err := s.broker.SaveImportSegment(ctx, req)
-		s.NoError(err)
-		s.resetMock()
-	})
-
-	s.Run("datacoord_return_failure_status", func() {
-		s.dc.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).
-			Return(nil, errors.New("mock"))
-		err := s.broker.SaveImportSegment(ctx, req)
-		s.Error(err)
-		s.resetMock()
-	})
-
-	s.Run("datacoord_return_failure_status", func() {
-		s.dc.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).
-			Return(merr.Status(errors.New("mock")), nil)
-		err := s.broker.SaveImportSegment(ctx, req)
-		s.Error(err)
-		s.resetMock()
-	})
-}
-
 func TestDataCoordBroker(t *testing.T) {
 	suite.Run(t, new(dataCoordSuite))
 }

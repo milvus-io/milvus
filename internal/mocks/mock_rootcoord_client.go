@@ -72,9 +72,9 @@ type MockRootCoordClient_AllocID_Call struct {
 }
 
 // AllocID is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *rootcoordpb.AllocIDRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *rootcoordpb.AllocIDRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) AllocID(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AllocID_Call {
 	return &MockRootCoordClient_AllocID_Call{Call: _e.mock.On("AllocID",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -142,9 +142,9 @@ type MockRootCoordClient_AllocTimestamp_Call struct {
 }
 
 // AllocTimestamp is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *rootcoordpb.AllocTimestampRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *rootcoordpb.AllocTimestampRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) AllocTimestamp(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AllocTimestamp_Call {
 	return &MockRootCoordClient_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -212,9 +212,9 @@ type MockRootCoordClient_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.AlterAliasRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.AlterAliasRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) AlterAlias(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AlterAlias_Call {
 	return &MockRootCoordClient_AlterAlias_Call{Call: _e.mock.On("AlterAlias",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -282,9 +282,9 @@ type MockRootCoordClient_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.AlterCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.AlterCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) AlterCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_AlterCollection_Call {
 	return &MockRootCoordClient_AlterCollection_Call{Call: _e.mock.On("AlterCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -352,9 +352,9 @@ type MockRootCoordClient_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CheckHealthRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CheckHealthRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) CheckHealth(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CheckHealth_Call {
 	return &MockRootCoordClient_CheckHealth_Call{Call: _e.mock.On("CheckHealth",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -463,9 +463,9 @@ type MockRootCoordClient_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CreateAliasRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CreateAliasRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) CreateAlias(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreateAlias_Call {
 	return &MockRootCoordClient_CreateAlias_Call{Call: _e.mock.On("CreateAlias",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -533,9 +533,9 @@ type MockRootCoordClient_CreateCollection_Call struct {
 }
 
 // CreateCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CreateCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CreateCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) CreateCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreateCollection_Call {
 	return &MockRootCoordClient_CreateCollection_Call{Call: _e.mock.On("CreateCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -603,9 +603,9 @@ type MockRootCoordClient_CreateCredential_Call struct {
 }
 
 // CreateCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.CredentialInfo
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.CredentialInfo
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) CreateCredential(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreateCredential_Call {
 	return &MockRootCoordClient_CreateCredential_Call{Call: _e.mock.On("CreateCredential",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -673,9 +673,9 @@ type MockRootCoordClient_CreateDatabase_Call struct {
 }
 
 // CreateDatabase is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CreateDatabaseRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CreateDatabaseRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) CreateDatabase(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreateDatabase_Call {
 	return &MockRootCoordClient_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -743,9 +743,9 @@ type MockRootCoordClient_CreatePartition_Call struct {
 }
 
 // CreatePartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CreatePartitionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CreatePartitionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) CreatePartition(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreatePartition_Call {
 	return &MockRootCoordClient_CreatePartition_Call{Call: _e.mock.On("CreatePartition",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -813,9 +813,9 @@ type MockRootCoordClient_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.CreateRoleRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.CreateRoleRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) CreateRole(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_CreateRole_Call {
 	return &MockRootCoordClient_CreateRole_Call{Call: _e.mock.On("CreateRole",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -883,9 +883,9 @@ type MockRootCoordClient_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DeleteCredentialRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DeleteCredentialRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DeleteCredential(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DeleteCredential_Call {
 	return &MockRootCoordClient_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -953,9 +953,9 @@ type MockRootCoordClient_DescribeAlias_Call struct {
 }
 
 // DescribeAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DescribeAliasRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DescribeAliasRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DescribeAlias(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DescribeAlias_Call {
 	return &MockRootCoordClient_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1023,9 +1023,9 @@ type MockRootCoordClient_DescribeCollection_Call struct {
 }
 
 // DescribeCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DescribeCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DescribeCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DescribeCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DescribeCollection_Call {
 	return &MockRootCoordClient_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1093,9 +1093,9 @@ type MockRootCoordClient_DescribeCollectionInternal_Call struct {
 }
 
 // DescribeCollectionInternal is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DescribeCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DescribeCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DescribeCollectionInternal(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DescribeCollectionInternal_Call {
 	return &MockRootCoordClient_DescribeCollectionInternal_Call{Call: _e.mock.On("DescribeCollectionInternal",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1163,9 +1163,9 @@ type MockRootCoordClient_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DropAliasRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DropAliasRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DropAlias(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropAlias_Call {
 	return &MockRootCoordClient_DropAlias_Call{Call: _e.mock.On("DropAlias",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1233,9 +1233,9 @@ type MockRootCoordClient_DropCollection_Call struct {
 }
 
 // DropCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DropCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DropCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DropCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropCollection_Call {
 	return &MockRootCoordClient_DropCollection_Call{Call: _e.mock.On("DropCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1303,9 +1303,9 @@ type MockRootCoordClient_DropDatabase_Call struct {
 }
 
 // DropDatabase is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DropDatabaseRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DropDatabaseRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DropDatabase(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropDatabase_Call {
 	return &MockRootCoordClient_DropDatabase_Call{Call: _e.mock.On("DropDatabase",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1373,9 +1373,9 @@ type MockRootCoordClient_DropPartition_Call struct {
 }
 
 // DropPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DropPartitionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DropPartitionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DropPartition(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropPartition_Call {
 	return &MockRootCoordClient_DropPartition_Call{Call: _e.mock.On("DropPartition",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1443,9 +1443,9 @@ type MockRootCoordClient_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.DropRoleRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.DropRoleRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) DropRole(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DropRole_Call {
 	return &MockRootCoordClient_DropRole_Call{Call: _e.mock.On("DropRole",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1513,9 +1513,9 @@ type MockRootCoordClient_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetComponentStatesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetComponentStatesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) GetComponentStates(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetComponentStates_Call {
 	return &MockRootCoordClient_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1583,9 +1583,9 @@ type MockRootCoordClient_GetCredential_Call struct {
 }
 
 // GetCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *rootcoordpb.GetCredentialRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *rootcoordpb.GetCredentialRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) GetCredential(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetCredential_Call {
 	return &MockRootCoordClient_GetCredential_Call{Call: _e.mock.On("GetCredential",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1610,76 +1610,6 @@ func (_c *MockRootCoordClient_GetCredential_Call) Return(_a0 *rootcoordpb.GetCre
 }
 
 func (_c *MockRootCoordClient_GetCredential_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetCredentialRequest, ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error)) *MockRootCoordClient_GetCredential_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetImportState provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) GetImportState(ctx context.Context, in *milvuspb.GetImportStateRequest, opts ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error) {
-	_va := make([]interface{}, len(opts))
-	for _i := range opts {
-		_va[_i] = opts[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	var r0 *milvuspb.GetImportStateResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest, ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error)); ok {
-		return rf(ctx, in, opts...)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest, ...grpc.CallOption) *milvuspb.GetImportStateResponse); ok {
-		r0 = rf(ctx, in, opts...)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.GetImportStateResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetImportStateRequest, ...grpc.CallOption) error); ok {
-		r1 = rf(ctx, in, opts...)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockRootCoordClient_GetImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportState'
-type MockRootCoordClient_GetImportState_Call struct {
-	*mock.Call
-}
-
-// GetImportState is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetImportStateRequest
-//   - opts ...grpc.CallOption
-func (_e *MockRootCoordClient_Expecter) GetImportState(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetImportState_Call {
-	return &MockRootCoordClient_GetImportState_Call{Call: _e.mock.On("GetImportState",
-		append([]interface{}{ctx, in}, opts...)...)}
-}
-
-func (_c *MockRootCoordClient_GetImportState_Call) Run(run func(ctx context.Context, in *milvuspb.GetImportStateRequest, opts ...grpc.CallOption)) *MockRootCoordClient_GetImportState_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]grpc.CallOption, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(grpc.CallOption)
-			}
-		}
-		run(args[0].(context.Context), args[1].(*milvuspb.GetImportStateRequest), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockRootCoordClient_GetImportState_Call) Return(_a0 *milvuspb.GetImportStateResponse, _a1 error) *MockRootCoordClient_GetImportState_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockRootCoordClient_GetImportState_Call) RunAndReturn(run func(context.Context, *milvuspb.GetImportStateRequest, ...grpc.CallOption) (*milvuspb.GetImportStateResponse, error)) *MockRootCoordClient_GetImportState_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1723,9 +1653,9 @@ type MockRootCoordClient_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.GetMetricsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.GetMetricsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) GetMetrics(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetMetrics_Call {
 	return &MockRootCoordClient_GetMetrics_Call{Call: _e.mock.On("GetMetrics",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1793,9 +1723,9 @@ type MockRootCoordClient_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetStatisticsChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetStatisticsChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) GetStatisticsChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetStatisticsChannel_Call {
 	return &MockRootCoordClient_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1863,9 +1793,9 @@ type MockRootCoordClient_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.GetTimeTickChannelRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.GetTimeTickChannelRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) GetTimeTickChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_GetTimeTickChannel_Call {
 	return &MockRootCoordClient_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -1933,9 +1863,9 @@ type MockRootCoordClient_HasCollection_Call struct {
 }
 
 // HasCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.HasCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.HasCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) HasCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_HasCollection_Call {
 	return &MockRootCoordClient_HasCollection_Call{Call: _e.mock.On("HasCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2003,9 +1933,9 @@ type MockRootCoordClient_HasPartition_Call struct {
 }
 
 // HasPartition is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.HasPartitionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.HasPartitionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) HasPartition(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_HasPartition_Call {
 	return &MockRootCoordClient_HasPartition_Call{Call: _e.mock.On("HasPartition",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2030,76 +1960,6 @@ func (_c *MockRootCoordClient_HasPartition_Call) Return(_a0 *milvuspb.BoolRespon
 }
 
 func (_c *MockRootCoordClient_HasPartition_Call) RunAndReturn(run func(context.Context, *milvuspb.HasPartitionRequest, ...grpc.CallOption) (*milvuspb.BoolResponse, error)) *MockRootCoordClient_HasPartition_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Import provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) Import(ctx context.Context, in *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-	_va := make([]interface{}, len(opts))
-	for _i := range opts {
-		_va[_i] = opts[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	var r0 *milvuspb.ImportResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest, ...grpc.CallOption) (*milvuspb.ImportResponse, error)); ok {
-		return rf(ctx, in, opts...)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest, ...grpc.CallOption) *milvuspb.ImportResponse); ok {
-		r0 = rf(ctx, in, opts...)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.ImportResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ImportRequest, ...grpc.CallOption) error); ok {
-		r1 = rf(ctx, in, opts...)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockRootCoordClient_Import_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Import'
-type MockRootCoordClient_Import_Call struct {
-	*mock.Call
-}
-
-// Import is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ImportRequest
-//   - opts ...grpc.CallOption
-func (_e *MockRootCoordClient_Expecter) Import(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_Import_Call {
-	return &MockRootCoordClient_Import_Call{Call: _e.mock.On("Import",
-		append([]interface{}{ctx, in}, opts...)...)}
-}
-
-func (_c *MockRootCoordClient_Import_Call) Run(run func(ctx context.Context, in *milvuspb.ImportRequest, opts ...grpc.CallOption)) *MockRootCoordClient_Import_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]grpc.CallOption, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(grpc.CallOption)
-			}
-		}
-		run(args[0].(context.Context), args[1].(*milvuspb.ImportRequest), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockRootCoordClient_Import_Call) Return(_a0 *milvuspb.ImportResponse, _a1 error) *MockRootCoordClient_Import_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockRootCoordClient_Import_Call) RunAndReturn(run func(context.Context, *milvuspb.ImportRequest, ...grpc.CallOption) (*milvuspb.ImportResponse, error)) *MockRootCoordClient_Import_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2143,9 +2003,9 @@ type MockRootCoordClient_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *proxypb.InvalidateCollMetaCacheRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *proxypb.InvalidateCollMetaCacheRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) InvalidateCollectionMetaCache(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_InvalidateCollectionMetaCache_Call {
 	return &MockRootCoordClient_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2213,9 +2073,9 @@ type MockRootCoordClient_ListAliases_Call struct {
 }
 
 // ListAliases is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ListAliasesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ListAliasesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ListAliases(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListAliases_Call {
 	return &MockRootCoordClient_ListAliases_Call{Call: _e.mock.On("ListAliases",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2283,9 +2143,9 @@ type MockRootCoordClient_ListCredUsers_Call struct {
 }
 
 // ListCredUsers is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ListCredUsersRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ListCredUsersRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ListCredUsers(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListCredUsers_Call {
 	return &MockRootCoordClient_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2353,9 +2213,9 @@ type MockRootCoordClient_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ListDatabasesRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ListDatabasesRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ListDatabases(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListDatabases_Call {
 	return &MockRootCoordClient_ListDatabases_Call{Call: _e.mock.On("ListDatabases",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2380,76 +2240,6 @@ func (_c *MockRootCoordClient_ListDatabases_Call) Return(_a0 *milvuspb.ListDatab
 }
 
 func (_c *MockRootCoordClient_ListDatabases_Call) RunAndReturn(run func(context.Context, *milvuspb.ListDatabasesRequest, ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error)) *MockRootCoordClient_ListDatabases_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ListImportTasks provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) ListImportTasks(ctx context.Context, in *milvuspb.ListImportTasksRequest, opts ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error) {
-	_va := make([]interface{}, len(opts))
-	for _i := range opts {
-		_va[_i] = opts[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	var r0 *milvuspb.ListImportTasksResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest, ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error)); ok {
-		return rf(ctx, in, opts...)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest, ...grpc.CallOption) *milvuspb.ListImportTasksResponse); ok {
-		r0 = rf(ctx, in, opts...)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.ListImportTasksResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListImportTasksRequest, ...grpc.CallOption) error); ok {
-		r1 = rf(ctx, in, opts...)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockRootCoordClient_ListImportTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImportTasks'
-type MockRootCoordClient_ListImportTasks_Call struct {
-	*mock.Call
-}
-
-// ListImportTasks is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ListImportTasksRequest
-//   - opts ...grpc.CallOption
-func (_e *MockRootCoordClient_Expecter) ListImportTasks(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListImportTasks_Call {
-	return &MockRootCoordClient_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks",
-		append([]interface{}{ctx, in}, opts...)...)}
-}
-
-func (_c *MockRootCoordClient_ListImportTasks_Call) Run(run func(ctx context.Context, in *milvuspb.ListImportTasksRequest, opts ...grpc.CallOption)) *MockRootCoordClient_ListImportTasks_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]grpc.CallOption, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(grpc.CallOption)
-			}
-		}
-		run(args[0].(context.Context), args[1].(*milvuspb.ListImportTasksRequest), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockRootCoordClient_ListImportTasks_Call) Return(_a0 *milvuspb.ListImportTasksResponse, _a1 error) *MockRootCoordClient_ListImportTasks_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockRootCoordClient_ListImportTasks_Call) RunAndReturn(run func(context.Context, *milvuspb.ListImportTasksRequest, ...grpc.CallOption) (*milvuspb.ListImportTasksResponse, error)) *MockRootCoordClient_ListImportTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2493,9 +2283,9 @@ type MockRootCoordClient_ListPolicy_Call struct {
 }
 
 // ListPolicy is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ListPolicyRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ListPolicyRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ListPolicy(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ListPolicy_Call {
 	return &MockRootCoordClient_ListPolicy_Call{Call: _e.mock.On("ListPolicy",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2563,9 +2353,9 @@ type MockRootCoordClient_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.OperatePrivilegeRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.OperatePrivilegeRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) OperatePrivilege(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_OperatePrivilege_Call {
 	return &MockRootCoordClient_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2633,9 +2423,9 @@ type MockRootCoordClient_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.OperateUserRoleRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.OperateUserRoleRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) OperateUserRole(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_OperateUserRole_Call {
 	return &MockRootCoordClient_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2703,9 +2493,9 @@ type MockRootCoordClient_RenameCollection_Call struct {
 }
 
 // RenameCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.RenameCollectionRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.RenameCollectionRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) RenameCollection(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_RenameCollection_Call {
 	return &MockRootCoordClient_RenameCollection_Call{Call: _e.mock.On("RenameCollection",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2730,76 +2520,6 @@ func (_c *MockRootCoordClient_RenameCollection_Call) Return(_a0 *commonpb.Status
 }
 
 func (_c *MockRootCoordClient_RenameCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.RenameCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_RenameCollection_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ReportImport provides a mock function with given fields: ctx, in, opts
-func (_m *MockRootCoordClient) ReportImport(ctx context.Context, in *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	_va := make([]interface{}, len(opts))
-	for _i := range opts {
-		_va[_i] = opts[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, in)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ImportResult, ...grpc.CallOption) (*commonpb.Status, error)); ok {
-		return rf(ctx, in, opts...)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ImportResult, ...grpc.CallOption) *commonpb.Status); ok {
-		r0 = rf(ctx, in, opts...)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ImportResult, ...grpc.CallOption) error); ok {
-		r1 = rf(ctx, in, opts...)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockRootCoordClient_ReportImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReportImport'
-type MockRootCoordClient_ReportImport_Call struct {
-	*mock.Call
-}
-
-// ReportImport is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *rootcoordpb.ImportResult
-//   - opts ...grpc.CallOption
-func (_e *MockRootCoordClient_Expecter) ReportImport(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ReportImport_Call {
-	return &MockRootCoordClient_ReportImport_Call{Call: _e.mock.On("ReportImport",
-		append([]interface{}{ctx, in}, opts...)...)}
-}
-
-func (_c *MockRootCoordClient_ReportImport_Call) Run(run func(ctx context.Context, in *rootcoordpb.ImportResult, opts ...grpc.CallOption)) *MockRootCoordClient_ReportImport_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]grpc.CallOption, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(grpc.CallOption)
-			}
-		}
-		run(args[0].(context.Context), args[1].(*rootcoordpb.ImportResult), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockRootCoordClient_ReportImport_Call) Return(_a0 *commonpb.Status, _a1 error) *MockRootCoordClient_ReportImport_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockRootCoordClient_ReportImport_Call) RunAndReturn(run func(context.Context, *rootcoordpb.ImportResult, ...grpc.CallOption) (*commonpb.Status, error)) *MockRootCoordClient_ReportImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2843,9 +2563,9 @@ type MockRootCoordClient_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.SelectGrantRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.SelectGrantRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) SelectGrant(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_SelectGrant_Call {
 	return &MockRootCoordClient_SelectGrant_Call{Call: _e.mock.On("SelectGrant",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2913,9 +2633,9 @@ type MockRootCoordClient_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.SelectRoleRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.SelectRoleRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) SelectRole(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_SelectRole_Call {
 	return &MockRootCoordClient_SelectRole_Call{Call: _e.mock.On("SelectRole",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -2983,9 +2703,9 @@ type MockRootCoordClient_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.SelectUserRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.SelectUserRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) SelectUser(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_SelectUser_Call {
 	return &MockRootCoordClient_SelectUser_Call{Call: _e.mock.On("SelectUser",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3053,9 +2773,9 @@ type MockRootCoordClient_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ShowCollectionsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ShowCollectionsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ShowCollections(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ShowCollections_Call {
 	return &MockRootCoordClient_ShowCollections_Call{Call: _e.mock.On("ShowCollections",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3123,9 +2843,9 @@ type MockRootCoordClient_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ShowConfigurationsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ShowConfigurationsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ShowConfigurations(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ShowConfigurations_Call {
 	return &MockRootCoordClient_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3193,9 +2913,9 @@ type MockRootCoordClient_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ShowPartitionsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ShowPartitionsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ShowPartitions(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ShowPartitions_Call {
 	return &MockRootCoordClient_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3263,9 +2983,9 @@ type MockRootCoordClient_ShowPartitionsInternal_Call struct {
 }
 
 // ShowPartitionsInternal is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ShowPartitionsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ShowPartitionsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ShowPartitionsInternal(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ShowPartitionsInternal_Call {
 	return &MockRootCoordClient_ShowPartitionsInternal_Call{Call: _e.mock.On("ShowPartitionsInternal",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3333,9 +3053,9 @@ type MockRootCoordClient_ShowSegments_Call struct {
 }
 
 // ShowSegments is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *milvuspb.ShowSegmentsRequest
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *milvuspb.ShowSegmentsRequest
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) ShowSegments(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_ShowSegments_Call {
 	return &MockRootCoordClient_ShowSegments_Call{Call: _e.mock.On("ShowSegments",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3403,9 +3123,9 @@ type MockRootCoordClient_UpdateChannelTimeTick_Call struct {
 }
 
 // UpdateChannelTimeTick is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.ChannelTimeTickMsg
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.ChannelTimeTickMsg
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) UpdateChannelTimeTick(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_UpdateChannelTimeTick_Call {
 	return &MockRootCoordClient_UpdateChannelTimeTick_Call{Call: _e.mock.On("UpdateChannelTimeTick",
 		append([]interface{}{ctx, in}, opts...)...)}
@@ -3473,9 +3193,9 @@ type MockRootCoordClient_UpdateCredential_Call struct {
 }
 
 // UpdateCredential is a helper method to define mock.On call
-//   - ctx context.Context
-//   - in *internalpb.CredentialInfo
-//   - opts ...grpc.CallOption
+//  - ctx context.Context
+//  - in *internalpb.CredentialInfo
+//  - opts ...grpc.CallOption
 func (_e *MockRootCoordClient_Expecter) UpdateCredential(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_UpdateCredential_Call {
 	return &MockRootCoordClient_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential",
 		append([]interface{}{ctx, in}, opts...)...)}

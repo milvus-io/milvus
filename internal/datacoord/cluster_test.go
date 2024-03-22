@@ -28,8 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -173,41 +171,5 @@ func (suite *ClusterSuite) TestFlushChannels() {
 		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
 		err := cluster.FlushChannels(context.Background(), 1, 0, channels)
 		suite.NoError(err)
-	})
-}
-
-func (suite *ClusterSuite) TestImport() {
-	suite.mockSession.EXPECT().Import(mock.Anything, mock.Anything, mock.Anything).Return().Once()
-	cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
-	suite.NotPanics(func() {
-		cluster.Import(context.Background(), 1, nil)
-	})
-}
-
-func (suite *ClusterSuite) TestAddImportSegment() {
-	suite.Run("channel not fount", func() {
-		suite.SetupTest()
-		suite.mockChManager.EXPECT().GetNodeIDByChannelName(mock.Anything).Return(false, 0)
-		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
-		resp, err := cluster.AddImportSegment(context.Background(), &datapb.AddImportSegmentRequest{
-			ChannelName: "ch-1",
-		})
-
-		suite.ErrorIs(err, merr.ErrChannelNotFound)
-		suite.Nil(resp)
-	})
-
-	suite.Run("normal", func() {
-		suite.SetupTest()
-		suite.mockChManager.EXPECT().GetNodeIDByChannelName(mock.Anything).Return(true, 0)
-		suite.mockSession.EXPECT().AddImportSegment(mock.Anything, mock.Anything, mock.Anything).Return(&datapb.AddImportSegmentResponse{}, nil)
-
-		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
-		resp, err := cluster.AddImportSegment(context.Background(), &datapb.AddImportSegmentRequest{
-			ChannelName: "ch-1",
-		})
-
-		suite.NoError(err)
-		suite.NotNil(resp)
 	})
 }

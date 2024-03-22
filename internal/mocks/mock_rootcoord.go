@@ -68,8 +68,8 @@ type RootCoord_AllocID_Call struct {
 }
 
 // AllocID is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.AllocIDRequest
+//  - _a0 context.Context
+//  - _a1 *rootcoordpb.AllocIDRequest
 func (_e *RootCoord_Expecter) AllocID(_a0 interface{}, _a1 interface{}) *RootCoord_AllocID_Call {
 	return &RootCoord_AllocID_Call{Call: _e.mock.On("AllocID", _a0, _a1)}
 }
@@ -123,8 +123,8 @@ type RootCoord_AllocTimestamp_Call struct {
 }
 
 // AllocTimestamp is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.AllocTimestampRequest
+//  - _a0 context.Context
+//  - _a1 *rootcoordpb.AllocTimestampRequest
 func (_e *RootCoord_Expecter) AllocTimestamp(_a0 interface{}, _a1 interface{}) *RootCoord_AllocTimestamp_Call {
 	return &RootCoord_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", _a0, _a1)}
 }
@@ -178,8 +178,8 @@ type RootCoord_AlterAlias_Call struct {
 }
 
 // AlterAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.AlterAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.AlterAliasRequest
 func (_e *RootCoord_Expecter) AlterAlias(_a0 interface{}, _a1 interface{}) *RootCoord_AlterAlias_Call {
 	return &RootCoord_AlterAlias_Call{Call: _e.mock.On("AlterAlias", _a0, _a1)}
 }
@@ -233,8 +233,8 @@ type RootCoord_AlterCollection_Call struct {
 }
 
 // AlterCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.AlterCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.AlterCollectionRequest
 func (_e *RootCoord_Expecter) AlterCollection(_a0 interface{}, _a1 interface{}) *RootCoord_AlterCollection_Call {
 	return &RootCoord_AlterCollection_Call{Call: _e.mock.On("AlterCollection", _a0, _a1)}
 }
@@ -288,8 +288,8 @@ type RootCoord_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CheckHealthRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CheckHealthRequest
 func (_e *RootCoord_Expecter) CheckHealth(_a0 interface{}, _a1 interface{}) *RootCoord_CheckHealth_Call {
 	return &RootCoord_CheckHealth_Call{Call: _e.mock.On("CheckHealth", _a0, _a1)}
 }
@@ -343,8 +343,8 @@ type RootCoord_CreateAlias_Call struct {
 }
 
 // CreateAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateAliasRequest
 func (_e *RootCoord_Expecter) CreateAlias(_a0 interface{}, _a1 interface{}) *RootCoord_CreateAlias_Call {
 	return &RootCoord_CreateAlias_Call{Call: _e.mock.On("CreateAlias", _a0, _a1)}
 }
@@ -398,8 +398,8 @@ type RootCoord_CreateCollection_Call struct {
 }
 
 // CreateCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateCollectionRequest
 func (_e *RootCoord_Expecter) CreateCollection(_a0 interface{}, _a1 interface{}) *RootCoord_CreateCollection_Call {
 	return &RootCoord_CreateCollection_Call{Call: _e.mock.On("CreateCollection", _a0, _a1)}
 }
@@ -453,8 +453,8 @@ type RootCoord_CreateCredential_Call struct {
 }
 
 // CreateCredential is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.CredentialInfo
+//  - _a0 context.Context
+//  - _a1 *internalpb.CredentialInfo
 func (_e *RootCoord_Expecter) CreateCredential(_a0 interface{}, _a1 interface{}) *RootCoord_CreateCredential_Call {
 	return &RootCoord_CreateCredential_Call{Call: _e.mock.On("CreateCredential", _a0, _a1)}
 }
@@ -508,8 +508,8 @@ type RootCoord_CreateDatabase_Call struct {
 }
 
 // CreateDatabase is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateDatabaseRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateDatabaseRequest
 func (_e *RootCoord_Expecter) CreateDatabase(_a0 interface{}, _a1 interface{}) *RootCoord_CreateDatabase_Call {
 	return &RootCoord_CreateDatabase_Call{Call: _e.mock.On("CreateDatabase", _a0, _a1)}
 }
@@ -563,8 +563,8 @@ type RootCoord_CreatePartition_Call struct {
 }
 
 // CreatePartition is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreatePartitionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreatePartitionRequest
 func (_e *RootCoord_Expecter) CreatePartition(_a0 interface{}, _a1 interface{}) *RootCoord_CreatePartition_Call {
 	return &RootCoord_CreatePartition_Call{Call: _e.mock.On("CreatePartition", _a0, _a1)}
 }
@@ -618,8 +618,8 @@ type RootCoord_CreateRole_Call struct {
 }
 
 // CreateRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.CreateRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.CreateRoleRequest
 func (_e *RootCoord_Expecter) CreateRole(_a0 interface{}, _a1 interface{}) *RootCoord_CreateRole_Call {
 	return &RootCoord_CreateRole_Call{Call: _e.mock.On("CreateRole", _a0, _a1)}
 }
@@ -673,8 +673,8 @@ type RootCoord_DeleteCredential_Call struct {
 }
 
 // DeleteCredential is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DeleteCredentialRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DeleteCredentialRequest
 func (_e *RootCoord_Expecter) DeleteCredential(_a0 interface{}, _a1 interface{}) *RootCoord_DeleteCredential_Call {
 	return &RootCoord_DeleteCredential_Call{Call: _e.mock.On("DeleteCredential", _a0, _a1)}
 }
@@ -728,8 +728,8 @@ type RootCoord_DescribeAlias_Call struct {
 }
 
 // DescribeAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DescribeAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DescribeAliasRequest
 func (_e *RootCoord_Expecter) DescribeAlias(_a0 interface{}, _a1 interface{}) *RootCoord_DescribeAlias_Call {
 	return &RootCoord_DescribeAlias_Call{Call: _e.mock.On("DescribeAlias", _a0, _a1)}
 }
@@ -783,8 +783,8 @@ type RootCoord_DescribeCollection_Call struct {
 }
 
 // DescribeCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DescribeCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DescribeCollectionRequest
 func (_e *RootCoord_Expecter) DescribeCollection(_a0 interface{}, _a1 interface{}) *RootCoord_DescribeCollection_Call {
 	return &RootCoord_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", _a0, _a1)}
 }
@@ -838,8 +838,8 @@ type RootCoord_DescribeCollectionInternal_Call struct {
 }
 
 // DescribeCollectionInternal is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DescribeCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DescribeCollectionRequest
 func (_e *RootCoord_Expecter) DescribeCollectionInternal(_a0 interface{}, _a1 interface{}) *RootCoord_DescribeCollectionInternal_Call {
 	return &RootCoord_DescribeCollectionInternal_Call{Call: _e.mock.On("DescribeCollectionInternal", _a0, _a1)}
 }
@@ -893,8 +893,8 @@ type RootCoord_DropAlias_Call struct {
 }
 
 // DropAlias is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropAliasRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropAliasRequest
 func (_e *RootCoord_Expecter) DropAlias(_a0 interface{}, _a1 interface{}) *RootCoord_DropAlias_Call {
 	return &RootCoord_DropAlias_Call{Call: _e.mock.On("DropAlias", _a0, _a1)}
 }
@@ -948,8 +948,8 @@ type RootCoord_DropCollection_Call struct {
 }
 
 // DropCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropCollectionRequest
 func (_e *RootCoord_Expecter) DropCollection(_a0 interface{}, _a1 interface{}) *RootCoord_DropCollection_Call {
 	return &RootCoord_DropCollection_Call{Call: _e.mock.On("DropCollection", _a0, _a1)}
 }
@@ -1003,8 +1003,8 @@ type RootCoord_DropDatabase_Call struct {
 }
 
 // DropDatabase is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropDatabaseRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropDatabaseRequest
 func (_e *RootCoord_Expecter) DropDatabase(_a0 interface{}, _a1 interface{}) *RootCoord_DropDatabase_Call {
 	return &RootCoord_DropDatabase_Call{Call: _e.mock.On("DropDatabase", _a0, _a1)}
 }
@@ -1058,8 +1058,8 @@ type RootCoord_DropPartition_Call struct {
 }
 
 // DropPartition is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropPartitionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropPartitionRequest
 func (_e *RootCoord_Expecter) DropPartition(_a0 interface{}, _a1 interface{}) *RootCoord_DropPartition_Call {
 	return &RootCoord_DropPartition_Call{Call: _e.mock.On("DropPartition", _a0, _a1)}
 }
@@ -1113,8 +1113,8 @@ type RootCoord_DropRole_Call struct {
 }
 
 // DropRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.DropRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.DropRoleRequest
 func (_e *RootCoord_Expecter) DropRole(_a0 interface{}, _a1 interface{}) *RootCoord_DropRole_Call {
 	return &RootCoord_DropRole_Call{Call: _e.mock.On("DropRole", _a0, _a1)}
 }
@@ -1168,8 +1168,8 @@ type RootCoord_GetComponentStates_Call struct {
 }
 
 // GetComponentStates is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetComponentStatesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.GetComponentStatesRequest
 func (_e *RootCoord_Expecter) GetComponentStates(_a0 interface{}, _a1 interface{}) *RootCoord_GetComponentStates_Call {
 	return &RootCoord_GetComponentStates_Call{Call: _e.mock.On("GetComponentStates", _a0, _a1)}
 }
@@ -1223,8 +1223,8 @@ type RootCoord_GetCredential_Call struct {
 }
 
 // GetCredential is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.GetCredentialRequest
+//  - _a0 context.Context
+//  - _a1 *rootcoordpb.GetCredentialRequest
 func (_e *RootCoord_Expecter) GetCredential(_a0 interface{}, _a1 interface{}) *RootCoord_GetCredential_Call {
 	return &RootCoord_GetCredential_Call{Call: _e.mock.On("GetCredential", _a0, _a1)}
 }
@@ -1242,61 +1242,6 @@ func (_c *RootCoord_GetCredential_Call) Return(_a0 *rootcoordpb.GetCredentialRes
 }
 
 func (_c *RootCoord_GetCredential_Call) RunAndReturn(run func(context.Context, *rootcoordpb.GetCredentialRequest) (*rootcoordpb.GetCredentialResponse, error)) *RootCoord_GetCredential_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// GetImportState provides a mock function with given fields: _a0, _a1
-func (_m *RootCoord) GetImportState(_a0 context.Context, _a1 *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *milvuspb.GetImportStateResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.GetImportStateRequest) *milvuspb.GetImportStateResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.GetImportStateResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.GetImportStateRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_GetImportState_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetImportState'
-type RootCoord_GetImportState_Call struct {
-	*mock.Call
-}
-
-// GetImportState is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.GetImportStateRequest
-func (_e *RootCoord_Expecter) GetImportState(_a0 interface{}, _a1 interface{}) *RootCoord_GetImportState_Call {
-	return &RootCoord_GetImportState_Call{Call: _e.mock.On("GetImportState", _a0, _a1)}
-}
-
-func (_c *RootCoord_GetImportState_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.GetImportStateRequest)) *RootCoord_GetImportState_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.GetImportStateRequest))
-	})
-	return _c
-}
-
-func (_c *RootCoord_GetImportState_Call) Return(_a0 *milvuspb.GetImportStateResponse, _a1 error) *RootCoord_GetImportState_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RootCoord_GetImportState_Call) RunAndReturn(run func(context.Context, *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error)) *RootCoord_GetImportState_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1333,8 +1278,8 @@ type RootCoord_GetMetrics_Call struct {
 }
 
 // GetMetrics is a helper method to define mock.On call
-//   - ctx context.Context
-//   - req *milvuspb.GetMetricsRequest
+//  - ctx context.Context
+//  - req *milvuspb.GetMetricsRequest
 func (_e *RootCoord_Expecter) GetMetrics(ctx interface{}, req interface{}) *RootCoord_GetMetrics_Call {
 	return &RootCoord_GetMetrics_Call{Call: _e.mock.On("GetMetrics", ctx, req)}
 }
@@ -1388,8 +1333,8 @@ type RootCoord_GetStatisticsChannel_Call struct {
 }
 
 // GetStatisticsChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.GetStatisticsChannelRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetStatisticsChannelRequest
 func (_e *RootCoord_Expecter) GetStatisticsChannel(_a0 interface{}, _a1 interface{}) *RootCoord_GetStatisticsChannel_Call {
 	return &RootCoord_GetStatisticsChannel_Call{Call: _e.mock.On("GetStatisticsChannel", _a0, _a1)}
 }
@@ -1443,8 +1388,8 @@ type RootCoord_GetTimeTickChannel_Call struct {
 }
 
 // GetTimeTickChannel is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.GetTimeTickChannelRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.GetTimeTickChannelRequest
 func (_e *RootCoord_Expecter) GetTimeTickChannel(_a0 interface{}, _a1 interface{}) *RootCoord_GetTimeTickChannel_Call {
 	return &RootCoord_GetTimeTickChannel_Call{Call: _e.mock.On("GetTimeTickChannel", _a0, _a1)}
 }
@@ -1498,8 +1443,8 @@ type RootCoord_HasCollection_Call struct {
 }
 
 // HasCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.HasCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.HasCollectionRequest
 func (_e *RootCoord_Expecter) HasCollection(_a0 interface{}, _a1 interface{}) *RootCoord_HasCollection_Call {
 	return &RootCoord_HasCollection_Call{Call: _e.mock.On("HasCollection", _a0, _a1)}
 }
@@ -1553,8 +1498,8 @@ type RootCoord_HasPartition_Call struct {
 }
 
 // HasPartition is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.HasPartitionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.HasPartitionRequest
 func (_e *RootCoord_Expecter) HasPartition(_a0 interface{}, _a1 interface{}) *RootCoord_HasPartition_Call {
 	return &RootCoord_HasPartition_Call{Call: _e.mock.On("HasPartition", _a0, _a1)}
 }
@@ -1572,61 +1517,6 @@ func (_c *RootCoord_HasPartition_Call) Return(_a0 *milvuspb.BoolResponse, _a1 er
 }
 
 func (_c *RootCoord_HasPartition_Call) RunAndReturn(run func(context.Context, *milvuspb.HasPartitionRequest) (*milvuspb.BoolResponse, error)) *RootCoord_HasPartition_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Import provides a mock function with given fields: _a0, _a1
-func (_m *RootCoord) Import(_a0 context.Context, _a1 *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *milvuspb.ImportResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ImportRequest) *milvuspb.ImportResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.ImportResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ImportRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_Import_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Import'
-type RootCoord_Import_Call struct {
-	*mock.Call
-}
-
-// Import is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ImportRequest
-func (_e *RootCoord_Expecter) Import(_a0 interface{}, _a1 interface{}) *RootCoord_Import_Call {
-	return &RootCoord_Import_Call{Call: _e.mock.On("Import", _a0, _a1)}
-}
-
-func (_c *RootCoord_Import_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ImportRequest)) *RootCoord_Import_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.ImportRequest))
-	})
-	return _c
-}
-
-func (_c *RootCoord_Import_Call) Return(_a0 *milvuspb.ImportResponse, _a1 error) *RootCoord_Import_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RootCoord_Import_Call) RunAndReturn(run func(context.Context, *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error)) *RootCoord_Import_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1704,8 +1594,8 @@ type RootCoord_InvalidateCollectionMetaCache_Call struct {
 }
 
 // InvalidateCollectionMetaCache is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *proxypb.InvalidateCollMetaCacheRequest
+//  - _a0 context.Context
+//  - _a1 *proxypb.InvalidateCollMetaCacheRequest
 func (_e *RootCoord_Expecter) InvalidateCollectionMetaCache(_a0 interface{}, _a1 interface{}) *RootCoord_InvalidateCollectionMetaCache_Call {
 	return &RootCoord_InvalidateCollectionMetaCache_Call{Call: _e.mock.On("InvalidateCollectionMetaCache", _a0, _a1)}
 }
@@ -1759,8 +1649,8 @@ type RootCoord_ListAliases_Call struct {
 }
 
 // ListAliases is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListAliasesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListAliasesRequest
 func (_e *RootCoord_Expecter) ListAliases(_a0 interface{}, _a1 interface{}) *RootCoord_ListAliases_Call {
 	return &RootCoord_ListAliases_Call{Call: _e.mock.On("ListAliases", _a0, _a1)}
 }
@@ -1814,8 +1704,8 @@ type RootCoord_ListCredUsers_Call struct {
 }
 
 // ListCredUsers is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListCredUsersRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListCredUsersRequest
 func (_e *RootCoord_Expecter) ListCredUsers(_a0 interface{}, _a1 interface{}) *RootCoord_ListCredUsers_Call {
 	return &RootCoord_ListCredUsers_Call{Call: _e.mock.On("ListCredUsers", _a0, _a1)}
 }
@@ -1869,8 +1759,8 @@ type RootCoord_ListDatabases_Call struct {
 }
 
 // ListDatabases is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListDatabasesRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ListDatabasesRequest
 func (_e *RootCoord_Expecter) ListDatabases(_a0 interface{}, _a1 interface{}) *RootCoord_ListDatabases_Call {
 	return &RootCoord_ListDatabases_Call{Call: _e.mock.On("ListDatabases", _a0, _a1)}
 }
@@ -1888,61 +1778,6 @@ func (_c *RootCoord_ListDatabases_Call) Return(_a0 *milvuspb.ListDatabasesRespon
 }
 
 func (_c *RootCoord_ListDatabases_Call) RunAndReturn(run func(context.Context, *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error)) *RootCoord_ListDatabases_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ListImportTasks provides a mock function with given fields: _a0, _a1
-func (_m *RootCoord) ListImportTasks(_a0 context.Context, _a1 *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *milvuspb.ListImportTasksResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.ListImportTasksRequest) *milvuspb.ListImportTasksResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.ListImportTasksResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.ListImportTasksRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_ListImportTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListImportTasks'
-type RootCoord_ListImportTasks_Call struct {
-	*mock.Call
-}
-
-// ListImportTasks is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ListImportTasksRequest
-func (_e *RootCoord_Expecter) ListImportTasks(_a0 interface{}, _a1 interface{}) *RootCoord_ListImportTasks_Call {
-	return &RootCoord_ListImportTasks_Call{Call: _e.mock.On("ListImportTasks", _a0, _a1)}
-}
-
-func (_c *RootCoord_ListImportTasks_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.ListImportTasksRequest)) *RootCoord_ListImportTasks_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.ListImportTasksRequest))
-	})
-	return _c
-}
-
-func (_c *RootCoord_ListImportTasks_Call) Return(_a0 *milvuspb.ListImportTasksResponse, _a1 error) *RootCoord_ListImportTasks_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RootCoord_ListImportTasks_Call) RunAndReturn(run func(context.Context, *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error)) *RootCoord_ListImportTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1979,8 +1814,8 @@ type RootCoord_ListPolicy_Call struct {
 }
 
 // ListPolicy is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.ListPolicyRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.ListPolicyRequest
 func (_e *RootCoord_Expecter) ListPolicy(_a0 interface{}, _a1 interface{}) *RootCoord_ListPolicy_Call {
 	return &RootCoord_ListPolicy_Call{Call: _e.mock.On("ListPolicy", _a0, _a1)}
 }
@@ -2034,8 +1869,8 @@ type RootCoord_OperatePrivilege_Call struct {
 }
 
 // OperatePrivilege is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.OperatePrivilegeRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.OperatePrivilegeRequest
 func (_e *RootCoord_Expecter) OperatePrivilege(_a0 interface{}, _a1 interface{}) *RootCoord_OperatePrivilege_Call {
 	return &RootCoord_OperatePrivilege_Call{Call: _e.mock.On("OperatePrivilege", _a0, _a1)}
 }
@@ -2089,8 +1924,8 @@ type RootCoord_OperateUserRole_Call struct {
 }
 
 // OperateUserRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.OperateUserRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.OperateUserRoleRequest
 func (_e *RootCoord_Expecter) OperateUserRole(_a0 interface{}, _a1 interface{}) *RootCoord_OperateUserRole_Call {
 	return &RootCoord_OperateUserRole_Call{Call: _e.mock.On("OperateUserRole", _a0, _a1)}
 }
@@ -2185,8 +2020,8 @@ type RootCoord_RenameCollection_Call struct {
 }
 
 // RenameCollection is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.RenameCollectionRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.RenameCollectionRequest
 func (_e *RootCoord_Expecter) RenameCollection(_a0 interface{}, _a1 interface{}) *RootCoord_RenameCollection_Call {
 	return &RootCoord_RenameCollection_Call{Call: _e.mock.On("RenameCollection", _a0, _a1)}
 }
@@ -2204,61 +2039,6 @@ func (_c *RootCoord_RenameCollection_Call) Return(_a0 *commonpb.Status, _a1 erro
 }
 
 func (_c *RootCoord_RenameCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.RenameCollectionRequest) (*commonpb.Status, error)) *RootCoord_RenameCollection_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ReportImport provides a mock function with given fields: _a0, _a1
-func (_m *RootCoord) ReportImport(_a0 context.Context, _a1 *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ImportResult) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.ImportResult) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.ImportResult) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// RootCoord_ReportImport_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReportImport'
-type RootCoord_ReportImport_Call struct {
-	*mock.Call
-}
-
-// ReportImport is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *rootcoordpb.ImportResult
-func (_e *RootCoord_Expecter) ReportImport(_a0 interface{}, _a1 interface{}) *RootCoord_ReportImport_Call {
-	return &RootCoord_ReportImport_Call{Call: _e.mock.On("ReportImport", _a0, _a1)}
-}
-
-func (_c *RootCoord_ReportImport_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.ImportResult)) *RootCoord_ReportImport_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*rootcoordpb.ImportResult))
-	})
-	return _c
-}
-
-func (_c *RootCoord_ReportImport_Call) Return(_a0 *commonpb.Status, _a1 error) *RootCoord_ReportImport_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *RootCoord_ReportImport_Call) RunAndReturn(run func(context.Context, *rootcoordpb.ImportResult) (*commonpb.Status, error)) *RootCoord_ReportImport_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -2295,8 +2075,8 @@ type RootCoord_SelectGrant_Call struct {
 }
 
 // SelectGrant is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SelectGrantRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SelectGrantRequest
 func (_e *RootCoord_Expecter) SelectGrant(_a0 interface{}, _a1 interface{}) *RootCoord_SelectGrant_Call {
 	return &RootCoord_SelectGrant_Call{Call: _e.mock.On("SelectGrant", _a0, _a1)}
 }
@@ -2350,8 +2130,8 @@ type RootCoord_SelectRole_Call struct {
 }
 
 // SelectRole is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SelectRoleRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SelectRoleRequest
 func (_e *RootCoord_Expecter) SelectRole(_a0 interface{}, _a1 interface{}) *RootCoord_SelectRole_Call {
 	return &RootCoord_SelectRole_Call{Call: _e.mock.On("SelectRole", _a0, _a1)}
 }
@@ -2405,8 +2185,8 @@ type RootCoord_SelectUser_Call struct {
 }
 
 // SelectUser is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.SelectUserRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.SelectUserRequest
 func (_e *RootCoord_Expecter) SelectUser(_a0 interface{}, _a1 interface{}) *RootCoord_SelectUser_Call {
 	return &RootCoord_SelectUser_Call{Call: _e.mock.On("SelectUser", _a0, _a1)}
 }
@@ -2439,7 +2219,7 @@ type RootCoord_SetAddress_Call struct {
 }
 
 // SetAddress is a helper method to define mock.On call
-//   - address string
+//  - address string
 func (_e *RootCoord_Expecter) SetAddress(address interface{}) *RootCoord_SetAddress_Call {
 	return &RootCoord_SetAddress_Call{Call: _e.mock.On("SetAddress", address)}
 }
@@ -2481,7 +2261,7 @@ type RootCoord_SetDataCoordClient_Call struct {
 }
 
 // SetDataCoordClient is a helper method to define mock.On call
-//   - dataCoord types.DataCoordClient
+//  - dataCoord types.DataCoordClient
 func (_e *RootCoord_Expecter) SetDataCoordClient(dataCoord interface{}) *RootCoord_SetDataCoordClient_Call {
 	return &RootCoord_SetDataCoordClient_Call{Call: _e.mock.On("SetDataCoordClient", dataCoord)}
 }
@@ -2514,7 +2294,7 @@ type RootCoord_SetEtcdClient_Call struct {
 }
 
 // SetEtcdClient is a helper method to define mock.On call
-//   - etcdClient *clientv3.Client
+//  - etcdClient *clientv3.Client
 func (_e *RootCoord_Expecter) SetEtcdClient(etcdClient interface{}) *RootCoord_SetEtcdClient_Call {
 	return &RootCoord_SetEtcdClient_Call{Call: _e.mock.On("SetEtcdClient", etcdClient)}
 }
@@ -2547,7 +2327,7 @@ type RootCoord_SetProxyCreator_Call struct {
 }
 
 // SetProxyCreator is a helper method to define mock.On call
-//   - _a0 func(context.Context , string , int64)(types.ProxyClient , error)
+//  - _a0 func(context.Context , string , int64)(types.ProxyClient , error)
 func (_e *RootCoord_Expecter) SetProxyCreator(_a0 interface{}) *RootCoord_SetProxyCreator_Call {
 	return &RootCoord_SetProxyCreator_Call{Call: _e.mock.On("SetProxyCreator", _a0)}
 }
@@ -2589,7 +2369,7 @@ type RootCoord_SetQueryCoordClient_Call struct {
 }
 
 // SetQueryCoordClient is a helper method to define mock.On call
-//   - queryCoord types.QueryCoordClient
+//  - queryCoord types.QueryCoordClient
 func (_e *RootCoord_Expecter) SetQueryCoordClient(queryCoord interface{}) *RootCoord_SetQueryCoordClient_Call {
 	return &RootCoord_SetQueryCoordClient_Call{Call: _e.mock.On("SetQueryCoordClient", queryCoord)}
 }
@@ -2622,7 +2402,7 @@ type RootCoord_SetTiKVClient_Call struct {
 }
 
 // SetTiKVClient is a helper method to define mock.On call
-//   - client *txnkv.Client
+//  - client *txnkv.Client
 func (_e *RootCoord_Expecter) SetTiKVClient(client interface{}) *RootCoord_SetTiKVClient_Call {
 	return &RootCoord_SetTiKVClient_Call{Call: _e.mock.On("SetTiKVClient", client)}
 }
@@ -2676,8 +2456,8 @@ type RootCoord_ShowCollections_Call struct {
 }
 
 // ShowCollections is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ShowCollectionsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ShowCollectionsRequest
 func (_e *RootCoord_Expecter) ShowCollections(_a0 interface{}, _a1 interface{}) *RootCoord_ShowCollections_Call {
 	return &RootCoord_ShowCollections_Call{Call: _e.mock.On("ShowCollections", _a0, _a1)}
 }
@@ -2731,8 +2511,8 @@ type RootCoord_ShowConfigurations_Call struct {
 }
 
 // ShowConfigurations is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.ShowConfigurationsRequest
+//  - _a0 context.Context
+//  - _a1 *internalpb.ShowConfigurationsRequest
 func (_e *RootCoord_Expecter) ShowConfigurations(_a0 interface{}, _a1 interface{}) *RootCoord_ShowConfigurations_Call {
 	return &RootCoord_ShowConfigurations_Call{Call: _e.mock.On("ShowConfigurations", _a0, _a1)}
 }
@@ -2786,8 +2566,8 @@ type RootCoord_ShowPartitions_Call struct {
 }
 
 // ShowPartitions is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ShowPartitionsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ShowPartitionsRequest
 func (_e *RootCoord_Expecter) ShowPartitions(_a0 interface{}, _a1 interface{}) *RootCoord_ShowPartitions_Call {
 	return &RootCoord_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", _a0, _a1)}
 }
@@ -2841,8 +2621,8 @@ type RootCoord_ShowPartitionsInternal_Call struct {
 }
 
 // ShowPartitionsInternal is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ShowPartitionsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ShowPartitionsRequest
 func (_e *RootCoord_Expecter) ShowPartitionsInternal(_a0 interface{}, _a1 interface{}) *RootCoord_ShowPartitionsInternal_Call {
 	return &RootCoord_ShowPartitionsInternal_Call{Call: _e.mock.On("ShowPartitionsInternal", _a0, _a1)}
 }
@@ -2896,8 +2676,8 @@ type RootCoord_ShowSegments_Call struct {
 }
 
 // ShowSegments is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *milvuspb.ShowSegmentsRequest
+//  - _a0 context.Context
+//  - _a1 *milvuspb.ShowSegmentsRequest
 func (_e *RootCoord_Expecter) ShowSegments(_a0 interface{}, _a1 interface{}) *RootCoord_ShowSegments_Call {
 	return &RootCoord_ShowSegments_Call{Call: _e.mock.On("ShowSegments", _a0, _a1)}
 }
@@ -3033,8 +2813,8 @@ type RootCoord_UpdateChannelTimeTick_Call struct {
 }
 
 // UpdateChannelTimeTick is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.ChannelTimeTickMsg
+//  - _a0 context.Context
+//  - _a1 *internalpb.ChannelTimeTickMsg
 func (_e *RootCoord_Expecter) UpdateChannelTimeTick(_a0 interface{}, _a1 interface{}) *RootCoord_UpdateChannelTimeTick_Call {
 	return &RootCoord_UpdateChannelTimeTick_Call{Call: _e.mock.On("UpdateChannelTimeTick", _a0, _a1)}
 }
@@ -3088,8 +2868,8 @@ type RootCoord_UpdateCredential_Call struct {
 }
 
 // UpdateCredential is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *internalpb.CredentialInfo
+//  - _a0 context.Context
+//  - _a1 *internalpb.CredentialInfo
 func (_e *RootCoord_Expecter) UpdateCredential(_a0 interface{}, _a1 interface{}) *RootCoord_UpdateCredential_Call {
 	return &RootCoord_UpdateCredential_Call{Call: _e.mock.On("UpdateCredential", _a0, _a1)}
 }
@@ -3122,7 +2902,7 @@ type RootCoord_UpdateStateCode_Call struct {
 }
 
 // UpdateStateCode is a helper method to define mock.On call
-//   - _a0 commonpb.StateCode
+//  - _a0 commonpb.StateCode
 func (_e *RootCoord_Expecter) UpdateStateCode(_a0 interface{}) *RootCoord_UpdateStateCode_Call {
 	return &RootCoord_UpdateStateCode_Call{Call: _e.mock.On("UpdateStateCode", _a0)}
 }
