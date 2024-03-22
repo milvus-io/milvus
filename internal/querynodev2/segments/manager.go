@@ -177,7 +177,6 @@ func NewManager() *Manager {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segMgr.mu.RLock()
 		defer segMgr.mu.RUnlock()
-		segLoader := manager.Loader.(*segmentLoader)
 
 		segment, ok := segMgr.sealedSegments[key]
 		if !ok {
@@ -191,7 +190,7 @@ func NewManager() *Manager {
 			if collection == nil {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
-			err := segLoader.loadSealedSegment(context.Background(), info, segment.(*LocalSegment), collection, LoadStatusMapped)
+			err := manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info, LoadStatusMapped)
 			return nil, err
 		})
 		if err != nil {

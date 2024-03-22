@@ -78,6 +78,12 @@ type Loader interface {
 
 	// LoadIndex append index for segment and remove vector binlogs.
 	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo, version int64) error
+
+	LoadSegment(ctx context.Context,
+		segment *LocalSegment,
+		loadInfo *querypb.SegmentLoadInfo,
+		loadStatus LoadStatus,
+	) error
 }
 
 type LoadResource struct {
@@ -208,7 +214,8 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 		if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
 			err = loader.LoadDelta(ctx, collectionID, segment.(*LocalSegment))
 		} else {
-			err = loader.loadSegment(ctx, segment.(*LocalSegment), loadInfo)
+			err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo, LoadStatusInMemory)
+
 		}
 		if err != nil {
 			log.Warn("load segment failed when load data into memory",
@@ -365,9 +372,10 @@ func (loader *segmentLoaderV2) loadBloomFilter(ctx context.Context, segmentID in
 	return nil
 }
 
-func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
+func (loader *segmentLoaderV2) LoadSegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
+	loadstatus LoadStatus,
 ) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
@@ -596,15 +604,20 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		debug.FreeOSMemory()
 	}()
 
+	loadStatus := LoadStatusInMemory
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		err := merr.WrapErrCollectionNotFound(collectionID)
+		log.Warn("failed to get collection", zap.Error(err))
+		return nil, err
+	}
+
+	if common.IsCollectionLazyLoadEnabled(collection.Schema().Properties...) {
+		loadStatus = LoadStatusMeta
+	}
+
 	for _, info := range infos {
 		loadInfo := info
-
-		collection := loader.manager.Collection.Get(collectionID)
-		if collection == nil {
-			err := merr.WrapErrCollectionNotFound(collectionID)
-			log.Warn("failed to get collection", zap.Error(err))
-			return nil, err
-		}
 
 		segment, err := NewSegment(
 			ctx,
@@ -640,7 +653,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
 			err = loader.LoadDeltaLogs(ctx, segment, loadInfo.GetDeltalogs())
 		} else {
-			err = loader.loadSegment(ctx, segment.(*LocalSegment), loadInfo)
+			err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo, loadStatus)
 		}
 		if err != nil {
 			log.Warn("load segment failed when load data into memory",
@@ -954,7 +967,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	log.Info("load fields...",
 		zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 	)
-	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
+	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos, WithLoadStatus(loadStatus)); err != nil {
 		return err
 	}
 	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -969,8 +982,12 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 				zap.Int64("fieldID", fieldID),
 				zap.String("index", info.IndexInfo.GetIndexName()),
 			)
+			status := loadStatus
+			if status != LoadStatusMeta {
+				status = LoadStatusMapped
+			}
 			// for scalar index's raw data, only load to mmap not memory
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, WithLoadStatus(LoadStatusMapped)); err != nil {
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, WithLoadStatus(status)); err != nil {
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
@@ -987,9 +1004,10 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	return nil
 }
 
-func (loader *segmentLoader) loadSegment(ctx context.Context,
+func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
+	loadStatus LoadStatus,
 ) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
@@ -1014,10 +1032,8 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 	defer debug.FreeOSMemory()
 
 	if segment.Type() == SegmentTypeSealed {
-		loadStatus := LoadStatusInMemory
-		if common.IsCollectionLazyLoadEnabled(collection.Schema().GetProperties()...) {
+		if loadStatus == LoadStatusMeta {
 			segment.baseSegment.loadInfo = loadInfo
-			loadStatus = LoadStatusMeta
 		}
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment, collection, loadStatus); err != nil {
 			return err
