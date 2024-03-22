@@ -21,8 +21,6 @@ import (
 	rand2 "crypto/rand"
 	"encoding/json"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/stretchr/testify/mock"
 	"io"
 	"math"
 	"math/rand"
@@ -32,11 +30,13 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
