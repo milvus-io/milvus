@@ -70,6 +70,7 @@ type mockMetaTable struct {
 	RemovePartitionFunc              func(ctx context.Context, collectionID UniqueID, partitionID UniqueID, ts Timestamp) error
 	CreateAliasFunc                  func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
 	AlterAliasFunc                   func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error
+	AlterAliasesFunc                 func(ctx context.Context, dbName string, oldCollectionName string, newCollectionName string, ts Timestamp) error
 	DropAliasFunc                    func(ctx context.Context, dbName string, alias string, ts Timestamp) error
 	IsAliasFunc                      func(dbName, name string) bool
 	DescribeAliasFunc                func(ctx context.Context, dbName, alias string, ts Timestamp) (string, error)
@@ -80,6 +81,7 @@ type mockMetaTable struct {
 	GetCollectionVirtualChannelsFunc func(colID int64) []string
 	AlterCollectionFunc              func(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
 	RenameCollectionFunc             func(ctx context.Context, oldName string, newName string, ts Timestamp) error
+	SwitchCollectionIDFunc           func(ctx context.Context, oldName string, newName string, ts Timestamp) error
 	AddCredentialFunc                func(credInfo *internalpb.CredentialInfo) error
 	GetCredentialFunc                func(username string) (*internalpb.CredentialInfo, error)
 	DeleteCredentialFunc             func(username string) error
@@ -171,6 +173,26 @@ func (m mockMetaTable) AlterCollection(ctx context.Context, oldColl *model.Colle
 
 func (m *mockMetaTable) RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error {
 	return m.RenameCollectionFunc(ctx, oldName, newName, ts)
+}
+
+func (m *mockMetaTable) SwitchCollectionID(ctx context.Context, dbName string, oldName string, newName string, ts Timestamp) error {
+	return m.SwitchCollectionIDFunc(ctx, oldName, newName, ts)
+}
+
+func (m *mockMetaTable) IsCollectionLocked(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) bool {
+	return false
+}
+
+func (m *mockMetaTable) LockCollection(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) error {
+	return nil
+}
+
+func (m *mockMetaTable) UnlockCollection(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) error {
+	return nil
+}
+
+func (m *mockMetaTable) CheckAndDropTempCollection(ctx context.Context, coll *model.Collection) error {
+	return nil
 }
 
 func (m mockMetaTable) GetCollectionIDByName(name string) (UniqueID, error) {
@@ -461,6 +483,9 @@ func withInvalidMeta() Opt {
 	}
 	meta.AlterAliasFunc = func(ctx context.Context, dbName string, alias string, collectionName string, ts Timestamp) error {
 		return errors.New("error mock AlterAlias")
+	}
+	meta.SwitchCollectionIDFunc = func(ctx context.Context, oldName string, newName string, ts Timestamp) error {
+		return errors.New("error mock SwitchCollectionID")
 	}
 	meta.DropAliasFunc = func(ctx context.Context, dbName string, alias string, ts Timestamp) error {
 		return errors.New("error mock DropAlias")

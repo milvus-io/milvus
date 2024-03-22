@@ -494,6 +494,37 @@ func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collectio
 	return fmt.Errorf("altering collection doesn't support %s", alterType.String())
 }
 
+func (kc *Catalog) SaveMultiCollectionInfo(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp) error {
+	if len(collections) == 0 {
+		return nil
+	}
+	kvMap := make(map[string]string, 0)
+	toRemoveKeys := make([]string, 0)
+	for _, alias := range aliases {
+		oldKBefore210 := BuildAliasKey210(alias.Name)
+		oldKeyWithoutDb := BuildAliasKey(alias.Name)
+		toRemoveKeys = append(toRemoveKeys, oldKBefore210, oldKeyWithoutDb)
+		k := BuildAliasKeyWithDB(alias.DbID, alias.Name)
+		aliasInfo := model.MarshalAliasModel(alias)
+		v, err := proto.Marshal(aliasInfo)
+		if err != nil {
+			return err
+		}
+		kvMap[k] = string(v)
+	}
+	for _, collection := range collections {
+		key := BuildCollectionKey(collection.DBID, collection.CollectionID)
+		collInfo := model.MarshalCollectionModel(collection)
+		value, err := proto.Marshal(collInfo)
+		if err != nil {
+			return fmt.Errorf("failed to marshal collection(%s) info: %s", collection.Name, err.Error())
+		}
+		kvMap[key] = string(value)
+	}
+
+	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(kvMap, toRemoveKeys, ts)
+}
+
 func (kc *Catalog) alterModifyPartition(oldPart *model.Partition, newPart *model.Partition, ts typeutil.Timestamp) error {
 	if oldPart.CollectionID != newPart.CollectionID || oldPart.PartitionID != newPart.PartitionID {
 		return fmt.Errorf("altering collection id or partition id is forbidden")

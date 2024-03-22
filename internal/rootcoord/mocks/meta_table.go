@@ -5,6 +5,8 @@ package mockrootcoord
 import (
 	context "context"
 
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+
 	etcdpb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
 
@@ -1108,6 +1110,20 @@ func (_c *IMetaTable_GetDatabaseByName_Call) Return(_a0 *model.Database, _a1 err
 func (_c *IMetaTable_GetDatabaseByName_Call) RunAndReturn(run func(context.Context, string, uint64) (*model.Database, error)) *IMetaTable_GetDatabaseByName_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+func (_m *IMetaTable) SwitchCollectionID(ctx context.Context, dbName string, oldName string, newName string, ts uint64) error {
+	return nil
+}
+
+func (_m *IMetaTable) IsCollectionLocked(ctx context.Context, collID typeutil.UniqueID, ts uint64) bool {
+	return false
+}
+func (_m *IMetaTable) LockCollection(ctx context.Context, collID typeutil.UniqueID, ts uint64) error {
+	return nil
+}
+func (_m *IMetaTable) UnlockCollection(ctx context.Context, collID typeutil.UniqueID, ts uint64) error {
+	return nil
 }
 
 // IsAlias provides a mock function with given fields: db, name

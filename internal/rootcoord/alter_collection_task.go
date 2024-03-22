@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type alterCollectionTask struct {
@@ -55,6 +56,9 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	if a.core.meta.IsCollectionLocked(ctx, oldColl.CollectionID, typeutil.MaxTimestamp) {
+		return fmt.Errorf("collection %s is locked", a.Req.GetCollectionName())
+	}
 	newColl := oldColl.Clone()
 	updateCollectionProperties(newColl, a.Req.GetProperties())
 

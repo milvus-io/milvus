@@ -81,6 +81,8 @@ service DataCoord {
   rpc GetSegmentIndexState(index.GetSegmentIndexStateRequest) returns (index.GetSegmentIndexStateResponse) {}
   rpc GetIndexInfos(index.GetIndexInfoRequest) returns (index.GetIndexInfoResponse){}
   rpc DropIndex(index.DropIndexRequest) returns (common.Status) {}
+  rpc LockIndexes(index.LockIndexesRequest) returns (common.Status) {}
+  rpc UnlockIndexes(index.UnlockIndexesRequest) returns (common.Status) {}
   rpc DescribeIndex(index.DescribeIndexRequest) returns (index.DescribeIndexResponse) {}
   rpc GetIndexStatistics(index.GetIndexStatisticsRequest) returns (index.GetIndexStatisticsResponse) {}
   // Deprecated: use DescribeIndex instead

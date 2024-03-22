@@ -406,6 +406,18 @@ func (m *mockRootCoordClient) DropCollection(ctx context.Context, req *milvuspb.
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) LockCollection(ctx context.Context, req *rootcoordpb.LockCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.LockCollectionResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordClient) UnlockCollection(ctx context.Context, req *rootcoordpb.UnlockCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordClient) SwitchCollection(ctx context.Context, req *rootcoordpb.SwitchCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	panic("not implemented") // TODO: Implement
 }

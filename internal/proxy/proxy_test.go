@@ -265,6 +265,10 @@ func (s *proxyTestServer) RenameCollection(ctx context.Context, request *milvusp
 	return s.Proxy.RenameCollection(ctx, request)
 }
 
+func (_m *proxyTestServer) TruncateCollection(ctx context.Context, _a1 *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 func (s *proxyTestServer) GetComponentStates(ctx context.Context, request *milvuspb.GetComponentStatesRequest) (*milvuspb.ComponentStates, error) {
 	return s.Proxy.GetComponentStates(ctx, request)
 }

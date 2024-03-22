@@ -31,6 +31,10 @@ service RootCoord {
      */
     rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
 
+    rpc LockCollection(LockCollectionRequest) returns (LockCollectionResponse) {}
+    rpc UnlockCollection(UnlockCollectionRequest) returns (common.Status) {}
+    rpc SwitchCollection(SwitchCollectionRequest) returns (common.Status) {}
+
     /**
      * @brief This method is used to test collection existence.
      *
@@ -140,6 +144,34 @@ service RootCoord {
     rpc CreateDatabase(milvus.CreateDatabaseRequest) returns (common.Status) {}
     rpc DropDatabase(milvus.DropDatabaseRequest) returns (common.Status) {}
     rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
+}
+
+message LockCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  string db_name = 2;
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3;
+}
+
+message LockCollectionResponse {
+  common.Status status = 1;
+  int64 collection_id = 2;
+}
+
+message UnlockCollectionRequest {
+  // Not useful for now
+  common.MsgBase base = 1;
+  string db_name = 2;
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3;
+}
+
+message SwitchCollectionRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string oldName = 3;
+  string newName = 4;
 }
 
 message AllocTimestampRequest {

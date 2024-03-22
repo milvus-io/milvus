@@ -5,6 +5,8 @@ package mocks
 import (
 	context "context"
 
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
+
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 
@@ -114,6 +116,10 @@ func (_c *RootCoordCatalog_AlterCollection_Call) Return(_a0 error) *RootCoordCat
 func (_c *RootCoordCatalog_AlterCollection_Call) RunAndReturn(run func(context.Context, *model.Collection, *model.Collection, metastore.AlterType, uint64) error) *RootCoordCatalog_AlterCollection_Call {
 	_c.Call.Return(run)
 	return _c
+}
+
+func (_m *RootCoordCatalog) SaveMultiCollectionInfo(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp) error {
+	return nil
 }
 
 // AlterCredential provides a mock function with given fields: ctx, credential

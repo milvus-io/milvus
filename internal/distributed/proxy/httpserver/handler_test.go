@@ -71,6 +71,10 @@ func (m *mockProxyComponent) DropCollection(ctx context.Context, request *milvus
 	return testStatus, nil
 }
 
+func (m *mockProxyComponent) TruncateCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	return testStatus, nil
+}
+
 func (m *mockProxyComponent) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return &milvuspb.BoolResponse{Status: testStatus}, nil
 }

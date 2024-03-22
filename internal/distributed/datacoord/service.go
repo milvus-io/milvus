@@ -461,6 +461,16 @@ func (s *Server) DropIndex(ctx context.Context, request *indexpb.DropIndexReques
 	return s.dataCoord.DropIndex(ctx, request)
 }
 
+// LockIndexes sends the drop index request to DataCoord.
+func (s *Server) LockIndexes(ctx context.Context, request *indexpb.LockIndexesRequest) (*commonpb.Status, error) {
+	return s.LockIndexes(ctx, request)
+}
+
+// UnlockIndexes sends the drop index request to DataCoord.
+func (s *Server) UnlockIndexes(ctx context.Context, request *indexpb.UnlockIndexesRequest) (*commonpb.Status, error) {
+	return s.UnlockIndexes(ctx, request)
+}
+
 // Deprecated: use DescribeIndex instead
 func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetIndexBuildProgressRequest) (*indexpb.GetIndexBuildProgressResponse, error) {
 	return s.dataCoord.GetIndexBuildProgress(ctx, req)

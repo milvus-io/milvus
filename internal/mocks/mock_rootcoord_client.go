@@ -1334,6 +1334,28 @@ func (_c *MockRootCoordClient_DropDatabase_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+func (_m *MockRootCoordClient) LockCollection(ctx context.Context, req *rootcoordpb.LockCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.LockCollectionResponse, error) {
+	return &rootcoordpb.LockCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		}}, nil
+}
+
+func (_m *MockRootCoordClient) UnlockCollection(ctx context.Context, req *rootcoordpb.UnlockCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (_m *MockRootCoordClient) SwitchCollection(ctx context.Context, req *rootcoordpb.SwitchCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 // DropPartition provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) DropPartition(ctx context.Context, in *milvuspb.DropPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))

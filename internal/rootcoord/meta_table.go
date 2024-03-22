@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -69,6 +70,10 @@ type IMetaTable interface {
 	ListAliases(ctx context.Context, dbName string, collectionName string, ts Timestamp) ([]string, error)
 	AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, ts Timestamp) error
 	RenameCollection(ctx context.Context, dbName string, oldName string, newDBName string, newName string, ts Timestamp) error
+	SwitchCollectionID(ctx context.Context, dbName string, oldName string, newName string, ts Timestamp) error
+	IsCollectionLocked(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) bool
+	LockCollection(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) error
+	UnlockCollection(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) error
 
 	// TODO: it'll be a big cost if we handle the time travel logic, since we should always list all aliases in catalog.
 	IsAlias(db, name string) bool
@@ -100,8 +105,9 @@ type MetaTable struct {
 
 	tsoAllocator tso.Allocator
 
-	dbName2Meta map[string]*model.Database              // database name ->  db meta
-	collID2Meta map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+	dbName2Meta   map[string]*model.Database              // database name ->  db meta
+	collID2Meta   map[typeutil.UniqueID]*model.Collection // collection id -> collection meta
+	lockedCollIDs map[typeutil.UniqueID]time.Time
 
 	// collections *collectionDb
 	names   *nameDb
@@ -130,6 +136,7 @@ func (mt *MetaTable) reload() error {
 	record := timerecord.NewTimeRecorder("rootcoord")
 	mt.dbName2Meta = make(map[string]*model.Database)
 	mt.collID2Meta = make(map[UniqueID]*model.Collection)
+	mt.lockedCollIDs = make(map[UniqueID]time.Time)
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
@@ -795,6 +802,94 @@ func (mt *MetaTable) RenameCollection(ctx context.Context, dbName string, oldNam
 	mt.collID2Meta[oldColl.CollectionID] = newColl
 
 	log.Info("rename collection finished")
+	return nil
+}
+
+func (mt *MetaTable) SwitchCollectionID(ctx context.Context, dbName string, oldName string, newName string, ts Timestamp) error {
+	mt.ddLock.Lock()
+	defer mt.ddLock.Unlock()
+
+	ctx = contextutil.WithTenantID(ctx, Params.CommonCfg.ClusterName.GetValue())
+	log := log.Ctx(ctx).With(
+		zap.String("db", dbName),
+		zap.String("oldName", oldName),
+		zap.String("newName", newName),
+	)
+
+	// backward compatibility for rolling  upgrade
+	if dbName == "" {
+		log.Warn("db name is empty")
+		dbName = util.DefaultDBName
+	}
+
+	// old collection should not be an alias
+	_, ok := mt.aliases.get(dbName, oldName)
+	if ok {
+		log.Warn("unsupported use a alias to rename collection")
+		return fmt.Errorf("unsupported use an alias to rename collection, alias:%s", oldName)
+	}
+
+	// check new collection already exists
+	newColl, err := mt.getCollectionByNameInternal(ctx, dbName, newName, ts)
+	if err != nil || newColl == nil {
+		log.Warn("check new collection name fail")
+		return err
+	}
+
+	// get old collection meta
+	oldColl, err := mt.getCollectionByNameInternal(ctx, dbName, oldName, ts)
+	if err != nil {
+		return err
+	}
+
+	aliases := mt.listAliasesByID(oldColl.CollectionID)
+	aliasModels := make([]*model.Alias, 0)
+	for _, alias := range aliases {
+		log.Info("switch collection alterAlias", zap.String("alias", alias), zap.String("collName", oldName))
+		aliasModels = append(aliasModels, &model.Alias{
+			Name:         alias,
+			CollectionID: newColl.CollectionID,
+			CreatedTime:  ts,
+			State:        pb.AliasState_AliasCreated,
+			DbID:         newColl.DBID,
+		})
+	}
+
+	newColl.Name = oldName
+	oldColl.Name = newName
+	if err := mt.catalog.SaveMultiCollectionInfo(ctx, []*model.Collection{newColl, oldColl}, aliasModels, ts); err != nil {
+		return nil
+	}
+
+	mt.names.insert(dbName, newColl.Name, newColl.CollectionID)
+	mt.collID2Meta[newColl.CollectionID] = newColl
+	mt.names.insert(dbName, oldColl.Name, oldColl.CollectionID)
+	mt.collID2Meta[oldColl.CollectionID] = oldColl
+
+	for _, alias := range aliases {
+		mt.aliases.insert(dbName, alias, newColl.CollectionID)
+	}
+
+	log.Info("switch collection finished")
+	return nil
+}
+
+func (mt *MetaTable) IsCollectionLocked(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) bool {
+	lockTime, exists := mt.lockedCollIDs[collID]
+	if exists && lockTime.Before(time.Now().Add(-5*time.Minute)) {
+		delete(mt.lockedCollIDs, collID)
+		return false
+	}
+	return exists
+}
+
+func (mt *MetaTable) LockCollection(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) error {
+	mt.lockedCollIDs[collID] = time.Now()
+	return nil
+}
+
+func (mt *MetaTable) UnlockCollection(ctx context.Context, collID typeutil.UniqueID, ts Timestamp) error {
+	delete(mt.lockedCollIDs, collID)
 	return nil
 }
 

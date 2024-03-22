@@ -381,6 +381,20 @@ func (s *Server) DropCollection(ctx context.Context, in *milvuspb.DropCollection
 	return s.rootCoord.DropCollection(ctx, in)
 }
 
+// LockCollection lock a collection
+func (s *Server) LockCollection(ctx context.Context, in *rootcoordpb.LockCollectionRequest) (*rootcoordpb.LockCollectionResponse, error) {
+	return s.rootCoord.LockCollection(ctx, in)
+}
+
+// UnlockCollection unlock a collection
+func (s *Server) UnlockCollection(ctx context.Context, in *rootcoordpb.UnlockCollectionRequest) (*commonpb.Status, error) {
+	return s.rootCoord.UnlockCollection(ctx, in)
+}
+
+func (s *Server) SwitchCollection(ctx context.Context, request *rootcoordpb.SwitchCollectionRequest) (*commonpb.Status, error) {
+	return s.rootCoord.SwitchCollection(ctx, request)
+}
+
 // HasCollection checks whether a collection is created
 func (s *Server) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootCoord.HasCollection(ctx, in)

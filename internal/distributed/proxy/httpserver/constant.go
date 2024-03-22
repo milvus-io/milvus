@@ -51,6 +51,7 @@ const (
 	VectorCollectionsPath         = "/vector/collections"
 	VectorCollectionsCreatePath   = "/vector/collections/create"
 	VectorCollectionsDescribePath = "/vector/collections/describe"
+	VectorCollectionsTruncatePath = "/vector/collections/truncate"
 	VectorCollectionsDropPath     = "/vector/collections/drop"
 	VectorInsertPath              = "/vector/insert"
 	VectorUpsertPath              = "/vector/upsert"
