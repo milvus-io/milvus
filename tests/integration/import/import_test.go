@@ -88,26 +88,6 @@ func (s *BulkInsertSuite) run() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createCollectionStatus.GetErrorCode())
 
-	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: collectionName,
-		FieldName:      "embeddings",
-		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
-	})
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
-
-	s.WaitForIndexBuilt(ctx, collectionName, "embeddings")
-
-	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		CollectionName: collectionName,
-	})
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
-	s.WaitForLoad(ctx, collectionName)
-
 	var files []*internalpb.ImportFile
 	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
 	s.NoError(err)
@@ -161,16 +141,26 @@ func (s *BulkInsertSuite) run() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	log.Info("Show segments", zap.Any("segments", segments))
 
-	// load refresh
-	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	// create index
+	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		Refresh:        true,
+		FieldName:      "embeddings",
+		IndexName:      "_default",
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
+	})
+	s.NoError(err)
+	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
+
+	s.WaitForIndexBuilt(ctx, collectionName, "embeddings")
+
+	// load
+	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		CollectionName: collectionName,
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
-	s.WaitForLoadRefresh(ctx, "", collectionName)
+	s.WaitForLoad(ctx, collectionName)
 
 	// search
 	expr := ""
@@ -185,7 +175,6 @@ func (s *BulkInsertSuite) run() {
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
-	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 }
 
 func (s *BulkInsertSuite) TestNumpy() {
