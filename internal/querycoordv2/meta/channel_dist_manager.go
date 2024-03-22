@@ -125,16 +125,20 @@ func (m *ChannelDistManager) GetByFilter(filters ...ChannelDistFilter) []*DmChan
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
+	mergedFilters := func(ch *DmChannel) bool {
+		for _, fn := range filters {
+			if fn != nil && !fn(ch) {
+				return false
+			}
+		}
+
+		return true
+	}
+
 	ret := make([]*DmChannel, 0)
 	for _, channels := range m.channels {
 		for _, channel := range channels {
-			allMatch := true
-			for _, fn := range filters {
-				if fn != nil && !fn(channel) {
-					allMatch = false
-				}
-			}
-			if allMatch {
+			if mergedFilters(channel) {
 				ret = append(ret, channel)
 			}
 		}

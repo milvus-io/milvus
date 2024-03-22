@@ -95,7 +95,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	}
 
 	// find already released segments which are not contained in target
-	segments := c.dist.SegmentDistManager.GetByFilter(nil)
+	segments := c.dist.SegmentDistManager.GetByFilter()
 	released := utils.FilterReleased(segments, collectionIDs)
 	reduceTasks := c.createSegmentReduceTasks(ctx, released, meta.NilReplica, querypb.DataScope_Historical)
 	task.SetReason("collection released", reduceTasks...)
