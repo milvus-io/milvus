@@ -53,7 +53,7 @@ func (wb *bfWriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 		}
 
 		for _, inData := range groups {
-			if delMsg.GetPartitionID() == common.InvalidPartitionID || delMsg.GetPartitionID() == inData.partitionID {
+			if delMsg.GetPartitionID() == common.AllPartitionsID || delMsg.GetPartitionID() == inData.partitionID {
 				var deletePks []storage.PrimaryKey
 				var deleteTss []typeutil.Timestamp
 				for idx, pk := range pks {
