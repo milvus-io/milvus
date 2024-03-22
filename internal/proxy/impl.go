@@ -5649,6 +5649,11 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("import request is empty"))
 		return resp, nil
 	}
+	if len(req.Files) > Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt() {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("The max number of import files should not exceed %d, but got %d",
+			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))))
+		return resp, nil
+	}
 	isBackup := importutilv2.IsBackup(req.GetOptions())
 	if !isBackup {
 		// check file type

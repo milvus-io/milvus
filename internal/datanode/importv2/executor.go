@@ -185,6 +185,12 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 	if err != nil {
 		return err
 	}
+	maxSize := paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024
+	if fileSize > int64(maxSize) {
+		return errors.New(fmt.Sprintf(
+			"The import file size has reached the maximum limit allowed for importing, "+
+				"fileSize=%d, maxSize=%d", fileSize, int64(maxSize)))
+	}
 
 	totalRows := 0
 	totalSize := 0
