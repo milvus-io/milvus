@@ -4282,16 +4282,21 @@ func convertToV1GetImportResponse(rsp *internalpb.GetImportProgressResponse) *mi
 		Key:   progressPercent,
 		Value: strconv.FormatInt(rsp.GetProgress(), 10),
 	})
+	var createTs int64
+	createTime, err := time.Parse("2006-01-02T15:04:05Z07:00", rsp.GetStartTime())
+	if err == nil {
+		createTs = createTime.Unix()
+	}
 	return &milvuspb.GetImportStateResponse{
 		Status:       rsp.GetStatus(),
 		State:        convertState(rsp.GetState()),
-		RowCount:     0,
+		RowCount:     rsp.GetImportedRows(),
 		IdList:       nil,
 		Infos:        infos,
 		Id:           0,
 		CollectionId: 0,
 		SegmentIds:   nil,
-		CreateTs:     0,
+		CreateTs:     createTs,
 	}
 }
 
