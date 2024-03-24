@@ -31,8 +31,12 @@ template <bool is_and>
 struct ConjunctElementFunc {
     int64_t
     operator()(ColumnVectorPtr& input_result, ColumnVectorPtr& result) {
-        bool* input_data = static_cast<bool*>(input_result->GetRawData());
-        bool* res_data = static_cast<bool*>(result->GetRawData());
+        TargetBitmapView input_data(input_result->GetRawData(),
+                                    input_result->size());
+        TargetBitmapView res_data(result->GetRawData(), result->size());
+
+        /*
+        // This is the original code, kept here for the documentation purposes        
         int64_t activate_rows = 0;
         for (int i = 0; i < result->size(); ++i) {
             if constexpr (is_and) {
@@ -47,7 +51,15 @@ struct ConjunctElementFunc {
                 }
             }
         }
-        return activate_rows;
+        */
+
+        if constexpr (is_and) {
+            return (int64_t)res_data.inplace_and_with_count(input_data,
+                                                            res_data.size());
+        } else {
+            return (int64_t)res_data.inplace_or_with_count(input_data,
+                                                           res_data.size());
+        }
     }
 };
 

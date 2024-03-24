@@ -36,33 +36,18 @@ compare_double(double x, double y, double epsilon = 0.000001f) {
 }
 
 bool
-Any(const milvus::FixedVector<bool>& vec) {
-    for (auto& val : vec) {
-        if (val == false) {
-            return false;
-        }
-    }
-    return true;
+Any(const milvus::TargetBitmap& bitmap) {
+    return bitmap.any();
 }
 
 bool
-BitSetNone(const milvus::FixedVector<bool>& vec) {
-    for (auto& val : vec) {
-        if (val == true) {
-            return false;
-        }
-    }
-    return true;
+BitSetNone(const milvus::TargetBitmap& bitmap) {
+    return bitmap.none();
 }
 
 uint64_t
-Count(const milvus::FixedVector<bool>& vec) {
-    uint64_t count = 0;
-    for (size_t i = 0; i < vec.size(); ++i) {
-        if (vec[i] == true)
-            count++;
-    }
-    return count;
+Count(const milvus::TargetBitmap& bitmap) {
+    return bitmap.count();
 }
 
 inline void

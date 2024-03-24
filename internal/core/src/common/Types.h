@@ -46,6 +46,8 @@
 #include "pb/segcore.pb.h"
 #include "Json.h"
 
+#include "CustomBitset.h"
+
 namespace milvus {
 
 using idx_t = int64_t;
@@ -158,8 +160,9 @@ using OptFieldT = std::unordered_map<
 using SegOffset =
     fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;
 
-using BitsetType = boost::dynamic_bitset<>;
-using BitsetTypePtr = std::shared_ptr<boost::dynamic_bitset<>>;
+//using BitsetType = boost::dynamic_bitset<>;
+using BitsetType = CustomBitset;
+using BitsetTypePtr = std::shared_ptr<BitsetType>;
 using BitsetTypeOpt = std::optional<BitsetType>;
 
 template <typename Type>
@@ -167,7 +170,10 @@ using FixedVector = folly::fbvector<
     Type>;  // boost::container::vector has memory leak when version > 1.79, so use folly::fbvector instead
 
 using Config = nlohmann::json;
-using TargetBitmap = FixedVector<bool>;
+//using TargetBitmap = std::vector<bool>;
+//using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
+using TargetBitmap = CustomBitset;
+using TargetBitmapView = CustomBitsetView;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 using BinaryPtr = knowhere::BinaryPtr;
@@ -188,9 +194,9 @@ IndexIsSparse(const IndexType& index_type) {
 // Plus 1 because we can't use greater(>) symbol
 constexpr size_t REF_SIZE_THRESHOLD = 16 + 1;
 
-using BitsetBlockType = BitsetType::block_type;
-constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
-constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
+//using BitsetBlockType = BitsetType::block_type;
+//constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
+//constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
 template <typename T>
 using MayConstRef = std::conditional_t<std::is_same_v<T, std::string> ||
                                            std::is_same_v<T, milvus::Json>,
