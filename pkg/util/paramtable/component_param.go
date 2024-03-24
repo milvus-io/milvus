@@ -230,8 +230,6 @@ type commonConfig struct {
 
 	JSONMaxLength ParamItem `refreshable:"false"`
 
-	ImportMaxFileSize ParamItem `refreshable:"true"`
-
 	MetricsPort ParamItem `refreshable:"false"`
 
 	// lock related params
@@ -633,13 +631,6 @@ like the old password verification when updating the credential`,
 	}
 	p.JSONMaxLength.Init(base.mgr)
 
-	p.ImportMaxFileSize = ParamItem{
-		Key:          "common.ImportMaxFileSize",
-		Version:      "2.2.9",
-		DefaultValue: fmt.Sprint(16 << 30),
-	}
-	p.ImportMaxFileSize.Init(base.mgr)
-
 	p.MetricsPort = ParamItem{
 		Key:          "common.MetricsPort",
 		Version:      "2.3.0",
@@ -891,10 +882,6 @@ type rootCoordConfig struct {
 	DmlChannelNum               ParamItem `refreshable:"false"`
 	MaxPartitionNum             ParamItem `refreshable:"true"`
 	MinSegmentSizeToEnableIndex ParamItem `refreshable:"true"`
-	ImportTaskExpiration        ParamItem `refreshable:"true"`
-	ImportTaskRetention         ParamItem `refreshable:"true"`
-	ImportMaxPendingTaskCount   ParamItem `refreshable:"true"`
-	ImportTaskSubPath           ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 	MaxDatabaseNum              ParamItem `refreshable:"false"`
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
@@ -929,38 +916,6 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MinSegmentSizeToEnableIndex.Init(base.mgr)
-
-	p.ImportTaskExpiration = ParamItem{
-		Key:          "rootCoord.importTaskExpiration",
-		Version:      "2.2.0",
-		DefaultValue: "900", // 15 * 60 seconds
-		Doc:          "(in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).",
-		Export:       true,
-	}
-	p.ImportTaskExpiration.Init(base.mgr)
-
-	p.ImportTaskRetention = ParamItem{
-		Key:          "rootCoord.importTaskRetention",
-		Version:      "2.2.0",
-		DefaultValue: strconv.Itoa(24 * 60 * 60),
-		Doc:          "(in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400, seconds (24 hours).",
-		Export:       true,
-	}
-	p.ImportTaskRetention.Init(base.mgr)
-
-	p.ImportTaskSubPath = ParamItem{
-		Key:          "rootCoord.ImportTaskSubPath",
-		Version:      "2.2.0",
-		DefaultValue: "importtask",
-	}
-	p.ImportTaskSubPath.Init(base.mgr)
-
-	p.ImportMaxPendingTaskCount = ParamItem{
-		Key:          "rootCoord.importMaxPendingTaskCount",
-		Version:      "2.2.2",
-		DefaultValue: strconv.Itoa(65535),
-	}
-	p.ImportMaxPendingTaskCount.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "rootCoord.enableActiveStandby",
@@ -3164,11 +3119,6 @@ type dataNodeConfig struct {
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
 
-	// timeout for bulkinsert
-	BulkInsertTimeoutSeconds ParamItem `refreshable:"true"`
-	BulkInsertReadBufferSize ParamItem `refreshable:"true"`
-	BulkInsertMaxMemorySize  ParamItem `refreshable:"true"`
-
 	// Skip BF
 	SkipBFStatsLoad ParamItem `refreshable:"true"`
 
@@ -3381,30 +3331,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		DefaultValue: "false",
 	}
 	p.SkipBFStatsLoad.Init(base.mgr)
-
-	p.BulkInsertTimeoutSeconds = ParamItem{
-		Key:          "datanode.bulkinsert.timeout.seconds",
-		Version:      "2.3.0",
-		PanicIfEmpty: false,
-		DefaultValue: "18000",
-	}
-	p.BulkInsertTimeoutSeconds.Init(base.mgr)
-
-	p.BulkInsertReadBufferSize = ParamItem{
-		Key:          "datanode.bulkinsert.readBufferSize",
-		Version:      "2.3.4",
-		PanicIfEmpty: false,
-		DefaultValue: "16777216",
-	}
-	p.BulkInsertReadBufferSize.Init(base.mgr)
-
-	p.BulkInsertMaxMemorySize = ParamItem{
-		Key:          "datanode.bulkinsert.maxMemorySize",
-		Version:      "2.3.4",
-		PanicIfEmpty: false,
-		DefaultValue: "6442450944",
-	}
-	p.BulkInsertMaxMemorySize.Init(base.mgr)
 
 	p.ChannelWorkPoolSize = ParamItem{
 		Key:          "datanode.channel.workPoolSize",

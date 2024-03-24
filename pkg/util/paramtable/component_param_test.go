@@ -117,8 +117,6 @@ func TestComponentParam(t *testing.T) {
 		t.Logf("master MaxPartitionNum = %d", Params.MaxPartitionNum.GetAsInt64())
 		assert.NotEqual(t, Params.MinSegmentSizeToEnableIndex.GetAsInt64(), 0)
 		t.Logf("master MinSegmentSizeToEnableIndex = %d", Params.MinSegmentSizeToEnableIndex.GetAsInt64())
-		assert.NotEqual(t, Params.ImportTaskExpiration.GetAsFloat(), 0)
-		t.Logf("master ImportTaskRetention = %f", Params.ImportTaskRetention.GetAsFloat())
 		assert.Equal(t, Params.EnableActiveStandby.GetAsBool(), false)
 		t.Logf("rootCoord EnableActiveStandby = %t", Params.EnableActiveStandby.GetAsBool())
 
@@ -422,10 +420,6 @@ func TestComponentParam(t *testing.T) {
 		period := &Params.SyncPeriod
 		t.Logf("SyncPeriod: %v", period)
 		assert.Equal(t, 10*time.Minute, Params.SyncPeriod.GetAsDuration(time.Second))
-
-		bulkinsertTimeout := &Params.BulkInsertTimeoutSeconds
-		t.Logf("BulkInsertTimeoutSeconds: %v", bulkinsertTimeout)
-		assert.Equal(t, "18000", Params.BulkInsertTimeoutSeconds.GetValue())
 
 		channelWorkPoolSize := Params.ChannelWorkPoolSize.GetAsInt()
 		t.Logf("channelWorkPoolSize: %d", channelWorkPoolSize)
