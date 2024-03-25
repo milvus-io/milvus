@@ -24,19 +24,26 @@ import (
 	"strings"
 
 	"github.com/samber/lo"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-type Reader struct {
+type reader struct {
+	ctx    context.Context
+	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
-	count  int64
-	frs    map[int64]*FieldReader // fieldID -> FieldReader
+
+	fileSize *atomic.Int64
+	paths    []string
+
+	count int64
+	frs   map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, paths []string, cm storage.ChunkManager, bufferSize int) (*Reader, error) {
+func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, paths []string, cm storage.ChunkManager, bufferSize int) (*reader, error) {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
@@ -56,14 +63,18 @@ func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, paths []s
 		}
 		crs[fieldID] = cr
 	}
-	return &Reader{
-		schema: schema,
-		count:  count,
-		frs:    crs,
+	return &reader{
+		ctx:      ctx,
+		cm:       cm,
+		schema:   schema,
+		fileSize: atomic.NewInt64(0),
+		paths:    paths,
+		count:    count,
+		frs:      crs,
 	}, nil
 }
 
-func (r *Reader) Read() (*storage.InsertData, error) {
+func (r *reader) Read() (*storage.InsertData, error) {
 	insertData, err := storage.NewInsertData(r.schema)
 	if err != nil {
 		return nil, err
@@ -89,7 +100,19 @@ func (r *Reader) Read() (*storage.InsertData, error) {
 	return insertData, nil
 }
 
-func (r *Reader) Close() {
+func (r *reader) Size() (int64, error) {
+	if size := r.fileSize.Load(); size != 0 {
+		return size, nil
+	}
+	size, err := storage.GetFilesSize(r.ctx, r.paths, r.cm)
+	if err != nil {
+		return 0, err
+	}
+	r.fileSize.Store(size)
+	return size, nil
+}
+
+func (r *reader) Close() {
 	for _, cr := range r.frs {
 		cr.Close()
 	}

@@ -251,7 +251,7 @@ func fillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema
 	if dynamicField == nil {
 		return nil
 	}
-	rowNum := GetInsertDataRowNum(data, schema)
+	rowNum := getInsertDataRowNum(data, schema)
 	dynamicData := data.Data[dynamicField.GetFieldID()]
 	jsonFD := dynamicData.(*storage.JSONFieldData)
 	bs := []byte("{}")
@@ -262,7 +262,7 @@ func fillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema
 	return nil
 }
 
-func GetInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
+func getInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})

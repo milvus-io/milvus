@@ -18,6 +18,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -1246,4 +1247,16 @@ func Min(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+func GetFilesSize(ctx context.Context, paths []string, cm ChunkManager) (int64, error) {
+	totalSize := int64(0)
+	for _, filePath := range paths {
+		size, err := cm.Size(ctx, filePath)
+		if err != nil {
+			return 0, err
+		}
+		totalSize += size
+	}
+	return totalSize, nil
 }

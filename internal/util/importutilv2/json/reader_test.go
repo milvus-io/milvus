@@ -17,9 +17,11 @@
 package json
 
 import (
+	"context"
 	rand2 "crypto/rand"
 	"encoding/json"
 	"fmt"
+	"io"
 	"math"
 	"math/rand"
 	"strconv"
@@ -28,11 +30,13 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"golang.org/x/exp/slices"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -246,8 +250,18 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 
 	jsonBytes, err := json.Marshal(rows)
 	suite.NoError(err)
-	r := strings.NewReader(string(jsonBytes))
-	reader, err := NewReader(r, schema, math.MaxInt)
+	type mockReader struct {
+		io.Reader
+		io.Closer
+		io.ReaderAt
+		io.Seeker
+	}
+	cm := mocks.NewChunkManager(suite.T())
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, s string) (storage.FileReader, error) {
+		r := &mockReader{Reader: strings.NewReader(string(jsonBytes))}
+		return r, nil
+	})
+	reader, err := NewReader(context.Background(), cm, schema, "mockPath", math.MaxInt)
 	suite.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {
