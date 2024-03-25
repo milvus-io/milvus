@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -485,7 +486,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 				testingOnly:                  true,
 			}
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID, false)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			plan := <-spy.spyChan
@@ -510,7 +511,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				testingOnly:                  true,
 			}
 			tt.collectionID = 1000
-			_, err := tr.forceTriggerCompaction(tt.collectionID)
+			_, err := tr.triggerManualCompaction(tt.collectionID, false)
 			assert.Equal(t, tt.wantErr, err != nil)
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
 			assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
@@ -827,7 +828,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 				testingOnly:                  true,
 			}
-			_, err := tr.forceTriggerCompaction(tt.args.collectionID)
+			_, err := tr.triggerManualCompaction(tt.args.collectionID, false)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
@@ -1759,10 +1760,10 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 // Test shouldDoSingleCompaction
 func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	indexMeta := newSegmentIndexMeta(nil)
-	trigger := newCompactionTrigger(&meta{
+	trigger := newCompactionTrigger(context.TODO(), &meta{
 		indexMeta:  indexMeta,
 		channelCPs: newChannelCps(),
-	}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler(), newIndexEngineVersionManager())
+	}, &compactionPlanHandler{}, newMockAllocator(), newMockHandler(), newIndexEngineVersionManager(), nil)
 
 	// Test too many deltalogs.
 	var binlogs []*datapb.FieldBinlog
@@ -2009,7 +2010,7 @@ func Test_compactionTrigger_new(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got := newCompactionTrigger(tt.args.meta, tt.args.compactionHandler, tt.args.allocator, newMockHandler(), newMockVersionManager())
+			got := newCompactionTrigger(context.TODO(), tt.args.meta, tt.args.compactionHandler, tt.args.allocator, newMockHandler(), newMockVersionManager(), nil)
 			assert.Equal(t, tt.args.meta, got.meta)
 			assert.Equal(t, tt.args.compactionHandler, got.compactionHandler)
 			assert.Equal(t, tt.args.allocator, got.allocator)
@@ -2018,44 +2019,18 @@ func Test_compactionTrigger_new(t *testing.T) {
 }
 
 func Test_compactionTrigger_allocTs(t *testing.T) {
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager())
+	got := newCompactionTrigger(context.TODO(), &meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager(), nil)
 	ts, err := got.allocTs()
 	assert.NoError(t, err)
 	assert.True(t, ts > 0)
 
-	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
+	got = newCompactionTrigger(context.TODO(), &meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, &FailsAllocator{}, newMockHandler(), newMockVersionManager(), nil)
 	ts, err = got.allocTs()
 	assert.Error(t, err)
 	assert.Equal(t, uint64(0), ts)
 }
 
 func Test_compactionTrigger_getCompactTime(t *testing.T) {
-	collections := map[UniqueID]*collectionInfo{
-		1: {
-			ID:         1,
-			Schema:     newTestSchema(),
-			Partitions: []UniqueID{1},
-			Properties: map[string]string{
-				common.CollectionTTLConfigKey: "10",
-			},
-		},
-		2: {
-			ID:         2,
-			Schema:     newTestSchema(),
-			Partitions: []UniqueID{1},
-			Properties: map[string]string{
-				common.CollectionTTLConfigKey: "error",
-			},
-		},
-	}
-
-	m := &meta{segments: NewSegmentsInfo(), collections: collections}
-	got := newCompactionTrigger(m, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(),
-		&ServerHandler{
-			&Server{
-				meta: m,
-			},
-		}, newMockVersionManager())
 	coll := &collectionInfo{
 		ID:         1,
 		Schema:     newTestSchema(),
@@ -2065,7 +2040,7 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 		},
 	}
 	now := tsoutil.GetCurrentTime()
-	ct, err := got.getCompactTime(now, coll)
+	ct, err := getCompactTime(now, coll)
 	assert.NoError(t, err)
 	assert.NotNil(t, ct)
 }
@@ -2080,12 +2055,12 @@ func Test_triggerSingleCompaction(t *testing.T) {
 		channelCPs: newChannelCps(),
 		segments:   NewSegmentsInfo(), collections: make(map[UniqueID]*collectionInfo),
 	}
-	got := newCompactionTrigger(m, &compactionPlanHandler{}, newMockAllocator(),
+	got := newCompactionTrigger(context.TODO(), m, &compactionPlanHandler{}, newMockAllocator(),
 		&ServerHandler{
 			&Server{
 				meta: m,
 			},
-		}, newMockVersionManager())
+		}, newMockVersionManager(), nil)
 	got.signals = make(chan *compactionSignal, 1)
 	{
 		err := got.triggerSingleCompaction(1, 1, 1, "a", false)
@@ -2299,11 +2274,13 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	s.handler = NewNMockHandler(s.T())
 	s.versionManager = NewMockVersionManager(s.T())
 	s.tr = newCompactionTrigger(
+		context.TODO(),
 		s.meta,
 		s.compactionHandler,
 		s.allocator,
 		s.handler,
 		s.versionManager,
+		nil,
 	)
 	s.tr.testingOnly = true
 }
@@ -2901,6 +2878,51 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 			assert.Equal(t, tt.isDiskANN, res)
 		})
 	}
+}
+
+func Test_compactionTrigger_major(t *testing.T) {
+	paramtable.Init()
+	catalog := mocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+	vecFieldID := int64(201)
+	meta := &meta{
+		catalog: catalog,
+		collections: map[int64]*collectionInfo{
+			1: {
+				ID: 1,
+				Schema: &schemapb.CollectionSchema{
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:  vecFieldID,
+							DataType: schemapb.DataType_FloatVector,
+							TypeParams: []*commonpb.KeyValuePair{
+								{
+									Key:   common.DimKey,
+									Value: "128",
+								},
+							},
+						},
+					},
+				},
+			},
+		},
+	}
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L2CompactionEnable.Key, "false")
+	tr := &compactionTrigger{
+		handler:                      newMockHandlerWithMeta(meta),
+		allocator:                    &MockAllocator0{},
+		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+		testingOnly:                  true,
+	}
+	_, err := tr.triggerManualCompaction(1, true)
+	assert.Error(t, err)
+	assert.True(t, errors.Is(err, merr.ErrMajorCompactionClusterNotSupport))
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L2CompactionEnable.Key, "true")
+	_, err2 := tr.triggerManualCompaction(1, true)
+	assert.Error(t, err2)
+	assert.True(t, errors.Is(err2, merr.ErrMajorCompactionCollectionNotSupport))
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {

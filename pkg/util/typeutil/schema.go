@@ -1049,6 +1049,16 @@ func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 	return false
 }
 
+// HasClusterKey check if a collection schema has ClusterKey field
+func HasClusterKey(schema *schemapb.CollectionSchema) bool {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.IsClusteringKey {
+			return true
+		}
+	}
+	return false
+}
+
 // GetPrimaryFieldData get primary field data from all field data inserted from sdk
 func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	primaryFieldID := primaryFieldSchema.FieldID

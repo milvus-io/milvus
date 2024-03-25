@@ -126,9 +126,10 @@ type Server struct {
 	importScheduler  ImportScheduler
 	importChecker    ImportChecker
 
-	compactionTrigger     trigger
-	compactionHandler     compactionPlanContext
-	compactionViewManager *CompactionViewManager
+	compactionTrigger      trigger
+	majorCompactionManager *MajorCompactionManager
+	compactionHandler      compactionPlanContext
+	compactionViewManager  *CompactionViewManager
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -509,7 +510,8 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
+	s.majorCompactionManager = newMajorCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler)
+	s.compactionTrigger = newCompactionTrigger(s.ctx, s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager, s.majorCompactionManager)
 }
 
 func (s *Server) stopCompactionTrigger() {

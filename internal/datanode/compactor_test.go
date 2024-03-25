@@ -187,11 +187,8 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			for _, test := range tests {
-				task := &compactionTask{
-					done: make(chan struct{}, 1),
-				}
 				t.Run(test.description, func(t *testing.T) {
-					pk2ts, err := task.mergeDeltalogs(test.dBlobs)
+					pk2ts, err := MergeDeltalogs(test.dBlobs)
 					if test.isvalid {
 						assert.NoError(t, err)
 						assert.Equal(t, 5, len(pk2ts))
@@ -264,10 +261,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 						dBlobs[test.segIDC] = d
 					}
 
-					task := &compactionTask{
-						done: make(chan struct{}, 1),
-					}
-					pk2ts, err := task.mergeDeltalogs(dBlobs)
+					pk2ts, err := MergeDeltalogs(dBlobs)
 					assert.NoError(t, err)
 					assert.Equal(t, test.expectedpk2ts, len(pk2ts))
 				})
