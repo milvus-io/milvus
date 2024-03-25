@@ -210,7 +210,7 @@ func (ats *analysisTaskScheduler) process(taskID int64) bool {
 			FieldType:     t.FieldType,
 			Dim:           t.Dim,
 			SegmentStats:  make(map[int64]*indexpb.SegmentStats),
-			Version:       t.Version,
+			Version:       t.Version + 1,
 			StorageConfig: storageConfig,
 		}
 

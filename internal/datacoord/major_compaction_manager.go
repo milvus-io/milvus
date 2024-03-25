@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"path"
 	"strconv"
 	"sync"
@@ -26,6 +27,8 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -33,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 //type MajorCompactionManager interface {
@@ -47,6 +51,7 @@ type MajorCompactionManager struct {
 	allocator         allocator
 	compactionHandler compactionPlanContext
 	scheduler         Scheduler
+	analysisScheduler *analysisTaskScheduler
 
 	forceMu sync.Mutex
 	quit    chan struct{}
@@ -62,12 +67,14 @@ func newMajorCompactionManager(
 	meta *meta,
 	allocator allocator,
 	compactionHandler compactionPlanContext,
+	analysisScheduler *analysisTaskScheduler,
 ) *MajorCompactionManager {
 	return &MajorCompactionManager{
 		ctx:               ctx,
 		meta:              meta,
 		allocator:         allocator,
 		compactionHandler: compactionHandler,
+		analysisScheduler: analysisScheduler,
 	}
 }
 
@@ -210,18 +217,64 @@ func (t *MajorCompactionManager) runCompactionJob(job *MajorCompactionJob) error
 	for _, plan := range plans {
 		segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
 		start := time.Now()
-		err := fillOriginPlan(t.allocator, plan)
+		planId, analysisTaskID, err := t.allocator.allocN(2)
 		if err != nil {
-			log.Warn("failed to fill plan", zap.Int64s("segmentIDs", segIDs), zap.Error(err))
-			continue
+			return err
 		}
+		plan.PlanID = planId
+		plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32()
+
 		// major compaction firstly analyze the plan, then decide whether to execute compaction
-		//analysisTask := &model.AnalysisTask{}
-		//analyzeResult, err := t.analysisScheduler.Submit(analysisTask)
-		//if err != nil {
-		//	log.Warn("failed to analyze compaction plan", zap.Int64("planID", plan.PlanID), zap.Int64s("segmentIDs", segIDs), zap.Error(err))
-		//	continue
-		//}
+		if typeutil.IsVectorType(job.clusteringKeyType) {
+			newAnalysisTask := &model.AnalysisTask{
+				CollectionID: job.collectionID,
+				PartitionID:  plan.SegmentBinlogs[0].PartitionID,
+				FieldID:      job.clusteringKeyID,
+				FieldName:    job.clusteringKeyName,
+				FieldType:    job.clusteringKeyType,
+				SegmentIDs:   segIDs,
+				TaskID:       analysisTaskID,
+			}
+			err = t.analysisScheduler.analysisMeta.AddAnalysisTask(newAnalysisTask)
+			if err != nil {
+				log.Warn("failed to create analysis task", zap.Int64("planID", plan.PlanID), zap.Error(err))
+				return err
+			}
+			t.analysisScheduler.enqueue(analysisTaskID)
+			log.Info("submit analysis task", zap.Int64("id", analysisTaskID))
+
+			var analysisTask *model.AnalysisTask
+			analysisFinished := func() bool {
+				analysisTask = t.analysisScheduler.analysisMeta.GetTask(analysisTaskID)
+				log.Debug("check analysis task state", zap.Int64("id", analysisTaskID), zap.String("state", analysisTask.State.String()))
+				if analysisTask.State == commonpb.IndexState_Finished ||
+					analysisTask.State == commonpb.IndexState_Failed {
+					return true
+				}
+				return false
+			}
+			for !analysisFinished() {
+				// respect context deadline/cancel
+				select {
+				case <-t.ctx.Done():
+					return nil
+				default:
+				}
+				time.Sleep(1 * time.Second)
+			}
+			log.Info("get analysisTask", zap.Any("analysisTask", analysisTask))
+			if analysisTask.State == commonpb.IndexState_Finished {
+				//version := int64(0) // analysisTask.Version
+				plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analysisTask.TaskID, analysisTask.Version))
+				log.Info("wayblink debug", zap.String("analyze_result_path", plan.AnalyzeResultPath))
+				offSetSegmentIDs := make([]int64, 0)
+				for segID, _ := range analysisTask.SegmentOffsetMappingFiles {
+					offSetSegmentIDs = append(offSetSegmentIDs, segID)
+				}
+				plan.AnalyzeSegmentIds = offSetSegmentIDs
+			}
+		}
+
 		//shouldDo, err := t.shouldDoMajorCompaction(analyzeResult)
 		//if err != nil {
 		//	log.Warn("failed to decide whether to execute this compaction plan", zap.Int64("planID", plan.PlanID), zap.Int64s("segmentIDs", segIDs), zap.Error(err))

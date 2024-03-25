@@ -365,6 +365,7 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
+	s.initAnalysisScheduler()
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
@@ -378,7 +379,6 @@ func (s *Server) initDataCoord() error {
 
 	s.initGarbageCollection(storageCli)
 	s.initIndexBuilder(storageCli)
-	s.initAnalysisScheduler()
 
 	s.importMeta, err = NewImportMeta(s.meta.catalog)
 	if err != nil {
@@ -412,6 +412,7 @@ func (s *Server) Start() error {
 func (s *Server) startDataCoord() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
+		s.analysisScheduler.Start()
 		s.compactionTrigger.start()
 		s.compactionViewManager.Start()
 	}
@@ -514,7 +515,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.majorCompactionManager = newMajorCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler)
+	s.majorCompactionManager = newMajorCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler, s.analysisScheduler)
 	s.compactionTrigger = newCompactionTrigger(s.ctx, s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager, s.majorCompactionManager)
 }
 
@@ -684,7 +685,6 @@ func (s *Server) startServerLoop() {
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
-	s.analysisScheduler.Start()
 }
 
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream

@@ -523,6 +523,8 @@ message CompactionPlan {
   int64 total_rows = 9;
   int64 clustering_key_id = 10;
   int64 l2_segment_max_rows = 11;
+  string analyze_result_path = 12;
+  repeated int64 analyze_segment_ids = 13;
 }
 
 message CompactionSegment {
@@ -842,14 +844,15 @@ message MajorCompactionInfo {
   int64 triggerID = 1;
   int64 collectionID = 2;
   int64 clusteringKeyID = 3;
-  CompactionTaskState state = 4;
-  uint64 startTime = 5;
-  uint64 lastUpdateTime = 6;
-  repeated CompactionPlan pipeliningPlans = 7;
-  repeated CompactionPlan executingPlans = 8;
-  repeated CompactionPlan completedPlans = 9;
-  repeated CompactionPlan failedPlans = 10;
-  repeated CompactionPlan timeoutPlans = 11;
-  int64 analysisTaskID = 12;
-  string analysisResult = 13;
+  string clusteringKeyName = 4;
+  schema.DataType clusteringKeyType = 5;
+  CompactionTaskState state = 6;
+  uint64 startTime = 7;
+  uint64 lastUpdateTime = 8;
+  repeated CompactionPlan pipeliningPlans = 9;
+  repeated CompactionPlan executingPlans = 10;
+  repeated CompactionPlan completedPlans = 11;
+  repeated CompactionPlan failedPlans = 12;
+  repeated CompactionPlan timeoutPlans = 13;
+  int64 analysisTaskID = 14;
 }

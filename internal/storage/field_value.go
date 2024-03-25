@@ -1037,3 +1037,13 @@ func NewScalarFieldValue(dtype schemapb.DataType, data interface{}) ScalarFieldV
 		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
 	}
 }
+
+func NewVectorFieldValue(dtype schemapb.DataType, data interface{}) VectorFieldValue {
+	switch dtype {
+	case schemapb.DataType_FloatVector:
+		return NewFloatVectorFieldValue(data.([]float32))
+	default:
+		// should not be reach
+		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
+	}
+}

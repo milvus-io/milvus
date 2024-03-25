@@ -650,12 +650,14 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 	}
 
 	majorCompactionJob := &MajorCompactionJob{
-		triggerID:       signal.id,
-		collectionID:    signal.collectionID,
-		clusteringKeyID: clusteringKeyField.FieldID,
-		startTime:       ts,
-		state:           pipelining,
-		pipeliningPlans: make([]*datapb.CompactionPlan, 0),
+		triggerID:         signal.id,
+		collectionID:      signal.collectionID,
+		clusteringKeyID:   clusteringKeyField.FieldID,
+		clusteringKeyName: clusteringKeyField.Name,
+		clusteringKeyType: clusteringKeyField.DataType,
+		startTime:         ts,
+		state:             pipelining,
+		pipeliningPlans:   make([]*datapb.CompactionPlan, 0),
 	}
 
 	for _, group := range partSegments {

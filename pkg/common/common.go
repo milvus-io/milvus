@@ -94,6 +94,9 @@ const (
 
 	// CompactionStagePath storage path const for stage data generate in compaction.
 	CompactionStagePath = `compaction_stage`
+
+	// AnalyzeStatsPath storage path const for analyze.
+	AnalyzeStatsPath = `filesanalyze_stats`
 )
 
 // Search, Index parameter keys
