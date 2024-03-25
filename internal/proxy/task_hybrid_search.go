@@ -89,10 +89,11 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 	t.Base.SourceID = paramtable.GetNodeID()
 
 	collectionName := t.request.CollectionName
-	collID, err := globalMetaCache.GetCollectionID(ctx, t.request.GetDbName(), collectionName)
+	collectionInfo, err := globalMetaCache.GetCollectionByName(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		return err
 	}
+	collID := collectionInfo.GetCollectionID()
 	t.CollectionID = collID
 
 	log := log.Ctx(ctx).With(zap.Int64("collID", collID), zap.String("collName", collectionName))
@@ -135,12 +136,6 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 		t.requery = true
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
-	if err2 != nil {
-		log.Warn("Proxy::hybridSearchTask::PreExecute failed to GetCollectionInfo from cache",
-			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID), zap.Error(err2))
-		return err2
-	}
 	guaranteeTs := t.request.GetGuaranteeTimestamp()
 	var consistencyLevel commonpb.ConsistencyLevel
 	useDefaultConsistency := t.request.GetUseDefaultConsistency()

@@ -2291,8 +2291,14 @@ func TestSearchTask_Requery(t *testing.T) {
 	schema := newSchemaInfo(collSchema)
 	cache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collectionID, nil).Maybe()
 	cache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil).Maybe()
-	cache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"_default": UniqueID(1)}, nil).Maybe()
-	cache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&collectionBasicInfo{}, nil).Maybe()
+	cache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(&collectionInfo{
+		partInfo: parsePartitionsInfo([]*partitionInfo{
+			{
+				name:        "_default",
+				partitionID: UniqueID(1),
+			},
+		}, true),
+	}, nil).Maybe()
 	cache.EXPECT().GetShards(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(map[string][]nodeInfo{}, nil).Maybe()
 	cache.EXPECT().DeprecateShardCache(mock.Anything, mock.Anything).Return().Maybe()
 	globalMetaCache = cache
@@ -2535,23 +2541,41 @@ func (s *GetPartitionIDsSuite) TestPlainPartitionNames() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
-
-	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	s.mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionInfo{
+			databaseName:   "default_db",
+			collectionName: "test_collection",
+			partInfo: parsePartitionsInfo([]*partitionInfo{
+				{
+					name:        "partition_0",
+					partitionID: 100,
+				},
+				{
+					name:        "partition_1",
+					partitionID: 200,
+				},
+			}, true),
+		}, nil).Once()
+	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_0", "partition_1"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
 
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{"partition_1": 100}, nil).Once()
+	s.mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionInfo{
+			partInfo: parsePartitionsInfo([]*partitionInfo{
+				{
+					name:        "partition_0",
+					partitionID: 100,
+				},
+			}, true),
+		}, nil).Once()
 
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_0", "partition_1"})
 	s.Error(err)
 
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(nil, errors.New("mocked")).Once()
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	s.mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_0", "partition_1"})
 	s.Error(err)
 }
 
@@ -2561,31 +2585,59 @@ func (s *GetPartitionIDsSuite) TestRegexpPartitionNames() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
+	s.mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionInfo{
+			partInfo: parsePartitionsInfo([]*partitionInfo{
+				{
+					name:        "partition_0",
+					partitionID: 100,
+				},
+				{
+					name:        "partition_1",
+					partitionID: 200,
+				},
+			}, true),
+		}, nil).Once()
 
-	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	result, err := getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_0", "partition_1"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
 
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{"partition_1": 100, "partition_2": 200}, nil).Once()
+	s.mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionInfo{
+			partInfo: parsePartitionsInfo([]*partitionInfo{
+				{
+					name:        "partition_0",
+					partitionID: 100,
+				},
+				{
+					name:        "partition_1",
+					partitionID: 200,
+				},
+			}, true),
+		}, nil).Once()
 
 	result, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_.*"})
 
 	s.NoError(err)
 	s.ElementsMatch([]int64{100, 200}, result)
 
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(map[string]int64{"partition_1": 100}, nil).Once()
+	s.mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionInfo{
+			partInfo: parsePartitionsInfo([]*partitionInfo{
+				{
+					name:        "partition_0",
+					partitionID: 100,
+				},
+			}, true),
+		}, nil).Once()
 
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_0", "partition_1"})
 	s.Error(err)
 
-	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).
-		Return(nil, errors.New("mocked")).Once()
-	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_1", "partition_2"})
+	s.mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mocked")).Once()
+	_, err = getPartitionIDs(ctx, "default_db", "test_collection", []string{"partition_0", "partition_1"})
 	s.Error(err)
 }
 
@@ -2610,8 +2662,8 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 			},
 		}
 		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
-		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+		mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Once()
@@ -2619,16 +2671,16 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		skip := st.CanSkipAllocTimestamp()
 		assert.True(t, skip)
 
-		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+		mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Bounded,
 			}, nil).Once()
 		skip = st.CanSkipAllocTimestamp()
 		assert.True(t, skip)
 
-		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+		mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Strong,
 			}, nil).Once()
@@ -2637,8 +2689,8 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 	})
 
 	t.Run("request consistency level", func(t *testing.T) {
-		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
+		mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionInfo{
 				collID:           collID,
 				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 			}, nil).Times(3)
@@ -2667,9 +2719,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 
 	t.Run("failed", func(t *testing.T) {
 		mockMetaCache.ExpectedCalls = nil
-		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
-		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			nil, fmt.Errorf("mock error")).Once()
+		mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error")).Once()
 
 		st := &searchTask{
 			request: &milvuspb.SearchRequest{
@@ -2685,12 +2735,7 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		assert.False(t, skip)
 
 		mockMetaCache.ExpectedCalls = nil
-		mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, fmt.Errorf("mock error"))
-		mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-			&collectionBasicInfo{
-				collID:           collID,
-				consistencyLevel: commonpb.ConsistencyLevel_Eventually,
-			}, nil)
+		mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
 
 		skip = st.CanSkipAllocTimestamp()
 		assert.False(t, skip)

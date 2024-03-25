@@ -249,15 +249,8 @@ func (t *queryTask) CanSkipAllocTimestamp() bool {
 	if !useDefaultConsistency {
 		consistencyLevel = t.request.GetConsistencyLevel()
 	} else {
-		collID, err := globalMetaCache.GetCollectionID(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
-		if err != nil { // err is not nil if collection not exists
-			log.Warn("query task get collectionID failed, can't skip alloc timestamp",
-				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
-			return false
-		}
-
-		collectionInfo, err2 := globalMetaCache.GetCollectionInfo(context.Background(), t.request.GetDbName(), t.request.GetCollectionName(), collID)
-		if err2 != nil {
+		collectionInfo, err := globalMetaCache.GetCollectionByName(context.Background(), t.request.GetDbName(), t.request.GetCollectionName())
+		if err != nil {
 			log.Warn("query task get collection info failed, can't skip alloc timestamp",
 				zap.String("collectionName", t.request.GetCollectionName()), zap.Error(err))
 			return false
@@ -393,7 +386,7 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		t.RetrieveRequest.Username = username
 	}
 
-	collectionInfo, err2 := globalMetaCache.GetCollectionInfo(ctx, t.request.GetDbName(), collectionName, t.CollectionID)
+	collectionInfo, err2 := globalMetaCache.GetCollectionByName(ctx, t.request.GetDbName(), collectionName)
 	if err2 != nil {
 		log.Warn("Proxy::queryTask::PreExecute failed to GetCollectionInfo from cache",
 			zap.String("collectionName", collectionName), zap.Int64("collectionID", t.CollectionID),

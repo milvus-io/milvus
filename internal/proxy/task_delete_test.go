@@ -765,12 +765,16 @@ func TestDeleteRunner_Run(t *testing.T) {
 
 		mockCache := NewMockCache(t)
 		mockCache.EXPECT().GetCollectionID(mock.Anything, dbName, collectionName).Return(collectionID, nil).Maybe()
-		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
-			partitionMaps, nil)
-		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(
-			schema, nil)
-		mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).
-			Return(indexedPartitions, nil)
+		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schema, nil)
+		mockCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+			&collectionInfo{
+				collID: collectionID,
+				partInfo: &partitionInfos{
+					name2ID:               partitionMaps,
+					indexedPartitionNames: indexedPartitions,
+				},
+				schema: schema,
+			}, nil)
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = metaCache }()
 
@@ -874,7 +878,6 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 	partitionMaps["test_0"] = 1
 	partitionMaps["test_1"] = 2
 	partitionMaps["test_2"] = 3
-	indexedPartitions := []string{"test_0", "test_1", "test_2"}
 	t.Run("partitionKey mode parse plan failed", func(t *testing.T) {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -935,8 +938,7 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		qn := mocks.NewMockQueryNodeClient(t)
 
 		mockCache := NewMockCache(t)
-		mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).
-			Return(nil, fmt.Errorf("mock error"))
+		mockCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 
@@ -976,12 +978,7 @@ func TestDeleteRunner_StreamingQueryAndDelteFunc(t *testing.T) {
 		qn := mocks.NewMockQueryNodeClient(t)
 
 		mockCache := NewMockCache(t)
-		mockCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).
-			Return(indexedPartitions, nil)
-		mockCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(
-			schema, nil)
-		mockCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(
-			nil, fmt.Errorf("mock error"))
+		mockCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
 		globalMetaCache = mockCache
 		defer func() { globalMetaCache = nil }()
 

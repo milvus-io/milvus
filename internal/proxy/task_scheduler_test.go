@@ -619,9 +619,8 @@ func TestTaskScheduler_SkipAllocTimestamp(t *testing.T) {
 	assert.True(t, queue.utEmpty())
 	assert.False(t, queue.utFull())
 
-	mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(collID, nil)
-	mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
-		&collectionBasicInfo{
+	mockMetaCache.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionInfo{
 			collID:           collID,
 			consistencyLevel: commonpb.ConsistencyLevel_Eventually,
 		}, nil)

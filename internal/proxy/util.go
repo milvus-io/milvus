@@ -1399,10 +1399,11 @@ func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
 
 // getDefaultPartitionNames only used in partition key mode
 func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, collectionName string) ([]string, error) {
-	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+	collInfo, err := globalMetaCache.GetCollectionByName(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
+	partitions := collInfo.GetPartitionNameMap()
 
 	// Make sure the order of the partition names got every time is the same
 	partitionNames, _, err := typeutil.RearrangePartitionsForPartitionKey(partitions)
@@ -1415,10 +1416,11 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 
 // getDefaultPartitionNames only used in partition key mode
 func getDefaultPartitionNames(ctx context.Context, dbName string, collectionName string) ([]string, error) {
-	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
+	collInfo, err := globalMetaCache.GetCollectionByName(ctx, dbName, collectionName)
 	if err != nil {
 		return nil, err
 	}
+	partitions := collInfo.GetPartitionNameMap()
 
 	// Make sure the order of the partition names got every time is the same
 	partitionNames := make([]string, len(partitions))
@@ -1457,7 +1459,11 @@ func assignChannelsByPK(pks *schemapb.IDs, channelNames []string, insertMsg *msg
 }
 
 func assignPartitionKeys(ctx context.Context, dbName string, collName string, keys []*planpb.GenericValue) ([]string, error) {
-	partitionNames, err := globalMetaCache.GetPartitionsIndex(ctx, dbName, collName)
+	collInfo, err := globalMetaCache.GetCollectionByName(ctx, dbName, collName)
+	if err != nil {
+		return nil, err
+	}
+	partitionNames, err := collInfo.GetPartitionNamesWithIndexSorted()
 	if err != nil {
 		return nil, err
 	}

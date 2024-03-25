@@ -111,7 +111,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	g.Base.MsgType = commonpb.MsgType_GetPartitionStatistics
 	g.Base.SourceID = paramtable.GetNodeID()
 
-	collID, err := globalMetaCache.GetCollectionID(ctx, g.request.GetDbName(), g.collectionName)
+	collInfo, err := globalMetaCache.GetCollectionByName(ctx, g.request.GetDbName(), g.collectionName)
 	if err != nil { // err is not nil if collection not exists
 		return err
 	}
@@ -121,7 +121,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	}
 
 	g.GetStatisticsRequest.DbID = 0 // todo
-	g.GetStatisticsRequest.CollectionID = collID
+	g.GetStatisticsRequest.CollectionID = collInfo.GetCollectionID()
 
 	g.TravelTimestamp = g.BeginTs()
 	g.GuaranteeTimestamp = parseGuaranteeTs(g.GuaranteeTimestamp, g.BeginTs())
@@ -132,7 +132,7 @@ func (g *getStatisticsTask) PreExecute(ctx context.Context) error {
 	}
 
 	// check if collection/partitions are loaded into query node
-	loaded, unloaded, err := checkFullLoaded(ctx, g.qc, g.request.GetDbName(), g.collectionName, g.GetStatisticsRequest.CollectionID, partIDs)
+	loaded, unloaded, err := checkFullLoaded(ctx, g.qc, g.request.GetDbName(), g.collectionName, partIDs)
 	log := log.Ctx(ctx).With(
 		zap.String("collectionName", g.collectionName),
 		zap.Int64("collectionID", g.CollectionID),
@@ -311,19 +311,16 @@ func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64
 
 // checkFullLoaded check if collection / partition was fully loaded into QueryNode
 // return loaded partitions, unloaded partitions and error
-func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName string, collectionName string, collectionID int64, searchPartitionIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
+func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName string, collectionName string, searchPartitionIDs []UniqueID) ([]UniqueID, []UniqueID, error) {
 	var loadedPartitionIDs []UniqueID
 	var unloadPartitionIDs []UniqueID
 
 	// TODO: Consider to check if partition loaded from cache to save rpc.
-	info, err := globalMetaCache.GetCollectionInfo(ctx, dbName, collectionName, collectionID)
+	collInfo, err := globalMetaCache.GetCollectionByName(ctx, dbName, collectionName)
 	if err != nil {
-		return nil, nil, fmt.Errorf("GetCollectionInfo failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
+		return nil, nil, fmt.Errorf("GetCollectionInfo failed, dbName = %s, collectionName = %s, err = %s", dbName, collectionName, err)
 	}
-	partitionInfos, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
-	if err != nil {
-		return nil, nil, fmt.Errorf("GetPartitions failed, dbName = %s, collectionName = %s,collectionID = %d, err = %s", dbName, collectionName, collectionID, err)
-	}
+	partitionInfos := collInfo.GetPartitionNameMap()
 
 	// If request to search partitions
 	if len(searchPartitionIDs) > 0 {
@@ -332,14 +329,14 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 				commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
-			CollectionID: info.collID,
+			CollectionID: collInfo.collID,
 			PartitionIDs: searchPartitionIDs,
 		})
 		if err != nil {
-			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
+			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collInfo.GetCollectionID(), searchPartitionIDs, err)
 		}
 		if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
+			return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collInfo.GetCollectionID(), searchPartitionIDs, resp.GetStatus().GetReason())
 		}
 
 		for i, percentage := range resp.GetInMemoryPercentages() {
@@ -358,13 +355,13 @@ func checkFullLoaded(ctx context.Context, qc types.QueryCoordClient, dbName stri
 			commonpbutil.WithMsgType(commonpb.MsgType_ShowPartitions),
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 		),
-		CollectionID: info.collID,
+		CollectionID: collInfo.collID,
 	})
 	if err != nil {
-		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collectionID, searchPartitionIDs, err)
+		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, err = %s", collInfo.GetCollectionID(), searchPartitionIDs, err)
 	}
 	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collectionID, searchPartitionIDs, resp.GetStatus().GetReason())
+		return nil, nil, fmt.Errorf("showPartitions failed, collection = %d, partitionIDs = %v, reason = %s", collInfo.GetCollectionID(), searchPartitionIDs, resp.GetStatus().GetReason())
 	}
 
 	loadedMap := make(map[UniqueID]bool)
