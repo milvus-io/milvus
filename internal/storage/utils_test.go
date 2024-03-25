@@ -993,6 +993,15 @@ func TestRowBasedInsertMsgToInsertData(t *testing.T) {
 	}
 }
 
+func TestRowBasedTransferInsertMsgToInsertRecord(t *testing.T) {
+	numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim := 10, 8, 8, 8, 8
+	schema, _, _ := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim, false)
+	msg, _, _ := genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
+
+	_, err := TransferInsertMsgToInsertRecord(schema, msg)
+	assert.NoError(t, err)
+}
+
 func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {
 	msg := &msgstream.InsertMsg{
 		BaseMsg: msgstream.BaseMsg{
