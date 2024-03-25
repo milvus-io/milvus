@@ -502,3 +502,11 @@ generate-mockery-pkg:
 
 generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg
 
+
+MMAP_MIGRATION_PATH = $(PWD)/cmd/tools/migration/mmap/tool
+mmap-migration:
+	@echo "Building migration tool ..."
+	@source $(PWD)/scripts/setenv.sh && \
+    		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
+    		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
+    		-tags dynamic -o $(INSTALL_PATH)/mmap-migration $(MMAP_MIGRATION_PATH)/main.go 1>/dev/null
