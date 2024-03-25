@@ -146,7 +146,7 @@ class TestCreateImportJob(TestBase):
                 tmp.update({f"dynamic_field_{i}": i})
             data.append(tmp)
         # dump data to file
-        file_name = f"bulk_insert_data_{int(time.time())}.json"
+        file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f)
@@ -235,7 +235,7 @@ class TestCreateImportJob(TestBase):
                 tmp.update({f"dynamic_field_{i}": i})
             data.append(tmp)
         # dump data to file
-        file_name = f"bulk_insert_data_{int(time.time())}.json"
+        file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f)
@@ -295,8 +295,6 @@ class TestCreateImportJob(TestBase):
         rsp = self.vector_client.vector_query(payload)
         assert rsp["code"] == 200
 
-
-
     def test_job_import_multi_json_file(self):
         # create collection
         name = gen_collection_name()
@@ -327,7 +325,7 @@ class TestCreateImportJob(TestBase):
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
-            file_name = f"bulk_insert_data_{file_num}.json"
+            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
             file_path = f"/tmp/{file_name}"
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -407,7 +405,7 @@ class TestCreateImportJob(TestBase):
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
-            file_name = f"bulk_insert_data_{file_num}.parquet"
+            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.parquet"
             file_path = f"/tmp/{file_name}"
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -488,7 +486,7 @@ class TestCreateImportJob(TestBase):
 
             file_list = []
             # dump data to file
-            file_dir = f"bulk_insert_data_{file_num}"
+            file_dir = f"bulk_insert_data_{file_num}_{uuid4()}"
             base_file_path = f"/tmp/{file_dir}"
             df = pd.DataFrame(data)
             # each column is a list and convert to a npy file
@@ -575,7 +573,7 @@ class TestCreateImportJob(TestBase):
 
             file_list = []
             # dump data to file
-            file_dir = f"bulk_insert_data_{file_num}"
+            file_dir = f"bulk_insert_data_{file_num}_{uuid4()}"
             base_file_path = f"/tmp/{file_dir}"
             df = pd.DataFrame(data)
             # each column is a list and convert to a npy file
@@ -599,7 +597,7 @@ class TestCreateImportJob(TestBase):
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
-            file_name = f"bulk_insert_data_{file_num}.parquet"
+            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.parquet"
             file_path = f"/tmp/{file_name}"
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -618,7 +616,7 @@ class TestCreateImportJob(TestBase):
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
-            file_name = f"bulk_insert_data_{file_num}.json"
+            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
             file_path = f"/tmp/{file_name}"
             with open(file_path, "w") as f:
                 json.dump(data, f)
@@ -847,7 +845,7 @@ class TestImportJobAdvance(TestBase):
                 for i in range(batch_size*file_num, batch_size*(file_num+1))]
 
             # dump data to file
-            file_name = f"bulk_insert_data_{file_num}.json"
+            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
             file_path = f"/tmp/{file_name}"
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -947,7 +945,7 @@ class TestCreateImportJobAdvance(TestBase):
                 for i in range(batch_size*file_num, batch_size*(file_num+1))]
 
             # dump data to file
-            file_name = f"bulk_insert_data_{file_num}.json"
+            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
             file_path = f"/tmp/{file_name}"
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -1036,7 +1034,7 @@ class TestCreateImportJobAdvance(TestBase):
                 for i in range(batch_size*file_num, batch_size*(file_num+1))]
 
             # dump data to file
-            file_name = f"bulk_insert_data_{file_num}.json"
+            file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
             file_path = f"/tmp/{file_name}"
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
@@ -1209,7 +1207,7 @@ class TestCreateImportJobNegative(TestBase):
             for i in range(10000)]
 
         # dump data to file
-        file_name = "bulk_insert_data.txt"
+        file_name = f"bulk_insert_data_{uuid4()}.txt"
         file_path = f"/tmp/{file_name}"
 
         json_data = json.dumps(data)
@@ -1331,7 +1329,7 @@ class TestCreateImportJobNegative(TestBase):
             data.append(tmp)
 
         # dump data to file
-        file_name = f"bulk_insert_data_{int(time.time())}.json"
+        file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f)
@@ -1388,7 +1386,7 @@ class TestCreateImportJobNegative(TestBase):
                 tmp.update({f"dynamic_field_{i}": i})
             data.append(tmp)
         # dump data to file
-        file_name = f"bulk_insert_data_{int(time.time())}.json"
+        file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f)
@@ -1485,7 +1483,7 @@ class TestListImportJob(TestBase):
                 tmp.update({f"dynamic_field_{i}": i})
             data.append(tmp)
         # dump data to file
-        file_name = f"bulk_insert_data_{int(time.time())}.json"
+        file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f)
@@ -1558,7 +1556,7 @@ class TestGetImportJobProgress(TestBase):
                 tmp.update({f"dynamic_field_{i}": i})
             data.append(tmp)
         # dump data to file
-        file_name = f"bulk_insert_data_{int(time.time())}.json"
+        file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
             json.dump(data, f)
