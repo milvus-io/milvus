@@ -51,11 +51,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	grpcmock "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -108,39 +106,8 @@ func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *mil
 	return r.RootCoordClient.DescribeCollection(ctx, req)
 }
 
-// func TestGetComponentStates(t *testing.T) {
-// svr := newTestServer(t)
-// defer closeTestServer(t, svr)
-// cli := newMockDataNodeClient(1)
-// err := cli.Init()
-// assert.NoError(t, err)
-// err = cli.Start()
-// assert.NoError(t, err)
-
-//err = svr.cluster.Register(&dataNode{
-//id: 1,
-//address: struct {
-//ip   string
-//port int64
-//}{
-//ip:   "",
-//port: 0,
-//},
-//client:     cli,
-//channelNum: 0,
-//})
-//assert.NoError(t, err)
-
-//resp, err := svr.GetComponentStates(context.TODO())
-//assert.NoError(t, err)
-//assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-//assert.EqualValues(t, commonpb.StateCode_Healthy, resp.State.StateCode)
-//assert.EqualValues(t, 1, len(resp.SubcomponentStates))
-//assert.EqualValues(t, commonpb.StateCode_Healthy, resp.SubcomponentStates[0].StateCode)
-//}
-
 func TestGetTimeTickChannel(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	resp, err := svr.GetTimeTickChannel(context.TODO(), nil)
 	assert.NoError(t, err)
@@ -150,7 +117,7 @@ func TestGetTimeTickChannel(t *testing.T) {
 
 func TestGetSegmentStates(t *testing.T) {
 	t.Run("normal cases", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		segment := &datapb.SegmentInfo{
 			ID:            1000,
@@ -201,7 +168,7 @@ func TestGetSegmentStates(t *testing.T) {
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.GetSegmentStates(context.TODO(), &datapb.GetSegmentStatesRequest{
 			Base: &commonpb.MsgBase{
@@ -219,7 +186,7 @@ func TestGetSegmentStates(t *testing.T) {
 
 func TestGetInsertBinlogPaths(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		info := &datapb.SegmentInfo{
@@ -250,7 +217,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 	})
 
 	t.Run("with invalid segmentID", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		info := &datapb.SegmentInfo{
@@ -282,7 +249,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.GetInsertBinlogPaths(context.TODO(), &datapb.GetInsertBinlogPathsRequest{
 			SegmentID: 0,
@@ -294,7 +261,7 @@ func TestGetInsertBinlogPaths(t *testing.T) {
 
 func TestGetCollectionStatistics(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		req := &datapb.GetCollectionStatisticsRequest{
@@ -305,7 +272,7 @@ func TestGetCollectionStatistics(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.GetCollectionStatistics(context.Background(), &datapb.GetCollectionStatisticsRequest{
 			CollectionID: 0,
@@ -317,7 +284,7 @@ func TestGetCollectionStatistics(t *testing.T) {
 
 func TestGetPartitionStatistics(t *testing.T) {
 	t.Run("normal cases", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		req := &datapb.GetPartitionStatisticsRequest{
@@ -329,7 +296,7 @@ func TestGetPartitionStatistics(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.GetPartitionStatistics(context.Background(), &datapb.GetPartitionStatisticsRequest{})
 		assert.NoError(t, err)
@@ -339,7 +306,7 @@ func TestGetPartitionStatistics(t *testing.T) {
 
 func TestGetSegmentInfo(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
@@ -380,7 +347,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 	t.Run("with wrong segmentID", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
@@ -398,7 +365,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrSegmentNotFound)
 	})
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.GetSegmentInfo(context.Background(), &datapb.GetSegmentInfoRequest{
 			SegmentIDs: []int64{},
@@ -407,7 +374,7 @@ func TestGetSegmentInfo(t *testing.T) {
 		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
 	})
 	t.Run("with dropped segment", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
@@ -444,7 +411,7 @@ func TestGetSegmentInfo(t *testing.T) {
 			Timestamp:   1000,
 		}
 
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		segInfo := &datapb.SegmentInfo{
@@ -514,7 +481,7 @@ func TestGetComponentStates(t *testing.T) {
 
 func TestGetFlushedSegments(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		type testCase struct {
 			collID            int64
@@ -593,7 +560,7 @@ func TestGetFlushedSegments(t *testing.T) {
 
 	t.Run("with closed server", func(t *testing.T) {
 		t.Run("with closed server", func(t *testing.T) {
-			svr := newTestServer(t, nil)
+			svr := newTestServer(t)
 			closeTestServer(t, svr)
 			resp, err := svr.GetFlushedSegments(context.Background(), &datapb.GetFlushedSegmentsRequest{})
 			assert.NoError(t, err)
@@ -604,7 +571,7 @@ func TestGetFlushedSegments(t *testing.T) {
 
 func TestGetSegmentsByStates(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		type testCase struct {
 			collID          int64
@@ -697,7 +664,7 @@ func TestGetSegmentsByStates(t *testing.T) {
 
 	t.Run("with closed server", func(t *testing.T) {
 		t.Run("with closed server", func(t *testing.T) {
-			svr := newTestServer(t, nil)
+			svr := newTestServer(t)
 			closeTestServer(t, svr)
 			resp, err := svr.GetSegmentsByStates(context.Background(), &datapb.GetSegmentsByStatesRequest{})
 			assert.NoError(t, err)
@@ -761,136 +728,8 @@ func TestService_WatchServices(t *testing.T) {
 	assert.True(t, flag)
 }
 
-//func TestServer_watchCoord(t *testing.T) {
-//	Params.Init()
-//	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-//	assert.NoError(t, err)
-//	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-//	assert.NotNil(t, etcdKV)
-//	factory := dependency.NewDefaultFactory(true)
-//	svr := CreateServer(context.TODO(), factory)
-//	svr.session = &sessionutil.Session{
-//		TriggerKill: true,
-//	}
-//	svr.kvClient = etcdKV
-//
-//	dnCh := make(chan *sessionutil.SessionEvent)
-//	//icCh := make(chan *sessionutil.SessionEvent)
-//	qcCh := make(chan *sessionutil.SessionEvent)
-//	rcCh := make(chan *sessionutil.SessionEvent)
-//
-//	svr.dnEventCh = dnCh
-//	//svr.icEventCh = icCh
-//	svr.qcEventCh = qcCh
-//	svr.rcEventCh = rcCh
-//
-//	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
-//	assert.NoError(t, err)
-//	assert.NotNil(t, segRefer)
-//	svr.segReferManager = segRefer
-//
-//	sc := make(chan os.Signal, 1)
-//	signal.Notify(sc, syscall.SIGINT)
-//	defer signal.Reset(syscall.SIGINT)
-//	closed := false
-//	sigQuit := make(chan struct{}, 1)
-//
-//	svr.serverLoopWg.Add(1)
-//	go func() {
-//		svr.watchService(context.Background())
-//	}()
-//
-//	go func() {
-//		<-sc
-//		closed = true
-//		sigQuit <- struct{}{}
-//	}()
-//
-//	icCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionAddEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 1,
-//		},
-//	}
-//	icCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionDelEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 1,
-//		},
-//	}
-//	close(icCh)
-//	<-sigQuit
-//	svr.serverLoopWg.Wait()
-//	assert.True(t, closed)
-//}
-
-//func TestServer_watchQueryCoord(t *testing.T) {
-//	Params.Init()
-//	etcdCli, err := etcd.GetEtcdClient(
-//		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-//		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-//		Params.EtcdCfg.Endpoints.GetAsStrings(),
-//		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-//		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-//		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-//		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-//	assert.NoError(t, err)
-//	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
-//	assert.NotNil(t, etcdKV)
-//	factory := dependency.NewDefaultFactory(true)
-//	svr := CreateServer(context.TODO(), factory)
-//	svr.session = &sessionutil.Session{
-//		TriggerKill: true,
-//	}
-//	svr.kvClient = etcdKV
-//
-//	dnCh := make(chan *sessionutil.SessionEvent)
-//	//icCh := make(chan *sessionutil.SessionEvent)
-//	qcCh := make(chan *sessionutil.SessionEvent)
-//
-//	svr.dnEventCh = dnCh
-//
-//	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
-//	assert.NoError(t, err)
-//	assert.NotNil(t, segRefer)
-//
-//	sc := make(chan os.Signal, 1)
-//	signal.Notify(sc, syscall.SIGINT)
-//	defer signal.Reset(syscall.SIGINT)
-//	closed := false
-//	sigQuit := make(chan struct{}, 1)
-//
-//	svr.serverLoopWg.Add(1)
-//	go func() {
-//		svr.watchService(context.Background())
-//	}()
-//
-//	go func() {
-//		<-sc
-//		closed = true
-//		sigQuit <- struct{}{}
-//	}()
-//
-//	qcCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionAddEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 2,
-//		},
-//	}
-//	qcCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionDelEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 2,
-//		},
-//	}
-//	close(qcCh)
-//	<-sigQuit
-//	svr.serverLoopWg.Wait()
-//	assert.True(t, closed)
-//}
-
 func TestServer_ShowConfigurations(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	pattern := "datacoord.Port"
 	req := &internalpb.ShowConfigurationsRequest{
@@ -919,7 +758,7 @@ func TestServer_ShowConfigurations(t *testing.T) {
 }
 
 func TestServer_GetMetrics(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 
 	var err error
@@ -960,7 +799,7 @@ func TestServer_GetMetrics(t *testing.T) {
 }
 
 func TestServer_getSystemInfoMetrics(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 
 	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
@@ -1032,7 +871,7 @@ func (s *spySegmentManager) DropSegmentsOfChannel(ctx context.Context, channel s
 func TestDropVirtualChannel(t *testing.T) {
 	t.Run("normal DropVirtualChannel", func(t *testing.T) {
 		spyCh := make(chan struct{}, 1)
-		svr := newTestServer(t, nil, WithSegmentManager(&spySegmentManager{spyCh: spyCh}))
+		svr := newTestServer(t, WithSegmentManager(&spySegmentManager{spyCh: spyCh}))
 
 		defer closeTestServer(t, svr)
 
@@ -1090,16 +929,17 @@ func TestDropVirtualChannel(t *testing.T) {
 		svr.meta.AddSegment(context.TODO(), NewSegmentInfo(os))
 
 		ctx := context.Background()
-		err := svr.channelManager.AddNode(0)
-		require.Nil(t, err)
-		err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		require.Nil(t, err)
+		chanName := "ch1"
+		mockChManager := NewMockChannelManager(t)
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(true).Twice()
+		mockChManager.EXPECT().Release(mock.Anything, chanName).Return(nil).Twice()
+		svr.channelManager = mockChManager
 
 		req := &datapb.DropVirtualChannelRequest{
 			Base: &commonpb.MsgBase{
 				Timestamp: uint64(time.Now().Unix()),
 			},
-			ChannelName: "ch1",
+			ChannelName: chanName,
 			Segments:    make([]*datapb.DropVirtualChannelSegment, 0, maxOperationsPerTxn),
 		}
 		for _, segment := range segments {
@@ -1164,9 +1004,6 @@ func TestDropVirtualChannel(t *testing.T) {
 
 		<-spyCh
 
-		err = svr.channelManager.Watch(ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		require.Nil(t, err)
-
 		// resend
 		resp, err = svr.DropVirtualChannel(ctx, req)
 		assert.NoError(t, err)
@@ -1174,12 +1011,11 @@ func TestDropVirtualChannel(t *testing.T) {
 	})
 
 	t.Run("with channel not matched", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
-		err := svr.channelManager.AddNode(0)
-		require.Nil(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 0})
-		require.Nil(t, err)
+		mockChManager := NewMockChannelManager(t)
+		mockChManager.EXPECT().Match(mock.Anything, mock.Anything).Return(false).Once()
+		svr.channelManager = mockChManager
 
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{
 			ChannelName: "ch2",
@@ -1189,7 +1025,7 @@ func TestDropVirtualChannel(t *testing.T) {
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.DropVirtualChannel(context.Background(), &datapb.DropVirtualChannelRequest{})
 		assert.NoError(t, err)
@@ -1262,7 +1098,7 @@ func TestGetChannelSeekPosition(t *testing.T) {
 	}
 	for _, test := range tests {
 		t.Run(test.testName, func(t *testing.T) {
-			svr := newTestServer(t, nil)
+			svr := newTestServer(t)
 			defer closeTestServer(t, svr)
 			schema := newTestSchema()
 			if test.collStartPos != nil {
@@ -1304,7 +1140,7 @@ func TestGetChannelSeekPosition(t *testing.T) {
 }
 
 func TestGetDataVChanPositions(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&collectionInfo{
@@ -1420,7 +1256,7 @@ func TestGetDataVChanPositions(t *testing.T) {
 }
 
 func TestGetQueryVChanPositions(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&collectionInfo{
@@ -1604,7 +1440,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 
 func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	t.Run("ab GC-ed, cde unIndexed", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
 		svr.meta.AddCollection(&collectionInfo{
@@ -1674,7 +1510,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	})
 
 	t.Run("a GC-ed, bcde unIndexed", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
 		svr.meta.AddCollection(&collectionInfo{
@@ -1760,7 +1596,7 @@ func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	})
 
 	t.Run("ab GC-ed, c unIndexed, de indexed", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		schema := newTestSchema()
 		svr.meta.AddCollection(&collectionInfo{
@@ -1869,7 +1705,7 @@ func TestShouldDropChannel(t *testing.T) {
 		Count:  1,
 	}, nil)
 
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 	schema := newTestSchema()
 	svr.meta.AddCollection(&collectionInfo{
@@ -1906,7 +1742,7 @@ func TestShouldDropChannel(t *testing.T) {
 
 func TestGetRecoveryInfo(t *testing.T) {
 	t.Run("test get recovery info with no segments", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
@@ -1950,7 +1786,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	}
 
 	t.Run("test get earliest position of flushed segments as seek position", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
@@ -2055,7 +1891,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("test get recovery of unflushed segments ", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
@@ -2130,7 +1966,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("test get binlogs", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		svr.meta.AddCollection(&collectionInfo{
@@ -2206,11 +2042,6 @@ func TestGetRecoveryInfo(t *testing.T) {
 		})
 		assert.NoError(t, err)
 
-		err = svr.channelManager.AddNode(0)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "vchan1", CollectionID: 0})
-		assert.NoError(t, err)
-
 		sResp, err := svr.SaveBinlogPaths(context.TODO(), binlogReq)
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, sResp.ErrorCode)
@@ -2234,7 +2065,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 		}
 	})
 	t.Run("with dropped segments", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
@@ -2276,7 +2107,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("with fake segments", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
@@ -2317,7 +2148,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("with continuous compaction", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
@@ -2399,7 +2230,7 @@ func TestGetRecoveryInfo(t *testing.T) {
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.GetRecoveryInfo(context.TODO(), &datapb.GetRecoveryInfoRequest{})
 		assert.NoError(t, err)
@@ -2576,7 +2407,7 @@ func TestOptions(t *testing.T) {
 	}()
 
 	t.Run("WithRootCoordCreator", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		var crt rootCoordCreatorFunc = func(ctx context.Context) (types.RootCoordClient, error) {
 			return nil, errors.New("dummy")
@@ -2601,7 +2432,7 @@ func TestOptions(t *testing.T) {
 		assert.NoError(t, err)
 		opt := WithCluster(cluster)
 		assert.NotNil(t, opt)
-		svr := newTestServer(t, nil, opt)
+		svr := newTestServer(t, opt)
 		defer closeTestServer(t, svr)
 
 		assert.Same(t, cluster, svr.cluster)
@@ -2648,9 +2479,10 @@ func TestHandleSessionEvent(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
+	sessionManager := NewSessionManagerImpl()
 	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
 	assert.NoError(t, err)
-	sessionManager := NewSessionManagerImpl()
+
 	cluster := NewClusterImpl(sessionManager, channelManager)
 	assert.NoError(t, err)
 
@@ -2658,7 +2490,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	assert.NoError(t, err)
 	defer cluster.Close()
 
-	svr := newTestServer(t, nil, WithCluster(cluster))
+	svr := newTestServer(t, WithCluster(cluster))
 	defer closeTestServer(t, svr)
 	t.Run("handle events", func(t *testing.T) {
 		// None event
@@ -2733,7 +2565,7 @@ func (rc *rootCoordSegFlushComplete) SegmentFlushCompleted(ctx context.Context, 
 
 func TestPostFlush(t *testing.T) {
 	t.Run("segment not found", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		err := svr.postFlush(context.Background(), 1)
@@ -2741,7 +2573,7 @@ func TestPostFlush(t *testing.T) {
 	})
 
 	t.Run("success post flush", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		svr.rootCoordClient = &rootCoordSegFlushComplete{flag: true}
 
@@ -2953,7 +2785,7 @@ func TestGetFlushAllStateWithDB(t *testing.T) {
 
 func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 		segment := &datapb.SegmentInfo{
 			ID:            1000,
@@ -2995,7 +2827,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	t.Run("dataCoord meta set state not exists", func(t *testing.T) {
 		meta, err := newMemoryMeta()
 		assert.NoError(t, err)
-		svr := newTestServerWithMeta(t, nil, meta)
+		svr := newTestServer(t, WithMeta(meta))
 		defer closeTestServer(t, svr)
 		// Set segment state.
 		svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
@@ -3019,7 +2851,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 
 	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		closeTestServer(t, svr)
 		resp, err := svr.SetSegmentState(context.TODO(), &datapb.SetSegmentStateRequest{
 			SegmentId: 1000,
@@ -3032,7 +2864,7 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 
 func TestDataCoord_SegmentStatistics(t *testing.T) {
 	t.Run("test update imported segment stat", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        100,
@@ -3059,7 +2891,7 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 	})
 
 	t.Run("test update flushed segment stat", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 
 		seg1 := &datapb.SegmentInfo{
 			ID:        100,
@@ -3090,7 +2922,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
 
 	t.Run("UpdateChannelCheckpoint_Success", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		datanodeID := int64(1)
@@ -3136,7 +2968,7 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	})
 
 	t.Run("UpdateChannelCheckpoint_NodeNotMatch", func(t *testing.T) {
-		svr := newTestServer(t, nil)
+		svr := newTestServer(t)
 		defer closeTestServer(t, svr)
 
 		datanodeID := int64(1)
@@ -3183,7 +3015,13 @@ func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 
 var globalTestTikv = tikv.SetupLocalTxn()
 
-func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
+func WithMeta(meta *meta) Option {
+	return func(svr *Server) {
+		svr.meta = meta
+	}
+}
+
+func newTestServer(t *testing.T, opts ...Option) *Server {
 	var err error
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	paramtable.Get().Save(Params.RocksmqCfg.CompressionTypes.Key, "0,0,0,0,0")
@@ -3206,14 +3044,10 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	svr.SetTiKVClient(globalTestTikv)
 
 	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(0, receiveCh)
+		return newMockDataNodeClient(0, nil)
 	}
 	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
 		return newMockRootCoordClient(), nil
-	}
-
-	for _, opt := range opts {
-		opt(svr)
 	}
 
 	err = svr.Init()
@@ -3223,63 +3057,16 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 	} else {
 		assert.Equal(t, commonpb.StateCode_Initializing, svr.stateCode.Load().(commonpb.StateCode))
 	}
+
+	for _, opt := range opts {
+		opt(svr)
+	}
+
 	err = svr.Register()
 	assert.NoError(t, err)
 	err = svr.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, svr.stateCode.Load().(commonpb.StateCode))
-
-	return svr
-}
-
-func newTestServerWithMeta(t *testing.T, receiveCh chan any, meta *meta, opts ...Option) *Server {
-	var err error
-	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
-	factory := dependency.NewDefaultFactory(true)
-
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
-	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
-	assert.NoError(t, err)
-
-	svr := CreateServer(context.TODO(), factory, opts...)
-	svr.SetEtcdClient(etcdCli)
-	svr.SetTiKVClient(globalTestTikv)
-
-	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(0, receiveCh)
-	}
-	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-		return newMockRootCoordClient(), nil
-	}
-	// indexCoord := mocks.NewMockIndexCoord(t)
-	// indexCoord.EXPECT().GetIndexInfos(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
-	// svr.indexCoord = indexCoord
-
-	err = svr.Init()
-	assert.NoError(t, err)
-	svr.meta = meta
-
-	err = svr.Start()
-	assert.NoError(t, err)
-	err = svr.Register()
-	assert.NoError(t, err)
-
-	// Stop channal watch state watcher in tests
-	if svr.channelManager != nil {
-		impl, ok := svr.channelManager.(*ChannelManagerImpl)
-		if ok && impl.stopChecker != nil {
-			impl.stopChecker()
-		}
-	}
 
 	return svr
 }
@@ -3290,54 +3077,6 @@ func closeTestServer(t *testing.T, svr *Server) {
 	err = svr.CleanMeta()
 	assert.NoError(t, err)
 	paramtable.Get().Reset(Params.CommonCfg.DataCoordTimeTick.Key)
-}
-
-func newTestServer2(t *testing.T, receiveCh chan any, opts ...Option) *Server {
-	var err error
-	paramtable.Init()
-	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
-	factory := dependency.NewDefaultFactory(true)
-
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
-	_, err = etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
-	assert.NoError(t, err)
-
-	svr := CreateServer(context.TODO(), factory, opts...)
-	svr.SetEtcdClient(etcdCli)
-	svr.SetTiKVClient(globalTestTikv)
-
-	svr.dataNodeCreator = func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(0, receiveCh)
-	}
-	svr.rootCoordClientCreator = func(ctx context.Context) (types.RootCoordClient, error) {
-		return newMockRootCoordClient(), nil
-	}
-
-	err = svr.Init()
-	assert.NoError(t, err)
-	err = svr.Start()
-	assert.NoError(t, err)
-	err = svr.Register()
-	assert.NoError(t, err)
-
-	// Stop channal watch state watcher in tests
-	if svr.channelManager != nil {
-		impl, ok := svr.channelManager.(*ChannelManagerImpl)
-		if ok && impl.stopChecker != nil {
-			impl.stopChecker()
-		}
-	}
-
-	return svr
 }
 
 func Test_CheckHealth(t *testing.T) {
@@ -3403,48 +3142,8 @@ func Test_CheckHealth(t *testing.T) {
 	})
 }
 
-//func Test_initServiceDiscovery(t *testing.T) {
-//	server := newTestServer2(t, nil)
-//	assert.NotNil(t, server)
-//
-//	segmentID := rand.Int63()
-//	err := server.meta.AddSegment(&SegmentInfo{
-//		SegmentInfo: &datapb.SegmentInfo{
-//			ID:           segmentID,
-//			CollectionID: rand.Int63(),
-//			PartitionID:  rand.Int63(),
-//			NumOfRows:    100,
-//		},
-//		currRows: 100,
-//	})
-//	assert.NoError(t, err)
-//
-//	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), server.etcdCli)
-//	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
-//	qcSession.Register()
-//	//req := &datapb.AcquireSegmentLockRequest{
-//	//	NodeID:     qcSession.ServerID,
-//	//	SegmentIDs: []UniqueID{segmentID},
-//	//}
-//	//resp, err := server.AcquireSegmentLock(context.TODO(), req)
-//	//assert.NoError(t, err)
-//	//assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-//
-//	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.QueryCoordRole)
-//	_, err = server.etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
-//	assert.NoError(t, err)
-//
-//	//for {
-//	//	if !server.segReferManager.HasSegmentLock(segmentID) {
-//	//		break
-//	//	}
-//	//}
-//
-//	closeTestServer(t, server)
-//}
-
 func Test_newChunkManagerFactory(t *testing.T) {
-	server := newTestServer2(t, nil)
+	server := newTestServer(t)
 	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
 	defer closeTestServer(t, server)
 
@@ -3471,7 +3170,7 @@ func Test_initGarbageCollection(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableGarbageCollection.Key)
 
-	server := newTestServer2(t, nil)
+	server := newTestServer(t)
 	defer closeTestServer(t, server)
 
 	t.Run("ok", func(t *testing.T) {
@@ -3491,294 +3190,18 @@ func Test_initGarbageCollection(t *testing.T) {
 	})
 }
 
-func testDataCoordBase(t *testing.T, opts ...Option) *Server {
-	var err error
-	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
-	factory := dependency.NewDefaultFactory(true)
-
-	ctx := context.Background()
-	etcdCli, err := etcd.GetEtcdClient(
-		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		Params.EtcdCfg.Endpoints.GetAsStrings(),
-		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-	assert.NoError(t, err)
-	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot)
-	_, err = etcdCli.Delete(ctx, sessKey, clientv3.WithPrefix())
-	assert.NoError(t, err)
-
-	svr := CreateServer(ctx, factory, opts...)
-	svr.SetEtcdClient(etcdCli)
-	svr.SetTiKVClient(globalTestTikv)
-
-	svr.SetDataNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.DataNodeClient, error) {
-		return newMockDataNodeClient(0, nil)
-	})
-	svr.SetIndexNodeCreator(func(ctx context.Context, addr string, nodeID int64) (types.IndexNodeClient, error) {
-		return &grpcmock.GrpcIndexNodeClient{Err: nil}, nil
-	})
-	svr.SetRootCoordClient(newMockRootCoordClient())
-
-	err = svr.Init()
-	assert.NoError(t, err)
-	err = svr.Start()
-	assert.NoError(t, err)
-	err = svr.Register()
-	assert.NoError(t, err)
-
-	resp, err := svr.GetComponentStates(context.Background(), nil)
-	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	assert.Equal(t, commonpb.StateCode_Healthy, resp.GetState().GetStateCode())
-
-	// stop channal watch state watcher in tests
-	if svr.channelManager != nil {
-		impl, ok := svr.channelManager.(*ChannelManagerImpl)
-		if ok && impl.stopChecker != nil {
-			impl.stopChecker()
-		}
-	}
-
-	return svr
-}
-
 func TestDataCoord_DisableActiveStandby(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "false")
-	svr := testDataCoordBase(t)
-	defer closeTestServer(t, svr)
+	svr := newTestServer(t)
+	closeTestServer(t, svr)
 }
 
 // make sure the main functions work well when EnableActiveStandby=true
 func TestDataCoord_EnableActiveStandby(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableActiveStandby.Key)
-	svr := testDataCoordBase(t)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
-}
-
-func TestDataNodeTtChannel(t *testing.T) {
-	paramtable.Get().Save(Params.DataNodeCfg.DataNodeTimeTickByRPC.Key, "false")
-	defer paramtable.Get().Reset(Params.DataNodeCfg.DataNodeTimeTickByRPC.Key)
-	genMsg := func(msgType commonpb.MsgType, ch string, t Timestamp) *msgstream.DataNodeTtMsg {
-		return &msgstream.DataNodeTtMsg{
-			BaseMsg: msgstream.BaseMsg{
-				HashValues: []uint32{0},
-			},
-			DataNodeTtMsg: msgpb.DataNodeTtMsg{
-				Base: &commonpb.MsgBase{
-					MsgType:   msgType,
-					MsgID:     0,
-					Timestamp: t,
-					SourceID:  0,
-				},
-				ChannelName: ch,
-				Timestamp:   t,
-			},
-		}
-	}
-	t.Run("Test segment flush after tt", func(t *testing.T) {
-		ch := make(chan any, 1)
-		svr := newTestServer(t, ch)
-		defer closeTestServer(t, svr)
-
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         0,
-			Schema:     newTestSchema(),
-			Partitions: []int64{0},
-		})
-
-		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
-		assert.NoError(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
-		defer ttMsgStream.Close()
-		info := &NodeInfo{
-			Address: "localhost:7777",
-			NodeID:  0,
-		}
-		err = svr.cluster.Register(info)
-		assert.NoError(t, err)
-
-		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:   0,
-			PeerRole: "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-1",
-					Count:        100,
-				},
-			},
-		})
-
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
-		assign := resp.SegIDAssignments[0]
-
-		resp2, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Flush,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			DbID:         0,
-			CollectionID: 0,
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.GetStatus().GetErrorCode())
-
-		msgPack := msgstream.MsgPack{}
-		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
-		msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
-			SegmentID: assign.GetSegID(),
-			NumRows:   1,
-		})
-		msgPack.Msgs = append(msgPack.Msgs, msg)
-		err = ttMsgStream.Produce(&msgPack)
-		assert.NoError(t, err)
-
-		flushMsg := <-ch
-		flushReq := flushMsg.(*datapb.FlushSegmentsRequest)
-		assert.EqualValues(t, 1, len(flushReq.SegmentIDs))
-		assert.EqualValues(t, assign.SegID, flushReq.SegmentIDs[0])
-	})
-
-	t.Run("flush segment with different channels", func(t *testing.T) {
-		ch := make(chan any, 1)
-		svr := newTestServer(t, ch)
-		defer closeTestServer(t, svr)
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         0,
-			Schema:     newTestSchema(),
-			Partitions: []int64{0},
-		})
-		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
-		assert.NoError(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
-		defer ttMsgStream.Close()
-		info := &NodeInfo{
-			Address: "localhost:7777",
-			NodeID:  0,
-		}
-		err = svr.cluster.Register(info)
-		assert.NoError(t, err)
-		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:   0,
-			PeerRole: "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-1",
-					Count:        100,
-				},
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-2",
-					Count:        100,
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.EqualValues(t, 2, len(resp.SegIDAssignments))
-		var assign *datapb.SegmentIDAssignment
-		for _, segment := range resp.SegIDAssignments {
-			if segment.GetChannelName() == "ch-1" {
-				assign = segment
-				break
-			}
-		}
-		assert.NotNil(t, assign)
-		resp2, err := svr.Flush(context.TODO(), &datapb.FlushRequest{
-			Base: &commonpb.MsgBase{
-				MsgType:   commonpb.MsgType_Flush,
-				MsgID:     0,
-				Timestamp: 0,
-				SourceID:  0,
-			},
-			DbID:         0,
-			CollectionID: 0,
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp2.GetStatus().GetErrorCode())
-
-		msgPack := msgstream.MsgPack{}
-		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", assign.ExpireTime)
-		msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
-			SegmentID: assign.GetSegID(),
-			NumRows:   1,
-		})
-		msgPack.Msgs = append(msgPack.Msgs, msg)
-		err = ttMsgStream.Produce(&msgPack)
-		assert.NoError(t, err)
-		flushMsg := <-ch
-		flushReq := flushMsg.(*datapb.FlushSegmentsRequest)
-		assert.EqualValues(t, 1, len(flushReq.SegmentIDs))
-		assert.EqualValues(t, assign.SegID, flushReq.SegmentIDs[0])
-	})
-
-	t.Run("test expire allocation after receiving tt msg", func(t *testing.T) {
-		ch := make(chan any, 1)
-		helper := ServerHelper{
-			eventAfterHandleDataNodeTt: func() { ch <- struct{}{} },
-		}
-		svr := newTestServer(t, nil, WithServerHelper(helper))
-		defer closeTestServer(t, svr)
-
-		svr.meta.AddCollection(&collectionInfo{
-			ID:         0,
-			Schema:     newTestSchema(),
-			Partitions: []int64{0},
-		})
-
-		ttMsgStream, err := svr.factory.NewMsgStream(context.TODO())
-		assert.NoError(t, err)
-		ttMsgStream.AsProducer([]string{Params.CommonCfg.DataCoordTimeTick.GetValue()})
-		defer ttMsgStream.Close()
-		node := &NodeInfo{
-			NodeID:  0,
-			Address: "localhost:7777",
-		}
-		err = svr.cluster.Register(node)
-		assert.NoError(t, err)
-
-		resp, err := svr.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:   0,
-			PeerRole: "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{
-				{
-					CollectionID: 0,
-					PartitionID:  0,
-					ChannelName:  "ch-1",
-					Count:        100,
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-		assert.EqualValues(t, 1, len(resp.SegIDAssignments))
-
-		assignedSegmentID := resp.SegIDAssignments[0].SegID
-		segment := svr.meta.GetHealthySegment(assignedSegmentID)
-		assert.EqualValues(t, 1, len(segment.allocations))
-
-		msgPack := msgstream.MsgPack{}
-		msg := genMsg(commonpb.MsgType_DataNodeTt, "ch-1", resp.SegIDAssignments[0].ExpireTime)
-		msgPack.Msgs = append(msgPack.Msgs, msg)
-		err = ttMsgStream.Produce(&msgPack)
-		assert.NoError(t, err)
-
-		<-ch
-		segment = svr.meta.GetHealthySegment(assignedSegmentID)
-		assert.EqualValues(t, 0, len(segment.allocations))
-	})
 }
 
 func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
