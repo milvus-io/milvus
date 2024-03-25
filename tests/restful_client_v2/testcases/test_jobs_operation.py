@@ -89,8 +89,9 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > 360:
                     assert False, "import job timeout"
-        time.sleep(10)
         c = Collection(name)
+        c.load(_refresh=True)
+        time.sleep(10)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -179,8 +180,9 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > 120:
                     assert False, "import job timeout"
-        time.sleep(10)
         c = Collection(name)
+        c.load(_refresh=True)
+        time.sleep(10)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -271,8 +273,9 @@ class TestCreateImportJob(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > 120:
                     assert False, "import job timeout"
-        time.sleep(10)
         c = Collection(name)
+        c.load(_refresh=True)
+        time.sleep(10)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
@@ -1419,8 +1422,9 @@ class TestCreateImportJobNegative(TestBase):
                 time.sleep(5)
                 if time.time() - t0 > 120:
                     assert False, "import job timeout"
-        time.sleep(10)
         c = Collection(name)
+        c.load(_refresh=True)
+        time.sleep(10)
         res = c.query(
             expr="",
             output_fields=["count(*)"],
