@@ -12,14 +12,10 @@ ARG MILVUS_BASE_IMAGE_REPO="milvusdb/milvus-base"
 ARG MILVUS_BASE_IMAGE_TAG="gpu-20230822-34f9067"
 FROM ${MILVUS_BASE_IMAGE_REPO}:${MILVUS_BASE_IMAGE_TAG}
 
-COPY ./bin/ /milvus/bin/
+COPY --chown=root:root --chmod=g+rwx ./bin/ /milvus/bin/ \
+                                    ./configs/ /milvus/configs/ \
+                                    ./lib/ /milvus/lib/
 
-COPY ./configs/ /milvus/configs/
-
-COPY ./lib/ /milvus/lib/
-
-RUN chgrp -R root /milvus && \
-    chmod -R g+rwx /milvus
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
