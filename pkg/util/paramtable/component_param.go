@@ -2536,6 +2536,7 @@ type dataCoordConfig struct {
 	ImportScheduleInterval   ParamItem `refreshable:"true"`
 	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
 	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
+	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -3071,6 +3072,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.ImportCheckIntervalLow.Init(base.mgr)
 
+	p.MaxFilesPerImportReq = ParamItem{
+		Key:          "dataCoord.import.maxImportFileNumPerReq",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of files allowed per single import request.",
+		DefaultValue: "1024",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxFilesPerImportReq.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -3131,7 +3142,9 @@ type dataNodeConfig struct {
 	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
+	// import
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio ParamItem `refreshable:"true"`
@@ -3389,6 +3402,16 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+
+	p.MaxImportFileSizeInGB = ParamItem{
+		Key:          "datanode.import.maxImportFileSizeInGB",
+		Version:      "2.4.0",
+		Doc:          "The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxImportFileSizeInGB.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "datanode.compaction.levelZeroBatchMemoryRatio",
