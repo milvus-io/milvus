@@ -575,7 +575,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 			for _, tsMsg := range msgPack.Msgs {
 				if tsMsg.Type() == commonpb.MsgType_Delete {
 					dmsg := tsMsg.(*msgstream.DeleteMsg)
-					if dmsg.CollectionID != sd.collectionID || dmsg.GetPartitionID() != candidate.Partition() {
+					if dmsg.CollectionID != sd.collectionID || (dmsg.GetPartitionID() != common.InvalidPartitionID && dmsg.GetPartitionID() != candidate.Partition()) {
 						continue
 					}
 
