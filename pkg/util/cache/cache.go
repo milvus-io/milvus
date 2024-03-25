@@ -4,6 +4,7 @@ import (
 	"container/list"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
@@ -13,27 +14,13 @@ import (
 var (
 	ErrNoSuchItem     = errors.New("no such item")
 	ErrNotEnoughSpace = errors.New("not enough space")
+	ErrTimeOut        = errors.New("time out")
 )
 
 type cacheItem[K comparable, V any] struct {
 	key      K
 	value    V
 	pinCount atomic.Int32
-}
-
-func newCacheItem[K comparable, V any](key K, value V) *cacheItem[K, V] {
-	return &cacheItem[K, V]{
-		key:   key,
-		value: value,
-	}
-}
-
-func (item *cacheItem[K, V]) Unpin() {
-	item.pinCount.Dec()
-}
-
-func (i *cacheItem[K, V]) Value() V {
-	return i.value
 }
 
 type (
@@ -48,10 +35,16 @@ type (
 type Scavenger[K comparable] interface {
 	// Collect records entry additions, if there is room, return true, or else return false and a collector.
 	//	The collector is a function which can be invoked repetedly, each invocation will test if there is enough
-	//	room provided that all entries in the collector is evicted.
+	//	room provided that all entries in the collector is evicted. Typically, the collector will get multiple false
+	//	before it gets a true.
 	Collect(key K) (bool, func(K) bool)
 	// Throw records entry removals.
 	Throw(key K)
+	// Sapre returns a collector function based on given key.
+	//	The collector is a function which can be invoked repetedly, each invocation will test if there is enough
+	//	room for all the pending entries if the thrown entry is evicted. Typically, the collector will get multiple true
+	//	before it gets a false.
+	Spare(key K) func(K) bool
 }
 
 type LazyScavenger[K comparable] struct {
@@ -84,8 +77,32 @@ func (s *LazyScavenger[K]) Throw(key K) {
 	s.size -= s.weight(key)
 }
 
+func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
+	w := s.weight(key)
+	available := s.capacity - s.size + w
+	return func(k K) bool {
+		available -= s.weight(k)
+		return available >= 0
+	}
+}
+
 type Cache[K comparable, V any] interface {
 	Do(key K, doer func(V) error) error
+	DoWait(key K, timeout time.Duration, doer func(V) error) error
+}
+
+type Waiter[K comparable] struct {
+	key K
+	wg  *sync.WaitGroup
+}
+
+func newWaiter[K comparable](key K) Waiter[K] {
+	wg := &sync.WaitGroup{}
+	wg.Add(1)
+	return Waiter[K]{
+		key: key,
+		wg:  wg,
+	}
 }
 
 // lruCache extends the ccache library to provide pinning and unpinning of items.
@@ -95,6 +112,8 @@ type lruCache[K comparable, V any] struct {
 	items              map[K]*list.Element
 	accessList         *list.List
 	loaderSingleFlight singleflight.Group
+
+	waitQueue *list.List
 
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
@@ -157,6 +176,7 @@ func newLRUCache[K comparable, V any](
 	return &lruCache[K, V]{
 		items:              make(map[K]*list.Element),
 		accessList:         list.New(),
+		waitQueue:          list.New(),
 		loaderSingleFlight: singleflight.Group{},
 		loader:             loader,
 		finalizer:          finalizer,
@@ -170,8 +190,78 @@ func (c *lruCache[K, V]) Do(key K, doer func(V) error) error {
 	if err != nil {
 		return err
 	}
-	defer item.Unpin()
-	return doer(item.Value())
+	defer c.Unpin(key)
+	return doer(item.value)
+}
+
+type pinResult[K comparable, V any] struct {
+	item *cacheItem[K, V]
+	err  error
+}
+
+func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error) error {
+	ch := make(chan pinResult[K, V])
+	go func() {
+		var ele *list.Element
+		for {
+			item, err := c.getAndPin(key)
+			if err != ErrNotEnoughSpace {
+				if ele != nil {
+					c.waitQueue.Remove(ele)
+				}
+				r := pinResult[K, V]{
+					item: item,
+					err:  err,
+				}
+				ch <- r
+				return
+			}
+			if ele == nil {
+				// If no enough space, enqueue the key
+				c.rwlock.Lock()
+				waiter := newWaiter(key)
+				ele = c.waitQueue.PushBack(&waiter)
+				c.rwlock.Unlock()
+			}
+			ele.Value.(*Waiter[K]).wg.Wait()
+		}
+	}()
+
+	select {
+	case pr := <-ch:
+		if pr.err != nil {
+			return pr.err
+		}
+		// the item is pinned already
+		item := pr.item
+		defer c.Unpin(key)
+		return doer(item.value)
+	case <-time.After(timeout):
+		return ErrTimeOut
+	}
+}
+
+func (c *lruCache[K, V]) Unpin(key K) {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+	e, ok := c.items[key]
+	if !ok {
+		return
+	}
+	item := e.Value.(*cacheItem[K, V])
+	item.pinCount.Dec()
+	if c.waitQueue.Len() > 0 {
+		// Notify waiters
+		collector := c.scavenger.Spare(key)
+		for e := c.waitQueue.Front(); e != nil; e = e.Next() {
+			w := e.Value.(*Waiter[K])
+			if ok := collector(w.key); ok {
+				w.wg.Done()
+			} else {
+				break
+			}
+		}
+	}
 }
 
 func (c *lruCache[K, V]) peek(key K) *cacheItem[K, V] {
@@ -261,7 +351,7 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
 
-	item := newCacheItem[K, V](key, value)
+	item := &cacheItem[K, V]{key: key, value: value}
 	item.pinCount.Inc()
 
 	// tryScavenge is done again since the load call is lock free.
