@@ -607,10 +607,12 @@ Milvus adopts dependencies from the following:
 - Thanks to [FAISS](https://github.com/facebookresearch/faiss) for the excellent search library.
 - Thanks to [etcd](https://github.com/coreos/etcd) for providing great open-source key-value store tools.
 - Thanks to [Pulsar](https://github.com/apache/pulsar) for its wonderful distributed pub-sub messaging system.
+- Thanks to [Tantivy](https://github.com/quickwit-oss/tantivy) for its full-text search engine library written in Rust.
 - Thanks to [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
 
 Milvus is adopted by following opensource project:
 - [Towhee](https://github.com/towhee-io/towhee) a flexible, application-oriented framework for computing embedding vectors over unstructured data.
 - [Haystack](https://github.com/deepset-ai/haystack) an open source NLP framework that leverages Transformer models
 - [Langchain](https://github.com/hwchase17/langchain) Building applications with LLMs through composability
+- [LLamaIndex](https://github.com/run-llama/llama_index) a data framework for your LLM applications
 - [GPTCache](https://github.com/zilliztech/GPTCache) a library for creating semantic cache to store responses from LLM queries.
