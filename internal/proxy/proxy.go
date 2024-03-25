@@ -421,8 +421,6 @@ func (node *Proxy) Start() error {
 
 // Stop stops a proxy node.
 func (node *Proxy) Stop() error {
-	node.cancel()
-
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))
@@ -445,8 +443,6 @@ func (node *Proxy) Stop() error {
 		}
 		log.Info("close channels time ticker", zap.String("role", typeutil.ProxyRole))
 	}
-
-	node.wg.Wait()
 
 	for _, cb := range node.closeCallbacks {
 		cb()
@@ -471,6 +467,9 @@ func (node *Proxy) Stop() error {
 	if node.resourceManager != nil {
 		node.resourceManager.Close()
 	}
+
+	node.cancel()
+	node.wg.Wait()
 
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
