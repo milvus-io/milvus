@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type indexMeta struct {
@@ -273,6 +275,10 @@ func (m *indexMeta) CreateIndex(index *model.Index) error {
 		zap.Int64("fieldID", index.FieldID), zap.Int64("indexID", index.IndexID), zap.String("indexName", index.IndexName))
 	m.Lock()
 	defer m.Unlock()
+
+	if m.isCollectionLocked(index.CollectionID) {
+		return fmt.Errorf("collection: %d is locked", index.CollectionID)
+	}
 
 	if err := m.catalog.CreateIndex(m.ctx, index); err != nil {
 		log.Error("meta update: CreateIndex save meta fail", zap.Int64("collectionID", index.CollectionID),
@@ -806,6 +812,9 @@ func (m *indexMeta) GetDeletedIndexes() []*model.Index {
 func (m *indexMeta) RemoveIndex(collID, indexID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
+	if m.isCollectionLocked(collID) {
+		return fmt.Errorf("collection: %d is locked", collID)
+	}
 	log.Info("IndexCoord meta table remove index", zap.Int64("collectionID", collID), zap.Int64("indexID", indexID))
 	err := m.catalog.DropIndex(m.ctx, collID, indexID)
 	if err != nil {
@@ -886,3 +895,23 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 
 	return ret
 }
+
+func (m *meta) isCollectionLocked(collID typeutil.UniqueID) bool {
+	lockTime, exists := m.lockedCollIDs[collID]
+	if exists && lockTime.Before(time.Now().Add(-5*time.Minute)) {
+		delete(m.lockedCollIDs, collID)
+		return false
+	}
+	return exists
+}
+
+func (m *meta) LockCollection(collID typeutil.UniqueID) error {
+	m.lockedCollIDs[collID] = time.Now()
+	return nil
+}
+
+func (m *meta) UnlockCollection(collID typeutil.UniqueID) error {
+	delete(m.lockedCollIDs, collID)
+	return nil
+}
+

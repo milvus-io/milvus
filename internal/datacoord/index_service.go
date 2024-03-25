@@ -839,6 +839,18 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	return merr.Success(), nil
 }
 
+// DropIndex deletes indexes based on IndexName. One IndexName corresponds to the index of an entire column. A column is
+// divided into many segments, and each segment corresponds to an IndexBuildID. DataCoord uses IndexBuildID to record
+// index tasks.
+func (s *Server) LockIndexes(ctx context.Context, req *indexpb.LockIndexesRequest) (*commonpb.Status, error) {
+	s.meta.LockCollection(req.CollectionID)
+	return merr.Status(nil), nil
+}
+
+func (s *Server) UnlockIndexes(ctx context.Context, req *indexpb.UnlockIndexesRequest) (*commonpb.Status, error) {
+	return merr.Status(nil), nil
+}
+
 // GetIndexInfos gets the index file paths for segment from DataCoord.
 func (s *Server) GetIndexInfos(ctx context.Context, req *indexpb.GetIndexInfoRequest) (*indexpb.GetIndexInfoResponse, error) {
 	log := log.Ctx(ctx).With(

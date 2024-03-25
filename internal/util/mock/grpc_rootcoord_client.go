@@ -118,6 +118,23 @@ func (m *GrpcRootCoordClient) DropCollection(ctx context.Context, in *milvuspb.D
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) LockCollection(ctx context.Context, in *rootcoordpb.LockCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.LockCollectionResponse, error) {
+	return &rootcoordpb.LockCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
+}
+
+func (m *GrpcRootCoordClient) UnlockCollection(ctx context.Context, in *rootcoordpb.UnlockCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
+func (m *GrpcRootCoordClient) SwitchCollection(ctx context.Context, in *rootcoordpb.SwitchCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	return &milvuspb.BoolResponse{}, m.Err
 }

@@ -161,6 +161,41 @@ func (c *Client) DropCollection(ctx context.Context, in *milvuspb.DropCollection
 	})
 }
 
+// LockCollection lock collection
+func (c *Client) LockCollection(ctx context.Context, in *rootcoordpb.LockCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.LockCollectionResponse, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.LockCollectionResponse, error) {
+		return client.LockCollection(ctx, in)
+	})
+}
+
+// UnlockCollection unlock collection
+func (c *Client) UnlockCollection(ctx context.Context, in *rootcoordpb.UnlockCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
+		return client.UnlockCollection(ctx, in)
+	})
+}
+
+func (c *Client) SwitchCollection(ctx context.Context, req *rootcoordpb.SwitchCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
+		return client.SwitchCollection(ctx, req)
+	})
+}
+
 // HasCollection check collection existence
 func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	in = typeutil.Clone(in)

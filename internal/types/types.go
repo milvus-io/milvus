@@ -231,7 +231,7 @@ type Proxy interface {
 //go:generate mockery --name=ProxyComponent --structname=MockProxy --output=../mocks  --filename=mock_proxy.go --with-expecter
 type ProxyComponent interface {
 	Proxy
-
+	TruncateCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error)
 	SetAddress(address string)
 	GetAddress() string
 	// SetEtcdClient set EtcdClient for Proxy

@@ -469,6 +469,29 @@ func (coord *RootCoordMock) HasCollection(ctx context.Context, req *milvuspb.Has
 	}, nil
 }
 
+func (coord *RootCoordMock) LockCollection(ctx context.Context, in *rootcoordpb.LockCollectionRequest, opts ...grpc.CallOption) (*rootcoordpb.LockCollectionResponse, error) {
+	return &rootcoordpb.LockCollectionResponse{
+		commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		},
+	}, nil
+}
+
+func (coord *RootCoordMock) UnlockCollection(ctx context.Context, in *rootcoordpb.UnlockCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (coord *RootCoordMock) SwitchCollection(ctx context.Context, in *rootcoordpb.SwitchCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 func (coord *RootCoordMock) SetDescribeCollectionFunc(f describeCollectionFuncType) {
 	coord.describeCollectionFunc = f
 }

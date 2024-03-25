@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
+	"strings"
 	"sync"
 	"time"
 
@@ -628,6 +629,9 @@ func (c *Core) restore(ctx context.Context) error {
 			return err
 		}
 		for _, coll := range colls {
+			if strings.HasPrefix(coll.Name, ".") {
+				continue
+			}
 			ts, err := c.tsoAllocator.GenerateTSO(1)
 			if err != nil {
 				return err
@@ -1037,6 +1041,150 @@ func (c *Core) DropCollection(ctx context.Context, in *milvuspb.DropCollectionRe
 		zap.String("name", in.GetCollectionName()),
 		zap.Uint64("ts", t.GetTs()))
 	return merr.Success(), nil
+}
+
+// LockCollection lock collection
+func (c *Core) LockCollection(ctx context.Context, in *rootcoordpb.LockCollectionRequest) (*rootcoordpb.LockCollectionResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.LockCollectionResponse{
+			Status:       merr.Status(err),
+			CollectionId: int64(0),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("LockCollection", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("LockCollection")
+
+	log.Ctx(ctx).Info("received request to lock collection",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("name", in.GetCollectionName()))
+
+	t := &lockCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Ctx(ctx).Info("failed to enqueue request to lock collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("LockCollection", metrics.FailLabel).Inc()
+		return &rootcoordpb.LockCollectionResponse{
+			Status:       merr.Status(err),
+			CollectionId: int64(0),
+		}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Ctx(ctx).Info("failed to lock collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("LockCollection", metrics.FailLabel).Inc()
+		return &rootcoordpb.LockCollectionResponse{
+			Status:       merr.Status(err),
+			CollectionId: int64(0),
+		}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("LockCollection", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("LockCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfCollections.Dec()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("LockCollection").Observe(float64(t.queueDur.Milliseconds()))
+
+	log.Ctx(ctx).Info("done to lock collection", zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.Uint64("ts", t.GetTs()))
+	return &rootcoordpb.LockCollectionResponse{
+		Status:       merr.Status(nil),
+		CollectionId: t.CollectionID,
+	}, nil
+}
+
+// UnlockCollection unlock collection
+func (c *Core) UnlockCollection(ctx context.Context, in *rootcoordpb.UnlockCollectionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("UnlockCollection", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("UnlockCollection")
+
+	log.Ctx(ctx).Info("received request to unlock collection",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("dbName", in.GetDbName()),
+		zap.String("name", in.GetCollectionName()))
+
+	t := &unlockCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Ctx(ctx).Info("failed to enqueue request to unlock collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("UnlockCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Ctx(ctx).Info("failed to unlock collection", zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetCollectionName()),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues("UnlockCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("UnlockCollection", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("UnlockCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordNumOfCollections.Dec()
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues("UnlockCollection").Observe(float64(t.queueDur.Milliseconds()))
+
+	log.Ctx(ctx).Info("done to unlock collection", zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetCollectionName()),
+		zap.Uint64("ts", t.GetTs()))
+	return merr.Status(nil), nil
+}
+
+func (c *Core) SwitchCollection(ctx context.Context, req *rootcoordpb.SwitchCollectionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	log := log.Ctx(ctx).With(zap.String("oldCollectionName", req.GetOldName()), zap.String("newCollectionName", req.GetNewName()))
+	log.Info("received request to rename collection")
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("RenameCollection")
+	t := &switchCollectionTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      req,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Warn("failed to enqueue request to rename collection", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("failed to rename collection", zap.Uint64("ts", t.GetTs()), zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("RenameCollection", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("RenameCollection").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to rename collection", zap.Uint64("ts", t.GetTs()))
+	return merr.Status(nil), nil
 }
 
 // HasCollection check collection existence

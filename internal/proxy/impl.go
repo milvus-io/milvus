@@ -38,9 +38,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -505,6 +507,212 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	return dct.result, nil
+}
+
+func generateTempCollectionName(collName string) string {
+	return "." + collName
+}
+
+// TruncateCollection truncate a collection.
+func (node *Proxy) TruncateCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-TruncateCollection")
+	defer sp.End()
+	method := "TruncateCollection"
+	newCollectionName := generateTempCollectionName(request.CollectionName)
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel).Inc()
+
+	stateResp, err := node.GetLoadState(ctx, &milvuspb.GetLoadStateRequest{
+		DbName:         request.DbName,
+		CollectionName: request.CollectionName,
+	})
+	if err != nil || stateResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	// limitation1: release collection
+	//if stateResp.State != commonpb.LoadState_LoadStateNotLoad {
+	//	return &commonpb.Status{
+	//		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//		Reason:    "please release collection: " + request.CollectionName + ", before you truncate it.",
+	//	}, nil
+	//}
+
+	lockResp, err := node.rootCoord.LockCollection(ctx, &rootcoordpb.LockCollectionRequest{
+		Base:           request.Base,
+		DbName:         request.DbName,
+		CollectionName: request.CollectionName,
+	})
+	if err != nil || lockResp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return lockResp.Status, nil
+	}
+	switched := false
+	created := false
+	indexLocked := false
+	defer func() {
+		if switched {
+			request.CollectionName = newCollectionName
+		}
+		if indexLocked {
+			node.dataCoord.UnlockIndexes(ctx, &indexpb.UnlockIndexesRequest{
+				CollectionID: lockResp.CollectionId,
+			})
+		}
+		node.rootCoord.UnlockCollection(ctx, &rootcoordpb.UnlockCollectionRequest{
+			Base:           request.Base,
+			DbName:         request.DbName,
+			CollectionName: request.CollectionName,
+		})
+		if created {
+			node.rootCoord.DropCollection(ctx, &milvuspb.DropCollectionRequest{
+				Base: commonpbutil.NewMsgBase(
+					commonpbutil.WithMsgType(commonpb.MsgType_DropCollection),
+					commonpbutil.WithMsgID(0),
+					commonpbutil.WithSourceID(paramtable.GetNodeID()),
+				),
+				DbName:         request.DbName,
+				CollectionName: newCollectionName,
+			})
+		}
+	}()
+
+	lockResp1, err := node.dataCoord.LockIndexes(ctx, &indexpb.LockIndexesRequest{
+		CollectionID: lockResp.CollectionId,
+	})
+	if err != nil || lockResp1.ErrorCode != commonpb.ErrorCode_Success {
+		return lockResp1, nil
+	}
+	indexLocked = true
+
+	coll, err := node.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
+		Base:           nil,
+		DbName:         request.DbName,
+		CollectionName: request.CollectionName,
+	})
+	if err != nil || coll.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	// limitation2: drop aliases
+	//if len(coll.Aliases) > 0 {
+	//	return &commonpb.Status{
+	//		ErrorCode: commonpb.ErrorCode_UnexpectedError,
+	//		Reason:    "please delete all aliases of collection: " + request.CollectionName + ", before you truncate it.",
+	//	}, nil
+	//}
+	schema := coll.Schema
+	schema.Name = newCollectionName
+	schemaStr, err := proto.Marshal(schema)
+	if err != nil {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	res, err := node.rootCoord.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_CreateCollection),
+			commonpbutil.WithMsgID(0),
+			commonpbutil.WithSourceID(paramtable.GetNodeID()),
+		),
+		DbName:         request.DbName,
+		CollectionName: newCollectionName,
+		Schema:         schemaStr,
+		ShardsNum:      coll.ShardsNum,
+	})
+	if err != nil || res.ErrorCode != commonpb.ErrorCode_Success {
+		return res, nil
+	}
+	created = true
+	resp, err := node.DescribeIndex(ctx, &milvuspb.DescribeIndexRequest{
+		DbName:         request.DbName,
+		CollectionName: request.CollectionName,
+	})
+	if err != nil || resp.Status.ErrorCode != commonpb.ErrorCode_Success {
+		return resp.Status, nil
+	}
+	for _, indexDesription := range resp.IndexDescriptions {
+		res, err := node.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+			Base:           nil,
+			DbName:         request.DbName,
+			CollectionName: newCollectionName,
+			FieldName:      indexDesription.FieldName,
+			ExtraParams:    indexDesription.Params,
+			IndexName:      indexDesription.IndexName,
+		})
+		if err != nil || res.ErrorCode != commonpb.ErrorCode_Success {
+			return res, nil
+		}
+	}
+	lct := &loadCollectionTask{
+		ctx:       ctx,
+		Condition: NewTaskCondition(ctx),
+		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_LoadCollection),
+				commonpbutil.WithMsgID(0),
+				commonpbutil.WithSourceID(paramtable.GetNodeID()),
+			),
+			DbName:         request.DbName,
+			CollectionName: newCollectionName,
+		},
+		queryCoord: node.queryCoord,
+		datacoord:  node.dataCoord,
+	}
+
+	log.Warn("pre load collection name", zap.Any("base", lct.Base))
+
+	if err := node.sched.ddQueue.Enqueue(lct); err != nil {
+		log.Warn("LoadCollection failed to enqueue",
+			zap.Error(err))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	if err := lct.WaitToFinish(); err != nil {
+		log.Warn("LoadCollection failed to WaitToFinish",
+			zap.Error(err),
+			zap.Uint64("BeginTS", lct.BeginTs()),
+			zap.Uint64("EndTS", lct.EndTs()))
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    err.Error(),
+		}, nil
+	}
+	//loadResp, err := node.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+	//	Base:           nil,
+	//	DbName:         request.DbName,
+	//	CollectionName: newCollectionName,
+	//})
+	//if err != nil || loadResp.ErrorCode != commonpb.ErrorCode_Success {
+	//	return loadResp, nil
+	//}
+
+	switchResp, err := node.rootCoord.SwitchCollection(ctx, &rootcoordpb.SwitchCollectionRequest{
+		Base:    request.Base,
+		OldName: request.CollectionName,
+		NewName: newCollectionName,
+	})
+	if err != nil || switchResp.ErrorCode != commonpb.ErrorCode_Success {
+		return switchResp, nil
+	}
+	switched = true
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
 }
 
 // HasCollection check if the specific collection exists in Milvus.

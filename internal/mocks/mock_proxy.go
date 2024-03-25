@@ -1380,6 +1380,10 @@ func (_m *MockProxy) DropDatabase(_a0 context.Context, _a1 *milvuspb.DropDatabas
 	return r0, r1
 }
 
+func (_m *MockProxy) TruncateCollection(_a0 context.Context, _a1 *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	return nil, nil
+}
+
 // MockProxy_DropDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropDatabase'
 type MockProxy_DropDatabase_Call struct {
 	*mock.Call

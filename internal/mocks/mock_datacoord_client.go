@@ -564,6 +564,20 @@ func (_c *MockDataCoordClient_DropIndex_Call) RunAndReturn(run func(context.Cont
 	return _c
 }
 
+func (_m *MockDataCoordClient) LockIndexes(ctx context.Context, in *indexpb.LockIndexesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (_m *MockDataCoordClient) UnlockIndexes(ctx context.Context, in *indexpb.UnlockIndexesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 // DropVirtualChannel provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataCoordClient) DropVirtualChannel(ctx context.Context, in *datapb.DropVirtualChannelRequest, opts ...grpc.CallOption) (*datapb.DropVirtualChannelResponse, error) {
 	_va := make([]interface{}, len(opts))

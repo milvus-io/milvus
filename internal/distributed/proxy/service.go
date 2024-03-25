@@ -780,6 +780,10 @@ func (s *Server) DropCollection(ctx context.Context, request *milvuspb.DropColle
 	return s.proxy.DropCollection(ctx, request)
 }
 
+func (s *Server) TruncateCollection(ctx context.Context, request *milvuspb.DropCollectionRequest) (*commonpb.Status, error) {
+	return s.proxy.TruncateCollection(ctx, request)
+}
+
 // HasCollection notifies Proxy to check a collection's existence at specified timestamp
 func (s *Server) HasCollection(ctx context.Context, request *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.proxy.HasCollection(ctx, request)

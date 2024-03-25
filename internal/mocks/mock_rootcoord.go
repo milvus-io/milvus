@@ -997,6 +997,28 @@ func (_m *RootCoord) DropDatabase(_a0 context.Context, _a1 *milvuspb.DropDatabas
 	return r0, r1
 }
 
+func (_m *RootCoord) LockCollection(ctx context.Context, req *rootcoordpb.LockCollectionRequest) (*rootcoordpb.LockCollectionResponse, error) {
+	return &rootcoordpb.LockCollectionResponse{
+		Status: &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_Success,
+			Reason:    "",
+		}}, nil
+}
+
+func (_m *RootCoord) UnlockCollection(ctx context.Context, req *rootcoordpb.UnlockCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
+func (_m *RootCoord) SwitchCollection(ctx context.Context, req *rootcoordpb.SwitchCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{
+		ErrorCode: commonpb.ErrorCode_Success,
+		Reason:    "",
+	}, nil
+}
+
 // RootCoord_DropDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropDatabase'
 type RootCoord_DropDatabase_Call struct {
 	*mock.Call

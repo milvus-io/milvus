@@ -715,6 +715,18 @@ func (c *Client) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, o
 	return resp, err
 }
 
+func (c *Client) LockIndexes(ctx context.Context, req *indexpb.LockIndexesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
+		return client.LockIndexes(ctx, req)
+	})
+}
+
+func (c *Client) UnlockIndexes(ctx context.Context, req *indexpb.UnlockIndexesRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
+		return client.UnlockIndexes(ctx, req)
+	})
+}
+
 func (c *Client) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
 		return client.ReportDataNodeTtMsgs(ctx, req)

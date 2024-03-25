@@ -56,6 +56,7 @@ type meta struct {
 	channelCPs   *channelCPs                  // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
+	lockedCollIDs map[typeutil.UniqueID]time.Time
 	indexMeta *indexMeta
 }
 
@@ -101,6 +102,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		channelCPs:   newChannelCps(),
 		indexMeta:    indexMeta,
 		chunkManager: chunkManager,
+		lockedCollIDs:        make(map[UniqueID]time.Time),
 	}
 	err = mt.reloadFromKV()
 	if err != nil {

@@ -67,6 +67,10 @@ func (t *dropCollectionTask) Execute(ctx context.Context) error {
 		return err
 	}
 
+	if t.core.meta.IsCollectionLocked(ctx, collMeta.CollectionID, typeutil.MaxTimestamp) {
+		return fmt.Errorf("collection %s is locked", t.Req.GetCollectionName())
+	}
+
 	// meta cache of all aliases should also be cleaned.
 	aliases := t.core.meta.ListAliasesByID(collMeta.CollectionID)
 

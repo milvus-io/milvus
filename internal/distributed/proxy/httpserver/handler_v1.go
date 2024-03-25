@@ -163,6 +163,7 @@ func (h *HandlersV1) RegisterRoutesToV1(router gin.IRouter) {
 	router.GET(VectorCollectionsPath, h.listCollections)
 	router.POST(VectorCollectionsCreatePath, h.createCollection)
 	router.GET(VectorCollectionsDescribePath, h.getCollectionDetails)
+	router.POST(VectorCollectionsTruncatePath, h.truncateCollection)
 	router.POST(VectorCollectionsDropPath, h.dropCollection)
 	router.POST(VectorQueryPath, h.query)
 	router.POST(VectorGetPath, h.get)
@@ -946,5 +947,58 @@ func (h *HandlersV1) search(c *gin.Context) {
 				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
 			}
 		}
+	}
+}
+
+func (h *HandlersV1) truncateCollection(c *gin.Context) {
+	httpReq := DropCollectionReq{
+		DbName: DefaultDbName,
+	}
+	if err := c.ShouldBindWith(&httpReq, binding.JSON); err != nil {
+		log.Warn("high level restful api, the parameter of drop collection is incorrect", zap.Any("request", httpReq), zap.Error(err))
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
+			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
+		})
+		return
+	}
+	if httpReq.CollectionName == "" {
+		log.Warn("high level restful api, drop collection require parameter: [collectionName], but miss")
+		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
+			HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", required parameters: [collectionName]",
+		})
+		return
+	}
+	req := &milvuspb.DropCollectionRequest{
+		DbName:         httpReq.DbName,
+		CollectionName: httpReq.CollectionName,
+	}
+	username, _ := c.Get(ContextUsername)
+	ctx := proxy.NewContextWithMetadata(c, username.(string), req.DbName)
+	response, err := h.executeRestRequestInterceptor(ctx, c, req, func(reqCtx context.Context, req any) (any, error) {
+		has, err := h.hasCollection(ctx, c, httpReq.DbName, httpReq.CollectionName)
+		if err != nil {
+			return nil, RestRequestInterceptorErr
+		}
+		if !has {
+			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPReturnCode:    merr.Code(merr.ErrCollectionNotFound),
+				HTTPReturnMessage: merr.ErrCollectionNotFound.Error() + ", database: " + httpReq.DbName + ", collection: " + httpReq.CollectionName,
+			})
+			return nil, RestRequestInterceptorErr
+		}
+		return h.proxy.TruncateCollection(reqCtx, req.(*milvuspb.DropCollectionRequest))
+	})
+	if err == RestRequestInterceptorErr {
+		return
+	}
+	if err == nil {
+		err = merr.Error(response.(*commonpb.Status))
+	}
+	if err != nil {
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+	} else {
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
 	}
 }

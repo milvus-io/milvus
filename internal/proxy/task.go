@@ -1515,8 +1515,11 @@ func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
 
 	collName := t.CollectionName
 
-	if err := validateCollectionName(collName); err != nil {
-		return err
+	if t.Base.SourceID != paramtable.GetNodeID() {
+		t.Base.SourceID = paramtable.GetNodeID()
+		if err := validateCollectionName(collName); err != nil {
+			return err
+		}
 	}
 
 	// To compat with LoadCollcetion before Milvus@2.1
