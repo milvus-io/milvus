@@ -150,10 +150,11 @@ func (s *DelegatorDataSuite) SetupTest() {
 	s.delegator = sd
 }
 
-func (s *DelegatorDataSuite) TestProcessInsert() {
+func (s *DelegatorDataSuite) TestProcessDataInsert() {
 	s.Run("normal_insert", func() {
-		s.delegator.ProcessInsert(map[int64]*InsertData{
-			100: {
+		err := s.delegator.ProcessData(context.Background(), []*InsertData{
+			{
+				SegmentID:     100,
 				RowIDs:        []int64{0, 1},
 				PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
 				Timestamps:    []uint64{10, 10},
@@ -192,42 +193,42 @@ func (s *DelegatorDataSuite) TestProcessInsert() {
 					NumRows: 2,
 				},
 			},
-		})
-
+		}, nil, 5, 15)
+		s.NoError(err)
 		s.NotNil(s.manager.Segment.GetGrowing(100))
 	})
 
 	s.Run("insert_bad_data", func() {
-		s.Panics(func() {
-			s.delegator.ProcessInsert(map[int64]*InsertData{
-				100: {
-					RowIDs:        []int64{0, 1},
-					PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
-					Timestamps:    []uint64{10, 10},
-					PartitionID:   500,
-					StartPosition: &msgpb.MsgPosition{},
-					InsertRecord: &segcorepb.InsertRecord{
-						FieldsData: []*schemapb.FieldData{
-							{
-								Type:      schemapb.DataType_Int64,
-								FieldName: "id",
-								Field: &schemapb.FieldData_Scalars{
-									Scalars: &schemapb.ScalarField{
-										Data: &schemapb.ScalarField_LongData{
-											LongData: &schemapb.LongArray{
-												Data: []int64{1, 2},
-											},
+		err := s.delegator.ProcessData(context.Background(), []*InsertData{
+			{
+				SegmentID:     100,
+				RowIDs:        []int64{0, 1},
+				PrimaryKeys:   []storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)},
+				Timestamps:    []uint64{10, 10},
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{},
+				InsertRecord: &segcorepb.InsertRecord{
+					FieldsData: []*schemapb.FieldData{
+						{
+							Type:      schemapb.DataType_Int64,
+							FieldName: "id",
+							Field: &schemapb.FieldData_Scalars{
+								Scalars: &schemapb.ScalarField{
+									Data: &schemapb.ScalarField_LongData{
+										LongData: &schemapb.LongArray{
+											Data: []int64{1, 2},
 										},
 									},
 								},
-								FieldId: 100,
 							},
+							FieldId: 100,
 						},
-						NumRows: 2,
 					},
+					NumRows: 2,
 				},
-			})
-		})
+			},
+		}, nil, 5, 15)
+		s.Error(err)
 	})
 }
 
@@ -307,14 +308,14 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	})
 	s.Require().NoError(err)
 
-	s.delegator.ProcessDelete([]*DeleteData{
+	s.delegator.ProcessData(ctx, nil, []*DeleteData{
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
 			Timestamps:  []uint64{10},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 5, 10)
 
 	// load sealed
 	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
@@ -333,40 +334,40 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	})
 	s.Require().NoError(err)
 
-	s.delegator.ProcessDelete([]*DeleteData{
+	s.delegator.ProcessData(ctx, nil, []*DeleteData{
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
 			Timestamps:  []uint64{10},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 5, 10)
 	s.True(s.delegator.distribution.Serviceable())
 
 	// test worker return segment not loaded
 	worker1.ExpectedCalls = nil
 	worker1.EXPECT().Delete(mock.Anything, mock.Anything).Return(merr.ErrSegmentNotLoaded)
-	s.delegator.ProcessDelete([]*DeleteData{
+	s.delegator.ProcessData(ctx, nil, []*DeleteData{
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
 			Timestamps:  []uint64{10},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 5, 10)
 	s.True(s.delegator.distribution.Serviceable(), "segment not loaded shall not trigger offline")
 
 	// test worker offline
 	worker1.ExpectedCalls = nil
 	worker1.EXPECT().Delete(mock.Anything, mock.Anything).Return(merr.ErrNodeNotFound)
-	s.delegator.ProcessDelete([]*DeleteData{
+	s.delegator.ProcessData(ctx, nil, []*DeleteData{
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
 			Timestamps:  []uint64{10},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 5, 10)
 
 	s.False(s.delegator.distribution.Serviceable())
 
@@ -393,14 +394,14 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	// Test normal errors with retry and fail
 	worker1.ExpectedCalls = nil
 	worker1.EXPECT().Delete(mock.Anything, mock.Anything).Return(merr.ErrSegcore)
-	s.delegator.ProcessDelete([]*DeleteData{
+	s.delegator.ProcessData(ctx, nil, []*DeleteData{
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
 			Timestamps:  []uint64{10},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 5, 10)
 	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
 
 	// refresh
@@ -426,14 +427,14 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	s.True(s.delegator.distribution.Serviceable())
 
 	s.delegator.Close()
-	s.delegator.ProcessDelete([]*DeleteData{
+	s.delegator.ProcessData(ctx, nil, []*DeleteData{
 		{
 			PartitionID: 500,
 			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
 			Timestamps:  []uint64{10},
 			RowCount:    1,
 		},
-	}, 10)
+	}, 5, 10)
 	s.Require().NoError(err)
 	s.False(s.delegator.distribution.Serviceable())
 }
@@ -530,7 +531,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			return workers[nodeID]
 		}, nil)
 
-		s.delegator.ProcessDelete([]*DeleteData{
+		s.delegator.ProcessDelete(context.Background(), nil, []*DeleteData{
 			{
 				PartitionID: 500,
 				PrimaryKeys: []storage.PrimaryKey{
@@ -686,7 +687,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 			return workers[nodeID]
 		}, nil)
 
-		s.delegator.ProcessDelete([]*DeleteData{
+		s.delegator.ProcessDelete(context.Background(), nil, []*DeleteData{
 			{
 				PartitionID: 500,
 				PrimaryKeys: []storage.PrimaryKey{

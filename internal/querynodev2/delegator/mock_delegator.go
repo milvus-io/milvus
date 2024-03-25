@@ -395,69 +395,48 @@ func (_c *MockShardDelegator_LoadSegments_Call) RunAndReturn(run func(context.Co
 	return _c
 }
 
-// ProcessDelete provides a mock function with given fields: deleteData, ts
-func (_m *MockShardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
-	_m.Called(deleteData, ts)
+// ProcessData provides a mock function with given fields: ctx, insertData, deleteData, tsFrom, tsTo
+func (_m *MockShardDelegator) ProcessData(ctx context.Context, insertData []*InsertData, deleteData []*DeleteData, tsFrom uint64, tsTo uint64) error {
+	ret := _m.Called(ctx, insertData, deleteData, tsFrom, tsTo)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*InsertData, []*DeleteData, uint64, uint64) error); ok {
+		r0 = rf(ctx, insertData, deleteData, tsFrom, tsTo)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
 }
 
-// MockShardDelegator_ProcessDelete_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ProcessDelete'
-type MockShardDelegator_ProcessDelete_Call struct {
+// MockShardDelegator_ProcessData_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ProcessData'
+type MockShardDelegator_ProcessData_Call struct {
 	*mock.Call
 }
 
-// ProcessDelete is a helper method to define mock.On call
+// ProcessData is a helper method to define mock.On call
+//   - ctx context.Context
+//   - insertData []*InsertData
 //   - deleteData []*DeleteData
-//   - ts uint64
-func (_e *MockShardDelegator_Expecter) ProcessDelete(deleteData interface{}, ts interface{}) *MockShardDelegator_ProcessDelete_Call {
-	return &MockShardDelegator_ProcessDelete_Call{Call: _e.mock.On("ProcessDelete", deleteData, ts)}
+//   - tsFrom uint64
+//   - tsTo uint64
+func (_e *MockShardDelegator_Expecter) ProcessData(ctx interface{}, insertData interface{}, deleteData interface{}, tsFrom interface{}, tsTo interface{}) *MockShardDelegator_ProcessData_Call {
+	return &MockShardDelegator_ProcessData_Call{Call: _e.mock.On("ProcessData", ctx, insertData, deleteData, tsFrom, tsTo)}
 }
 
-func (_c *MockShardDelegator_ProcessDelete_Call) Run(run func(deleteData []*DeleteData, ts uint64)) *MockShardDelegator_ProcessDelete_Call {
+func (_c *MockShardDelegator_ProcessData_Call) Run(run func(ctx context.Context, insertData []*InsertData, deleteData []*DeleteData, tsFrom uint64, tsTo uint64)) *MockShardDelegator_ProcessData_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].([]*DeleteData), args[1].(uint64))
+		run(args[0].(context.Context), args[1].([]*InsertData), args[2].([]*DeleteData), args[3].(uint64), args[4].(uint64))
 	})
 	return _c
 }
 
-func (_c *MockShardDelegator_ProcessDelete_Call) Return() *MockShardDelegator_ProcessDelete_Call {
-	_c.Call.Return()
+func (_c *MockShardDelegator_ProcessData_Call) Return(_a0 error) *MockShardDelegator_ProcessData_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockShardDelegator_ProcessDelete_Call) RunAndReturn(run func([]*DeleteData, uint64)) *MockShardDelegator_ProcessDelete_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ProcessInsert provides a mock function with given fields: insertRecords
-func (_m *MockShardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
-	_m.Called(insertRecords)
-}
-
-// MockShardDelegator_ProcessInsert_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ProcessInsert'
-type MockShardDelegator_ProcessInsert_Call struct {
-	*mock.Call
-}
-
-// ProcessInsert is a helper method to define mock.On call
-//   - insertRecords map[int64]*InsertData
-func (_e *MockShardDelegator_Expecter) ProcessInsert(insertRecords interface{}) *MockShardDelegator_ProcessInsert_Call {
-	return &MockShardDelegator_ProcessInsert_Call{Call: _e.mock.On("ProcessInsert", insertRecords)}
-}
-
-func (_c *MockShardDelegator_ProcessInsert_Call) Run(run func(insertRecords map[int64]*InsertData)) *MockShardDelegator_ProcessInsert_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[int64]*InsertData))
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_ProcessInsert_Call) Return() *MockShardDelegator_ProcessInsert_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockShardDelegator_ProcessInsert_Call) RunAndReturn(run func(map[int64]*InsertData)) *MockShardDelegator_ProcessInsert_Call {
+func (_c *MockShardDelegator_ProcessData_Call) RunAndReturn(run func(context.Context, []*InsertData, []*DeleteData, uint64, uint64) error) *MockShardDelegator_ProcessData_Call {
 	_c.Call.Return(run)
 	return _c
 }

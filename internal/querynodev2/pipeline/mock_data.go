@@ -160,7 +160,7 @@ func genDefaultFiledData(numRows int) []*schemapb.FieldData {
 	}
 }
 
-func genFiledDataWithSchema(schema *schemapb.CollectionSchema, numRows int) []*schemapb.FieldData {
+func genFieldDataWithSchema(schema *schemapb.CollectionSchema, numRows int) []*schemapb.FieldData {
 	fieldsData := make([]*schemapb.FieldData, 0)
 	for _, field := range schema.Fields {
 		if field.DataType < 100 {

@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator/deletebuffer"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
@@ -55,76 +54,24 @@ import (
 
 // delegator data related part
 
-// InsertData
-type InsertData struct {
-	RowIDs        []int64
-	PrimaryKeys   []storage.PrimaryKey
-	Timestamps    []uint64
-	InsertRecord  *segcorepb.InsertRecord
-	StartPosition *msgpb.MsgPosition
-	PartitionID   int64
-}
-
-type DeleteData struct {
-	PartitionID int64
-	PrimaryKeys []storage.PrimaryKey
-	Timestamps  []uint64
-	RowCount    int64
-}
-
-// Append appends another delete data into this one.
-func (d *DeleteData) Append(ad DeleteData) {
-	d.PrimaryKeys = append(d.PrimaryKeys, ad.PrimaryKeys...)
-	d.Timestamps = append(d.Timestamps, ad.Timestamps...)
-	d.RowCount += ad.RowCount
-}
-
-// ProcessInsert handles insert data in delegator.
-func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
+func (sd *shardDelegator) ProcessData(ctx context.Context, insertData []*InsertData, deleteData []*DeleteData, tsFrom, tsTo uint64) error {
+	// process insert data
 	method := "ProcessInsert"
 	tr := timerecord.NewTimeRecorder(method)
-	log := sd.getLogger(context.Background())
-	for segmentID, insertData := range insertRecords {
-		growing := sd.segmentManager.GetGrowing(segmentID)
-		if growing == nil {
-			var err error
-			// TODO: It's a wired implementation that growing segment have load info.
-			// we should separate the growing segment and sealed segment by type system.
-			growing, err = segments.NewSegment(
-				context.Background(),
-				sd.collection,
-				segments.SegmentTypeGrowing,
-				0,
-				&querypb.SegmentLoadInfo{
-					SegmentID:     segmentID,
-					PartitionID:   insertData.PartitionID,
-					CollectionID:  sd.collectionID,
-					InsertChannel: sd.vchannelName,
-					StartPosition: insertData.StartPosition,
-					DeltaPosition: insertData.StartPosition,
-					Level:         datapb.SegmentLevel_L1,
-				},
-			)
-			if err != nil {
-				log.Error("failed to create new segment",
-					zap.Int64("segmentID", segmentID),
-					zap.Error(err))
-				panic(err)
-			}
-		}
-
-		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
+	growings := make(map[int]segments.Segment)
+	for idx, batch := range insertData {
+		growing := sd.getGrowing(batch.SegmentID, batch.PartitionID, &msgpb.MsgPosition{
+			ChannelName: sd.vchannelName,
+			Timestamp:   tsFrom,
+		})
+		growings[idx] = growing
+		err := growing.Insert(ctx, batch.RowIDs, batch.Timestamps, batch.InsertRecord)
 		if err != nil {
-			log.Error("failed to insert data into growing segment",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
-			)
 			if errors.IsAny(err, merr.ErrSegmentNotLoaded, merr.ErrSegmentNotFound) {
 				log.Warn("try to insert data into released segment, skip it", zap.Error(err))
 				continue
 			}
-			// panic here, insert failure
-			panic(err)
+			return err
 		}
 		metrics.QueryNodeNumEntities.WithLabelValues(
 			fmt.Sprint(paramtable.GetNodeID()),
@@ -132,37 +79,74 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			fmt.Sprint(growing.Partition()),
 			growing.Type().String(),
 			"0",
-		).Add(float64(len(insertData.RowIDs)))
-		growing.UpdateBloomFilter(insertData.PrimaryKeys)
-
+		).Add(float64(len(batch.RowIDs)))
+		// add growing here only, since empty growing segment will panic serving search/query
 		if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 			// register created growing segment after insert, avoid to add empty growing to delegator
 			sd.pkOracle.Register(growing, paramtable.GetNodeID())
 			sd.segmentManager.Put(segments.SegmentTypeGrowing, growing)
 			sd.addGrowing(SegmentEntry{
 				NodeID:        paramtable.GetNodeID(),
-				SegmentID:     segmentID,
-				PartitionID:   insertData.PartitionID,
+				SegmentID:     batch.SegmentID,
+				PartitionID:   batch.PartitionID,
 				Version:       0,
 				TargetVersion: initialTargetVersion,
 			})
 		}
-
-		log.Debug("insert into growing segment",
-			zap.Int64("collectionID", growing.Collection()),
-			zap.Int64("segmentID", segmentID),
-			zap.Int("rowCount", len(insertData.RowIDs)),
-			zap.Uint64("maxTimestamp", insertData.Timestamps[len(insertData.Timestamps)-1]),
-		)
 	}
 	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
 		Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	// process delete
+	if len(deleteData) > 0 {
+		sd.ProcessDelete(ctx, insertData, deleteData, tsTo)
+	}
+
+	// update bloom filters
+	for idx, batch := range insertData {
+		growing := growings[idx]
+		growing.UpdateBloomFilter(batch.PrimaryKeys)
+	}
+
+	return nil
+}
+
+func (sd *shardDelegator) getGrowing(segmentID int64, partitionID int64, startPosition *msgpb.MsgPosition) segments.Segment {
+	growing := sd.segmentManager.GetGrowing(segmentID)
+	if growing == nil {
+		var err error
+		// TODO: It's a wired implementation that growing segment have load info.
+		// we should separate the growing segment and sealed segment by type system.
+		growing, err = segments.NewSegment(
+			context.Background(),
+			sd.collection,
+			segments.SegmentTypeGrowing,
+			0,
+			&querypb.SegmentLoadInfo{
+				SegmentID:     segmentID,
+				PartitionID:   partitionID,
+				CollectionID:  sd.collectionID,
+				InsertChannel: sd.vchannelName,
+				StartPosition: startPosition,
+				DeltaPosition: startPosition,
+				Level:         datapb.SegmentLevel_L1,
+			},
+		)
+		if err != nil {
+			log.Error("failed to create new segment",
+				zap.Int64("segmentID", segmentID),
+				zap.Error(err))
+			panic(err)
+		}
+	}
+
+	return growing
 }
 
 // ProcessDelete handles delete data in delegator.
 // delegator puts deleteData into buffer first,
 // then dispatch data to segments acoording to the result of pkOracle.
-func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
+func (sd *shardDelegator) ProcessDelete(ctx context.Context, batches []*InsertData, deleteData []*DeleteData, ts uint64) {
 	method := "ProcessDelete"
 	tr := timerecord.NewTimeRecorder(method)
 	// block load segment handle delete buffer
@@ -199,6 +183,22 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 				log.Warn("failed to get delete candidates for pk", zap.Any("pk", pk.GetValue()))
 				continue
 			}
+
+			var batchIDs []int64
+			for _, batch := range batches {
+				if data.PartitionID == common.AllPartitionsID || data.PartitionID == batch.PartitionID {
+					ts := data.Timestamps[i]
+					if batch.PkExist(pk, ts) {
+						batchIDs = append(batchIDs, batch.SegmentID)
+					}
+				}
+			}
+			if len(batchIDs) > 0 {
+				set := typeutil.NewSet(segmentIDs...)
+				set.Insert(batchIDs...)
+				segmentIDs = set.Collect()
+			}
+
 			for _, segmentID := range segmentIDs {
 				delRecord := delRecords[segmentID]
 				delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pk)
