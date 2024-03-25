@@ -1,27 +1,30 @@
-// Copyright (C) 2019-2023 Zilliz. All rights reserved.
-//
-// Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-// http://www.apache.org/licenses/LICENSE-2.0
+//     http://www.apache.org/licenses/LICENSE-2.0
 //
-// Unless required by applicable law or agreed to in writing, software distributed under the License
-// is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
-// or implied. See the License for the specific language governing permissions and limitations under the License.
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
 
 #pragma once
 
-#include <cpuid.h>
-
 #include <array>
 #include <bitset>
-#include <cstring>
-#include <iostream>
 #include <string>
 #include <vector>
 
 namespace milvus {
-namespace simd {
+namespace bitset {
+namespace detail {
+namespace x86 {
 
 class InstructionSet {
  public:
@@ -32,83 +35,7 @@ class InstructionSet {
     }
 
  private:
-    InstructionSet()
-        : nIds_{0},
-          nExIds_{0},
-          isIntel_{false},
-          isAMD_{false},
-          f_1_ECX_{0},
-          f_1_EDX_{0},
-          f_7_EBX_{0},
-          f_7_ECX_{0},
-          f_81_ECX_{0},
-          f_81_EDX_{0},
-          data_{},
-          extdata_{} {
-        std::array<int, 4> cpui;
-
-        // Calling __cpuid with 0x0 as the function_id argument
-        // gets the number of the highest valid function ID.
-        __cpuid(0, cpui[0], cpui[1], cpui[2], cpui[3]);
-        nIds_ = cpui[0];
-
-        for (int i = 0; i <= nIds_; ++i) {
-            __cpuid_count(i, 0, cpui[0], cpui[1], cpui[2], cpui[3]);
-            data_.push_back(cpui);
-        }
-
-        // Capture vendor string
-        char vendor[0x20];
-        memset(vendor, 0, sizeof(vendor));
-        *reinterpret_cast<int*>(vendor) = data_[0][1];
-        *reinterpret_cast<int*>(vendor + 4) = data_[0][3];
-        *reinterpret_cast<int*>(vendor + 8) = data_[0][2];
-        vendor_ = vendor;
-        if (vendor_ == "GenuineIntel") {
-            isIntel_ = true;
-        } else if (vendor_ == "AuthenticAMD") {
-            isAMD_ = true;
-        }
-
-        // load bitset with flags for function 0x00000001
-        if (nIds_ >= 1) {
-            f_1_ECX_ = data_[1][2];
-            f_1_EDX_ = data_[1][3];
-        }
-
-        // load bitset with flags for function 0x00000007
-        if (nIds_ >= 7) {
-            f_7_EBX_ = data_[7][1];
-            f_7_ECX_ = data_[7][2];
-        }
-
-        // Calling __cpuid with 0x80000000 as the function_id argument
-        // gets the number of the highest valid extended ID.
-        __cpuid(0x80000000, cpui[0], cpui[1], cpui[2], cpui[3]);
-        nExIds_ = cpui[0];
-
-        char brand[0x40];
-        memset(brand, 0, sizeof(brand));
-
-        for (int i = 0x80000000; i <= nExIds_; ++i) {
-            __cpuid_count(i, 0, cpui[0], cpui[1], cpui[2], cpui[3]);
-            extdata_.push_back(cpui);
-        }
-
-        // load bitset with flags for function 0x80000001
-        if (nExIds_ >= (int)0x80000001) {
-            f_81_ECX_ = extdata_[1][2];
-            f_81_EDX_ = extdata_[1][3];
-        }
-
-        // Interpret CPU brand string if reported
-        if (nExIds_ >= (int)0x80000004) {
-            memcpy(brand, extdata_[2].data(), sizeof(cpui));
-            memcpy(brand + 16, extdata_[3].data(), sizeof(cpui));
-            memcpy(brand + 32, extdata_[4].data(), sizeof(cpui));
-            brand_ = brand;
-        }
-    };
+    InstructionSet();
 
  public:
     // getters
@@ -348,21 +275,32 @@ class InstructionSet {
     }
 
  private:
-    int nIds_;
-    int nExIds_;
+    int nIds_ = 0;
+    int nExIds_ = 0;
     std::string vendor_;
     std::string brand_;
-    bool isIntel_;
-    bool isAMD_;
-    std::bitset<32> f_1_ECX_;
-    std::bitset<32> f_1_EDX_;
-    std::bitset<32> f_7_EBX_;
-    std::bitset<32> f_7_ECX_;
-    std::bitset<32> f_81_ECX_;
-    std::bitset<32> f_81_EDX_;
+    bool isIntel_ = false;
+    bool isAMD_ = false;
+    std::bitset<32> f_1_ECX_ = {0};
+    std::bitset<32> f_1_EDX_ = {0};
+    std::bitset<32> f_7_EBX_ = {0};
+    std::bitset<32> f_7_ECX_ = {0};
+    std::bitset<32> f_81_ECX_ = {0};
+    std::bitset<32> f_81_EDX_ = {0};
     std::vector<std::array<int, 4>> data_;
     std::vector<std::array<int, 4>> extdata_;
 };
-}  // namespace simd
 
+bool
+cpu_support_avx512();
+bool
+cpu_support_avx2();
+bool
+cpu_support_sse4_2();
+bool
+cpu_support_sse2();
+
+}  // namespace x86
+}  // namespace detail
+}  // namespace bitset
 }  // namespace milvus

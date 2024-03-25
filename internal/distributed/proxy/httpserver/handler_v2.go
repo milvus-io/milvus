@@ -1821,25 +1821,34 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
 		returnData["collectionName"] = response.GetCollectionName()
+		returnData["completeTime"] = response.GetCompleteTime()
 		returnData["state"] = response.GetState().String()
 		returnData["progress"] = response.GetProgress()
+		returnData["importedRows"] = response.GetImportedRows()
+		returnData["totalRows"] = response.GetTotalRows()
 		reason := response.GetReason()
 		if reason != "" {
 			returnData["reason"] = reason
 		}
 		details := make([]map[string]interface{}, 0)
+		totalFileSize := int64(0)
 		for _, taskProgress := range response.GetTaskProgresses() {
 			detail := make(map[string]interface{})
 			detail["fileName"] = taskProgress.GetFileName()
 			detail["fileSize"] = taskProgress.GetFileSize()
 			detail["progress"] = taskProgress.GetProgress()
 			detail["completeTime"] = taskProgress.GetCompleteTime()
+			detail["state"] = taskProgress.GetState()
+			detail["importedRows"] = taskProgress.GetImportedRows()
+			detail["totalRows"] = taskProgress.GetTotalRows()
 			reason = taskProgress.GetReason()
 			if reason != "" {
 				detail["reason"] = reason
 			}
 			details = append(details, detail)
+			totalFileSize += taskProgress.GetFileSize()
 		}
+		returnData["fileSize"] = totalFileSize
 		returnData["details"] = details
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}

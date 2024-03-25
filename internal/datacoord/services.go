@@ -1697,6 +1697,7 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 			State:          internalpb.ImportJobState_Pending,
 			Files:          files,
 			Options:        in.GetOptions(),
+			StartTime:      time.Now().Format("2006-01-02T15:04:05Z07:00"),
 		},
 	}
 	err = s.importMeta.AddJob(job)
@@ -1727,12 +1728,15 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		return resp, nil
 	}
 	job := s.importMeta.GetJob(jobID)
-	progress, state, reason := GetJobProgress(jobID, s.importMeta, s.meta)
+	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
 	resp.Progress = progress
 	resp.CollectionName = job.GetCollectionName()
+	resp.StartTime = job.GetStartTime()
 	resp.CompleteTime = job.GetCompleteTime()
+	resp.ImportedRows = importedRows
+	resp.TotalRows = totalRows
 	resp.TaskProgresses = GetTaskProgresses(jobID, s.importMeta, s.meta)
 	log.Info("GetImportProgress done", zap.Any("resp", resp))
 	return resp, nil
@@ -1761,7 +1765,7 @@ func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 	}
 
 	for _, job := range jobs {
-		progress, state, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta)
+		progress, state, _, _, reason := GetJobProgress(job.GetJobID(), s.importMeta, s.meta)
 		resp.JobIDs = append(resp.JobIDs, fmt.Sprintf("%d", job.GetJobID()))
 		resp.States = append(resp.States, state)
 		resp.Reasons = append(resp.Reasons, reason)

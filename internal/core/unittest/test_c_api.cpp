@@ -4696,41 +4696,41 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
 }
 
 TEST(CApiTest, AssembeChunkTest) {
-    FixedVector<bool> chunk;
+    TargetBitmap chunk(1000);
     for (size_t i = 0; i < 1000; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     BitsetType result;
     milvus::query::AppendOneChunk(result, chunk);
-    std::string s;
-    boost::to_string(result, s);
-    std::cout << s << std::endl;
+    //    std::string s;
+    //    boost::to_string(result, s);
+    //    std::cout << s << std::endl;
     int index = 0;
     for (size_t i = 0; i < 1000; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 
-    chunk.clear();
+    chunk = TargetBitmap(934);
     for (int i = 0; i < 934; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     milvus::query::AppendOneChunk(result, chunk);
     for (size_t i = 0; i < 934; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 
-    chunk.clear();
+    chunk = TargetBitmap(62);
     for (int i = 0; i < 62; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     milvus::query::AppendOneChunk(result, chunk);
     for (size_t i = 0; i < 62; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 
-    chunk.clear();
+    chunk = TargetBitmap(105);
     for (int i = 0; i < 105; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     milvus::query::AppendOneChunk(result, chunk);
     for (size_t i = 0; i < 105; i++) {
@@ -4745,16 +4745,17 @@ search_id(const BitsetType& bitset,
           bool use_find) {
     std::vector<SegOffset> dst_offset;
     if (use_find) {
-        for (int i = bitset.find_first(); i < bitset.size();
-             i = bitset.find_next(i)) {
-            if (i == BitsetType::npos) {
-                return dst_offset;
-            }
-            auto offset = SegOffset(i);
+        auto i = bitset.find_first();
+        while (i.has_value()) {
+            auto offset = SegOffset(i.value());
             if (timestamps[offset.get()] <= timestamp) {
                 dst_offset.push_back(offset);
             }
+
+            i = bitset.find_next(i.value());
         }
+
+        return dst_offset;
     } else {
         for (int i = 0; i < bitset.size(); i++) {
             if (bitset[i]) {
@@ -4769,7 +4770,7 @@ search_id(const BitsetType& bitset,
 }
 
 TEST(CApiTest, SearchIdTest) {
-    using BitsetType = boost::dynamic_bitset<>;
+    //    using BitsetType = boost::dynamic_bitset<>;
 
     auto test = [&](int NT) {
         BitsetType bitset(1000000);
@@ -4819,9 +4820,9 @@ TEST(CApiTest, SearchIdTest) {
 }
 
 TEST(CApiTest, AssembeChunkPerfTest) {
-    FixedVector<bool> chunk;
+    TargetBitmap chunk(100000000);
     for (size_t i = 0; i < 100000000; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     BitsetType result;
     // while (true) {

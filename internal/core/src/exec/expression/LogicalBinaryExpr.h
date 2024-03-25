@@ -23,7 +23,6 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
-#include "simd/hook.h"
 
 namespace milvus {
 namespace exec {
@@ -33,16 +32,9 @@ enum class LogicalOpType { Invalid = 0, And = 1, Or = 2, Xor = 3, Minus = 4 };
 template <LogicalOpType op>
 struct LogicalElementFunc {
     void
-    operator()(bool* left, bool* right, int n) {
-#if defined(USE_DYNAMIC_SIMD)
-        if constexpr (op == LogicalOpType::And) {
-            milvus::simd::and_bool(left, right, n);
-        } else if constexpr (op == LogicalOpType::Or) {
-            milvus::simd::or_bool(left, right, n);
-        } else {
-            PanicInfo(OpTypeInvalid, "unsupported logical operator: {}", op);
-        }
-#else
+    operator()(TargetBitmapView left, TargetBitmapView right, int n) {
+        /*
+        // This is the original code, kept here for the documentation purposes
         for (size_t i = 0; i < n; ++i) {
             if constexpr (op == LogicalOpType::And) {
                 left[i] &= right[i];
@@ -53,7 +45,19 @@ struct LogicalElementFunc {
                     OpTypeInvalid, "unsupported logical operator: {}", op);
             }
         }
-#endif
+        */
+
+        if constexpr (op == LogicalOpType::And) {
+            left.inplace_and(right, n);
+        } else if constexpr (op == LogicalOpType::Or) {
+            left.inplace_or(right, n);
+        } else if constexpr (op == LogicalOpType::Xor) {
+            left.inplace_xor(right, n);
+        } else if constexpr (op == LogicalOpType::Minus) {
+            left.inplace_sub(right, n);
+        } else {
+            PanicInfo(OpTypeInvalid, "unsupported logical operator: {}", op);
+        }
     }
 };
 

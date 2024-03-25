@@ -781,6 +781,7 @@ message ImportJob {
   string complete_time = 13;
   repeated internal.ImportFile files = 14;
   repeated common.KeyValuePair options = 15;
+  string start_time = 16;
 }
 
 enum ImportTaskStateV2 {
