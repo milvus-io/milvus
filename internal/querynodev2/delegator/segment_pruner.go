@@ -214,10 +214,23 @@ func FilterSegmentsOnScalarField(partitionStats *storage.PartitionStatsSnapshot,
 	overlap := func(min storage.ScalarFieldValue, max storage.ScalarFieldValue) bool {
 		for _, tRange := range targetRanges {
 			switch keyField.DataType {
-			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+			case schemapb.DataType_Int8:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int8)), int64(max.GetValue().(int8)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int16:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int16)), int64(max.GetValue().(int16)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int32:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int32)), int64(max.GetValue().(int32)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int64:
 				targetRange := tRange.ToIntRange()
 				statRange := exprutil.NewIntRange(min.GetValue().(int64), max.GetValue().(int64), true, true)
 				return exprutil.IntRangeOverlap(targetRange, statRange)
+			// todo: add float/double pruner
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
 				targetRange := tRange.ToStrRange()
 				statRange := exprutil.NewStrRange(min.GetValue().(string), max.GetValue().(string), true, true)
