@@ -78,6 +78,12 @@ type Loader interface {
 
 	// LoadIndex append index for segment and remove vector binlogs.
 	LoadIndex(ctx context.Context, segment *LocalSegment, info *querypb.SegmentLoadInfo, version int64) error
+
+	LoadSegment(ctx context.Context,
+		segment *LocalSegment,
+		loadInfo *querypb.SegmentLoadInfo,
+		loadStatus LoadStatus,
+	) error
 }
 
 type LoadResource struct {
@@ -208,7 +214,7 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 		if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
 			err = loader.LoadDelta(ctx, collectionID, segment.(*LocalSegment))
 		} else {
-			err = loader.loadSegment(ctx, segment.(*LocalSegment), loadInfo)
+			err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo, LoadStatusInMemory)
 		}
 		if err != nil {
 			log.Warn("load segment failed when load data into memory",
@@ -365,9 +371,10 @@ func (loader *segmentLoaderV2) loadBloomFilter(ctx context.Context, segmentID in
 	return nil
 }
 
-func (loader *segmentLoaderV2) loadSegment(ctx context.Context,
+func (loader *segmentLoaderV2) LoadSegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
+	loadstatus LoadStatus,
 ) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
@@ -596,15 +603,20 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		debug.FreeOSMemory()
 	}()
 
+	loadStatus := LoadStatusInMemory
+	collection := loader.manager.Collection.Get(collectionID)
+	if collection == nil {
+		err := merr.WrapErrCollectionNotFound(collectionID)
+		log.Warn("failed to get collection", zap.Error(err))
+		return nil, err
+	}
+
+	if common.IsCollectionLazyLoadEnabled(collection.Schema().Properties...) {
+		loadStatus = LoadStatusMeta
+	}
+
 	for _, info := range infos {
 		loadInfo := info
-
-		collection := loader.manager.Collection.Get(collectionID)
-		if collection == nil {
-			err := merr.WrapErrCollectionNotFound(collectionID)
-			log.Warn("failed to get collection", zap.Error(err))
-			return nil, err
-		}
 
 		segment, err := NewSegment(
 			ctx,
@@ -640,7 +652,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
 			err = loader.LoadDeltaLogs(ctx, segment, loadInfo.GetDeltalogs())
 		} else {
-			err = loader.loadSegment(ctx, segment.(*LocalSegment), loadInfo)
+			err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo, loadStatus)
 		}
 		if err != nil {
 			log.Warn("load segment failed when load data into memory",
@@ -913,9 +925,88 @@ func (loader *segmentLoader) LoadBloomFilterSet(ctx context.Context, collectionI
 	return loadedBfs.Collect(), nil
 }
 
-func (loader *segmentLoader) loadSegment(ctx context.Context,
+func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*IndexedFieldInfo, []*datapb.FieldBinlog) {
+	fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
+	for _, indexInfo := range loadInfo.IndexInfos {
+		if len(indexInfo.GetIndexFilePaths()) > 0 {
+			fieldID := indexInfo.FieldID
+			fieldID2IndexInfo[fieldID] = indexInfo
+		}
+	}
+
+	indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
+	fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(loadInfo.BinlogPaths))
+
+	for _, fieldBinlog := range loadInfo.BinlogPaths {
+		fieldID := fieldBinlog.FieldID
+		// check num rows of data meta and index meta are consistent
+		if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
+			fieldInfo := &IndexedFieldInfo{
+				FieldBinlog: fieldBinlog,
+				IndexInfo:   indexInfo,
+			}
+			indexedFieldInfos[fieldID] = fieldInfo
+		} else {
+			fieldBinlogs = append(fieldBinlogs, fieldBinlog)
+		}
+	}
+
+	return indexedFieldInfos, fieldBinlogs
+}
+
+func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment, collection *Collection, loadStatus LoadStatus) error {
+	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
+	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
+
+	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
+		return err
+	}
+
+	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
+	log.Info("load fields...",
+		zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
+	)
+	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos, WithLoadStatus(loadStatus)); err != nil {
+		return err
+	}
+	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	for fieldID, info := range indexedFieldInfos {
+		field, err := schemaHelper.GetFieldFromID(fieldID)
+		if err != nil {
+			return err
+		}
+		if !typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID) {
+			log.Info("field index doesn't include raw data, load binlog...",
+				zap.Int64("fieldID", fieldID),
+				zap.String("index", info.IndexInfo.GetIndexName()),
+			)
+			status := loadStatus
+			if status != LoadStatusMeta {
+				status = LoadStatusMapped
+			}
+			// for scalar index's raw data, only load to mmap not memory
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, WithLoadStatus(status)); err != nil {
+				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
+				return err
+			}
+		}
+	}
+	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
+		return err
+	}
+	// https://github.com/milvus-io/milvus/23654
+	// legacy entry num = 0
+	if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
+	loadStatus LoadStatus,
 ) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
@@ -940,75 +1031,10 @@ func (loader *segmentLoader) loadSegment(ctx context.Context,
 	defer debug.FreeOSMemory()
 
 	if segment.Type() == SegmentTypeSealed {
-		loadStatus := LoadStatusInMemory
-		if common.IsCollectionLazyLoadEnabled(collection.Schema().GetProperties()...) {
+		if loadStatus == LoadStatusMeta {
 			segment.baseSegment.loadInfo = loadInfo
-			loadStatus = LoadStatusMeta
 		}
-
-		fieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
-		for _, indexInfo := range loadInfo.IndexInfos {
-			if len(indexInfo.GetIndexFilePaths()) > 0 {
-				fieldID := indexInfo.FieldID
-				fieldID2IndexInfo[fieldID] = indexInfo
-			}
-		}
-
-		indexedFieldInfos := make(map[int64]*IndexedFieldInfo)
-		fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(loadInfo.BinlogPaths))
-
-		for _, fieldBinlog := range loadInfo.BinlogPaths {
-			fieldID := fieldBinlog.FieldID
-			// check num rows of data meta and index meta are consistent
-			if indexInfo, ok := fieldID2IndexInfo[fieldID]; ok {
-				fieldInfo := &IndexedFieldInfo{
-					FieldBinlog: fieldBinlog,
-					IndexInfo:   indexInfo,
-				}
-				indexedFieldInfos[fieldID] = fieldInfo
-			} else {
-				fieldBinlogs = append(fieldBinlogs, fieldBinlog)
-			}
-		}
-
-		schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-
-		if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
-			return err
-		}
-
-		tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
-		log.Info("load fields...",
-			zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
-		)
-		if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
-			return err
-		}
-		metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-		for fieldID, info := range indexedFieldInfos {
-			field, err := schemaHelper.GetFieldFromID(fieldID)
-			if err != nil {
-				return err
-			}
-			if !typeutil.IsVectorType(field.GetDataType()) && !segment.HasRawData(fieldID) {
-				log.Info("field index doesn't include raw data, load binlog...",
-					zap.Int64("fieldID", fieldID),
-					zap.String("index", info.IndexInfo.GetIndexName()),
-				)
-				// for scalar index's raw data, only load to mmap not memory
-				if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, WithLoadStatus(LoadStatusMapped)); err != nil {
-					log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
-					return err
-				}
-			}
-		}
-		if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows(), WithLoadStatus(loadStatus)); err != nil {
-			return err
-		}
-		// https://github.com/milvus-io/milvus/23654
-		// legacy entry num = 0
-		if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {
+		if err := loader.loadSealedSegment(ctx, loadInfo, segment, collection, loadStatus); err != nil {
 			return err
 		}
 	} else {
@@ -1102,6 +1128,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	segment *LocalSegment,
 	numRows int64,
 	indexedFieldInfos map[int64]*IndexedFieldInfo,
+	opts ...loadOption,
 ) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
@@ -1112,7 +1139,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 
 	for fieldID, fieldInfo := range indexedFieldInfos {
 		indexInfo := fieldInfo.IndexInfo
-		err := loader.loadFieldIndex(ctx, segment, indexInfo)
+		err := loader.loadFieldIndex(ctx, segment, indexInfo, opts...)
 		if err != nil {
 			return err
 		}
@@ -1139,7 +1166,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 	return nil
 }
 
-func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo) error {
+func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalSegment, indexInfo *querypb.FieldIndexInfo, opts ...loadOption) error {
 	filteredPaths := make([]string, 0, len(indexInfo.IndexFilePaths))
 
 	for _, indexPath := range indexInfo.IndexFilePaths {
@@ -1159,7 +1186,7 @@ func (loader *segmentLoader) loadFieldIndex(ctx context.Context, segment *LocalS
 		return merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load field index")
 	}
 
-	return segment.LoadIndex(ctx, indexInfo, fieldType)
+	return segment.LoadIndex(ctx, indexInfo, fieldType, opts...)
 }
 
 func (loader *segmentLoader) loadBloomFilter(ctx context.Context, segmentID int64, bfs *pkoracle.BloomFilterSet,

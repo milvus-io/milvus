@@ -158,6 +158,7 @@ type Manager struct {
 	Collection CollectionManager
 	Segment    SegmentManager
 	DiskCache  cache.Cache[int64, Segment]
+	Loader     Loader
 }
 
 func NewManager() *Manager {
@@ -189,7 +190,7 @@ func NewManager() *Manager {
 			if collection == nil {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
-			err := loadSealedSegmentFields(context.Background(), collection, segment.(*LocalSegment), info.BinlogPaths, info.GetNumOfRows(), WithLoadStatus(LoadStatusMapped))
+			err := manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info, LoadStatusMapped)
 			return nil, err
 		})
 		if err != nil {
@@ -203,6 +204,10 @@ func NewManager() *Manager {
 		return nil
 	}).Build()
 	return manager
+}
+
+func (mgr *Manager) SetLoader(loader Loader) {
+	mgr.Loader = loader
 }
 
 type SegmentManager interface {

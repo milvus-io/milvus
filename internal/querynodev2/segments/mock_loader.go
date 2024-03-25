@@ -261,6 +261,51 @@ func (_c *MockLoader_LoadIndex_Call) RunAndReturn(run func(context.Context, *Loc
 	return _c
 }
 
+// LoadSegment provides a mock function with given fields: ctx, segment, loadInfo, loadStatus
+func (_m *MockLoader) LoadSegment(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, loadStatus LoadStatus) error {
+	ret := _m.Called(ctx, segment, loadInfo, loadStatus)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo, LoadStatus) error); ok {
+		r0 = rf(ctx, segment, loadInfo, loadStatus)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockLoader_LoadSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadSegment'
+type MockLoader_LoadSegment_Call struct {
+	*mock.Call
+}
+
+// LoadSegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - segment *LocalSegment
+//   - loadInfo *querypb.SegmentLoadInfo
+//   - loadStatus LoadStatus
+func (_e *MockLoader_Expecter) LoadSegment(ctx interface{}, segment interface{}, loadInfo interface{}, loadStatus interface{}) *MockLoader_LoadSegment_Call {
+	return &MockLoader_LoadSegment_Call{Call: _e.mock.On("LoadSegment", ctx, segment, loadInfo, loadStatus)}
+}
+
+func (_c *MockLoader_LoadSegment_Call) Run(run func(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, loadStatus LoadStatus)) *MockLoader_LoadSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*LocalSegment), args[2].(*querypb.SegmentLoadInfo), args[3].(LoadStatus))
+	})
+	return _c
+}
+
+func (_c *MockLoader_LoadSegment_Call) Return(_a0 error) *MockLoader_LoadSegment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockLoader_LoadSegment_Call) RunAndReturn(run func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo, LoadStatus) error) *MockLoader_LoadSegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockLoader creates a new instance of MockLoader. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockLoader(t interface {

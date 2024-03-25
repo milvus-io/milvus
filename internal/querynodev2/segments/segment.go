@@ -74,6 +74,7 @@ var ErrSegmentUnhealthy = errors.New("segment unhealthy")
 type IndexedFieldInfo struct {
 	FieldBinlog *datapb.FieldBinlog
 	IndexInfo   *querypb.FieldIndexInfo
+	LazyLoad    bool
 }
 
 type baseSegment struct {
@@ -1137,9 +1138,19 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		opt(options)
 	}
 
+	if options.LoadStatus == LoadStatusMeta {
+		s.addIndex(indexInfo.GetFieldID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			LazyLoad:  true,
+		})
+		return nil
+	}
 	old := s.GetIndex(indexInfo.GetFieldID())
 	// the index loaded
-	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() {
+	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && !old.LazyLoad {
 		log.Warn("index already loaded")
 		return nil
 	}
@@ -1228,6 +1239,7 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 			FieldID: indexInfo.GetFieldID(),
 		},
 		IndexInfo: indexInfo,
+		LazyLoad:  false,
 	})
 	log.Info("updateSegmentIndex done")
 	return nil

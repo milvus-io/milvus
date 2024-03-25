@@ -354,6 +354,7 @@ func (node *QueryNode) Init() error {
 		} else {
 			node.loader = segments.NewLoader(node.manager, node.chunkManager)
 		}
+		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)
