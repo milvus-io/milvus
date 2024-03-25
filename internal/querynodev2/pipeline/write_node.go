@@ -21,6 +21,9 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -30,8 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 type writeNode struct {
