@@ -31,7 +31,15 @@ import (
 
 //go:generate mockery --name=Reader --structname=MockReader --output=./  --filename=mock_reader.go --with-expecter --inpackage
 type Reader interface {
+	// Size returns the size of the underlying file/files in bytes.
+	// It returns an error if the size cannot be determined.
+	Size() (int64, error)
+
+	// Read reads data from the underlying file/files.
+	// It returns the storage.InsertData and an error, if any.
 	Read() (*storage.InsertData, error)
+
+	// Close closes the underlying file reader.
 	Close()
 }
 
@@ -57,19 +65,11 @@ func NewReader(ctx context.Context,
 	}
 	switch fileType {
 	case JSON:
-		reader, err := cm.Reader(ctx, importFile.GetPaths()[0])
-		if err != nil {
-			return nil, WrapReadFileError(importFile.GetPaths()[0], err)
-		}
-		return json.NewReader(reader, schema, bufferSize)
+		return json.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
 	case Numpy:
 		return numpy.NewReader(ctx, schema, importFile.GetPaths(), cm, bufferSize)
 	case Parquet:
-		cmReader, err := cm.Reader(ctx, importFile.GetPaths()[0])
-		if err != nil {
-			return nil, err
-		}
-		return parquet.NewReader(ctx, schema, cmReader, bufferSize)
+		return parquet.NewReader(ctx, cm, schema, importFile.GetPaths()[0], bufferSize)
 	}
 	return nil, merr.WrapErrImportFailed("unexpected import file")
 }

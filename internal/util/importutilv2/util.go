@@ -50,10 +50,6 @@ func (f FileType) String() string {
 	return FileTypeName[int(f)]
 }
 
-func WrapReadFileError(file string, err error) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("failed to read the file '%s', error: %s", file, err.Error()))
-}
-
 func GetFileType(file *internalpb.ImportFile) (FileType, error) {
 	if len(file.GetPaths()) == 0 {
 		return Invalid, merr.WrapErrImportFailed("no file to import")
