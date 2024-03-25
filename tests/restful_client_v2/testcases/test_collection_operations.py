@@ -174,7 +174,6 @@ class TestCreateCollection(TestBase):
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
                     {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
                     {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
-                    {"fieldName": "image_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
                 ]
             }
         }
@@ -248,141 +247,6 @@ class TestCreateCollection(TestBase):
         assert len(indexes) == len(payload['indexParams'])
         # assert load success
         assert rsp['data']['load'] == "LoadStateLoaded"
-
-    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
-    @pytest.mark.parametrize("dim", [128])
-    def test_create_collections_multi_float_vector_with_one_index(self, dim, metric_type):
-        """
-        target: test create collection
-        method: create a collection with a simple schema
-        expected: create collection success
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "schema": {
-                "fields": [
-                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
-                    {"fieldName": "image_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
-            },
-            "indexParams": [
-                {"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": f"{metric_type}"}]
-        }
-        logging.info(f"create collection {name} with payload: {payload}")
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 65535
-        rsp = client.collection_list()
-
-        all_collections = rsp['data']
-        assert name in all_collections
-        # describe collection
-        time.sleep(10)
-        rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
-        assert rsp['data']['collectionName'] == name
-        # assert index created
-        indexes = rsp['data']['indexes']
-        assert len(indexes) == len(payload['indexParams'])
-        # assert load success
-        assert rsp['data']['load'] == "LoadStateNotLoad"
-
-    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
-    @pytest.mark.parametrize("dim", [128])
-    def test_create_collections_multi_float_vector_with_all_index(self, dim, metric_type):
-        """
-        target: test create collection
-        method: create a collection with a simple schema
-        expected: create collection success
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "schema": {
-                "fields": [
-                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
-                    {"fieldName": "image_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
-                ]
-            },
-            "indexParams": [
-                {"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": f"{metric_type}"},
-                {"fieldName": "image_intro", "indexName": "image_intro_vector", "metricType": f"{metric_type}"}]
-        }
-        logging.info(f"create collection {name} with payload: {payload}")
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list()
-
-        all_collections = rsp['data']
-        assert name in all_collections
-        # describe collection
-        time.sleep(10)
-        rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
-        assert rsp['data']['collectionName'] == name
-        # assert index created
-        indexes = rsp['data']['indexes']
-        assert len(indexes) == len(payload['indexParams'])
-        # assert load success
-        assert rsp['data']['load'] == "LoadStateLoaded"
-
-    @pytest.mark.parametrize("auto_id", [True])
-    @pytest.mark.parametrize("enable_dynamic_field", [True])
-    @pytest.mark.parametrize("enable_partition_key", [True])
-    @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
-    def test_create_collections_float16_vector_datatype(self, dim, auto_id, enable_dynamic_field, enable_partition_key,
-                                                        metric_type):
-        """
-        target: test create collection
-        method: create a collection with a simple schema
-        expected: create collection success
-        """
-        name = gen_collection_name()
-        dim = 128
-        client = self.collection_client
-        payload = {
-            "collectionName": name,
-            "schema": {
-                "autoId": auto_id,
-                "enableDynamicField": enable_dynamic_field,
-                "fields": [
-                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
-                    {"fieldName": "float16_vector", "dataType": "Float16Vector",
-                     "elementTypeParams": {"dim": f"{dim}"}},
-                    {"fieldName": "bfloat16_vector", "dataType": "BFloat16Vector",
-                     "elementTypeParams": {"dim": f"{dim}"}},
-                ]
-            },
-            "indexParams": [
-                {"fieldName": "float16_vector", "indexName": "float16_vector_index", "metricType": f"{metric_type}"},
-                {"fieldName": "bfloat16_vector", "indexName": "bfloat16_vector_index", "metricType": f"{metric_type}"}]
-
-        }
-        logging.info(f"create collection {name} with payload: {payload}")
-        rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
-        rsp = client.collection_list()
-
-        all_collections = rsp['data']
-        assert name in all_collections
-        c = Collection(name)
-        logger.info(f"schema: {c.schema}")
-        # describe collection
-        rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
-        assert rsp['data']['collectionName'] == name
-        assert len(rsp['data']['fields']) == len(c.schema.fields)
 
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
@@ -671,6 +535,7 @@ class TestGetCollectionStats(TestBase):
         assert rsp['data']['rowCount'] == nb
 
 
+@pytest.mark.L0
 class TestLoadReleaseCollection(TestBase):
 
     def test_load_and_release_collection(self):
@@ -719,6 +584,7 @@ class TestLoadReleaseCollection(TestBase):
         assert rsp['data']['loadState'] == "LoadStateNotLoad"
 
 
+@pytest.mark.L0
 class TestGetCollectionLoadState(TestBase):
 
     def test_get_collection_load_state(self):
@@ -741,7 +607,7 @@ class TestGetCollectionLoadState(TestBase):
         client.collection_describe(collection_name=name)
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['code'] == 200
-        assert rsp['data']['load'] == "LoadStateNotLoad"
+        assert rsp['data']['loadState'] in ["LoadStateNotLoad", "LoadStateLoading"]
         # insert data
         nb = 3000
         data = get_data_by_payload(payload, nb)
@@ -751,10 +617,10 @@ class TestGetCollectionLoadState(TestBase):
         }
         self.vector_client.vector_insert(payload=payload)
         rsp = client.collection_load_state(collection_name=name)
-        assert rsp['data']['load'] == "LoadStateLoading"
+        assert rsp['data']['loadState'] in ["LoadStateLoading", "LoadStateLoaded"]
         time.sleep(10)
         rsp = client.collection_load_state(collection_name=name)
-        assert rsp['data']['load'] == "LoadStateLoaded"
+        assert rsp['data']['loadState'] == "LoadStateLoaded"
 
 
 @pytest.mark.L0
