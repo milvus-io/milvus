@@ -18,14 +18,11 @@ RUN apt-get update && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
-COPY ./bin/ /milvus/bin/
+COPY --chown=root:root --chmod=g+rwx ./bin/ /milvus/bin/
 
-COPY ./configs/ /milvus/configs/
+COPY --chown=root:root --chmod=g+rwx ./configs/ /milvus/configs/
 
-COPY ./lib/ /milvus/lib/
-
-RUN chgrp -R root /milvus && \
-    chmod -R g+rwx /milvus
+COPY --chown=root:root --chmod=g+rwx ./lib/ /milvus/lib/
 
 ENV PATH=/milvus/bin:$PATH
 ENV LD_LIBRARY_PATH=/milvus/lib:$LD_LIBRARY_PATH:/usr/lib
