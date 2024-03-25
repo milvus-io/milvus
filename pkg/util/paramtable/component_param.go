@@ -2558,6 +2558,7 @@ type dataCoordConfig struct {
 	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
 	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
 	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
+	WaitForIndex             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -3102,6 +3103,16 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.MaxFilesPerImportReq.Init(base.mgr)
+
+	p.WaitForIndex = ParamItem{
+		Key:          "dataCoord.import.waitForIndex",
+		Version:      "2.4.0",
+		Doc:          "Indicates whether the import operation waits for the completion of index building.",
+		DefaultValue: "true",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.WaitForIndex.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",

@@ -159,7 +159,7 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 		}(nodeID)
 	}
 	wg.Wait()
-	log.Info("peek slots done", zap.Any("nodeSlots", nodeSlots))
+	log.Debug("peek slots done", zap.Any("nodeSlots", nodeSlots))
 	return nodeSlots
 }
 

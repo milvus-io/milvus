@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sort"
 	"time"
@@ -428,8 +429,12 @@ func DropImportTask(task ImportTask, cluster Cluster, tm ImportMeta) error {
 }
 
 func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, importFile *internalpb.ImportFile) ([]*internalpb.ImportFile, error) {
-	if len(importFile.GetPaths()) < 1 {
+	if len(importFile.GetPaths()) == 0 {
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(importFile.GetPaths()) > 2 {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths()))
 	}
 
 	insertPrefix := importFile.GetPaths()[0]

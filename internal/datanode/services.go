@@ -425,7 +425,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	}
 
 	task := importv2.NewPreImportTask(req)
-	node.importManager.Add(task)
+	node.impTaskMgr.Add(task)
 
 	log.Info("datanode added preimport task")
 	return merr.Success(), nil
@@ -444,7 +444,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 	task := importv2.NewImportTask(req)
-	node.importManager.Add(task)
+	node.impTaskMgr.Add(task)
 
 	log.Info("datanode added import task")
 	return merr.Success(), nil
@@ -458,7 +458,7 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 		return &datapb.QueryPreImportResponse{Status: merr.Status(err)}, nil
 	}
 	status := merr.Success()
-	task := node.importManager.Get(req.GetTaskID())
+	task := node.impTaskMgr.Get(req.GetTaskID())
 	if task == nil || task.GetType() != importv2.PreImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.PreImportTaskType))
 	}
@@ -487,12 +487,12 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 	if req.GetQuerySlot() {
 		return &datapb.QueryImportResponse{
 			Status: status,
-			Slots:  node.importManager.Slots(),
+			Slots:  node.impScheduler.Slots(),
 		}, nil
 	}
 
 	// query import
-	task := node.importManager.Get(req.GetTaskID())
+	task := node.impTaskMgr.Get(req.GetTaskID())
 	if task == nil || task.GetType() != importv2.ImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.ImportTaskType))
 	}
@@ -515,7 +515,7 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 		return merr.Status(err), nil
 	}
 
-	node.importManager.Remove(req.GetTaskID())
+	node.impTaskMgr.Remove(req.GetTaskID())
 
 	log.Info("datanode drop import done")
 
