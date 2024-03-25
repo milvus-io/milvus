@@ -197,18 +197,19 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 	)
 
 	// Get shard leader for the given replica and segment
-	leaderID, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), task.Shard())
-	if !ok {
+	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+	view := ex.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, action.Shard())
+	if view == nil {
 		msg := "no shard leader for the segment to execute loading"
 		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	log = log.With(zap.Int64("shardLeader", leaderID))
+	log = log.With(zap.Int64("shardLeader", view.ID))
 
 	startTs := time.Now()
 	log.Info("load segments...")
-	status, err := ex.cluster.LoadSegments(task.Context(), leaderID, req)
+	status, err := ex.cluster.LoadSegments(task.Context(), view.ID, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Error(err))
@@ -248,13 +249,21 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		req.Shard = task.shard
 
 		if ex.meta.CollectionManager.Exist(task.CollectionID()) {
-			leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), req.GetShard())
-			if !ok {
-				log.Warn("no shard leader for the segment to execute releasing", zap.String("shard", req.GetShard()))
+			// leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), req.GetShard())
+			// if !ok {
+			// 	log.Warn("no shard leader for the segment to execute releasing", zap.String("shard", req.GetShard()))
+			// 	return
+			// }
+			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+			view := ex.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, action.Shard())
+			if view == nil {
+				msg := "no shard leader for the segment to execute releasing"
+				err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+				log.Warn(msg, zap.Error(err))
 				return
 			}
-			dstNode = leader
-			log = log.With(zap.Int64("shardLeader", leader))
+			dstNode = view.ID
+			log = log.With(zap.Int64("shardLeader", view.ID))
 			req.NeedTransfer = true
 		}
 	}
