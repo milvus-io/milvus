@@ -24,62 +24,6 @@ func (_m *MockSessionManager) EXPECT() *MockSessionManager_Expecter {
 	return &MockSessionManager_Expecter{mock: &_m.Mock}
 }
 
-// AddImportSegment provides a mock function with given fields: ctx, nodeID, req
-func (_m *MockSessionManager) AddImportSegment(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	ret := _m.Called(ctx, nodeID, req)
-
-	var r0 *datapb.AddImportSegmentResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)); ok {
-		return rf(ctx, nodeID, req)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, *datapb.AddImportSegmentRequest) *datapb.AddImportSegmentResponse); ok {
-		r0 = rf(ctx, nodeID, req)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*datapb.AddImportSegmentResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, int64, *datapb.AddImportSegmentRequest) error); ok {
-		r1 = rf(ctx, nodeID, req)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockSessionManager_AddImportSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddImportSegment'
-type MockSessionManager_AddImportSegment_Call struct {
-	*mock.Call
-}
-
-// AddImportSegment is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
-//   - req *datapb.AddImportSegmentRequest
-func (_e *MockSessionManager_Expecter) AddImportSegment(ctx interface{}, nodeID interface{}, req interface{}) *MockSessionManager_AddImportSegment_Call {
-	return &MockSessionManager_AddImportSegment_Call{Call: _e.mock.On("AddImportSegment", ctx, nodeID, req)}
-}
-
-func (_c *MockSessionManager_AddImportSegment_Call) Run(run func(ctx context.Context, nodeID int64, req *datapb.AddImportSegmentRequest)) *MockSessionManager_AddImportSegment_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(*datapb.AddImportSegmentRequest))
-	})
-	return _c
-}
-
-func (_c *MockSessionManager_AddImportSegment_Call) Return(_a0 *datapb.AddImportSegmentResponse, _a1 error) *MockSessionManager_AddImportSegment_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockSessionManager_AddImportSegment_Call) RunAndReturn(run func(context.Context, int64, *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)) *MockSessionManager_AddImportSegment_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // AddSession provides a mock function with given fields: node
 func (_m *MockSessionManager) AddSession(node *NodeInfo) {
 	_m.Called(node)
@@ -91,7 +35,7 @@ type MockSessionManager_AddSession_Call struct {
 }
 
 // AddSession is a helper method to define mock.On call
-//   - node *NodeInfo
+//  - node *NodeInfo
 func (_e *MockSessionManager_Expecter) AddSession(node interface{}) *MockSessionManager_AddSession_Call {
 	return &MockSessionManager_AddSession_Call{Call: _e.mock.On("AddSession", node)}
 }
@@ -145,9 +89,9 @@ type MockSessionManager_CheckChannelOperationProgress_Call struct {
 }
 
 // CheckChannelOperationProgress is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
-//   - info *datapb.ChannelWatchInfo
+//  - ctx context.Context
+//  - nodeID int64
+//  - info *datapb.ChannelWatchInfo
 func (_e *MockSessionManager_Expecter) CheckChannelOperationProgress(ctx interface{}, nodeID interface{}, info interface{}) *MockSessionManager_CheckChannelOperationProgress_Call {
 	return &MockSessionManager_CheckChannelOperationProgress_Call{Call: _e.mock.On("CheckChannelOperationProgress", ctx, nodeID, info)}
 }
@@ -189,7 +133,7 @@ type MockSessionManager_CheckHealth_Call struct {
 }
 
 // CheckHealth is a helper method to define mock.On call
-//   - ctx context.Context
+//  - ctx context.Context
 func (_e *MockSessionManager_Expecter) CheckHealth(ctx interface{}) *MockSessionManager_CheckHealth_Call {
 	return &MockSessionManager_CheckHealth_Call{Call: _e.mock.On("CheckHealth", ctx)}
 }
@@ -263,9 +207,9 @@ type MockSessionManager_Compaction_Call struct {
 }
 
 // Compaction is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
-//   - plan *datapb.CompactionPlan
+//  - ctx context.Context
+//  - nodeID int64
+//  - plan *datapb.CompactionPlan
 func (_e *MockSessionManager_Expecter) Compaction(ctx interface{}, nodeID interface{}, plan interface{}) *MockSessionManager_Compaction_Call {
 	return &MockSessionManager_Compaction_Call{Call: _e.mock.On("Compaction", ctx, nodeID, plan)}
 }
@@ -298,7 +242,7 @@ type MockSessionManager_DeleteSession_Call struct {
 }
 
 // DeleteSession is a helper method to define mock.On call
-//   - node *NodeInfo
+//  - node *NodeInfo
 func (_e *MockSessionManager_Expecter) DeleteSession(node interface{}) *MockSessionManager_DeleteSession_Call {
 	return &MockSessionManager_DeleteSession_Call{Call: _e.mock.On("DeleteSession", node)}
 }
@@ -340,8 +284,8 @@ type MockSessionManager_DropImport_Call struct {
 }
 
 // DropImport is a helper method to define mock.On call
-//   - nodeID int64
-//   - in *datapb.DropImportRequest
+//  - nodeID int64
+//  - in *datapb.DropImportRequest
 func (_e *MockSessionManager_Expecter) DropImport(nodeID interface{}, in interface{}) *MockSessionManager_DropImport_Call {
 	return &MockSessionManager_DropImport_Call{Call: _e.mock.On("DropImport", nodeID, in)}
 }
@@ -374,9 +318,9 @@ type MockSessionManager_Flush_Call struct {
 }
 
 // Flush is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
-//   - req *datapb.FlushSegmentsRequest
+//  - ctx context.Context
+//  - nodeID int64
+//  - req *datapb.FlushSegmentsRequest
 func (_e *MockSessionManager_Expecter) Flush(ctx interface{}, nodeID interface{}, req interface{}) *MockSessionManager_Flush_Call {
 	return &MockSessionManager_Flush_Call{Call: _e.mock.On("Flush", ctx, nodeID, req)}
 }
@@ -418,9 +362,9 @@ type MockSessionManager_FlushChannels_Call struct {
 }
 
 // FlushChannels is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
-//   - req *datapb.FlushChannelsRequest
+//  - ctx context.Context
+//  - nodeID int64
+//  - req *datapb.FlushChannelsRequest
 func (_e *MockSessionManager_Expecter) FlushChannels(ctx interface{}, nodeID interface{}, req interface{}) *MockSessionManager_FlushChannels_Call {
 	return &MockSessionManager_FlushChannels_Call{Call: _e.mock.On("FlushChannels", ctx, nodeID, req)}
 }
@@ -581,41 +525,6 @@ func (_c *MockSessionManager_GetSessions_Call) RunAndReturn(run func() []*Sessio
 	return _c
 }
 
-// Import provides a mock function with given fields: ctx, nodeID, itr
-func (_m *MockSessionManager) Import(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest) {
-	_m.Called(ctx, nodeID, itr)
-}
-
-// MockSessionManager_Import_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Import'
-type MockSessionManager_Import_Call struct {
-	*mock.Call
-}
-
-// Import is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
-//   - itr *datapb.ImportTaskRequest
-func (_e *MockSessionManager_Expecter) Import(ctx interface{}, nodeID interface{}, itr interface{}) *MockSessionManager_Import_Call {
-	return &MockSessionManager_Import_Call{Call: _e.mock.On("Import", ctx, nodeID, itr)}
-}
-
-func (_c *MockSessionManager_Import_Call) Run(run func(ctx context.Context, nodeID int64, itr *datapb.ImportTaskRequest)) *MockSessionManager_Import_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(*datapb.ImportTaskRequest))
-	})
-	return _c
-}
-
-func (_c *MockSessionManager_Import_Call) Return() *MockSessionManager_Import_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSessionManager_Import_Call) RunAndReturn(run func(context.Context, int64, *datapb.ImportTaskRequest)) *MockSessionManager_Import_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // ImportV2 provides a mock function with given fields: nodeID, in
 func (_m *MockSessionManager) ImportV2(nodeID int64, in *datapb.ImportRequest) error {
 	ret := _m.Called(nodeID, in)
@@ -636,8 +545,8 @@ type MockSessionManager_ImportV2_Call struct {
 }
 
 // ImportV2 is a helper method to define mock.On call
-//   - nodeID int64
-//   - in *datapb.ImportRequest
+//  - nodeID int64
+//  - in *datapb.ImportRequest
 func (_e *MockSessionManager_Expecter) ImportV2(nodeID interface{}, in interface{}) *MockSessionManager_ImportV2_Call {
 	return &MockSessionManager_ImportV2_Call{Call: _e.mock.On("ImportV2", nodeID, in)}
 }
@@ -679,9 +588,9 @@ type MockSessionManager_NotifyChannelOperation_Call struct {
 }
 
 // NotifyChannelOperation is a helper method to define mock.On call
-//   - ctx context.Context
-//   - nodeID int64
-//   - req *datapb.ChannelOperationsRequest
+//  - ctx context.Context
+//  - nodeID int64
+//  - req *datapb.ChannelOperationsRequest
 func (_e *MockSessionManager_Expecter) NotifyChannelOperation(ctx interface{}, nodeID interface{}, req interface{}) *MockSessionManager_NotifyChannelOperation_Call {
 	return &MockSessionManager_NotifyChannelOperation_Call{Call: _e.mock.On("NotifyChannelOperation", ctx, nodeID, req)}
 }
@@ -723,8 +632,8 @@ type MockSessionManager_PreImport_Call struct {
 }
 
 // PreImport is a helper method to define mock.On call
-//   - nodeID int64
-//   - in *datapb.PreImportRequest
+//  - nodeID int64
+//  - in *datapb.PreImportRequest
 func (_e *MockSessionManager_Expecter) PreImport(nodeID interface{}, in interface{}) *MockSessionManager_PreImport_Call {
 	return &MockSessionManager_PreImport_Call{Call: _e.mock.On("PreImport", nodeID, in)}
 }
@@ -778,8 +687,8 @@ type MockSessionManager_QueryImport_Call struct {
 }
 
 // QueryImport is a helper method to define mock.On call
-//   - nodeID int64
-//   - in *datapb.QueryImportRequest
+//  - nodeID int64
+//  - in *datapb.QueryImportRequest
 func (_e *MockSessionManager_Expecter) QueryImport(nodeID interface{}, in interface{}) *MockSessionManager_QueryImport_Call {
 	return &MockSessionManager_QueryImport_Call{Call: _e.mock.On("QueryImport", nodeID, in)}
 }
@@ -833,8 +742,8 @@ type MockSessionManager_QueryPreImport_Call struct {
 }
 
 // QueryPreImport is a helper method to define mock.On call
-//   - nodeID int64
-//   - in *datapb.QueryPreImportRequest
+//  - nodeID int64
+//  - in *datapb.QueryPreImportRequest
 func (_e *MockSessionManager_Expecter) QueryPreImport(nodeID interface{}, in interface{}) *MockSessionManager_QueryPreImport_Call {
 	return &MockSessionManager_QueryPreImport_Call{Call: _e.mock.On("QueryPreImport", nodeID, in)}
 }
@@ -876,8 +785,8 @@ type MockSessionManager_SyncSegments_Call struct {
 }
 
 // SyncSegments is a helper method to define mock.On call
-//   - nodeID int64
-//   - req *datapb.SyncSegmentsRequest
+//  - nodeID int64
+//  - req *datapb.SyncSegmentsRequest
 func (_e *MockSessionManager_Expecter) SyncSegments(nodeID interface{}, req interface{}) *MockSessionManager_SyncSegments_Call {
 	return &MockSessionManager_SyncSegments_Call{Call: _e.mock.On("SyncSegments", nodeID, req)}
 }

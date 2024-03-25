@@ -1426,7 +1426,6 @@ func (t *flushTask) Execute(ctx context.Context) error {
 				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
 			),
 			CollectionID: collID,
-			IsImport:     false,
 		}
 		resp, err := t.dataCoord.Flush(ctx, flushReq)
 		if err != nil {

@@ -176,8 +176,6 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
-  importTaskExpiration: 900 # (in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).
-  importTaskRetention: 86400 # (in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400, seconds (24 hours).
   enableActiveStandby: false
   # can specify ip for example
   # ip: 127.0.0.1
@@ -602,9 +600,6 @@ common:
     names: ['topic1', 'topic2']
     # need to set a separated topic to stand for currently consumed timestamp for each channel
     timeticker: 'timetick-channel'
-
-  ImportMaxFileSize: 17179869184 # 16 * 1024 * 1024 * 1024
-  # max file size to import for bulkInsert
 
   locks:
     metrics:

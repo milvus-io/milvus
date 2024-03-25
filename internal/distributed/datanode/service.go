@@ -363,16 +363,8 @@ func (s *Server) GetCompactionState(ctx context.Context, request *datapb.Compact
 	return s.datanode.GetCompactionState(ctx, request)
 }
 
-func (s *Server) Import(ctx context.Context, request *datapb.ImportTaskRequest) (*commonpb.Status, error) {
-	return s.datanode.Import(ctx, request)
-}
-
 func (s *Server) ResendSegmentStats(ctx context.Context, request *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
 	return s.datanode.ResendSegmentStats(ctx, request)
-}
-
-func (s *Server) AddImportSegment(ctx context.Context, request *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	return s.datanode.AddImportSegment(ctx, request)
 }
 
 func (s *Server) SyncSegments(ctx context.Context, request *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
