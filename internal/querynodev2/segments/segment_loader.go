@@ -1457,8 +1457,9 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 	for _, fieldBinlog := range loadInfo.BinlogPaths {
 		fieldID := fieldBinlog.FieldID
-		mmapEnabled := common.IsFieldMmapEnabled(schema, fieldID)
+		var mmapEnabled bool
 		if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
+			mmapEnabled = isIndexMmapEnable(fieldIndexInfo)
 			neededMemSize, neededDiskSize, err := getIndexAttrCache().GetIndexResourceUsage(fieldIndexInfo, multiplyFactor.memoryIndexUsageFactor)
 			if err != nil {
 				return nil, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
@@ -1473,6 +1474,8 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 				segmentDiskSize += neededDiskSize
 			}
 		} else {
+			mmapEnabled = common.IsFieldMmapEnabled(schema, fieldID) ||
+				(!common.FieldHasMmapKey(schema, fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
 			binlogSize := uint64(getBinlogDataSize(fieldBinlog))
 			if mmapEnabled {
 				segmentDiskSize += binlogSize
