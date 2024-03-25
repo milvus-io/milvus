@@ -316,6 +316,48 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("field_data dim not match schema dim", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8},
+							},
+						},
+						Dim: 16,
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "8",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 1)
+
+		assert.Error(t, err)
+	})
+
 	t.Run("invalid num rows", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -328,6 +370,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 								Data: []float32{1.1, 2.2},
 							},
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -369,6 +412,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 								Data: []float32{1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8},
 							},
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -445,7 +489,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("invalid num rows", func(t *testing.T) {
+	t.Run("field data dim not match schema dim", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
 				FieldName: "test",
@@ -453,47 +497,9 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: []byte("not128"),
+							BinaryVector: []byte("66666666"),
 						},
-					},
-				},
-			},
-		}
-
-		schema := &schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					Name:     "test",
-					DataType: schemapb.DataType_BinaryVector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   common.DimKey,
-							Value: "128",
-						},
-					},
-				},
-			},
-		}
-		h, err := typeutil.CreateSchemaHelper(schema)
-		assert.NoError(t, err)
-
-		v := newValidateUtil()
-
-		err = v.checkAligned(data, h, 100)
-
-		assert.Error(t, err)
-	})
-
-	t.Run("num rows mismatch", func(t *testing.T) {
-		data := []*schemapb.FieldData{
-			{
-				FieldName: "test",
-				Type:      schemapb.DataType_BinaryVector,
-				Field: &schemapb.FieldData_Vectors{
-					Vectors: &schemapb.VectorField{
-						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: []byte{'1', '2'},
-						},
+						Dim: 128,
 					},
 				},
 			},
@@ -522,7 +528,6 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 
 		assert.Error(t, err)
 	})
-
 	//////////////////////////////////////////////////////////////////
 
 	t.Run("mismatch", func(t *testing.T) {
@@ -580,6 +585,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 								Data: generateFloatVectors(10, 8),
 							},
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -591,6 +597,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_BinaryVector{
 							BinaryVector: generateBinaryVectors(10, 8),
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -1611,6 +1618,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Type:      schemapb.DataType_FloatVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
+						Dim: 8,
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
 								Data: generateFloatVectors(2, 8),
@@ -1624,6 +1632,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Type:      schemapb.DataType_BinaryVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
+						Dim: 8,
 						Data: &schemapb.VectorField_BinaryVector{
 							BinaryVector: generateBinaryVectors(2, 8),
 						},
