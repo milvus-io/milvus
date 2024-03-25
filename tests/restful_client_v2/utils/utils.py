@@ -4,10 +4,8 @@ import random
 import string
 from faker import Faker
 import numpy as np
-import jax.numpy as jnp
 from sklearn import preprocessing
 import base64
-import requests
 from loguru import logger
 import datetime
 
@@ -203,10 +201,6 @@ def gen_vector(datatype="float_vector", dim=128, binary_data=False):
         return preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
     if datatype == "BinaryVector":
         value = gen_binary_vectors(1, dim)[1][0]
-    if datatype == "Float16Vector":
-        value = gen_fp16_vectors(1, dim)[1][0]
-    if datatype == "BFloat16Vector":
-        value = gen_bf16_vectors(1, dim)[1][0]
     if value is None:
         raise Exception(f"unsupported datatype: {datatype}")
     else:

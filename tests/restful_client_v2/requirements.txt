@@ -11,6 +11,3 @@ scikit-learn~=1.1.3
 pytest-xdist==2.5.0
 minio==7.1.14
 
-# for bf16 datatype
-jax==0.4.13
-jaxlib==0.4.13
