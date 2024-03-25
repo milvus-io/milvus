@@ -140,6 +140,8 @@ issues:
     - which can be annoying to use
     # Binds to all network interfaces
     - G102
+    # Use of unsafe calls should be audited
+    - G103
     # Errors unhandled
     - G104
     # file/folder Permission
