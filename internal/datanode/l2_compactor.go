@@ -72,7 +72,7 @@ type level2CompactionTask struct {
 
 	plan *datapb.CompactionPlan
 
-	//schedule
+	// schedule
 	totalBufferSize atomic.Int64
 	spillChan       chan SpillSignal
 	spillCount      atomic.Int64
@@ -314,7 +314,6 @@ func (t *level2CompactionTask) mapStep(ctx context.Context,
 			segmentStats: make(map[UniqueID]storage.SegmentStats, 0),
 		}
 		t.groups = append(t.groups, group)
-		//t.bufferDatas.Store(bucket, writeBuffer)
 		for _, key := range bucket {
 			keyToGroupMap[key] = group
 		}
@@ -919,60 +918,13 @@ func (t *level2CompactionTask) analyzeSegment(
 			return nil, err
 		}
 
-		//iter, err := storage.NewBinlogDeserializeReader(blobs)
-		//if err != nil {
-		//	log.Warn("new insert binlogs reader wrong", zap.Strings("path", path), zap.Error(err))
-		//	return nil, err
-		//}
-		//
-		//for {
-		//	err := iter.Next()
-		//	if err != nil {
-		//		if err == sio.EOF {
-		//			break
-		//		} else {
-		//			log.Warn("transfer interface to Value wrong", zap.Strings("path", path))
-		//			return nil, errors.New("unexpected error")
-		//		}
-		//	}
-		//	v := iter.Value()
-		//
-		//	ts := Timestamp(v.Timestamp)
-		//	// Filtering expired entity
-		//	if IsExpiredEntity(t.plan.GetCollectionTtl(), ts, t.currentTs) {
-		//		expired++
-		//		continue
-		//	}
-		//
-		//	// Update timestampFrom, timestampTo
-		//	if v.Timestamp < timestampFrom || timestampFrom == -1 {
-		//		timestampFrom = v.Timestamp
-		//	}
-		//	if v.Timestamp > timestampTo || timestampFrom == -1 {
-		//		timestampTo = v.Timestamp
-		//	}
-		//
-		//	row, ok := v.Value.(map[UniqueID]interface{})
-		//	if !ok {
-		//		log.Warn("transfer interface to map wrong", zap.Strings("path", path))
-		//		return nil, errors.New("unexpected error")
-		//	}
-		//	key := row[fID]
-		//	if _, exist := analyzeResult[key]; exist {
-		//		analyzeResult[key] = analyzeResult[key] + 1
-		//	} else {
-		//		analyzeResult[key] = 1
-		//	}
-		//	remained++
-		//}
-
 		pkIter, err := storage.NewInsertBinlogIterator(blobs, t.primaryKeyField.GetFieldID(), t.primaryKeyField.GetDataType())
 		if err != nil {
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, err
 		}
 
-		//log.Info("pkIter.RowNum()", zap.Int("pkIter.RowNum()", pkIter.RowNum()), zap.Bool("hasNext", pkIter.HasNext()))
+		// log.Info("pkIter.RowNum()", zap.Int("pkIter.RowNum()", pkIter.RowNum()), zap.Bool("hasNext", pkIter.HasNext()))
 		for pkIter.HasNext() {
 			vInter, _ := pkIter.Next()
 			v, ok := vInter.(*storage.Value)
@@ -995,7 +947,7 @@ func (t *level2CompactionTask) analyzeSegment(
 			if v.Timestamp > timestampTo || timestampFrom == -1 {
 				timestampTo = v.Timestamp
 			}
-			//rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
+			// rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 			row, ok := v.Value.(map[UniqueID]interface{})
 			if !ok {
 				log.Warn("transfer interface to map wrong", zap.Strings("path", path))
@@ -1031,8 +983,8 @@ func (t *level2CompactionTask) planStep(dict map[interface{}]int64) [][]interfac
 	buckets := make([][]interface{}, 0)
 	currentBucket := make([]interface{}, 0)
 	var currentBucketSize int64 = 0
-	var maxTres = t.plan.L2SegmentMaxRows
-	var minTres = t.plan.L2SegmentMaxRows / 2
+	maxTres := t.plan.L2SegmentMaxRows
+	minTres := t.plan.L2SegmentMaxRows / 2
 	for _, key := range keys {
 		// todo can optimize
 		if dict[key] > minTres {

@@ -75,7 +75,6 @@ func GetClusteringKeyField(collectionSchema *schemapb.CollectionSchema) *schemap
 		return partitionKeyField
 	} else if paramtable.Get().CommonCfg.UseVectorAsClusteringKey.GetAsBool() && len(vectorFields) == 1 {
 		return vectorFields[0]
-	} else {
-		return nil
 	}
+	return nil
 }
