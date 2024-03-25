@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -908,16 +909,14 @@ func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
 }
 
 func NewContextWithMetadata(ctx context.Context, username string, dbName string) context.Context {
+	dbKey := strings.ToLower(util.HeaderDBName)
+	if username == "" {
+		return contextutil.AppendToIncomingContext(ctx, dbKey, dbName)
+	}
 	originValue := fmt.Sprintf("%s%s%s", username, util.CredentialSeperator, username)
 	authKey := strings.ToLower(util.HeaderAuthorize)
 	authValue := crypto.Base64Encode(originValue)
-	dbKey := strings.ToLower(util.HeaderDBName)
-	contextMap := map[string]string{
-		authKey: authValue,
-		dbKey:   dbName,
-	}
-	md := metadata.New(contextMap)
-	return metadata.NewIncomingContext(ctx, md)
+	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
 }
 
 func GetRole(username string) ([]string, error) {

@@ -16,7 +16,12 @@
 
 package contextutil
 
-import "context"
+import (
+	"context"
+	"fmt"
+
+	"google.golang.org/grpc/metadata"
+)
 
 type ctxTenantKey struct{}
 
@@ -36,4 +41,20 @@ func TenantID(ctx context.Context) string {
 	}
 
 	return ""
+}
+
+func AppendToIncomingContext(ctx context.Context, kv ...string) context.Context {
+	if len(kv)%2 == 1 {
+		panic(fmt.Sprintf("metadata: AppendToOutgoingContext got an odd number of input pairs for metadata: %d", len(kv)))
+	}
+	md, ok := metadata.FromIncomingContext(ctx)
+	if !ok {
+		md = metadata.New(make(map[string]string, len(kv)/2))
+	}
+	for i, s := range kv {
+		if i%2 == 0 {
+			md.Append(s, kv[i+1])
+		}
+	}
+	return metadata.NewIncomingContext(ctx, md)
 }

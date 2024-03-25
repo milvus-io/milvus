@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
 // HandlersV1 handles http requests
@@ -163,7 +164,7 @@ func (h *HandlersV1) listCollections(c *gin.Context) {
 func (h *HandlersV1) createCollection(c *gin.Context) {
 	httpReq := CreateCollectionReq{
 		DbName:             DefaultDbName,
-		MetricType:         DefaultMetricType,
+		MetricType:         metric.L2,
 		PrimaryField:       DefaultPrimaryFieldName,
 		VectorField:        DefaultVectorFieldName,
 		EnableDynamicField: EnableDynamic,
@@ -635,7 +636,6 @@ func (h *HandlersV1) insert(c *gin.Context) {
 	req := milvuspb.InsertRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
 	}
 	username, _ := c.Get(ContextUsername)
@@ -726,7 +726,6 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 	req := milvuspb.UpsertRequest{
 		DbName:         httpReq.DbName,
 		CollectionName: httpReq.CollectionName,
-		PartitionName:  "_default",
 		NumRows:        uint32(len(httpReq.Data)),
 	}
 	username, _ := c.Get(ContextUsername)
@@ -845,7 +844,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 		DbName:             httpReq.DbName,
 		CollectionName:     httpReq.CollectionName,
 		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   vector2PlaceholderGroupBytes(httpReq.Vector),
+		PlaceholderGroup:   vectors2PlaceholderGroupBytes([][]float32{httpReq.Vector}),
 		DslType:            commonpb.DslType_BoolExprV1,
 		OutputFields:       httpReq.OutputFields,
 		SearchParams:       searchParams,

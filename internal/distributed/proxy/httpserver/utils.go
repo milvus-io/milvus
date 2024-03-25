@@ -133,6 +133,14 @@ func IsVectorField(field *schemapb.FieldSchema) bool {
 }
 
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
+	return printFieldDetails(fields, true)
+}
+
+func printFieldsV2(fields []*schemapb.FieldSchema) []gin.H {
+	return printFieldDetails(fields, false)
+}
+
+func printFieldDetails(fields []*schemapb.FieldSchema, oldVersion bool) []gin.H {
 	var res []gin.H
 	for _, field := range fields {
 		fieldDetail := gin.H{
@@ -143,13 +151,28 @@ func printFields(fields []*schemapb.FieldSchema) []gin.H {
 			HTTPReturnDescription:       field.Description,
 		}
 		if IsVectorField(field) {
-			dim, _ := getDim(field)
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+			if oldVersion {
+				dim, _ := getDim(field)
+				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(dim, 10) + ")"
+			}
 		} else if field.DataType == schemapb.DataType_VarChar {
-			maxLength, _ := parameterutil.GetMaxLength(field)
-			fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
+			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+			if oldVersion {
+				maxLength, _ := parameterutil.GetMaxLength(field)
+				fieldDetail[HTTPReturnFieldType] = field.DataType.String() + "(" + strconv.FormatInt(maxLength, 10) + ")"
+			}
 		} else {
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
+		}
+		if !oldVersion {
+			fieldDetail[HTTPReturnFieldID] = field.FieldID
+			if field.TypeParams != nil {
+				fieldDetail[Params] = field.TypeParams
+			}
+			if field.DataType == schemapb.DataType_Array {
+				fieldDetail[HTTPReturnFieldElementType] = field.GetElementType().String()
+			}
 		}
 		res = append(res, fieldDetail)
 	}
@@ -183,7 +206,7 @@ func printIndexes(indexes []*milvuspb.IndexDescription) []gin.H {
 
 func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error, []map[string]interface{}) {
 	var reallyDataArray []map[string]interface{}
-	dataResult := gjson.Get(body, "data")
+	dataResult := gjson.Get(body, HTTPRequestData)
 	dataResultArray := dataResult.Array()
 	if len(dataResultArray) == 0 {
 		return merr.ErrMissingRequiredParameters, reallyDataArray
@@ -914,7 +937,69 @@ func serialize(fv []float32) []byte {
 	return data
 }
 
-func vector2PlaceholderGroupBytes(vectors []float32) []byte {
+func serializeFloatVectors(vectors []gjson.Result, dataType schemapb.DataType, dimension, bytesLen int64) ([][]byte, error) {
+	values := make([][]byte, 0)
+	for _, vector := range vectors {
+		var vectorArray []float32
+		err := json.Unmarshal([]byte(vector.String()), &vectorArray)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vector.String(), err.Error())
+		}
+		if int64(len(vectorArray)) != dimension {
+			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vector.String(),
+				fmt.Sprintf("dimension: %d, but length of []float: %d", dimension, len(vectorArray)))
+		}
+		vectorBytes := serialize(vectorArray)
+		values = append(values, vectorBytes)
+	}
+	return values, nil
+}
+
+func serializeByteVectors(vectorStr string, dataType schemapb.DataType, dimension, bytesLen int64) ([][]byte, error) {
+	values := make([][]byte, 0)
+	err := json.Unmarshal([]byte(vectorStr), &values) // todo check len == dimension * 1/2/2
+	if err != nil {
+		return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vectorStr, err.Error())
+	}
+	for _, vectorArray := range values {
+		if int64(len(vectorArray)) != bytesLen {
+			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], string(vectorArray),
+				fmt.Sprintf("dimension: %d, bytesLen: %d, but length of []byte: %d", dimension, bytesLen, len(vectorArray)))
+		}
+	}
+	return values, nil
+}
+
+func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
+	var valueType commonpb.PlaceholderType
+	var values [][]byte
+	var err error
+	switch dataType {
+	case schemapb.DataType_FloatVector:
+		valueType = commonpb.PlaceholderType_FloatVector
+		values, err = serializeFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType, dimension, dimension*4)
+	case schemapb.DataType_BinaryVector:
+		valueType = commonpb.PlaceholderType_BinaryVector
+		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension/8)
+	case schemapb.DataType_Float16Vector:
+		valueType = commonpb.PlaceholderType_Float16Vector
+		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*2)
+	case schemapb.DataType_BFloat16Vector:
+		valueType = commonpb.PlaceholderType_BFloat16Vector
+		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*2)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &commonpb.PlaceholderValue{
+		Tag:    "$0",
+		Type:   valueType,
+		Values: values,
+	}, nil
+}
+
+// todo: support [][]byte for BinaryVector
+func vectors2PlaceholderGroupBytes(vectors [][]float32) []byte {
 	var placeHolderType commonpb.PlaceholderType
 	ph := &commonpb.PlaceholderValue{
 		Tag:    "$0",
@@ -924,7 +1009,9 @@ func vector2PlaceholderGroupBytes(vectors []float32) []byte {
 		placeHolderType = commonpb.PlaceholderType_FloatVector
 
 		ph.Type = placeHolderType
-		ph.Values = append(ph.Values, serialize(vectors))
+		for _, vector := range vectors {
+			ph.Values = append(ph.Values, serialize(vector))
+		}
 	}
 	phg := &commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{
