@@ -264,9 +264,6 @@ func (t *level2CompactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	if err != nil {
 		return nil, err
 	}
-	for k, v := range analyzeDict {
-		log.Info("compaction analyze result", zap.Any("key", k), zap.Int64("count", v))
-	}
 	plan := t.planStep(analyzeDict)
 
 	// 3, mapStep
@@ -544,7 +541,7 @@ func (t *level2CompactionTask) writeToBuffer(ctx context.Context, pk storage.Pri
 	totalBufferSize := t.totalBufferSize.Add(int64(rowSize))
 
 	// trigger spill
-	if group.bufferSize > t.plan.GetPrefixSegmentMaxSize() {
+	if group.bufferRowNum > t.plan.L2SegmentMaxRows {
 		t.spillChan <- SpillSignal{
 			key: clusteringKey,
 		}
@@ -686,7 +683,10 @@ func (t *level2CompactionTask) spill(ctx context.Context, group *Group) error {
 	t.groupLocks.Lock(group)
 	defer t.groupLocks.Unlock(group)
 
-	if group.currentSpillSize+group.bufferSize > t.plan.GetPrefixSegmentMaxSize() {
+	//if group.currentSpillSize+group.bufferSize > t.plan.GetPrefixSegmentMaxSize() {
+	//	t.packGroupsToSegments(ctx, group)
+	//}
+	if group.currentSpillRowNum+group.bufferRowNum > t.plan.L2SegmentMaxRows {
 		t.packGroupsToSegments(ctx, group)
 	}
 
@@ -1042,8 +1042,8 @@ func (t *level2CompactionTask) planStep(dict map[interface{}]int64) [][]interfac
 	buckets := make([][]interface{}, 0)
 	currentBucket := make([]interface{}, 0)
 	var currentBucketSize int64 = 0
-	var maxTres int64 = 2000
-	var minTres int64 = 1000
+	var maxTres = t.plan.L2SegmentMaxRows
+	var minTres = t.plan.L2SegmentMaxRows / 2
 	for _, key := range keys {
 		// todo can optimize
 		if dict[key] > minTres {

@@ -444,7 +444,7 @@ dataCoord:
       newDataSizeThreshold: 256m
       dropTolerance: 86400
       preferSegmentSizeMin: 10m # In l2 compaction, data pieces whose size is smaller than preferSegmentSizeMin will be merged together to close to a prefer range [preferSegmentSizeMin, preferSegmentSizeMax].
-      preferSegmentSizeMax: 512m # In l2 compaction, data pieces whose size is larger than preferSegmentSizeMax will be redivided into multiple segments to make their sizes close to a prefer range [preferSegmentSizeMin, preferSegmentSizeMax].
+      preferSegmentSizeMax: 10m # In l2 compaction, data pieces whose size is larger than preferSegmentSizeMax will be redivided into multiple segments to make their sizes close to a prefer range [preferSegmentSizeMin, preferSegmentSizeMax].
 
     levelzero:
       forceTrigger:

@@ -522,8 +522,7 @@ message CompactionPlan {
   int64 collection_ttl = 8;
   int64 total_rows = 9;
   int64 clustering_key_id = 10;
-  int64 prefixSegmentMinSize = 11;
-  int64 prefixSegmentMaxSize = 12;
+  int64 l2_segment_max_rows = 11;
 }
 
 message CompactionSegment {
