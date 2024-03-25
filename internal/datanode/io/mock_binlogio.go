@@ -131,6 +131,49 @@ func (_c *MockBinlogIO_JoinFullPath_Call) RunAndReturn(run func(...string) strin
 	return _c
 }
 
+// Remove provides a mock function with given fields: ctx, key
+func (_m *MockBinlogIO) Remove(ctx context.Context, key string) error {
+	ret := _m.Called(ctx, key)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) error); ok {
+		r0 = rf(ctx, key)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockBinlogIO_Remove_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Remove'
+type MockBinlogIO_Remove_Call struct {
+	*mock.Call
+}
+
+// Remove is a helper method to define mock.On call
+//   - ctx context.Context
+//   - key string
+func (_e *MockBinlogIO_Expecter) Remove(ctx interface{}, key interface{}) *MockBinlogIO_Remove_Call {
+	return &MockBinlogIO_Remove_Call{Call: _e.mock.On("Remove", ctx, key)}
+}
+
+func (_c *MockBinlogIO_Remove_Call) Run(run func(ctx context.Context, key string)) *MockBinlogIO_Remove_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockBinlogIO_Remove_Call) Return(_a0 error) *MockBinlogIO_Remove_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockBinlogIO_Remove_Call) RunAndReturn(run func(context.Context, string) error) *MockBinlogIO_Remove_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Upload provides a mock function with given fields: ctx, kvs
 func (_m *MockBinlogIO) Upload(ctx context.Context, kvs map[string][]byte) error {
 	ret := _m.Called(ctx, kvs)

@@ -951,3 +951,35 @@ func WrapErrInconsistentRequery(msg ...string) error {
 	}
 	return err
 }
+
+func WrapErrCompactionReadDeltaLogErr(msg ...string) error {
+	err := error(ErrCompactionReadDeltaLogErr)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrMajorCompactionClusterNotSupport(msg ...string) error {
+	err := error(ErrMajorCompactionClusterNotSupport)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrMajorCompactionCollectionNotSupport(msg ...string) error {
+	err := error(ErrMajorCompactionCollectionNotSupport)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrMajorCompactionCollectionIsCompacting(msg ...string) error {
+	err := error(ErrMajorCompactionCollectionIsCompacting)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}

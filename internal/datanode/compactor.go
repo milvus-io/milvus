@@ -143,8 +143,7 @@ func (t *compactionTask) getNumRows() (int64, error) {
 	return numRows, nil
 }
 
-func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interface{}]Timestamp, error) {
-	log := log.With(zap.Int64("planID", t.getPlanID()))
+func MergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interface{}]Timestamp, error) {
 	mergeStart := time.Now()
 	dCodec := storage.NewDeleteCodec()
 
@@ -153,8 +152,7 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interf
 	for _, blobs := range dBlobs {
 		_, _, dData, err := dCodec.Deserialize(blobs)
 		if err != nil {
-			log.Warn("merge deltalogs wrong", zap.Error(err))
-			return nil, err
+			return nil, merr.WrapErrCompactionReadDeltaLogErr(err.Error())
 		}
 
 		for i := int64(0); i < dData.RowCount; i++ {
@@ -484,52 +482,13 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	dblobs := make(map[UniqueID][]*Blob)
-	allPath := make([][]string, 0)
-	for _, s := range t.plan.GetSegmentBinlogs() {
-		// Get the number of field binlog files from non-empty segment
-		var binlogNum int
-		for _, b := range s.GetFieldBinlogs() {
-			if b != nil {
-				binlogNum = len(b.GetBinlogs())
-				break
-			}
-		}
-		// Unable to deal with all empty segments cases, so return error
-		if binlogNum == 0 {
-			log.Warn("compact wrong, all segments' binlogs are empty")
-			return nil, errIllegalCompactionPlan
-		}
-
-		for idx := 0; idx < binlogNum; idx++ {
-			var ps []string
-			for _, f := range s.GetFieldBinlogs() {
-				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
-			}
-			allPath = append(allPath, ps)
-		}
-
-		segID := s.GetSegmentID()
-		paths := make([]string, 0)
-		for _, d := range s.GetDeltalogs() {
-			for _, l := range d.GetBinlogs() {
-				path := l.GetLogPath()
-				paths = append(paths, path)
-			}
-		}
-
-		if len(paths) != 0 {
-			bs, err := downloadBlobs(ctxTimeout, t.binlogIO, paths)
-			if err != nil {
-				log.Warn("compact wrong, fail to download deltalogs", zap.Int64("segment", segID), zap.Strings("path", paths), zap.Error(err))
-				return nil, err
-			}
-			dblobs[segID] = append(dblobs[segID], bs...)
-		}
+	delatBlobs, allPath, err := loadDeltaMap(ctxTimeout, t.binlogIO, t.plan.GetSegmentBinlogs())
+	if err != nil {
+		log.Warn("compact wrong, fail to load deltalogs", zap.Error(err))
+		return nil, err
 	}
 	log.Info("compact download deltalogs done", zap.Duration("elapse", t.tr.RecordSpan()))
-
-	deltaPk2Ts, err := t.mergeDeltalogs(dblobs)
+	deltaPk2Ts, err := MergeDeltalogs(delatBlobs)
 	if err != nil {
 		log.Warn("compact wrong, fail to merge deltalogs", zap.Error(err))
 		return nil, err
@@ -821,13 +780,52 @@ func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {
 }
 
 func (t *compactionTask) isExpiredEntity(ts, now Timestamp) bool {
-	// entity expire is not enabled if duration <= 0
-	if t.plan.GetCollectionTtl() <= 0 {
-		return false
-	}
+	return IsExpiredEntity(t.plan.GetCollectionTtl(), ts, now)
+}
 
-	pts, _ := tsoutil.ParseTS(ts)
-	pnow, _ := tsoutil.ParseTS(now)
-	expireTime := pts.Add(time.Duration(t.plan.GetCollectionTtl()))
-	return expireTime.Before(pnow)
+func loadDeltaMap(ctx context.Context, binlogIO io.BinlogIO, segments []*datapb.CompactionSegmentBinlogs) (map[UniqueID][]*Blob, [][]string, error) {
+	dblobs := make(map[UniqueID][]*Blob)
+	allPath := make([][]string, 0)
+	for _, s := range segments {
+		// Get the number of field binlog files from non-empty segment
+		var binlogNum int
+		for _, b := range s.GetFieldBinlogs() {
+			if b != nil {
+				binlogNum = len(b.GetBinlogs())
+				break
+			}
+		}
+		// Unable to deal with all empty segments cases, so return error
+		if binlogNum == 0 {
+			log.Warn("compact wrong, all segments' binlogs are empty")
+			return nil, nil, errIllegalCompactionPlan
+		}
+
+		for idx := 0; idx < binlogNum; idx++ {
+			var ps []string
+			for _, f := range s.GetFieldBinlogs() {
+				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
+			}
+			allPath = append(allPath, ps)
+		}
+
+		segID := s.GetSegmentID()
+		paths := make([]string, 0)
+		for _, d := range s.GetDeltalogs() {
+			for _, l := range d.GetBinlogs() {
+				path := l.GetLogPath()
+				paths = append(paths, path)
+			}
+		}
+
+		if len(paths) != 0 {
+			bs, err := downloadBlobs(ctx, binlogIO, paths)
+			if err != nil {
+				log.Warn("compact wrong, fail to download deltalogs", zap.Int64("segment", segID), zap.Strings("path", paths), zap.Error(err))
+				return nil, nil, err
+			}
+			dblobs[segID] = append(dblobs[segID], bs...)
+		}
+	}
+	return dblobs, allPath, nil
 }

@@ -387,6 +387,23 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		params.Save("dataCoord.compaction.major.enable", "true")
+		assert.Equal(t, true, Params.L2CompactionEnable.GetAsBool())
+		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10")
+		assert.Equal(t, int64(10), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10k")
+		assert.Equal(t, int64(10*1024), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10m")
+		assert.Equal(t, int64(10*1024*1024), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10g")
+		assert.Equal(t, int64(10*1024*1024*1024), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.major.dropTolerance", "86400")
+		assert.Equal(t, int64(86400), Params.L2CompactionDropTolerance.GetAsInt64())
+		params.Save("dataCoord.l2Compaction.preferSegmentSizeMax", "100m")
+		assert.Equal(t, int64(100*1024*1024), Params.L2CompactionPreferSegmentSizeMax.GetAsSize())
+		params.Save("dataCoord.l2Compaction.preferSegmentSizeMin", "10m")
+		assert.Equal(t, int64(10*1024*1024), Params.L2CompactionPreferSegmentSizeMin.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -438,6 +455,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(16), Params.MaxImportFileSizeInGB.GetAsInt64())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		// l2 compaction
+		params.Save("datanode.l2Compaction.memoryBufferRatio", "0.1")
+		assert.Equal(t, 0.1, Params.L2CompactionMemoryBufferRatio.GetAsFloat())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
@@ -455,6 +476,14 @@ func TestComponentParam(t *testing.T) {
 		params.Save(Params.RootCoordDml.FallbackKeys[0], "dml2")
 
 		assert.Equal(t, "by-dev-dml1", Params.RootCoordDml.GetValue())
+	})
+
+	t.Run("majorcompaction config", func(t *testing.T) {
+		Params := &params.CommonCfg
+		params.Save("common.l2compaction.usePartitionKeyAsClusteringKey", "true")
+		assert.Equal(t, true, Params.UsePartitionKeyAsClusteringKey.GetAsBool())
+		params.Save("common.l2compaction.useVectorAsClusteringKey", "true")
+		assert.Equal(t, true, Params.UseVectorAsClusteringKey.GetAsBool())
 	})
 }
 
