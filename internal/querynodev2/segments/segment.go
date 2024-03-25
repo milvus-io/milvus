@@ -89,6 +89,7 @@ type baseSegment struct {
 	segmentType    SegmentType
 	bloomFilterSet *pkoracle.BloomFilterSet
 	loadInfo       *querypb.SegmentLoadInfo
+	isLazyLoad     bool
 
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
 }
@@ -191,6 +192,8 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	s.resourceUsageCache.Store(usage)
 	return *usage
 }
+
+func (s *baseSegment) IsLazyLoad() bool { return s.isLazyLoad }
 
 type FieldInfo struct {
 	datapb.FieldBinlog

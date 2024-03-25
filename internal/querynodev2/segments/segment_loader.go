@@ -1032,6 +1032,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 
 	if segment.Type() == SegmentTypeSealed {
 		if loadStatus == LoadStatusMeta {
+			segment.baseSegment.isLazyLoad = true
 			segment.baseSegment.loadInfo = loadInfo
 		}
 		if err := loader.loadSealedSegment(ctx, loadInfo, segment, collection, loadStatus); err != nil {

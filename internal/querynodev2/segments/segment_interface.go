@@ -92,4 +92,5 @@ type Segment interface {
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)
+	IsLazyLoad() bool
 }
