@@ -60,10 +60,7 @@ func (sd *shardDelegator) ProcessData(ctx context.Context, insertData []*InsertD
 	tr := timerecord.NewTimeRecorder(method)
 	growings := make(map[int]segments.Segment)
 	for idx, batch := range insertData {
-		growing := sd.getGrowing(batch.SegmentID, batch.PartitionID, &msgpb.MsgPosition{
-			ChannelName: sd.vchannelName,
-			Timestamp:   tsFrom,
-		})
+		growing := sd.getGrowing(batch.SegmentID, batch.PartitionID, batch.StartPosition)
 		growings[idx] = growing
 		err := growing.Insert(ctx, batch.RowIDs, batch.Timestamps, batch.InsertRecord)
 		if err != nil {

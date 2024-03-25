@@ -24,6 +24,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -57,9 +58,6 @@ func (wNode *writeNode) organizeInsertMsgs(insertMsgs []*msgstream.InsertMsg) ([
 		inData := &delegator.InsertData{
 			SegmentID:   segment,
 			PartitionID: segmentPartition[segment],
-			Data:        make([]*storage.InsertData, 0, len(msgs)),
-			PkData:      make([]storage.FieldData, 0, len(msgs)),
-			TsData:      make([]*storage.Int64FieldData, 0, len(msgs)),
 		}
 		for _, msg := range msgs {
 			insertRecord, err := storage.TransferInsertMsgToInsertRecord(schema, msg)
@@ -68,6 +66,10 @@ func (wNode *writeNode) organizeInsertMsgs(insertMsgs []*msgstream.InsertMsg) ([
 			}
 			if inData.InsertRecord == nil {
 				inData.InsertRecord = insertRecord
+				inData.StartPosition = &msgpb.MsgPosition{
+					Timestamp:   msg.BeginTs(),
+					ChannelName: msg.GetShardName(),
+				}
 			} else {
 				err = typeutil.MergeFieldData(inData.InsertRecord.FieldsData, insertRecord.FieldsData)
 				if err != nil {

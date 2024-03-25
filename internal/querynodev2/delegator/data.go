@@ -35,9 +35,6 @@ type InsertData struct {
 	PrimaryKeys   []storage.PrimaryKey
 	Timestamps    []uint64
 	InsertRecord  *segcorepb.InsertRecord
-	Data          []*storage.InsertData
-	PkData        []storage.FieldData
-	TsData        []*storage.Int64FieldData
 	StartPosition *msgpb.MsgPosition
 	SegmentID     int64
 	PartitionID   int64
