@@ -1201,6 +1201,32 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					},
 				},
 			}
+		case *Float16VectorFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Float16Vector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: rawData.Data,
+						},
+						Dim: int64(rawData.Dim),
+					},
+				},
+			}
+		case *BFloat16VectorFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_BFloat16Vector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: rawData.Data,
+						},
+						Dim: int64(rawData.Dim),
+					},
+				},
+			}
 		case *SparseFloatVectorFieldData:
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_SparseFloatVector,
