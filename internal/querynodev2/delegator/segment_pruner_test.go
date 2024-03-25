@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/testutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -227,6 +228,7 @@ func (sps *SegmentPrunerSuite) SetupForClustering(clusterKeyFieldName string,
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 	sps.SetupForClustering("age", schemapb.DataType_Int32)
+	paramtable.Init()
 	targetPartitions := make([]UniqueID, 0)
 	targetPartitions = append(targetPartitions, sps.targetPartition)
 	{
@@ -242,7 +244,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{defaultFilterRatio})
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(2, len(testSegments[0].Segments))
 		sps.Equal(0, len(testSegments[1].Segments))
 	}
@@ -259,7 +261,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{defaultFilterRatio})
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(0, len(testSegments[0].Segments))
 		sps.Equal(2, len(testSegments[1].Segments))
 	}
@@ -276,7 +278,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{defaultFilterRatio})
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(2, len(testSegments[0].Segments))
 		sps.Equal(2, len(testSegments[1].Segments))
 	}
@@ -293,7 +295,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{defaultFilterRatio})
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(0, len(testSegments[0].Segments))
 		sps.Equal(1, len(testSegments[1].Segments))
 	}
@@ -301,6 +303,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarIntField() {
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 	sps.SetupForClustering("info", schemapb.DataType_VarChar)
+	paramtable.Init()
 	targetPartitions := make([]UniqueID, 0)
 	targetPartitions = append(targetPartitions, sps.targetPartition)
 	{
@@ -316,7 +319,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{defaultFilterRatio})
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(0, len(testSegments[0].Segments))
 		sps.Equal(0, len(testSegments[1].Segments))
 		// there should be no segments fulfilling the info=="rag"
@@ -334,7 +337,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{defaultFilterRatio})
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(0, len(testSegments[0].Segments))
 		sps.Equal(1, len(testSegments[1].Segments))
 		// there should be no segments fulfilling the info=="rag"
@@ -352,7 +355,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByScalarStrField() {
 			SerializedExprPlan: serializedPlan,
 			PartitionIDs:       targetPartitions,
 		}
-		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{defaultFilterRatio})
+		PruneSegments(context.TODO(), sps.partitionStats, nil, queryReq, sps.schema, testSegments, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 		sps.Equal(2, len(testSegments[0].Segments))
 		sps.Equal(1, len(testSegments[1].Segments))
 		// there should be no segments fulfilling the info=="rag"
@@ -376,8 +379,8 @@ func vector2Placeholder(vectors [][]float32) *commonpb.PlaceholderValue {
 }
 
 func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
+	paramtable.Init()
 	sps.SetupForClustering("vec", schemapb.DataType_FloatVector)
-
 	vector1 := []float32{0.8877872002188053, 0.6131822285635065, 0.8476814632326242, 0.6645877829359371, 0.9962627712600025, 0.8976183052440327, 0.41941169325798844, 0.7554387854258499}
 	vector2 := []float32{0.8644394874390322, 0.023327886647378615, 0.08330118483461302, 0.7068040179963112, 0.6983994910799851, 0.5562075958994153, 0.3288536247938002, 0.07077341010237759}
 	vectors := [][]float32{vector1, vector2}

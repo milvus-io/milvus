@@ -102,9 +102,10 @@ func PruneSegments(ctx context.Context,
 			item.Segments = newSegments
 			sealedSegments[idx] = item
 		}
-		log.Debug("Pruned segment for search/query",
-			zap.Int("pruned_segment_num", len(filteredSegments)),
+		log.RatedInfo(30, "Pruned segment for search/query",
+			zap.Int("filtered_segment_num[excluded]", len(filteredSegments)),
 			zap.Int("total_segment_num", totalSegNum),
+			zap.Float32("filtered_rate", float32(len(filteredSegments)/totalSegNum)),
 		)
 	}
 }
