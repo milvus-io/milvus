@@ -312,6 +312,9 @@ message ImportTaskProgress {
   string reason = 3;
   int64 progress = 4;
   string complete_time = 5;
+  string state = 6;
+  int64 imported_rows = 7;
+  int64 total_rows = 8;
 }
 
 message GetImportProgressResponse {
@@ -322,6 +325,9 @@ message GetImportProgressResponse {
   string collection_name = 5;
   string complete_time = 6;
   repeated ImportTaskProgress task_progresses = 7;
+  int64 imported_rows = 8;
+  int64 total_rows = 9;
+  string start_time = 10;
 }
 
 message ListImportsRequestInternal {
