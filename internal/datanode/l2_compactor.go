@@ -826,15 +826,6 @@ func (t *level2CompactionTask) analyzeStep(ctx context.Context, meta *etcdpb.Col
 	mapStart := time.Now()
 	var mutex sync.Mutex
 	analyzeDict := make(map[interface{}]int64, 0)
-
-	clusteringKeyID := t.plan.GetClusteringKeyId()
-	var clusteringKeyType schemapb.DataType
-	for _, field := range meta.Schema.Fields {
-		if field.FieldID == clusteringKeyID {
-			clusteringKeyType = field.DataType
-			break
-		}
-	}
 	for _, segment := range flightSegments {
 		segmentClone := &datapb.CompactionSegmentBinlogs{
 			SegmentID:           segment.SegmentID,
@@ -847,7 +838,7 @@ func (t *level2CompactionTask) analyzeStep(ctx context.Context, meta *etcdpb.Col
 			PartitionID:         segment.PartitionID,
 		}
 		future := t.pool.Submit(func() (any, error) {
-			analyzeResult, err := t.analyzeSegment(ctx, clusteringKeyID, clusteringKeyType, segmentClone)
+			analyzeResult, err := t.analyzeSegment(ctx, segmentClone)
 			mutex.Lock()
 			defer mutex.Unlock()
 			for key, v := range analyzeResult {
@@ -874,8 +865,6 @@ func (t *level2CompactionTask) analyzeStep(ctx context.Context, meta *etcdpb.Col
 
 func (t *level2CompactionTask) analyzeSegment(
 	ctx context.Context,
-	fID UniqueID,
-	fDType schemapb.DataType,
 	segment *datapb.CompactionSegmentBinlogs,
 ) (map[interface{}]int64, error) {
 	log := log.With(zap.Int64("planID", t.getPlanID()), zap.Int64("segmentID", segment.GetSegmentID()))
@@ -911,13 +900,13 @@ func (t *level2CompactionTask) analyzeSegment(
 		var ps []string
 		for _, f := range segment.GetFieldBinlogs() {
 			// todo add a new reader only read one column
-			if f.FieldID == fID || f.FieldID == common.RowIDField || f.FieldID == common.TimeStampField {
+			if f.FieldID == t.primaryKeyField.GetFieldID() || f.FieldID == t.clusteringKeyField.GetFieldID() || f.FieldID == common.RowIDField || f.FieldID == common.TimeStampField {
 				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
 			}
 		}
 		fieldBinlogPaths = append(fieldBinlogPaths, ps)
 	}
-	log.Info("fieldBinlogPaths", zap.Int("length", len(fieldBinlogPaths)))
+	log.Info("fieldBinlogPaths", zap.Int("length", len(fieldBinlogPaths)), zap.Any("fieldBinlogPaths", fieldBinlogPaths))
 
 	for _, path := range fieldBinlogPaths {
 		bytesArr, err := t.io.Download(ctx, path)
@@ -977,7 +966,7 @@ func (t *level2CompactionTask) analyzeSegment(
 		//	remained++
 		//}
 
-		pkIter, err := storage.NewInsertBinlogIterator(blobs, fID, fDType)
+		pkIter, err := storage.NewInsertBinlogIterator(blobs, t.primaryKeyField.GetFieldID(), t.primaryKeyField.GetDataType())
 		if err != nil {
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
 			return nil, err
@@ -1006,13 +995,13 @@ func (t *level2CompactionTask) analyzeSegment(
 			if v.Timestamp > timestampTo || timestampFrom == -1 {
 				timestampTo = v.Timestamp
 			}
-
+			//rowValue := vIter.GetData().(*iterators.InsertRow).GetValue()
 			row, ok := v.Value.(map[UniqueID]interface{})
 			if !ok {
 				log.Warn("transfer interface to map wrong", zap.Strings("path", path))
 				return nil, errors.New("unexpected error")
 			}
-			key := row[fID]
+			key := row[t.clusteringKeyField.GetFieldID()]
 			if _, exist := analyzeResult[key]; exist {
 				analyzeResult[key] = analyzeResult[key] + 1
 			} else {
