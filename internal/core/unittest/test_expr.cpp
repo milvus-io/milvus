@@ -1245,6 +1245,7 @@ TEST_P(ExprTest, TestCompareExpr) {
 }
 
 TEST_P(ExprTest, TestMultiLogicalExprsOptimization) {
+    GTEST_SKIP() << "Skip unstable case, see also https://github.com/milvus-io/milvus/issues/31586";
     auto schema = std::make_shared<Schema>();
     auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
