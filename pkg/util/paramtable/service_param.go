@@ -1095,9 +1095,8 @@ func (p *MinioConfig) Init(base *BaseTable) {
 	p.SecretAccessKey.Init(base.mgr)
 
 	p.UseSSL = ParamItem{
-		Key:          "minio.ssl.enabled",
-		FallbackKeys: []string{"minio.useSSL"},
-		Version:      "2.3.12",
+		Key:          "minio.useSSL",
+		Version:      "2.0.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
 		Doc:          "Access to MinIO/S3 with SSL",
