@@ -309,9 +309,8 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 
 		if err == nil {
 			return item.(*cacheItem[K, V]), nil
-		} else {
-			return nil, err
 		}
+		return nil, err
 	}
 
 	return nil, ErrNoSuchItem
