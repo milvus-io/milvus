@@ -102,16 +102,15 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
                    "expr result vector's children size not equal one");
         LOG_DEBUG("output result length:{}", childrens[0]->size());
         if (auto vec = std::dynamic_pointer_cast<ColumnVector>(childrens[0])) {
-            AppendOneChunk(bitset_holder,
-                           static_cast<bool*>(vec->GetRawData()),
-                           vec->size());
+            TargetBitmapView view(vec->GetRawData(), vec->size());
+            AppendOneChunk(bitset_holder, view);
         } else if (auto row =
                        std::dynamic_pointer_cast<RowVector>(childrens[0])) {
             auto bit_vec =
                 std::dynamic_pointer_cast<ColumnVector>(row->child(0));
-            AppendOneChunk(bitset_holder,
-                           static_cast<bool*>(bit_vec->GetRawData()),
-                           bit_vec->size());
+            TargetBitmapView view(bit_vec->GetRawData(), bit_vec->size());
+            AppendOneChunk(bitset_holder, view);
+
             if (!cache_offset_getted) {
                 // offset cache only get once because not support iterator batch
                 auto cache_offset_vec =
@@ -168,7 +167,7 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
         BitsetType expr_res;
         ExecuteExprNode(
             node.filter_plannode_.value(), segment, active_count, expr_res);
-        bitset_holder = std::make_unique<BitsetType>(expr_res);
+        bitset_holder = std::make_unique<BitsetType>(expr_res.clone());
         bitset_holder->flip();
     } else {
         bitset_holder = std::make_unique<BitsetType>(active_count, false);

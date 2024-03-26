@@ -125,8 +125,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
         return nullptr;
     }
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     ValueType val = GetValueFromProto<ValueType>(expr_->val_);
     auto op_type = expr_->op_type_;
@@ -136,7 +136,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
     }
     auto execute_sub_batch = [op_type](const milvus::ArrayView* data,
                                        const int size,
-                                       bool* res,
+                                       TargetBitmapView res,
                                        ValueType val,
                                        int index) {
         switch (op_type) {
@@ -210,8 +210,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
 
     ExprValueType val = GetValueFromProto<ExprValueType>(expr_->val_);
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     auto op_type = expr_->op_type_;
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
@@ -247,7 +247,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
 
     auto execute_sub_batch = [op_type, pointer](const milvus::Json* data,
                                                 const int size,
-                                                bool* res,
+                                                TargetBitmapView res,
                                                 ExprValueType val) {
         switch (op_type) {
             case proto::plan::GreaterThan: {
@@ -392,7 +392,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForIndex() {
     }
     auto op_type = expr_->op_type_;
     auto execute_sub_batch = [op_type](Index* index_ptr, IndexInnerType val) {
-        FixedVector<bool> res;
+        TargetBitmap res;
         switch (op_type) {
             case proto::plan::GreaterThan: {
                 UnaryIndexFunc<T, proto::plan::GreaterThan> func;
@@ -472,13 +472,12 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                 case proto::plan::GreaterThan:
                 case proto::plan::GreaterEqual: {
                     auto res_vec = std::make_shared<ColumnVector>(
-                        DataType::BOOL, batch_size);
+                        TargetBitmap(batch_size));
                     cached_overflow_res_ = res_vec;
-                    bool* res = (bool*)res_vec->GetRawData();
+                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
+
                     if (milvus::query::lt_lb<T>(val)) {
-                        for (size_t i = 0; i < batch_size; ++i) {
-                            res[i] = true;
-                        }
+                        res.set();
                         return res_vec;
                     }
                     return res_vec;
@@ -486,35 +485,32 @@ PhyUnaryRangeFilterExpr::PreCheckOverflow() {
                 case proto::plan::LessThan:
                 case proto::plan::LessEqual: {
                     auto res_vec = std::make_shared<ColumnVector>(
-                        DataType::BOOL, batch_size);
+                        TargetBitmap(batch_size));
                     cached_overflow_res_ = res_vec;
-                    bool* res = (bool*)res_vec->GetRawData();
+                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
+
                     if (milvus::query::gt_ub<T>(val)) {
-                        for (size_t i = 0; i < batch_size; ++i) {
-                            res[i] = true;
-                        }
+                        res.set();
                         return res_vec;
                     }
                     return res_vec;
                 }
                 case proto::plan::Equal: {
                     auto res_vec = std::make_shared<ColumnVector>(
-                        DataType::BOOL, batch_size);
+                        TargetBitmap(batch_size));
                     cached_overflow_res_ = res_vec;
-                    bool* res = (bool*)res_vec->GetRawData();
-                    for (size_t i = 0; i < batch_size; ++i) {
-                        res[i] = false;
-                    }
+                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
+
+                    res.reset();
                     return res_vec;
                 }
                 case proto::plan::NotEqual: {
                     auto res_vec = std::make_shared<ColumnVector>(
-                        DataType::BOOL, batch_size);
+                        TargetBitmap(batch_size));
                     cached_overflow_res_ = res_vec;
-                    bool* res = (bool*)res_vec->GetRawData();
-                    for (size_t i = 0; i < batch_size; ++i) {
-                        res[i] = true;
-                    }
+                    TargetBitmapView res(res_vec->GetRawData(), batch_size);
+
+                    res.set();
                     return res_vec;
                 }
                 default: {
@@ -544,12 +540,12 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplForData() {
     }
     IndexInnerType val = GetValueFromProto<IndexInnerType>(expr_->val_);
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
     auto expr_type = expr_->op_type_;
     auto execute_sub_batch = [expr_type](const T* data,
                                          const int size,
-                                         bool* res,
+                                         TargetBitmapView res,
                                          IndexInnerType val) {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
