@@ -6,15 +6,16 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
 	"golang.org/x/sync/singleflight"
+
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 var (
-	ErrNoSuchItem     = errors.New("no such item")
-	ErrNotEnoughSpace = errors.New("not enough space")
-	ErrTimeOut        = errors.New("time out")
+	ErrNoSuchItem     = merr.WrapErrServiceInternal("no such item")
+	ErrNotEnoughSpace = merr.WrapErrServiceInternal("not enough space")
+	ErrTimeOut        = merr.WrapErrServiceInternal("time out")
 )
 
 type cacheItem[K comparable, V any] struct {
@@ -40,7 +41,7 @@ type Scavenger[K comparable] interface {
 	Collect(key K) (bool, func(K) bool)
 	// Throw records entry removals.
 	Throw(key K)
-	// Sapre returns a collector function based on given key.
+	// Spare returns a collector function based on given key.
 	//	The collector is a function which can be invoked repetedly, each invocation will test if there is enough
 	//	room for all the pending entries if the thrown entry is evicted. Typically, the collector will get multiple true
 	//	before it gets a false.
@@ -93,15 +94,13 @@ type Cache[K comparable, V any] interface {
 
 type Waiter[K comparable] struct {
 	key K
-	wg  *sync.WaitGroup
+	c   *sync.Cond
 }
 
 func newWaiter[K comparable](key K) Waiter[K] {
-	wg := &sync.WaitGroup{}
-	wg.Add(1)
 	return Waiter[K]{
 		key: key,
-		wg:  wg,
+		c:   sync.NewCond(&sync.Mutex{}),
 	}
 }
 
@@ -194,50 +193,50 @@ func (c *lruCache[K, V]) Do(key K, doer func(V) error) error {
 	return doer(item.value)
 }
 
-type pinResult[K comparable, V any] struct {
-	item *cacheItem[K, V]
-	err  error
-}
-
 func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error) error {
-	ch := make(chan pinResult[K, V])
-	go func() {
-		var ele *list.Element
-		for {
-			item, err := c.getAndPin(key)
-			if err != ErrNotEnoughSpace {
-				if ele != nil {
-					c.waitQueue.Remove(ele)
-				}
-				r := pinResult[K, V]{
-					item: item,
-					err:  err,
-				}
-				ch <- r
-				return
-			}
-			if ele == nil {
-				// If no enough space, enqueue the key
+	timedWait := func(cond *sync.Cond, timeout time.Duration) bool {
+		c := make(chan struct{})
+		go func() {
+			cond.L.Lock()
+			defer cond.L.Unlock()
+			defer close(c)
+			cond.Wait()
+		}()
+		select {
+		case <-c:
+			return false // completed normally
+		case <-time.After(timeout):
+			return true // timed out
+		}
+	}
+
+	var ele *list.Element
+	start := time.Now()
+	for {
+		item, err := c.getAndPin(key)
+		if err == nil {
+			if ele != nil {
 				c.rwlock.Lock()
-				waiter := newWaiter(key)
-				ele = c.waitQueue.PushBack(&waiter)
+				c.waitQueue.Remove(ele)
 				c.rwlock.Unlock()
 			}
-			ele.Value.(*Waiter[K]).wg.Wait()
+			defer c.Unpin(key)
+			return doer(item.value)
+		} else if err != ErrNotEnoughSpace {
+			return err
 		}
-	}()
-
-	select {
-	case pr := <-ch:
-		if pr.err != nil {
-			return pr.err
+		if ele == nil {
+			// If no enough space, enqueue the key
+			c.rwlock.Lock()
+			waiter := newWaiter(key)
+			ele = c.waitQueue.PushBack(&waiter)
+			c.rwlock.Unlock()
 		}
-		// the item is pinned already
-		item := pr.item
-		defer c.Unpin(key)
-		return doer(item.value)
-	case <-time.After(timeout):
-		return ErrTimeOut
+		// Wait for the key to be available
+		timeLeft := time.Until(start.Add(timeout))
+		if timeLeft <= 0 || timedWait(ele.Value.(*Waiter[K]).c, timeLeft) {
+			return ErrTimeOut
+		}
 	}
 }
 
@@ -256,7 +255,7 @@ func (c *lruCache[K, V]) Unpin(key K) {
 		for e := c.waitQueue.Front(); e != nil; e = e.Next() {
 			w := e.Value.(*Waiter[K])
 			if ok := collector(w.key); ok {
-				w.wg.Done()
+				w.c.Broadcast()
 			} else {
 				break
 			}
@@ -264,13 +263,14 @@ func (c *lruCache[K, V]) Unpin(key K) {
 	}
 }
 
-func (c *lruCache[K, V]) peek(key K) *cacheItem[K, V] {
+func (c *lruCache[K, V]) peekAndPin(key K) *cacheItem[K, V] {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
 	e, ok := c.items[key]
 	if ok {
 		item := e.Value.(*cacheItem[K, V])
 		c.accessList.MoveToFront(e)
+		item.pinCount.Inc()
 		return item
 	}
 	return nil
@@ -278,8 +278,7 @@ func (c *lruCache[K, V]) peek(key K) *cacheItem[K, V] {
 
 // GetAndPin gets and pins the given key if it exists
 func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
-	if item := c.peek(key); item != nil {
-		item.pinCount.Inc()
+	if item := c.peekAndPin(key); item != nil {
 		return item, nil
 	}
 
@@ -292,8 +291,7 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 
 		strKey := fmt.Sprint(key)
 		item, err, _ := c.loaderSingleFlight.Do(strKey, func() (interface{}, error) {
-			if item := c.peek(key); item != nil {
-				item.pinCount.Inc()
+			if item := c.peekAndPin(key); item != nil {
 				return item, nil
 			}
 
@@ -311,6 +309,8 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], error) {
 
 		if err == nil {
 			return item.(*cacheItem[K, V]), nil
+		} else {
+			return nil, err
 		}
 	}
 

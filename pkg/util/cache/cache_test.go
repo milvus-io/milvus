@@ -222,4 +222,29 @@ func TestLRUCacheConcurrency(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	})
+
+	t.Run("test wait race condition", func(t *testing.T) {
+		numEvict := new(atomic.Int32)
+		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+			return key, true
+		}).WithCapacity(5).WithFinalizer(func(key, value int) error {
+			numEvict.Add(1)
+			return nil
+		}).Build()
+
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					err := cache.DoWait(j, 2*time.Second, func(v int) error {
+						return nil
+					})
+					assert.NoError(t, err)
+				}
+			}(i)
+		}
+		wg.Wait()
+	})
 }
