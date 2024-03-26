@@ -611,7 +611,8 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		return nil, err
 	}
 
-	if common.IsCollectionLazyLoadEnabled(collection.Schema().Properties...) {
+	if common.IsCollectionLazyLoadEnabled(collection.Schema().Properties...) ||
+		(!common.HasLazyload(collection.Schema().Properties) && params.Params.QueryNodeCfg.LazyLoadEnabled.GetAsBool()) {
 		loadStatus = LoadStatusMeta
 	}
 

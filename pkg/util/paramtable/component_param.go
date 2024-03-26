@@ -1947,6 +1947,8 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 	MmapEnabled      ParamItem `refreshable:"false"`
 
+	LazyLoadEnabled ParamItem `refreshable:"false"`
+
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
 	ChunkCacheWarmingUp ParamItem `refreshable:"true"`
@@ -2178,6 +2180,14 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Doc:          "Enable mmap for loading data",
 	}
 	p.MmapEnabled.Init(base.mgr)
+
+	p.LazyLoadEnabled = ParamItem{
+		Key:          "queryNode.lazyloadEnabled",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "Enable lazyload for loading data",
+	}
+	p.LazyLoadEnabled.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",
