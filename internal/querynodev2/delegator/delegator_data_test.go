@@ -18,6 +18,8 @@ package delegator
 
 import (
 	"context"
+	"path"
+	"strconv"
 	"testing"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
@@ -41,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -58,7 +61,9 @@ type DelegatorDataSuite struct {
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
 
-	delegator *shardDelegator
+	delegator    *shardDelegator
+	rootPath     string
+	chunkManager storage.ChunkManager
 }
 
 func (s *DelegatorDataSuite) SetupSuite() {
@@ -126,16 +131,19 @@ func (s *DelegatorDataSuite) SetupTest() {
 			},
 		},
 	}, &querypb.LoadMetaInfo{
-		LoadType: querypb.LoadType_LoadCollection,
+		LoadType:     querypb.LoadType_LoadCollection,
+		PartitionIDs: []int64{1001, 1002},
 	})
 
 	s.mq = &msgstream.MockMsgStream{}
-
+	s.rootPath = s.Suite.T().Name()
+	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), s.rootPath)
+	s.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(context.Background())
 	delegator, err := NewShardDelegator(context.Background(), s.collectionID, s.replicaID, s.vchannelName, s.version, s.workerManager, s.manager, s.tsafeManager, s.loader, &msgstream.MockMqFactory{
 		NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 			return s.mq, nil
 		},
-	}, 10000, nil)
+	}, 10000, nil, s.chunkManager)
 	s.Require().NoError(err)
 	sd, ok := delegator.(*shardDelegator)
 	s.Require().True(ok)
@@ -361,6 +369,73 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	}, 10)
 
 	s.False(s.delegator.distribution.Serviceable())
+
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(nil)
+	// reload, refresh the state
+	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     1000,
+				CollectionID:  s.collectionID,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			},
+		},
+		Version: 1,
+	})
+	s.Require().NoError(err)
+	s.True(s.delegator.distribution.Serviceable())
+	// Test normal errors with retry and fail
+	worker1.ExpectedCalls = nil
+	worker1.EXPECT().Delete(mock.Anything, mock.Anything).Return(merr.ErrSegcore)
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
+			Timestamps:  []uint64{10},
+			RowCount:    1,
+		},
+	}, 10)
+	s.False(s.delegator.distribution.Serviceable(), "should retry and failed")
+
+	// refresh
+	worker1.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
+		Return(nil)
+	// reload, refresh the state
+	s.delegator.LoadSegments(ctx, &querypb.LoadSegmentsRequest{
+		Base:         commonpbutil.NewMsgBase(),
+		DstNodeID:    1,
+		CollectionID: s.collectionID,
+		Infos: []*querypb.SegmentLoadInfo{
+			{
+				SegmentID:     1000,
+				CollectionID:  s.collectionID,
+				PartitionID:   500,
+				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+			},
+		},
+		Version: 2,
+	})
+	s.Require().NoError(err)
+	s.True(s.delegator.distribution.Serviceable())
+
+	s.delegator.Close()
+	s.delegator.ProcessDelete([]*DeleteData{
+		{
+			PartitionID: 500,
+			PrimaryKeys: []storage.PrimaryKey{storage.NewInt64PrimaryKey(10)},
+			Timestamps:  []uint64{10},
+			RowCount:    1,
+		},
+	}, 10)
+	s.Require().NoError(err)
+	s.False(s.delegator.distribution.Serviceable())
 }
 
 func (s *DelegatorDataSuite) TestLoadSegments() {
@@ -542,7 +617,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 				NewMsgStreamFunc: func(_ context.Context) (msgstream.MsgStream, error) {
 					return s.mq, nil
 				},
-			}, 10000, nil)
+			}, 10000, nil, nil)
 		s.NoError(err)
 
 		growing0 := segments.NewMockSegment(s.T())
@@ -901,6 +976,78 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	s.NoError(err)
 }
 
+func (s *DelegatorDataSuite) TestLoadPartitionStats() {
+	segStats := make(map[UniqueID]storage.SegmentStats)
+	centroid := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
+	var segID int64 = 1
+	rows := 1990
+	{
+		// p1 stats
+		fieldStats := make([]storage.FieldStats, 0)
+		fieldStat1 := storage.FieldStats{
+			FieldID: 1,
+			Type:    schemapb.DataType_Int64,
+			Max:     storage.NewInt64FieldValue(200),
+			Min:     storage.NewInt64FieldValue(100),
+		}
+		fieldStat2 := storage.FieldStats{
+			FieldID: 2,
+			Type:    schemapb.DataType_Int64,
+			Max:     storage.NewInt64FieldValue(400),
+			Min:     storage.NewInt64FieldValue(300),
+		}
+		fieldStat3 := storage.FieldStats{
+			FieldID: 3,
+			Type:    schemapb.DataType_FloatVector,
+			Centroids: []storage.VectorFieldValue{
+				&storage.FloatVectorFieldValue{
+					Value: centroid,
+				},
+				&storage.FloatVectorFieldValue{
+					Value: centroid,
+				},
+			},
+		}
+		fieldStats = append(fieldStats, fieldStat1)
+		fieldStats = append(fieldStats, fieldStat2)
+		fieldStats = append(fieldStats, fieldStat3)
+		segStats[segID] = *storage.NewSegmentStats(fieldStats, rows)
+	}
+	partitionStats1 := &storage.PartitionStatsSnapshot{
+		SegmentStats: segStats,
+	}
+	statsData1, err := storage.SerializePartitionStatsSnapshot(partitionStats1)
+	s.NoError(err)
+	partitionID1 := int64(1001)
+	idPath1 := metautil.JoinIDPath(s.collectionID, partitionID1)
+	idPath1 = path.Join(idPath1, s.delegator.vchannelName)
+	statsPath1 := path.Join(s.chunkManager.RootPath(), common.PartitionStatsPath, idPath1, strconv.Itoa(1))
+	s.chunkManager.Write(context.Background(), statsPath1, statsData1)
+	defer s.chunkManager.Remove(context.Background(), statsPath1)
+
+	// reload and check partition stats
+	s.delegator.maybeReloadPartitionStats(context.Background())
+	s.Equal(1, len(s.delegator.partitionStats))
+	s.NotNil(s.delegator.partitionStats[partitionID1])
+	p1Stats := s.delegator.partitionStats[partitionID1]
+	s.Equal(int64(1), p1Stats.GetVersion())
+	s.Equal(rows, p1Stats.SegmentStats[segID].NumRows)
+	s.Equal(3, len(p1Stats.SegmentStats[segID].FieldStats))
+
+	// judge vector stats
+	vecFieldStats := p1Stats.SegmentStats[segID].FieldStats[2]
+	s.Equal(2, len(vecFieldStats.Centroids))
+	s.Equal(8, len(vecFieldStats.Centroids[0].GetValue().([]float32)))
+
+	// judge scalar stats
+	fieldStats1 := p1Stats.SegmentStats[segID].FieldStats[0]
+	s.Equal(int64(100), fieldStats1.Min.GetValue().(int64))
+	s.Equal(int64(200), fieldStats1.Max.GetValue().(int64))
+	fieldStats2 := p1Stats.SegmentStats[segID].FieldStats[1]
+	s.Equal(int64(300), fieldStats2.Min.GetValue().(int64))
+	s.Equal(int64(400), fieldStats2.Max.GetValue().(int64))
+}
+
 func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 	for i := int64(0); i < 5; i++ {
 		ms := &segments.MockSegment{}
@@ -935,7 +1082,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
 	s.Empty(pks)
 
-	delegator.level0Deletions[common.InvalidPartitionID] = allPartitionDeleteData
+	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
 	pks, _ = delegator.GetLevel0Deletions(partitionID)
 	s.Len(pks, 2)
 	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
@@ -956,7 +1103,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
 	s.Empty(pks)
 
-	delegator.level0Deletions[common.InvalidPartitionID] = allPartitionDeleteData
+	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
 	pks, _ = delegator.GetLevel0Deletions(partitionID)
 	s.Len(pks, 2)
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))

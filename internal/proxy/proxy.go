@@ -123,6 +123,9 @@ type Proxy struct {
 	// resource manager
 	resourceManager        resource.Manager
 	replicateStreamManager *ReplicateStreamManager
+
+	// materialized view
+	enableMaterializedView bool
 }
 
 // NewProxy returns a Proxy struct.
@@ -290,6 +293,8 @@ func (node *Proxy) Init() error {
 	}
 	log.Debug("init meta cache done", zap.String("role", typeutil.ProxyRole))
 
+	node.enableMaterializedView = Params.CommonCfg.EnableMaterializedView.GetAsBool()
+
 	log.Info("init proxy done", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("Address", node.address))
 	return nil
 }
@@ -421,8 +426,6 @@ func (node *Proxy) Start() error {
 
 // Stop stops a proxy node.
 func (node *Proxy) Stop() error {
-	node.cancel()
-
 	if node.rowIDAllocator != nil {
 		node.rowIDAllocator.Close()
 		log.Info("close id allocator", zap.String("role", typeutil.ProxyRole))
@@ -445,8 +448,6 @@ func (node *Proxy) Stop() error {
 		}
 		log.Info("close channels time ticker", zap.String("role", typeutil.ProxyRole))
 	}
-
-	node.wg.Wait()
 
 	for _, cb := range node.closeCallbacks {
 		cb()
@@ -471,6 +472,9 @@ func (node *Proxy) Stop() error {
 	if node.resourceManager != nil {
 		node.resourceManager.Close()
 	}
+
+	node.cancel()
+	node.wg.Wait()
 
 	// https://github.com/milvus-io/milvus/issues/12282
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)

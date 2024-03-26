@@ -24,10 +24,12 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -83,7 +85,26 @@ func TestFlowGraphManager(t *testing.T) {
 		}
 		require.False(t, fm.HasFlowgraph(vchanName))
 
-		err := fm.AddandStartWithEtcdTickler(node, vchan, nil, genTestTickler())
+		err := fm.AddandStartWithEtcdTickler(node, vchan, &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+				},
+				{
+					FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		}, genTestTickler())
 		assert.NoError(t, err)
 		assert.True(t, fm.HasFlowgraph(vchanName))
 
@@ -98,7 +119,26 @@ func TestFlowGraphManager(t *testing.T) {
 		}
 		require.False(t, fm.HasFlowgraph(vchanName))
 
-		err := fm.AddandStartWithEtcdTickler(node, vchan, nil, genTestTickler())
+		err := fm.AddandStartWithEtcdTickler(node, vchan, &schemapb.CollectionSchema{
+			Name: "test_collection",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64,
+				},
+				{
+					FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
+				},
+				{
+					FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{Key: common.DimKey, Value: "128"},
+					},
+				},
+			},
+		}, genTestTickler())
 		assert.NoError(t, err)
 		assert.True(t, fm.HasFlowgraph(vchanName))
 

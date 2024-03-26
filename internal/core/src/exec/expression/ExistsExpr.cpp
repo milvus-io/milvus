@@ -45,13 +45,13 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
         return nullptr;
     }
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     auto execute_sub_batch = [](const milvus::Json* data,
                                 const int size,
-                                bool* res,
+                                TargetBitmapView res,
                                 const std::string& pointer) {
         for (int i = 0; i < size; ++i) {
             res[i] = data[i].exist(pointer);

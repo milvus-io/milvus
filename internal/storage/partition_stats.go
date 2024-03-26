@@ -20,6 +20,14 @@ import "encoding/json"
 
 type SegmentStats struct {
 	FieldStats []FieldStats `json:"fieldStats"`
+	NumRows    int
+}
+
+func NewSegmentStats(fieldStats []FieldStats, rows int) *SegmentStats {
+	return &SegmentStats{
+		FieldStats: fieldStats,
+		NumRows:    rows,
+	}
 }
 
 type PartitionStatsSnapshot struct {

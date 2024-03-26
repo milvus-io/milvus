@@ -67,6 +67,6 @@ func WithSegmentIDs(segmentIDs ...int64) CandidateFilter {
 // WithPartitionID returns CandidateFilter with provided partitionID.
 func WithPartitionID(partitionID int64) CandidateFilter {
 	return func(candidate candidateWithWorker) bool {
-		return candidate.Partition() == partitionID || partitionID == common.InvalidPartitionID
+		return candidate.Partition() == partitionID || partitionID == common.AllPartitionsID
 	}
 }

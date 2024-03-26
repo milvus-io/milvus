@@ -33,7 +33,13 @@ const (
 	IndexSparseInverted  IndexType = "SPARSE_INVERTED_INDEX"
 	IndexSparseWand      IndexType = "SPARSE_WAND"
 
-	InvertedIndexType IndexType = "INVERTED"
+	IndexINVERTED IndexType = "INVERTED"
+
+	IndexSTLSORT IndexType = "STL_SORT"
+	IndexTRIE    IndexType = "TRIE"
+	IndexTrie    IndexType = "Trie"
+
+	AutoIndex IndexType = "AUTOINDEX"
 )
 
 func IsGpuIndex(indexType IndexType) bool {

@@ -60,6 +60,7 @@ message QueryInfo {
   string search_params = 4;
   int64 round_decimal = 5;
   int64 group_by_field_id = 6;
+  bool materialized_view_involved = 7;
 }
 
 message ColumnInfo {
@@ -70,6 +71,7 @@ message ColumnInfo {
   repeated string nested_path = 5;
   bool is_partition_key = 6;
   schema.DataType element_type = 7;
+  bool is_clustering_key = 8;
 }
 
 message ColumnExpr {

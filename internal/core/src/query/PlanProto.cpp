@@ -202,6 +202,8 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
     search_info.round_decimal_ = query_info_proto.round_decimal();
     search_info.search_params_ =
         nlohmann::json::parse(query_info_proto.search_params());
+    search_info.materialized_view_involved =
+        query_info_proto.materialized_view_involved();
 
     if (query_info_proto.group_by_field_id() > 0) {
         auto group_by_field_id = FieldId(query_info_proto.group_by_field_id());

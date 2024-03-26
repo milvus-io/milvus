@@ -237,10 +237,7 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 	return result
 }
 
-// GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
-func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
-	m.RLock()
-	defer m.RUnlock()
+func (m *meta) getNumRowsOfCollectionUnsafe(collectionID UniqueID) int64 {
 	var ret int64
 	segments := m.segments.GetSegments()
 	for _, segment := range segments {
@@ -249,6 +246,13 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 		}
 	}
 	return ret
+}
+
+// GetNumRowsOfCollection returns total rows count of segments belongs to provided collection
+func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
+	m.RLock()
+	defer m.RUnlock()
+	return m.getNumRowsOfCollectionUnsafe(collectionID)
 }
 
 // GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
@@ -278,6 +282,16 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		}
 	}
 	return total, collectionBinlogSize
+}
+
+func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
+	m.RLock()
+	defer m.RUnlock()
+	ret := make(map[int64]int64, len(m.collections))
+	for collectionID := range m.collections {
+		ret[collectionID] = m.getNumRowsOfCollectionUnsafe(collectionID)
+	}
+	return ret
 }
 
 // AddSegment records segment info, persisting info into kv store
@@ -477,34 +491,6 @@ func (m *meta) UpdateSegment(segmentID int64, operators ...SegmentOperator) erro
 	return nil
 }
 
-// UnsetIsImporting removes the `isImporting` flag of a segment.
-func (m *meta) UnsetIsImporting(segmentID UniqueID) error {
-	log.Debug("meta update: unsetting isImport state of segment",
-		zap.Int64("segmentID", segmentID))
-	m.Lock()
-	defer m.Unlock()
-	curSegInfo := m.segments.GetSegment(segmentID)
-	if curSegInfo == nil {
-		return fmt.Errorf("segment not found %d", segmentID)
-	}
-	// Persist segment updates first.
-	clonedSegment := curSegInfo.Clone()
-	clonedSegment.IsImporting = false
-	if isSegmentHealthy(clonedSegment) {
-		if err := m.catalog.AlterSegments(m.ctx, []*datapb.SegmentInfo{clonedSegment.SegmentInfo}); err != nil {
-			log.Warn("meta update: unsetting isImport state of segment - failed to unset segment isImporting state",
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err))
-			return err
-		}
-	}
-	// Update in-memory meta.
-	m.segments.SetIsImporting(segmentID, false)
-	log.Info("meta update: unsetting isImport state of segment - complete",
-		zap.Int64("segmentID", segmentID))
-	return nil
-}
-
 type updateSegmentPack struct {
 	meta     *meta
 	segments map[int64]*SegmentInfo
@@ -607,12 +593,12 @@ func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 	}
 }
 
-// update binlogs in segmentInfo
-func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+// Add binlogs in segmentInfo
+func AddBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
-			log.Warn("meta update: update binlog failed - segment not found",
+			log.Warn("meta update: add binlog failed - segment not found",
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
@@ -627,11 +613,11 @@ func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*dat
 	}
 }
 
-func ReplaceBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
+func UpdateBinlogsOperator(segmentID int64, binlogs, statslogs, deltalogs []*datapb.FieldBinlog) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
-			log.Warn("meta update: replace binlog failed - segment not found",
+			log.Warn("meta update: update binlog failed - segment not found",
 				zap.Int64("segmentID", segmentID))
 			return false
 		}
@@ -684,10 +670,8 @@ func UpdateDmlPosition(segmentID int64, dmlPosition *msgpb.MsgPosition) UpdateOp
 	}
 }
 
-// update segment checkpoint and num rows
-// if was importing segment
-// only update rows.
-func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*datapb.CheckPoint) UpdateOperator {
+// UpdateCheckPointOperator updates segment checkpoint and num rows
+func UpdateCheckPointOperator(segmentID int64, checkpoints []*datapb.CheckPoint) UpdateOperator {
 	return func(modPack *updateSegmentPack) bool {
 		segment := modPack.Get(segmentID)
 		if segment == nil {
@@ -696,25 +680,21 @@ func UpdateCheckPointOperator(segmentID int64, importing bool, checkpoints []*da
 			return false
 		}
 
-		if importing {
-			segment.NumOfRows = segment.currRows
-		} else {
-			for _, cp := range checkpoints {
-				if cp.SegmentID != segmentID {
-					// Don't think this is gonna to happen, ignore for now.
-					log.Warn("checkpoint in segment is not same as flush segment to update, igreo", zap.Int64("current", segmentID), zap.Int64("checkpoint segment", cp.SegmentID))
-					continue
-				}
-
-				if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
-					log.Warn("checkpoint in segment is larger than reported", zap.Any("current", segment.GetDmlPosition()), zap.Any("reported", cp.GetPosition()))
-					// segment position in etcd is larger than checkpoint, then dont change it
-					continue
-				}
-
-				segment.NumOfRows = cp.NumOfRows
-				segment.DmlPosition = cp.GetPosition()
+		for _, cp := range checkpoints {
+			if cp.SegmentID != segmentID {
+				// Don't think this is gonna to happen, ignore for now.
+				log.Warn("checkpoint in segment is not same as flush segment to update, igreo", zap.Int64("current", segmentID), zap.Int64("checkpoint segment", cp.SegmentID))
+				continue
 			}
+
+			if segment.DmlPosition != nil && segment.DmlPosition.Timestamp >= cp.Position.Timestamp {
+				log.Warn("checkpoint in segment is larger than reported", zap.Any("current", segment.GetDmlPosition()), zap.Any("reported", cp.GetPosition()))
+				// segment position in etcd is larger than checkpoint, then dont change it
+				continue
+			}
+
+			segment.NumOfRows = cp.NumOfRows
+			segment.DmlPosition = cp.GetPosition()
 		}
 
 		count := segmentutil.CalcRowCountFromBinLog(segment.SegmentInfo)
@@ -1272,7 +1252,7 @@ func (m *meta) copyNewDeltalogs(latestCompactFromInfos []*SegmentInfo, logIDsInP
 }
 
 // buildSegment utility function for compose datapb.SegmentInfo struct with provided info
-func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string, isImporting bool) *SegmentInfo {
+func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, channelName string) *SegmentInfo {
 	info := &datapb.SegmentInfo{
 		ID:            segmentID,
 		CollectionID:  collectionID,
@@ -1280,7 +1260,6 @@ func buildSegment(collectionID UniqueID, partitionID UniqueID, segmentID UniqueI
 		InsertChannel: channelName,
 		NumOfRows:     0,
 		State:         commonpb.SegmentState_Growing,
-		IsImporting:   isImporting,
 	}
 	return NewSegmentInfo(info)
 }

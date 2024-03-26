@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/metastore/kv/rootcoord"
@@ -1719,6 +1720,91 @@ func TestMetaTable_CreateDatabase(t *testing.T) {
 		assert.True(t, meta.aliases.exist("exist"))
 		assert.True(t, meta.names.empty("exist"))
 		assert.True(t, meta.aliases.empty("exist"))
+	})
+}
+
+func TestAlterDatabase(t *testing.T) {
+	t.Run("normal case", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		catalog.On("AlterDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(nil)
+
+		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated)
+
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				"db1": db,
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+		newDB := db.Clone()
+		db.Properties = []*commonpb.KeyValuePair{
+			{
+				Key:   "key1",
+				Value: "value1",
+			},
+		}
+		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
+		assert.NoError(t, err)
+	})
+
+	t.Run("access catalog failed", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		mockErr := errors.New("access catalog failed")
+		catalog.On("AlterDatabase",
+			mock.Anything,
+			mock.Anything,
+			mock.Anything,
+		).Return(mockErr)
+
+		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated)
+
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				"db1": db,
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+		newDB := db.Clone()
+		db.Properties = []*commonpb.KeyValuePair{
+			{
+				Key:   "key1",
+				Value: "value1",
+			},
+		}
+		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
+		assert.ErrorIs(t, err, mockErr)
+	})
+
+	t.Run("alter database name", func(t *testing.T) {
+		catalog := mocks.NewRootCoordCatalog(t)
+		db := model.NewDatabase(1, "db1", pb.DatabaseState_DatabaseCreated)
+
+		meta := &MetaTable{
+			dbName2Meta: map[string]*model.Database{
+				"db1": db,
+			},
+			names:   newNameDb(),
+			aliases: newNameDb(),
+			catalog: catalog,
+		}
+		newDB := db.Clone()
+		newDB.Name = "db2"
+		db.Properties = []*commonpb.KeyValuePair{
+			{
+				Key:   "key1",
+				Value: "value1",
+			},
+		}
+		err := meta.AlterDatabase(context.TODO(), db, newDB, typeutil.ZeroTimestamp)
+		assert.Error(t, err)
 	})
 }
 

@@ -3,7 +3,9 @@ package model
 import (
 	"time"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
 )
 
@@ -13,14 +15,16 @@ type Database struct {
 	Name        string
 	State       pb.DatabaseState
 	CreatedTime uint64
+	Properties  []*commonpb.KeyValuePair
 }
 
-func NewDatabase(id int64, name string, sate pb.DatabaseState) *Database {
+func NewDatabase(id int64, name string, state pb.DatabaseState) *Database {
 	return &Database{
 		ID:          id,
 		Name:        name,
-		State:       sate,
+		State:       state,
 		CreatedTime: uint64(time.Now().UnixNano()),
+		Properties:  make([]*commonpb.KeyValuePair, 0),
 	}
 }
 
@@ -39,6 +43,7 @@ func (c *Database) Clone() *Database {
 		Name:        c.Name,
 		State:       c.State,
 		CreatedTime: c.CreatedTime,
+		Properties:  common.CloneKeyValuePairs(c.Properties),
 	}
 }
 
@@ -47,7 +52,8 @@ func (c *Database) Equal(other Database) bool {
 		c.Name == other.Name &&
 		c.ID == other.ID &&
 		c.State == other.State &&
-		c.CreatedTime == other.CreatedTime
+		c.CreatedTime == other.CreatedTime &&
+		checkParamsEqual(c.Properties, other.Properties)
 }
 
 func MarshalDatabaseModel(db *Database) *pb.DatabaseInfo {
@@ -61,6 +67,7 @@ func MarshalDatabaseModel(db *Database) *pb.DatabaseInfo {
 		Name:        db.Name,
 		State:       db.State,
 		CreatedTime: db.CreatedTime,
+		Properties:  db.Properties,
 	}
 }
 
@@ -75,5 +82,6 @@ func UnmarshalDatabaseModel(info *pb.DatabaseInfo) *Database {
 		CreatedTime: info.GetCreatedTime(),
 		State:       info.GetState(),
 		TenantID:    info.GetTenantId(),
+		Properties:  info.GetProperties(),
 	}
 }

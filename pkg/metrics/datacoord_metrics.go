@@ -93,6 +93,16 @@ var (
 			segmentStateLabelName,
 		})
 
+	DataCoordBulkVectors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.DataCoordRole,
+			Name:      "bulk_insert_vectors_count",
+			Help:      "counter of vectors successfully bulk inserted",
+		}, []string{
+			collectionIDLabelName,
+		})
+
 	DataCoordNumStoredRowsCounter = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
@@ -284,6 +294,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumSegments)
 	registry.MustRegister(DataCoordNumCollections)
 	registry.MustRegister(DataCoordNumStoredRows)
+	registry.MustRegister(DataCoordBulkVectors)
 	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordCheckpointUnixSeconds)
@@ -321,4 +332,10 @@ func CleanupDataCoordNumStoredRows(collectionID int64) {
 			segmentStateLabelName: fmt.Sprint(state),
 		})
 	}
+}
+
+func CleanupDataCoordBulkInsertVectors(collectionID int64) {
+	DataCoordBulkVectors.Delete(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
 }

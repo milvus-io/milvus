@@ -82,7 +82,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 		2: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 2, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 2}}}},
 		3: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 3, State: commonpb.CompactionState_Executing}},
 		4: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 4, State: commonpb.CompactionState_Executing}},
-	})
+	}, nil)
 
 	s.mockSessMgr.EXPECT().SyncSegments(int64(100), mock.Anything).Return(nil).Once()
 	{
@@ -297,6 +297,49 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 		err := handler.RefreshPlan(task)
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)
+	})
+
+	s.Run("select zero segments", func() {
+		s.SetupTest()
+		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).RunAndReturn(func(segID int64) *SegmentInfo {
+			return &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				Level:         datapb.SegmentLevel_L0,
+				InsertChannel: channel,
+				State:         commonpb.SegmentState_Flushed,
+				Deltalogs:     deltalogs,
+			}}
+		}).Times(2)
+		s.mockMeta.EXPECT().SelectSegments(mock.Anything).Return(nil).Once()
+
+		// 2 l0 segments
+		plan := &datapb.CompactionPlan{
+			PlanID: 1,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{
+					SegmentID:     100,
+					Level:         datapb.SegmentLevel_L0,
+					InsertChannel: channel,
+				},
+				{
+					SegmentID:     101,
+					Level:         datapb.SegmentLevel_L0,
+					InsertChannel: channel,
+				},
+			},
+			Type: datapb.CompactionType_Level0DeleteCompaction,
+		}
+
+		task := &compactionTask{
+			triggerInfo: &compactionSignal{id: 19530, collectionID: 1, partitionID: 10},
+			state:       executing,
+			plan:        plan,
+			dataNodeID:  1,
+		}
+
+		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		err := handler.RefreshPlan(task)
+		s.Error(err)
 	})
 }
 
@@ -644,7 +687,7 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 		2: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 2, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 2}}}},
 		3: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 3, State: commonpb.CompactionState_Executing}},
 		5: {A: 222, B: &datapb.CompactionPlanResult{PlanID: 5, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 5}}}},
-	})
+	}, nil)
 
 	inPlans := map[int64]*compactionTask{
 		1: {

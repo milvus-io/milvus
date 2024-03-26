@@ -276,14 +276,6 @@ func (ds *DataCoordFactory) ReportDataNodeTtMsgs(ctx context.Context, req *datap
 	return merr.Success(), nil
 }
 
-func (ds *DataCoordFactory) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
-}
-
-func (ds *DataCoordFactory) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return merr.Success(), nil
-}
-
 func (ds *DataCoordFactory) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return merr.Success(), nil
 }
@@ -1058,23 +1050,6 @@ func (m *RootCoordFactory) GetComponentStates(ctx context.Context, req *milvuspb
 		SubcomponentStates: make([]*milvuspb.ComponentInfo, 0),
 		Status:             merr.Success(),
 	}, nil
-}
-
-func (m *RootCoordFactory) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	if ctx != nil && ctx.Value(ctxKey{}) != nil {
-		if v := ctx.Value(ctxKey{}).(string); v == returnError {
-			return nil, fmt.Errorf("injected error")
-		}
-	}
-	if m.ReportImportErr {
-		return merr.Success(), fmt.Errorf("mock report import error")
-	}
-	if m.ReportImportNotSuccess {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		}, nil
-	}
-	return merr.Success(), nil
 }
 
 // FailMessageStreamFactory mock MessageStreamFactory failure

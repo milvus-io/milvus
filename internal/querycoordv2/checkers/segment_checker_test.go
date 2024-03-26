@@ -91,10 +91,10 @@ func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
 		plans := make([]balance.SegmentAssignPlan, 0, len(segments))
 		for i, s := range segments {
 			plan := balance.SegmentAssignPlan{
-				Segment:   s,
-				From:      -1,
-				To:        nodes[i%len(nodes)],
-				ReplicaID: -1,
+				Segment: s,
+				From:    -1,
+				To:      nodes[i%len(nodes)],
+				Replica: meta.NilReplica,
 			}
 			plans = append(plans, plan)
 		}
@@ -166,6 +166,77 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	suite.True(checker.IsActive())
 	tasks = checker.Check(context.TODO())
 	suite.Len(tasks, 1)
+}
+
+func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
+	checker := suite.checker
+	// set meta
+	checker.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	checker.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
+	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+
+	// set target
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: "test-insert-channel",
+			Level:         datapb.SegmentLevel_L0,
+		},
+	}
+
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID: 1,
+			ChannelName:  "test-insert-channel",
+		},
+	}
+
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, segments, nil)
+	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
+
+	// set dist
+	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
+	// seg l0 segment exist on a non delegator node
+	checker.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
+	checker.dist.LeaderViewManager.Update(2, utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{}))
+
+	tasks := checker.Check(context.TODO())
+	suite.Len(tasks, 1)
+	suite.Len(tasks[0].Actions(), 1)
+	action, ok := tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.True(ok)
+	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.Equal(task.ActionTypeGrow, action.Type())
+	suite.EqualValues(1, action.SegmentID())
+	suite.EqualValues(2, action.Node())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+
+	// release duplicate l0 segment
+	checker.dist.SegmentDistManager.Update(2, utils.CreateTestSegment(1, 1, 1, 2, 100, "test-insert-channel"))
+	tasks = checker.Check(context.TODO())
+	suite.Len(tasks, 1)
+	suite.Len(tasks[0].Actions(), 1)
+	action, ok = tasks[0].Actions()[0].(*task.SegmentAction)
+	suite.True(ok)
+	suite.EqualValues(1, tasks[0].ReplicaID())
+	suite.Equal(task.ActionTypeReduce, action.Type())
+	suite.EqualValues(1, action.SegmentID())
+	suite.EqualValues(1, action.Node())
+	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
 }
 
 func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {

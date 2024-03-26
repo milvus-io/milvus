@@ -81,6 +81,8 @@ const (
 	functionLabelName        = "function_name"
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
+	indexName                = "index_name"
+	isVectorIndex            = "is_vector_index"
 	segmentStateLabelName    = "segment_state"
 	segmentIDLabelName       = "segment_id"
 	segmentLevelLabelName    = "segment_level"
@@ -97,6 +99,12 @@ const (
 	lockType                 = "lock_type"
 	lockOp                   = "lock_op"
 	loadTypeName             = "load_type"
+
+	// entities label
+	LoadedLabel         = "loaded"
+	NumEntitiesAllLabel = "all"
+
+	taskTypeLabel = "task_type"
 )
 
 var (

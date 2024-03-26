@@ -233,7 +233,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestAssignSegment() {
 			}
 			for i := range c.collectionIDs {
 				plans := balancer.AssignSegment(c.collectionIDs[i], c.assignments[i], c.nodes)
-				suite.ElementsMatch(c.expectPlans[i], plans)
+				assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans[i], plans)
 			}
 		})
 	}
@@ -316,7 +316,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 				},
 			},
 			expectPlans: []SegmentAssignPlan{
-				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2}, From: 2, To: 1, ReplicaID: 1},
+				{Segment: &meta.Segment{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 2}, From: 2, To: 1, Replica: newReplicaDefaultRG(1)},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
@@ -386,8 +386,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 
 			// 4. balance and verify result
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, c.collectionID)
-			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
-			suite.ElementsMatch(c.expectPlans, segmentPlans)
+			assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
+			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
 		})
 	}
 }
@@ -450,7 +450,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 					Segment: &meta.Segment{
 						SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 20},
 						Node:        2,
-					}, From: 2, To: 3, ReplicaID: 1,
+					}, From: 2, To: 3, Replica: newReplicaDefaultRG(1),
 				},
 			},
 			{},
@@ -498,7 +498,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 
 	// 4. first round balance
 	segmentPlans, _ := suite.getCollectionBalancePlans(balancer, balanceCase.collectionIDs[0])
-	suite.ElementsMatch(balanceCase.expectPlans[0], segmentPlans)
+	assertSegmentAssignPlanElementMatch(&suite.Suite, balanceCase.expectPlans[0], segmentPlans)
 
 	// 5. update segment distribution to simulate balance effect
 	for node, s := range balanceCase.distributions[1] {
@@ -507,7 +507,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 
 	// 6. balance again
 	segmentPlans, _ = suite.getCollectionBalancePlans(balancer, balanceCase.collectionIDs[1])
-	suite.ElementsMatch(balanceCase.expectPlans[1], segmentPlans)
+	assertSegmentAssignPlanElementMatch(&suite.Suite, balanceCase.expectPlans[1], segmentPlans)
 }
 
 func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
@@ -548,11 +548,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 				{Segment: &meta.Segment{
 					SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20},
 					Node:        1,
-				}, From: 1, To: 3, ReplicaID: 1},
+				}, From: 1, To: 3, Replica: newReplicaDefaultRG(1)},
 				{Segment: &meta.Segment{
 					SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 10},
 					Node:        1,
-				}, From: 1, To: 3, ReplicaID: 1},
+				}, From: 1, To: 3, Replica: newReplicaDefaultRG(1)},
 			},
 			expectChannelPlans: []ChannelAssignPlan{},
 		},
@@ -651,8 +651,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 
 			// 4. balance and verify result
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(suite.balancer, c.collectionID)
-			suite.ElementsMatch(c.expectChannelPlans, channelPlans)
-			suite.ElementsMatch(c.expectPlans, segmentPlans)
+			assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
+			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
 		})
 	}
 }

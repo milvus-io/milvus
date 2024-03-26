@@ -459,47 +459,6 @@ func (_c *MockSegment_InsertCount_Call) RunAndReturn(run func() int64) *MockSegm
 	return _c
 }
 
-// IsLazyLoad provides a mock function with given fields:
-func (_m *MockSegment) IsLazyLoad() bool {
-	ret := _m.Called()
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockSegment_IsLazyLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsLazyLoad'
-type MockSegment_IsLazyLoad_Call struct {
-	*mock.Call
-}
-
-// IsLazyLoad is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) IsLazyLoad() *MockSegment_IsLazyLoad_Call {
-	return &MockSegment_IsLazyLoad_Call{Call: _e.mock.On("IsLazyLoad")}
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) Run(run func()) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) Return(_a0 bool) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) RunAndReturn(run func() bool) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // LastDeltaTimestamp provides a mock function with given fields:
 func (_m *MockSegment) LastDeltaTimestamp() uint64 {
 	ret := _m.Called()
@@ -948,6 +907,47 @@ func (_c *MockSegment_Release_Call) Return() *MockSegment_Release_Call {
 }
 
 func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *MockSegment_Release_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResourceUsageEstimate provides a mock function with given fields:
+func (_m *MockSegment) ResourceUsageEstimate() ResourceUsage {
+	ret := _m.Called()
+
+	var r0 ResourceUsage
+	if rf, ok := ret.Get(0).(func() ResourceUsage); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(ResourceUsage)
+	}
+
+	return r0
+}
+
+// MockSegment_ResourceUsageEstimate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResourceUsageEstimate'
+type MockSegment_ResourceUsageEstimate_Call struct {
+	*mock.Call
+}
+
+// ResourceUsageEstimate is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) ResourceUsageEstimate() *MockSegment_ResourceUsageEstimate_Call {
+	return &MockSegment_ResourceUsageEstimate_Call{Call: _e.mock.On("ResourceUsageEstimate")}
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) Run(run func()) *MockSegment_ResourceUsageEstimate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) Return(_a0 ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) RunAndReturn(run func() ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
 	_c.Call.Return(run)
 	return _c
 }

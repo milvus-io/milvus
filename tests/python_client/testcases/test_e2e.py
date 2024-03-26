@@ -20,6 +20,20 @@ class TestE2e(TestcaseBase):
         collection_w = self.init_collection_wrap(name=name, active_trace=True)
         tt = time.time() - t0
         assert collection_w.name == name
+
+        # index
+        index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
+        t0 = time.time()
+        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
+                                             index_params=index_params,
+                                             index_name=cf.gen_unique_str())
+        index, _ = collection_w.create_index(field_name=ct.default_string_field_name,
+                                             index_params={},
+                                             index_name=cf.gen_unique_str())
+        tt = time.time() - t0
+        log.info(f"assert index: {tt}")
+        assert len(collection_w.indexes) == 2
+
         entities = collection_w.num_entities
         log.info(f"assert create collection: {tt}, init_entities: {entities}")
 
@@ -39,19 +53,6 @@ class TestE2e(TestcaseBase):
         tt = time.time() - t0
         entities = collection_w.num_entities
         log.info(f"assert flush: {tt}, entities: {entities}")
-
-        # index
-        index_params = {"index_type": "IVF_SQ8", "params": {"nlist": 64}, "metric_type": "L2"}
-        t0 = time.time()
-        index, _ = collection_w.create_index(field_name=ct.default_float_vec_field_name,
-                                             index_params=index_params,
-                                             index_name=cf.gen_unique_str())
-        index, _ = collection_w.create_index(field_name=ct.default_string_field_name,
-                                             index_params={},
-                                             index_name=cf.gen_unique_str())
-        tt = time.time() - t0
-        log.info(f"assert index: {tt}")
-        assert len(collection_w.indexes) == 2
 
         # load
         collection_w.load()

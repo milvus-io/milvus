@@ -55,7 +55,7 @@ func InsertOutOfTarget(n *filterNode, c *Collection, msg *InsertMsg) error {
 		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
 	}
 
-	// all growing will be be in-memory to support dynamic partition load/release
+	// all growing will be in-memory to support dynamic partition load/release
 	return nil
 }
 
@@ -88,7 +88,7 @@ func DeleteOutOfTarget(n *filterNode, c *Collection, msg *DeleteMsg) error {
 		return merr.WrapErrParameterInvalid(msg.GetCollectionID(), c.ID(), "msg not target because of collection")
 	}
 
-	// all growing will be be in-memory to support dynamic partition load/release
+	// all growing will be in-memory to support dynamic partition load/release
 	return nil
 }
 

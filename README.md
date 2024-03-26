@@ -169,7 +169,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-359-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-363-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -223,7 +223,6 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/LionelDong"><img src="https://avatars.githubusercontent.com/u/7533395?v=4" width="30px" /></a>
 <a href="https://github.com/LocoRichard"><img src="https://avatars.githubusercontent.com/u/81553353?v=4" width="30px" /></a>
 <a href="https://github.com/LoveEachDay"><img src="https://avatars.githubusercontent.com/u/1573213?v=4" width="30px" /></a>
-<a href="https://github.com/MXDA"><img src="https://avatars.githubusercontent.com/u/47274057?v=4" width="30px" /></a>
 <a href="https://github.com/MrPresent-Han"><img src="https://avatars.githubusercontent.com/u/116052805?v=4" width="30px" /></a>
 <a href="https://github.com/NavanshGoel"><img src="https://avatars.githubusercontent.com/u/74401713?v=4" width="30px" /></a>
 <a href="https://github.com/NicoYuan1986"><img src="https://avatars.githubusercontent.com/u/109071306?v=4" width="30px" /></a>
@@ -253,6 +252,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/Tumao727"><img src="https://avatars.githubusercontent.com/u/20420181?v=4" width="30px" /></a>
 <a href="https://github.com/Writer-X"><img src="https://avatars.githubusercontent.com/u/80471801?v=4" width="30px" /></a>
 <a href="https://github.com/Writtic"><img src="https://avatars.githubusercontent.com/u/11371498?v=4" width="30px" /></a>
+<a href="https://github.com/Wuzhengda55"><img src="https://avatars.githubusercontent.com/u/47274057?v=4" width="30px" /></a>
 <a href="https://github.com/Xieql"><img src="https://avatars.githubusercontent.com/u/45359033?v=4" width="30px" /></a>
 <a href="https://github.com/XuPeng-SH"><img src="https://avatars.githubusercontent.com/u/39627130?v=4" width="30px" /></a>
 <a href="https://github.com/XuanYang-cn"><img src="https://avatars.githubusercontent.com/u/51370125?v=4" width="30px" /></a>
@@ -271,6 +271,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/aoiasd"><img src="https://avatars.githubusercontent.com/u/45024769?v=4" width="30px" /></a>
 <a href="https://github.com/arijit-chowdhury-genea"><img src="https://avatars.githubusercontent.com/u/104769013?v=4" width="30px" /></a>
 <a href="https://github.com/armanexplorer"><img src="https://avatars.githubusercontent.com/u/44166374?v=4" width="30px" /></a>
+<a href="https://github.com/ashkrisk"><img src="https://avatars.githubusercontent.com/u/137368647?v=4" width="30px" /></a>
 <a href="https://github.com/ashyshyshyman"><img src="https://avatars.githubusercontent.com/u/50362613?v=4" width="30px" /></a>
 <a href="https://github.com/avats-dev"><img src="https://avatars.githubusercontent.com/u/35889327?v=4" width="30px" /></a>
 <a href="https://github.com/avsolatorio"><img src="https://avatars.githubusercontent.com/u/3009596?v=4" width="30px" /></a>
@@ -335,6 +336,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/fishpenguin"><img src="https://avatars.githubusercontent.com/u/49153041?v=4" width="30px" /></a>
 <a href="https://github.com/foxspy"><img src="https://avatars.githubusercontent.com/u/11503321?v=4" width="30px" /></a>
 <a href="https://github.com/freestsoul"><img src="https://avatars.githubusercontent.com/u/3909908?v=4" width="30px" /></a>
+<a href="https://github.com/gcmutator"><img src="https://avatars.githubusercontent.com/u/134900551?v=4" width="30px" /></a>
 <a href="https://github.com/ggaaooppeenngg"><img src="https://avatars.githubusercontent.com/u/4769989?v=4" width="30px" /></a>
 <a href="https://github.com/git-hulk"><img src="https://avatars.githubusercontent.com/u/4987594?v=4" width="30px" /></a>
 <a href="https://github.com/godchen0212"><img src="https://avatars.githubusercontent.com/u/67679556?v=4" width="30px" /></a>
@@ -350,6 +352,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/haorenfsa"><img src="https://avatars.githubusercontent.com/u/15938850?v=4" width="30px" /></a>
 <a href="https://github.com/henryoswald"><img src="https://avatars.githubusercontent.com/u/343366?v=4" width="30px" /></a>
 <a href="https://github.com/hey-hoho"><img src="https://avatars.githubusercontent.com/u/8401517?v=4" width="30px" /></a>
+<a href="https://github.com/hishope"><img src="https://avatars.githubusercontent.com/u/153272819?v=4" width="30px" /></a>
 <a href="https://github.com/huanghaoyuanhhy"><img src="https://avatars.githubusercontent.com/u/103482615?v=4" width="30px" /></a>
 <a href="https://github.com/huangjincheng2022"><img src="https://avatars.githubusercontent.com/u/98305308?v=4" width="30px" /></a>
 <a href="https://github.com/ibrahimhaddad"><img src="https://avatars.githubusercontent.com/u/1656002?v=4" width="30px" /></a>
@@ -422,6 +425,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/psc0606"><img src="https://avatars.githubusercontent.com/u/7888889?v=4" width="30px" /></a>
 <a href="https://github.com/punkerpunker"><img src="https://avatars.githubusercontent.com/u/54440025?v=4" width="30px" /></a>
 <a href="https://github.com/qbzenker"><img src="https://avatars.githubusercontent.com/u/51972064?v=4" width="30px" /></a>
+<a href="https://github.com/qixuan0212"><img src="https://avatars.githubusercontent.com/u/135136620?v=4" width="30px" /></a>
 <a href="https://github.com/rahulmistri1997"><img src="https://avatars.githubusercontent.com/u/58909377?v=4" width="30px" /></a>
 <a href="https://github.com/ronnie-llamado"><img src="https://avatars.githubusercontent.com/u/35092029?v=4" width="30px" /></a>
 <a href="https://github.com/sachitolani"><img src="https://avatars.githubusercontent.com/u/146494073?v=4" width="30px" /></a>
@@ -604,10 +608,12 @@ Milvus adopts dependencies from the following:
 - Thanks to [FAISS](https://github.com/facebookresearch/faiss) for the excellent search library.
 - Thanks to [etcd](https://github.com/coreos/etcd) for providing great open-source key-value store tools.
 - Thanks to [Pulsar](https://github.com/apache/pulsar) for its wonderful distributed pub-sub messaging system.
+- Thanks to [Tantivy](https://github.com/quickwit-oss/tantivy) for its full-text search engine library written in Rust.
 - Thanks to [RocksDB](https://github.com/facebook/rocksdb) for the powerful storage engines.
 
 Milvus is adopted by following opensource project:
 - [Towhee](https://github.com/towhee-io/towhee) a flexible, application-oriented framework for computing embedding vectors over unstructured data.
 - [Haystack](https://github.com/deepset-ai/haystack) an open source NLP framework that leverages Transformer models
 - [Langchain](https://github.com/hwchase17/langchain) Building applications with LLMs through composability
+- [LLamaIndex](https://github.com/run-llama/llama_index) a data framework for your LLM applications
 - [GPTCache](https://github.com/zilliztech/GPTCache) a library for creating semantic cache to store responses from LLM queries.

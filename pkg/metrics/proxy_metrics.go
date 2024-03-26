@@ -60,6 +60,14 @@ var (
 			Help:      "counter of vectors successfully upserted",
 		}, []string{nodeIDLabelName})
 
+	ProxyDeleteVectors = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "delete_vectors_count",
+			Help:      "counter of vectors successfully deleted",
+		}, []string{nodeIDLabelName})
+
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(
 		prometheus.HistogramOpts{
@@ -306,6 +314,14 @@ var (
 			Name:      "rate_limit_req_count",
 			Help:      "count of operation executed",
 		}, []string{nodeIDLabelName, msgTypeLabelName, statusLabelName})
+
+	ProxySlowQueryCount = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "slow_query_count",
+			Help:      "count of slow query executed",
+		}, []string{nodeIDLabelName, msgTypeLabelName})
 )
 
 // RegisterProxy registers Proxy metrics
@@ -314,6 +330,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySearchVectors)
 	registry.MustRegister(ProxyInsertVectors)
 	registry.MustRegister(ProxyUpsertVectors)
+	registry.MustRegister(ProxyDeleteVectors)
 
 	registry.MustRegister(ProxySQLatency)
 	registry.MustRegister(ProxyCollectionSQLatency)
@@ -351,6 +368,8 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyWorkLoadScore)
 	registry.MustRegister(ProxyExecutingTotalNq)
 	registry.MustRegister(ProxyRateLimitReqCount)
+
+	registry.MustRegister(ProxySlowQueryCount)
 }
 
 func CleanupCollectionMetrics(nodeID int64, collection string) {

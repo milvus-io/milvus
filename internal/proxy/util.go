@@ -66,10 +66,10 @@ const (
 	defaultMaxSearchRequest = 1024
 
 	// DefaultArithmeticIndexType name of default index type for scalar field
-	DefaultArithmeticIndexType = "STL_SORT"
+	DefaultArithmeticIndexType = indexparamcheck.IndexINVERTED
 
 	// DefaultStringIndexType name of default index type for varChar/string field
-	DefaultStringIndexType = "Trie"
+	DefaultStringIndexType = indexparamcheck.IndexINVERTED
 
 	defaultRRFParamsValue = 60
 	maxRRFParamsValue     = 16384
@@ -255,16 +255,6 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	}
 
 	return nil
-}
-
-func validateStringIndexType(indexType string) bool {
-	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
-	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == indexparamcheck.InvertedIndexType
-}
-
-func validateArithmeticIndexType(indexType string) bool {
-	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == indexparamcheck.InvertedIndexType
 }
 
 func validateFieldName(fieldName string) error {

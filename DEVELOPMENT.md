@@ -131,7 +131,7 @@ Install Conan
 pip install conan==1.61.0
 ```
 
-Note: Conan version 2.x is not currently supported, please use version 1.58.
+Note: Conan version 2.x is not currently supported, please use version 1.61.
 
 #### Go
 

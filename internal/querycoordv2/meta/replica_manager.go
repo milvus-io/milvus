@@ -30,6 +30,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// NilReplica is used to represent a nil replica.
+var NilReplica = NewReplica(&querypb.Replica{
+	ID: -1,
+}, typeutil.NewUniqueSet())
+
 type Replica struct {
 	*querypb.Replica
 	nodes   typeutil.UniqueSet // a helper field for manipulating replica's Nodes slice field

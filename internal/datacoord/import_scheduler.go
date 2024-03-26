@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
 const (
@@ -86,13 +88,20 @@ func (s *importScheduler) Close() {
 
 func (s *importScheduler) process() {
 	getNodeID := func(nodeSlots map[int64]int64) int64 {
-		for nodeID, slots := range nodeSlots {
-			if slots > 0 {
-				nodeSlots[nodeID]--
-				return nodeID
+		var (
+			nodeID   int64 = NullNodeID
+			maxSlots int64 = -1
+		)
+		for id, slots := range nodeSlots {
+			if slots > 0 && slots > maxSlots {
+				nodeID = id
+				maxSlots = slots
 			}
 		}
-		return NullNodeID
+		if nodeID != NullNodeID {
+			nodeSlots[nodeID]--
+		}
+		return nodeID
 	}
 
 	jobs := s.imeta.GetJobBy()
@@ -266,12 +275,16 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		if info.GetImportedRows() <= segment.GetNumOfRows() {
 			continue // rows not changed, no need to update
 		}
+		diff := info.GetImportedRows() - segment.GetNumOfRows()
 		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
 		err = s.meta.UpdateSegmentsInfo(op)
 		if err != nil {
 			log.Warn("update import segment rows failed", WrapTaskLog(task, zap.Error(err))...)
 			return
 		}
+		metrics.DataCoordBulkVectors.WithLabelValues(
+			strconv.FormatInt(task.GetCollectionID(), 10),
+		).Add(float64(diff))
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
@@ -282,7 +295,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
 				return
 			}
-			op := ReplaceBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
+			op := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
 			err = s.meta.UpdateSegmentsInfo(op)
 			if err != nil {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)

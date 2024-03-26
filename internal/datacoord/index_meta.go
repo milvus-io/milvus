@@ -869,7 +869,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 		segIndexInfos, ok := m.segmentIndexes[segID]
 		if !ok || len(segIndexInfos) == 0 {
-			return ret
+			continue
 		}
 
 		for _, segIdx := range segIndexInfos {

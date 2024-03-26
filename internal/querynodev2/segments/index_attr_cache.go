@@ -25,6 +25,7 @@ import "C"
 
 import (
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -33,9 +34,15 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+var indexAttrCache = NewIndexAttrCache()
+
+// getIndexAttrCache use a singleton to store index meta cache.
+func getIndexAttrCache() *IndexAttrCache {
+	return indexAttrCache
+}
 
 // IndexAttrCache index meta cache stores calculated attribute.
 type IndexAttrCache struct {
@@ -49,7 +56,7 @@ func NewIndexAttrCache() *IndexAttrCache {
 	}
 }
 
-func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo, fieldBinlog *datapb.FieldBinlog) (memory uint64, disk uint64, err error) {
+func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo, memoryIndexLoadPredictMemoryUsageFactor float64, fieldBinlog *datapb.FieldBinlog) (memory uint64, disk uint64, err error) {
 	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.IndexParams)
 	if err != nil {
 		return 0, 0, fmt.Errorf("index type not exist in index params")
@@ -59,7 +66,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 		neededDiskSize := indexInfo.IndexSize - neededMemSize
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
-	if indexType == indexparamcheck.InvertedIndexType {
+	if indexType == indexparamcheck.IndexINVERTED {
 		neededMemSize := float64(indexInfo.IndexSize) * paramtable.Get().QueryNodeCfg.InvertedIndexLoadPredictMemoryUsageFactor.GetAsFloat()
 		// we will mmap the binlog if the index type is inverted index.
 		neededDiskSize := indexInfo.IndexSize + getBinlogDataSize(fieldBinlog)
@@ -86,7 +93,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 	factor := float64(1)
 	diskUsage := uint64(0)
 	if !isLoadWithDisk {
-		factor = paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat()
+		factor = memoryIndexLoadPredictMemoryUsageFactor
 	} else {
 		diskUsage = uint64(indexInfo.IndexSize)
 	}

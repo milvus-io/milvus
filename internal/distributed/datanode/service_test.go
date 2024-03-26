@@ -40,20 +40,19 @@ import (
 type MockDataNode struct {
 	nodeID typeutil.UniqueID
 
-	stateCode            commonpb.StateCode
-	states               *milvuspb.ComponentStates
-	status               *commonpb.Status
-	err                  error
-	initErr              error
-	startErr             error
-	stopErr              error
-	regErr               error
-	strResp              *milvuspb.StringResponse
-	configResp           *internalpb.ShowConfigurationsResponse
-	metricResp           *milvuspb.GetMetricsResponse
-	resendResp           *datapb.ResendSegmentStatsResponse
-	addImportSegmentResp *datapb.AddImportSegmentResponse
-	compactionResp       *datapb.CompactionStateResponse
+	stateCode      commonpb.StateCode
+	states         *milvuspb.ComponentStates
+	status         *commonpb.Status
+	err            error
+	initErr        error
+	startErr       error
+	stopErr        error
+	regErr         error
+	strResp        *milvuspb.StringResponse
+	configResp     *internalpb.ShowConfigurationsResponse
+	metricResp     *milvuspb.GetMetricsResponse
+	resendResp     *datapb.ResendSegmentStatsResponse
+	compactionResp *datapb.CompactionStateResponse
 }
 
 func (m *MockDataNode) Init() error {
@@ -138,16 +137,8 @@ func (m *MockDataNode) GetCompactionState(ctx context.Context, req *datapb.Compa
 func (m *MockDataNode) SetEtcdClient(client *clientv3.Client) {
 }
 
-func (m *MockDataNode) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*commonpb.Status, error) {
-	return m.status, m.err
-}
-
 func (m *MockDataNode) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest) (*datapb.ResendSegmentStatsResponse, error) {
 	return m.resendResp, m.err
-}
-
-func (m *MockDataNode) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	return m.addImportSegmentResp, m.err
 }
 
 func (m *MockDataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegmentsRequest) (*commonpb.Status, error) {
@@ -295,32 +286,11 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	t.Run("Import", func(t *testing.T) {
-		server.datanode = &MockDataNode{
-			status: &commonpb.Status{},
-		}
-		resp, err := server.Import(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
-	})
-
 	t.Run("ResendSegmentStats", func(t *testing.T) {
 		server.datanode = &MockDataNode{
 			resendResp: &datapb.ResendSegmentStatsResponse{},
 		}
 		resp, err := server.ResendSegmentStats(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
-	})
-
-	t.Run("add segment", func(t *testing.T) {
-		server.datanode = &MockDataNode{
-			status: &commonpb.Status{},
-			addImportSegmentResp: &datapb.AddImportSegmentResponse{
-				Status: merr.Success(),
-			},
-		}
-		resp, err := server.AddImportSegment(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})

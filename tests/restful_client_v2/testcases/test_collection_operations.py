@@ -17,9 +17,8 @@ from pymilvus import (
 @pytest.mark.L0
 class TestCreateCollection(TestBase):
 
-    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
     @pytest.mark.parametrize("dim", [128])
-    def test_create_collections_fast(self, dim, metric_type):
+    def test_create_collections_quick_setup(self, dim):
         """
         target: test create collection
         method: create a collection with a simple schema
@@ -31,7 +30,6 @@ class TestCreateCollection(TestBase):
         payload = {
             "collectionName": name,
             "dimension": dim,
-            "metricType": metric_type
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
@@ -44,6 +42,112 @@ class TestCreateCollection(TestBase):
         rsp = client.collection_describe(name)
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
+        assert rsp['data']['autoId'] is False
+        assert rsp['data']['enableDynamicField'] is True
+        assert "COSINE" in str(rsp['data']["indexes"])
+
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("metric_type", ["L2", "COSINE", "IP"])
+    @pytest.mark.parametrize("id_type", ["Int64", "VarChar"])
+    @pytest.mark.parametrize("primary_field", ["id", "url"])
+    @pytest.mark.parametrize("vector_field", ["vector", "embedding"])
+    def test_create_collection_quick_setup_with_custom(self, vector_field, primary_field, dim, id_type, metric_type):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        collection_payload = {
+            "collectionName": name,
+            "dimension": dim,
+            "metricType": metric_type,
+            "primaryFieldName": primary_field,
+            "vectorFieldName": vector_field,
+            "idType": id_type,
+        }
+        if id_type == "VarChar":
+            collection_payload["params"] = {"max_length": "256"}
+        rsp = self.collection_client.collection_create(collection_payload)
+        assert rsp['code'] == 200
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 200
+        assert rsp['data']['collectionName'] == name
+        fields = [f["name"] for f in rsp['data']['fields']]
+        assert primary_field in fields
+        assert vector_field in fields
+        for f in rsp['data']['fields']:
+            if f['name'] == primary_field:
+                assert f['type'] == id_type
+                assert f['primaryKey'] is True
+        for index in rsp['data']['indexes']:
+            assert index['metricType'] == metric_type
+
+    def test_create_collections_with_all_params(self):
+        """
+        target: test create collection
+        method: create a collection with a simple schema
+        expected: create collection success
+        """
+        name = gen_collection_name()
+        dim = 128
+        metric_type = "COSINE"
+        client = self.collection_client
+        num_shards = 2
+        num_partitions = 36
+        consistency_level = "Strong"
+        ttl_seconds = 360
+        payload = {
+            "collectionName": name,
+            "enableDynamicField": True,
+            "params":{
+                "shardsNum": f"{num_shards}",
+                "partitionsNum": f"{num_partitions}",
+                "consistencyLevel": f"{consistency_level}",
+                "ttlSeconds": f"{ttl_seconds}",
+            },
+            "schema": {
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": True, "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}},
+                    {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64",
+                     "elementTypeParams": {"max_capacity": "1024"}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": f"{metric_type}"}]
+        }
+
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 200
+        rsp = client.collection_list()
+
+        all_collections = rsp['data']
+        assert name in all_collections
+        # describe collection by pymilvus
+        c = Collection(name)
+        res = c.describe()
+        logger.info(f"describe collection: {res}")
+        # describe collection
+        time.sleep(10)
+        rsp = client.collection_describe(name)
+        logger.info(f"describe collection: {rsp}")
+
+        ttl_seconds_actual = None
+        for d in rsp["data"]["properties"]:
+            if d["key"] == "collection.ttl.seconds":
+                ttl_seconds_actual = int(d["value"])
+        assert rsp['code'] == 200
+        assert rsp['data']['collectionName'] == name
+        assert rsp['data']['shardsNum'] == num_shards
+        assert rsp['data']['partitionsNum'] == num_partitions
+        assert rsp['data']['consistencyLevel'] == consistency_level
+        assert ttl_seconds_actual == ttl_seconds
+
 
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -369,7 +473,6 @@ class TestCreateCollection(TestBase):
         rsp = client.collection_describe(name)
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
-        assert f"FloatVector({dim})" in str(rsp['data']['fields'])
 
     def test_create_collections_concurrent_with_different_param(self):
         """
@@ -737,7 +840,7 @@ class TestDescribeCollection(TestBase):
         rsp = client.collection_describe(name)
         assert rsp['code'] == 200
         assert rsp['data']['collectionName'] == name
-        assert rsp['data']['autoId'] is True
+        assert rsp['data']['autoId'] is False
         assert rsp['data']['enableDynamicField'] is True
         assert len(rsp['data']['indexes']) == 1
 
@@ -781,7 +884,7 @@ class TestDescribeCollection(TestBase):
 
         for field in rsp['data']['fields']:
             if field['name'] == "store_address":
-                assert field['PartitionKey'] is True
+                assert field['partitionKey'] is True
             if field['name'] == "reviewer_id":
                 assert field['primaryKey'] is True
         assert rsp['data']['autoId'] is False

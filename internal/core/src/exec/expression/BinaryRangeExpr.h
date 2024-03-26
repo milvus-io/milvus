@@ -35,17 +35,19 @@ struct BinaryRangeElementFunc {
                                T>
         HighPrecisionType;
     void
-    operator()(T val1, T val2, const T* src, size_t n, bool* res) {
-        for (size_t i = 0; i < n; ++i) {
-            if constexpr (lower_inclusive && upper_inclusive) {
-                res[i] = val1 <= src[i] && src[i] <= val2;
-            } else if constexpr (lower_inclusive && !upper_inclusive) {
-                res[i] = val1 <= src[i] && src[i] < val2;
-            } else if constexpr (!lower_inclusive && upper_inclusive) {
-                res[i] = val1 < src[i] && src[i] <= val2;
-            } else {
-                res[i] = val1 < src[i] && src[i] < val2;
-            }
+    operator()(T val1, T val2, const T* src, size_t n, TargetBitmapView res) {
+        if constexpr (lower_inclusive && upper_inclusive) {
+            res.inplace_within_range_val<T, milvus::bitset::RangeType::IncInc>(
+                val1, val2, src, n);
+        } else if constexpr (lower_inclusive && !upper_inclusive) {
+            res.inplace_within_range_val<T, milvus::bitset::RangeType::IncExc>(
+                val1, val2, src, n);
+        } else if constexpr (!lower_inclusive && upper_inclusive) {
+            res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcInc>(
+                val1, val2, src, n);
+        } else {
+            res.inplace_within_range_val<T, milvus::bitset::RangeType::ExcExc>(
+                val1, val2, src, n);
         }
     }
 };
@@ -80,7 +82,7 @@ struct BinaryRangeElementFuncForJson {
                const std::string& pointer,
                const milvus::Json* src,
                size_t n,
-               bool* res) {
+               TargetBitmapView res) {
         for (size_t i = 0; i < n; ++i) {
             if constexpr (lower_inclusive && upper_inclusive) {
                 BinaryRangeJSONCompare(val1 <= value && value <= val2);
@@ -106,7 +108,7 @@ struct BinaryRangeElementFuncForArray {
                int index,
                const milvus::ArrayView* src,
                size_t n,
-               bool* res) {
+               TargetBitmapView res) {
         for (size_t i = 0; i < n; ++i) {
             if constexpr (lower_inclusive && upper_inclusive) {
                 if (index >= src[i].length()) {
@@ -152,7 +154,7 @@ struct BinaryRangeIndexFunc {
                                int64_t,
                                IndexInnerType>
         HighPrecisionType;
-    FixedVector<bool>
+    TargetBitmap
     operator()(Index* index,
                IndexInnerType val1,
                IndexInnerType val2,

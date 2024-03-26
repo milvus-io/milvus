@@ -1012,17 +1012,6 @@ func (coord *RootCoordMock) ListImportTasks(ctx context.Context, in *milvuspb.Li
 	}, nil
 }
 
-func (coord *RootCoordMock) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	code := coord.state.Load().(commonpb.StateCode)
-	if code != commonpb.StateCode_Healthy {
-		return &commonpb.Status{
-			ErrorCode: commonpb.ErrorCode_UnexpectedError,
-			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
-		}, nil
-	}
-	return merr.Success(), nil
-}
-
 func NewRootCoordMock(opts ...RootCoordMockOption) *RootCoordMock {
 	rc := &RootCoordMock{
 		nodeID:            typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt()),

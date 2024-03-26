@@ -63,6 +63,11 @@ class PlanNode {
     virtual std::string_view
     name() const = 0;
 
+    virtual expr::ExprInfo
+    GatherInfo() const {
+        return {};
+    };
+
  private:
     PlanNodeId id_;
 };
@@ -241,6 +246,13 @@ class FilterBitsNode : public PlanNode {
     ToString() const override {
         return fmt::format("FilterBitsNode:[filter_expr:{}]",
                            filter_->ToString());
+    }
+
+    expr::ExprInfo
+    GatherInfo() const override {
+        expr::ExprInfo info;
+        filter_->GatherInfo(info);
+        return info;
     }
 
  private:

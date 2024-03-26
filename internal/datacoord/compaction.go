@@ -145,7 +145,11 @@ func (c *compactionPlanHandler) checkResult() {
 		log.Warn("fail to check result", zap.Error(err))
 		return
 	}
-	_ = c.updateCompaction(ts)
+	err = c.updateCompaction(ts)
+	if err != nil {
+		log.Warn("fail to update compaction", zap.Error(err))
+		return
+	}
 }
 
 func (c *compactionPlanHandler) GetCurrentTS() (Timestamp, error) {
@@ -328,6 +332,9 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 				info.GetLevel() != datapb.SegmentLevel_L0 &&
 				info.GetDmlPosition().GetTimestamp() < task.triggerInfo.pos.GetTimestamp()
 		})
+		if len(sealedSegments) == 0 {
+			return errors.Errorf("Selected zero L1/L2 segments for the position=%v", task.triggerInfo.pos)
+		}
 
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
@@ -446,7 +453,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
 	var operators []UpdateOperator
 	for _, seg := range result.GetSegments() {
-		operators = append(operators, UpdateBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs()))
+		operators = append(operators, AddBinlogsOperator(seg.GetSegmentID(), nil, nil, seg.GetDeltalogs()))
 	}
 
 	levelZeroSegments := lo.Filter(plan.GetSegmentBinlogs(), func(b *datapb.CompactionSegmentBinlogs, _ int) bool {
@@ -522,7 +529,12 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	//  for DC might add new task while GetCompactionState.
 	executingTasks := c.getTasksByState(executing)
 	timeoutTasks := c.getTasksByState(timeout)
-	planStates := c.sessions.GetCompactionPlansResults()
+	planStates, err := c.sessions.GetCompactionPlansResults()
+	if err != nil {
+		// if there is a data node alive but we failed to get info,
+		log.Warn("failed to get compaction plans from all nodes", zap.Error(err))
+		return err
+	}
 	cachedPlans := []int64{}
 
 	// TODO reduce the lock range

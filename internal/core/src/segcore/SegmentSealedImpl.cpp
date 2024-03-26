@@ -979,8 +979,9 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     auto absent_fields = request_fields - field_ready_bitset;
 
     if (absent_fields.any()) {
+        // absent_fields.find_first() returns std::optional<>
         auto field_id =
-            FieldId(absent_fields.find_first() + START_USER_FIELDID);
+            FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
         auto& field_meta = schema_->operator[](field_id);
         PanicInfo(
             FieldNotLoaded,
@@ -1133,6 +1134,16 @@ SegmentSealedImpl::ClearData() {
     vector_indexings_.clear();
     insert_record_.clear();
     fields_.clear();
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    if (cc == nullptr) {
+        return;
+    }
+    // munmap and remove binlog from chunk cache
+    for (const auto& iter : field_data_info_.field_infos) {
+        for (const auto& binlog : iter.second.insert_files) {
+            cc->Remove(binlog);
+        }
+    }
 }
 
 std::unique_ptr<DataArray>

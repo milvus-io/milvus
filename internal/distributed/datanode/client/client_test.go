@@ -69,14 +69,8 @@ func Test_NewClient(t *testing.T) {
 		r6, err := client.Compaction(ctx, nil)
 		retCheck(retNotNil, r6, err)
 
-		r7, err := client.Import(ctx, nil)
-		retCheck(retNotNil, r7, err)
-
 		r8, err := client.ResendSegmentStats(ctx, nil)
 		retCheck(retNotNil, r8, err)
-
-		r9, err := client.AddImportSegment(ctx, nil)
-		retCheck(retNotNil, r9, err)
 
 		r10, err := client.ShowConfigurations(ctx, nil)
 		retCheck(retNotNil, r10, err)

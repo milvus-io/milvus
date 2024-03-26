@@ -279,6 +279,7 @@ func (scheduler *taskScheduler) Add(task Task) error {
 
 	scheduler.updateTaskMetrics()
 	log.Ctx(task.Context()).Info("task added", zap.String("task", task.String()))
+	task.RecordStartTs()
 	return nil
 }
 
@@ -652,8 +653,10 @@ func (scheduler *taskScheduler) preProcess(task Task) bool {
 			return false
 		}
 
-		for segmentID := range segmentsInTarget {
-			if _, exist := leader.Segments[segmentID]; !exist {
+		for segmentID, s := range segmentsInTarget {
+			_, exist := leader.Segments[segmentID]
+			l0WithWrongLocation := exist && s.GetLevel() == datapb.SegmentLevel_L0 && leader.Segments[segmentID].GetNodeID() != leader.ID
+			if !exist || l0WithWrongLocation {
 				return false
 			}
 		}
@@ -793,6 +796,44 @@ func (scheduler *taskScheduler) remove(task Task) {
 
 	scheduler.updateTaskMetrics()
 	log.Info("task removed")
+	metrics.QueryCoordTaskLatency.WithLabelValues(scheduler.getTaskMetricsLabel(task), fmt.Sprint(task.CollectionID()), task.Shard()).Observe(float64(task.GetTaskLatency()))
+}
+
+func (scheduler *taskScheduler) getTaskMetricsLabel(task Task) string {
+	taskType := GetTaskType(task)
+	switch task.(type) {
+	case *SegmentTask:
+		switch taskType {
+		case TaskTypeGrow:
+			return metrics.SegmentGrowTaskLabel
+		case TaskTypeReduce:
+			return metrics.SegmentReduceTaskLabel
+		case TaskTypeMove:
+			return metrics.SegmentMoveTaskLabel
+		case TaskTypeUpdate:
+			return metrics.SegmentUpdateTaskLabel
+		}
+
+	case *ChannelTask:
+		switch taskType {
+		case TaskTypeGrow:
+			return metrics.ChannelGrowTaskLabel
+		case TaskTypeReduce:
+			return metrics.ChannelReduceTaskLabel
+		case TaskTypeMove:
+			return metrics.ChannelMoveTaskLabel
+		}
+
+	case *LeaderTask:
+		switch taskType {
+		case TaskTypeGrow:
+			return metrics.LeaderGrowTaskLabel
+		case TaskTypeReduce:
+			return metrics.LeaderReduceTaskLabel
+		}
+	}
+
+	return metrics.UnknownTaskLabel
 }
 
 func (scheduler *taskScheduler) checkStale(task Task) error {
@@ -848,12 +889,16 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
 			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
 				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
-				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTargetFirst)
 			}
 			if segment == nil {
 				log.Warn("task stale due to the segment to load not exists in targets",
@@ -892,6 +937,10 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+				log.Warn("task stale due to node offline", zap.String("channel", task.Channel()))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
 			if scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.NextTargetFirst) == nil {
 				log.Warn("the task is stale, the channel to subscribe not exists in targets",
 					zap.String("channel", task.Channel()))
@@ -917,6 +966,11 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
+
 			taskType := GetTaskType(task)
 			segment := scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTargetFirst)
 			if segment == nil {

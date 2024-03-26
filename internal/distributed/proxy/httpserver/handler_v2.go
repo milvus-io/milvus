@@ -89,6 +89,11 @@ func (h *HandlersV2) RegisterRoutesToV2(router gin.IRouter) {
 			Limit: 100,
 		}
 	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
+	router.POST(EntityCategory+HybridSearchAction, timeoutMiddleware(wrapperPost(func() any {
+		return &HybridSearchReq{
+			Limit: 100,
+		}
+	}, wrapperTraceLog(h.wrapperCheckDatabase(h.advancedSearch)))))
 
 	router.POST(PartitionCategory+ListAction, timeoutMiddleware(wrapperPost(func() any { return &CollectionNameReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.listPartitions)))))
 	router.POST(PartitionCategory+HasAction, timeoutMiddleware(wrapperPost(func() any { return &PartitionReq{} }, wrapperTraceLog(h.wrapperCheckDatabase(h.hasPartitions)))))
@@ -1723,7 +1728,16 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		err := checkAuthorization(ctx, c, &milvuspb.ListImportsAuthPlaceholder{
+			DbName:         dbName,
+			CollectionName: collectionName,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListImports(reqCtx, req.(*internalpb.ListImportsRequest))
 	})
 	if err == nil {
@@ -1764,7 +1778,17 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}),
 		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		err := checkAuthorization(ctx, c, &milvuspb.ImportAuthPlaceholder{
+			DbName:         dbName,
+			CollectionName: collectionGetter.GetCollectionName(),
+			PartitionName:  partitionGetter.GetPartitionName(),
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ImportV2(reqCtx, req.(*internalpb.ImportRequest))
 	})
 	if err == nil {
@@ -1781,7 +1805,15 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		DbName: dbName,
 		JobID:  jobIDGetter.GetJobID(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	if h.checkAuth {
+		err := checkAuthorization(ctx, c, &milvuspb.GetImportProgressAuthPlaceholder{
+			DbName: dbName,
+		})
+		if err != nil {
+			return nil, err
+		}
+	}
+	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetImportProgress(reqCtx, req.(*internalpb.GetImportProgressRequest))
 	})
 	if err == nil {
@@ -1789,25 +1821,34 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
 		returnData["collectionName"] = response.GetCollectionName()
+		returnData["completeTime"] = response.GetCompleteTime()
 		returnData["state"] = response.GetState().String()
 		returnData["progress"] = response.GetProgress()
+		returnData["importedRows"] = response.GetImportedRows()
+		returnData["totalRows"] = response.GetTotalRows()
 		reason := response.GetReason()
 		if reason != "" {
 			returnData["reason"] = reason
 		}
 		details := make([]map[string]interface{}, 0)
+		totalFileSize := int64(0)
 		for _, taskProgress := range response.GetTaskProgresses() {
 			detail := make(map[string]interface{})
 			detail["fileName"] = taskProgress.GetFileName()
 			detail["fileSize"] = taskProgress.GetFileSize()
 			detail["progress"] = taskProgress.GetProgress()
 			detail["completeTime"] = taskProgress.GetCompleteTime()
+			detail["state"] = taskProgress.GetState()
+			detail["importedRows"] = taskProgress.GetImportedRows()
+			detail["totalRows"] = taskProgress.GetTotalRows()
 			reason = taskProgress.GetReason()
 			if reason != "" {
 				detail["reason"] = reason
 			}
 			details = append(details, detail)
+			totalFileSize += taskProgress.GetFileSize()
 		}
+		returnData["fileSize"] = totalFileSize
 		returnData["details"] = details
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}

@@ -354,6 +354,7 @@ func (node *QueryNode) Init() error {
 		} else {
 			node.loader = segments.NewLoader(node.manager, node.chunkManager)
 		}
+		node.manager.SetLoader(node.loader)
 		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.QueryNodeRole, node.GetNodeID())
 		// init pipeline manager
 		node.pipelineManager = pipeline.NewManager(node.manager, node.tSafeManager, node.dispClient, node.delegators)
@@ -392,8 +393,7 @@ func (node *QueryNode) Start() error {
 
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
-		mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-		mmapEnabled := len(mmapDirPath) > 0
+		mmapEnabled := paramtable.Get().QueryNodeCfg.MmapEnabled.GetAsBool()
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)

@@ -65,13 +65,9 @@ service DataCoord {
   rpc DropVirtualChannel(DropVirtualChannelRequest) returns (DropVirtualChannelResponse) {}
 
   rpc SetSegmentState(SetSegmentStateRequest) returns (SetSegmentStateResponse) {}
-  // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(ImportTaskRequest) returns (ImportTaskResponse) {}
   rpc UpdateSegmentStatistics(UpdateSegmentStatisticsRequest) returns (common.Status) {}
   rpc UpdateChannelCheckpoint(UpdateChannelCheckpointRequest) returns (common.Status) {}
 
-  rpc SaveImportSegment(SaveImportSegmentRequest) returns(common.Status) {}
-  rpc UnsetIsImportingState(UnsetIsImportingStateRequest) returns(common.Status) {}
   rpc MarkSegmentsDropped(MarkSegmentsDroppedRequest) returns(common.Status) {}
 
   rpc BroadcastAlteredCollection(AlterCollectionRequest) returns (common.Status) {}
@@ -118,13 +114,8 @@ service DataNode {
   rpc GetCompactionState(CompactionStateRequest) returns (CompactionStateResponse) {}
   rpc SyncSegments(SyncSegmentsRequest) returns (common.Status) {}
 
-  // https://wiki.lfaidata.foundation/display/MIL/MEP+24+--+Support+bulk+load
-  rpc Import(ImportTaskRequest) returns(common.Status) {}
-
   // Deprecated
   rpc ResendSegmentStats(ResendSegmentStatsRequest) returns(ResendSegmentStatsResponse) {}
-
-  rpc AddImportSegment(AddImportSegmentRequest) returns(AddImportSegmentResponse) {}
 
   rpc FlushChannels(FlushChannelsRequest) returns(common.Status) {}
   rpc NotifyChannelOperation(ChannelOperationsRequest) returns(common.Status) {}
@@ -143,7 +134,7 @@ message FlushRequest {
   int64 dbID = 2;
   repeated int64 segmentIDs = 3;
   int64 collectionID = 4;
-  bool  isImport = 5;
+  bool  isImport = 5; // deprecated
 }
 
 message FlushResponse {
@@ -167,8 +158,8 @@ message SegmentIDRequest {
   string channel_name = 2;
   int64 collectionID = 3;
   int64 partitionID = 4;
-  bool isImport = 5;        // Indicate whether this request comes from a bulk insert task.
-  int64 importTaskID = 6;   // Needed for segment lock.
+  bool isImport = 5;        // deprecated
+  int64 importTaskID = 6;   // deprecated
   SegmentLevel level = 7;
 }
 
@@ -347,7 +338,7 @@ message SaveBinlogPathsRequest {
   repeated FieldBinlog field2StatslogPaths = 8;
   repeated FieldBinlog deltalogs = 9;
   bool dropped = 10;
-  bool importing = 11;
+  bool importing = 11; // deprecated
   string channel = 12; // report channel name for verification
   SegmentLevel seg_level =13;
   int64 partitionID =14; // report partitionID for create L0 segment
@@ -604,56 +595,6 @@ message DropVirtualChannelResponse {
   common.Status status = 1;
 }
 
-message ImportTask {
-  common.Status status = 1;
-  int64 collection_id = 2;                   // target collection ID
-  int64 partition_id = 3;                    // target partition ID
-  repeated string channel_names = 4;         // target channel names of the collection.
-  bool row_based = 5;                        // the file is row-based or column-based
-  int64 task_id = 6;                         // id of the task
-  repeated string files = 7;                 // file paths to be imported
-  repeated common.KeyValuePair infos = 8;    // extra information about the task, bucket, etc.
-  string database_name = 16;                 // Database name
-}
-
-message ImportTaskState {
-  common.ImportState stateCode = 1;    // Import state code.
-  repeated int64 segments = 2;         // Ids of segments created in import task.
-  repeated int64 row_ids = 3;          // Row IDs for the newly inserted rows.
-  int64 row_count = 4;                 // # of rows added in the import task.
-  string error_message = 5;            // Error message for the failed task.
-}
-
-message ImportTaskInfo {
-  int64 id = 1;                                 // Task ID.
-  int64 request_id = 2 [deprecated = true];     // Request ID of the import task.
-  int64 datanode_id = 3;                        // ID of DataNode that processes the task.
-  int64 collection_id = 4;                      // Collection ID for the import task.
-  int64 partition_id = 5;                       // Partition ID for the import task.
-  repeated string channel_names = 6;            // Names of channels for the collection.
-  string bucket = 7;                            // Bucket for the import task.
-  bool row_based = 8;                           // Boolean indicating whether import files are row-based or column-based.
-  repeated string files = 9;                    // A list of files to import.
-  int64 create_ts = 10;                         // Timestamp when the import task is created.
-  ImportTaskState state = 11;                   // State of the import task.
-  string collection_name = 12;                  // Collection name for the import task.
-  string partition_name = 13;                   // Partition name for the import task.
-  repeated common.KeyValuePair infos = 14;      // extra information about the task, bucket, etc.
-  int64 start_ts = 15;                          // Timestamp when the import task is sent to datanode to execute.
-  string database_name = 16;                    // Database name
-}
-
-message ImportTaskResponse {
-  common.Status status = 1;
-  int64 datanode_id = 2;         // which datanode takes this task
-}
-
-message ImportTaskRequest {
-  common.MsgBase base = 1;
-  ImportTask import_task = 2;          // Target import task.
-  repeated int64 working_nodes = 3;    // DataNodes that are currently working.
-}
-
 message UpdateSegmentStatisticsRequest {
   common.MsgBase base = 1;
   repeated common.SegmentStats stats = 2;
@@ -673,37 +614,6 @@ message ResendSegmentStatsRequest {
 message ResendSegmentStatsResponse {
   common.Status status = 1;
   repeated int64 seg_resent = 2;
-}
-
-message AddImportSegmentRequest {
-  common.MsgBase base = 1;
-  int64 segment_id = 2;
-  string channel_name = 3;
-  int64 collection_id = 4;
-  int64 partition_id = 5;
-  int64 row_num = 6;
-  repeated FieldBinlog stats_log = 7;
-}
-
-message AddImportSegmentResponse {
-  common.Status status = 1;
-  bytes channel_pos = 2; // deprecated
-}
-
-message SaveImportSegmentRequest {
-  common.MsgBase base = 1;
-  int64 segment_id = 2;
-  string channel_name = 3;
-  int64 collection_id = 4;
-  int64 partition_id = 5;
-  int64 row_num = 6;
-  SaveBinlogPathsRequest save_binlog_path_req = 7;
-  bytes dml_position_id = 8;
-}
-
-message UnsetIsImportingStateRequest {
-  common.MsgBase base = 1;
-  repeated int64 segment_ids = 2;       // IDs of segments whose `isImport` states need to be unset.
 }
 
 message MarkSegmentsDroppedRequest {
@@ -871,6 +781,7 @@ message ImportJob {
   string complete_time = 13;
   repeated internal.ImportFile files = 14;
   repeated common.KeyValuePair options = 15;
+  string start_time = 16;
 }
 
 enum ImportTaskStateV2 {

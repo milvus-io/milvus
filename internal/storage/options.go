@@ -7,6 +7,7 @@ type config struct {
 	accessKeyID       string
 	secretAccessKeyID string
 	useSSL            bool
+	sslCACert         string
 	createBucket      bool
 	rootPath          string
 	useIAM            bool
@@ -51,6 +52,12 @@ func SecretAccessKeyID(secretAccessKeyID string) Option {
 func UseSSL(useSSL bool) Option {
 	return func(c *config) {
 		c.useSSL = useSSL
+	}
+}
+
+func SslCACert(sslCACert string) Option {
+	return func(c *config) {
+		c.sslCACert = sslCACert
 	}
 }
 

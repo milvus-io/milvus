@@ -287,7 +287,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 
 		// vector index build needs information of optional scalar fields data
 		optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
-		if Params.CommonCfg.EnableNodeFilteringOnPartitionKey.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
+		if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
 			colSchema := ib.meta.GetCollection(meta.CollectionID).Schema
 			hasPartitionKey := typeutil.HasPartitionKey(colSchema)
 			if hasPartitionKey {
@@ -319,6 +319,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
 				SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
 				UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
+				SslCACert:        Params.MinioCfg.SslCACert.GetValue(),
 				BucketName:       Params.MinioCfg.BucketName.GetValue(),
 				RootPath:         Params.MinioCfg.RootPath.GetValue(),
 				UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),
