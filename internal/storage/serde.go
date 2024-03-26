@@ -424,7 +424,8 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	sizeOfBytes := func(v any) uint64 {
 		return uint64(len(v.([]byte)))
 	}
-	m[schemapb.DataType_JSON] = serdeEntry{
+
+	byteEntry := serdeEntry{
 		func(i int) arrow.DataType {
 			return arrow.BinaryTypes.Binary
 		},
@@ -445,6 +446,8 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 		},
 		sizeOfBytes,
 	}
+
+	m[schemapb.DataType_JSON] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {
 		if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
@@ -516,44 +519,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return uint64(len(v.([]float32)) * 4)
 		},
 	}
-	m[schemapb.DataType_SparseFloatVector] = serdeEntry{
-		func(i int) arrow.DataType {
-			return arrow.BinaryTypes.Binary
-		},
-		func(a arrow.Array, i int) (any, bool) {
-			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
-
-				value := arr.Value(i)
-				return value, true
-				// fieldData := &SparseFloatVectorFieldData{}
-				// if len(value)%8 != 0 {
-				// 	return nil, false
-				// }
-
-				// fieldData.Contents = append(fieldData.Contents, value)
-				// rowDim := typeutil.SparseFloatRowDim(value)
-				// if rowDim > fieldData.Dim {
-				// 	fieldData.Dim = rowDim
-				// }
-
-				// return fieldData, true
-			}
-			return nil, false
-		},
-		func(b array.Builder, v any) bool {
-			if builder, ok := b.(*array.BinaryBuilder); ok {
-				if vv, ok := v.(*SparseFloatVectorFieldData); ok {
-					length := len(vv.SparseFloatArray.Contents)
-					for i := 0; i < length; i++ {
-						builder.Append(vv.SparseFloatArray.Contents[i])
-					}
-					return true
-				}
-			}
-			return false
-		},
-		sizeOfBytes,
-	}
+	m[schemapb.DataType_SparseFloatVector] = byteEntry
 	return m
 }()
 
@@ -853,9 +819,9 @@ func (sw *SerializeWriter[T]) WrittenMemorySize() uint64 {
 	return sw.writtenMemorySize
 }
 
-func (sw *SerializeWriter[T]) Close() {
-	sw.Flush()
+func (sw *SerializeWriter[T]) Close() error {
 	sw.rw.Close()
+	return sw.Flush()
 }
 
 func NewSerializeRecordWriter[T any](rw RecordWriter, serializer Serializer[T], batchSize int) *SerializeWriter[T] {
@@ -1035,7 +1001,7 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 				}
 				ok = typeEntry.serialize(builders[fid], e)
 				if !ok {
-					return nil, 0, errors.New(fmt.Sprintf("unexpected type %s", types[fid]))
+					return nil, 0, errors.New(fmt.Sprintf("serialize error on type %s", types[fid]))
 				}
 				memorySize += typeEntry.sizeof(e)
 			}
@@ -1054,6 +1020,6 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 			field2Col[fid] = i
 			i++
 		}
-		return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, -1), types, field2Col), memorySize, nil
+		return newSimpleArrowRecord(array.NewRecord(arrow.NewSchema(fields, nil), arrays, int64(len(v))), types, field2Col), memorySize, nil
 	}, batchSize), nil
 }

@@ -148,7 +148,9 @@ func TestBinlogSerializeWriter(t *testing.T) {
 
 		err = reader.Next()
 		assert.Equal(t, io.EOF, err)
-		writer.Close()
+		err = writer.Close()
+		assert.NoError(t, err)
+		assert.True(t, writer.WrittenMemorySize() >= 429)
 
 		// Read from the written data
 		newblobs := make([]*Blob, len(writers))
@@ -170,7 +172,6 @@ func TestBinlogSerializeWriter(t *testing.T) {
 
 			value := reader.Value()
 			assertTestData(t, i, value)
-			writer.Write(value)
 		}
 	})
 }
