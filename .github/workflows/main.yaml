@@ -174,8 +174,7 @@ jobs:
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
-          make getdeps
-          ./build/builder.sh /bin/bash -c "./scripts/run_go_codecov.sh \"$(PWD)/bin/gotestsum --\""
+          ./build/builder.sh /bin/bash -c "make getdeps && ./scripts/run_go_codecov.sh \"$(PWD)/bin/gotestsum --\""
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
