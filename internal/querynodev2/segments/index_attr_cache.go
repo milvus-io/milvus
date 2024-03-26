@@ -25,7 +25,6 @@ import "C"
 
 import (
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"unsafe"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 

@@ -32,8 +32,7 @@ const (
 	IndexDISKANN         IndexType = "DISKANN"
 	IndexSparseInverted  IndexType = "SPARSE_INVERTED_INDEX"
 	IndexSparseWand      IndexType = "SPARSE_WAND"
-
-	IndexINVERTED IndexType = "INVERTED"
+	IndexINVERTED        IndexType = "INVERTED"
 
 	IndexSTLSORT IndexType = "STL_SORT"
 	IndexTRIE    IndexType = "TRIE"
