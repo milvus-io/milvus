@@ -27,7 +27,8 @@
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
-    return knowhere::UseDiskLoad(index_type, index_engine_version);
+    return knowhere::UseDiskLoad(index_type, index_engine_version) ||
+           strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
 }
 
 CStatus

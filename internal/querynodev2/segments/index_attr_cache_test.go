@@ -22,6 +22,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
@@ -51,7 +52,7 @@ func (s *IndexAttrCacheSuite) TestCacheMissing() {
 		CurrentIndexVersion: 0,
 	}
 
-	_, _, err := s.c.GetIndexResourceUsage(info)
+	_, _, err := s.c.GetIndexResourceUsage(info, nil)
 	s.Require().NoError(err)
 
 	_, has := s.c.loadWithDisk.Get(typeutil.NewPair[string, int32]("test", 0))
@@ -67,7 +68,7 @@ func (s *IndexAttrCacheSuite) TestDiskANN() {
 		IndexSize:           100,
 	}
 
-	memory, disk, err := s.c.GetIndexResourceUsage(info)
+	memory, disk, err := s.c.GetIndexResourceUsage(info, nil)
 	s.Require().NoError(err)
 
 	_, has := s.c.loadWithDisk.Get(typeutil.NewPair[string, int32](indexparamcheck.IndexDISKANN, 0))
@@ -75,6 +76,30 @@ func (s *IndexAttrCacheSuite) TestDiskANN() {
 
 	s.EqualValues(25, memory)
 	s.EqualValues(75, disk)
+}
+
+func (s *IndexAttrCacheSuite) TestInvertedIndex() {
+	defaultFactor := paramtable.Get().GetWithDefault("queryNode.invertedIndexLoadPredictMemoryUsageFactor", "0.2")
+	paramtable.Get().Save("queryNode.invertedIndexLoadPredictMemoryUsageFactor", "0.2")
+	defer paramtable.Get().Save("queryNode.invertedIndexLoadPredictMemoryUsageFactor", defaultFactor)
+
+	info := &querypb.FieldIndexInfo{
+		IndexParams: []*commonpb.KeyValuePair{
+			{Key: common.IndexTypeKey, Value: indexparamcheck.InvertedIndexType},
+		},
+		CurrentIndexVersion: 0,
+		IndexSize:           50,
+	}
+	binlog := &datapb.FieldBinlog{
+		Binlogs: []*datapb.Binlog{
+			{LogSize: 60},
+		},
+	}
+
+	memory, disk, err := s.c.GetIndexResourceUsage(info, binlog)
+	s.Require().NoError(err)
+	s.EqualValues(uint64(10), memory)
+	s.EqualValues(uint64(110), disk)
 }
 
 func (s *IndexAttrCacheSuite) TestLoadWithDisk() {
@@ -88,7 +113,7 @@ func (s *IndexAttrCacheSuite) TestLoadWithDisk() {
 
 	s.Run("load_with_disk", func() {
 		s.c.loadWithDisk.Insert(typeutil.NewPair[string, int32]("test", 0), true)
-		memory, disk, err := s.c.GetIndexResourceUsage(info)
+		memory, disk, err := s.c.GetIndexResourceUsage(info, nil)
 		s.Require().NoError(err)
 
 		s.EqualValues(100, memory)
@@ -97,7 +122,7 @@ func (s *IndexAttrCacheSuite) TestLoadWithDisk() {
 
 	s.Run("load_with_disk", func() {
 		s.c.loadWithDisk.Insert(typeutil.NewPair[string, int32]("test", 0), false)
-		memory, disk, err := s.c.GetIndexResourceUsage(info)
+		memory, disk, err := s.c.GetIndexResourceUsage(info, nil)
 		s.Require().NoError(err)
 
 		s.Equal(uint64(250), memory)
@@ -109,7 +134,7 @@ func (s *IndexAttrCacheSuite) TestLoadWithDisk() {
 			IndexParams: []*commonpb.KeyValuePair{},
 		}
 
-		_, _, err := s.c.GetIndexResourceUsage(info)
+		_, _, err := s.c.GetIndexResourceUsage(info, nil)
 		s.Error(err)
 	})
 }

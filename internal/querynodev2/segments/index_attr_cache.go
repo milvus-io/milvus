@@ -27,6 +27,7 @@ import (
 	"fmt"
 	"unsafe"
 
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -48,7 +49,7 @@ func NewIndexAttrCache() *IndexAttrCache {
 	}
 }
 
-func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo) (memory uint64, disk uint64, err error) {
+func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo, fieldBinlog *datapb.FieldBinlog) (memory uint64, disk uint64, err error) {
 	indexType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.IndexTypeKey, indexInfo.IndexParams)
 	if err != nil {
 		return 0, 0, fmt.Errorf("index type not exist in index params")
@@ -56,6 +57,12 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 	if indexType == indexparamcheck.IndexDISKANN {
 		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
 		neededDiskSize := indexInfo.IndexSize - neededMemSize
+		return uint64(neededMemSize), uint64(neededDiskSize), nil
+	}
+	if indexType == indexparamcheck.InvertedIndexType {
+		neededMemSize := float64(indexInfo.IndexSize) * paramtable.Get().QueryNodeCfg.InvertedIndexLoadPredictMemoryUsageFactor.GetAsFloat()
+		// we will mmap the binlog if the index type is inverted index.
+		neededDiskSize := indexInfo.IndexSize + getBinlogDataSize(fieldBinlog)
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
 

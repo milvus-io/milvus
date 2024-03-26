@@ -1400,7 +1400,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 			fieldID := fieldBinlog.FieldID
 			mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID)
 			if fieldIndexInfo, ok := vecFieldID2IndexInfo[fieldID]; ok {
-				neededMemSize, neededDiskSize, err := loader.GetIndexResourceUsage(fieldIndexInfo)
+				neededMemSize, neededDiskSize, err := loader.GetIndexResourceUsage(fieldIndexInfo, fieldBinlog)
 				if err != nil {
 					log.Warn("failed to get index size",
 						zap.Int64("collectionID", loadInfo.CollectionID),

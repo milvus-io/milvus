@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -69,8 +70,6 @@ const (
 
 	// DefaultStringIndexType name of default index type for varChar/string field
 	DefaultStringIndexType = "Trie"
-
-	InvertedIndexType = "INVERTED"
 
 	defaultRRFParamsValue = 60
 	maxRRFParamsValue     = 16384
@@ -260,12 +259,12 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 
 func validateStringIndexType(indexType string) bool {
 	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
-	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == InvertedIndexType
+	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == indexparamcheck.InvertedIndexType
 }
 
 func validateArithmeticIndexType(indexType string) bool {
 	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == InvertedIndexType
+	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == indexparamcheck.InvertedIndexType
 }
 
 func validateFieldName(fieldName string) error {

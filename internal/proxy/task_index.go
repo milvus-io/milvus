@@ -166,9 +166,9 @@ func (cit *createIndexTask) parseIndexParams() error {
 			if !exist {
 				return merr.WrapErrParameterInvalidMsg("no index type specified")
 			}
-			if specifyIndexType != InvertedIndexType {
+			if specifyIndexType != indexparamcheck.InvertedIndexType {
 				return merr.WrapErrParameterInvalidMsg("index type (%s) not supported for boolean, supported: %s",
-					specifyIndexType, InvertedIndexType)
+					specifyIndexType, indexparamcheck.InvertedIndexType)
 			}
 		} else {
 			return merr.WrapErrParameterInvalid("supported field",
