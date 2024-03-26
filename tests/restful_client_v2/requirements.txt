@@ -14,3 +14,6 @@ minio==7.1.14
 # for bf16 datatype
 jax==0.4.13
 jaxlib==0.4.13
+
+# for performance test
+locust==2.24.1
