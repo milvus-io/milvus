@@ -150,7 +150,7 @@ func (e *executor) PreImport(task Task) {
 		}
 		defer reader.Close()
 		start := time.Now()
-		err = e.readFileStat(reader, task, i, file)
+		err = e.readFileStat(reader, task, i)
 		if err != nil {
 			e.handleErr(task, err, "preimport failed")
 			return err
@@ -180,10 +180,16 @@ func (e *executor) PreImport(task Task) {
 		WrapLogFields(task, zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))...)
 }
 
-func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int, file *internalpb.ImportFile) error {
-	fileSize, err := GetFileSize(file, e.cm, task)
+func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
+	fileSize, err := reader.Size()
 	if err != nil {
 		return err
+	}
+	maxSize := paramtable.Get().DataNodeCfg.MaxImportFileSizeInGB.GetAsFloat() * 1024 * 1024 * 1024
+	if fileSize > int64(maxSize) {
+		return errors.New(fmt.Sprintf(
+			"The import file size has reached the maximum limit allowed for importing, "+
+				"fileSize=%d, maxSize=%d", fileSize, int64(maxSize)))
 	}
 
 	totalRows := 0

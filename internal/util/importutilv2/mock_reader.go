@@ -105,6 +105,57 @@ func (_c *MockReader_Read_Call) RunAndReturn(run func() (*storage.InsertData, er
 	return _c
 }
 
+// Size provides a mock function with given fields:
+func (_m *MockReader) Size() (int64, error) {
+	ret := _m.Called()
+
+	var r0 int64
+	var r1 error
+	if rf, ok := ret.Get(0).(func() (int64, error)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func() error); ok {
+		r1 = rf()
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockReader_Size_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Size'
+type MockReader_Size_Call struct {
+	*mock.Call
+}
+
+// Size is a helper method to define mock.On call
+func (_e *MockReader_Expecter) Size() *MockReader_Size_Call {
+	return &MockReader_Size_Call{Call: _e.mock.On("Size")}
+}
+
+func (_c *MockReader_Size_Call) Run(run func()) *MockReader_Size_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockReader_Size_Call) Return(_a0 int64, _a1 error) *MockReader_Size_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockReader_Size_Call) RunAndReturn(run func() (int64, error)) *MockReader_Size_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockReader creates a new instance of MockReader. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockReader(t interface {
