@@ -28,7 +28,7 @@ def main(host="127.0.0.1"):
         'Authorization': 'Bearer root:Milvus'
     }
 
-    for op in ["search", "query", "insert"]:
+    for op in ["search", "hybrid_search", "query_id", "query_varchar", "insert"]:
         time_list_sdk = []
         time_list_restful = []
         logger.info("start sdk test")
@@ -38,11 +38,17 @@ def main(host="127.0.0.1"):
             logger.info(f"{op}...")
             if op == "search":
                 res = collection.search([vector_to_search[random_id]], "emb", search_params, 100, output_fields=["*"])
-            elif op == "query":
+            if op == "hybrid_search":
+                res = collection.search([vector_to_search[random_id]], "emb", search_params, 100, output_fields=["*"])
+            elif op == "query_id":
                 res = collection.query(expr=f"id in {[x for x in range(100)]}", output_fields=["*"])
-            else:
+            elif op == "query_varchar":
+                res = collection.query(expr=f"id in {[x for x in range(100)]}", output_fields=["*"])
+            elif op == "insert":
                 insert_collection = Collection(name="test_restful_insert_perf")
                 res = insert_collection.insert(data=insert_data)
+            else:
+                raise Exception(f"unsupported op {op}")
             t1 = time.time()
             tt = t1 - t0
             time_list_sdk.append(tt)
@@ -61,16 +67,32 @@ def main(host="127.0.0.1"):
                                       })
 
                 response = requests.request("POST", url, headers=headers, data=payload)
-            elif op == "query":
+            if op == "hybrid_search":
+                payload = json.dumps({"collectionName": "test_restful_perf",
+                                      "outputFields": ["*"],
+                                      "vector": [random.random() for _ in range(768)],
+                                      "limit": 100,
+                                      })
+
+                response = requests.request("POST", url, headers=headers, data=payload)
+            elif op == "query_id":
                 payload = json.dumps({"collectionName": "test_restful_perf",
                                       "outputFields": ["*"],
                                       "expr": f"id in {[x for x in range(100)]}",
                                       })
                 response = requests.request("POST", url, headers=headers, data=payload)
-            else:
+            elif op == "query_varchar":
+                payload = json.dumps({"collectionName": "test_restful_perf",
+                                      "outputFields": ["*"],
+                                      "expr": f"id in {[x for x in range(100)]}",
+                                      })
+                response = requests.request("POST", url, headers=headers, data=payload)
+            elif op == "insert":
                 payload = json.dumps({"collectionName": "test_restful_insert_perf",
                                       "data": insert_data})
                 response = requests.request("POST", url, headers=headers, data=payload)
+            else:
+                raise Exception(f"unsupported op {op}")
             t1 = time.time()
             tt = t1 - t0
             time_list_restful.append(tt)

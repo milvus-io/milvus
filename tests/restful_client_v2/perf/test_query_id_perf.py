@@ -2,7 +2,7 @@ from locust import HttpUser, task, LoadTestShape
 
 
 class MilvusUser(HttpUser):
-    host = "http://10.104.33.50:19530"
+    host = "http://127.0.0.1:19530"
     id_to_get = [i for i in range(100)]
 
     @task
@@ -14,11 +14,11 @@ class MilvusUser(HttpUser):
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
                               catch_response=True
                               ) as resp:
-            print(resp.status_code)
-            print(resp.json()["code"])
+            # print(resp.status_code)
+            # print(resp.json()["code"])
             if resp.status_code != 200 or resp.json()["code"] != 200 or len(resp.json()["data"]) == 0:
-                print(resp.text)
-                resp.failure("query failed")
+                # print(resp.text)
+                resp.failure(f"query failed with rsp {resp.text}")
 
 
 class StagesShape(LoadTestShape):
