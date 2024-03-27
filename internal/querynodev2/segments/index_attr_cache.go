@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -67,7 +66,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
 	if indexType == indexparamcheck.IndexINVERTED {
-		neededMemSize := float64(indexInfo.IndexSize) * paramtable.Get().QueryNodeCfg.InvertedIndexLoadPredictMemoryUsageFactor.GetAsFloat()
+		neededMemSize := 0
 		// we will mmap the binlog if the index type is inverted index.
 		neededDiskSize := indexInfo.IndexSize + getBinlogDataSize(fieldBinlog)
 		return uint64(neededMemSize), uint64(neededDiskSize), nil

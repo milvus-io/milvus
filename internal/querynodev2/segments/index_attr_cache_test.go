@@ -79,10 +79,6 @@ func (s *IndexAttrCacheSuite) TestDiskANN() {
 }
 
 func (s *IndexAttrCacheSuite) TestInvertedIndex() {
-	defaultFactor := paramtable.Get().GetWithDefault("queryNode.invertedIndexLoadPredictMemoryUsageFactor", "0.2")
-	paramtable.Get().Save("queryNode.invertedIndexLoadPredictMemoryUsageFactor", "0.2")
-	defer paramtable.Get().Save("queryNode.invertedIndexLoadPredictMemoryUsageFactor", defaultFactor)
-
 	info := &querypb.FieldIndexInfo{
 		IndexParams: []*commonpb.KeyValuePair{
 			{Key: common.IndexTypeKey, Value: indexparamcheck.IndexINVERTED},
@@ -98,7 +94,7 @@ func (s *IndexAttrCacheSuite) TestInvertedIndex() {
 
 	memory, disk, err := s.c.GetIndexResourceUsage(info, paramtable.Get().QueryNodeCfg.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat(), binlog)
 	s.Require().NoError(err)
-	s.EqualValues(uint64(10), memory)
+	s.EqualValues(uint64(0), memory)
 	s.EqualValues(uint64(110), disk)
 }
 
