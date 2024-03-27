@@ -341,9 +341,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err := job.Wait()
-	// Even there's not enough node now, load operation can be passed.
-	// Replica will report not enough node error by log and metrics.
-	suite.NoError(err)
+	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
 
 	// Load with 3 replica on 3 rg
 	req = &querypb.LoadCollectionRequest{
@@ -364,9 +362,7 @@ func (suite *JobSuite) TestLoadCollection() {
 	)
 	suite.scheduler.Add(job)
 	err = job.Wait()
-	// Even there's not enough node now, load operation can be passed.
-	// Replica will report not enough node error by log and metrics.
-	suite.NoError(err)
+	suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
 }
 
 func (suite *JobSuite) TestLoadCollectionWithReplicas() {
@@ -395,9 +391,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		// Even there's not enough node now, load operation can be passed.
-		// Replica will report not enough node error by log and metrics.
-		suite.NoError(err)
+		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
 	}
 }
 
@@ -607,58 +601,49 @@ func (suite *JobSuite) TestLoadPartition() {
 	suite.meta.ResourceManager.AddResourceGroup("rg2")
 	suite.meta.ResourceManager.AddResourceGroup("rg3")
 
-	// Test load partition with more partition
-	for _, collection := range suite.collections {
-		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
-			continue
-		}
-
-		req := &querypb.LoadPartitionsRequest{
-			CollectionID:   collection,
-			PartitionIDs:   append(suite.partitions[collection], 201),
-			ReplicaNumber:  1,
-			ResourceGroups: []string{"rg1"},
-		}
-		job := NewLoadPartitionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err := job.Wait()
-		// Even there's not enough node now, load operation can be passed.
-		// Replica will report not enough node error by log and metrics.
-		suite.NoError(err)
-
-		req = &querypb.LoadPartitionsRequest{
-			CollectionID:   collection,
-			PartitionIDs:   append(suite.partitions[collection], 202),
-			ReplicaNumber:  1,
-			ResourceGroups: []string{"rg1", "rg2", "rg3"},
-		}
-		job = NewLoadPartitionJob(
-			ctx,
-			req,
-			suite.dist,
-			suite.meta,
-			suite.broker,
-			suite.cluster,
-			suite.targetMgr,
-			suite.targetObserver,
-			suite.nodeMgr,
-		)
-		suite.scheduler.Add(job)
-		err = job.Wait()
-		// Even there's not enough node now, load operation can be passed.
-		// Replica will report not enough node error by log and metrics.
-		suite.NoError(err)
+	// test load 3 replica in 1 rg, should pass rg check
+	req := &querypb.LoadPartitionsRequest{
+		CollectionID:   999,
+		PartitionIDs:   []int64{888},
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1"},
 	}
+	job := NewLoadPartitionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.broker,
+		suite.cluster,
+		suite.targetMgr,
+		suite.targetObserver,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err := job.Wait()
+	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
+
+	// test load 3 replica in 3 rg, should pass rg check
+	req = &querypb.LoadPartitionsRequest{
+		CollectionID:   999,
+		PartitionIDs:   []int64{888},
+		ReplicaNumber:  3,
+		ResourceGroups: []string{"rg1", "rg2", "rg3"},
+	}
+	job = NewLoadPartitionJob(
+		ctx,
+		req,
+		suite.dist,
+		suite.meta,
+		suite.broker,
+		suite.cluster,
+		suite.targetMgr,
+		suite.targetObserver,
+		suite.nodeMgr,
+	)
+	suite.scheduler.Add(job)
+	err = job.Wait()
+	suite.Contains(err.Error(), meta.ErrNodeNotEnough.Error())
 }
 
 func (suite *JobSuite) TestDynamicLoad() {
@@ -802,9 +787,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		// Even there's not enough node now, load operation can be passed.
-		// Replica will report not enough node error by log and metrics.
-		suite.NoError(err)
+		suite.ErrorContains(err, meta.ErrNodeNotEnough.Error())
 	}
 }
 
@@ -1212,7 +1195,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrFailedAllocateID)
+		suite.ErrorIs(err, meta.ErrNodeNotEnough)
 	}
 }
 

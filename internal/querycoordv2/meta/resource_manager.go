@@ -320,6 +320,7 @@ func (rm *ResourceManager) GetNodesOfMultiRG(rgName []string) (map[string]typeut
 		if rm.groups[name] == nil {
 			return nil, merr.WrapErrResourceGroupNotFound(name)
 		}
+		rm.checkRGNodeStatus(name)
 		ret[name] = typeutil.NewUniqueSet(rm.groups[name].GetNodes()...)
 	}
 	return ret, nil

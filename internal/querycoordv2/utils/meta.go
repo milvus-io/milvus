@@ -24,7 +24,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -129,30 +128,12 @@ func RecoverAllCollection(m *meta.Meta) {
 	}
 }
 
-func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int32) error {
+func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int32) (map[string]int, error) {
 	if len(resourceGroups) != 0 && len(resourceGroups) != 1 && len(resourceGroups) != int(replicaNumber) {
-		return ErrUseWrongNumRG
+		return nil, ErrUseWrongNumRG
 	}
 
-	// TODO: !!!Warning, ResourceManager and ReplicaManager doesn't protected with each other in concurrent operation.
-	// 1. replica1 got rg1's node snapshot but doesn't spawn finished.
-	// 2. rg1 is removed.
-	// 3. replica1 spawn finished, but cannot find related resource group.
-	for _, rgName := range resourceGroups {
-		if !m.ContainResourceGroup(rgName) {
-			return merr.ErrResourceGroupNotFound
-		}
-	}
-	return nil
-}
-
-// SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
-func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32) ([]*meta.Replica, error) {
-	if err := checkResourceGroup(m, resourceGroups, replicaNumber); err != nil {
-		return nil, err
-	}
 	replicaNumInRG := make(map[string]int)
-
 	if len(resourceGroups) == 0 {
 		// All replicas should be spawned in default resource group.
 		replicaNumInRG[meta.DefaultResourceGroupName] = int(replicaNumber)
@@ -162,8 +143,35 @@ func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string
 	} else {
 		// replicas should be spawned in different resource groups one by one.
 		for _, rgName := range resourceGroups {
-			replicaNumInRG[rgName] = 1
+			replicaNumInRG[rgName] += 1
 		}
+	}
+
+	// TODO: !!!Warning, ResourceManager and ReplicaManager doesn't protected with each other in concurrent operation.
+	// 1. replica1 got rg1's node snapshot but doesn't spawn finished.
+	// 2. rg1 is removed.
+	// 3. replica1 spawn finished, but cannot find related resource group.
+	for rgName, num := range replicaNumInRG {
+		if !m.ContainResourceGroup(rgName) {
+			return nil, ErrGetNodesFromRG
+		}
+		nodes, err := m.ResourceManager.GetNodes(rgName)
+		if err != nil {
+			return nil, err
+		}
+		if num > len(nodes) {
+			log.Warn("node not enough", zap.Error(meta.ErrNodeNotEnough), zap.Int("replicaNum", num), zap.Int("nodeNum", len(nodes)), zap.String("rgName", rgName))
+			return nil, meta.ErrNodeNotEnough
+		}
+	}
+	return replicaNumInRG, nil
+}
+
+// SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
+func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32) ([]*meta.Replica, error) {
+	replicaNumInRG, err := checkResourceGroup(m, resourceGroups, replicaNumber)
+	if err != nil {
+		return nil, err
 	}
 
 	// Spawn it in replica manager.
