@@ -1914,13 +1914,13 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 		NodeID:    100,
 	}
 
-	// expect one segments in distribution
+	// remove segment with wrong node id, expect success
 	req.Actions = []*querypb.SyncAction{releaseAction}
 	status, err := suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 4)
+	suite.Len(sealedSegments[0].Segments, 3)
 
 	releaseAction = &querypb.SyncAction{
 		Type:      querypb.SyncType_Remove,
@@ -1928,13 +1928,13 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 		NodeID:    sealedSegments[0].Segments[0].NodeID,
 	}
 
-	// expect one segments in distribution
+	// remove segment with correct node id, expect success
 	req.Actions = []*querypb.SyncAction{releaseAction}
 	status, err = suite.node.SyncDistribution(ctx, req)
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 3)
+	suite.Len(sealedSegments[0].Segments, 2)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Failed() {
