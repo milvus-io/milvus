@@ -179,6 +179,15 @@ func FieldHasMmapKey(schema *schemapb.CollectionSchema, fieldID int64) bool {
 	return false
 }
 
+func HasLazyload(props []*commonpb.KeyValuePair) bool {
+	for _, kv := range props {
+		if kv.Key == LazyLoadEnableKey {
+			return true
+		}
+	}
+	return false
+}
+
 func IsCollectionLazyLoadEnabled(kvs ...*commonpb.KeyValuePair) bool {
 	for _, kv := range kvs {
 		if kv.Key == LazyLoadEnableKey && strings.ToLower(kv.Value) == "true" {
