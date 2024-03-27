@@ -1,4 +1,4 @@
-package deflate
+package invalid
 
 import (
 	"compress/flate"
@@ -8,8 +8,7 @@ import (
 	"google.golang.org/grpc/encoding"
 )
 
-// Name is the name registered for the DEFLATE compressor.
-const Name = "deflate"
+const Name = "invalid"
 
 func init() {
 	c := &compressor{}

@@ -1,4 +1,4 @@
-package zstd
+package datadog
 
 import (
 	"bytes"
@@ -8,7 +8,7 @@ import (
 	"google.golang.org/grpc/encoding"
 )
 
-const Name = "zstd"
+const Name = "datadog"
 
 type grpcCompressor struct{}
 

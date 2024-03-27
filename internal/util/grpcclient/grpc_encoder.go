@@ -20,6 +20,7 @@ package grpcclient
 import (
 	_ "google.golang.org/grpc/encoding/gzip"
 
+	_ "github.com/milvus-io/milvus/pkg/util/compressor/datadog"
 	_ "github.com/milvus-io/milvus/pkg/util/compressor/deflate"
 	_ "github.com/milvus-io/milvus/pkg/util/compressor/lz4"
 	_ "github.com/milvus-io/milvus/pkg/util/compressor/snappy"
