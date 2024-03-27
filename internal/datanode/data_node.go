@@ -143,8 +143,7 @@ func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
-		eventManager: NewEventManager(),
-		clearSignal:  make(chan string, 100),
+		clearSignal: make(chan string, 100),
 
 		reportImportRetryTimes: 10,
 	}
@@ -292,6 +291,8 @@ func (node *DataNode) Init() error {
 
 		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
 			node.channelManager = NewChannelManager(node)
+		} else {
+			node.eventManager = NewEventManager()
 		}
 
 		log.Info("init datanode done", zap.Int64("nodeID", node.GetNodeID()), zap.String("Address", node.address))
@@ -425,7 +426,9 @@ func (node *DataNode) Stop() error {
 			node.channelManager.Close()
 		}
 
-		node.eventManager.CloseAll()
+		if node.eventManager != nil {
+			node.eventManager.CloseAll()
+		}
 
 		if node.writeBufferManager != nil {
 			node.writeBufferManager.Stop()

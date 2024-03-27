@@ -601,8 +601,7 @@ func (_c *MockCluster_Watch_Call) RunAndReturn(run func(context.Context, RWChann
 func NewMockCluster(t interface {
 	mock.TestingT
 	Cleanup(func())
-},
-) *MockCluster {
+}) *MockCluster {
 	mock := &MockCluster{}
 	mock.Mock.Test(t)
 

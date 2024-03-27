@@ -290,7 +290,7 @@ func (r *opRunner) Execute(info *datapb.ChannelWatchInfo) *opState {
 	}
 
 	// ToRelease state
-	return releaseWithTimer(r.releaseFunc, info.GetVchan().GetChannelName(), info.GetOpID())
+	return r.releaseWithTimer(r.releaseFunc, info.GetVchan().GetChannelName(), info.GetOpID())
 }
 
 // watchWithTimer will return WatchFailure after WatchTimeoutInterval
@@ -337,6 +337,13 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 				log.Info("Stop timer for ToWatch operation timeout")
 				return
 
+			case <-r.closeCh.CloseCh():
+				// runner closed from outside
+				tickler.close()
+				cancel()
+				log.Info("Suspend ToWatch operation from outside of opRunner")
+				return
+
 			case <-tickler.progressSig:
 				log.Info("Reset timer for tickler updated")
 				timer.Reset(watchTimeout)
@@ -368,7 +375,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 }
 
 // releaseWithTimer will return ReleaseFailure after WatchTimeoutInterval
-func releaseWithTimer(releaseFunc releaseFunc, channel string, opID UniqueID) *opState {
+func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opID UniqueID) *opState {
 	opState := &opState{
 		channel: channel,
 		opID:    opID,
@@ -378,23 +385,29 @@ func releaseWithTimer(releaseFunc releaseFunc, channel string, opID UniqueID) *o
 		waiter     sync.WaitGroup
 	)
 
-	log := log.With(zap.String("channel", channel))
+	log := log.With(zap.Int64("opID", opID), zap.String("channel", channel))
 	startTimer := func(wg *sync.WaitGroup) {
 		defer wg.Done()
 		releaseTimeout := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
 		timer := time.NewTimer(releaseTimeout)
 		defer timer.Stop()
 
-		log.Info("Start timer for ToRelease operation", zap.Duration("timeout", releaseTimeout))
+		log := log.With(zap.Duration("timeout", releaseTimeout))
+		log.Info("Start ToRelease timer")
 		for {
 			select {
 			case <-timer.C:
-				log.Info("Stop timer for ToRelease operation timeout", zap.Duration("timeout", releaseTimeout))
+				log.Info("Stop timer for ToRelease operation timeout")
 				opState.state = datapb.ChannelWatchState_ReleaseFailure
 				return
 
+			case <-r.closeCh.CloseCh():
+				// runner closed from outside
+				log.Info("Stop timer for opRunner closed")
+				return
+
 			case <-successSig:
-				log.Info("Stop timer for ToRelease operation succeeded", zap.Duration("timeout", releaseTimeout))
+				log.Info("Stop timer for ToRelease operation succeeded")
 				opState.state = datapb.ChannelWatchState_ReleaseSuccess
 				return
 			}
@@ -425,14 +438,6 @@ func (r *opRunner) NotifyState(state *opState) {
 }
 
 func (r *opRunner) Close() {
-	r.guard.Lock()
-	for _, info := range r.allOps {
-		if info.tickler != nil {
-			info.tickler.close()
-		}
-	}
-	r.guard.Unlock()
-
 	r.closeCh.Close()
 	r.closeWg.Wait()
 }
