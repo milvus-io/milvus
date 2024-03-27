@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -159,6 +160,8 @@ type Server struct {
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
+
+	segmentKeyLock *lock.KeyLock[int64]
 }
 
 // ServerHelper datacoord server injection helper
@@ -226,6 +229,7 @@ func CreateServer(ctx context.Context, factory dependency.Factory, opts ...Optio
 		helper:                 defaultServerHelper(),
 		metricsCacheManager:    metricsinfo.NewMetricsCacheManager(),
 		enableActiveStandBy:    Params.DataCoordCfg.EnableActiveStandby.GetAsBool(),
+		segmentKeyLock:         lock.NewKeyLock[int64](),
 	}
 
 	for _, opt := range opts {
