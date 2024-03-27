@@ -399,14 +399,14 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 			nodes := make([]int64, 0)
 			for _, r := range replicas {
 				availableNodes := suite.rgs[r.GetResourceGroup()]
-				if maximumNodes == -1 || r.AvailableNodesCount() > maximumNodes {
-					maximumNodes = r.AvailableNodesCount()
+				if maximumNodes == -1 || r.RWNodesCount() > maximumNodes {
+					maximumNodes = r.RWNodesCount()
 				}
-				if minimumNodes == -1 || r.AvailableNodesCount() < minimumNodes {
-					minimumNodes = r.AvailableNodesCount()
+				if minimumNodes == -1 || r.RWNodesCount() < minimumNodes {
+					minimumNodes = r.RWNodesCount()
 				}
 				nodes = append(nodes, r.GetNodes()...)
-				r.RangeOverOutboundNodes(func(node int64) bool {
+				r.RangeOverRONodes(func(node int64) bool {
 					if availableNodes.Contain(node) {
 						nodes = append(nodes, node)
 					}
@@ -458,7 +458,7 @@ func (suite *ReplicaManagerV2Suite) recoverReplica(k int, clearOutbound bool) {
 			for id := range suite.collections {
 				replicas := suite.mgr.GetByCollection(id)
 				for _, r := range replicas {
-					outboundNodes := r.GetOutboundNodes()
+					outboundNodes := r.GetRONodes()
 					suite.mgr.RemoveNode(r.GetID(), outboundNodes...)
 				}
 			}

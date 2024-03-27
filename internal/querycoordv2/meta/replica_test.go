@@ -20,7 +20,7 @@ func (suite *ReplicaSuite) SetupSuite() {
 		CollectionID:  2,
 		Nodes:         []int64{1, 2, 3},
 		ResourceGroup: DefaultResourceGroupName,
-		OutboundNodes: []int64{4},
+		RoNodes:       []int64{4},
 	}
 }
 
@@ -38,8 +38,8 @@ func (suite *ReplicaSuite) TestClone() {
 	suite.testRead(r)
 
 	// after apply write operation on copy, the original should not be affected.
-	r2.AddAvailableNode(5, 6)
-	r2.AddOutboundNode(1, 2)
+	r2.AddRWNode(5, 6)
+	r2.AddRONode(1, 2)
 	r2.RemoveNode(3)
 	suite.testRead(r)
 }
@@ -47,30 +47,30 @@ func (suite *ReplicaSuite) TestClone() {
 func (suite *ReplicaSuite) TestRange() {
 	count := 0
 	r := newReplica(suite.replicaPB)
-	r.RangeOverAvailableNodes(func(nodeID int64) bool {
+	r.RangeOverRWNodes(func(nodeID int64) bool {
 		count++
 		return true
 	})
 	suite.Equal(3, count)
 	count = 0
-	r.RangeOverOutboundNodes(func(nodeID int64) bool {
+	r.RangeOverRONodes(func(nodeID int64) bool {
 		count++
 		return true
 	})
 	suite.Equal(1, count)
 
 	count = 0
-	r.RangeOverAvailableNodes(func(nodeID int64) bool {
+	r.RangeOverRWNodes(func(nodeID int64) bool {
 		count++
 		return false
 	})
 	suite.Equal(1, count)
 
 	mr := r.copyForWrite()
-	mr.AddOutboundNode(1)
+	mr.AddRONode(1)
 
 	count = 0
-	mr.RangeOverAvailableNodes(func(nodeID int64) bool {
+	mr.RangeOverRWNodes(func(nodeID int64) bool {
 		count++
 		return false
 	})
@@ -84,48 +84,48 @@ func (suite *ReplicaSuite) TestWriteOperation() {
 	// test add available node.
 	suite.False(mr.Contains(5))
 	suite.False(mr.Contains(6))
-	mr.AddAvailableNode(5, 6)
-	suite.Equal(3, r.AvailableNodesCount())
-	suite.Equal(1, r.OutboundNodesCount())
+	mr.AddRWNode(5, 6)
+	suite.Equal(3, r.RWNodesCount())
+	suite.Equal(1, r.RONodesCount())
 	suite.Equal(4, r.NodesCount())
-	suite.Equal(5, mr.AvailableNodesCount())
-	suite.Equal(1, mr.OutboundNodesCount())
+	suite.Equal(5, mr.RWNodesCount())
+	suite.Equal(1, mr.RONodesCount())
 	suite.Equal(6, mr.NodesCount())
 	suite.True(mr.Contains(5))
 	suite.True(mr.Contains(5))
 	suite.True(mr.Contains(6))
 
-	// test add outbound node.
+	// test add ro node.
 	suite.False(mr.Contains(4))
 	suite.False(mr.Contains(7))
-	mr.AddAvailableNode(4, 7)
-	suite.Equal(3, r.AvailableNodesCount())
-	suite.Equal(1, r.OutboundNodesCount())
+	mr.AddRWNode(4, 7)
+	suite.Equal(3, r.RWNodesCount())
+	suite.Equal(1, r.RONodesCount())
 	suite.Equal(4, r.NodesCount())
-	suite.Equal(7, mr.AvailableNodesCount())
-	suite.Equal(0, mr.OutboundNodesCount())
+	suite.Equal(7, mr.RWNodesCount())
+	suite.Equal(0, mr.RONodesCount())
 	suite.Equal(7, mr.NodesCount())
 	suite.True(mr.Contains(4))
 	suite.True(mr.Contains(7))
 
-	// test remove node to outbound.
-	mr.AddOutboundNode(4, 7)
-	suite.Equal(3, r.AvailableNodesCount())
-	suite.Equal(1, r.OutboundNodesCount())
+	// test remove node to ro.
+	mr.AddRONode(4, 7)
+	suite.Equal(3, r.RWNodesCount())
+	suite.Equal(1, r.RONodesCount())
 	suite.Equal(4, r.NodesCount())
-	suite.Equal(5, mr.AvailableNodesCount())
-	suite.Equal(2, mr.OutboundNodesCount())
+	suite.Equal(5, mr.RWNodesCount())
+	suite.Equal(2, mr.RONodesCount())
 	suite.Equal(7, mr.NodesCount())
 	suite.False(mr.Contains(4))
 	suite.False(mr.Contains(7))
 
 	// test remove node.
 	mr.RemoveNode(4, 5, 7, 8)
-	suite.Equal(3, r.AvailableNodesCount())
-	suite.Equal(1, r.OutboundNodesCount())
+	suite.Equal(3, r.RWNodesCount())
+	suite.Equal(1, r.RONodesCount())
 	suite.Equal(4, r.NodesCount())
-	suite.Equal(4, mr.AvailableNodesCount())
-	suite.Equal(0, mr.OutboundNodesCount())
+	suite.Equal(4, mr.RWNodesCount())
+	suite.Equal(0, mr.RONodesCount())
 	suite.Equal(4, mr.NodesCount())
 	suite.False(mr.Contains(4))
 	suite.False(mr.Contains(5))
@@ -156,18 +156,18 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 	// Test GetNodes()
 	suite.ElementsMatch(suite.replicaPB.GetNodes(), r.GetNodes())
 
-	// Test GetOutboundNodes()
-	suite.ElementsMatch(suite.replicaPB.GetOutboundNodes(), r.GetOutboundNodes())
+	// Test GetRONodes()
+	suite.ElementsMatch(suite.replicaPB.GetRoNodes(), r.GetRONodes())
 
 	// Test AvailableNodesCount()
-	suite.Equal(len(suite.replicaPB.GetNodes()), r.AvailableNodesCount())
+	suite.Equal(len(suite.replicaPB.GetNodes()), r.RWNodesCount())
 
 	// Test Contains()
 	suite.True(r.Contains(1))
 	suite.False(r.Contains(4))
 
-	// Test ContainOutboundNode()
-	suite.True(r.ContainOutboundNode(4))
+	// Test ContainRONode()
+	suite.True(r.ContainRONode(4))
 }
 
 func TestReplica(t *testing.T) {

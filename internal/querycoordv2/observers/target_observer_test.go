@@ -94,7 +94,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.NoError(err)
 	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1})
 	suite.NoError(err)
-	replicas[0].AddAvailableNode(2)
+	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(replicas...)
 	suite.NoError(err)
 
@@ -278,7 +278,7 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.NoError(err)
 	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1})
 	suite.NoError(err)
-	replicas[0].AddAvailableNode(2)
+	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(replicas...)
 	suite.NoError(err)
 }

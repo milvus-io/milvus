@@ -469,11 +469,11 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAs
 	onlineNodes := make([]int64, 0)
 	offlineNodes := make([]int64, 0)
 
-	// outboundNode is offline in current replica.
-	if replica.OutboundNodesCount() > 0 {
+	// read only nodes is offline in current replica.
+	if replica.RONodesCount() > 0 {
 		// if node is stop or transfer to other rg
-		log.RatedInfo(10, "meet outbound node, try to move out all segment/channel", zap.Int64s("node", replica.GetOutboundNodes()))
-		offlineNodes = append(offlineNodes, replica.GetOutboundNodes()...)
+		log.RatedInfo(10, "meet read only node, try to move out all segment/channel", zap.Int64s("node", replica.GetRONodes()))
+		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
 	}
 
 	// get all available nodes and filter out the stopping nodes

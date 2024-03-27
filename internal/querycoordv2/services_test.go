@@ -1236,8 +1236,8 @@ func (suite *ServiceSuite) TestLoadBalanceWithEmptySegmentList() {
 	// update two collection's dist
 	for _, collection := range suite.collections {
 		replicas := suite.meta.ReplicaManager.GetByCollection(collection)
-		replicas[0].AddAvailableNode(srcNode)
-		replicas[0].AddAvailableNode(dstNode)
+		replicas[0].AddRWNode(srcNode)
+		replicas[0].AddRWNode(dstNode)
 		suite.updateCollectionStatus(collection, querypb.LoadStatus_Loaded)
 
 		for partition, segments := range suite.segments[collection] {

@@ -378,7 +378,7 @@ func (suite *ResourceManagerSuite) TestGetOutboundNode() {
 			CollectionID:  100,
 			ResourceGroup: "rg",
 			Nodes:         []int64{1, 2},
-			OutboundNodes: []int64{3},
+			RoNodes:       []int64{3},
 		},
 		typeutil.NewUniqueSet(1, 2),
 	)

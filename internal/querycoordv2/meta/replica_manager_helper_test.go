@@ -10,7 +10,7 @@ import (
 )
 
 type expectedReplicaPlan struct {
-	newOutboundNodes  int
+	newRONodes        int
 	recoverNodes      int
 	incomingNodeCount int
 	expectedNodeCount int
@@ -33,24 +33,24 @@ func (s *CollectionAssignmentHelperSuite) TestNoModificationCase() {
 		rgToReplicas: map[string][]*Replica{
 			"rg1": {
 				newReplica(&querypb.Replica{
-					ID:            1,
-					CollectionID:  1,
-					Nodes:         []int64{1, 2, 3, 4},
-					OutboundNodes: []int64{},
+					ID:           1,
+					CollectionID: 1,
+					Nodes:        []int64{1, 2, 3, 4},
+					RoNodes:      []int64{},
 				}),
 			},
 			"rg2": {
 				newReplica(&querypb.Replica{
-					ID:            2,
-					CollectionID:  1,
-					Nodes:         []int64{5, 6},
-					OutboundNodes: []int64{},
+					ID:           2,
+					CollectionID: 1,
+					Nodes:        []int64{5, 6},
+					RoNodes:      []int64{},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            3,
-					CollectionID:  1,
-					Nodes:         []int64{7, 8},
-					OutboundNodes: []int64{},
+					ID:           3,
+					CollectionID: 1,
+					Nodes:        []int64{7, 8},
+					RoNodes:      []int64{},
 				}),
 			},
 		},
@@ -60,19 +60,19 @@ func (s *CollectionAssignmentHelperSuite) TestNoModificationCase() {
 		},
 		expectedPlan: map[typeutil.UniqueID]expectedReplicaPlan{
 			1: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 4,
 			},
 			2: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 2,
 			},
 			3: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 2,
@@ -89,24 +89,24 @@ func (s *CollectionAssignmentHelperSuite) TestNoModificationCase() {
 		rgToReplicas: map[string][]*Replica{
 			"rg1": {
 				newReplica(&querypb.Replica{
-					ID:            1,
-					CollectionID:  1,
-					Nodes:         []int64{1, 2, 3, 4},
-					OutboundNodes: []int64{},
+					ID:           1,
+					CollectionID: 1,
+					Nodes:        []int64{1, 2, 3, 4},
+					RoNodes:      []int64{},
 				}),
 			},
 			"rg2": {
 				newReplica(&querypb.Replica{
-					ID:            2,
-					CollectionID:  1,
-					Nodes:         []int64{5},
-					OutboundNodes: []int64{},
+					ID:           2,
+					CollectionID: 1,
+					Nodes:        []int64{5},
+					RoNodes:      []int64{},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            3,
-					CollectionID:  1,
-					Nodes:         []int64{6, 7},
-					OutboundNodes: []int64{},
+					ID:           3,
+					CollectionID: 1,
+					Nodes:        []int64{6, 7},
+					RoNodes:      []int64{},
 				}),
 			},
 		},
@@ -116,19 +116,19 @@ func (s *CollectionAssignmentHelperSuite) TestNoModificationCase() {
 		},
 		expectedPlan: map[typeutil.UniqueID]expectedReplicaPlan{
 			1: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 4,
 			},
 			2: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 1,
 			},
 			3: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 2,
@@ -141,30 +141,30 @@ func (s *CollectionAssignmentHelperSuite) TestNoModificationCase() {
 	})
 }
 
-func (s *CollectionAssignmentHelperSuite) TestOutbound() {
+func (s *CollectionAssignmentHelperSuite) TestRO() {
 	s.runCase(testCase{
 		collectionID: 1,
 		rgToReplicas: map[string][]*Replica{
 			"rg1": {
 				newReplica(&querypb.Replica{
-					ID:            1,
-					CollectionID:  1,
-					Nodes:         []int64{1, 2, 3, 4, 5},
-					OutboundNodes: []int64{},
+					ID:           1,
+					CollectionID: 1,
+					Nodes:        []int64{1, 2, 3, 4, 5},
+					RoNodes:      []int64{},
 				}),
 			},
 			"rg2": {
 				newReplica(&querypb.Replica{
-					ID:            2,
-					CollectionID:  1,
-					Nodes:         []int64{6},
-					OutboundNodes: []int64{},
+					ID:           2,
+					CollectionID: 1,
+					Nodes:        []int64{6},
+					RoNodes:      []int64{},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            3,
-					CollectionID:  1,
-					Nodes:         []int64{7, 8},
-					OutboundNodes: []int64{},
+					ID:           3,
+					CollectionID: 1,
+					Nodes:        []int64{7, 8},
+					RoNodes:      []int64{},
 				}),
 			},
 		},
@@ -174,19 +174,19 @@ func (s *CollectionAssignmentHelperSuite) TestOutbound() {
 		},
 		expectedPlan: map[typeutil.UniqueID]expectedReplicaPlan{
 			1: {
-				newOutboundNodes:  1,
+				newRONodes:        1,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 4,
 			},
 			2: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 1,
 			},
 			3: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 2,
@@ -203,24 +203,24 @@ func (s *CollectionAssignmentHelperSuite) TestOutbound() {
 		rgToReplicas: map[string][]*Replica{
 			"rg1": {
 				newReplica(&querypb.Replica{
-					ID:            1,
-					CollectionID:  1,
-					Nodes:         []int64{1, 2, 3, 4, 5},
-					OutboundNodes: []int64{},
+					ID:           1,
+					CollectionID: 1,
+					Nodes:        []int64{1, 2, 3, 4, 5},
+					RoNodes:      []int64{},
 				}),
 			},
 			"rg2": {
 				newReplica(&querypb.Replica{
-					ID:            2,
-					CollectionID:  1,
-					Nodes:         []int64{6},
-					OutboundNodes: []int64{},
+					ID:           2,
+					CollectionID: 1,
+					Nodes:        []int64{6},
+					RoNodes:      []int64{},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            3,
-					CollectionID:  1,
-					Nodes:         []int64{7, 8},
-					OutboundNodes: []int64{},
+					ID:           3,
+					CollectionID: 1,
+					Nodes:        []int64{7, 8},
+					RoNodes:      []int64{},
 				}),
 			},
 		},
@@ -230,19 +230,19 @@ func (s *CollectionAssignmentHelperSuite) TestOutbound() {
 		},
 		expectedPlan: map[typeutil.UniqueID]expectedReplicaPlan{
 			1: {
-				newOutboundNodes:  1,
+				newRONodes:        1,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 4,
 			},
 			2: {
-				newOutboundNodes:  1,
+				newRONodes:        1,
 				recoverNodes:      0,
 				incomingNodeCount: 1,
 				expectedNodeCount: 1,
 			},
 			3: {
-				newOutboundNodes:  1,
+				newRONodes:        1,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 1,
@@ -261,24 +261,24 @@ func (s *CollectionAssignmentHelperSuite) TestIncomingNode() {
 		rgToReplicas: map[string][]*Replica{
 			"rg1": {
 				newReplica(&querypb.Replica{
-					ID:            1,
-					CollectionID:  1,
-					Nodes:         []int64{1, 2},
-					OutboundNodes: []int64{5},
+					ID:           1,
+					CollectionID: 1,
+					Nodes:        []int64{1, 2},
+					RoNodes:      []int64{5},
 				}),
 			},
 			"rg2": {
 				newReplica(&querypb.Replica{
-					ID:            2,
-					CollectionID:  1,
-					Nodes:         []int64{6},
-					OutboundNodes: []int64{},
+					ID:           2,
+					CollectionID: 1,
+					Nodes:        []int64{6},
+					RoNodes:      []int64{},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            3,
-					CollectionID:  1,
-					Nodes:         []int64{7},
-					OutboundNodes: []int64{},
+					ID:           3,
+					CollectionID: 1,
+					Nodes:        []int64{7},
+					RoNodes:      []int64{},
 				}),
 			},
 		},
@@ -288,19 +288,19 @@ func (s *CollectionAssignmentHelperSuite) TestIncomingNode() {
 		},
 		expectedPlan: map[typeutil.UniqueID]expectedReplicaPlan{
 			1: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 2,
 				expectedNodeCount: 4,
 			},
 			2: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 1,
 			},
 			3: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 1,
 				expectedNodeCount: 2,
@@ -319,24 +319,24 @@ func (s *CollectionAssignmentHelperSuite) TestRecoverNode() {
 		rgToReplicas: map[string][]*Replica{
 			"rg1": {
 				newReplica(&querypb.Replica{
-					ID:            1,
-					CollectionID:  1,
-					Nodes:         []int64{1, 2},
-					OutboundNodes: []int64{3},
+					ID:           1,
+					CollectionID: 1,
+					Nodes:        []int64{1, 2},
+					RoNodes:      []int64{3},
 				}),
 			},
 			"rg2": {
 				newReplica(&querypb.Replica{
-					ID:            2,
-					CollectionID:  1,
-					Nodes:         []int64{6},
-					OutboundNodes: []int64{7},
+					ID:           2,
+					CollectionID: 1,
+					Nodes:        []int64{6},
+					RoNodes:      []int64{7},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            3,
-					CollectionID:  1,
-					Nodes:         []int64{8},
-					OutboundNodes: []int64{},
+					ID:           3,
+					CollectionID: 1,
+					Nodes:        []int64{8},
+					RoNodes:      []int64{},
 				}),
 			},
 		},
@@ -346,19 +346,19 @@ func (s *CollectionAssignmentHelperSuite) TestRecoverNode() {
 		},
 		expectedPlan: map[typeutil.UniqueID]expectedReplicaPlan{
 			1: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      1,
 				incomingNodeCount: 1,
 				expectedNodeCount: 4,
 			},
 			2: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      1,
 				incomingNodeCount: 0,
 				expectedNodeCount: 2,
 			},
 			3: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 1,
 				expectedNodeCount: 2,
@@ -377,38 +377,38 @@ func (s *CollectionAssignmentHelperSuite) TestMixRecoverNode() {
 		rgToReplicas: map[string][]*Replica{
 			"rg1": {
 				newReplica(&querypb.Replica{
-					ID:            1,
-					CollectionID:  1,
-					Nodes:         []int64{1, 2},
-					OutboundNodes: []int64{3},
+					ID:           1,
+					CollectionID: 1,
+					Nodes:        []int64{1, 2},
+					RoNodes:      []int64{3},
 				}),
 			},
 			"rg2": {
 				newReplica(&querypb.Replica{
-					ID:            2,
-					CollectionID:  1,
-					Nodes:         []int64{6},
-					OutboundNodes: []int64{7},
+					ID:           2,
+					CollectionID: 1,
+					Nodes:        []int64{6},
+					RoNodes:      []int64{7},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            3,
-					CollectionID:  1,
-					Nodes:         []int64{8},
-					OutboundNodes: []int64{},
+					ID:           3,
+					CollectionID: 1,
+					Nodes:        []int64{8},
+					RoNodes:      []int64{},
 				}),
 			},
 			"rg3": {
 				newReplica(&querypb.Replica{
-					ID:            4,
-					CollectionID:  1,
-					Nodes:         []int64{9},
-					OutboundNodes: []int64{},
+					ID:           4,
+					CollectionID: 1,
+					Nodes:        []int64{9},
+					RoNodes:      []int64{},
 				}),
 				newReplica(&querypb.Replica{
-					ID:            5,
-					CollectionID:  1,
-					Nodes:         []int64{10},
-					OutboundNodes: []int64{},
+					ID:           5,
+					CollectionID: 1,
+					Nodes:        []int64{10},
+					RoNodes:      []int64{},
 				}),
 			},
 		},
@@ -419,31 +419,31 @@ func (s *CollectionAssignmentHelperSuite) TestMixRecoverNode() {
 		},
 		expectedPlan: map[typeutil.UniqueID]expectedReplicaPlan{
 			1: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      1,
 				incomingNodeCount: 1,
 				expectedNodeCount: 4,
 			},
 			2: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      1,
 				incomingNodeCount: 0,
 				expectedNodeCount: 2,
 			},
 			3: {
-				newOutboundNodes:  1,
+				newRONodes:        1,
 				recoverNodes:      0,
 				incomingNodeCount: 1,
 				expectedNodeCount: 1,
 			},
 			4: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 1,
 			},
 			5: {
-				newOutboundNodes:  0,
+				newRONodes:        0,
 				recoverNodes:      0,
 				incomingNodeCount: 0,
 				expectedNodeCount: 1,
@@ -462,12 +462,12 @@ func (s *CollectionAssignmentHelperSuite) runCase(c testCase) {
 	cHelper.RangeOverResourceGroup(func(rHelper *replicaAssignmentHelper) {
 		s.ElementsMatch(c.expectedNewIncomingNodes[rHelper.rgName].Collect(), rHelper.incomingNodes.Collect())
 		rHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
-			outboundNodes := assignment.GetNewOutboundNodes()
+			roNodes := assignment.GetNewRONodes()
 			recoverNodes, incomingNodes := assignment.GetRecoverNodesAndIncomingNodeCount()
 			plan := c.expectedPlan[assignment.GetReplicaID()]
 			s.Equal(
-				plan.newOutboundNodes,
-				len(outboundNodes),
+				plan.newRONodes,
+				len(roNodes),
 			)
 			s.Equal(
 				plan.incomingNodeCount,

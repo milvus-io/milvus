@@ -290,7 +290,7 @@ func (m *ReplicaManager) GetByResourceGroup(rgName string) []*Replica {
 
 // RecoverNodesInCollection recovers all nodes in collection with latest resource group.
 // Promise a node will be only assigned to one replica in same collection at same time.
-// 1. Move the nodes to outbound if they are not in related resource group.
+// 1. Move the rw nodes to ro nodes if they are not in related resource group.
 // 2. Add new incoming nodes into the replica if they are not in-used by other replicas of same collection.
 // 3. replicas in same resource group will shared the nodes in resource group fairly.
 func (m *ReplicaManager) RecoverNodesInCollection(collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) error {
@@ -311,20 +311,20 @@ func (m *ReplicaManager) RecoverNodesInCollection(collectionID typeutil.UniqueID
 	// recover node by resource group.
 	helper.RangeOverResourceGroup(func(replicaHelper *replicaAssignmentHelper) {
 		replicaHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
-			outboundNodes := assignment.GetNewOutboundNodes()
+			roNodes := assignment.GetNewRONodes()
 			recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
 			// There may be not enough incoming nodes for current replica,
 			// Even we filtering the nodes that are used by other replica of same collection in other resource group,
 			// current replica's expected node may be still used by other replica of same collection in same resource group.
 			incomingNode := replicaHelper.AllocateIncomingNodes(incomingNodeCount)
-			if len(outboundNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
+			if len(roNodes) == 0 && len(recoverableNodes) == 0 && len(incomingNode) == 0 {
 				// nothing to do.
 				return
 			}
 			mutableReplica := m.replicas[assignment.GetReplicaID()].copyForWrite()
-			mutableReplica.AddOutboundNode(outboundNodes...)
-			mutableReplica.AddAvailableNode(recoverableNodes...)
-			mutableReplica.AddAvailableNode(incomingNode...)
+			mutableReplica.AddRONode(roNodes...)          // rw -> ro
+			mutableReplica.AddRWNode(recoverableNodes...) // ro -> rw
+			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
 			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		})
 	})
@@ -380,7 +380,7 @@ func (m *ReplicaManager) RemoveNode(replicaID typeutil.UniqueID, nodes ...typeut
 	}
 
 	mutableReplica := replica.copyForWrite()
-	mutableReplica.RemoveNode(nodes...)
+	mutableReplica.RemoveNode(nodes...) // ro -> unused
 	return m.put(mutableReplica.IntoReplica())
 }
 

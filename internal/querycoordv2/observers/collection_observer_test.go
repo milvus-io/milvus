@@ -393,7 +393,7 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 	replicas, err := suite.meta.ReplicaManager.Spawn(collection, map[string]int{meta.DefaultResourceGroupName: int(suite.replicaNumber[collection])})
 	suite.NoError(err)
 	for _, replica := range replicas {
-		replica.AddAvailableNode(suite.nodes...)
+		replica.AddRWNode(suite.nodes...)
 	}
 	err = suite.meta.ReplicaManager.Put(replicas...)
 	suite.NoError(err)
