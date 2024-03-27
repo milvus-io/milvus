@@ -108,6 +108,9 @@ func newMinioClient(ctx context.Context, cfg config) (*minio.Client, error) {
 		creds = credentials.NewStaticV4(cfg.accessKeyID, cfg.secretAccessKeyID, "")
 	}
 
+	// We must set the cert path by os environment variable "SSL_CERT_FILE",
+	// because the minio.DefaultTransport() need this path to read the file content,
+	// we shouldn't read this file by ourself.
 	if cfg.useSSL && len(cfg.sslCACert) > 0 {
 		err := os.Setenv("SSL_CERT_FILE", cfg.sslCACert)
 		if err != nil {
@@ -123,6 +126,7 @@ func newMinioClient(ctx context.Context, cfg config) (*minio.Client, error) {
 	if err != nil {
 		return nil, err
 	}
+
 	var bucketExists bool
 	// check valid in first query
 	checkBucketFn := func() error {

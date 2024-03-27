@@ -218,15 +218,33 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// Segment which exist on next target, but not on dist
 	for segmentID, segment := range nextTargetMap {
-		leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica,
-			segment.GetInsertChannel(),
-		)
-		node, ok := distMap[segmentID]
-		if !ok ||
+		node, existInDist := distMap[segmentID]
+		l0WithWrongLocation := false
+		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
 			// the L0 segments have to been in the same node as the channel watched
-			leader != nil &&
-				segment.GetLevel() == datapb.SegmentLevel_L0 &&
-				node != leader.ID {
+			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
+			l0WithWrongLocation = leader != nil && node != leader.ID
+		}
+		if !existInDist || l0WithWrongLocation {
+			toLoad = append(toLoad, segment)
+		}
+	}
+
+	// l0 Segment which exist on current target, but not on dist
+	for segmentID, segment := range currentTargetMap {
+		// to avoid generate duplicate segment task
+		if nextTargetMap[segmentID] != nil {
+			continue
+		}
+
+		node, existInDist := distMap[segmentID]
+		l0WithWrongLocation := false
+		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
+			// the L0 segments have to been in the same node as the channel watched
+			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
+			l0WithWrongLocation = leader != nil && node != leader.ID
+		}
+		if !existInDist || l0WithWrongLocation {
 			toLoad = append(toLoad, segment)
 		}
 	}
@@ -236,13 +254,8 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		_, existOnCurrent := currentTargetMap[segment.GetID()]
 		_, existOnNext := nextTargetMap[segment.GetID()]
 
-		l0WithWrongLocation := false
-		if existOnCurrent {
-			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
-			l0WithWrongLocation = segment.GetLevel() == datapb.SegmentLevel_L0 && segment.Node != leader.ID
-		}
-
-		if !existOnNext && !existOnCurrent || l0WithWrongLocation {
+		// l0 segment should be release with channel together
+		if !existOnNext && !existOnCurrent {
 			toRelease = append(toRelease, segment)
 		}
 	}
@@ -278,6 +291,14 @@ func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Seg
 	dist := c.getSealedSegmentsDist(replica)
 	versions := make(map[int64]*meta.Segment)
 	for _, s := range dist {
+		// l0 segment should be release with channel together
+		segment := c.targetMgr.GetSealedSegment(s.GetCollectionID(), s.GetID(), meta.CurrentTargetFirst)
+		existInTarget := segment != nil
+		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
+		if isL0Segment {
+			continue
+		}
+
 		maxVer, ok := versions[s.GetID()]
 		if !ok {
 			versions[s.GetID()] = s
