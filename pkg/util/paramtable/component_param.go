@@ -1995,6 +1995,7 @@ type queryNodeConfig struct {
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
+	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2475,6 +2476,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "use partition prune function on shard delegator",
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
+	p.DefaultSegmentFilterRatio = ParamItem{
+		Key:          "queryNode.defaultSegmentFilterRatio",
+		Version:      "2.4.0",
+		DefaultValue: "0.5",
+		Doc:          "filter ratio used for pruning segments when searching",
+	}
+	p.DefaultSegmentFilterRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

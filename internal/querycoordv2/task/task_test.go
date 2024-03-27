@@ -429,6 +429,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -529,6 +530,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -623,6 +625,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -1005,6 +1008,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segmentInfos := []*datapb.SegmentInfo{}
 	for _, segment := range suite.loadSegments {
@@ -1097,6 +1101,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
