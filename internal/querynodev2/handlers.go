@@ -129,6 +129,8 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 			}
 			continue
 		}
+		// try to update segment version after load delta logs
+		node.manager.Segment.UpdateBy(segments.IncreaseVersion(req.GetVersion()), segments.WithType(segments.SegmentTypeSealed), segments.WithID(info.GetSegmentID()))
 	}
 
 	if finalErr != nil {
