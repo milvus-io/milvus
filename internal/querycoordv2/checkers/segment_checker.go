@@ -39,6 +39,7 @@ import (
 const initialTargetVersion = int64(0)
 
 type SegmentChecker struct {
+	*checkerActivation
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
@@ -54,16 +55,17 @@ func NewSegmentChecker(
 	nodeMgr *session.NodeManager,
 ) *SegmentChecker {
 	return &SegmentChecker{
-		meta:      meta,
-		dist:      dist,
-		targetMgr: targetMgr,
-		balancer:  balancer,
-		nodeMgr:   nodeMgr,
+		checkerActivation: newCheckerActivation(),
+		meta:              meta,
+		dist:              dist,
+		targetMgr:         targetMgr,
+		balancer:          balancer,
+		nodeMgr:           nodeMgr,
 	}
 }
 
 func (c *SegmentChecker) ID() task.Source {
-	return segmentChecker
+	return utils.SegmentChecker
 }
 
 func (c *SegmentChecker) Description() string {
@@ -78,6 +80,9 @@ func (c *SegmentChecker) readyToCheck(collectionID int64) bool {
 }
 
 func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
+	if !c.IsActive() {
+		return nil
+	}
 	collectionIDs := c.meta.CollectionManager.GetAll()
 	results := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
@@ -368,7 +373,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.balancer.AssignSegment(replica.CollectionID, segmentInfos, availableNodes)
+		shardPlans := c.balancer.AssignSegment(replica.CollectionID, segmentInfos, availableNodes, false)
 		for i := range shardPlans {
 			shardPlans[i].ReplicaID = replica.GetID()
 		}

@@ -18,6 +18,7 @@ package checkers
 
 import (
 	"context"
+	"sync/atomic"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 )
@@ -26,4 +27,29 @@ type Checker interface {
 	ID() task.Source
 	Description() string
 	Check(ctx context.Context) []task.Task
+	IsActive() bool
+	Activate()
+	Deactivate()
+}
+
+type checkerActivation struct {
+	active atomic.Bool
+}
+
+func (c *checkerActivation) IsActive() bool {
+	return c.active.Load()
+}
+
+func (c *checkerActivation) Activate() {
+	c.active.Store(true)
+}
+
+func (c *checkerActivation) Deactivate() {
+	c.active.Store(false)
+}
+
+func newCheckerActivation() *checkerActivation {
+	c := &checkerActivation{}
+	c.Activate()
+	return c
 }
