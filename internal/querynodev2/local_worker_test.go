@@ -94,7 +94,9 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 
 	suite.schema = segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	suite.indexMeta = segments.GenTestIndexMeta(suite.collectionID, suite.schema)
-	collection := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, querypb.LoadType_LoadCollection)
+	collection := segments.NewCollection(suite.collectionID, suite.schema, suite.indexMeta, &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection,
+	})
 	loadMata := &querypb.LoadMetaInfo{
 		LoadType:     querypb.LoadType_LoadCollection,
 		CollectionID: suite.collectionID,

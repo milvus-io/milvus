@@ -320,6 +320,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(task.CollectionID()),
 		task.CollectionID(),
+		collectionInfo.GetDbName(),
+		task.ResourceGroup(),
 		partitions...,
 	)
 
@@ -562,10 +564,13 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 	}
 
 	loadMeta := packLoadMeta(
-		ex.meta.GetLoadType(collectionID),
-		collectionID,
+		ex.meta.GetLoadType(task.CollectionID()),
+		task.CollectionID(),
+		collectionInfo.GetDbName(),
+		task.ResourceGroup(),
 		partitions...,
 	)
+
 	// get channel first, in case of target updated after segment info fetched
 	channel := ex.targetMgr.GetDmChannel(collectionID, shard, meta.NextTargetFirst)
 	if channel == nil {
