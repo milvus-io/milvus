@@ -2,11 +2,12 @@ package cache
 
 import (
 	"sync"
-	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"go.uber.org/atomic"
 )
 
 func TestLRUCache(t *testing.T) {
@@ -174,5 +175,76 @@ func TestLRUCacheConcurrency(t *testing.T) {
 		})
 		wg.Done()
 		assert.Equal(t, ErrNotEnoughSpace, err)
+	})
+
+	t.Run("test time out", func(t *testing.T) {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+			return key, true
+		}).WithCapacity(1).WithFinalizer(func(key, value int) error {
+			return nil
+		}).Build()
+
+		var wg sync.WaitGroup  // Let key 1000 be blocked
+		var wg1 sync.WaitGroup // Make sure goroutine is started
+		wg.Add(1)
+		wg1.Add(1)
+		go cache.Do(1000, func(v int) error {
+			wg1.Done()
+			wg.Wait()
+			return nil
+		})
+		wg1.Wait()
+		err := cache.DoWait(1001, time.Nanosecond, func(v int) error {
+			return nil
+		})
+		wg.Done()
+		assert.Equal(t, ErrTimeOut, err)
+	})
+
+	t.Run("test wait", func(t *testing.T) {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+			return key, true
+		}).WithCapacity(1).WithFinalizer(func(key, value int) error {
+			return nil
+		}).Build()
+
+		var wg1 sync.WaitGroup // Make sure goroutine is started
+
+		wg1.Add(1)
+		go cache.Do(1000, func(v int) error {
+			wg1.Done()
+			time.Sleep(time.Second)
+			return nil
+		})
+		wg1.Wait()
+		err := cache.DoWait(1001, time.Second*2, func(v int) error {
+			return nil
+		})
+		assert.NoError(t, err)
+	})
+
+	t.Run("test wait race condition", func(t *testing.T) {
+		numEvict := new(atomic.Int32)
+		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+			return key, true
+		}).WithCapacity(5).WithFinalizer(func(key, value int) error {
+			numEvict.Add(1)
+			return nil
+		}).Build()
+
+		var wg sync.WaitGroup
+		for i := 0; i < 10; i++ {
+			wg.Add(1)
+			go func(i int) {
+				defer wg.Done()
+				for j := 0; j < 100; j++ {
+					err := cache.DoWait(j, 2*time.Second, func(v int) error {
+						return nil
+					})
+					assert.NoError(t, err)
+				}
+			}(i)
+		}
+		wg.Wait()
 	})
 }
