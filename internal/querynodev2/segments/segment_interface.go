@@ -93,4 +93,8 @@ type Segment interface {
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
 	Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error)
 	IsLazyLoad() bool
+
+	// lazy load related
+	NeedUpdatedVersion() int64
+	RemoveUnusedFieldFiles() error
 }

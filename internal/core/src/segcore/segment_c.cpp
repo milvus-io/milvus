@@ -444,3 +444,10 @@ WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
+
+void
+RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id) {
+    auto segment =
+        reinterpret_cast<milvus::segcore::SegmentSealedImpl*>(c_segment);
+    segment->RemoveFieldFile(milvus::FieldId(field_id));
+}
