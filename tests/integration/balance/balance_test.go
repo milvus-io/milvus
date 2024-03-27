@@ -188,17 +188,18 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
-	// check total segment number
+	// check total segment number and total channel number
 	s.Eventually(func() bool {
-		count := 0
+		segNum, chNum := 0, 0
 		for _, node := range s.Cluster.GetAllQueryNodes() {
 			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp1.GetStatus()))
-			count += len(resp1.Segments)
+			segNum += len(resp1.Segments)
+			chNum += len(resp1.Channels)
 		}
-		return count == 8
-	}, 10*time.Second, 1*time.Second)
+		return segNum == 8 && chNum == 2
+	}, 30*time.Second, 1*time.Second)
 }
 
 func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
@@ -244,17 +245,18 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
-	// check total segment num
+	// check total segment number and total channel number
 	s.Eventually(func() bool {
-		count := 0
+		segNum, chNum := 0, 0
 		for _, node := range s.Cluster.GetAllQueryNodes() {
 			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp1.GetStatus()))
-			count += len(resp1.Segments)
+			segNum += len(resp1.Segments)
+			chNum += len(resp1.Channels)
 		}
-		return count == 16
-	}, 10*time.Second, 1*time.Second)
+		return segNum == 16 && chNum == 4
+	}, 30*time.Second, 1*time.Second)
 }
 
 func (s *BalanceTestSuit) TestNodeDown() {
