@@ -58,7 +58,39 @@ func NewInt64FieldData(fieldName string, numRows int) *schemapb.FieldData {
 			Scalars: &schemapb.ScalarField{
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
-						Data: GenerateInt64Array(numRows),
+						Data: GenerateInt64Array(numRows, 0),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewInt64FieldDataWithStart(fieldName string, numRows int, start int64) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: GenerateInt64Array(numRows, start),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewInt64SameFieldData(fieldName string, numRows int, value int64) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_Int64,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: GenerateSameInt64Array(numRows, value),
 					},
 				},
 			},
@@ -144,10 +176,18 @@ func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.Fiel
 	}
 }
 
-func GenerateInt64Array(numRows int) []int64 {
+func GenerateInt64Array(numRows int, start int64) []int64 {
 	ret := make([]int64, numRows)
 	for i := 0; i < numRows; i++ {
-		ret[i] = int64(i)
+		ret[i] = int64(i) + start
+	}
+	return ret
+}
+
+func GenerateSameInt64Array(numRows int, value int64) []int64 {
+	ret := make([]int64, numRows)
+	for i := 0; i < numRows; i++ {
+		ret[i] = value
 	}
 	return ret
 }

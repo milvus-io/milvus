@@ -177,7 +177,6 @@ func createStream(factory msgstream.Factory, pchans []pChan, repack repackFuncTy
 	var err error
 
 	stream, err = factory.NewMsgStream(context.Background())
-
 	if err != nil {
 		return nil, err
 	}

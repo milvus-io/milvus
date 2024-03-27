@@ -34,6 +34,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -3835,4 +3836,68 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 		cancel()
 		wg.Wait()
 	})
+}
+
+func TestGetCollectionStorage(t *testing.T) {
+	paramtable.Init()
+	mockSession := sessionutil.NewMockSession(t)
+	mockSession.EXPECT().GetAddress().Return("localhost:8888")
+	size := atomic.NewInt64(100)
+
+	s := &Server{
+		session: mockSession,
+		meta: &meta{
+			segments: &SegmentsInfo{
+				segments: map[UniqueID]*SegmentInfo{
+					1: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:           1,
+							State:        commonpb.SegmentState_Growing,
+							CollectionID: 10001,
+							PartitionID:  10000,
+							NumOfRows:    10,
+						},
+						size: *size,
+					},
+					2: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:           2,
+							State:        commonpb.SegmentState_Dropped,
+							CollectionID: 10001,
+							PartitionID:  10000,
+							NumOfRows:    10,
+						},
+						size: *size,
+					},
+					3: {
+						SegmentInfo: &datapb.SegmentInfo{
+							ID:           3,
+							State:        commonpb.SegmentState_Flushed,
+							CollectionID: 10002,
+							PartitionID:  9999,
+							NumOfRows:    10,
+						},
+						size: *size,
+					},
+				},
+			},
+		},
+	}
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+
+	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.CollectionStorageMetrics)
+	assert.NoError(t, err)
+	resp, err := s.GetMetrics(context.TODO(), req)
+	assert.NoError(t, err)
+
+	var coordTopology metricsinfo.DataCoordTopology
+	err = metricsinfo.UnmarshalTopology(resp.Response, &coordTopology)
+	assert.NoError(t, err)
+
+	m := coordTopology.Cluster.Self.QuotaMetrics
+	assert.NotNil(t, m)
+	assert.Equal(t, int64(200), m.TotalBinlogSize)
+	assert.Len(t, m.CollectionBinlogSize, 2)
+	assert.Equal(t, int64(100), m.CollectionBinlogSize[10001])
+	assert.Equal(t, int64(100), m.CollectionBinlogSize[10002])
 }

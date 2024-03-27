@@ -686,15 +686,15 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 				},
 			}
 		case schemapb.DataType_VarChar:
-			strIds := make([]string, len(data))
+			strIDs := make([]string, len(data))
 			for i, v := range data {
-				strIds[i] = strconv.FormatInt(v, 10)
+				strIDs[i] = strconv.FormatInt(v, 10)
 			}
 			fieldData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strIds,
+							Data: strIDs,
 						},
 					},
 				},
@@ -901,6 +901,11 @@ func GetCurUserFromContext(ctx context.Context) (string, error) {
 	}
 	username := secrets[0]
 	return username, nil
+}
+
+func GetCurUserFromContextOrDefault(ctx context.Context) string {
+	username, _ := GetCurUserFromContext(ctx)
+	return username
 }
 
 func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
@@ -1633,4 +1638,17 @@ func CheckDatabase(ctx context.Context, dbName string) bool {
 		return globalMetaCache.HasDatabase(ctx, dbName)
 	}
 	return false
+}
+
+func SetReportValue(status *commonpb.Status, value int) {
+	if value <= 0 {
+		return
+	}
+	if !merr.Ok(status) {
+		return
+	}
+	if status.ExtraInfo == nil {
+		status.ExtraInfo = make(map[string]string)
+	}
+	status.ExtraInfo["report_value"] = strconv.Itoa(value)
 }

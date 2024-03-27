@@ -28,6 +28,7 @@ import (
 	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -104,6 +105,24 @@ func (s *MiniClusterSuite) SetupTest() {
 	s.Cluster = c
 
 	// start mini cluster
+	nodeIDCheckReport := func() {
+		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
+		defer cancelFunc()
+
+		for {
+			select {
+			case <-timeoutCtx.Done():
+				s.Fail("node id check timeout")
+			case report := <-c.Extension.GetReportChan():
+				reportInfo := report.(map[string]any)
+				s.T().Log("node id report info: ", reportInfo)
+				s.Equal(hookutil.OpTypeNodeID, reportInfo[hookutil.OpTypeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.NodeIDKey])
+				return
+			}
+		}
+	}
+	go nodeIDCheckReport()
 	s.Require().NoError(s.Cluster.Start())
 }
 

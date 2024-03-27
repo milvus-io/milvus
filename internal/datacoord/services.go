@@ -1030,6 +1030,23 @@ func (s *Server) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 			zap.Error(err))
 
 		return metrics, nil
+	} else if metricType == metricsinfo.CollectionStorageMetrics {
+		metrics, err := s.getCollectionStorageMetrics(ctx)
+		if err != nil {
+			log.Warn("DataCoord GetMetrics CollectionStorage failed", zap.Int64("nodeID", paramtable.GetNodeID()), zap.Error(err))
+			return &milvuspb.GetMetricsResponse{
+				Status: merr.Status(err),
+			}, nil
+		}
+
+		log.RatedDebug(60, "DataCoord.GetMetrics CollectionStorage",
+			zap.Int64("nodeID", paramtable.GetNodeID()),
+			zap.String("req", req.Request),
+			zap.String("metricType", metricType),
+			zap.Any("metrics", metrics),
+			zap.Error(err))
+
+		return metrics, nil
 	}
 
 	log.RatedWarn(60.0, "DataCoord.GetMetrics failed, request metric type is not implemented yet",

@@ -134,6 +134,7 @@ message SearchResults {
   // search request cost
   CostAggregation costAggregation = 13;
   map<string, uint64> channels_mvcc = 14;
+  int64 all_search_count = 15;
 }
 
 message CostAggregation {
@@ -175,6 +176,7 @@ message RetrieveResults {
 
    // query request cost
   CostAggregation costAggregation = 13;
+  int64 all_retrieve_count = 14;
 }
 
 message LoadIndex {

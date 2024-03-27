@@ -691,7 +691,7 @@ func TestInsert(t *testing.T) {
 	mp5, _ = wrapWithDescribeColl(t, mp5, ReturnSuccess, 1, nil)
 	mp5.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 		Status:    &StatusSuccess,
-		IDs:       genIds(schemapb.DataType_Int64),
+		IDs:       genIDs(schemapb.DataType_Int64),
 		InsertCnt: 3,
 	}, nil).Once()
 	testCases = append(testCases, testCase{
@@ -705,7 +705,7 @@ func TestInsert(t *testing.T) {
 	mp6, _ = wrapWithDescribeColl(t, mp6, ReturnSuccess, 1, nil)
 	mp6.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 		Status:    &StatusSuccess,
-		IDs:       genIds(schemapb.DataType_VarChar),
+		IDs:       genIDs(schemapb.DataType_VarChar),
 		InsertCnt: 3,
 	}, nil).Once()
 	testCases = append(testCases, testCase{
@@ -776,7 +776,7 @@ func TestInsertForDataType(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(schemapb.DataType_Int64),
+				IDs:       genIDs(schemapb.DataType_Int64),
 				InsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -844,7 +844,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				InsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -875,7 +875,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -906,7 +906,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				InsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -938,7 +938,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -971,7 +971,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				InsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -1002,7 +1002,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -1033,7 +1033,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				InsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -1065,7 +1065,7 @@ func TestReturnInt64(t *testing.T) {
 			}, nil).Once()
 			mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 				Status:    &StatusSuccess,
-				IDs:       genIds(dataType),
+				IDs:       genIDs(dataType),
 				UpsertCnt: 3,
 			}, nil).Once()
 			testEngine := initHTTPServer(mp, true)
@@ -1132,7 +1132,7 @@ func TestUpsert(t *testing.T) {
 	mp5, _ = wrapWithDescribeColl(t, mp5, ReturnSuccess, 1, nil)
 	mp5.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 		Status:    &StatusSuccess,
-		IDs:       genIds(schemapb.DataType_Int64),
+		IDs:       genIDs(schemapb.DataType_Int64),
 		UpsertCnt: 3,
 	}, nil).Once()
 	testCases = append(testCases, testCase{
@@ -1146,7 +1146,7 @@ func TestUpsert(t *testing.T) {
 	mp6, _ = wrapWithDescribeColl(t, mp6, ReturnSuccess, 1, nil)
 	mp6.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{
 		Status:    &StatusSuccess,
-		IDs:       genIds(schemapb.DataType_VarChar),
+		IDs:       genIDs(schemapb.DataType_VarChar),
 		UpsertCnt: 3,
 	}, nil).Once()
 	testCases = append(testCases, testCase{
@@ -1198,8 +1198,8 @@ func TestUpsert(t *testing.T) {
 	})
 }
 
-func genIds(dataType schemapb.DataType) *schemapb.IDs {
-	return generateIds(dataType, 3)
+func genIDs(dataType schemapb.DataType) *schemapb.IDs {
+	return generateIDs(dataType, 3)
 }
 
 func TestSearch(t *testing.T) {
