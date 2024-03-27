@@ -459,7 +459,7 @@ func (s *CollectionAssignmentHelperSuite) TestMixRecoverNode() {
 
 func (s *CollectionAssignmentHelperSuite) runCase(c testCase) {
 	cHelper := newCollectionAssignmentHelper(c.collectionID, c.rgToReplicas, c.rgs)
-	cHelper.RangeOverResourceGroup(func(rHelper *replicaAssignmentHelper) {
+	cHelper.RangeOverResourceGroup(func(rHelper *replicasInSameRGAssignmentHelper) {
 		s.ElementsMatch(c.expectedNewIncomingNodes[rHelper.rgName].Collect(), rHelper.incomingNodes.Collect())
 		rHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
 			roNodes := assignment.GetNewRONodes()

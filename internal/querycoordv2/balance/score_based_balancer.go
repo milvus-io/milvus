@@ -205,8 +205,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
 	}
 
-	nodes := replica.GetNodes()
-	for _, nid := range nodes {
+	for _, nid := range replica.GetNodes() {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue
@@ -217,7 +216,7 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		}
 	}
 
-	if len(nodes) == len(offlineNodes) || len(onlineNodes) == 0 {
+	if len(onlineNodes) == 0 {
 		// no available nodes to balance
 		return nil, nil
 	}

@@ -476,9 +476,7 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAs
 		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
 	}
 
-	// get all available nodes and filter out the stopping nodes
-	nodes := replica.GetNodes()
-	for _, nid := range nodes {
+	for _, nid := range replica.GetNodes() {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue
@@ -489,7 +487,7 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAs
 		}
 	}
 
-	if len(nodes) == len(offlineNodes) || len(onlineNodes) == 0 {
+	if len(onlineNodes) == 0 {
 		// no available nodes to balance
 		return nil, nil
 	}

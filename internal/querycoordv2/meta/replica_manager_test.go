@@ -128,7 +128,7 @@ func (suite *ReplicaManagerSuite) TestGet() {
 		for _, replica := range replicas {
 			suite.Equal(collectionID, replica.GetCollectionID())
 			suite.Equal(replica, mgr.Get(replica.GetID()))
-			suite.Equal(len(replica.replicaPB.GetNodes()), replica.AvailableNodesCount())
+			suite.Equal(len(replica.replicaPB.GetNodes()), replica.RWNodesCount())
 			suite.Equal(replica.replicaPB.GetNodes(), replica.GetNodes())
 			replicaNodes[replica.GetID()] = replica.GetNodes()
 			nodes = append(nodes, replica.GetNodes()...)

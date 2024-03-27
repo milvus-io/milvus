@@ -164,7 +164,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		zap.Int64("replicaID", replica.GetCollectionID()),
 		zap.String("resourceGroup", replica.GetResourceGroup()),
 	)
-	if replica.NodesCount() < 2 {
+	if replica.NodesCount() == 0 {
 		return nil, nil
 	}
 
@@ -178,8 +178,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
 	}
 
-	nodes := replica.GetNodes()
-	for _, nid := range nodes {
+	for _, nid := range replica.GetNodes() {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue
@@ -190,7 +189,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		}
 	}
 
-	if len(nodes) == len(offlineNodes) || len(onlineNodes) == 0 {
+	if len(onlineNodes) == 0 {
 		// no available nodes to balance
 		return nil, nil
 	}

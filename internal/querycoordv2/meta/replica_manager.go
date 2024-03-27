@@ -166,13 +166,13 @@ func (m *ReplicaManager) TransferReplica(collectionID typeutil.UniqueID, srcRGNa
 	defer m.rwmutex.Unlock()
 
 	// Check if replica can be transfer.
-	if err := m.isTransferable(collectionID, srcRGName, replicaNum); err != nil {
+	srcReplicas, err := m.getSrcReplicasAndCheckIfTransferable(collectionID, srcRGName, replicaNum)
+	if err != nil {
 		return err
 	}
 
 	// Transfer N replicas from srcRGName to dstRGName.
 	// Node Change will be executed by replica_observer in background.
-	srcReplicas := m.getByCollectionAndRG(collectionID, srcRGName)
 	replicas := make([]*Replica, 0, replicaNum)
 	for i := 0; i < replicaNum; i++ {
 		mutableReplica := srcReplicas[i].copyForWrite()
@@ -182,11 +182,11 @@ func (m *ReplicaManager) TransferReplica(collectionID typeutil.UniqueID, srcRGNa
 	return m.put(replicas...)
 }
 
-// isTransferable checks if the collection can be transfer from srcRGName to dstRGName.
-func (m *ReplicaManager) isTransferable(collectionID typeutil.UniqueID, srcRGName string, replicaNum int) error {
+// getSrcReplicasAndCheckIfTransferable checks if the collection can be transfer from srcRGName to dstRGName.
+func (m *ReplicaManager) getSrcReplicasAndCheckIfTransferable(collectionID typeutil.UniqueID, srcRGName string, replicaNum int) ([]*Replica, error) {
 	// Check if collection is loaded.
 	if m.collIDToReplicaIDs[collectionID] == nil {
-		return merr.WrapErrParameterInvalid(
+		return nil, merr.WrapErrParameterInvalid(
 			"Collection not loaded",
 			fmt.Sprintf("collectionID %d", collectionID),
 		)
@@ -197,9 +197,9 @@ func (m *ReplicaManager) isTransferable(collectionID typeutil.UniqueID, srcRGNam
 	if len(srcReplicas) < replicaNum {
 		err := merr.WrapErrParameterInvalid("NumReplica not greater than the number of replica in source resource group", fmt.Sprintf("only found [%d] replicas in source resource group[%s]",
 			replicaNum, srcRGName))
-		return err
+		return nil, err
 	}
-	return nil
+	return srcReplicas, nil
 }
 
 // RemoveCollection removes replicas of given collection,
@@ -252,7 +252,7 @@ func (m *ReplicaManager) GetByNode(nodeID typeutil.UniqueID) []*Replica {
 
 	replicas := make([]*Replica, 0)
 	for _, replica := range m.replicas {
-		if replica.availableNodes.Contain(nodeID) {
+		if replica.rwNodes.Contain(nodeID) {
 			replicas = append(replicas, replica)
 		}
 	}
@@ -261,16 +261,18 @@ func (m *ReplicaManager) GetByNode(nodeID typeutil.UniqueID) []*Replica {
 }
 
 func (m *ReplicaManager) getByCollectionAndRG(collectionID int64, rgName string) []*Replica {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	ret := make([]*Replica, 0)
-	for _, replica := range m.replicas {
-		if replica.GetCollectionID() == collectionID && replica.GetResourceGroup() == rgName {
-			ret = append(ret, replica)
-		}
+	replicaIDs, ok := m.collIDToReplicaIDs[collectionID]
+	if !ok {
+		return make([]*Replica, 0)
 	}
 
+	ret := make([]*Replica, 0)
+	replicaIDs.Range(func(replicaID typeutil.UniqueID) bool {
+		if m.replicas[replicaID].GetResourceGroup() == rgName {
+			ret = append(ret, m.replicas[replicaID])
+		}
+		return true
+	})
 	return ret
 }
 
@@ -302,14 +304,14 @@ func (m *ReplicaManager) RecoverNodesInCollection(collectionID typeutil.UniqueID
 	defer m.rwmutex.Unlock()
 
 	// create a helper to do the recover.
-	helper, err := m.getReplicaAssignmentHelper(collectionID, rgs)
+	helper, err := m.getCollectionAssignmentHelper(collectionID, rgs)
 	if err != nil {
 		return err
 	}
 
 	modifiedReplicas := make([]*Replica, 0)
 	// recover node by resource group.
-	helper.RangeOverResourceGroup(func(replicaHelper *replicaAssignmentHelper) {
+	helper.RangeOverResourceGroup(func(replicaHelper *replicasInSameRGAssignmentHelper) {
 		replicaHelper.RangeOverReplicas(func(assignment *replicaAssignmentInfo) {
 			roNodes := assignment.GetNewRONodes()
 			recoverableNodes, incomingNodeCount := assignment.GetRecoverNodesAndIncomingNodeCount()
@@ -346,8 +348,8 @@ func (m *ReplicaManager) validateResourceGroups(rgs map[string]typeutil.UniqueSe
 	return nil
 }
 
-// getReplicaAssignmentHelper checks if the collection is recoverable and group replicas by resource group.
-func (m *ReplicaManager) getReplicaAssignmentHelper(collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) (*collectionAssignmentHelper, error) {
+// getCollectionAssignmentHelper checks if the collection is recoverable and group replicas by resource group.
+func (m *ReplicaManager) getCollectionAssignmentHelper(collectionID typeutil.UniqueID, rgs map[string]typeutil.UniqueSet) (*collectionAssignmentHelper, error) {
 	// check if the collection is exist.
 	replicaIDs, ok := m.collIDToReplicaIDs[collectionID]
 	if !ok {

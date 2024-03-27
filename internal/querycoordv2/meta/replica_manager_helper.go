@@ -9,7 +9,7 @@ import (
 // collectionAssignmentHelper is a helper to manage the replica assignment in same collection.
 type collectionAssignmentHelper struct {
 	collectionID            typeutil.UniqueID
-	resourceGroupToReplicas map[string]*replicaAssignmentHelper
+	resourceGroupToReplicas map[string]*replicasInSameRGAssignmentHelper
 }
 
 // newCollectionAssignmentHelper creates a new collectionAssignmentHelper.
@@ -18,7 +18,7 @@ func newCollectionAssignmentHelper(
 	rgToReplicas map[string][]*Replica,
 	rgs map[string]typeutil.UniqueSet,
 ) *collectionAssignmentHelper {
-	resourceGroupToReplicas := make(map[string]*replicaAssignmentHelper)
+	resourceGroupToReplicas := make(map[string]*replicasInSameRGAssignmentHelper)
 	for rgName, replicas := range rgToReplicas {
 		resourceGroupToReplicas[rgName] = newReplicaAssignmentHelper(rgName, replicas, rgs[rgName])
 	}
@@ -38,7 +38,7 @@ func (h *collectionAssignmentHelper) updateIncomingNodesAndExpectedNode() {
 	for _, helper := range h.resourceGroupToReplicas {
 		// some node in current resource group may load other replica data of same collection in other resource group.
 		// those node cannot be used right now.
-		newIncomingNodes := helper.allAvailableNodes.Clone()
+		newIncomingNodes := helper.nodesInRG.Clone()
 		currentUsedNodeCount := newIncomingNodes.Len()
 		h.RangeOverReplicas(func(rgName string, assignment *replicaAssignmentInfo) {
 			assignment.RangeOverAllNodes(func(nodeID int64) {
@@ -58,7 +58,7 @@ func (h *collectionAssignmentHelper) updateIncomingNodesAndExpectedNode() {
 }
 
 // RangeOverResourceGroup iterate resource groups
-func (h *collectionAssignmentHelper) RangeOverResourceGroup(f func(helper *replicaAssignmentHelper)) {
+func (h *collectionAssignmentHelper) RangeOverResourceGroup(f func(helper *replicasInSameRGAssignmentHelper)) {
 	for _, helper := range h.resourceGroupToReplicas {
 		f(helper)
 	}
@@ -74,28 +74,28 @@ func (h *collectionAssignmentHelper) RangeOverReplicas(f func(rgName string, ass
 }
 
 // newReplicaAssignmentHelper creates a new replicaAssignmentHelper.
-func newReplicaAssignmentHelper(rgName string, replicas []*Replica, nodeInRG typeutil.UniqueSet) *replicaAssignmentHelper {
+func newReplicaAssignmentHelper(rgName string, replicas []*Replica, nodeInRG typeutil.UniqueSet) *replicasInSameRGAssignmentHelper {
 	assignmentInfos := make([]*replicaAssignmentInfo, 0, len(replicas))
 	for _, replica := range replicas {
 		assignmentInfos = append(assignmentInfos, newReplicaAssignmentInfo(replica, nodeInRG))
 	}
-	h := &replicaAssignmentHelper{
-		rgName:            rgName,
-		allAvailableNodes: nodeInRG,
-		replicas:          assignmentInfos,
+	h := &replicasInSameRGAssignmentHelper{
+		rgName:    rgName,
+		nodesInRG: nodeInRG,
+		replicas:  assignmentInfos,
 	}
 	return h
 }
 
-// replicaAssignmentHelper is a helper to manage the replica assignment in same rg.
-type replicaAssignmentHelper struct {
-	rgName            string
-	allAvailableNodes typeutil.UniqueSet
-	incomingNodes     typeutil.UniqueSet
-	replicas          []*replicaAssignmentInfo
+// replicasInSameRGAssignmentHelper is a helper to manage the replica assignment in same rg.
+type replicasInSameRGAssignmentHelper struct {
+	rgName        string
+	nodesInRG     typeutil.UniqueSet
+	incomingNodes typeutil.UniqueSet // nodes that not used by current replicas in resource group.
+	replicas      []*replicaAssignmentInfo
 }
 
-func (h *replicaAssignmentHelper) AllocateIncomingNodes(n int) []int64 {
+func (h *replicasInSameRGAssignmentHelper) AllocateIncomingNodes(n int) []int64 {
 	nodeIDs := make([]int64, 0, n)
 	h.incomingNodes.Range(func(nodeID int64) bool {
 		if n > 0 {
@@ -111,14 +111,14 @@ func (h *replicaAssignmentHelper) AllocateIncomingNodes(n int) []int64 {
 }
 
 // RangeOverReplicas iterate replicas.
-func (h *replicaAssignmentHelper) RangeOverReplicas(f func(*replicaAssignmentInfo)) {
+func (h *replicasInSameRGAssignmentHelper) RangeOverReplicas(f func(*replicaAssignmentInfo)) {
 	for _, info := range h.replicas {
 		f(info)
 	}
 }
 
 // updateExpectedNodeCountForReplicas updates the expected node count for all replicas in same resource group.
-func (h *replicaAssignmentHelper) updateExpectedNodeCountForReplicas(currentUsageNodesCount int) {
+func (h *replicasInSameRGAssignmentHelper) updateExpectedNodeCountForReplicas(currentUsageNodesCount int) {
 	minimumNodeCount := currentUsageNodesCount / len(h.replicas)
 	maximumNodeCount := minimumNodeCount
 	remainder := currentUsageNodesCount % len(h.replicas)
