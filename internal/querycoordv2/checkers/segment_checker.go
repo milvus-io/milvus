@@ -232,6 +232,11 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 
 	// l0 Segment which exist on current target, but not on dist
 	for segmentID, segment := range currentTargetMap {
+		// to avoid generate duplicate segment task
+		if nextTargetMap[segmentID] != nil {
+			continue
+		}
+
 		node, existInDist := distMap[segmentID]
 		l0WithWrongLocation := false
 		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
@@ -248,6 +253,8 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	for _, segment := range dist {
 		_, existOnCurrent := currentTargetMap[segment.GetID()]
 		_, existOnNext := nextTargetMap[segment.GetID()]
+
+		// l0 segment should be release with channel together
 		if !existOnNext && !existOnCurrent {
 			toRelease = append(toRelease, segment)
 		}
@@ -284,6 +291,14 @@ func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Seg
 	dist := c.getSealedSegmentsDist(replica)
 	versions := make(map[int64]*meta.Segment)
 	for _, s := range dist {
+		// l0 segment should be release with channel together
+		segment := c.targetMgr.GetSealedSegment(s.GetCollectionID(), s.GetID(), meta.CurrentTargetFirst)
+		existInTarget := segment != nil
+		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
+		if isL0Segment {
+			continue
+		}
+
 		maxVer, ok := versions[s.GetID()]
 		if !ok {
 			versions[s.GetID()] = s
