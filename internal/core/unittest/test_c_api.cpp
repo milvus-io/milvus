@@ -42,6 +42,7 @@
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "exec/expression/Expr.h"
+#include "segcore/load_index_c.h"
 
 namespace chrono = std::chrono;
 
@@ -5272,4 +5273,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
     DeleteSearchResult(search_result);
     DeleteCollection(c_collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, IsLoadWithDisk) {
+    ASSERT_TRUE(IsLoadWithDisk(INVERTED_INDEX_TYPE, 0));
 }
