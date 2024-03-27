@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -65,10 +66,10 @@ const (
 	defaultMaxSearchRequest = 1024
 
 	// DefaultArithmeticIndexType name of default index type for scalar field
-	DefaultArithmeticIndexType = "INVERTED"
+	DefaultArithmeticIndexType = indexparamcheck.IndexINVERTED
 
 	// DefaultStringIndexType name of default index type for varChar/string field
-	DefaultStringIndexType = "INVERTED"
+	DefaultStringIndexType = indexparamcheck.IndexINVERTED
 
 	defaultRRFParamsValue = 60
 	maxRRFParamsValue     = 16384
