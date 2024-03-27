@@ -434,6 +434,9 @@ dataCoord:
     rpcTimeout: 10 # compaction rpc request timeout in seconds
     maxParallelTaskNum: 10 # max parallel compaction task number
     indexBasedCompaction: true
+    majorCompaction:
+      segmentSize: 100 # size of a segment after major compaction in MB
+      trainSize: 26 # max train size in GB
 
     l2:
       enable: true

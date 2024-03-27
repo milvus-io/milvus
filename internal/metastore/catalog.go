@@ -152,6 +152,10 @@ type DataCoordCatalog interface {
 	ListMajorCompactionInfos(ctx context.Context) ([]*datapb.MajorCompactionInfo, error)
 	SaveMajorCompactionInfo(ctx context.Context, info *datapb.MajorCompactionInfo) error
 	DropMajorCompactionInfo(ctx context.Context, info *datapb.MajorCompactionInfo) error
+
+	ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error)
+	SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error
+	DropAnalysisTask(ctx context.Context, taskID typeutil.UniqueID) error
 }
 
 type QueryCoordCatalog interface {

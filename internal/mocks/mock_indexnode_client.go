@@ -31,6 +31,76 @@ func (_m *MockIndexNodeClient) EXPECT() *MockIndexNodeClient_Expecter {
 	return &MockIndexNodeClient_Expecter{mock: &_m.Mock}
 }
 
+// Analysis provides a mock function with given fields: ctx, in, opts
+func (_m *MockIndexNodeClient) Analysis(ctx context.Context, in *indexpb.AnalysisRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalysisRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalysisRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.AnalysisRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNodeClient_Analysis_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Analysis'
+type MockIndexNodeClient_Analysis_Call struct {
+	*mock.Call
+}
+
+// Analysis is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *indexpb.AnalysisRequest
+//   - opts ...grpc.CallOption
+func (_e *MockIndexNodeClient_Expecter) Analysis(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_Analysis_Call {
+	return &MockIndexNodeClient_Analysis_Call{Call: _e.mock.On("Analysis",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockIndexNodeClient_Analysis_Call) Run(run func(ctx context.Context, in *indexpb.AnalysisRequest, opts ...grpc.CallOption)) *MockIndexNodeClient_Analysis_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*indexpb.AnalysisRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockIndexNodeClient_Analysis_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNodeClient_Analysis_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNodeClient_Analysis_Call) RunAndReturn(run func(context.Context, *indexpb.AnalysisRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockIndexNodeClient_Analysis_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with given fields:
 func (_m *MockIndexNodeClient) Close() error {
 	ret := _m.Called()
@@ -138,6 +208,76 @@ func (_c *MockIndexNodeClient_CreateJob_Call) Return(_a0 *commonpb.Status, _a1 e
 }
 
 func (_c *MockIndexNodeClient_CreateJob_Call) RunAndReturn(run func(context.Context, *indexpb.CreateJobRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockIndexNodeClient_CreateJob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropAnalysisTasks provides a mock function with given fields: ctx, in, opts
+func (_m *MockIndexNodeClient) DropAnalysisTasks(ctx context.Context, in *indexpb.DropAnalysisTasksRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropAnalysisTasksRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropAnalysisTasksRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.DropAnalysisTasksRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNodeClient_DropAnalysisTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropAnalysisTasks'
+type MockIndexNodeClient_DropAnalysisTasks_Call struct {
+	*mock.Call
+}
+
+// DropAnalysisTasks is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *indexpb.DropAnalysisTasksRequest
+//   - opts ...grpc.CallOption
+func (_e *MockIndexNodeClient_Expecter) DropAnalysisTasks(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_DropAnalysisTasks_Call {
+	return &MockIndexNodeClient_DropAnalysisTasks_Call{Call: _e.mock.On("DropAnalysisTasks",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockIndexNodeClient_DropAnalysisTasks_Call) Run(run func(ctx context.Context, in *indexpb.DropAnalysisTasksRequest, opts ...grpc.CallOption)) *MockIndexNodeClient_DropAnalysisTasks_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*indexpb.DropAnalysisTasksRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockIndexNodeClient_DropAnalysisTasks_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNodeClient_DropAnalysisTasks_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNodeClient_DropAnalysisTasks_Call) RunAndReturn(run func(context.Context, *indexpb.DropAnalysisTasksRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockIndexNodeClient_DropAnalysisTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -488,6 +628,76 @@ func (_c *MockIndexNodeClient_GetStatisticsChannel_Call) Return(_a0 *milvuspb.St
 }
 
 func (_c *MockIndexNodeClient_GetStatisticsChannel_Call) RunAndReturn(run func(context.Context, *internalpb.GetStatisticsChannelRequest, ...grpc.CallOption) (*milvuspb.StringResponse, error)) *MockIndexNodeClient_GetStatisticsChannel_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryAnalysisResult provides a mock function with given fields: ctx, in, opts
+func (_m *MockIndexNodeClient) QueryAnalysisResult(ctx context.Context, in *indexpb.QueryAnalysisResultRequest, opts ...grpc.CallOption) (*indexpb.QueryAnalysisResultResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *indexpb.QueryAnalysisResultResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryAnalysisResultRequest, ...grpc.CallOption) (*indexpb.QueryAnalysisResultResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryAnalysisResultRequest, ...grpc.CallOption) *indexpb.QueryAnalysisResultResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexpb.QueryAnalysisResultResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.QueryAnalysisResultRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNodeClient_QueryAnalysisResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryAnalysisResult'
+type MockIndexNodeClient_QueryAnalysisResult_Call struct {
+	*mock.Call
+}
+
+// QueryAnalysisResult is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *indexpb.QueryAnalysisResultRequest
+//   - opts ...grpc.CallOption
+func (_e *MockIndexNodeClient_Expecter) QueryAnalysisResult(ctx interface{}, in interface{}, opts ...interface{}) *MockIndexNodeClient_QueryAnalysisResult_Call {
+	return &MockIndexNodeClient_QueryAnalysisResult_Call{Call: _e.mock.On("QueryAnalysisResult",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockIndexNodeClient_QueryAnalysisResult_Call) Run(run func(ctx context.Context, in *indexpb.QueryAnalysisResultRequest, opts ...grpc.CallOption)) *MockIndexNodeClient_QueryAnalysisResult_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*indexpb.QueryAnalysisResultRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockIndexNodeClient_QueryAnalysisResult_Call) Return(_a0 *indexpb.QueryAnalysisResultResponse, _a1 error) *MockIndexNodeClient_QueryAnalysisResult_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNodeClient_QueryAnalysisResult_Call) RunAndReturn(run func(context.Context, *indexpb.QueryAnalysisResultRequest, ...grpc.CallOption) (*indexpb.QueryAnalysisResultResponse, error)) *MockIndexNodeClient_QueryAnalysisResult_Call {
 	_c.Call.Return(run)
 	return _c
 }

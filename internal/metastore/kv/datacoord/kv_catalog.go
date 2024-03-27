@@ -852,3 +852,41 @@ func (kc *Catalog) DropMajorCompactionInfo(ctx context.Context, info *datapb.Maj
 	key := buildMajorCompactionInfoPath(info.CollectionID, info.TriggerID)
 	return kc.MetaKv.Remove(key)
 }
+
+func (kc *Catalog) ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error) {
+	tasks := make([]*model.AnalysisTask, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(AnalysisTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		task := &indexpb.AnalysisTask{}
+		err = proto.Unmarshal([]byte(value), task)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, model.UnmarshalAnalysisTask(task))
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error {
+	key := buildAnalysisTaskKey(task.TaskID)
+
+	value, err := proto.Marshal(model.MarshalAnalysisTask(task))
+	if err != nil {
+		return err
+	}
+
+	err = kc.MetaKv.Save(key, string(value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) DropAnalysisTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildAnalysisTaskKey(taskID)
+	return kc.MetaKv.Remove(key)
+}

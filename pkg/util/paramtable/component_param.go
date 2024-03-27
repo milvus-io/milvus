@@ -2527,9 +2527,11 @@ type dataCoordConfig struct {
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction     ParamItem `refreshable:"false"`
-	EnableAutoCompaction ParamItem `refreshable:"true"`
-	IndexBasedCompaction ParamItem `refreshable:"true"`
+	EnableCompaction           ParamItem `refreshable:"false"`
+	EnableAutoCompaction       ParamItem `refreshable:"true"`
+	IndexBasedCompaction       ParamItem `refreshable:"true"`
+	MajorCompactionSegmentSize ParamItem `refreshable:"true"`
+	MajorCompactionTrainSize   ParamItem `refreshable:"true"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
@@ -2753,6 +2755,22 @@ the number of binlog file reaches to max value.`,
 		Export:       true,
 	}
 	p.IndexBasedCompaction.Init(base.mgr)
+
+	p.MajorCompactionSegmentSize = ParamItem{
+		Key:          "dataCoord.compaction.majorCompaction.segmentSize",
+		Version:      "2.4.0",
+		DefaultValue: "100",
+		Export:       true,
+	}
+	p.MajorCompactionSegmentSize.Init(base.mgr)
+
+	p.MajorCompactionTrainSize = ParamItem{
+		Key: "dataCoord.compaction.majorCompaction.trainSize",
+		Version: "2.4.0",
+		DefaultValue: "26",
+		Export: true,
+	}
+	p.MajorCompactionTrainSize.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
