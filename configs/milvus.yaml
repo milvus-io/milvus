@@ -434,9 +434,6 @@ dataCoord:
     rpcTimeout: 10 # compaction rpc request timeout in seconds
     maxParallelTaskNum: 10 # max parallel compaction task number
     indexBasedCompaction: true
-    majorCompaction:
-      segmentSize: 100 # size of a segment after major compaction in MB
-      trainSize: 26 # max train size in GB
 
     l2:
       enable: true
@@ -446,8 +443,12 @@ dataCoord:
       newDataRatioThreshold: 0.2
       newDataSizeThreshold: 256m
       dropTolerance: 86400
-      preferSegmentSizeMin: 10m # In l2 compaction, data pieces whose size is smaller than preferSegmentSizeMin will be merged together to close to a prefer range [preferSegmentSizeMin, preferSegmentSizeMax].
-      preferSegmentSizeMax: 10m # In l2 compaction, data pieces whose size is larger than preferSegmentSizeMax will be redivided into multiple segments to make their sizes close to a prefer range [preferSegmentSizeMin, preferSegmentSizeMax].
+      # l2 compaction will try best to distribute data into segments with size range in [preferSegmentSize, maxSegmentSize].
+      # data will be clustered by preferSegmentSize, if a cluster is larger than maxSegmentSize(scalar clustering key), will spilt it into multi segment
+      # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally distribute too often
+      preferSegmentSize: 64m       
+      maxSegmentSize: 128m
+      maxTrainSize: 26 # max data size(in GB) in analyze, if data is larger than it, will down sampling to meet this limit
 
     levelzero:
       forceTrigger:
@@ -520,7 +521,7 @@ dataNode:
     maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
 
   l2Compaction:
-    memoryBufferRatio: 0.05 # The ratio of memory buffer of l2 compaction. Data larger than threshold will be spilled to storage.
+    memoryBufferRatio: 0.1 # The ratio of memory buffer of l2 compaction. Data larger than threshold will be spilled to storage.
 
 # Configures the system log output.
 log:

@@ -401,9 +401,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save("dataCoord.compaction.major.dropTolerance", "86400")
 		assert.Equal(t, int64(86400), Params.L2CompactionDropTolerance.GetAsInt64())
 		params.Save("dataCoord.l2Compaction.preferSegmentSizeMax", "100m")
-		assert.Equal(t, int64(100*1024*1024), Params.L2CompactionPreferSegmentSizeMax.GetAsSize())
+		assert.Equal(t, int64(100*1024*1024), Params.L2CompactionMaxSegmentSize.GetAsSize())
 		params.Save("dataCoord.l2Compaction.preferSegmentSizeMin", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.L2CompactionPreferSegmentSizeMin.GetAsSize())
+		assert.Equal(t, int64(10*1024*1024), Params.L2CompactionPreferSegmentSize.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {

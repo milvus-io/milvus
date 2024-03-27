@@ -339,7 +339,7 @@ func (t *MajorCompactionManager) setSegmentsCompacting(plan *datapb.CompactionPl
 func (t *MajorCompactionManager) generateMajorCompactionPlans(segments []*SegmentInfo, clusteringKeyId int64, compactTime *compactTime) []*datapb.CompactionPlan {
 	plan := segmentsToPlan(segments, datapb.CompactionType_MajorCompaction, compactTime)
 	plan.ClusteringKeyId = clusteringKeyId
-	l2SegmentMaxSize := paramtable.Get().DataCoordCfg.L2CompactionPreferSegmentSizeMax.GetAsSize()
+	l2SegmentMaxSize := paramtable.Get().DataCoordCfg.L2CompactionMaxSegmentSize.GetAsSize()
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	plan.L2SegmentMaxRows = segments[0].MaxRowNum * l2SegmentMaxSize / segmentMaxSize
 	log.Info("compaction plan L2SegmentMaxRows", zap.Int64("L2SegmentMaxRows", plan.L2SegmentMaxRows))

@@ -2527,11 +2527,9 @@ type dataCoordConfig struct {
 	AutoUpgradeSegmentIndex        ParamItem `refreshable:"true"`
 
 	// compaction
-	EnableCompaction           ParamItem `refreshable:"false"`
-	EnableAutoCompaction       ParamItem `refreshable:"true"`
-	IndexBasedCompaction       ParamItem `refreshable:"true"`
-	MajorCompactionSegmentSize ParamItem `refreshable:"true"`
-	MajorCompactionTrainSize   ParamItem `refreshable:"true"`
+	EnableCompaction     ParamItem `refreshable:"false"`
+	EnableAutoCompaction ParamItem `refreshable:"true"`
+	IndexBasedCompaction ParamItem `refreshable:"true"`
 
 	CompactionRPCTimeout              ParamItem `refreshable:"true"`
 	CompactionMaxParallelTasks        ParamItem `refreshable:"true"`
@@ -2558,8 +2556,9 @@ type dataCoordConfig struct {
 	L2CompactionNewDataRatioThreshold ParamItem `refreshable:"true"`
 	L2CompactionNewDataSizeThreshold  ParamItem `refreshable:"true"`
 	L2CompactionDropTolerance         ParamItem `refreshable:"true"`
-	L2CompactionPreferSegmentSizeMin  ParamItem `refreshable:"true"`
-	L2CompactionPreferSegmentSizeMax  ParamItem `refreshable:"true"`
+	L2CompactionPreferSegmentSize     ParamItem `refreshable:"true"`
+	L2CompactionMaxSegmentSize        ParamItem `refreshable:"true"`
+	L2CompactionMaxTrainSize          ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -2755,22 +2754,6 @@ the number of binlog file reaches to max value.`,
 		Export:       true,
 	}
 	p.IndexBasedCompaction.Init(base.mgr)
-
-	p.MajorCompactionSegmentSize = ParamItem{
-		Key:          "dataCoord.compaction.majorCompaction.segmentSize",
-		Version:      "2.4.0",
-		DefaultValue: "100",
-		Export:       true,
-	}
-	p.MajorCompactionSegmentSize.Init(base.mgr)
-
-	p.MajorCompactionTrainSize = ParamItem{
-		Key: "dataCoord.compaction.majorCompaction.trainSize",
-		Version: "2.4.0",
-		DefaultValue: "26",
-		Export: true,
-	}
-	p.MajorCompactionTrainSize.Init(base.mgr)
 
 	p.CompactionRPCTimeout = ParamItem{
 		Key:          "dataCoord.compaction.rpcTimeout",
@@ -2984,7 +2967,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Key:          "dataCoord.compaction.l2.newDataSizeThreshold",
 		Version:      "2.4.0",
 		Doc:          "If new data size is large than newDataSizeThreshold, execute major compaction",
-		DefaultValue: "100m",
+		DefaultValue: "512m",
 	}
 	p.L2CompactionNewDataSizeThreshold.Init(base.mgr)
 
@@ -2996,25 +2979,32 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.L2CompactionDropTolerance.Init(base.mgr)
 
-	p.L2CompactionPreferSegmentSizeMin = ParamItem{
-		Key:          "dataCoord.compaction.l2.preferSegmentSizeMin",
+	p.L2CompactionPreferSegmentSize = ParamItem{
+		Key:          "dataCoord.compaction.l2.preferSegmentSize",
 		Version:      "2.4.0",
-		Doc:          "In l2 compaction, data pieces whose size is smaller than preferSegmentSizeMin will be merged together to close to a prefer range [preferSegmentSizeMin, preferSegmentSizeMax].",
-		DefaultValue: "10m",
+		DefaultValue: "64m",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.L2CompactionPreferSegmentSizeMin.Init(base.mgr)
+	p.L2CompactionPreferSegmentSize.Init(base.mgr)
 
-	p.L2CompactionPreferSegmentSizeMax = ParamItem{
-		Key:          "dataCoord.compaction.l2.preferSegmentSizeMax",
+	p.L2CompactionMaxSegmentSize = ParamItem{
+		Key:          "dataCoord.compaction.l2.maxSegmentSize",
 		Version:      "2.4.0",
-		Doc:          "In l2 compaction, data pieces whose size is larger than preferSegmentSizeMax will be redivided into multiple segments to make their sizes close to a prefer range [preferSegmentSizeMin, preferSegmentSizeMax].",
-		DefaultValue: "100G",
+		DefaultValue: "128m",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.L2CompactionPreferSegmentSizeMax.Init(base.mgr)
+	p.L2CompactionMaxSegmentSize.Init(base.mgr)
+
+	p.L2CompactionMaxTrainSize = ParamItem{
+		Key:          "dataCoord.compaction.l2.maxTrainSize",
+		Version:      "2.4.0",
+		DefaultValue: "26",
+		Doc:          "max data size in Kmeans train, if larger than it, will down sampling to meet this limit",
+		Export:       true,
+	}
+	p.L2CompactionMaxTrainSize.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",
@@ -3593,7 +3583,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.majorCompaction.memoryBufferRatio",
 		Version:      "2.4.0",
 		Doc:          "The ratio of memory buffer of major compaction. Data larger than threshold will be spilled to storage.",
-		DefaultValue: "0.05",
+		DefaultValue: "0.1",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
