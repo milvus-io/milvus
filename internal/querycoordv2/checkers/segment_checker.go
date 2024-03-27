@@ -362,7 +362,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return nil
 	}
 
-	// filter out stopping nodes and outbound nodes
+	// filter out stopping nodes.
 	availableNodes := lo.Filter(replica.GetNodes(), func(node int64, _ int) bool {
 		stop, err := c.nodeMgr.IsStoppingNode(node)
 		if err != nil {

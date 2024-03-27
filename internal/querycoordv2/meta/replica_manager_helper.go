@@ -147,45 +147,45 @@ func (h *replicaAssignmentHelper) updateExpectedNodeCountForReplicas(currentUsag
 // newReplicaAssignmentInfo creates a new replicaAssignmentInfo.
 func newReplicaAssignmentInfo(replica *Replica, nodeInRG typeutil.UniqueSet) *replicaAssignmentInfo {
 	// node in replica can be split into 3 part.
-	availableNodes := make(typeutil.UniqueSet, replica.AvailableNodesCount())
-	newOutBoundNodes := make(typeutil.UniqueSet, replica.OutboundNodesCount())
-	unrecoverableOutboundNodes := make(typeutil.UniqueSet, replica.OutboundNodesCount())
-	recoverableOutboundNodes := make(typeutil.UniqueSet, replica.OutboundNodesCount())
+	rwNodes := make(typeutil.UniqueSet, replica.RWNodesCount())
+	newRONodes := make(typeutil.UniqueSet, replica.RONodesCount())
+	unrecoverableRONodes := make(typeutil.UniqueSet, replica.RONodesCount())
+	recoverableRONodes := make(typeutil.UniqueSet, replica.RONodesCount())
 
-	replica.RangeOverAvailableNodes(func(nodeID int64) bool {
+	replica.RangeOverRWNodes(func(nodeID int64) bool {
 		if nodeInRG.Contain(nodeID) {
-			availableNodes.Insert(nodeID)
+			rwNodes.Insert(nodeID)
 		} else {
-			newOutBoundNodes.Insert(nodeID)
+			newRONodes.Insert(nodeID)
 		}
 		return true
 	})
 
-	replica.RangeOverOutboundNodes(func(nodeID int64) bool {
+	replica.RangeOverRONodes(func(nodeID int64) bool {
 		if nodeInRG.Contain(nodeID) {
-			recoverableOutboundNodes.Insert(nodeID)
+			recoverableRONodes.Insert(nodeID)
 		} else {
-			unrecoverableOutboundNodes.Insert(nodeID)
+			unrecoverableRONodes.Insert(nodeID)
 		}
 		return true
 	})
 	return &replicaAssignmentInfo{
-		replicaID:                  replica.GetID(),
-		expectedNodeCount:          0,
-		availableNodes:             availableNodes,
-		newOutBoundNodes:           newOutBoundNodes,
-		recoverableOutboundNodes:   recoverableOutboundNodes,
-		unrecoverableOutboundNodes: unrecoverableOutboundNodes,
+		replicaID:            replica.GetID(),
+		expectedNodeCount:    0,
+		rwNodes:              rwNodes,
+		newRONodes:           newRONodes,
+		recoverableRONodes:   recoverableRONodes,
+		unrecoverableRONodes: unrecoverableRONodes,
 	}
 }
 
 type replicaAssignmentInfo struct {
-	replicaID                  typeutil.UniqueID
-	expectedNodeCount          int                // expected node count for each replica.
-	availableNodes             typeutil.UniqueSet // nodes is used by current replica and not outbound at current resource group.
-	newOutBoundNodes           typeutil.UniqueSet // new outbound nodes for these replica.
-	recoverableOutboundNodes   typeutil.UniqueSet // recoverable outbound nodes for these replica (outbound node can be put back to available node if it's in current resource group).
-	unrecoverableOutboundNodes typeutil.UniqueSet // unrecoverable outbound nodes for these replica (outbound node can't be put back to available node if it's not in current resource group).
+	replicaID            typeutil.UniqueID
+	expectedNodeCount    int                // expected node count for each replica.
+	rwNodes              typeutil.UniqueSet // rw nodes is used by current replica. (rw -> rw)
+	newRONodes           typeutil.UniqueSet // new ro nodes for these replica. (rw -> ro)
+	recoverableRONodes   typeutil.UniqueSet // recoverable ro nodes for these replica (ro node can be put back to rw node if it's in current resource group). (may ro -> rw)
+	unrecoverableRONodes typeutil.UniqueSet // unrecoverable ro nodes for these replica (ro node can't be put back to rw node if it's not in current resource group). (ro -> ro)
 }
 
 // GetReplicaID returns the replica id for these replica.
@@ -193,20 +193,20 @@ func (s *replicaAssignmentInfo) GetReplicaID() typeutil.UniqueID {
 	return s.replicaID
 }
 
-// GetNewOutboundNodes returns the new outbound nodes for these replica.
-func (s *replicaAssignmentInfo) GetNewOutboundNodes() []int64 {
-	newOutBoundNodes := make([]int64, 0, s.newOutBoundNodes.Len())
-	// not in current resource group must be set outbound.
-	for nodeID := range s.newOutBoundNodes {
-		newOutBoundNodes = append(newOutBoundNodes, nodeID)
+// GetNewRONodes returns the new ro nodes for these replica.
+func (s *replicaAssignmentInfo) GetNewRONodes() []int64 {
+	newRONodes := make([]int64, 0, s.newRONodes.Len())
+	// not in current resource group must be set ro.
+	for nodeID := range s.newRONodes {
+		newRONodes = append(newRONodes, nodeID)
 	}
 
-	// too much node is occupied by current replica, then set some node to outbound.
-	if s.availableNodes.Len() > s.expectedNodeCount {
-		cnt := s.availableNodes.Len() - s.expectedNodeCount
-		s.availableNodes.Range(func(node int64) bool {
+	// too much node is occupied by current replica, then set some node to ro.
+	if s.rwNodes.Len() > s.expectedNodeCount {
+		cnt := s.rwNodes.Len() - s.expectedNodeCount
+		s.rwNodes.Range(func(node int64) bool {
 			if cnt > 0 {
-				newOutBoundNodes = append(newOutBoundNodes, node)
+				newRONodes = append(newRONodes, node)
 				cnt--
 			} else {
 				return false
@@ -214,16 +214,16 @@ func (s *replicaAssignmentInfo) GetNewOutboundNodes() []int64 {
 			return true
 		})
 	}
-	return newOutBoundNodes
+	return newRONodes
 }
 
-// GetRecoverNodesAndIncomingNodeCount returns the recoverable outbound nodes and incoming node count for these replica.
+// GetRecoverNodesAndIncomingNodeCount returns the recoverable ro nodes and incoming node count for these replica.
 func (s *replicaAssignmentInfo) GetRecoverNodesAndIncomingNodeCount() (recoverNodes []int64, incomingNodeCount int) {
-	recoverNodes = make([]int64, 0, s.recoverableOutboundNodes.Len())
+	recoverNodes = make([]int64, 0, s.recoverableRONodes.Len())
 	incomingNodeCount = 0
-	if s.availableNodes.Len() < s.expectedNodeCount {
-		incomingNodeCount = s.expectedNodeCount - s.availableNodes.Len()
-		s.recoverableOutboundNodes.Range(func(node int64) bool {
+	if s.rwNodes.Len() < s.expectedNodeCount {
+		incomingNodeCount = s.expectedNodeCount - s.rwNodes.Len()
+		s.recoverableRONodes.Range(func(node int64) bool {
 			if incomingNodeCount > 0 {
 				recoverNodes = append(recoverNodes, node)
 				incomingNodeCount--
@@ -242,10 +242,10 @@ func (s *replicaAssignmentInfo) RangeOverAllNodes(f func(nodeID int64)) {
 		f(nodeID)
 		return true
 	}
-	s.availableNodes.Range(ff)
-	s.newOutBoundNodes.Range(ff)
-	s.recoverableOutboundNodes.Range(ff)
-	s.unrecoverableOutboundNodes.Range(ff)
+	s.rwNodes.Range(ff)
+	s.newRONodes.Range(ff)
+	s.recoverableRONodes.Range(ff)
+	s.unrecoverableRONodes.Range(ff)
 }
 
 type replicaAssignmentInfoSorter []*replicaAssignmentInfo
@@ -263,8 +263,8 @@ type replicaAssignmentInfoSortByAvailableAndRecoverable struct {
 }
 
 func (s replicaAssignmentInfoSortByAvailableAndRecoverable) Less(i, j int) bool {
-	left := s.replicaAssignmentInfoSorter[i].availableNodes.Len() + s.replicaAssignmentInfoSorter[i].recoverableOutboundNodes.Len()
-	right := s.replicaAssignmentInfoSorter[j].availableNodes.Len() + s.replicaAssignmentInfoSorter[j].recoverableOutboundNodes.Len()
+	left := s.replicaAssignmentInfoSorter[i].rwNodes.Len() + s.replicaAssignmentInfoSorter[i].recoverableRONodes.Len()
+	right := s.replicaAssignmentInfoSorter[j].rwNodes.Len() + s.replicaAssignmentInfoSorter[j].recoverableRONodes.Len()
 
 	// Reach stable sort result by replica id.
 	// Otherwise unstable assignment may cause unnecessary node transfer.

@@ -29,7 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-// check replica, find outbound nodes and remove it from replica if all segment/channel has been moved
+// check replica, find read only nodes and remove it from replica if all segment/channel has been moved
 type ReplicaObserver struct {
 	cancel  context.CancelFunc
 	wg      sync.WaitGroup
@@ -88,21 +88,21 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 		utils.RecoverReplicaOfCollection(ob.meta, collectionID)
 	}
 
-	// check all outbound nodes, remove it from replica if all segment/channel has been moved
+	// check all ro nodes, remove it from replica if all segment/channel has been moved
 	for _, collectionID := range collections {
 		replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
 		for _, replica := range replicas {
-			outboundNodes := replica.GetOutboundNodes()
-			if len(outboundNodes) == 0 {
+			roNodes := replica.GetRONodes()
+			if len(roNodes) == 0 {
 				continue
 			}
-			log.RatedInfo(10, "found outbound nodes in replica",
+			log.RatedInfo(10, "found ro nodes in replica",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
-				zap.Int64s("allOutboundNodes", outboundNodes),
+				zap.Int64s("RONodes", roNodes),
 			)
-			removeNodes := make([]int64, 0, len(outboundNodes))
-			for _, node := range outboundNodes {
+			removeNodes := make([]int64, 0, len(roNodes))
+			for _, node := range roNodes {
 				channels := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
 				segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
 				if len(channels) == 0 && len(segments) == 0 {
@@ -116,14 +116,14 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replica.GetID()),
 				zap.Int64s("removedNodes", removeNodes),
-				zap.Int64s("outboundNodes", outboundNodes),
+				zap.Int64s("roNodes", roNodes),
 				zap.Int64s("availableNodes", replica.GetNodes()),
 			)
 			if err := ob.meta.ReplicaManager.RemoveNode(replica.GetID(), removeNodes...); err != nil {
 				logger.Warn("fail to remove node from replica", zap.Error(err))
 				continue
 			}
-			logger.Info("all segment/channel has been removed from outbound node, try to remove it from replica")
+			logger.Info("all segment/channel has been removed from ro node, try to remove it from replica")
 		}
 	}
 }

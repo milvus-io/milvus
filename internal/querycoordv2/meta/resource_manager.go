@@ -348,7 +348,7 @@ func (rm *ResourceManager) GetOutgoingNodeNumByReplica(replica *Replica) map[str
 
 	rg := rm.groups[replica.GetResourceGroup()]
 	ret := make(map[string]int32)
-	replica.RangeOverOutboundNodes(func(node int64) bool {
+	replica.RangeOverRONodes(func(node int64) bool {
 		if !rg.containsNode(node) {
 			rgName, err := rm.findResourceGroupByNode(node)
 			if err == nil {

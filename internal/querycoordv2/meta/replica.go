@@ -16,13 +16,14 @@ var NilReplica = newReplica(&querypb.Replica{
 // Performed a copy-on-write strategy to keep the consistency of the replica manager.
 // So only read only operations are allowed on these type.
 type Replica struct {
-	replicaPB      *querypb.Replica
-	availableNodes typeutil.UniqueSet // a helper field for manipulating replica's Available Nodes slice field.
+	replicaPB *querypb.Replica
+	rwNodes   typeutil.UniqueSet // a helper field for manipulating replica's Available Nodes slice field.
 	// always keep consistent with replicaPB.Nodes.
-	// mutual exclusive with outboundNodes.
-	outboundNodes typeutil.UniqueSet // a helper field for manipulating replica's Outbound Nodes slice field.
-	// always keep consistent with replicaPB.OutboundNodes.
-	// node used by replica but not in resource group will be in outboundNodes.
+	// mutual exclusive with roNodes.
+	roNodes typeutil.UniqueSet // a helper field for manipulating replica's RO Nodes slice field.
+	// always keep consistent with replicaPB.RoNodes.
+	// node used by replica but cannot add more channel or segment ont it.
+	// include rebalance node or node out of resource group.
 }
 
 // Deprecated: may break the consistency of ReplicaManager, use `Spawn` of `ReplicaManager` or `newReplica` instead.
@@ -39,9 +40,9 @@ func NewReplica(replica *querypb.Replica, nodes ...typeutil.UniqueSet) *Replica 
 // newReplica creates a new replica from pb.
 func newReplica(replica *querypb.Replica) *Replica {
 	return &Replica{
-		replicaPB:      proto.Clone(replica).(*querypb.Replica),
-		availableNodes: typeutil.NewUniqueSet(replica.Nodes...),
-		outboundNodes:  typeutil.NewUniqueSet(replica.OutboundNodes...),
+		replicaPB: proto.Clone(replica).(*querypb.Replica),
+		rwNodes:   typeutil.NewUniqueSet(replica.Nodes...),
+		roNodes:   typeutil.NewUniqueSet(replica.RoNodes...),
 	}
 }
 
@@ -60,69 +61,69 @@ func (replica *Replica) GetResourceGroup() string {
 	return replica.replicaPB.GetResourceGroup()
 }
 
-// GetNodes returns the available nodes of the replica.
+// GetNodes returns the rw nodes of the replica.
 // readonly, don't modify the returned slice.
 func (replica *Replica) GetNodes() []int64 {
 	return replica.replicaPB.GetNodes()
 }
 
-// GetOutboundNodes returns the outbound nodes of the replica.
+// GetRONodes returns the ro nodes of the replica.
 // readonly, don't modify the returned slice.
-func (replica *Replica) GetOutboundNodes() []int64 {
-	return replica.replicaPB.GetOutboundNodes()
+func (replica *Replica) GetRONodes() []int64 {
+	return replica.replicaPB.GetRoNodes()
 }
 
-// RangeOverAvailableNodes iterates over the available nodes of the replica.
-func (replica *Replica) RangeOverAvailableNodes(f func(node int64) bool) {
-	replica.availableNodes.Range(f)
+// RangeOverRWNodes iterates over the read and write nodes of the replica.
+func (replica *Replica) RangeOverRWNodes(f func(node int64) bool) {
+	replica.rwNodes.Range(f)
 }
 
-// RangeOverOutboundNodes iterates over the outbound nodes of the replica.
-func (replica *Replica) RangeOverOutboundNodes(f func(node int64) bool) {
-	replica.outboundNodes.Range(f)
+// RangeOverRONodes iterates over the ro nodes of the replica.
+func (replica *Replica) RangeOverRONodes(f func(node int64) bool) {
+	replica.roNodes.Range(f)
 }
 
-// AvailableNodesCount returns the count of available nodes of the replica.
-func (replica *Replica) AvailableNodesCount() int {
-	return replica.availableNodes.Len()
+// RWNodesCount returns the count of rw nodes of the replica.
+func (replica *Replica) RWNodesCount() int {
+	return replica.rwNodes.Len()
 }
 
-// OutboundNodesCount returns the count of outbound nodes of the replica.
-func (replica *Replica) OutboundNodesCount() int {
-	return replica.outboundNodes.Len()
+// RONodesCount returns the count of ro nodes of the replica.
+func (replica *Replica) RONodesCount() int {
+	return replica.roNodes.Len()
 }
 
-// NodesCount returns the count of available nodes and outbound nodes of the replica.
+// NodesCount returns the count of rw nodes and ro nodes of the replica.
 func (replica *Replica) NodesCount() int {
-	return replica.availableNodes.Len() + replica.outboundNodes.Len()
+	return replica.rwNodes.Len() + replica.roNodes.Len()
 }
 
-// Contains checks if the node is in available nodes of the replica.
+// Contains checks if the node is in rw nodes of the replica.
 func (replica *Replica) Contains(node int64) bool {
-	return replica.availableNodes.Contain(node)
+	return replica.rwNodes.Contain(node)
 }
 
-// ContainOutboundNode checks if the node is in outbound nodes of the replica.
-func (replica *Replica) ContainOutboundNode(node int64) bool {
-	return replica.outboundNodes.Contain(node)
+// ContainRONode checks if the node is in ro nodes of the replica.
+func (replica *Replica) ContainRONode(node int64) bool {
+	return replica.roNodes.Contain(node)
 }
 
 // Deprecated: Warning, break the consistency of ReplicaManager, use `SetAvailableNodesInSameCollectionAndRG` in ReplicaManager instead.
 // TODO: removed in future, only for old unittest now.
-func (replica *Replica) AddAvailableNode(nodes ...int64) {
-	replica.outboundNodes.Remove(nodes...)
-	replica.replicaPB.OutboundNodes = replica.outboundNodes.Collect()
-	replica.availableNodes.Insert(nodes...)
-	replica.replicaPB.Nodes = replica.availableNodes.Collect()
+func (replica *Replica) AddRWNode(nodes ...int64) {
+	replica.roNodes.Remove(nodes...)
+	replica.replicaPB.RoNodes = replica.roNodes.Collect()
+	replica.rwNodes.Insert(nodes...)
+	replica.replicaPB.Nodes = replica.rwNodes.Collect()
 }
 
 // copyForWrite returns a mutable replica for write operations.
 func (replica *Replica) copyForWrite() *mutableReplica {
 	return &mutableReplica{
 		&Replica{
-			replicaPB:      proto.Clone(replica.replicaPB).(*querypb.Replica),
-			availableNodes: typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
-			outboundNodes:  typeutil.NewUniqueSet(replica.replicaPB.OutboundNodes...),
+			replicaPB: proto.Clone(replica.replicaPB).(*querypb.Replica),
+			rwNodes:   typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
+			roNodes:   typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
 		},
 	}
 }
@@ -137,27 +138,27 @@ func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 	replica.replicaPB.ResourceGroup = resourceGroup
 }
 
-// AddAvailableNode adds the node to available nodes of the replica.
-func (replica *mutableReplica) AddAvailableNode(nodes ...int64) {
-	replica.Replica.AddAvailableNode(nodes...)
+// AddRWNode adds the node to rw nodes of the replica.
+func (replica *mutableReplica) AddRWNode(nodes ...int64) {
+	replica.Replica.AddRWNode(nodes...)
 }
 
-// AddOutboundNode moves the node from available nodes to outbound nodes of the replica.
+// AddRONode moves the node from rw nodes to ro nodes of the replica.
 // only used in replica manager.
-func (replica *mutableReplica) AddOutboundNode(nodes ...int64) {
-	replica.availableNodes.Remove(nodes...)
-	replica.replicaPB.Nodes = replica.availableNodes.Collect()
-	replica.outboundNodes.Insert(nodes...)
-	replica.replicaPB.OutboundNodes = replica.outboundNodes.Collect()
+func (replica *mutableReplica) AddRONode(nodes ...int64) {
+	replica.rwNodes.Remove(nodes...)
+	replica.replicaPB.Nodes = replica.rwNodes.Collect()
+	replica.roNodes.Insert(nodes...)
+	replica.replicaPB.RoNodes = replica.roNodes.Collect()
 }
 
-// RemoveNode removes the node from available nodes and outbound nodes of the replica.
+// RemoveNode removes the node from rw nodes and ro nodes of the replica.
 // only used in replica manager.
 func (replica *mutableReplica) RemoveNode(nodes ...int64) {
-	replica.outboundNodes.Remove(nodes...)
-	replica.replicaPB.OutboundNodes = replica.outboundNodes.Collect()
-	replica.availableNodes.Remove(nodes...)
-	replica.replicaPB.Nodes = replica.availableNodes.Collect()
+	replica.roNodes.Remove(nodes...)
+	replica.replicaPB.RoNodes = replica.roNodes.Collect()
+	replica.rwNodes.Remove(nodes...)
+	replica.replicaPB.Nodes = replica.rwNodes.Collect()
 }
 
 // IntoReplica returns the immutable replica, After calling this method, the mutable replica should not be used again.
