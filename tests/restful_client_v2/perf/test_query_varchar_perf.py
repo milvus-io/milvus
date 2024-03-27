@@ -9,7 +9,7 @@ class MilvusUser(HttpUser):
     def query(self):
         with self.client.post("/v2/vectordb/entities/query",
                               json={"collectionName": "test_restful_perf",
-                                    "filter": 'text like "1%"',
+                                    "filter": 'text like "%1"',
                                     "outputFields": ["text"]
                                     },
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
