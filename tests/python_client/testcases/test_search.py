@@ -10459,7 +10459,10 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     def random_primary_key(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    # skip fp16/bf16 for now, the case need to be modified
+    # see also https://github.com/milvus-io/milvus/issues/31625
+    # @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
+    @pytest.fixture(scope="function", params=["FLOAT_VECTOR"])
     def vector_data_type(self, request):
         yield request.param
 
