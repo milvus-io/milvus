@@ -11,7 +11,7 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, data_size=1000):
+def prepare_data(host="127.0.0.1", port=19530, data_size=1000000):
 
     connections.connect(
         host=host,
@@ -58,6 +58,6 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=19530)
-    parser.add_argument("--data_size", type=int, default=5000)
+    parser.add_argument("--data_size", type=int, default=1000000)
     args = parser.parse_args()
     prepare_data(host=args.host, port=args.port, data_size=args.data_size)

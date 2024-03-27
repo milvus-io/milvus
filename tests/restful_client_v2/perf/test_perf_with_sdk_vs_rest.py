@@ -2,7 +2,8 @@ import time
 import random
 from pymilvus import (
     connections,
-    Collection
+    Collection,
+    AnnSearchRequest, RRFRanker
 )
 import requests
 import json
@@ -37,13 +38,15 @@ def main(host="127.0.0.1"):
             t0 = time.time()
             logger.info(f"{op}...")
             if op == "search":
-                res = collection.search([vector_to_search[random_id]], "emb", search_params, 100, output_fields=["*"])
+                res = collection.search([vector_to_search[random_id]], "text_emb", search_params, 100, output_fields=["*"])
             if op == "hybrid_search":
-                res = collection.search([vector_to_search[random_id]], "emb", search_params, 100, output_fields=["*"])
+                sq1=AnnSearchRequest([vector_to_search[random_id]], "text_emb", search_params, 100, output_fields=["*"])
+                sq2=AnnSearchRequest([vector_to_search[random_id]], "image_emb", search_params, 100, output_fields=["*"])
+                res = collection.hybrid_search([sq1, sq2], RRFRanker(10), 100, output_fields=["*"])
             elif op == "query_id":
                 res = collection.query(expr=f"id in {[x for x in range(100)]}", output_fields=["*"])
             elif op == "query_varchar":
-                res = collection.query(expr=f"id in {[x for x in range(100)]}", output_fields=["*"])
+                res = collection.query(expr='text like %1', output_fields=["*"])
             elif op == "insert":
                 insert_collection = Collection(name="test_restful_insert_perf")
                 res = insert_collection.insert(data=insert_data)
