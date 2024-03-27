@@ -2209,7 +2209,7 @@ func Test_checkTrain(t *testing.T) {
 		m := map[string]string{
 			common.IndexTypeKey: "scalar",
 		}
-		assert.NoError(t, checkTrain(f, m))
+		assert.Error(t, checkTrain(f, m))
 	})
 
 	t.Run("dimension mismatch", func(t *testing.T) {

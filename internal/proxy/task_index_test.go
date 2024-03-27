@@ -593,6 +593,24 @@ func Test_parseIndexParams(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("create index on VarChar field without index type", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+				IndexName:   "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_VarChar,
+			},
+		}
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: DefaultStringIndexType}})
+	})
+
 	t.Run("create index on Arithmetic field", func(t *testing.T) {
 		cit := &createIndexTask{
 			req: &milvuspb.CreateIndexRequest{
@@ -613,6 +631,24 @@ func Test_parseIndexParams(t *testing.T) {
 		}
 		err := cit.parseIndexParams()
 		assert.NoError(t, err)
+	})
+
+	t.Run("create index on Arithmetic field without index type", func(t *testing.T) {
+		cit := &createIndexTask{
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{},
+				IndexName:   "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				DataType:     schemapb.DataType_Int64,
+			},
+		}
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: DefaultArithmeticIndexType}})
 	})
 
 	// Compatible with the old version <= 2.3.0
@@ -763,7 +799,7 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 		err := cit4.parseIndexParams()
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Error(t, err)
 
 		cit5 := &createIndexTask{
 			Condition: nil,
@@ -808,7 +844,113 @@ func Test_parseIndexParams(t *testing.T) {
 			},
 		}
 		err = cit5.parseIndexParams()
-		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		assert.Error(t, err)
+	})
+
+	t.Run("enable scalar auto index", func(t *testing.T) {
+		err := Params.Save(Params.AutoIndexConfig.ScalarAutoIndexEnable.Key, "true")
+		assert.NoError(t, err)
+
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: "",
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				Description:  "field no.1",
+				DataType:     schemapb.DataType_Int64,
+			},
+		}
+
+		err = cit.parseIndexParams()
+		assert.NoError(t, err)
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: DefaultArithmeticIndexType}})
+	})
+
+	t.Run("create auto index on numeric field", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: AutoIndexName,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				Description:  "field no.1",
+				DataType:     schemapb.DataType_Int64,
+			},
+		}
+
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: DefaultArithmeticIndexType}})
+	})
+
+	t.Run("create auto index on varchar field", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: AutoIndexName,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				Description:  "field no.1",
+				DataType:     schemapb.DataType_VarChar,
+			},
+		}
+
+		err := cit.parseIndexParams()
+		assert.NoError(t, err)
+		assert.Equal(t, cit.newIndexParams, []*commonpb.KeyValuePair{{Key: common.IndexTypeKey, Value: DefaultStringIndexType}})
+	})
+
+	t.Run("create auto index on json field", func(t *testing.T) {
+		cit := &createIndexTask{
+			Condition: nil,
+			req: &milvuspb.CreateIndexRequest{
+				ExtraParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: AutoIndexName,
+					},
+				},
+				IndexName: "",
+			},
+			fieldSchema: &schemapb.FieldSchema{
+				FieldID:      101,
+				Name:         "FieldID",
+				IsPrimaryKey: false,
+				Description:  "field no.1",
+				DataType:     schemapb.DataType_JSON,
+			},
+		}
+
+		err := cit.parseIndexParams()
+		assert.Error(t, err)
 	})
 }
 
