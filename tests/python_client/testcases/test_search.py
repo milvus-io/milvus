@@ -3321,7 +3321,7 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async, enable_dynamic_field):
+    def test_search_expression_all_data_type(self, nb, nq, dim, auto_id, _async):
         """
         target: test search using all supported data types
         method: search using different supported data types
@@ -3329,8 +3329,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         # 1. initialize with data
         collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb, is_all_data_type=True,
-                                                                      auto_id=auto_id, dim=dim,
-                                                                      enable_dynamic_field=enable_dynamic_field)[0:4]
+                                                                      auto_id=auto_id, dim=dim)[0:4]
         # 2. search
         log.info("test_search_expression_all_data_type: Searching collection %s" %
                  collection_w.name)
