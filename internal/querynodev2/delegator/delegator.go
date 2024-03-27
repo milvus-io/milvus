@@ -210,7 +210,8 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed, PruneInfo{filterRatio: defaultFilterRatio})
+		PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
+			PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 	}
 
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
@@ -504,7 +505,7 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{defaultFilterRatio})
+		PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
 	}
 
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
