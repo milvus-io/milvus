@@ -92,6 +92,8 @@ type baseSegment struct {
 	isLazyLoad     bool
 
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
+
+	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
 }
 
 func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) baseSegment {
@@ -104,6 +106,7 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+		needUpdatedVersion: atomic.NewInt64(0),
 	}
 }
 
@@ -202,6 +205,17 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 }
 
 func (s *baseSegment) IsLazyLoad() bool { return s.isLazyLoad }
+func (s *baseSegment) NeedUpdatedVersion() int64 {
+	return s.needUpdatedVersion.Load()
+}
+
+func (s *baseSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
+	s.loadInfo = loadInfo
+}
+
+func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
+	s.needUpdatedVersion.Store(version)
+}
 
 type FieldInfo struct {
 	datapb.FieldBinlog
@@ -1398,4 +1412,35 @@ func (s *LocalSegment) startRelease(scope ReleaseScope) state.LoadStateLockGuard
 	default:
 		panic(fmt.Sprintf("unexpected release scope %d", scope))
 	}
+}
+
+func (s *LocalSegment) RemoveFieldFile(fieldId int64) {
+	C.RemoveFieldFile(s.ptr, C.int64_t(fieldId))
+}
+
+func (s *LocalSegment) RemoveUnusedFieldFiles() error {
+	schema := s.collection.Schema()
+	indexInfos, _ := separateIndexAndBinlog(s.loadInfo)
+	for _, indexInfo := range indexInfos {
+		need, err := s.indexNeedLoadRawData(schema, indexInfo)
+		if err != nil {
+			return err
+		}
+		if !need {
+			s.RemoveFieldFile(indexInfo.IndexInfo.FieldID)
+		}
+	}
+	return nil
+}
+
+func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, indexInfo *IndexedFieldInfo) (bool, error) {
+	schemaHelper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return false, err
+	}
+	fieldSchema, err := schemaHelper.GetFieldFromID(indexInfo.IndexInfo.FieldID)
+	if err != nil {
+		return false, err
+	}
+	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
 }

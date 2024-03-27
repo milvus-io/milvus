@@ -35,9 +35,10 @@ var (
 )
 
 type cacheItem[K comparable, V any] struct {
-	key      K
-	value    V
-	pinCount atomic.Int32
+	key        K
+	value      V
+	pinCount   atomic.Int32
+	needReload bool
 }
 
 type (
@@ -57,18 +58,21 @@ type Scavenger[K comparable] interface {
 	Collect(key K) (bool, func(K) bool)
 	// Throw records entry removals.
 	Throw(key K)
+	Replace(key K) (bool, func(K) bool, func())
 }
 
 type LazyScavenger[K comparable] struct {
 	capacity int64
 	size     int64
 	weight   func(K) int64
+	weights  map[K]int64
 }
 
 func NewLazyScavenger[K comparable](weight func(K) int64, capacity int64) *LazyScavenger[K] {
 	return &LazyScavenger[K]{
 		capacity: capacity,
 		weight:   weight,
+		weights:  make(map[K]int64),
 	}
 }
 
@@ -77,16 +81,38 @@ func (s *LazyScavenger[K]) Collect(key K) (bool, func(K) bool) {
 	if s.size+w > s.capacity {
 		needCollect := s.size + w - s.capacity
 		return false, func(key K) bool {
-			needCollect -= s.weight(key)
+			needCollect -= s.weights[key]
 			return needCollect <= 0
 		}
 	}
 	s.size += w
+	s.weights[key] = w
 	return true, nil
 }
 
+func (s *LazyScavenger[K]) Replace(key K) (bool, func(K) bool, func()) {
+	pw := s.weights[key]
+	w := s.weight(key)
+	if s.size-pw+w > s.capacity {
+		needCollect := s.size - pw + w - s.capacity
+		return false, func(key K) bool {
+			needCollect -= s.weights[key]
+			return needCollect <= 0
+		}, nil
+	}
+	s.size += w - pw
+	s.weights[key] = w
+	return true, nil, func() {
+		s.size -= w - pw
+		s.weights[key] = pw
+	}
+}
+
 func (s *LazyScavenger[K]) Throw(key K) {
-	s.size -= s.weight(key)
+	if w, ok := s.weights[key]; ok {
+		s.size -= w
+		delete(s.weights, key)
+	}
 }
 
 type Stats struct {
@@ -113,6 +139,7 @@ type Cache[K comparable, V any] interface {
 
 	// Get stats
 	Stats() *Stats
+	MarkItemNeedReload(key K) bool
 }
 
 type Waiter[K comparable] struct {
@@ -140,12 +167,14 @@ type lruCache[K comparable, V any] struct {
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
 	scavenger Scavenger[K]
+	reloader  Loader[K, V]
 }
 
 type CacheBuilder[K comparable, V any] struct {
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
 	scavenger Scavenger[K]
+	reloader  Loader[K, V]
 }
 
 func NewCacheBuilder[K comparable, V any]() *CacheBuilder[K, V] {
@@ -186,14 +215,20 @@ func (b *CacheBuilder[K, V]) WithCapacity(capacity int64) *CacheBuilder[K, V] {
 	return b
 }
 
+func (b *CacheBuilder[K, V]) WithReloader(reloader Loader[K, V]) *CacheBuilder[K, V] {
+	b.reloader = reloader
+	return b
+}
+
 func (b *CacheBuilder[K, V]) Build() Cache[K, V] {
-	return newLRUCache(b.loader, b.finalizer, b.scavenger)
+	return newLRUCache(b.loader, b.finalizer, b.scavenger, b.reloader)
 }
 
 func newLRUCache[K comparable, V any](
 	loader Loader[K, V],
 	finalizer Finalizer[K, V],
 	scavenger Scavenger[K],
+	reloader Loader[K, V],
 ) Cache[K, V] {
 	return &lruCache[K, V]{
 		items:              make(map[K]*list.Element),
@@ -204,6 +239,7 @@ func newLRUCache[K comparable, V any](
 		loader:             loader,
 		finalizer:          finalizer,
 		scavenger:          scavenger,
+		reloader:           reloader,
 	}
 }
 
@@ -297,6 +333,21 @@ func (c *lruCache[K, V]) peekAndPin(key K) *cacheItem[K, V] {
 	e, ok := c.items[key]
 	if ok {
 		item := e.Value.(*cacheItem[K, V])
+		if item.needReload && item.pinCount.Load() == 0 {
+			ok, _, retback := c.scavenger.Replace(key)
+			if ok {
+				// there is room for reload and no one is using the item
+				if c.reloader != nil {
+					reloaded, ok := c.reloader(key)
+					if ok {
+						item.value = reloaded
+					} else if retback != nil {
+						retback()
+					}
+				}
+				item.needReload = false
+			}
+		}
 		c.accessList.MoveToFront(e)
 		item.pinCount.Inc()
 		return item
@@ -418,4 +469,29 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 	c.items[item.key] = e
 
 	return item, nil
+}
+
+func (c *lruCache[K, V]) evict(key K) {
+	e := c.items[key]
+	delete(c.items, key)
+	c.accessList.Remove(e)
+	c.scavenger.Throw(key)
+
+	if c.finalizer != nil {
+		item := e.Value.(*cacheItem[K, V])
+		c.finalizer(key, item.value)
+	}
+}
+
+func (c *lruCache[K, V]) MarkItemNeedReload(key K) bool {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+
+	if e, ok := c.items[key]; ok {
+		item := e.Value.(*cacheItem[K, V])
+		item.needReload = true
+		return true
+	}
+
+	return false
 }

@@ -173,7 +173,10 @@ func NewManager() *Manager {
 	}
 
 	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithLazyScavenger(func(key int64) int64 {
-		return int64(segMgr.sealedSegments[key].ResourceUsageEstimate().DiskSize)
+		if segment, ok := segMgr.sealedSegments[key]; ok {
+			return int64(segment.ResourceUsageEstimate().DiskSize)
+		}
+		return 0
 	}, diskCap).WithLoader(func(key int64) (Segment, bool) {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segMgr.mu.RLock()
@@ -213,6 +216,26 @@ func NewManager() *Manager {
 
 		segment.Release(WithReleaseScope(ReleaseScopeData))
 		return nil
+	}).WithReloader(func(key int64) (Segment, bool) {
+		segMgr.mu.RLock()
+		defer segMgr.mu.RUnlock()
+		segment, ok := segMgr.sealedSegments[key]
+		if !ok {
+			// the segment has been released, just ignore it
+			return nil, false
+		}
+		localSegment := segment.(*LocalSegment)
+		err := manager.Loader.LoadIndex(context.Background(), localSegment, segment.LoadInfo(), segment.NeedUpdatedVersion())
+		if err != nil {
+			log.Warn("reload segment failed", zap.Int64("segmentID", key), zap.Error(err))
+			return nil, false
+		}
+		if err := localSegment.RemoveUnusedFieldFiles(); err != nil {
+			log.Warn("remove unused field files failed", zap.Int64("segmentID", key), zap.Error(err))
+			return nil, false
+		}
+
+		return segment, true
 	}).Build()
 	return manager
 }

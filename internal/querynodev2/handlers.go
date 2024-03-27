@@ -163,6 +163,12 @@ func (node *QueryNode) loadIndex(ctx context.Context, req *querypb.LoadSegmentsR
 			continue
 		}
 
+		if localSegment.IsLazyLoad() {
+			localSegment.SetLoadInfo(info)
+			localSegment.SetNeedUpdatedVersion(req.GetVersion())
+			node.manager.DiskCache.MarkItemNeedReload(localSegment.ID())
+			return nil
+		}
 		err := node.loader.LoadIndex(ctx, localSegment, info, req.Version)
 		if err != nil {
 			log.Warn("failed to load index", zap.Error(err))

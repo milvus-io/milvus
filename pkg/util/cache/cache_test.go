@@ -135,6 +135,30 @@ func TestLRUCache(t *testing.T) {
 		assert.True(t, missing)
 		assert.Equal(t, ErrNoSuchItem, err)
 	})
+
+	t.Run("test reloader", func(t *testing.T) {
+		cache := cacheBuilder.WithReloader(func(key int) (int, bool) {
+			return -key, true
+		}).Build()
+		err := cache.Do(1, func(i int) error { return nil })
+		assert.NoError(t, err)
+		exist := cache.MarkItemNeedReload(1)
+		assert.True(t, exist)
+		cache.Do(1, func(i int) error {
+			assert.Equal(t, -1, i)
+			return nil
+		})
+	})
+
+	t.Run("test mark", func(t *testing.T) {
+		cache := cacheBuilder.WithCapacity(1).Build()
+		exist := cache.MarkItemNeedReload(1)
+		assert.False(t, exist)
+		err := cache.Do(1, func(i int) error { return nil })
+		assert.NoError(t, err)
+		exist = cache.MarkItemNeedReload(1)
+		assert.True(t, exist)
+	})
 }
 
 func TestStats(t *testing.T) {
@@ -320,6 +344,40 @@ func TestLRUCacheConcurrency(t *testing.T) {
 				}
 			}(i)
 		}
+		wg.Wait()
+	})
+
+	t.Run("test concurrent reload and mark", func(t *testing.T) {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+			return key, true
+		}).WithCapacity(5).WithFinalizer(func(key, value int) error {
+			return nil
+		}).WithReloader(func(key int) (int, bool) {
+			return key, true
+		}).Build()
+
+		for i := 0; i < 100; i++ {
+			cache.DoWait(i, 2*time.Second, func(v int) error { return nil })
+		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				for j := 0; j < 100; j++ {
+					cache.MarkItemNeedReload(j)
+				}
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				for j := 0; j < 100; j++ {
+					cache.DoWait(j, 2*time.Second, func(v int) error { return nil })
+				}
+			}
+		}()
 		wg.Wait()
 	})
 }

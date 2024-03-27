@@ -1647,5 +1647,20 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         return false;
     }
 }
+void
+SegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    if (cc == nullptr) {
+        return;
+    }
+    for (const auto& iter : field_data_info_.field_infos) {
+        if (iter.second.field_id == field_id.get()) {
+            for (const auto& binlog : iter.second.insert_files) {
+                cc->Remove(binlog);
+            }
+            return;
+        }
+    }
+}
 
 }  // namespace milvus::segcore
