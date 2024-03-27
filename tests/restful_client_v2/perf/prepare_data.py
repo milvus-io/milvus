@@ -58,20 +58,19 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
     for files in batch_files:
         task_id = utility.do_bulk_insert(collection_name=collection_name, files=files)
         task_ids.append(task_id)
-        print(f"Create a bulk inert task, task id: {task_id}")
+        logger.info(f"Create a bulk inert task, task id: {task_id}")
 
     while len(task_ids) > 0:
-        print("Wait 1 second to check bulk insert tasks state...")
+        logger.info("Wait 1 second to check bulk insert tasks state...")
         time.sleep(1)
         for id in task_ids:
             state = utility.get_bulk_insert_state(task_id=id)
             if state.state == BulkInsertState.ImportFailed or state.state == BulkInsertState.ImportFailedAndCleaned:
-                print(f"The task {state.task_id} failed, reason: {state.failed_reason}")
+                logger.info(f"The task {state.task_id} failed, reason: {state.failed_reason}")
                 task_ids.remove(id)
             elif state.state == BulkInsertState.ImportCompleted:
-                print(f"The task {state.task_id} completed")
+                logger.info(f"The task {state.task_id} completed with state {state}")
                 task_ids.remove(id)
-
 
     logger.info(f"inserted {data_size} vectors")
     collection.create_index("text_emb", index_params=index_params)
