@@ -87,7 +87,7 @@ func (suite *SegmentCheckerTestSuite) TearDownTest() {
 
 func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
 	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(collectionID int64, segments []*meta.Segment, nodes []int64) []balance.SegmentAssignPlan {
+	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(collectionID int64, segments []*meta.Segment, nodes []int64, _ bool) []balance.SegmentAssignPlan {
 		plans := make([]balance.SegmentAssignPlan, 0, len(segments))
 		for i, s := range segments {
 			plan := balance.SegmentAssignPlan{
