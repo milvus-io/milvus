@@ -27,6 +27,9 @@ const (
 
 	// SystemInfoMetrics means users request for system information metrics.
 	SystemInfoMetrics = "system_info"
+
+	// CollectionStorageMetrics means users request for collection storage metrics.
+	CollectionStorageMetrics = "collection_storage"
 )
 
 // ParseMetricType returns the metric type of req

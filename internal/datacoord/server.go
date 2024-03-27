@@ -94,7 +94,7 @@ type rootCoordCreatorFunc func(ctx context.Context) (types.RootCoordClient, erro
 // makes sure Server implements `DataCoord`
 var _ types.DataCoord = (*Server)(nil)
 
-var Params *paramtable.ComponentParam = paramtable.Get()
+var Params = paramtable.Get()
 
 // Server implements `types.DataCoord`
 // handles Data Coordinator related jobs
@@ -159,6 +159,11 @@ type Server struct {
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
+}
+
+type CollectionNameInfo struct {
+	CollectionName string
+	DBName         string
 }
 
 // ServerHelper datacoord server injection helper

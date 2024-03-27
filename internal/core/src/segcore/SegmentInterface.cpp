@@ -100,6 +100,7 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
             fmt::format("query results exceed the limit size ", limit_size));
     }
 
+    results->set_all_retrieve_count(retrieve_results.total_data_cnt_);
     if (plan->plan_node_->is_count_) {
         AssertInfo(retrieve_results.field_data_.size() == 1,
                    "count result should only have one column");

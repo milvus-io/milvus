@@ -66,6 +66,7 @@ type searchTask struct {
 	userOutputFields []string
 
 	offset    int64
+	dimension int64
 	resultBuf *typeutil.ConcurrentSet[*internalpb.SearchResults]
 
 	qc              types.QueryCoordClient
@@ -302,6 +303,11 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("get collection schema failed", zap.Error(err))
+		return err
+	}
+	t.dimension, err = typeutil.GetCollectionDim(t.schema.CollectionSchema)
+	if err != nil {
+		log.Warn("get collection dimension failed", zap.Error(err))
 		return err
 	}
 

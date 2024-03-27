@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -2394,6 +2395,15 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
 	successCnt := it.result.InsertCnt - int64(len(it.result.ErrIndex))
+	v := Extension.Report(map[string]any{
+		hookutil.OpTypeKey:     hookutil.OpTypeInsert,
+		hookutil.DatabaseKey:   request.DbName,
+		hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
+		hookutil.DataSizeKey:   proto.Size(request),
+		hookutil.SuccessCntKey: successCnt,
+		hookutil.FailCntKey:    len(it.result.ErrIndex),
+	})
+	SetReportValue(it.result.GetStatus(), v)
 	metrics.ProxyInsertVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(successCnt))
 	metrics.ProxyMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.ProxyCollectionMutationLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.InsertLabel, request.CollectionName).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -2468,6 +2478,15 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	successCnt := dr.result.GetDeleteCnt()
 	metrics.ProxyDeleteVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(successCnt))
+
+	v := Extension.Report(map[string]any{
+		hookutil.OpTypeKey:     hookutil.OpTypeDelete,
+		hookutil.DatabaseKey:   request.DbName,
+		hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
+		hookutil.SuccessCntKey: successCnt,
+		hookutil.RelatedCntKey: dr.allQueryCnt.Load(),
+	})
+	SetReportValue(dr.result.GetStatus(), v)
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel).Inc()
@@ -2583,6 +2602,16 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	// UpsertCnt always equals to the number of entities in the request
 	it.result.UpsertCnt = int64(request.NumRows)
+
+	v := Extension.Report(map[string]any{
+		hookutil.OpTypeKey:     hookutil.OpTypeUpsert,
+		hookutil.DatabaseKey:   request.DbName,
+		hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
+		hookutil.DataSizeKey:   proto.Size(it.req),
+		hookutil.SuccessCntKey: it.result.UpsertCnt,
+		hookutil.FailCntKey:    len(it.result.ErrIndex),
+	})
+	SetReportValue(it.result.GetStatus(), v)
 
 	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(it.upsertMsg.DeleteMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
 
@@ -2759,6 +2788,15 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
+		v := Extension.Report(map[string]any{
+			hookutil.OpTypeKey:     hookutil.OpTypeSearch,
+			hookutil.DatabaseKey:   request.DbName,
+			hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
+			hookutil.DataSizeKey:   sentSize,
+			hookutil.RelatedCntKey: qt.result.GetResults().GetAllSearchCount(),
+			hookutil.DimensionKey:  qt.dimension,
+		})
+		SetReportValue(qt.result.GetStatus(), v)
 		metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
 	}
@@ -2902,6 +2940,15 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	if qt.result != nil {
 		sentSize := proto.Size(qt.result)
+		v := Extension.Report(map[string]any{
+			hookutil.OpTypeKey:     hookutil.OpTypeHybridSearch,
+			hookutil.DatabaseKey:   request.DbName,
+			hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
+			hookutil.DataSizeKey:   sentSize,
+			hookutil.RelatedCntKey: qt.result.GetResults().GetAllSearchCount(),
+			hookutil.DimensionKey:  qt.dimension,
+		})
+		SetReportValue(qt.result.GetStatus(), v)
 		metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
 	}
@@ -3182,7 +3229,19 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		qc:      node.queryCoord,
 		lb:      node.lbPolicy,
 	}
-	return node.query(ctx, qt)
+	res, err := node.query(ctx, qt)
+	if merr.Ok(res.Status) && err == nil {
+		v := Extension.Report(map[string]any{
+			hookutil.OpTypeKey:     hookutil.OpTypeQuery,
+			hookutil.DatabaseKey:   request.DbName,
+			hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
+			hookutil.DataSizeKey:   proto.Size(res),
+			hookutil.RelatedCntKey: qt.allQueryCnt,
+			hookutil.DimensionKey:  qt.dimension,
+		})
+		SetReportValue(res.Status, v)
+	}
+	return res, err
 }
 
 // CreateAlias create alias for collection, then you can search the collection with alias.

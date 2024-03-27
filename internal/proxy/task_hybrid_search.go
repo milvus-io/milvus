@@ -37,6 +37,7 @@ type hybridSearchTask struct {
 	ctx context.Context
 	*internalpb.HybridSearchRequest
 
+	dimension   int64
 	result      *milvuspb.SearchResults
 	request     *milvuspb.HybridSearchRequest
 	searchTasks []*searchTask
@@ -99,6 +100,11 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 	t.schema, err = globalMetaCache.GetCollectionSchema(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("get collection schema failed", zap.Error(err))
+		return err
+	}
+	t.dimension, err = typeutil.GetCollectionDim(t.schema.CollectionSchema)
+	if err != nil {
+		log.Warn("get collection dimension failed", zap.Error(err))
 		return err
 	}
 
@@ -529,6 +535,7 @@ func rankSearchResultData(ctx context.Context,
 	}
 
 	for _, result := range searchResults {
+		ret.Results.AllSearchCount += result.GetResults().GetAllSearchCount()
 		scores := result.GetResults().GetScores()
 		start := int64(0)
 		for i := int64(0); i < nq; i++ {

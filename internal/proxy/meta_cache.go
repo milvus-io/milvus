@@ -59,6 +59,8 @@ type Cache interface {
 	GetCollectionName(ctx context.Context, database string, collectionID int64) (string, error)
 	// GetCollectionInfo get collection's information by name or collection id, such as schema, and etc.
 	GetCollectionInfo(ctx context.Context, database, collectionName string, collectionID int64) (*collectionBasicInfo, error)
+	// GetCollectionNamesByID get collection name and database name by collection id
+	GetCollectionNamesByID(ctx context.Context, collectionID []UniqueID) ([]string, []string, error)
 	// GetPartitionID get partition's identifier of specific collection.
 	GetPartitionID(ctx context.Context, database, collectionName string, partitionName string) (typeutil.UniqueID, error)
 	// GetPartitions get all partitions' id of specific collection.
@@ -242,11 +244,12 @@ type MetaCache struct {
 	rootCoord  types.RootCoordClient
 	queryCoord types.QueryCoordClient
 
-	collInfo       map[string]map[string]*collectionInfo // database -> collectionName -> collection_info
-	collLeader     map[string]map[string]*shardLeaders   // database -> collectionName -> collection_leaders
-	credMap        map[string]*internalpb.CredentialInfo // cache for credential, lazy load
-	privilegeInfos map[string]struct{}                   // privileges cache
-	userToRoles    map[string]map[string]struct{}        // user to role cache
+	collInfo       map[string]map[string]*collectionInfo   // database -> collectionName -> collection_info
+	collLeader     map[string]map[string]*shardLeaders     // database -> collectionName -> collection_leaders
+	dbInfo         map[string]map[typeutil.UniqueID]string // database -> collectionID -> collectionName
+	credMap        map[string]*internalpb.CredentialInfo   // cache for credential, lazy load
+	privilegeInfos map[string]struct{}                     // privileges cache
+	userToRoles    map[string]map[string]struct{}          // user to role cache
 	mu             sync.RWMutex
 	credMut        sync.RWMutex
 	leaderMut      sync.RWMutex
@@ -288,6 +291,7 @@ func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordCl
 		queryCoord:     queryCoord,
 		collInfo:       map[string]map[string]*collectionInfo{},
 		collLeader:     map[string]map[string]*shardLeaders{},
+		dbInfo:         map[string]map[typeutil.UniqueID]string{},
 		credMap:        map[string]*internalpb.CredentialInfo{},
 		shardMgr:       shardMgr,
 		privilegeInfos: map[string]struct{}{},
@@ -469,6 +473,90 @@ func (m *MetaCache) GetCollectionInfo(ctx context.Context, database string, coll
 
 	metrics.ProxyCacheStatsCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), method, metrics.CacheHitLabel).Inc()
 	return collInfo.getBasicInfo(), nil
+}
+
+func (m *MetaCache) GetCollectionNamesByID(ctx context.Context, collectionIDs []UniqueID) ([]string, []string, error) {
+	hasUpdate := false
+
+	dbNames := make([]string, 0)
+	collectionNames := make([]string, 0)
+	for _, collectionID := range collectionIDs {
+		dbName, collectionName := m.innerGetCollectionByID(collectionID)
+		if dbName != "" {
+			dbNames = append(dbNames, dbName)
+			collectionNames = append(collectionNames, collectionName)
+			continue
+		}
+		if hasUpdate {
+			return nil, nil, errors.New("collection not found after meta cache has been updated")
+		}
+		hasUpdate = true
+		err := m.updateDBInfo(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		dbName, collectionName = m.innerGetCollectionByID(collectionID)
+		if dbName == "" {
+			return nil, nil, errors.New("collection not found")
+		}
+		dbNames = append(dbNames, dbName)
+		collectionNames = append(collectionNames, collectionName)
+	}
+
+	return dbNames, collectionNames, nil
+}
+
+func (m *MetaCache) innerGetCollectionByID(collectionID int64) (string, string) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+
+	for database, db := range m.dbInfo {
+		name, ok := db[collectionID]
+		if ok {
+			return database, name
+		}
+	}
+	return "", ""
+}
+
+func (m *MetaCache) updateDBInfo(ctx context.Context) error {
+	databaseResp, err := m.rootCoord.ListDatabases(ctx, &milvuspb.ListDatabasesRequest{
+		Base: commonpbutil.NewMsgBase(commonpbutil.WithMsgType(commonpb.MsgType_ListDatabases)),
+	})
+
+	if err := merr.CheckRPCCall(databaseResp, err); err != nil {
+		log.Warn("failed to ListDatabases", zap.Error(err))
+		return err
+	}
+
+	dbInfo := make(map[string]map[int64]string)
+	for _, dbName := range databaseResp.DbNames {
+		resp, err := m.rootCoord.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{
+			Base: commonpbutil.NewMsgBase(
+				commonpbutil.WithMsgType(commonpb.MsgType_ShowCollections),
+			),
+			DbName: dbName,
+		})
+
+		if err := merr.CheckRPCCall(resp, err); err != nil {
+			log.Warn("failed to ShowCollections",
+				zap.String("dbName", dbName),
+				zap.Error(err))
+			return err
+		}
+
+		collections := make(map[int64]string)
+		for i, collection := range resp.CollectionNames {
+			collections[resp.CollectionIds[i]] = collection
+		}
+		dbInfo[dbName] = collections
+	}
+
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.dbInfo = dbInfo
+
+	return nil
 }
 
 // GetCollectionInfo returns the collection information related to provided collection name

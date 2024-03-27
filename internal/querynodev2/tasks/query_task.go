@@ -135,6 +135,7 @@ func (t *QueryTask) Execute() error {
 		CostAggregation: &internalpb.CostAggregation{
 			ServiceTime: tr.ElapseSpan().Milliseconds(),
 		},
+		AllRetrieveCount: reducedResult.GetAllRetrieveCount(),
 	}
 	return nil
 }
