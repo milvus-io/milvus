@@ -124,6 +124,30 @@ IsPrimaryKeyDataType(DataType data_type) {
     return data_type == DataType::INT64 || data_type == DataType::VARCHAR;
 }
 
+inline bool
+IsIntegral(DataType data_type) {
+    return data_type == DataType::INT8 || data_type == DataType::INT16 ||
+           data_type == DataType::INT32 || data_type == DataType::INT64;
+}
+
+inline bool
+IsFloat(DataType data_type) {
+    return data_type == DataType::FLOAT || data_type == DataType::DOUBLE;
+}
+
+inline bool
+IsString(DataType data_type) {
+    return data_type == DataType::STRING || data_type == DataType::VARCHAR;
+}
+
+inline bool
+IsVectorType(DataType data_type) {
+    return data_type == DataType::VECTOR_BINARY ||
+           data_type == DataType::VECTOR_FLOAT ||
+           data_type == DataType::VECTOR_FLOAT16 ||
+           data_type == DataType::VECTOR_BFLOAT16;
+}
+
 // NOTE: dependent type
 // used at meta-template programming
 template <class...>
