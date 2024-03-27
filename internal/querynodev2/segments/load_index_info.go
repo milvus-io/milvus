@@ -70,19 +70,24 @@ func deleteLoadIndexInfo(info *LoadIndexInfo) {
 	}).Await()
 }
 
+func isIndexMmapEnable(indexInfo *querypb.FieldIndexInfo) bool {
+	enableMmap := common.IsMmapEnabled(indexInfo.IndexParams...)
+	if !enableMmap {
+		_, ok := funcutil.KeyValuePair2Map(indexInfo.IndexParams)[common.MmapEnabledKey]
+		indexType := datacoord.GetIndexType(indexInfo.IndexParams)
+		indexSupportMmap := indexparamcheck.IsMmapSupported(indexType)
+		enableMmap = !ok && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool() && indexSupportMmap
+	}
+	return enableMmap
+}
+
 func (li *LoadIndexInfo) appendLoadIndexInfo(ctx context.Context, indexInfo *querypb.FieldIndexInfo, collectionID int64, partitionID int64, segmentID int64, fieldType schemapb.DataType) error {
 	fieldID := indexInfo.FieldID
 	indexPaths := indexInfo.IndexFilePaths
 
 	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
 
-	enableMmap := common.IsMmapEnabled(indexInfo.IndexParams...)
-	if !enableMmap {
-		_, ok := indexParams[common.MmapEnabledKey]
-		indexType := datacoord.GetIndexType(indexInfo.IndexParams)
-		indexSupportMmap := indexparamcheck.IsMmapSupported(indexType)
-		enableMmap = !ok && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool() && indexSupportMmap
-	}
+	enableMmap := isIndexMmapEnable(indexInfo)
 	// as Knowhere reports error if encounter a unknown param, we need to delete it
 	delete(indexParams, common.MmapEnabledKey)
 
