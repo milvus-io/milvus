@@ -107,6 +107,17 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 0)
 
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
 	// test leader view lack of segments
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
@@ -127,7 +138,6 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 
 	// test segment's version in leader view doesn't match segment's version in dist
-
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
 	view = utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
@@ -190,6 +200,17 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
@@ -271,6 +292,17 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.target.UpdateCollectionNextTarget(int64(1))
@@ -312,6 +344,18 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	}
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
 		channels, segments, nil)
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 0, "test-insert-channel"))

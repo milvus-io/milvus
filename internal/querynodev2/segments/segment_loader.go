@@ -1293,9 +1293,6 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	// try to update segment version after load delta logs
-	loader.manager.Segment.UpdateBy(IncreaseVersion(segment.Version()), WithType(SegmentTypeSealed), WithID(segment.ID()))
-
 	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.RowCount))
 	return nil
 }
