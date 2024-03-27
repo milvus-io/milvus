@@ -731,6 +731,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 							SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 								{SegmentID: 1},
 							},
+							Channel: "ch-1",
 						},
 					},
 					2: {
@@ -740,6 +741,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 							PlanID:           2,
 							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0),
 							TimeoutInSeconds: 1,
+							Channel:          "ch-1",
 						},
 					},
 					3: {
@@ -749,6 +751,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 							PlanID:           3,
 							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0),
 							TimeoutInSeconds: 1,
+							Channel:          "ch-1",
 						},
 					},
 					4: {
@@ -758,6 +761,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 							PlanID:           4,
 							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0) - 200*1000,
 							TimeoutInSeconds: 1,
+							Channel:          "ch-1",
 						},
 					},
 					5: { // timeout and failed
@@ -767,6 +771,7 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 							PlanID:           5,
 							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0) - 200*1000,
 							TimeoutInSeconds: 1,
+							Channel:          "ch-1",
 						},
 					},
 					6: { // timeout and executing
@@ -776,6 +781,16 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 							PlanID:           6,
 							StartTime:        tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0) - 200*1000,
 							TimeoutInSeconds: 1,
+							Channel:          "ch-1",
+						},
+					},
+					8: { // node not match with channel
+						state:      executing,
+						dataNodeID: 2,
+						plan: &datapb.CompactionPlan{
+							PlanID:    8,
+							StartTime: tsoutil.ComposeTS(ts.UnixNano()/int64(time.Millisecond), 0) - 200*1000,
+							Channel:   "ch-8",
 						},
 					},
 				},
@@ -801,9 +816,11 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 										{PlanID: 4, State: commonpb.CompactionState_Executing},
 										{PlanID: 6, State: commonpb.CompactionState_Executing},
 										{PlanID: 7, State: commonpb.CompactionState_Completed, Result: &datapb.CompactionResult{PlanID: 7}},
+										{PlanID: 8, State: commonpb.CompactionState_Completed, Result: &datapb.CompactionResult{PlanID: 8}},
 									},
 								},
 							}},
+							100: {client: &mockDataNodeClient{}},
 						},
 					},
 				},
@@ -811,17 +828,27 @@ func Test_compactionPlanHandler_updateCompaction(t *testing.T) {
 			args{ts: tsoutil.ComposeTS(ts.Add(5*time.Second).UnixNano()/int64(time.Millisecond), 0)},
 			false,
 			[]int64{4, 6},
-			[]int64{2, 5},
+			[]int64{2, 5, 8},
 			[]int64{1, 3},
 		},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			paramtable.Get().Save(paramtable.Get().DataCoordCfg.CompactionWorkerParalleTasks.Key, "10")
+			defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.CompactionWorkerParalleTasks.Key)
 			c := &compactionPlanHandler{
 				plans:      tt.fields.plans,
 				sessions:   tt.fields.sessions,
 				meta:       tt.fields.meta,
 				parallelCh: make(map[int64]chan struct{}),
+				chManager: &ChannelManager{
+					store: &ChannelStore{
+						channelsInfo: map[int64]*NodeChannelInfo{
+							2:   {NodeID: 2, Channels: []RWChannel{&channelMeta{Name: "ch-1"}}},
+							100: {NodeID: 100, Channels: []RWChannel{&channelMeta{Name: "ch-8"}}},
+						},
+					},
+				},
 			}
 			for range tt.failed {
 				c.acquireQueue(2)
