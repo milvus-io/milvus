@@ -11,6 +11,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -61,8 +62,8 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 	t.SearchRequest.OutputFieldsId = outputFieldIDs
 
 	if t.request.GetDslType() == commonpb.DslType_BoolExprV1 {
-		annsField, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
-		if err != nil || len(annsField) == 0 {
+		annsFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(AnnsFieldKey, t.request.GetSearchParams())
+		if err != nil || len(annsFieldName) == 0 {
 			vecFields := typeutil.GetVectorFieldSchemas(t.schema.CollectionSchema)
 			if len(vecFields) == 0 {
 				return errors.New(AnnsFieldKey + " not found in schema")
@@ -72,24 +73,29 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 				return errors.New("multiple anns_fields exist, please specify a anns_field in search_params")
 			}
 
-			annsField = vecFields[0].Name
+			annsFieldName = vecFields[0].Name
 		}
 		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams(), t.schema.CollectionSchema)
+		annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
+		if queryInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
+			return errors.New("not support search_group_by operation based on binary vector column")
+		}
+
 		if err != nil {
 			return err
 		}
 		t.offset = offset
 
-		plan, err := planparserv2.CreateSearchPlan(t.schema.schemaHelper, t.request.Dsl, annsField, queryInfo)
+		plan, err := planparserv2.CreateSearchPlan(t.schema.schemaHelper, t.request.Dsl, annsFieldName, queryInfo)
 		if err != nil {
 			log.Warn("failed to create query plan", zap.Error(err),
 				zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
-				zap.String("anns field", annsField), zap.Any("query info", queryInfo))
+				zap.String("anns field", annsFieldName), zap.Any("query info", queryInfo))
 			return merr.WrapErrParameterInvalidMsg("failed to create query plan: %v", err)
 		}
 		log.Debug("create query plan",
 			zap.String("dsl", t.request.Dsl), // may be very large if large term passed.
-			zap.String("anns field", annsField), zap.Any("query info", queryInfo))
+			zap.String("anns field", annsFieldName), zap.Any("query info", queryInfo))
 
 		if t.partitionKeyMode {
 			expr, err := ParseExprFromPlan(plan)

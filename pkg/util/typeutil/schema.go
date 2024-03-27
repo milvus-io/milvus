@@ -1075,6 +1075,12 @@ func GetField(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldS
 	})
 }
 
+func GetFieldByName(schema *schemapb.CollectionSchema, fieldName string) *schemapb.FieldSchema {
+	return lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool {
+		return field.GetName() == fieldName
+	})
+}
+
 func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) bool {
 	primaryFieldID := primaryFieldSchema.FieldID
 	primaryFieldName := primaryFieldSchema.Name
