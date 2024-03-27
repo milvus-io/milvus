@@ -125,6 +125,20 @@ func TestLRUCache(t *testing.T) {
 		})
 		assert.Equal(t, ErrNoSuchItem, err)
 	})
+
+	t.Run("test reloader", func(t *testing.T) {
+		cache := cacheBuilder.WithReloader(func(key int) (int, bool) {
+			return -key, true
+		}).Build()
+		err := cache.Do(1, func(i int) error { return nil })
+		assert.NoError(t, err)
+		exist := cache.MarkItemNeedReload(1)
+		assert.True(t, exist)
+		cache.Do(1, func(i int) error {
+			assert.Equal(t, -1, i)
+			return nil
+		})
+	})
 }
 
 func TestLRUCacheConcurrency(t *testing.T) {
