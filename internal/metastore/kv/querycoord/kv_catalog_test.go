@@ -203,22 +203,22 @@ func (suite *CatalogTestSuite) TestResourceGroup() {
 }
 
 func (suite *CatalogTestSuite) TestCollectionTarget() {
-	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
+	suite.catalog.SaveCollectionTargets(&querypb.CollectionTarget{
 		CollectionID: 1,
 		Version:      1,
-	})
-	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
-		CollectionID: 2,
-		Version:      2,
-	})
-	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
-		CollectionID: 3,
-		Version:      3,
-	})
-	suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{
-		CollectionID: 1,
-		Version:      4,
-	})
+	},
+		&querypb.CollectionTarget{
+			CollectionID: 2,
+			Version:      2,
+		},
+		&querypb.CollectionTarget{
+			CollectionID: 3,
+			Version:      3,
+		},
+		&querypb.CollectionTarget{
+			CollectionID: 1,
+			Version:      4,
+		})
 	suite.catalog.RemoveCollectionTarget(2)
 
 	targets, err := suite.catalog.GetCollectionTargets()
@@ -230,18 +230,18 @@ func (suite *CatalogTestSuite) TestCollectionTarget() {
 	// test access meta store failed
 	mockStore := mocks.NewMetaKv(suite.T())
 	mockErr := errors.New("failed to access etcd")
-	mockStore.EXPECT().Save(mock.Anything, mock.Anything).Return(mockErr)
+	mockStore.EXPECT().MultiSave(mock.Anything).Return(mockErr)
 	mockStore.EXPECT().LoadWithPrefix(mock.Anything).Return(nil, nil, mockErr)
 
 	suite.catalog.cli = mockStore
-	err = suite.catalog.SaveCollectionTarget(&querypb.CollectionTarget{})
+	err = suite.catalog.SaveCollectionTargets(&querypb.CollectionTarget{})
 	suite.ErrorIs(err, mockErr)
 
 	_, err = suite.catalog.GetCollectionTargets()
 	suite.ErrorIs(err, mockErr)
 
 	// test invalid message
-	err = suite.catalog.SaveCollectionTarget(nil)
+	err = suite.catalog.SaveCollectionTargets(nil)
 	suite.Error(err)
 }
 

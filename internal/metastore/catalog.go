@@ -164,7 +164,7 @@ type QueryCoordCatalog interface {
 	RemoveResourceGroup(rgName string) error
 	GetResourceGroups() ([]*querypb.ResourceGroup, error)
 
-	SaveCollectionTarget(target *querypb.CollectionTarget) error
+	SaveCollectionTargets(target ...*querypb.CollectionTarget) error
 	RemoveCollectionTarget(collectionID int64) error
 	GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error)
 }

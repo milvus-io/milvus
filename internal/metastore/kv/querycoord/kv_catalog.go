@@ -241,16 +241,21 @@ func (s Catalog) ReleaseReplica(collection, replica int64) error {
 	return s.cli.Remove(key)
 }
 
-func (s Catalog) SaveCollectionTarget(target *querypb.CollectionTarget) error {
-	k := encodeCollectionTargetKey(target.GetCollectionID())
-	v, err := proto.Marshal(target)
-	if err != nil {
-		return err
+func (s Catalog) SaveCollectionTargets(targets ...*querypb.CollectionTarget) error {
+	kvs := make(map[string]string)
+	for _, target := range targets {
+		k := encodeCollectionTargetKey(target.GetCollectionID())
+		v, err := proto.Marshal(target)
+		if err != nil {
+			return err
+		}
+		var compressed bytes.Buffer
+		compressor.ZstdCompress(bytes.NewReader(v), io.Writer(&compressed), zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		kvs[k] = compressed.String()
 	}
+
 	// to reduce the target size, we do compress before write to etcd
-	var compressed bytes.Buffer
-	compressor.ZstdCompress(bytes.NewReader(v), io.Writer(&compressed), zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
-	err = s.cli.Save(k, compressed.String())
+	err := s.cli.MultiSave(kvs)
 	if err != nil {
 		return err
 	}
