@@ -42,11 +42,11 @@ def main(host="127.0.0.1"):
             if op == "hybrid_search":
                 sq1=AnnSearchRequest([vector_to_search[random_id]], "text_emb", search_params, 100, output_fields=["*"])
                 sq2=AnnSearchRequest([vector_to_search[random_id]], "image_emb", search_params, 100, output_fields=["*"])
-                res = collection.hybrid_search([sq1, sq2], RRFRanker(10), 100, output_fields=["*"])
+                res = collection.hybrid_search([sq1, sq2], RRFRanker(60), 100, output_fields=["*"])
             elif op == "query_id":
-                res = collection.query(expr=f"id in {[x for x in range(100)]}", output_fields=["*"])
+                res = collection.query(expr=f"id in {[x for x in range(100)]}", output_fields=["*"], limit=100)
             elif op == "query_varchar":
-                res = collection.query(expr='text like %1', output_fields=["*"])
+                res = collection.query(expr='text like "1%"', output_fields=["*"], limit=100)
             elif op == "insert":
                 insert_collection = Collection(name="test_restful_insert_perf")
                 res = insert_collection.insert(data=insert_data)
@@ -58,24 +58,48 @@ def main(host="127.0.0.1"):
             logger.info(f"{op} cost  {tt:.4f} seconds")
 
         logger.info("start restful test")
-        url = f"http://{host}:19530/v1/vector/{op}"
+        path = op
+        if "query" in op:
+            path = "query"
+
+        url = f"http://{host}:19530/v2/vectordb/entities/{path}"
         logger.info(f"{op}...")
         for i in range(100):
             t0 = time.time()
             if op == "search":
                 payload = json.dumps({"collectionName": "test_restful_perf",
                                       "outputFields": ["*"],
-                                      "vector": [random.random() for _ in range(768)],
+                                      "annsField": "text_emb",
+                                      "data": [random.random() for _ in range(768)],
                                       "limit": 100,
                                       })
 
                 response = requests.request("POST", url, headers=headers, data=payload)
             if op == "hybrid_search":
                 payload = json.dumps({"collectionName": "test_restful_perf",
-                                      "outputFields": ["*"],
-                                      "vector": [random.random() for _ in range(768)],
-                                      "limit": 100,
-                                      })
+                                    "search": [
+                                        {
+                                            "data": [random.random() for _ in range(768)],
+                                            "annsField": "text_emb",
+                                            "limit": 100,
+                                            "outputFields": ["*"]
+                                        },
+                                        {
+                                            "data": [random.random() for _ in range(768)],
+                                            "annsField": "image_emb",
+                                            "limit": 100,
+                                            "outputFields": ["*"]
+                                        },
+                                    ],
+                                    "rerank": {
+                                        "strategy": "rrf",
+                                        "params": {
+                                            "k": 60,
+                                        }
+                                    },
+                                    "limit": 100,
+                                    "outputFields": ["*"]
+                                    })
 
                 response = requests.request("POST", url, headers=headers, data=payload)
             elif op == "query_id":
@@ -87,7 +111,7 @@ def main(host="127.0.0.1"):
             elif op == "query_varchar":
                 payload = json.dumps({"collectionName": "test_restful_perf",
                                       "outputFields": ["*"],
-                                      "expr": f"id in {[x for x in range(100)]}",
+                                      "expr": 'text like "1%"',
                                       })
                 response = requests.request("POST", url, headers=headers, data=payload)
             elif op == "insert":
