@@ -222,7 +222,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
 		return !outboundNodes.Contain(node)
 	})
-	plans := c.balancer.AssignChannel(channels, availableNodes)
+	plans := c.balancer.AssignChannel(channels, availableNodes, false)
 	for i := range plans {
 		plans[i].Replica = replica
 	}
