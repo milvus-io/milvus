@@ -2149,17 +2149,19 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.CacheEnabled.Init(base.mgr)
 
 	p.MmapDirPath = ParamItem{
-		Key:          "queryNode.mmapDirPath",
+		Key:          "queryNode.mmap.mmapDirPath",
 		Version:      "2.3.0",
 		DefaultValue: "",
+		FallbackKeys: []string{"queryNode.mmapDirPath"},
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 	}
 	p.MmapDirPath.Init(base.mgr)
 
 	p.MmapEnabled = ParamItem{
-		Key:          "queryNode.mmapEnabled",
+		Key:          "queryNode.mmap.mmapEnabled",
 		Version:      "2.4.0",
 		DefaultValue: "false",
+		FallbackKeys: []string{"queryNode.mmapEnabled"},
 		Doc:          "Enable mmap for loading data",
 	}
 	p.MmapEnabled.Init(base.mgr)

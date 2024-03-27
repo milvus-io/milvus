@@ -354,7 +354,8 @@ queryNode:
       taskQueueExpire: 60 # 1 min by default, expire time of inner user task queue since queue is empty.
       enableCrossUserGrouping: false # false by default Enable Cross user grouping when using user-task-polling policy. (close it if task of any user can not merge others).
       maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
-  mmapEnabled: false # enable mmap global, if set true, will use mmap to load segment data
+  mmap:
+    mmapEnabled: false # enable mmap global, if set true, will use mmap to load segment data
 
   # can specify ip for example
   # ip: 127.0.0.1
