@@ -80,6 +80,10 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
     collection.load()
     num = collection.num_entities
     logger.info(f"collection {collection_name} loaded, num_entities: {num}")
+    index_list = utility.list_indexes(collection_name=collection_name)
+    for index_name in index_list:
+        progress = utility.index_building_progress(collection_name=collection_name, index_name=index_name)
+        logger.info(f"collection {collection_name} index {index_name} progress: {progress}")
 
 
 if __name__ == "__main__":
