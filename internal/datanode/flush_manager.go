@@ -105,9 +105,12 @@ type orderFlushQueue struct {
 	tailMut sync.Mutex
 	tailCh  chan struct{}
 
-	injectMut     sync.Mutex
-	runningTasks  int32
+	injectMut    sync.Mutex
+	injectWg     sync.WaitGroup // block create task when some inject wait handler done
+	runningTasks int32
+
 	postInjection postInjectionFunc
+	postMut       sync.Mutex
 }
 
 // newOrderFlushQueue creates an orderFlushQueue
@@ -136,6 +139,8 @@ func (q *orderFlushQueue) getFlushTaskRunner(pos *msgpb.MsgPosition) *flushTaskR
 	if !loaded {
 		// take over injection if task queue is handling it
 		q.injectMut.Lock()
+		// wait injection handling before finished.
+		q.injectWg.Wait()
 		q.runningTasks++
 		q.injectMut.Unlock()
 		// add task to tail
@@ -157,6 +162,11 @@ func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInj
 	q.working.GetAndRemove(getSyncTaskID(pack.pos))
 	// after descreasing working count, check whether flush queue is empty
 	q.injectMut.Lock()
+	defer q.injectMut.Unlock()
+
+	q.postMut.Lock()
+	defer q.postMut.Unlock()
+
 	q.runningTasks--
 	// set postInjection function if injection is handled in task
 	if postInjection != nil {
@@ -171,11 +181,10 @@ func (q *orderFlushQueue) postTask(pack *segmentFlushPack, postInjection postInj
 	if q.runningTasks == 0 {
 		for i := 0; i < len(q.injectCh); i++ {
 			inject := <-q.injectCh
+			q.injectWg.Add(1)
 			go q.handleInject(inject)
 		}
 	}
-
-	q.injectMut.Unlock()
 }
 
 // enqueueInsertBuffer put insert buffer data into queue
@@ -202,17 +211,19 @@ func (q *orderFlushQueue) inject(inject *taskInjection) {
 		return
 	}
 	// otherwise just handle injection here
+	q.injectWg.Add(1)
 	go q.handleInject(inject)
 }
 
 func (q *orderFlushQueue) handleInject(inject *taskInjection) {
+	defer q.injectWg.Done()
 	// notify one injection done
 	inject.injectOne()
 	ok := <-inject.injectOver
 	// apply injection
 	if ok {
-		q.injectMut.Lock()
-		defer q.injectMut.Unlock()
+		q.postMut.Lock()
+		defer q.postMut.Unlock()
 		q.postInjection = inject.postInjection
 	}
 }
@@ -627,11 +638,11 @@ func (m *rendezvousFlushManager) startDropping() {
 		for _, pack := range m.dropHandler.packs {
 			q := m.getFlushQueue(pack.segmentID)
 			// queue will never be nil, sincde getFlushQueue will initialize one if not found
-			q.injectMut.Lock()
+			q.postMut.Lock()
 			if q.postInjection != nil {
 				q.postInjection(pack)
 			}
-			q.injectMut.Unlock()
+			q.postMut.Unlock()
 		}
 		m.dropHandler.flushAndDrop(m.dropHandler.packs) // invoke drop & flush
 	}()
@@ -652,6 +663,7 @@ func (m *rendezvousFlushManager) close() {
 		// assertion ok
 		queue.injectMut.Lock()
 		for i := 0; i < len(queue.injectCh); i++ {
+			queue.injectWg.Add(1)
 			go queue.handleInject(<-queue.injectCh)
 		}
 		queue.injectMut.Unlock()
