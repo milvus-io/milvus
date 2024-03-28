@@ -343,7 +343,7 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 	suite.Equal(tasks[0].ReplicaID(), int64(1))
 	suite.Len(tasks[0].Actions(), 1)
 	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeReduce)
-	suite.Equal(tasks[0].Actions()[0].Node(), int64(1))
+	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).SegmentID(), int64(3))
 	suite.Equal(tasks[0].Actions()[0].(*task.LeaderAction).Version(), int64(0))
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityHigh)
