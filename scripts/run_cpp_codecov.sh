@@ -61,11 +61,17 @@ fi
 # starting the timer
 beginTime=`date +%s`
 
+findASANBeginTime=`date +%s`
+ASAN_PATH=$(find /usr -name 'libasan.so*' 2>/dev/null -printf "%T@ %p\n" | sort -n | tail -1 | awk '{print $2}')
+echo "ASAN_PATH: ${ASAN_PATH}"
+findASANEndTime=`date +%s`
+echo "Total time for finding libasan.so:" $(($findASANEndTime-$findASANBeginTime)) "s"
+
 # run unittest
 for test in `ls ${MILVUS_CORE_UNITTEST_DIR}`; do
     echo "Running cpp unittest: ${MILVUS_CORE_UNITTEST_DIR}/$test"
     # run unittest
-    ${MILVUS_CORE_UNITTEST_DIR}/${test}
+    LD_PRELOAD=${ASAN_PATH} ${MILVUS_CORE_UNITTEST_DIR}/${test}
     if [ $? -ne 0 ]; then
         echo ${args}
         echo "${MILVUS_CORE_UNITTEST_DIR}/${test} run failed"
