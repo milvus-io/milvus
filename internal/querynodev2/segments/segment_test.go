@@ -197,7 +197,6 @@ func (suite *SegmentSuite) TestCASVersion() {
 }
 
 func (suite *SegmentSuite) TestSegmentRemoveUnusedFieldFiles() {
-	
 }
 
 func (suite *SegmentSuite) TestSegmentReleased() {

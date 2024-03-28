@@ -207,6 +207,7 @@ func (s *baseSegment) IsLazyLoad() bool { return s.isLazyLoad }
 func (s *baseSegment) NeedUpdatedVersion() int64 {
 	return s.needUpdatedVersion.Load()
 }
+
 func (s *baseSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
 	s.loadInfo = loadInfo
 }
