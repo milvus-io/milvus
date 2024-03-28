@@ -53,9 +53,19 @@ class SegcoreConfig {
         return nprobe_;
     }
 
+    float
+    get_vec_compress_ratio() const {
+        return vec_compress_ratio_;
+    }
+
     void
     set_nlist(int64_t nlist) {
         nlist_ = nlist;
+    }
+
+    void
+    set_vec_compress_ratio(float value) {
+        vec_compress_ratio_ = value;
     }
 
     void
@@ -78,6 +88,7 @@ class SegcoreConfig {
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
     inline static int64_t nprobe_ = 4;
+    inline static float vec_compress_ratio_ = 0.25;
 };
 
 }  // namespace milvus::segcore

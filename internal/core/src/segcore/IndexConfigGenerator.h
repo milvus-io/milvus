@@ -11,6 +11,7 @@
 
 #pragma once
 
+#include <optional>
 #include "common/Types.h"
 #include "common/IndexMeta.h"
 #include "knowhere/config.h"
@@ -30,15 +31,15 @@ enum class IndexConfigLevel {
 // this is the config used for generating growing index or the temp sealed index
 // when the segment is sealed before the index is built.
 class VecIndexConfig {
-    inline static const std::map<SegmentType, std::string> support_index_types =
-        {{SegmentType::Growing, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC},
-         {SegmentType::Sealed, knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC}};
-
     inline static const std::map<std::string, double> index_build_ratio = {
-        {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC, 0.1}};
+        {knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC, 0.1},
+        {knowhere::IndexEnum::INDEX_FAISS_IVFSQ_CC, 0.1}};
 
     inline static const std::unordered_set<std::string> maintain_params = {
         "radius", "range_filter", "drop_ratio_search"};
+
+    inline static const std::set<DataType> supported_vec_data_type = {
+        DataType::VECTOR_FLOAT};
 
  public:
     VecIndexConfig(const int64_t max_index_row_count,
@@ -60,6 +61,22 @@ class VecIndexConfig {
 
     SearchInfo
     GetSearchConf(const SearchInfo& searchInfo);
+
+    void
+    SetDenseVecIndexType(float vec_compress_ratio);
+
+    std::optional<uint32_t>
+    GetVecCodeSize(float vec_compress_ratio);
+
+    uint64_t
+    EstimateBuildBinlogIndexMemoryInBytes(uint32_t row_data_size,
+                                          float build_expand_rate);
+
+    inline bool
+    IsSupportedDataType(DataType data_type) {
+        return supported_vec_data_type.find(data_type) !=
+               supported_vec_data_type.end();
+    }
 
  private:
     const SegcoreConfig& config_;

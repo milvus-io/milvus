@@ -24,6 +24,7 @@
 #include "storage/Util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "IndexConfigGenerator.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {

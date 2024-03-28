@@ -1929,6 +1929,7 @@ type queryNodeConfig struct {
 	EnableTempSegmentIndex        ParamItem `refreshable:"false"`
 	InterimIndexNlist             ParamItem `refreshable:"false"`
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
+	InterimIndexVecCompressRatio  ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
@@ -2123,6 +2124,15 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export: true,
 	}
 	p.InterimIndexNProbe.Init(base.mgr)
+
+	p.InterimIndexVecCompressRatio = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.vecCompressRatio",
+		Version:      "2.0.0",
+		DefaultValue: "0.25",
+		Doc:          "temp index compress each vector conponent into vecCompressRatio * origin vector size",
+		Export:       true,
+	}
+	p.InterimIndexVecCompressRatio.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",

@@ -28,7 +28,7 @@
 #include "log/Log.h"
 #include "segcore/SegcoreConfig.h"
 #include "index/VectorIndex.h"
-
+#include "storage/IndexingRecordFileManager.h"
 namespace milvus::segcore {
 
 // this should be concurrent
@@ -174,7 +174,9 @@ class VectorFieldIndexing : public FieldIndexing {
     explicit VectorFieldIndexing(const FieldMeta& field_meta,
                                  const FieldIndexMeta& field_index_meta,
                                  int64_t segment_max_row_count,
-                                 const SegcoreConfig& segcore_config);
+                                 const SegcoreConfig& segcore_config,
+                                 milvus::storage::IndexingRecordFileManagerPtr
+                                     index_record_local_manager);
 
     void
     BuildIndexRange(int64_t ack_beg,
@@ -244,22 +246,31 @@ class VectorFieldIndexing : public FieldIndexing {
     std::unique_ptr<VecIndexConfig> config_;
     std::unique_ptr<index::VectorIndex> index_;
     tbb::concurrent_vector<std::unique_ptr<index::VectorIndex>> data_;
+    std::optional<std::string> index_raw_data_prefix_ = std::nullopt;
 };
 
 std::unique_ptr<FieldIndexing>
-CreateIndex(const FieldMeta& field_meta,
-            const FieldIndexMeta& field_index_meta,
-            int64_t segment_max_row_count,
-            const SegcoreConfig& segcore_config);
+CreateIndex(
+    const FieldMeta& field_meta,
+    const FieldIndexMeta& field_index_meta,
+    int64_t segment_max_row_count,
+    const SegcoreConfig& segcore_config,
+    milvus::storage::IndexingRecordFileManagerPtr index_cecord_file_manager);
 
 class IndexingRecord {
  public:
     explicit IndexingRecord(const Schema& schema,
                             const IndexMetaPtr& indexMetaPtr,
-                            const SegcoreConfig& segcore_config)
+                            const SegcoreConfig& segcore_config,
+                            const int64_t segment_id)
         : schema_(schema),
           index_meta_(indexMetaPtr),
           segcore_config_(segcore_config) {
+        if (segment_id != -1) {
+            ir_file_manager_ =
+                std::make_shared<milvus::storage::IndexingRecordFileManager>(
+                    segment_id);
+        }
         Initialize();
     }
 
@@ -291,7 +302,8 @@ class IndexingRecord {
                             CreateIndex(field_meta,
                                         vec_filed_meta,
                                         index_meta_->GetIndexMaxRowCount(),
-                                        segcore_config_));
+                                        segcore_config_,
+                                        ir_file_manager_));
                     }
                 }
             }
@@ -450,6 +462,7 @@ class IndexingRecord {
     //    std::atomic<int64_t> finished_ack_ = 0;
     AckResponder finished_ack_;
     std::mutex mutex_;
+    milvus::storage::IndexingRecordFileManagerPtr ir_file_manager_ = nullptr;
 
     // field_offset => indexing
     std::map<FieldId, std::unique_ptr<FieldIndexing>> field_indexings_;
