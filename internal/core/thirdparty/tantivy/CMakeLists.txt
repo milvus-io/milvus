@@ -27,11 +27,18 @@ add_custom_command(OUTPUT cargo_clean
         )
 add_custom_target(cargo_clean_target DEPENDS cargo_clean)
 
+add_custom_command(OUTPUT cargo_tree
+        COMMENT "cargo tree"
+        COMMAND cargo tree
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
+        )
+add_custom_target(cargo_tree_target DEPENDS cargo_tree)
+
 add_custom_command(OUTPUT ls_cargo
         COMMENT "ls cargo"
         COMMAND ls ${HOME_VAR}/.cargo/bin/
         )
-add_custom_target(ls_cargo_target DEPENDS ls_cargo cargo_clean_target)
+add_custom_target(ls_cargo_target DEPENDS ls_cargo cargo_clean_target cargo_tree_target)
 
 add_custom_command(OUTPUT compile_tantivy
         COMMENT "Compiling tantivy binding"
