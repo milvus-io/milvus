@@ -107,7 +107,7 @@ func TestCompactionExecutor(t *testing.T) {
 			found = ex.executing.Contain(mc.getPlanID())
 		}
 
-		ex.clearTasksByChannel("mock")
+		ex.discardByDroppedChannel("mock")
 
 		select {
 		case <-mc.ctx.Done():
