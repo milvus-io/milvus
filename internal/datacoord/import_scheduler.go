@@ -25,6 +25,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -47,6 +48,8 @@ type importScheduler struct {
 	alloc   allocator
 	imeta   ImportMeta
 
+	buildIndexCh chan UniqueID
+
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -55,13 +58,15 @@ func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	alloc allocator,
 	imeta ImportMeta,
+	buildIndexCh chan UniqueID,
 ) ImportScheduler {
 	return &importScheduler{
-		meta:      meta,
-		cluster:   cluster,
-		alloc:     alloc,
-		imeta:     imeta,
-		closeChan: make(chan struct{}),
+		meta:         meta,
+		cluster:      cluster,
+		alloc:        alloc,
+		imeta:        imeta,
+		buildIndexCh: buildIndexCh,
+		closeChan:    make(chan struct{}),
 	}
 }
 
@@ -295,12 +300,14 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
 				return
 			}
-			op := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
-			err = s.meta.UpdateSegmentsInfo(op)
+			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
+			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
+			err = s.meta.UpdateSegmentsInfo(op1, op2)
 			if err != nil {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)
 				return
 			}
+			s.buildIndexCh <- info.GetSegmentID() // accelerate index building
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")
 		err = s.imeta.UpdateTask(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed), UpdateCompleteTime(completeTime))

@@ -39,13 +39,12 @@ type ImportChecker interface {
 }
 
 type importChecker struct {
-	meta         *meta
-	broker       broker.Broker
-	cluster      Cluster
-	alloc        allocator
-	sm           Manager
-	imeta        ImportMeta
-	buildIndexCh chan UniqueID
+	meta    *meta
+	broker  broker.Broker
+	cluster Cluster
+	alloc   allocator
+	sm      Manager
+	imeta   ImportMeta
 
 	closeOnce sync.Once
 	closeChan chan struct{}
@@ -57,17 +56,15 @@ func NewImportChecker(meta *meta,
 	alloc allocator,
 	sm Manager,
 	imeta ImportMeta,
-	buildIndexCh chan UniqueID,
 ) ImportChecker {
 	return &importChecker{
-		meta:         meta,
-		broker:       broker,
-		cluster:      cluster,
-		alloc:        alloc,
-		sm:           sm,
-		imeta:        imeta,
-		buildIndexCh: buildIndexCh,
-		closeChan:    make(chan struct{}),
+		meta:      meta,
+		broker:    broker,
+		cluster:   cluster,
+		alloc:     alloc,
+		sm:        sm,
+		imeta:     imeta,
+		closeChan: make(chan struct{}),
 	}
 }
 
@@ -256,9 +253,6 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 
 	// Verify completion of index building for imported segments.
 	unindexed := c.meta.indexMeta.GetUnindexedSegments(job.GetCollectionID(), segmentIDs)
-	for _, segmentID := range unindexed {
-		c.buildIndexCh <- segmentID // accelerate index building
-	}
 	if Params.DataCoordCfg.WaitForIndex.GetAsBool() && len(unindexed) > 0 {
 		log.Debug("waiting for import segments building index...", zap.Int64s("unindexed", unindexed))
 		return
@@ -272,14 +266,6 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		}
 		return segment.GetIsImporting()
 	})
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	err := c.sm.FlushImportSegments(ctx, job.GetCollectionID(), unfinished)
-	if err != nil {
-		log.Warn("flush imported segments failed", zap.Int64s("segments", unfinished), zap.Error(err))
-		return
-	}
 
 	channels, err := c.meta.GetSegmentsChannels(unfinished)
 	if err != nil {

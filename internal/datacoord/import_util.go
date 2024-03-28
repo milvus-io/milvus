@@ -350,7 +350,7 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, i
 	if totalSegment != 0 {
 		completedProgress = float32(unsetIsImportingSegment) / float32(totalSegment)
 	}
-	return importingProgress*0.8 + completedProgress*0.2, importedRows, totalRows
+	return importingProgress*0.5 + completedProgress*0.5, importedRows, totalRows
 }
 
 func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
@@ -362,11 +362,11 @@ func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalp
 
 	case internalpb.ImportJobState_PreImporting:
 		progress := getPreImportingProgress(jobID, imeta)
-		return 10 + int64(progress*40), internalpb.ImportJobState_Importing, 0, 0, ""
+		return 10 + int64(progress*30), internalpb.ImportJobState_Importing, 0, 0, ""
 
 	case internalpb.ImportJobState_Importing:
 		progress, importedRows, totalRows := getImportingProgress(jobID, imeta, meta)
-		return 10 + 40 + int64(progress*50), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
+		return 10 + 30 + int64(progress*60), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
 
 	case internalpb.ImportJobState_Completed:
 		totalRows := int64(0)

@@ -88,9 +88,11 @@ func (s *scheduler) Start() {
 				case PreImportTaskType:
 					fs := s.PreImport(task)
 					futures[task.GetTaskID()] = fs
+					tryFreeFutures(futures)
 				case ImportTaskType:
 					fs := s.Import(task)
 					futures[task.GetTaskID()] = fs
+					tryFreeFutures(futures)
 				}
 			}
 			for taskID, fs := range futures {
@@ -127,6 +129,15 @@ func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 	}
 	res = append(res, fields...)
 	return res
+}
+
+func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
+	for k, fs := range futures {
+		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
+			return !f.Done()
+		})
+		futures[k] = fs
+	}
 }
 
 func (s *scheduler) handleErr(task Task, err error, msg string) {
