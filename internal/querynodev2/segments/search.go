@@ -109,6 +109,78 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	return searchResults, nil
 }
 
+const (
+	defaultStreamConcurrency = 2
+)
+
+// searchSegmentsStreamly performs search on listed segments in a stream mode instead of a batch mode
+// all segment ids are validated before calling this function
+func searchSegmentsStreamly(ctx context.Context,
+	mgr *Manager,
+	segments []Segment,
+	segType SegmentType,
+	searchReq *SearchRequest,
+	resultStream chan *SearchResult,
+	errStream chan error,
+) {
+	var (
+		wg sync.WaitGroup
+		// For log only
+		mu                   sync.Mutex
+		segmentsWithoutIndex []int64
+	)
+
+	searchLabel := metrics.SealedSegmentLabel
+	if segType == commonpb.SegmentState_Growing {
+		searchLabel = metrics.GrowingSegmentLabel
+	}
+
+	streamCredits := make(chan int, defaultStreamConcurrency)
+	for i := 0; i < defaultStreamConcurrency; i++ {
+		streamCredits <- i
+	}
+	defer close(streamCredits)
+	searcher := func(seg Segment) error {
+		// record search time
+		tr := timerecord.NewTimeRecorder("searchOnSegments")
+		searchResult, err := seg.Search(ctx, searchReq)
+		errStream <- err
+		resultStream <- searchResult
+		// update metrics
+		elapsed := tr.ElapseSpan().Milliseconds()
+		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
+		return nil
+	}
+
+	// calling segment search in goroutines
+	for i, segment := range segments {
+		wg.Add(1)
+		go func(seg Segment, i int) {
+			defer wg.Done()
+			if !seg.ExistIndex(searchReq.searchFieldID) {
+				mu.Lock()
+				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
+				mu.Unlock()
+			}
+			<-streamCredits
+			if seg.LoadStatus() == LoadStatusMeta {
+				mgr.DiskCache.Do(seg.ID(), searcher)
+			} else {
+				searcher(seg)
+			}
+			defer func() {
+				streamCredits <- 1
+			}()
+		}(segment, i)
+	}
+	wg.Wait()
+	defer close(resultStream)
+	defer close(errStream)
+}
+
 // search will search on the historical segments the target segments in historical.
 // if segIDs is not specified, it will search on all the historical segments speficied by partIDs.
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
@@ -131,4 +203,15 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 	}
 	searchResults, err := searchSegments(ctx, manager, segments, SegmentTypeGrowing, searchReq)
 	return searchResults, segments, err
+}
+
+func SearchHistoricalStreamly(ctx context.Context, manager *Manager, searchReq *SearchRequest,
+	collID int64, partIDs []int64, segIDs []int64, streamingResults chan *SearchResult, errStream chan error,
+) ([]Segment, error) {
+	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
+	if err != nil {
+		return segments, err
+	}
+	searchSegmentsStreamly(ctx, manager, segments, SegmentTypeSealed, searchReq, streamingResults, errStream)
+	return segments, nil
 }
