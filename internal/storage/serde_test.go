@@ -17,6 +17,8 @@
 package storage
 
 import (
+	"bytes"
+	"context"
 	"io"
 	"reflect"
 	"testing"
@@ -24,6 +26,8 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/apache/arrow/go/v12/parquet/file"
+	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -46,23 +50,18 @@ func TestBinlogDeserializeReader(t *testing.T) {
 	})
 
 	t.Run("test deserialize", func(t *testing.T) {
-		len := 3
-		blobs, err := generateTestData(len)
+		size := 3
+		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
 		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
 		assert.NoError(t, err)
 		defer reader.Close()
 
-		for i := 1; i <= len; i++ {
+		for i := 1; i <= size; i++ {
 			err = reader.Next()
 			assert.NoError(t, err)
 
 			value := reader.Value()
-
-			f102 := make([]float32, 8)
-			for j := range f102 {
-				f102[j] = float32(i)
-			}
 			assertTestData(t, i, value)
 		}
 
@@ -71,61 +70,116 @@ func TestBinlogDeserializeReader(t *testing.T) {
 	})
 }
 
-func Test_deserializeCell(t *testing.T) {
-	onelinerArray := func(dtype arrow.DataType, payload interface{}) arrow.Array {
-		mem := memory.DefaultAllocator
+func TestBinlogStreamWriter(t *testing.T) {
+	t.Run("test write", func(t *testing.T) {
+		size := 3
 
-		switch dtype.ID() {
-		case arrow.BOOL:
-			builder := array.NewBooleanBuilder(mem)
-			builder.Append(payload.(bool))
-			return builder.NewBooleanArray()
-		case arrow.INT8:
-			builder := array.NewInt8Builder(mem)
-			builder.Append(payload.(int8))
-			return builder.NewInt8Array()
-		case arrow.INT16:
-			builder := array.NewInt16Builder(mem)
-			builder.Append(payload.(int16))
-			return builder.NewInt16Array()
-		case arrow.INT32:
-			builder := array.NewInt32Builder(mem)
-			builder.Append(payload.(int32))
-			return builder.NewInt32Array()
-		case arrow.INT64:
-			builder := array.NewInt64Builder(mem)
-			builder.Append(payload.(int64))
-			return builder.NewInt64Array()
-		case arrow.FLOAT32:
-			builder := array.NewFloat32Builder(mem)
-			builder.Append(payload.(float32))
-			return builder.NewFloat32Array()
-		case arrow.FLOAT64:
-			builder := array.NewFloat64Builder(mem)
-			builder.Append(payload.(float64))
-			return builder.NewFloat64Array()
-		case arrow.STRING:
-			builder := array.NewStringBuilder(mem)
-			builder.Append(payload.(string))
-			return builder.NewStringArray()
-		case arrow.BINARY:
-			builder := array.NewBinaryBuilder(mem, arrow.BinaryTypes.Binary)
-			builder.Append(payload.([]byte))
-			return builder.NewBinaryArray()
-		case arrow.FIXED_SIZE_BINARY:
-			typ := dtype.(*arrow.FixedSizeBinaryType)
-			builder := array.NewFixedSizeBinaryBuilder(mem, typ)
-			builder.Append(payload.([]byte))
-			return builder.NewFixedSizeBinaryArray()
+		field := arrow.Field{Name: "bool", Type: arrow.FixedWidthTypes.Boolean}
+		var w bytes.Buffer
+		rw, err := newSingleFieldRecordWriter(1, field, &w)
+		assert.NoError(t, err)
+
+		builder := array.NewBooleanBuilder(memory.DefaultAllocator)
+		builder.AppendValues([]bool{true, false, true}, nil)
+		arr := builder.NewArray()
+		defer arr.Release()
+		ar := array.NewRecord(
+			arrow.NewSchema(
+				[]arrow.Field{field},
+				nil,
+			),
+			[]arrow.Array{arr},
+			int64(size),
+		)
+		r := newSimpleArrowRecord(ar, map[FieldID]schemapb.DataType{1: schemapb.DataType_Bool}, map[FieldID]int{1: 0})
+		defer r.Release()
+		err = rw.Write(r)
+		assert.NoError(t, err)
+		rw.Close()
+
+		reader, err := file.NewParquetReader(bytes.NewReader(w.Bytes()))
+		assert.NoError(t, err)
+		arrowReader, err := pqarrow.NewFileReader(reader, pqarrow.ArrowReadProperties{BatchSize: 1024}, memory.DefaultAllocator)
+		assert.NoError(t, err)
+		rr, err := arrowReader.GetRecordReader(context.Background(), nil, nil)
+		assert.NoError(t, err)
+		defer rr.Release()
+		ok := rr.Next()
+		assert.True(t, ok)
+		rec := rr.Record()
+		defer rec.Release()
+		assert.Equal(t, int64(size), rec.NumRows())
+		ok = rr.Next()
+		assert.False(t, ok)
+	})
+}
+
+func TestBinlogSerializeWriter(t *testing.T) {
+	t.Run("test empty data", func(t *testing.T) {
+		reader, err := NewBinlogDeserializeReader(nil, common.RowIDField)
+		assert.NoError(t, err)
+		defer reader.Close()
+		err = reader.Next()
+		assert.Equal(t, io.EOF, err)
+	})
+
+	t.Run("test serialize", func(t *testing.T) {
+		size := 3
+		blobs, err := generateTestData(size)
+		assert.NoError(t, err)
+		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		assert.NoError(t, err)
+		defer reader.Close()
+
+		schema := generateTestSchema()
+		// Copy write the generated data
+		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 1024)
+		assert.NoError(t, err)
+
+		for i := 1; i <= size; i++ {
+			err = reader.Next()
+			assert.NoError(t, err)
+
+			value := reader.Value()
+			assertTestData(t, i, value)
+			writer.Write(value)
 		}
 
-		return nil
-	}
+		err = reader.Next()
+		assert.Equal(t, io.EOF, err)
+		err = writer.Close()
+		assert.NoError(t, err)
+		assert.True(t, writer.WrittenMemorySize() >= 429)
 
+		// Read from the written data
+		newblobs := make([]*Blob, len(writers))
+		i := 0
+		for _, w := range writers {
+			blob, err := w.Finalize()
+			assert.NoError(t, err)
+			assert.NotNil(t, blob)
+			newblobs[i] = blob
+			i++
+		}
+		// assert.Equal(t, blobs[0].Value, newblobs[0].Value)
+		reader, err = NewBinlogDeserializeReader(blobs, common.RowIDField)
+		assert.NoError(t, err)
+		defer reader.Close()
+		for i := 1; i <= size; i++ {
+			err = reader.Next()
+			assert.NoError(t, err, i)
+
+			value := reader.Value()
+			assertTestData(t, i, value)
+		}
+	})
+}
+
+func TestSerDe(t *testing.T) {
 	type args struct {
-		col      arrow.Array
-		dataType schemapb.DataType
-		i        int
+		dt schemapb.DataType
+		v  any
 	}
 	tests := []struct {
 		name  string
@@ -133,45 +187,49 @@ func Test_deserializeCell(t *testing.T) {
 		want  interface{}
 		want1 bool
 	}{
-		{"test bool", args{col: onelinerArray(arrow.FixedWidthTypes.Boolean, true), dataType: schemapb.DataType_Bool, i: 0}, true, true},
-		{"test bool negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Bool, i: 0}, nil, false},
-		{"test int8", args{col: onelinerArray(arrow.PrimitiveTypes.Int8, int8(1)), dataType: schemapb.DataType_Int8, i: 0}, int8(1), true},
-		{"test int8 negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Int8, i: 0}, nil, false},
-		{"test int16", args{col: onelinerArray(arrow.PrimitiveTypes.Int16, int16(1)), dataType: schemapb.DataType_Int16, i: 0}, int16(1), true},
-		{"test int16 negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Int16, i: 0}, nil, false},
-		{"test int32", args{col: onelinerArray(arrow.PrimitiveTypes.Int32, int32(1)), dataType: schemapb.DataType_Int32, i: 0}, int32(1), true},
-		{"test int32 negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Int32, i: 0}, nil, false},
-		{"test int64", args{col: onelinerArray(arrow.PrimitiveTypes.Int64, int64(1)), dataType: schemapb.DataType_Int64, i: 0}, int64(1), true},
-		{"test int64 negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Int64, i: 0}, nil, false},
-		{"test float32", args{col: onelinerArray(arrow.PrimitiveTypes.Float32, float32(1)), dataType: schemapb.DataType_Float, i: 0}, float32(1), true},
-		{"test float32 negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Float, i: 0}, nil, false},
-		{"test float64", args{col: onelinerArray(arrow.PrimitiveTypes.Float64, float64(1)), dataType: schemapb.DataType_Double, i: 0}, float64(1), true},
-		{"test float64 negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Double, i: 0}, nil, false},
-		{"test string", args{col: onelinerArray(arrow.BinaryTypes.String, "test"), dataType: schemapb.DataType_String, i: 0}, "test", true},
-		{"test string negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_String, i: 0}, nil, false},
-		{"test varchar", args{col: onelinerArray(arrow.BinaryTypes.String, "test"), dataType: schemapb.DataType_VarChar, i: 0}, "test", true},
-		{"test varchar negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_VarChar, i: 0}, nil, false},
-		{"test array negative", args{col: onelinerArray(arrow.BinaryTypes.Binary, []byte("{}")), dataType: schemapb.DataType_Array, i: 0}, nil, false},
-		{"test array negative null", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_Array, i: 0}, nil, false},
-		{"test json", args{col: onelinerArray(arrow.BinaryTypes.Binary, []byte("{}")), dataType: schemapb.DataType_JSON, i: 0}, []byte("{}"), true},
-		{"test json negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_JSON, i: 0}, nil, false},
-		{"test float vector", args{col: onelinerArray(&arrow.FixedSizeBinaryType{ByteWidth: 4}, []byte{0, 0, 0, 0}), dataType: schemapb.DataType_FloatVector, i: 0}, []float32{0.0}, true},
-		{"test float vector negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_FloatVector, i: 0}, nil, false},
-		{"test bool vector", args{col: onelinerArray(&arrow.FixedSizeBinaryType{ByteWidth: 4}, []byte("test")), dataType: schemapb.DataType_BinaryVector, i: 0}, []byte("test"), true},
-		{"test float16 vector", args{col: onelinerArray(&arrow.FixedSizeBinaryType{ByteWidth: 4}, []byte("test")), dataType: schemapb.DataType_Float16Vector, i: 0}, []byte("test"), true},
-		{"test bfloat16 vector", args{col: onelinerArray(&arrow.FixedSizeBinaryType{ByteWidth: 4}, []byte("test")), dataType: schemapb.DataType_BFloat16Vector, i: 0}, []byte("test"), true},
-		{"test bfloat16 vector negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_BFloat16Vector, i: 0}, nil, false},
-		{"test sparse float vector", args{col: onelinerArray(arrow.BinaryTypes.Binary, []byte("1234test")), dataType: schemapb.DataType_SparseFloatVector, i: 0}, []byte("1234test"), true},
-		{"test sparse float vector negative", args{col: onelinerArray(arrow.Null, nil), dataType: schemapb.DataType_SparseFloatVector, i: 0}, nil, false},
+		{"test bool", args{dt: schemapb.DataType_Bool, v: true}, true, true},
+		{"test bool negative", args{dt: schemapb.DataType_Bool, v: nil}, nil, false},
+		{"test int8", args{dt: schemapb.DataType_Int8, v: int8(1)}, int8(1), true},
+		{"test int8 negative", args{dt: schemapb.DataType_Int8, v: nil}, nil, false},
+		{"test int16", args{dt: schemapb.DataType_Int16, v: int16(1)}, int16(1), true},
+		{"test int16 negative", args{dt: schemapb.DataType_Int16, v: nil}, nil, false},
+		{"test int32", args{dt: schemapb.DataType_Int32, v: int32(1)}, int32(1), true},
+		{"test int32 negative", args{dt: schemapb.DataType_Int32, v: nil}, nil, false},
+		{"test int64", args{dt: schemapb.DataType_Int64, v: int64(1)}, int64(1), true},
+		{"test int64 negative", args{dt: schemapb.DataType_Int64, v: nil}, nil, false},
+		{"test float32", args{dt: schemapb.DataType_Float, v: float32(1)}, float32(1), true},
+		{"test float32 negative", args{dt: schemapb.DataType_Float, v: nil}, nil, false},
+		{"test float64", args{dt: schemapb.DataType_Double, v: float64(1)}, float64(1), true},
+		{"test float64 negative", args{dt: schemapb.DataType_Double, v: nil}, nil, false},
+		{"test string", args{dt: schemapb.DataType_String, v: "test"}, "test", true},
+		{"test string negative", args{dt: schemapb.DataType_String, v: nil}, nil, false},
+		{"test varchar", args{dt: schemapb.DataType_VarChar, v: "test"}, "test", true},
+		{"test varchar negative", args{dt: schemapb.DataType_VarChar, v: nil}, nil, false},
+		{"test array negative", args{dt: schemapb.DataType_Array, v: "{}"}, nil, false},
+		{"test array negative null", args{dt: schemapb.DataType_Array, v: nil}, nil, false},
+		{"test json", args{dt: schemapb.DataType_JSON, v: []byte("{}")}, []byte("{}"), true},
+		{"test json negative", args{dt: schemapb.DataType_JSON, v: nil}, nil, false},
+		{"test float vector", args{dt: schemapb.DataType_FloatVector, v: []float32{1.0}}, []float32{1.0}, true},
+		{"test float vector negative", args{dt: schemapb.DataType_FloatVector, v: nil}, nil, false},
+		{"test bool vector", args{dt: schemapb.DataType_BinaryVector, v: []byte{0xff}}, []byte{0xff}, true},
+		{"test float16 vector", args{dt: schemapb.DataType_Float16Vector, v: []byte{0xff, 0xff}}, []byte{0xff, 0xff}, true},
+		{"test bfloat16 vector", args{dt: schemapb.DataType_BFloat16Vector, v: []byte{0xff, 0xff}}, []byte{0xff, 0xff}, true},
+		{"test bfloat16 vector negative", args{dt: schemapb.DataType_BFloat16Vector, v: nil}, nil, false},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, got1 := deserializeCell(tt.args.col, tt.args.dataType, tt.args.i)
+			dt := tt.args.dt
+			v := tt.args.v
+			builder := array.NewBuilder(memory.DefaultAllocator, serdeMap[dt].arrowType(1))
+			serdeMap[dt].serialize(builder, v)
+			// assert.True(t, ok)
+			a := builder.NewArray()
+			got, got1 := serdeMap[dt].deserialize(a, 0)
 			if !reflect.DeepEqual(got, tt.want) {
-				t.Errorf("deserializeCell() got = %v, want %v", got, tt.want)
+				t.Errorf("deserialize() got = %v, want %v", got, tt.want)
 			}
 			if got1 != tt.want1 {
-				t.Errorf("deserializeCell() got1 = %v, want %v", got1, tt.want1)
+				t.Errorf("deserialize() got1 = %v, want %v", got1, tt.want1)
 			}
 		})
 	}
