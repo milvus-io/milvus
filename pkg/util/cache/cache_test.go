@@ -20,10 +20,11 @@ func TestLRUCache(t *testing.T) {
 		cache := cacheBuilder.WithCapacity(int64(size)).Build()
 
 		for i := 0; i < size; i++ {
-			err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
+			assert.True(t, missing)
 			assert.NoError(t, err)
 		}
 	})
@@ -37,20 +38,22 @@ func TestLRUCache(t *testing.T) {
 		}).Build()
 
 		for i := 0; i < size*2; i++ {
-			err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
+			assert.True(t, missing)
 			assert.NoError(t, err)
 		}
 		assert.Equal(t, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, finalizeSeq)
 
 		// Hit the cache again, there should be no swap-out
 		for i := size; i < size*2; i++ {
-			err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
+			assert.False(t, missing)
 			assert.NoError(t, err)
 		}
 		assert.Equal(t, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9}, finalizeSeq)
@@ -67,10 +70,11 @@ func TestLRUCache(t *testing.T) {
 		}).Build()
 
 		for i := 0; i < 20; i++ {
-			err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
+			assert.True(t, missing)
 			assert.NoError(t, err)
 		}
 		assert.Equal(t, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}, finalizeSeq)
@@ -79,9 +83,10 @@ func TestLRUCache(t *testing.T) {
 	t.Run("test do negative", func(t *testing.T) {
 		cache := cacheBuilder.Build()
 		theErr := errors.New("error")
-		err := cache.Do(-1, func(v int) error {
+		missing, err := cache.Do(-1, func(v int) error {
 			return theErr
 		})
+		assert.True(t, missing)
 		assert.Equal(t, theErr, err)
 	})
 
@@ -96,16 +101,18 @@ func TestLRUCache(t *testing.T) {
 		}).Build()
 
 		for i := 0; i < 20; i++ {
-			err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
+			assert.True(t, missing)
 			assert.NoError(t, err)
 		}
 		assert.Equal(t, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}, finalizeSeq)
-		err := cache.Do(100, func(v int) error {
+		missing, err := cache.Do(100, func(v int) error {
 			return nil
 		})
+		assert.True(t, missing)
 		assert.Equal(t, ErrNotEnoughSpace, err)
 	})
 
@@ -116,13 +123,15 @@ func TestLRUCache(t *testing.T) {
 			}
 			return key, true
 		}).Build()
-		err := cache.Do(0, func(v int) error {
+		missing, err := cache.Do(0, func(v int) error {
 			return nil
 		})
+		assert.True(t, missing)
 		assert.NoError(t, err)
-		err = cache.Do(-1, func(v int) error {
+		missing, err = cache.Do(-1, func(v int) error {
 			return nil
 		})
+		assert.True(t, missing)
 		assert.Equal(t, ErrNoSuchItem, err)
 	})
 }
@@ -143,7 +152,7 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				for j := 0; j < 100; j++ {
-					err := cache.Do(j, func(v int) error {
+					_, err := cache.Do(j, func(v int) error {
 						return nil
 					})
 					assert.NoError(t, err)
@@ -170,7 +179,7 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			return nil
 		})
 		wg1.Wait()
-		err := cache.Do(1001, func(v int) error {
+		_, err := cache.Do(1001, func(v int) error {
 			return nil
 		})
 		wg.Done()

@@ -71,8 +71,11 @@ func (t *QueryTask) PreExecute() error {
 	// Update in queue metric for prometheus.
 	metrics.QueryNodeSQLatencyInQueue.WithLabelValues(
 		nodeID,
-		metrics.QueryLabel).
-		Observe(float64(inQueueDuration.Milliseconds()))
+		metrics.QueryLabel,
+		t.collection.GetDBName(),
+		t.collection.GetResourceGroup(), // TODO: resource group and db name may be removed at runtime.
+		// should be refactor into metricsutil.observer in the future.
+	).Observe(float64(inQueueDuration.Milliseconds()))
 
 	username := t.Username()
 	metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(

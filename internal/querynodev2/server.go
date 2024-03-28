@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/optimizers"
 	"github.com/milvus-io/milvus/internal/querynodev2/pipeline"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/querynodev2/tasks"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/registry"
@@ -295,6 +296,9 @@ func (node *QueryNode) Init() error {
 				return
 			}
 		}
+
+		// init metrics collector scheduler.
+		metricsutil.StartScheduler()
 
 		node.factory.Init(paramtable.Get())
 

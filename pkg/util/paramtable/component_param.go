@@ -1998,6 +1998,10 @@ type queryNodeConfig struct {
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+
+	// Metric Collector
+	MetricScrapeInterval       ParamItem `refreshable:"true"`
+	ActiveSegmentPredicateExpr ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2487,6 +2491,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "use partition prune function on shard delegator",
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
+
 	p.DefaultSegmentFilterRatio = ParamItem{
 		Key:          "queryNode.defaultSegmentFilterRatio",
 		Version:      "2.4.0",
@@ -2494,6 +2499,22 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
+
+	p.MetricScrapeInterval = ParamItem{
+		Key:          "queryNode.metricScrapeInterval",
+		Version:      "2.4.1",
+		DefaultValue: "15", // every xx seconds.
+		Doc:          "the interval of scrape metric in seconds",
+	}
+	p.MetricScrapeInterval.Init(base.mgr)
+
+	p.ActiveSegmentPredicateExpr = ParamItem{
+		Key:          "queryNode.activeSegmentPredicateExpr",
+		Version:      "2.4.1",
+		DefaultValue: `len(Snapshots) >= 4 && (((Snapshots[-1].AccessCount() - Snapshots[0].AccessCount()) / (Snapshots[-1].Time.Sub(Snapshots[0].Time).Seconds())) > 0.1)`, // > 0.1 segment level qps at last 1 minute (4 * 15 seconds).
+		Doc:          "the predicate expression to filter hot segment, if the segment match the predicate, it will be treated as hot segment",
+	}
+	p.ActiveSegmentPredicateExpr.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

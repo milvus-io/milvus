@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -65,10 +66,19 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		wg.Add(1)
 		go func(seg Segment, i int) {
 			defer wg.Done()
-
+			// record search time and cache miss
 			var err error
+			accessRecord := metricsutil.NewQuerySegmentAccessRecord(getSegmentMetricLabel(seg))
+			defer func() {
+				accessRecord.Finish(err)
+			}()
+
 			if seg.IsLazyLoad() {
-				err = mgr.DiskCache.Do(seg.ID(), retriever)
+				var missing bool
+				missing, err = mgr.DiskCache.Do(seg.ID(), retriever)
+				if missing {
+					accessRecord.CacheMissing()
+				}
 			} else {
 				err = retriever(seg)
 			}

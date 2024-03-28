@@ -50,6 +50,8 @@ type Segment interface {
 
 	// Properties
 	ID() int64
+	DatabaseName() string
+	ResourceGroup() string
 	Collection() int64
 	Partition() int64
 	Shard() string
