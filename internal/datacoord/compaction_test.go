@@ -88,13 +88,13 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(0, errors.New("mock")).Once()
 		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)
-		handler.checkResult()
+		handler.CheckResult()
 	}
 
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil).Once()
 		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)
-		handler.checkResult()
+		handler.CheckResult()
 	}
 }
 
