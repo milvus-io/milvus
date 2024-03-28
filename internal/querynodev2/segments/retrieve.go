@@ -67,7 +67,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			defer wg.Done()
 
 			var err error
-			if seg.LoadStatus() == LoadStatusMeta {
+			if seg.IsLazyLoad() {
 				err = mgr.DiskCache.Do(seg.ID(), retriever)
 			} else {
 				err = retriever(seg)

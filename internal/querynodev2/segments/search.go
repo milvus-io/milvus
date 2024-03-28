@@ -77,7 +77,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				mu.Unlock()
 			}
 			var err error
-			if seg.LoadStatus() == LoadStatusMeta {
+			if seg.IsLazyLoad() {
 				err = mgr.DiskCache.Do(seg.ID(), searcher)
 			} else {
 				err = searcher(seg)
