@@ -18,17 +18,25 @@ package rocksdbkv
 
 import (
 	"fmt"
+	"os"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"github.com/tecbot/gorocksdb"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ kv.BaseKV = (*RocksdbKV)(nil)
+
+const (
+	LockFileName = "LOCK"
+)
 
 // RocksdbKV is KV implemented by rocksdb
 type RocksdbKV struct {
@@ -73,6 +81,20 @@ func NewRocksdbKVWithOpts(name string, opts *gorocksdb.Options) (*RocksdbKV, err
 	// only has one columnn families
 	db, err := gorocksdb.OpenDb(opts, name)
 	if err != nil {
+		// when process try and open the one rocksdb, will create lock file
+		// if another process open the same db, fails with “db/LOCK: Resource temporarily unavailable”
+		// try to clean it before open, related with https://github.com/milvus-io/milvus/issues/30501
+		if strings.Contains(err.Error(), "LOCK: Resource temporarily unavailable") {
+			lockFilePath := name + "/" + LockFileName
+			_, err := os.Stat(lockFilePath)
+			if err == nil {
+				log.Info("lock file exist")
+				err := os.Remove(lockFilePath)
+				if err != nil {
+					return nil, err
+				}
+			}
+		}
 		return nil, err
 	}
 	return &RocksdbKV{
