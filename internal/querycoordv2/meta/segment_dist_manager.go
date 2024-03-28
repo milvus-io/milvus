@@ -108,16 +108,19 @@ func (m *SegmentDistManager) GetByFilter(filters ...SegmentDistFilter) []*Segmen
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
+	mergedFilters := func(s *Segment) bool {
+		for _, f := range filters {
+			if f != nil && !f(s) {
+				return false
+			}
+		}
+		return true
+	}
+
 	ret := make([]*Segment, 0)
 	for _, segments := range m.segments {
 		for _, segment := range segments {
-			allMatch := true
-			for _, f := range filters {
-				if f != nil && !f(segment) {
-					allMatch = false
-				}
-			}
-			if allMatch {
+			if mergedFilters(segment) {
 				ret = append(ret, segment)
 			}
 		}

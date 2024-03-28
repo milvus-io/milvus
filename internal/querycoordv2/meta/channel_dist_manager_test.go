@@ -66,36 +66,36 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 
 	// Test GetAll
-	channels := dist.GetAll()
+	channels := dist.GetByFilter(nil)
 	suite.Len(channels, 4)
 
 	// Test GetByNode
 	for _, node := range suite.nodes {
-		channels := dist.GetByNode(node)
+		channels := dist.GetByFilter(WithNodeID2Channel(node))
 		suite.AssertNode(channels, node)
 	}
 
 	// Test GetByCollection
-	channels = dist.GetByCollection(suite.collection)
+	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection))
 	suite.Len(channels, 4)
 	suite.AssertCollection(channels, suite.collection)
-	channels = dist.GetByCollection(-1)
+	channels = dist.GetByFilter(WithCollectionID2Channel(-1))
 	suite.Len(channels, 0)
 
 	// Test GetByNodeAndCollection
 	// 1. Valid node and valid collection
 	for _, node := range suite.nodes {
-		channels := dist.GetByCollectionAndNode(suite.collection, node)
+		channels := dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(node))
 		suite.AssertNode(channels, node)
 		suite.AssertCollection(channels, suite.collection)
 	}
 
 	// 2. Valid node and invalid collection
-	channels = dist.GetByCollectionAndNode(-1, suite.nodes[1])
+	channels = dist.GetByFilter(WithCollectionID2Channel(-1), WithNodeID2Channel(suite.nodes[1]))
 	suite.Len(channels, 0)
 
 	// 3. Invalid node and valid collection
-	channels = dist.GetByCollectionAndNode(suite.collection, -1)
+	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(-1))
 	suite.Len(channels, 0)
 }
 
@@ -146,47 +146,6 @@ func (suite *ChannelDistManagerSuite) TestGetShardLeader() {
 	suite.Len(leaders, 2)
 	suite.Equal(leaders["dmc0"], suite.nodes[1])
 	suite.Equal(leaders["dmc1"], suite.nodes[1])
-}
-
-func (suite *ChannelDistManagerSuite) TestGetChannelDistByReplica() {
-	replica := NewReplica(
-		&querypb.Replica{
-			CollectionID: suite.collection,
-		},
-		typeutil.NewUniqueSet(11, 22, 33),
-	)
-
-	ch1 := &DmChannel{
-		VchannelInfo: &datapb.VchannelInfo{
-			CollectionID: suite.collection,
-			ChannelName:  "test-channel1",
-		},
-		Node:    11,
-		Version: 1,
-	}
-	ch2 := &DmChannel{
-		VchannelInfo: &datapb.VchannelInfo{
-			CollectionID: suite.collection,
-			ChannelName:  "test-channel1",
-		},
-		Node:    22,
-		Version: 1,
-	}
-	ch3 := &DmChannel{
-		VchannelInfo: &datapb.VchannelInfo{
-			CollectionID: suite.collection,
-			ChannelName:  "test-channel2",
-		},
-		Node:    33,
-		Version: 1,
-	}
-	suite.dist.Update(11, ch1)
-	suite.dist.Update(22, ch2)
-	suite.dist.Update(33, ch3)
-
-	dist := suite.dist.GetChannelDistByReplica(replica)
-	suite.Len(dist["test-channel1"], 2)
-	suite.Len(dist["test-channel2"], 1)
 }
 
 func (suite *ChannelDistManagerSuite) AssertNames(channels []*DmChannel, names ...string) bool {
