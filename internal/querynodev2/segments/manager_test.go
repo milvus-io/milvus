@@ -97,6 +97,19 @@ func (s *ManagerSuite) TestGetAndPin() {
 	s.Equal(len(segments), 0)
 }
 
+func (s *ManagerSuite) TestPutAgain() {
+	for i, segmentID := range s.segmentIDs {
+		segment := s.mgr.Get(segmentID)
+		s.mgr.Put(s.types[i], segment)
+		localSegment, ok := segment.(*LocalSegment)
+		if ok {
+			localSegment.ptrLock.RLock()
+			s.NotNil(localSegment.ptr)
+			localSegment.ptrLock.RUnlock()
+		}
+	}
+}
+
 func (s *ManagerSuite) TestRemoveGrowing() {
 	for i, id := range s.segmentIDs {
 		isGrowing := s.types[i] == SegmentTypeGrowing
