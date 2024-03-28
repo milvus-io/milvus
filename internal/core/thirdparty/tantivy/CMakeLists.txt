@@ -20,11 +20,18 @@ set(PATH_VAR $ENV{PATH})
 set(ENV{PATH} ${HOME_VAR}/.cargo/bin:${PATH_VAR})
 message($ENV{PATH})
 
+add_custom_command(OUTPUT cargo_clean
+        COMMENT "cargo clean"
+        COMMAND cargo clean
+        WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/tantivy-binding
+        )
+add_custom_target(cargo_clean_target DEPENDS cargo_clean)
+
 add_custom_command(OUTPUT ls_cargo
         COMMENT "ls cargo"
         COMMAND ls ${HOME_VAR}/.cargo/bin/
         )
-add_custom_target(ls_cargo_target DEPENDS ls_cargo)
+add_custom_target(ls_cargo_target DEPENDS ls_cargo cargo_clean_target)
 
 add_custom_command(OUTPUT compile_tantivy
         COMMENT "Compiling tantivy binding"
