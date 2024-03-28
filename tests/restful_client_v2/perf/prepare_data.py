@@ -83,8 +83,9 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
     for index_name in index_list:
         progress = utility.index_building_progress(collection_name=collection_name, index_name=index_name)
         while progress["pending_index_rows"] > 0:
-            time.sleep(10)
+            time.sleep(30)
             progress = utility.index_building_progress(collection_name=collection_name, index_name=index_name)
+            logger.info(f"collection {collection_name} index {index_name} progress: {progress}")
         logger.info(f"collection {collection_name} index {index_name} progress: {progress}")
 
 
