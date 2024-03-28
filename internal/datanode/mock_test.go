@@ -28,6 +28,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
@@ -80,10 +81,12 @@ var segID2SegInfo = map[int64]*datapb.SegmentInfo{
 		InsertChannel: "by-dev-rootcoord-dml-test_v1",
 	},
 }
+var nodeID atomic.Int64
 
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
 	factory := dependency.NewDefaultFactory(true)
-	node := NewDataNode(ctx, factory, 1)
+	nodeID.Store(1)
+	node := NewDataNode(ctx, factory, &nodeID)
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.dispClient = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 

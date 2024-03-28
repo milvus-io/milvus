@@ -31,6 +31,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	uatomic "go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -83,7 +84,7 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
 	ctx              context.Context
-	serverID         int64
+	serverID         *uatomic.Int64
 	cancel           context.CancelFunc
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
@@ -128,7 +129,7 @@ type DataNode struct {
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64) *DataNode {
+func NewDataNode(ctx context.Context, factory dependency.Factory, serverID *uatomic.Int64) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
@@ -227,7 +228,11 @@ func (node *DataNode) initRateCollector() error {
 }
 
 func (node *DataNode) GetNodeID() int64 {
-	return node.serverID
+	if node.serverID != nil {
+		return node.serverID.Load()
+	}
+	log.Error("Datanode has nil server ID.", zap.Int64("Node Id from paramtable", paramtable.GetNodeID()))
+	return paramtable.GetNodeID()
 }
 
 func (node *DataNode) Init() error {
