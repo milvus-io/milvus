@@ -815,3 +815,40 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	}
 	return len(keys) == 0 && len(values) == 0
 }
+
+func (kc *Catalog) ListMajorCompactionInfos(ctx context.Context) ([]*datapb.MajorCompactionInfo, error) {
+	infos := make([]*datapb.MajorCompactionInfo, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(MajorCompactionInfoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		info := &datapb.MajorCompactionInfo{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func (kc *Catalog) SaveMajorCompactionInfo(ctx context.Context, coll *datapb.MajorCompactionInfo) error {
+	if coll == nil {
+		return nil
+	}
+	cloned := proto.Clone(coll).(*datapb.MajorCompactionInfo)
+	k, v, err := buildCollectionCompactionInfoKv(cloned)
+	if err != nil {
+		return err
+	}
+	kvs := make(map[string]string)
+	kvs[k] = v
+	return kc.SaveByBatch(kvs)
+}
+
+func (kc *Catalog) DropMajorCompactionInfo(ctx context.Context, info *datapb.MajorCompactionInfo) error {
+	key := buildMajorCompactionInfoPath(info.CollectionID, info.TriggerID)
+	return kc.MetaKv.Remove(key)
+}

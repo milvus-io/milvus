@@ -91,6 +91,9 @@ const (
 
 	// PartitionStatsPath storage path const for partition stats files
 	PartitionStatsPath = `part_stats`
+
+	// CompactionStagePath storage path const for stage data generate in compaction.
+	CompactionStagePath = `compaction_stage`
 )
 
 // Search, Index parameter keys

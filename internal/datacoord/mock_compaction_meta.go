@@ -84,6 +84,48 @@ func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run f
 	return _c
 }
 
+// DropMajorCompactionInfo provides a mock function with given fields: info
+func (_m *MockCompactionMeta) DropMajorCompactionInfo(info *datapb.MajorCompactionInfo) error {
+	ret := _m.Called(info)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*datapb.MajorCompactionInfo) error); ok {
+		r0 = rf(info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_DropMajorCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropMajorCompactionInfo'
+type MockCompactionMeta_DropMajorCompactionInfo_Call struct {
+	*mock.Call
+}
+
+// DropMajorCompactionInfo is a helper method to define mock.On call
+//   - info *datapb.MajorCompactionInfo
+func (_e *MockCompactionMeta_Expecter) DropMajorCompactionInfo(info interface{}) *MockCompactionMeta_DropMajorCompactionInfo_Call {
+	return &MockCompactionMeta_DropMajorCompactionInfo_Call{Call: _e.mock.On("DropMajorCompactionInfo", info)}
+}
+
+func (_c *MockCompactionMeta_DropMajorCompactionInfo_Call) Run(run func(info *datapb.MajorCompactionInfo)) *MockCompactionMeta_DropMajorCompactionInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*datapb.MajorCompactionInfo))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_DropMajorCompactionInfo_Call) Return(_a0 error) *MockCompactionMeta_DropMajorCompactionInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_DropMajorCompactionInfo_Call) RunAndReturn(run func(*datapb.MajorCompactionInfo) error) *MockCompactionMeta_DropMajorCompactionInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetHealthySegment provides a mock function with given fields: segID
 func (_m *MockCompactionMeta) GetHealthySegment(segID int64) *SegmentInfo {
 	ret := _m.Called(segID)
@@ -124,6 +166,48 @@ func (_c *MockCompactionMeta_GetHealthySegment_Call) Return(_a0 *SegmentInfo) *M
 }
 
 func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(int64) *SegmentInfo) *MockCompactionMeta_GetHealthySegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveMajorCompactionInfo provides a mock function with given fields: info
+func (_m *MockCompactionMeta) SaveMajorCompactionInfo(info *datapb.MajorCompactionInfo) error {
+	ret := _m.Called(info)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*datapb.MajorCompactionInfo) error); ok {
+		r0 = rf(info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_SaveMajorCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveMajorCompactionInfo'
+type MockCompactionMeta_SaveMajorCompactionInfo_Call struct {
+	*mock.Call
+}
+
+// SaveMajorCompactionInfo is a helper method to define mock.On call
+//   - info *datapb.MajorCompactionInfo
+func (_e *MockCompactionMeta_Expecter) SaveMajorCompactionInfo(info interface{}) *MockCompactionMeta_SaveMajorCompactionInfo_Call {
+	return &MockCompactionMeta_SaveMajorCompactionInfo_Call{Call: _e.mock.On("SaveMajorCompactionInfo", info)}
+}
+
+func (_c *MockCompactionMeta_SaveMajorCompactionInfo_Call) Run(run func(info *datapb.MajorCompactionInfo)) *MockCompactionMeta_SaveMajorCompactionInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*datapb.MajorCompactionInfo))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_SaveMajorCompactionInfo_Call) Return(_a0 error) *MockCompactionMeta_SaveMajorCompactionInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_SaveMajorCompactionInfo_Call) RunAndReturn(run func(*datapb.MajorCompactionInfo) error) *MockCompactionMeta_SaveMajorCompactionInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

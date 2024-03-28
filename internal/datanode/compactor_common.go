@@ -14,21 +14,22 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datacoord
+package datanode
 
-const (
-	MetaPrefix                = "datacoord-meta"
-	SegmentPrefix             = MetaPrefix + "/s"
-	SegmentBinlogPathPrefix   = MetaPrefix + "/binlog"
-	SegmentDeltalogPathPrefix = MetaPrefix + "/deltalog"
-	SegmentStatslogPathPrefix = MetaPrefix + "/statslog"
-	ChannelRemovePrefix       = MetaPrefix + "/channel-removal"
-	ChannelCheckpointPrefix   = MetaPrefix + "/channel-cp"
-	ImportJobPrefix           = MetaPrefix + "/import-job"
-	ImportTaskPrefix          = MetaPrefix + "/import-task"
-	PreImportTaskPrefix       = MetaPrefix + "/preimport-task"
-	MajorCompactionInfoPrefix = MetaPrefix + "/major-compaction"
+import (
+	"time"
 
-	NonRemoveFlagTomestone = "non-removed"
-	RemoveFlagTomestone    = "removed"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
+
+func IsExpiredEntity(ttl int64, ts, now Timestamp) bool {
+	// entity expire is not enabled if duration <= 0
+	if ttl <= 0 {
+		return false
+	}
+
+	pts, _ := tsoutil.ParseTS(ts)
+	pnow, _ := tsoutil.ParseTS(now)
+	expireTime := pts.Add(time.Duration(ttl))
+	return expireTime.Before(pnow)
+}
