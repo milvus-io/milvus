@@ -107,37 +107,6 @@ func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *mil
 	return r.RootCoordClient.DescribeCollection(ctx, req)
 }
 
-// func TestGetComponentStates(t *testing.T) {
-// svr := newTestServer(t)
-// defer closeTestServer(t, svr)
-// cli := newMockDataNodeClient(1)
-// err := cli.Init()
-// assert.NoError(t, err)
-// err = cli.Start()
-// assert.NoError(t, err)
-
-//err = svr.cluster.Register(&dataNode{
-//id: 1,
-//address: struct {
-//ip   string
-//port int64
-//}{
-//ip:   "",
-//port: 0,
-//},
-//client:     cli,
-//channelNum: 0,
-//})
-//assert.NoError(t, err)
-
-//resp, err := svr.GetComponentStates(context.TODO())
-//assert.NoError(t, err)
-//assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-//assert.EqualValues(t, commonpb.StateCode_Healthy, resp.State.StateCode)
-//assert.EqualValues(t, 1, len(resp.SubcomponentStates))
-//assert.EqualValues(t, commonpb.StateCode_Healthy, resp.SubcomponentStates[0].StateCode)
-//}
-
 func TestGetTimeTickChannel(t *testing.T) {
 	svr := newTestServer(t, nil)
 	defer closeTestServer(t, svr)
@@ -759,134 +728,6 @@ func TestService_WatchServices(t *testing.T) {
 	<-sigDone
 	assert.True(t, flag)
 }
-
-//func TestServer_watchCoord(t *testing.T) {
-//	Params.Init()
-//	etcdCli, err := etcd.GetEtcdClient(&Params.EtcdCfg)
-//	assert.NoError(t, err)
-//	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath)
-//	assert.NotNil(t, etcdKV)
-//	factory := dependency.NewDefaultFactory(true)
-//	svr := CreateServer(context.TODO(), factory)
-//	svr.session = &sessionutil.Session{
-//		TriggerKill: true,
-//	}
-//	svr.kvClient = etcdKV
-//
-//	dnCh := make(chan *sessionutil.SessionEvent)
-//	//icCh := make(chan *sessionutil.SessionEvent)
-//	qcCh := make(chan *sessionutil.SessionEvent)
-//	rcCh := make(chan *sessionutil.SessionEvent)
-//
-//	svr.dnEventCh = dnCh
-//	//svr.icEventCh = icCh
-//	svr.qcEventCh = qcCh
-//	svr.rcEventCh = rcCh
-//
-//	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
-//	assert.NoError(t, err)
-//	assert.NotNil(t, segRefer)
-//	svr.segReferManager = segRefer
-//
-//	sc := make(chan os.Signal, 1)
-//	signal.Notify(sc, syscall.SIGINT)
-//	defer signal.Reset(syscall.SIGINT)
-//	closed := false
-//	sigQuit := make(chan struct{}, 1)
-//
-//	svr.serverLoopWg.Add(1)
-//	go func() {
-//		svr.watchService(context.Background())
-//	}()
-//
-//	go func() {
-//		<-sc
-//		closed = true
-//		sigQuit <- struct{}{}
-//	}()
-//
-//	icCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionAddEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 1,
-//		},
-//	}
-//	icCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionDelEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 1,
-//		},
-//	}
-//	close(icCh)
-//	<-sigQuit
-//	svr.serverLoopWg.Wait()
-//	assert.True(t, closed)
-//}
-
-//func TestServer_watchQueryCoord(t *testing.T) {
-//	Params.Init()
-//	etcdCli, err := etcd.GetEtcdClient(
-//		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-//		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-//		Params.EtcdCfg.Endpoints.GetAsStrings(),
-//		Params.EtcdCfg.EtcdTLSCert.GetValue(),
-//		Params.EtcdCfg.EtcdTLSKey.GetValue(),
-//		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-//		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-//	assert.NoError(t, err)
-//	etcdKV := etcdkv.NewEtcdKV(etcdCli, Params.EtcdCfg.MetaRootPath.GetValue())
-//	assert.NotNil(t, etcdKV)
-//	factory := dependency.NewDefaultFactory(true)
-//	svr := CreateServer(context.TODO(), factory)
-//	svr.session = &sessionutil.Session{
-//		TriggerKill: true,
-//	}
-//	svr.kvClient = etcdKV
-//
-//	dnCh := make(chan *sessionutil.SessionEvent)
-//	//icCh := make(chan *sessionutil.SessionEvent)
-//	qcCh := make(chan *sessionutil.SessionEvent)
-//
-//	svr.dnEventCh = dnCh
-//
-//	segRefer, err := NewSegmentReferenceManager(etcdKV, nil)
-//	assert.NoError(t, err)
-//	assert.NotNil(t, segRefer)
-//
-//	sc := make(chan os.Signal, 1)
-//	signal.Notify(sc, syscall.SIGINT)
-//	defer signal.Reset(syscall.SIGINT)
-//	closed := false
-//	sigQuit := make(chan struct{}, 1)
-//
-//	svr.serverLoopWg.Add(1)
-//	go func() {
-//		svr.watchService(context.Background())
-//	}()
-//
-//	go func() {
-//		<-sc
-//		closed = true
-//		sigQuit <- struct{}{}
-//	}()
-//
-//	qcCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionAddEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 2,
-//		},
-//	}
-//	qcCh <- &sessionutil.SessionEvent{
-//		EventType: sessionutil.SessionDelEvent,
-//		Session: &sessionutil.Session{
-//			ServerID: 2,
-//		},
-//	}
-//	close(qcCh)
-//	<-sigQuit
-//	svr.serverLoopWg.Wait()
-//	assert.True(t, closed)
-//}
 
 func TestServer_ShowConfigurations(t *testing.T) {
 	svr := newTestServer(t, nil)
@@ -3417,46 +3258,6 @@ func Test_CheckHealth(t *testing.T) {
 	})
 }
 
-//func Test_initServiceDiscovery(t *testing.T) {
-//	server := newTestServer2(t, nil)
-//	assert.NotNil(t, server)
-//
-//	segmentID := rand.Int63()
-//	err := server.meta.AddSegment(&SegmentInfo{
-//		SegmentInfo: &datapb.SegmentInfo{
-//			ID:           segmentID,
-//			CollectionID: rand.Int63(),
-//			PartitionID:  rand.Int63(),
-//			NumOfRows:    100,
-//		},
-//		currRows: 100,
-//	})
-//	assert.NoError(t, err)
-//
-//	qcSession := sessionutil.NewSession(context.Background(), Params.EtcdCfg.MetaRootPath.GetValue(), server.etcdCli)
-//	qcSession.Init(typeutil.QueryCoordRole, "localhost:19532", true, true)
-//	qcSession.Register()
-//	//req := &datapb.AcquireSegmentLockRequest{
-//	//	NodeID:     qcSession.ServerID,
-//	//	SegmentIDs: []UniqueID{segmentID},
-//	//}
-//	//resp, err := server.AcquireSegmentLock(context.TODO(), req)
-//	//assert.NoError(t, err)
-//	//assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
-//
-//	sessKey := path.Join(Params.EtcdCfg.MetaRootPath.GetValue(), sessionutil.DefaultServiceRoot, typeutil.QueryCoordRole)
-//	_, err = server.etcdCli.Delete(context.Background(), sessKey, clientv3.WithPrefix())
-//	assert.NoError(t, err)
-//
-//	//for {
-//	//	if !server.segReferManager.HasSegmentLock(segmentID) {
-//	//		break
-//	//	}
-//	//}
-//
-//	closeTestServer(t, server)
-//}
-
 func Test_newChunkManagerFactory(t *testing.T) {
 	server := newTestServer2(t, nil)
 	paramtable.Get().Save(Params.DataCoordCfg.EnableGarbageCollection.Key, "true")
@@ -3871,5 +3672,24 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 
 		cancel()
 		wg.Wait()
+	})
+}
+
+func TestLoadCollectionFromRootCoord(t *testing.T) {
+	t.Run("fail to get database id", func(t *testing.T) {
+		brokerInt := broker.NewMockBroker(t)
+		server := &Server{
+			broker: brokerInt,
+		}
+		brokerInt.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			Status:         merr.Success(),
+			CollectionID:   100,
+			CollectionName: "foo",
+			DbName:         "default",
+		}, nil).Once()
+		brokerInt.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{1, 2, 3}, nil).Once()
+		brokerInt.EXPECT().GetDatabaseID(mock.Anything, mock.Anything).Return(0, errors.New("mock error: get database id")).Once()
+		err := server.loadCollectionFromRootCoord(context.Background(), 100)
+		assert.Error(t, err)
 	})
 }

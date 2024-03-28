@@ -1443,6 +1443,43 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 	})
 }
 
+func TestRootCoord_DescribeDatabase(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("add task failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("execute task failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+}
+
 func TestRootCoord_RBACError(t *testing.T) {
 	ctx := context.Background()
 	c := newTestCore(withHealthyCode(), withInvalidMeta())

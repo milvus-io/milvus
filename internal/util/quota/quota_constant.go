@@ -19,6 +19,7 @@
 package quota
 
 import (
+	"math"
 	"sync"
 
 	"go.uber.org/zap"
@@ -88,7 +89,8 @@ func GetQuotaConfigMap(scope internalpb.RateScope, params *paramtable.ComponentP
 	initLimitConfigMaps(params)
 	configMap, ok := limitConfigMap[scope]
 	if !ok {
-		log.Panic("Unknown rate scope", zap.Any("scope", scope))
+		log.Warn("Unknown rate scope", zap.Any("scope", scope))
+		return make(map[internalpb.RateType]*paramtable.ParamItem)
 	}
 	return configMap
 }
@@ -97,7 +99,8 @@ func GetQuotaValue(scope internalpb.RateScope, rateType internalpb.RateType, par
 	configMap := GetQuotaConfigMap(scope, params)
 	config, ok := configMap[rateType]
 	if !ok {
-		log.Panic("Unknown rate type", zap.Any("rateType", rateType))
+		log.Warn("Unknown rate type", zap.Any("rateType", rateType))
+		return math.MaxFloat64
 	}
 	return config.GetAsFloat()
 }

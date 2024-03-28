@@ -23,11 +23,13 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -37,8 +39,9 @@ import (
 // RateLimitInterceptor returns a new unary server interceptors that performs request rate limiting.
 func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		dbID, collectionIDToPartIDs, rt, n, err := getRequestInfo(req)
+		dbID, collectionIDToPartIDs, rt, n, err := getRequestInfo(ctx, req)
 		if err != nil {
+			log.RatedWarn(10, "failed to get request info", zap.Error(err))
 			return handler(ctx, req)
 		}
 
@@ -74,23 +77,41 @@ type reqCollName interface {
 	requestutil.CollectionNameGetter
 }
 
-func getCollectionAndPartitionID(r reqPartName) (int64, map[int64][]int64) {
-	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
-	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
-	part, _ := globalMetaCache.GetPartitionInfo(context.TODO(), r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
-	return db.dbID, map[int64][]int64{collectionID: {part.partitionID}}
+func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map[int64][]int64, error) {
+	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+	if err != nil {
+		return 0, nil, err
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
+	if err != nil {
+		return 0, nil, err
+	}
+	part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
+	if err != nil {
+		return 0, nil, err
+	}
+	return db.dbID, map[int64][]int64{collectionID: {part.partitionID}}, nil
 }
 
-func getCollectionAndPartitionIDs(r reqPartNames) (int64, map[int64][]int64) {
-	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
-	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
+func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, map[int64][]int64, error) {
+	db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
+	if err != nil {
+		return 0, nil, err
+	}
+	collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), r.GetCollectionName())
+	if err != nil {
+		return 0, nil, err
+	}
 	parts := make([]int64, len(r.GetPartitionNames()))
-	for _, s := range r.GetPartitionNames() {
-		part, _ := globalMetaCache.GetPartitionInfo(context.TODO(), r.GetDbName(), r.GetCollectionName(), s)
-		parts = append(parts, part.partitionID)
+	for i, s := range r.GetPartitionNames() {
+		part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), s)
+		if err != nil {
+			return 0, nil, err
+		}
+		parts[i] = part.partitionID
 	}
 
-	return db.dbID, map[int64][]int64{collectionID: parts}
+	return db.dbID, map[int64][]int64{collectionID: parts}, nil
 }
 
 func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
@@ -100,26 +121,26 @@ func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
 }
 
 // getRequestInfo returns collection name and rateType of request and return tokens needed.
-func getRequestInfo(req interface{}) (int64, map[int64][]int64, internalpb.RateType, int, error) {
+func getRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]int64, internalpb.RateType, int, error) {
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
-		dbID, collToPartIDs := getCollectionAndPartitionID(req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), nil
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.UpsertRequest:
-		dbID, collToPartIDs := getCollectionAndPartitionID(req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLUpsert, proto.Size(r), nil
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		return dbID, collToPartIDs, internalpb.RateType_DMLUpsert, proto.Size(r), err
 	case *milvuspb.DeleteRequest:
-		dbID, collToPartIDs := getCollectionAndPartitionID(req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(r), nil
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(r), err
 	case *milvuspb.ImportRequest:
-		dbID, collToPartIDs := getCollectionAndPartitionID(req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), nil
+		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
+		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), err
 	case *milvuspb.SearchRequest:
-		dbID, collToPartIDs := getCollectionAndPartitionIDs(req.(reqPartNames))
-		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), nil
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err
 	case *milvuspb.QueryRequest:
-		dbID, collToPartIDs := getCollectionAndPartitionIDs(req.(reqPartNames))
-		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, nil // think of the query request's nq as 1
+		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
+		return dbID, collToPartIDs, internalpb.RateType_DQLQuery, 1, err // think of the query request's nq as 1
 	case *milvuspb.CreateCollectionRequest:
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLCollection, 1, nil
@@ -151,20 +172,26 @@ func getRequestInfo(req interface{}) (int64, map[int64][]int64, internalpb.RateT
 		dbID, collToPartIDs := getCollectionID(req.(reqCollName))
 		return dbID, collToPartIDs, internalpb.RateType_DDLIndex, 1, nil
 	case *milvuspb.FlushRequest:
-		db, err := globalMetaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
+		db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
 		if err != nil {
 			return 0, map[int64][]int64{}, 0, 0, err
 		}
 
 		collToPartIDs := make(map[int64][]int64, 0)
 		for _, collectionName := range r.GetCollectionNames() {
-			collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), collectionName)
+			collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), collectionName)
+			if err != nil {
+				return 0, map[int64][]int64{}, 0, 0, err
+			}
 			collToPartIDs[collectionID] = []int64{}
 		}
 		return db.dbID, collToPartIDs, internalpb.RateType_DDLFlush, 1, nil
 	case *milvuspb.ManualCompactionRequest:
-		dbName, _ := requestutil.GetDbNameFromRequest(req)
-		dbInfo, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), dbName.(string))
+		dbName := GetCurDBNameFromContextOrDefault(ctx)
+		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
+		if err != nil {
+			return 0, map[int64][]int64{}, 0, 0, err
+		}
 		return dbInfo.dbID, map[int64][]int64{
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil

@@ -17,13 +17,17 @@
 package ratelimitutil
 
 import (
+	"strings"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -87,4 +91,115 @@ func TestTraverseRateLimiterTree(t *testing.T) {
 
 	assert.Equal(t, 3, fn1Count)
 	assert.Equal(t, 3, fn2Count)
+}
+
+func TestRateLimiterNodeCancel(t *testing.T) {
+	t.Run("cancel not exist type", func(t *testing.T) {
+		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
+		limitNode.Cancel(internalpb.RateType_DMLInsert, 10)
+	})
+}
+
+func TestRateLimiterNodeCheck(t *testing.T) {
+	t.Run("quota exceed", func(t *testing.T) {
+		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
+		limitNode.limiters.Insert(internalpb.RateType_DMLInsert, ratelimitutil.NewLimiter(0, 0))
+		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToWrite, commonpb.ErrorCode_ForceDeny)
+		err := limitNode.Check(internalpb.RateType_DMLInsert, 10)
+		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
+	})
+
+	t.Run("rate limit", func(t *testing.T) {
+		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
+		limitNode.limiters.Insert(internalpb.RateType_DMLInsert, ratelimitutil.NewLimiter(0.01, 0.01))
+		{
+			err := limitNode.Check(internalpb.RateType_DMLInsert, 1)
+			assert.NoError(t, err)
+		}
+		{
+			err := limitNode.Check(internalpb.RateType_DMLInsert, 1)
+			assert.True(t, errors.Is(err, merr.ErrServiceRateLimit))
+		}
+	})
+}
+
+func TestRateLimiterNodeGetQuotaExceededError(t *testing.T) {
+	t.Run("write", func(t *testing.T) {
+		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
+		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToWrite, commonpb.ErrorCode_ForceDeny)
+		err := limitNode.GetQuotaExceededError(internalpb.RateType_DMLInsert)
+		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
+		// reference: ratelimitutil.GetQuotaErrorString(errCode)
+		assert.True(t, strings.Contains(err.Error(), "deactivated"))
+	})
+
+	t.Run("read", func(t *testing.T) {
+		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
+		limitNode.quotaStates.Insert(milvuspb.QuotaState_DenyToRead, commonpb.ErrorCode_ForceDeny)
+		err := limitNode.GetQuotaExceededError(internalpb.RateType_DQLSearch)
+		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
+		// reference: ratelimitutil.GetQuotaErrorString(errCode)
+		assert.True(t, strings.Contains(err.Error(), "deactivated"))
+	})
+
+	t.Run("unknown", func(t *testing.T) {
+		limitNode := NewRateLimiterNode(internalpb.RateScope_Cluster)
+		err := limitNode.GetQuotaExceededError(internalpb.RateType_DDLCompaction)
+		assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
+		assert.True(t, strings.Contains(err.Error(), "rate type"))
+	})
+}
+
+func TestRateLimiterTreeClearInvalidLimiterNode(t *testing.T) {
+	root := NewRateLimiterNode(internalpb.RateScope_Cluster)
+	tree := NewRateLimiterTree(root)
+
+	generateNodeFFunc := func(level internalpb.RateScope) func() *RateLimiterNode {
+		return func() *RateLimiterNode {
+			return NewRateLimiterNode(level)
+		}
+	}
+
+	tree.GetOrCreatePartitionLimiters(1, 10, 100,
+		generateNodeFFunc(internalpb.RateScope_Database),
+		generateNodeFFunc(internalpb.RateScope_Collection),
+		generateNodeFFunc(internalpb.RateScope_Partition),
+	)
+	tree.GetOrCreatePartitionLimiters(1, 10, 200,
+		generateNodeFFunc(internalpb.RateScope_Database),
+		generateNodeFFunc(internalpb.RateScope_Collection),
+		generateNodeFFunc(internalpb.RateScope_Partition),
+	)
+	tree.GetOrCreatePartitionLimiters(1, 20, 300,
+		generateNodeFFunc(internalpb.RateScope_Database),
+		generateNodeFFunc(internalpb.RateScope_Collection),
+		generateNodeFFunc(internalpb.RateScope_Partition),
+	)
+	tree.GetOrCreatePartitionLimiters(2, 30, 400,
+		generateNodeFFunc(internalpb.RateScope_Database),
+		generateNodeFFunc(internalpb.RateScope_Collection),
+		generateNodeFFunc(internalpb.RateScope_Partition),
+	)
+
+	assert.Equal(t, 2, root.GetChildren().Len())
+	assert.Equal(t, 2, root.GetChild(1).GetChildren().Len())
+	assert.Equal(t, 2, root.GetChild(1).GetChild(10).GetChildren().Len())
+
+	tree.ClearInvalidLimiterNode(&proxypb.LimiterNode{
+		Children: map[int64]*proxypb.LimiterNode{
+			1: {
+				Children: map[int64]*proxypb.LimiterNode{
+					10: {
+						Children: map[int64]*proxypb.LimiterNode{
+							100: {},
+						},
+					},
+				},
+			},
+		},
+	})
+
+	assert.Equal(t, 1, root.GetChildren().Len())
+	assert.Equal(t, 1, root.GetChild(1).GetChildren().Len())
+	assert.Equal(t, 1, root.GetChild(1).GetChild(10).GetChildren().Len())
 }
