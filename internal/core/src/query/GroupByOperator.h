@@ -157,9 +157,8 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                 "group_by operation will be terminated",
                 e.what());
             throw std::runtime_error(
-                "Failed to groupBy, please check the index type, trying to "
-                "groupBy on unsupported index type will fail, currently only "
-                "support ivf-flat, ivf_cc and HNSW");
+                "Failed to groupBy, current index:" + index.GetIndexType() +
+                " doesn't support search_group_by");
         }
         return true;
     }
