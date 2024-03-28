@@ -146,11 +146,10 @@ func CheckCtxValid(ctx context.Context) bool {
 func GetVecFieldIDs(schema *schemapb.CollectionSchema) []int64 {
 	var vecFieldIDs []int64
 	for _, field := range schema.Fields {
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_Float16Vector || field.DataType == schemapb.DataType_BFloat16Vector || field.DataType == schemapb.DataType_SparseFloatVector {
+		if typeutil.IsVectorType(field.DataType) {
 			vecFieldIDs = append(vecFieldIDs, field.FieldID)
 		}
 	}
-
 	return vecFieldIDs
 }
 

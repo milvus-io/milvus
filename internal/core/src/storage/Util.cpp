@@ -415,6 +415,24 @@ GetDimensionFromArrowArray(std::shared_ptr<arrow::Array> data,
                 std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
             return array->byte_width() * 8;
         }
+        case DataType::VECTOR_FLOAT16: {
+            AssertInfo(
+                data->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
+                "inconsistent data type: {}",
+                data->type_id());
+            auto array =
+                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
+            return array->byte_width() / sizeof(float16);
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            AssertInfo(
+                data->type()->id() == arrow::Type::type::FIXED_SIZE_BINARY,
+                "inconsistent data type: {}",
+                data->type_id());
+            auto array =
+                std::dynamic_pointer_cast<arrow::FixedSizeBinaryArray>(data);
+            return array->byte_width() / sizeof(bfloat16);
+        }
         default:
             PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
     }
