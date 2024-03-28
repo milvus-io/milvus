@@ -448,42 +448,6 @@ func TestSesssionMarshal(t *testing.T) {
 	assert.Equal(t, s.Version.String(), s2.Version.String())
 }
 
-func TestSesssionDelete(t *testing.T) {
-	paramtable.Init()
-	params := paramtable.Get()
-	endpoints := params.EtcdCfg.Endpoints.GetValue()
-	etcdEndpoints := strings.Split(endpoints, ",")
-	etcdCli, err := etcd.GetRemoteEtcdClient(etcdEndpoints)
-	require.NoError(t, err)
-	defer etcdCli.Close()
-
-	// Empty etcdCli
-	s := &Session{
-		SessionRaw: SessionRaw{
-			ServerID:   1,
-			ServerName: "test",
-			Address:    "localhost",
-		},
-		Version: common.Version,
-	}
-	res := s.deleteSession()
-	assert.False(t, res)
-
-	// Closed etcdCli
-	s = &Session{
-		SessionRaw: SessionRaw{
-			ServerID:   1,
-			ServerName: "test",
-			Address:    "localhost",
-		},
-		Version: common.Version,
-	}
-	s.etcdCli = etcdCli
-	etcdCli.Close()
-	res = s.deleteSession()
-	assert.False(t, res)
-}
-
 func TestSessionUnmarshal(t *testing.T) {
 	t.Run("json failure", func(t *testing.T) {
 		s := &Session{}

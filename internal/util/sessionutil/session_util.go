@@ -930,24 +930,10 @@ func (s *Session) cancelKeepAlive() {
 	}
 }
 
-func (s *Session) deleteSession() bool {
-	if s.etcdCli == nil {
-		log.Error("failed to delete session due to nil etcdCli!")
-		return false
-	}
-	_, err := s.etcdCli.Delete(context.Background(), s.getCompleteKey())
-	if err != nil {
-		log.Warn("failed to delete session", zap.Error(err))
-		return false
-	}
-	return true
-}
-
 func (s *Session) Stop() {
 	s.isStopped.Store(true)
 	s.Revoke(time.Second)
 	s.cancelKeepAlive()
-	s.deleteSession()
 	s.wg.Wait()
 }
 
