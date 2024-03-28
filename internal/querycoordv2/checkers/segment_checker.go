@@ -400,7 +400,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.balancer.AssignSegment(replica.CollectionID, segmentInfos, availableNodes)
+		shardPlans := c.balancer.AssignSegment(replica.CollectionID, segmentInfos, availableNodes, false)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 		}

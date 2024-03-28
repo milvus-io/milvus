@@ -102,6 +102,7 @@ func (suite *ReplicaManagerSuite) TestGet() {
 		for _, replica := range replicas {
 			suite.Equal(collection, replica.GetCollectionID())
 			suite.Equal(replica, mgr.Get(replica.GetID()))
+			suite.Equal(len(replica.Replica.GetNodes()), replica.Len())
 			suite.Equal(replica.Replica.GetNodes(), replica.GetNodes())
 			replicaNodes[replica.GetID()] = replica.Replica.GetNodes()
 			nodes = append(nodes, replica.Replica.Nodes...)
@@ -115,6 +116,24 @@ func (suite *ReplicaManagerSuite) TestGet() {
 			}
 		}
 	}
+}
+
+func (suite *ReplicaManagerSuite) TestGetByNode() {
+	mgr := suite.mgr
+
+	randomNodeID := int64(11111)
+	testReplica1, err := mgr.spawn(3002, DefaultResourceGroupName)
+	suite.NoError(err)
+	testReplica1.AddNode(randomNodeID)
+
+	testReplica2, err := mgr.spawn(3002, DefaultResourceGroupName)
+	suite.NoError(err)
+	testReplica2.AddNode(randomNodeID)
+
+	mgr.Put(testReplica1, testReplica2)
+
+	replicas := mgr.GetByNode(randomNodeID)
+	suite.Len(replicas, 2)
 }
 
 func (suite *ReplicaManagerSuite) TestRecover() {

@@ -232,7 +232,7 @@ func (m *ReplicaManager) GetByCollection(collectionID typeutil.UniqueID) []*Repl
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	replicas := make([]*Replica, 0, 3)
+	replicas := make([]*Replica, 0)
 	for _, replica := range m.replicas {
 		if replica.CollectionID == collectionID {
 			replicas = append(replicas, replica)
@@ -253,6 +253,20 @@ func (m *ReplicaManager) GetByCollectionAndNode(collectionID, nodeID typeutil.Un
 	}
 
 	return nil
+}
+
+func (m *ReplicaManager) GetByNode(nodeID typeutil.UniqueID) []*Replica {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	replicas := make([]*Replica, 0)
+	for _, replica := range m.replicas {
+		if replica.nodes.Contain(nodeID) {
+			replicas = append(replicas, replica)
+		}
+	}
+
+	return replicas
 }
 
 func (m *ReplicaManager) GetByCollectionAndRG(collectionID int64, rgName string) []*Replica {

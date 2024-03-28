@@ -144,6 +144,61 @@ func (_c *MockQueryCoord_CheckHealth_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// CheckQueryNodeDistribution provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) CheckQueryNodeDistribution(_a0 context.Context, _a1 *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_CheckQueryNodeDistribution_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckQueryNodeDistribution'
+type MockQueryCoord_CheckQueryNodeDistribution_Call struct {
+	*mock.Call
+}
+
+// CheckQueryNodeDistribution is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.CheckQueryNodeDistributionRequest
+func (_e *MockQueryCoord_Expecter) CheckQueryNodeDistribution(_a0 interface{}, _a1 interface{}) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	return &MockQueryCoord_CheckQueryNodeDistribution_Call{Call: _e.mock.On("CheckQueryNodeDistribution", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) Run(run func(_a0 context.Context, _a1 *querypb.CheckQueryNodeDistributionRequest)) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.CheckQueryNodeDistributionRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_CheckQueryNodeDistribution_Call) RunAndReturn(run func(context.Context, *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error)) *MockQueryCoord_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateResourceGroup provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) CreateResourceGroup(_a0 context.Context, _a1 *milvuspb.CreateResourceGroupRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -529,6 +584,61 @@ func (_c *MockQueryCoord_GetPartitionStates_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// GetQueryNodeDistribution provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) GetQueryNodeDistribution(_a0 context.Context, _a1 *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *querypb.GetQueryNodeDistributionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryNodeDistributionRequest) *querypb.GetQueryNodeDistributionResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.GetQueryNodeDistributionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetQueryNodeDistributionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_GetQueryNodeDistribution_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryNodeDistribution'
+type MockQueryCoord_GetQueryNodeDistribution_Call struct {
+	*mock.Call
+}
+
+// GetQueryNodeDistribution is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.GetQueryNodeDistributionRequest
+func (_e *MockQueryCoord_Expecter) GetQueryNodeDistribution(_a0 interface{}, _a1 interface{}) *MockQueryCoord_GetQueryNodeDistribution_Call {
+	return &MockQueryCoord_GetQueryNodeDistribution_Call{Call: _e.mock.On("GetQueryNodeDistribution", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_GetQueryNodeDistribution_Call) Run(run func(_a0 context.Context, _a1 *querypb.GetQueryNodeDistributionRequest)) *MockQueryCoord_GetQueryNodeDistribution_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.GetQueryNodeDistributionRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_GetQueryNodeDistribution_Call) Return(_a0 *querypb.GetQueryNodeDistributionResponse, _a1 error) *MockQueryCoord_GetQueryNodeDistribution_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_GetQueryNodeDistribution_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error)) *MockQueryCoord_GetQueryNodeDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetReplicas provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) GetReplicas(_a0 context.Context, _a1 *milvuspb.GetReplicasRequest) (*milvuspb.GetReplicasResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -900,6 +1010,61 @@ func (_c *MockQueryCoord_ListCheckers_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// ListQueryNode provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ListQueryNode(_a0 context.Context, _a1 *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *querypb.ListQueryNodeResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListQueryNodeRequest) *querypb.ListQueryNodeResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ListQueryNodeResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ListQueryNodeRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ListQueryNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListQueryNode'
+type MockQueryCoord_ListQueryNode_Call struct {
+	*mock.Call
+}
+
+// ListQueryNode is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ListQueryNodeRequest
+func (_e *MockQueryCoord_Expecter) ListQueryNode(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ListQueryNode_Call {
+	return &MockQueryCoord_ListQueryNode_Call{Call: _e.mock.On("ListQueryNode", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ListQueryNode_Call) Run(run func(_a0 context.Context, _a1 *querypb.ListQueryNodeRequest)) *MockQueryCoord_ListQueryNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ListQueryNodeRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ListQueryNode_Call) Return(_a0 *querypb.ListQueryNodeResponse, _a1 error) *MockQueryCoord_ListQueryNode_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ListQueryNode_Call) RunAndReturn(run func(context.Context, *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error)) *MockQueryCoord_ListQueryNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListResourceGroups provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) ListResourceGroups(_a0 context.Context, _a1 *milvuspb.ListResourceGroupsRequest) (*milvuspb.ListResourceGroupsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1267,6 +1432,116 @@ func (_c *MockQueryCoord_ReleasePartitions_Call) Return(_a0 *commonpb.Status, _a
 }
 
 func (_c *MockQueryCoord_ReleasePartitions_Call) RunAndReturn(run func(context.Context, *querypb.ReleasePartitionsRequest) (*commonpb.Status, error)) *MockQueryCoord_ReleasePartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResumeBalance provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ResumeBalance(_a0 context.Context, _a1 *querypb.ResumeBalanceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeBalanceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeBalanceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ResumeBalanceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ResumeBalance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResumeBalance'
+type MockQueryCoord_ResumeBalance_Call struct {
+	*mock.Call
+}
+
+// ResumeBalance is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ResumeBalanceRequest
+func (_e *MockQueryCoord_Expecter) ResumeBalance(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ResumeBalance_Call {
+	return &MockQueryCoord_ResumeBalance_Call{Call: _e.mock.On("ResumeBalance", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ResumeBalance_Call) Run(run func(_a0 context.Context, _a1 *querypb.ResumeBalanceRequest)) *MockQueryCoord_ResumeBalance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ResumeBalanceRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ResumeBalance_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_ResumeBalance_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ResumeBalance_Call) RunAndReturn(run func(context.Context, *querypb.ResumeBalanceRequest) (*commonpb.Status, error)) *MockQueryCoord_ResumeBalance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResumeNode provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) ResumeNode(_a0 context.Context, _a1 *querypb.ResumeNodeRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeNodeRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeNodeRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ResumeNodeRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_ResumeNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResumeNode'
+type MockQueryCoord_ResumeNode_Call struct {
+	*mock.Call
+}
+
+// ResumeNode is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.ResumeNodeRequest
+func (_e *MockQueryCoord_Expecter) ResumeNode(_a0 interface{}, _a1 interface{}) *MockQueryCoord_ResumeNode_Call {
+	return &MockQueryCoord_ResumeNode_Call{Call: _e.mock.On("ResumeNode", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_ResumeNode_Call) Run(run func(_a0 context.Context, _a1 *querypb.ResumeNodeRequest)) *MockQueryCoord_ResumeNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.ResumeNodeRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_ResumeNode_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_ResumeNode_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_ResumeNode_Call) RunAndReturn(run func(context.Context, *querypb.ResumeNodeRequest) (*commonpb.Status, error)) *MockQueryCoord_ResumeNode_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1734,6 +2009,116 @@ func (_c *MockQueryCoord_Stop_Call) RunAndReturn(run func() error) *MockQueryCoo
 	return _c
 }
 
+// SuspendBalance provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) SuspendBalance(_a0 context.Context, _a1 *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendBalanceRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendBalanceRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SuspendBalanceRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_SuspendBalance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SuspendBalance'
+type MockQueryCoord_SuspendBalance_Call struct {
+	*mock.Call
+}
+
+// SuspendBalance is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.SuspendBalanceRequest
+func (_e *MockQueryCoord_Expecter) SuspendBalance(_a0 interface{}, _a1 interface{}) *MockQueryCoord_SuspendBalance_Call {
+	return &MockQueryCoord_SuspendBalance_Call{Call: _e.mock.On("SuspendBalance", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_SuspendBalance_Call) Run(run func(_a0 context.Context, _a1 *querypb.SuspendBalanceRequest)) *MockQueryCoord_SuspendBalance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.SuspendBalanceRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_SuspendBalance_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_SuspendBalance_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_SuspendBalance_Call) RunAndReturn(run func(context.Context, *querypb.SuspendBalanceRequest) (*commonpb.Status, error)) *MockQueryCoord_SuspendBalance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SuspendNode provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) SuspendNode(_a0 context.Context, _a1 *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendNodeRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendNodeRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SuspendNodeRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_SuspendNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SuspendNode'
+type MockQueryCoord_SuspendNode_Call struct {
+	*mock.Call
+}
+
+// SuspendNode is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.SuspendNodeRequest
+func (_e *MockQueryCoord_Expecter) SuspendNode(_a0 interface{}, _a1 interface{}) *MockQueryCoord_SuspendNode_Call {
+	return &MockQueryCoord_SuspendNode_Call{Call: _e.mock.On("SuspendNode", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_SuspendNode_Call) Run(run func(_a0 context.Context, _a1 *querypb.SuspendNodeRequest)) *MockQueryCoord_SuspendNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.SuspendNodeRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_SuspendNode_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_SuspendNode_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_SuspendNode_Call) RunAndReturn(run func(context.Context, *querypb.SuspendNodeRequest) (*commonpb.Status, error)) *MockQueryCoord_SuspendNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SyncNewCreatedPartition provides a mock function with given fields: _a0, _a1
 func (_m *MockQueryCoord) SyncNewCreatedPartition(_a0 context.Context, _a1 *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -1785,6 +2170,61 @@ func (_c *MockQueryCoord_SyncNewCreatedPartition_Call) Return(_a0 *commonpb.Stat
 }
 
 func (_c *MockQueryCoord_SyncNewCreatedPartition_Call) RunAndReturn(run func(context.Context, *querypb.SyncNewCreatedPartitionRequest) (*commonpb.Status, error)) *MockQueryCoord_SyncNewCreatedPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TransferChannel provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) TransferChannel(_a0 context.Context, _a1 *querypb.TransferChannelRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferChannelRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferChannelRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.TransferChannelRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_TransferChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransferChannel'
+type MockQueryCoord_TransferChannel_Call struct {
+	*mock.Call
+}
+
+// TransferChannel is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.TransferChannelRequest
+func (_e *MockQueryCoord_Expecter) TransferChannel(_a0 interface{}, _a1 interface{}) *MockQueryCoord_TransferChannel_Call {
+	return &MockQueryCoord_TransferChannel_Call{Call: _e.mock.On("TransferChannel", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_TransferChannel_Call) Run(run func(_a0 context.Context, _a1 *querypb.TransferChannelRequest)) *MockQueryCoord_TransferChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.TransferChannelRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_TransferChannel_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_TransferChannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_TransferChannel_Call) RunAndReturn(run func(context.Context, *querypb.TransferChannelRequest) (*commonpb.Status, error)) *MockQueryCoord_TransferChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1895,6 +2335,61 @@ func (_c *MockQueryCoord_TransferReplica_Call) Return(_a0 *commonpb.Status, _a1 
 }
 
 func (_c *MockQueryCoord_TransferReplica_Call) RunAndReturn(run func(context.Context, *querypb.TransferReplicaRequest) (*commonpb.Status, error)) *MockQueryCoord_TransferReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TransferSegment provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) TransferSegment(_a0 context.Context, _a1 *querypb.TransferSegmentRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferSegmentRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferSegmentRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.TransferSegmentRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_TransferSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransferSegment'
+type MockQueryCoord_TransferSegment_Call struct {
+	*mock.Call
+}
+
+// TransferSegment is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *querypb.TransferSegmentRequest
+func (_e *MockQueryCoord_Expecter) TransferSegment(_a0 interface{}, _a1 interface{}) *MockQueryCoord_TransferSegment_Call {
+	return &MockQueryCoord_TransferSegment_Call{Call: _e.mock.On("TransferSegment", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_TransferSegment_Call) Run(run func(_a0 context.Context, _a1 *querypb.TransferSegmentRequest)) *MockQueryCoord_TransferSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*querypb.TransferSegmentRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_TransferSegment_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_TransferSegment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_TransferSegment_Call) RunAndReturn(run func(context.Context, *querypb.TransferSegmentRequest) (*commonpb.Status, error)) *MockQueryCoord_TransferSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

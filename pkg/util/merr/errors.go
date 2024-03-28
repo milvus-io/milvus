@@ -90,11 +90,12 @@ var (
 	ErrDatabaseInvalidName      = newMilvusError("invalid database name", 802, false)
 
 	// Node related
-	ErrNodeNotFound     = newMilvusError("node not found", 901, false)
-	ErrNodeOffline      = newMilvusError("node offline", 902, false)
-	ErrNodeLack         = newMilvusError("node lacks", 903, false)
-	ErrNodeNotMatch     = newMilvusError("node not match", 904, false)
-	ErrNodeNotAvailable = newMilvusError("node not available", 905, false)
+	ErrNodeNotFound        = newMilvusError("node not found", 901, false)
+	ErrNodeOffline         = newMilvusError("node offline", 902, false)
+	ErrNodeLack            = newMilvusError("node lacks", 903, false)
+	ErrNodeNotMatch        = newMilvusError("node not match", 904, false)
+	ErrNodeNotAvailable    = newMilvusError("node not available", 905, false)
+	ErrNodeStateUnexpected = newMilvusError("node state unexpected", 906, false)
 
 	// IO related
 	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)

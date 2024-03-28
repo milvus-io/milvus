@@ -27,6 +27,7 @@ const (
 	BalanceCheckerName = "balance_checker"
 	IndexCheckerName   = "index_checker"
 	LeaderCheckerName  = "leader_checker"
+	ManualBalanceName  = "manual_balance"
 )
 
 type CheckerType int32
@@ -37,6 +38,7 @@ const (
 	BalanceChecker
 	IndexChecker
 	LeaderChecker
+	ManualBalance
 )
 
 var checkerNames = map[CheckerType]string{
@@ -45,6 +47,7 @@ var checkerNames = map[CheckerType]string{
 	BalanceChecker: BalanceCheckerName,
 	IndexChecker:   IndexCheckerName,
 	LeaderChecker:  LeaderCheckerName,
+	ManualBalance:  ManualBalanceName,
 }
 
 func (s CheckerType) String() string {

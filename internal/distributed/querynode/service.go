@@ -74,6 +74,10 @@ func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisti
 	return s.querynode.GetStatistics(ctx, request)
 }
 
+func (s *Server) GetQueryNode() types.QueryNodeComponent {
+	return s.querynode
+}
+
 // NewServer create a new QueryNode grpc server.
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)

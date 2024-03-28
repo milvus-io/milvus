@@ -20,6 +20,8 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
@@ -57,8 +59,8 @@ var (
 )
 
 type Balance interface {
-	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan
-	AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan
+	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan
+	AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan
 	BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan)
 }
 
@@ -67,7 +69,15 @@ type RoundRobinBalancer struct {
 	nodeManager *session.NodeManager
 }
 
-func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
+	if !manualBalance {
+		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+			info := b.nodeManager.Get(node)
+			return info != nil && info.GetState() == session.NodeStateNormal
+		})
+	}
+
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil
@@ -90,7 +100,14 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 	return ret
 }
 
-func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64) []ChannelAssignPlan {
+func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
+	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
+	if !manualBalance {
+		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+			info := b.nodeManager.Get(node)
+			return info != nil && info.GetState() == session.NodeStateNormal
+		})
+	}
 	nodesInfo := b.getNodes(nodes)
 	if len(nodesInfo) == 0 {
 		return nil

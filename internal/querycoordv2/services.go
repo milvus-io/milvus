@@ -682,24 +682,67 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 		return merr.Status(errors.Wrap(err,
 			fmt.Sprintf("can't balance, because the source node[%d] is invalid", srcNode))), nil
 	}
-	for _, dstNode := range req.GetDstNodeIDs() {
-		if !replica.Contains(dstNode) {
-			err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
-			log.Warn("failed to balance to the destination node", zap.Error(err))
-			return merr.Status(err), nil
+
+	// when no dst node specified, default to use all other nodes in same
+	dstNodeSet := typeutil.NewUniqueSet()
+	if len(req.GetDstNodeIDs()) == 0 {
+		outboundNodes := s.meta.ResourceManager.CheckOutboundNodes(replica)
+		availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool { return !outboundNodes.Contain(node) })
+		dstNodeSet.Insert(availableNodes...)
+	} else {
+		for _, dstNode := range req.GetDstNodeIDs() {
+			if !replica.Contains(dstNode) {
+				err := merr.WrapErrNodeNotFound(dstNode, "destination node not found in the same replica")
+				log.Warn("failed to balance to the destination node", zap.Error(err))
+				return merr.Status(err), nil
+			}
+			dstNodeSet.Insert(dstNode)
 		}
+	}
+
+	// check whether dstNode is healthy
+	for dstNode := range dstNodeSet {
 		if err := s.isStoppingNode(dstNode); err != nil {
 			return merr.Status(errors.Wrap(err,
 				fmt.Sprintf("can't balance, because the destination node[%d] is invalid", dstNode))), nil
 		}
 	}
 
-	err := s.balanceSegments(ctx, req, replica)
+	// check sealed segment list
+	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(req.GetCollectionID()), meta.WithNodeID(srcNode))
+	segmentsMap := lo.SliceToMap(segments, func(s *meta.Segment) (int64, *meta.Segment) {
+		return s.GetID(), s
+	})
+
+	toBalance := typeutil.NewSet[*meta.Segment]()
+	if len(req.GetSealedSegmentIDs()) == 0 {
+		toBalance.Insert(segments...)
+	} else {
+		// check whether sealed segment exist
+		for _, segmentID := range req.GetSealedSegmentIDs() {
+			segment, ok := segmentsMap[segmentID]
+			if !ok {
+				err := merr.WrapErrSegmentNotFound(segmentID, "segment not found in source node")
+				return merr.Status(err), nil
+			}
+
+			// Only balance segments in targets
+			existInTarget := s.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil
+			if !existInTarget {
+				log.Info("segment doesn't exist in current target, skip it", zap.Int64("segmentID", segmentID))
+				continue
+			}
+			toBalance.Insert(segment)
+		}
+	}
+
+	err := s.balanceSegments(ctx, replica.GetCollectionID(), replica, srcNode, dstNodeSet.Collect(), toBalance.Collect(), true, false)
 	if err != nil {
 		msg := "failed to balance segments"
 		log.Warn(msg, zap.Error(err))
 		return merr.Status(errors.Wrap(err, msg)), nil
 	}
+
 	return merr.Success(), nil
 }
 
