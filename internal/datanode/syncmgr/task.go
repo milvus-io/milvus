@@ -216,6 +216,13 @@ func (t *SyncTask) Run() (err error) {
 		metrics.DataNodeAutoFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
 	}
 	metrics.DataNodeFlushBufferCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel, t.level.String()).Inc()
+
+	// free blobs and data
+	t.binlogBlobs = nil
+	t.deltaBlob = nil
+	t.mergedStatsBlob = nil
+	t.batchStatsBlob = nil
+	t.segmentData = nil
 	return nil
 }
 
