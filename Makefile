@@ -178,10 +178,6 @@ INTERATION_PATH = $(PWD)/tests/integration
 integration-test: getdeps
 	@echo "Building integration tests ..."
 	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
-	#@source $(PWD)/scripts/setenv.sh && \
-    		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-    		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-    		-tags dynamic -o $(INSTALL_PATH)/integration-test $(INTERATION_PATH)/ #1>/dev/null
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
@@ -329,6 +325,11 @@ codecov: codecov-go codecov-cpp
 codecov-go: build-cpp-with-coverage
 	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
+
+# Run codecov-go without build core again, used in github action
+codecov-go-without-build: getdeps
+	@echo "Running go coverage..."
+	@(env bash $(PWD)/scripts/run_go_codecov.sh "$(INSTALL_PATH)/gotestsum --")
 
 # Run codecov-cpp
 codecov-cpp: build-cpp-with-coverage
