@@ -666,7 +666,10 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 			Description: "",
 			AutoID:      false,
 			Fields: []*schemapb.FieldSchema{
-				{Name: field1},
+				{
+					Name:     field1,
+					DataType: schemapb.DataType_Int64,
+				},
 			},
 		}
 		marshaledSchema, err := proto.Marshal(schema)
