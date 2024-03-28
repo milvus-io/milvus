@@ -76,6 +76,8 @@ extern const std::unique_ptr<PrometheusClient> prometheusClient;
 #define DEFINE_PROMETHEUS_HISTOGRAM(alias, name, labels) \
     prometheus::Histogram& alias =                       \
         name##_family.Add(labels, milvus::storage::buckets);
+#define DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(alias, name, labels, buckets) \
+    prometheus::Histogram& alias = name##_family.Add(labels, buckets);
 
 #define DECLARE_PROMETHEUS_GAUGE_FAMILY(name_gauge_family) \
     extern prometheus::Family<prometheus::Gauge>& name_gauge_family;
@@ -112,4 +114,12 @@ DECLARE_PROMETHEUS_COUNTER(internal_storage_op_count_list_suc);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_op_count_list_fail);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_op_count_remove_suc);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_op_count_remove_fail);
+
+// mmap metrics
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_mmap_allocated_space_bytes);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_mmap_allocated_space_bytes_anon);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_mmap_allocated_space_bytes_file);
+DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_mmap_in_used_space_bytes);
+DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon);
+DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file);
 }  // namespace milvus::storage
