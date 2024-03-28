@@ -16,7 +16,9 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/grpc/encoding/gzip"
 
+	"github.com/milvus-io/milvus/pkg/util/compressor/zstd"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -145,6 +147,12 @@ func TestGrpcClientParams(t *testing.T) {
 	assert.Equal(t, clientConfig.CompressionEnabled.GetAsBool(), DefaultCompressionEnabled)
 	base.Save(clientConfig.CompressionEnabled.Key, "true")
 	assert.Equal(t, true, clientConfig.CompressionEnabled.GetAsBool())
+
+	assert.Equal(t, clientConfig.CompressionType.GetValue(), zstd.Name)
+	base.Save("grpc.client.compressionType", gzip.Name)
+	assert.Equal(t, clientConfig.CompressionType.GetValue(), gzip.Name)
+	base.Save("grpc.client.compressionType", "invalid")
+	assert.Equal(t, clientConfig.CompressionType.GetValue(), "invalid")
 
 	assert.Equal(t, clientConfig.MinResetInterval.GetValue(), "1000")
 	base.Save("grpc.client.minResetInterval", "abc")

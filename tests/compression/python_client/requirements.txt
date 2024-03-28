@@ -1,0 +1,5 @@
+--extra-index-url https://test.pypi.org/simple/
+grpcio==1.58.0
+pytest==7.2.0
+pymilvus==2.5.0rc3
+PyYAML==6.0

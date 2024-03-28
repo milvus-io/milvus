@@ -19,4 +19,18 @@ RUN python3 -m pip install --upgrade setuptools \
     && python3 -m pip install --upgrade pip \
     && python3 -m pip install --no-cache-dir  -r /requirements.txt --timeout 30 --retries 6
 
+COPY ./tests/compression/python_client/requirements.txt /requirements.txt
+RUN python3 -m pip install pytest-benchmark \
+    && python3 -m pip install --no-cache-dir  -r /requirements.txt --timeout 30 --retries 6
+
+# Install Go
+ENV GOPATH /go
+ENV GOROOT /usr/local/go
+ENV GO111MODULE on
+ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.20.7.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+    mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
+    go clean --modcache && \
+    chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
+
 CMD ["tail", "-f", "/dev/null"]

@@ -65,6 +65,35 @@ fi
 echo "prepare e2e test"
 install_pytest_requirements
 
+# Run go test
+cd ${ROOT}/tests/compression/go_client
+install_go_env
+MILVUS_SERVICE_ADDRESS=${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} go test
+
+#MILVUS_SERVICE_ADDRESS=${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} go test -bench=Benchmark128M -benchtime=20s
+#MILVUS_SERVICE_ADDRESS=${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} go test -bench=BenchmarkCompression -benchtime=20s
+
+cd ${ROOT}/tests/compression/python_client
+python3 -m pip install --no-cache-dir -r requirements.txt --timeout 30 --retries 6
+
+if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+
+  timeout  "${TEST_TIMEOUT}" pytest testcases --endpoint ${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m normal -n 6 --timeout 180\
+                                     --html=${CI_LOG_PATH}/report_normal.html  --self-contained-html
+else
+  pytest testcases --endpoint ${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m normal -n 6 --timeout 180\
+                                     --html=${CI_LOG_PATH}/report_normal.html --self-contained-html
+fi
+
+#python3 -m pip install pytest-benchmark
+#if [[ -n "${TEST_TIMEOUT:-}" ]]; then
+#  timeout  "${TEST_TIMEOUT}" py.test --endpoint ${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m bench --timeout 180\
+#                                     --html=${CI_LOG_PATH}/report_bench.html  --self-contained-html
+#else
+#  py.test --endpoint ${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m bench --timeout 180\
+#                                     --html=${CI_LOG_PATH}/report_bench.html --self-contained-html
+#fi
+
 
 # Run restful test v1
 

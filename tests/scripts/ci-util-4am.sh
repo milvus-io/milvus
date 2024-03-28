@@ -47,6 +47,29 @@ export PIP_FIND_LINKS="https://nexus-ci.zilliz.cc/repository/pypi-all/pypi"
  python3 -m pip install --no-cache-dir -r requirements.txt --timeout 30 --retries 6 
 }
 
+# Install go env
+function install_go_env(){
+ echo "Install go env"
+  if go version >/dev/null 2>&1 ; then
+    echo "go env is ready"
+  else
+    mkdir /go
+    chmod -R 777 /go
+    mkdir /go/src
+    mkdir /go/bin
+    mkdir -p /usr/local/go
+    export GOPATH=/go
+    export GOROOT=/usr/local/go
+    export GO111MODULE=on
+    export PATH=$GOPATH/bin:$GOROOT/bin:$PATH
+    wget -qO- "https://go.dev/dl/go1.20.7.linux-amd64.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go
+    go clean --modcache
+    chmod -R a+w $(go env GOTOOLDIR)
+  fi
+  go version
+
+}
+
 # Login in ci docker registry
 function docker_login_ci_registry(){
 

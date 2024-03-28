@@ -202,6 +202,7 @@ type GrpcClientConfig struct {
 	grpcConfig
 
 	CompressionEnabled ParamItem `refreshable:"false"`
+	CompressionType    ParamItem `refreshable:"false"`
 
 	ClientMaxSendSize ParamItem `refreshable:"false"`
 	ClientMaxRecvSize ParamItem `refreshable:"false"`
@@ -411,6 +412,15 @@ func (p *GrpcClientConfig) Init(domain string, base *BaseTable) {
 		Export: true,
 	}
 	p.CompressionEnabled.Init(base.mgr)
+
+	p.CompressionType = ParamItem{
+		Key:          "grpc.client.compressionType",
+		Version:      "2.3.9",
+		DefaultValue: "zstd",
+		Doc:          "available values are [gzip, zstd, deflate, snappy, lz4]",
+		Export:       true,
+	}
+	p.CompressionType.Init(base.mgr)
 
 	p.MinResetInterval = ParamItem{
 		Key:          "grpc.client.minResetInterval",
