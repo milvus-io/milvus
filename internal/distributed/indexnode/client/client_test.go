@@ -164,6 +164,24 @@ func TestIndexNodeClient(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("Analysis", func(t *testing.T) {
+		req := &indexpb.AnalysisRequest{}
+		_, err := inc.Analysis(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("QueryAnalysisResult", func(t *testing.T) {
+		req := &indexpb.QueryAnalysisResultRequest{}
+		_, err := inc.QueryAnalysisResult(ctx, req)
+		assert.NoError(t, err)
+	})
+
+	t.Run("DropAnalysisTasks", func(t *testing.T) {
+		req := &indexpb.DropAnalysisTasksRequest{}
+		_, err := inc.DropAnalysisTasks(ctx, req)
+		assert.NoError(t, err)
+	})
+
 	err := inc.Close()
 	assert.NoError(t, err)
 }

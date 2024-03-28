@@ -529,17 +529,17 @@ func TestIndexTaskWhenStoppingNode(t *testing.T) {
 	paramtable.Init()
 	in := NewIndexNode(ctx, factory)
 
-	in.loadOrStoreTask("cluster-1", 1, &taskInfo{
+	in.loadOrStoreIndexTask("cluster-1", 1, &indexTaskInfo{
 		state: commonpb.IndexState_InProgress,
 	})
-	in.loadOrStoreTask("cluster-2", 2, &taskInfo{
+	in.loadOrStoreIndexTask("cluster-2", 2, &indexTaskInfo{
 		state: commonpb.IndexState_Finished,
 	})
 
 	assert.True(t, in.hasInProgressTask())
 	go func() {
 		time.Sleep(2 * time.Second)
-		in.storeTaskState("cluster-1", 1, commonpb.IndexState_Finished, "")
+		in.storeIndexTaskState("cluster-1", 1, commonpb.IndexState_Finished, "")
 	}()
 	noTaskChan := make(chan struct{})
 	go func() {

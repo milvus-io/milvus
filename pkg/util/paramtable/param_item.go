@@ -223,6 +223,34 @@ func (pi *ParamItem) GetAsRoleDetails() map[string](map[string]([](map[string]st
 	return getAndConvert(pi.GetValue(), funcutil.JSONToRoleDetails, nil)
 }
 
+func (pi *ParamItem) GetAsSize() int64 {
+	valueStr := strings.ToLower(pi.GetValue())
+	if strings.HasSuffix(valueStr, "g") || strings.HasSuffix(valueStr, "gb") {
+		size, err := strconv.ParseInt(strings.Split(valueStr, "g")[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return size * 1024 * 1024 * 1024
+	} else if strings.HasSuffix(valueStr, "m") || strings.HasSuffix(valueStr, "mb") {
+		size, err := strconv.ParseInt(strings.Split(valueStr, "m")[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return size * 1024 * 1024
+	} else if strings.HasSuffix(valueStr, "k") || strings.HasSuffix(valueStr, "kb") {
+		size, err := strconv.ParseInt(strings.Split(valueStr, "k")[0], 10, 64)
+		if err != nil {
+			return 0
+		}
+		return size * 1024
+	}
+	size, err := strconv.ParseInt(valueStr, 10, 64)
+	if err != nil {
+		return 0
+	}
+	return size
+}
+
 type CompositeParamItem struct {
 	Items  []*ParamItem
 	Format func(map[string]string) string

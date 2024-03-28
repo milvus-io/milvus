@@ -12,9 +12,11 @@
 
 set(INDEXBUILDER_FILES
         VecIndexCreator.cpp
+        analysis_c.cpp
         index_c.cpp
         init_c.cpp
         ScalarIndexCreator.cpp
+        KmeansMajorCompaction.cpp
         )
 
 milvus_add_pkg_config("milvus_indexbuilder")

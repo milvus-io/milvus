@@ -116,15 +116,19 @@ func (itr *InsertBinlogIterator) Dispose() {
 }
 
 func (itr *InsertBinlogIterator) hasNext() bool {
-	_, ok := itr.data.Data[common.RowIDField]
-	if !ok {
-		return false
-	}
-	return itr.pos < itr.data.Data[common.RowIDField].RowNum()
+	return itr.pos < itr.RowNum()
 }
 
 func (itr *InsertBinlogIterator) isDisposed() bool {
 	return atomic.LoadInt32(&itr.dispose) == 1
+}
+
+func (itr *InsertBinlogIterator) DataSize() int {
+	return itr.data.GetMemorySize()
+}
+
+func (itr *InsertBinlogIterator) RowNum() int {
+	return itr.data.GetRowNum()
 }
 
 /*

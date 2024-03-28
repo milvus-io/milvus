@@ -815,3 +815,78 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	}
 	return len(keys) == 0 && len(values) == 0
 }
+
+func (kc *Catalog) ListMajorCompactionInfos(ctx context.Context) ([]*datapb.MajorCompactionInfo, error) {
+	infos := make([]*datapb.MajorCompactionInfo, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(MajorCompactionInfoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		info := &datapb.MajorCompactionInfo{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func (kc *Catalog) SaveMajorCompactionInfo(ctx context.Context, coll *datapb.MajorCompactionInfo) error {
+	if coll == nil {
+		return nil
+	}
+	cloned := proto.Clone(coll).(*datapb.MajorCompactionInfo)
+	k, v, err := buildCollectionCompactionInfoKv(cloned)
+	if err != nil {
+		return err
+	}
+	kvs := make(map[string]string)
+	kvs[k] = v
+	return kc.SaveByBatch(kvs)
+}
+
+func (kc *Catalog) DropMajorCompactionInfo(ctx context.Context, info *datapb.MajorCompactionInfo) error {
+	key := buildMajorCompactionInfoPath(info.CollectionID, info.TriggerID)
+	return kc.MetaKv.Remove(key)
+}
+
+func (kc *Catalog) ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error) {
+	tasks := make([]*model.AnalysisTask, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(AnalysisTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		task := &indexpb.AnalysisTask{}
+		err = proto.Unmarshal([]byte(value), task)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, model.UnmarshalAnalysisTask(task))
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error {
+	key := buildAnalysisTaskKey(task.TaskID)
+
+	value, err := proto.Marshal(model.MarshalAnalysisTask(task))
+	if err != nil {
+		return err
+	}
+
+	err = kc.MetaKv.Save(key, string(value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) DropAnalysisTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildAnalysisTaskKey(taskID)
+	return kc.MetaKv.Remove(key)
+}
