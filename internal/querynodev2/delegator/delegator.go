@@ -72,8 +72,7 @@ type ShardDelegator interface {
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) ([]*internalpb.GetStatisticsResponse, error)
 
 	// data
-	ProcessInsert(insertRecords map[int64]*InsertData)
-	ProcessDelete(deleteData []*DeleteData, ts uint64)
+	ProcessData(ctx context.Context, insertData []*InsertData, deleteData []*DeleteData, tsFrom, tsTo uint64) error
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error

@@ -76,7 +76,7 @@ func (suite *PipelineTestSuite) buildMsgPack(schema *schemapb.CollectionSchema) 
 
 	for id, segmentID := range suite.insertSegmentIDs {
 		insertMsg := buildInsertMsg(suite.collectionID, suite.partitionIDs[id%len(suite.partitionIDs)], segmentID, suite.channel, 1)
-		insertMsg.FieldsData = genFiledDataWithSchema(schema, 1)
+		insertMsg.FieldsData = genFieldDataWithSchema(schema, 1)
 		msgPack.Msgs = append(msgPack.Msgs, insertMsg)
 	}
 
@@ -119,22 +119,18 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
 	//	mock delegator
-	suite.delegator.EXPECT().ProcessInsert(mock.Anything).Run(
-		func(insertRecords map[int64]*delegator.InsertData) {
-			for segmentID := range insertRecords {
-				suite.True(lo.Contains(suite.insertSegmentIDs, segmentID))
+	suite.delegator.EXPECT().ProcessData(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Run(func(ctx context.Context, insertData []*delegator.InsertData, deleteData []*delegator.DeleteData, tsFrom, tsTo uint64) {
+		for _, entry := range insertData {
+			suite.True(lo.Contains(suite.insertSegmentIDs, entry.SegmentID))
+		}
+		for _, data := range deleteData {
+			for _, pk := range data.PrimaryKeys {
+				suite.True(lo.Contains(suite.deletePKs, pk.GetValue().(int64)))
 			}
-		})
+		}
+	}).Return(nil)
 
-	suite.delegator.EXPECT().ProcessDelete(mock.Anything, mock.Anything).Run(
-		func(deleteData []*delegator.DeleteData, ts uint64) {
-			for _, data := range deleteData {
-				for _, pk := range data.PrimaryKeys {
-					suite.True(lo.Contains(suite.deletePKs, pk.GetValue().(int64)))
-				}
-			}
-		})
-	// build pipleine
+	// build pipeline
 	manager := &segments.Manager{
 		Collection: suite.collectionManager,
 		Segment:    suite.segmentManager,

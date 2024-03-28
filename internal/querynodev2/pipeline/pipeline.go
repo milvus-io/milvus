@@ -66,8 +66,7 @@ func NewPipeLine(
 	}
 
 	filterNode := newFilterNode(collectionID, channel, manager, excludedSegments, pipelineQueueLength)
-	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
-	deleteNode := newDeleteNode(collectionID, channel, manager, tSafeManager, delegator, pipelineQueueLength)
-	p.Add(filterNode, insertNode, deleteNode)
+	writeNode := newWriteNode(collectionID, channel, manager, tSafeManager, delegator, pipelineQueueLength)
+	p.Add(filterNode, writeNode)
 	return p, nil
 }
