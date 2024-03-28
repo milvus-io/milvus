@@ -17,6 +17,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proxy"
@@ -309,7 +310,7 @@ func TestTimeout(t *testing.T) {
 	})
 	headerTestCases = append(headerTestCases, headerTestCase{
 		path:    path, // timeout 3s
-		headers: map[string]string{HTTPHeaderRequestTimeout: "3"},
+		headers: map[string]string{mhttp.HTTPHeaderRequestTimeout: "3"},
 		status:  http.StatusRequestTimeout,
 	})
 	path = "/middleware/timeout/31"
@@ -322,7 +323,7 @@ func TestTimeout(t *testing.T) {
 	})
 	headerTestCases = append(headerTestCases, headerTestCase{
 		path:    path, // wait 32s
-		headers: map[string]string{HTTPHeaderRequestTimeout: "32"},
+		headers: map[string]string{mhttp.HTTPHeaderRequestTimeout: "32"},
 	})
 
 	for _, testcase := range headerTestCases {
