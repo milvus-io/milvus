@@ -20,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
@@ -89,12 +90,12 @@ func initHTTPServer(proxy types.ProxyComponent, needAuth bool) *gin.Engine {
 	h := NewHandlersV1(proxy)
 	ginHandler := gin.Default()
 	ginHandler.Use(func(c *gin.Context) {
-		_, err := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
+		_, err := strconv.ParseBool(c.Request.Header.Get(mhttp.HTTPHeaderAllowInt64))
 		if err != nil {
 			if paramtable.Get().HTTPCfg.AcceptTypeAllowInt64.GetAsBool() {
-				c.Request.Header.Set(HTTPHeaderAllowInt64, "true")
+				c.Request.Header.Set(mhttp.HTTPHeaderAllowInt64, "true")
 			} else {
-				c.Request.Header.Set(HTTPHeaderAllowInt64, "false")
+				c.Request.Header.Set(mhttp.HTTPHeaderAllowInt64, "false")
 			}
 		}
 		c.Next()
@@ -126,9 +127,9 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 			c.Set(ContextUsername, "")
 			username, password, ok := ParseUsernamePassword(c)
 			if !ok {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			} else if username == util.UserRoot && password != util.DefaultRootPassword {
-				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+				c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{mhttp.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), mhttp.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 			} else {
 				c.Set(ContextUsername, username)
 			}
@@ -140,7 +141,7 @@ func genAuthMiddleWare(needAuth bool) gin.HandlerFunc {
 }
 
 func Print(code int32, message string) string {
-	return fmt.Sprintf("{\"%s\":%d,\"%s\":\"%s\"}", HTTPReturnCode, code, HTTPReturnMessage, message)
+	return fmt.Sprintf("{\"%s\":%d,\"%s\":\"%s\"}", mhttp.HTTPReturnCode, code, mhttp.HTTPReturnMessage, message)
 }
 
 func PrintErr(err error) string {
@@ -148,7 +149,7 @@ func PrintErr(err error) string {
 }
 
 func CheckErrCode(errorStr string, err error) bool {
-	prefix := fmt.Sprintf("{\"%s\":%d,\"%s\":\"%s", HTTPReturnCode, merr.Code(err), HTTPReturnMessage, err.Error())
+	prefix := fmt.Sprintf("{\"%s\":%d,\"%s\":\"%s", mhttp.HTTPReturnCode, merr.Code(err), mhttp.HTTPReturnMessage, err.Error())
 	return strings.HasPrefix(errorStr, prefix)
 }
 
@@ -528,8 +529,8 @@ func TestQuery(t *testing.T) {
 				resp := map[string]interface{}{}
 				err := json.Unmarshal(w.Body.Bytes(), &resp)
 				assert.Equal(t, nil, err)
-				if resp[HTTPReturnCode] == float64(200) {
-					data := resp[HTTPReturnData].([]interface{})
+				if resp[mhttp.HTTPReturnCode] == float64(200) {
+					data := resp[mhttp.HTTPReturnData].([]interface{})
 					rows := generateQueryResult64(false)
 					for i, row := range data {
 						assert.Equal(t, true, compareRow64(row.(map[string]interface{}), rows[i]))
@@ -717,8 +718,8 @@ func TestInsert(t *testing.T) {
 
 	rows := generateSearchResult(schemapb.DataType_Int64)
 	data, _ := json.Marshal(map[string]interface{}{
-		HTTPCollectionName: DefaultCollectionName,
-		HTTPReturnData:     rows[0],
+		HTTPCollectionName:   DefaultCollectionName,
+		mhttp.HTTPReturnData: rows[0],
 	})
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -782,8 +783,8 @@ func TestInsertForDataType(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(schemapb.DataType_Int64))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
@@ -807,8 +808,8 @@ func TestInsertForDataType(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(schemapb.DataType_Int64))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
@@ -850,8 +851,8 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
@@ -881,8 +882,8 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
@@ -912,13 +913,13 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
-			req.Header.Set(HTTPHeaderAllowInt64, "true")
+			req.Header.Set(mhttp.HTTPHeaderAllowInt64, "true")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -944,13 +945,13 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
-			req.Header.Set(HTTPHeaderAllowInt64, "true")
+			req.Header.Set(mhttp.HTTPHeaderAllowInt64, "true")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -977,8 +978,8 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
@@ -1008,8 +1009,8 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
@@ -1039,13 +1040,13 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorInsertPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
-			req.Header.Set(HTTPHeaderAllowInt64, "false")
+			req.Header.Set(mhttp.HTTPHeaderAllowInt64, "false")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -1071,13 +1072,13 @@ func TestReturnInt64(t *testing.T) {
 			testEngine := initHTTPServer(mp, true)
 			rows := newSearchResult(generateSearchResult(dataType))
 			data, _ := json.Marshal(map[string]interface{}{
-				HTTPCollectionName: DefaultCollectionName,
-				HTTPReturnData:     rows,
+				HTTPCollectionName:   DefaultCollectionName,
+				mhttp.HTTPReturnData: rows,
 			})
 			bodyReader := bytes.NewReader(data)
 			req := httptest.NewRequest(http.MethodPost, versional(VectorUpsertPath), bodyReader)
 			req.SetBasicAuth(util.UserRoot, util.DefaultRootPassword)
-			req.Header.Set(HTTPHeaderAllowInt64, "false")
+			req.Header.Set(mhttp.HTTPHeaderAllowInt64, "false")
 			w := httptest.NewRecorder()
 			testEngine.ServeHTTP(w, req)
 			assert.Equal(t, http.StatusOK, w.Code)
@@ -1158,8 +1159,8 @@ func TestUpsert(t *testing.T) {
 
 	rows := generateSearchResult(schemapb.DataType_Int64)
 	data, _ := json.Marshal(map[string]interface{}{
-		HTTPCollectionName: DefaultCollectionName,
-		HTTPReturnData:     rows[0],
+		HTTPCollectionName:   DefaultCollectionName,
+		mhttp.HTTPReturnData: rows[0],
 	})
 	for _, tt := range testCases {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1282,8 +1283,8 @@ func TestSearch(t *testing.T) {
 			resp := map[string]interface{}{}
 			err := json.Unmarshal(w.Body.Bytes(), &resp)
 			assert.Equal(t, nil, err)
-			if resp[HTTPReturnCode] == float64(200) {
-				data := resp[HTTPReturnData].([]interface{})
+			if resp[mhttp.HTTPReturnCode] == float64(200) {
+				data := resp[mhttp.HTTPReturnData].([]interface{})
 				rows := generateQueryResult64(true)
 				for i, row := range data {
 					assert.Equal(t, true, compareRow64(row.(map[string]interface{}), rows[i]))

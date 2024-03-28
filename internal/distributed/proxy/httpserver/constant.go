@@ -1,8 +1,6 @@
 package httpserver
 
 import (
-	"time"
-
 	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
@@ -65,29 +63,23 @@ const (
 	EnableAutoID  = true
 	DisableAutoID = false
 
-	HTTPCollectionName       = "collectionName"
-	HTTPCollectionID         = "collectionID"
-	HTTPDbName               = "dbName"
-	HTTPPartitionName        = "partitionName"
-	HTTPPartitionNames       = "partitionNames"
-	HTTPUserName             = "userName"
-	HTTPRoleName             = "roleName"
-	HTTPIndexName            = "indexName"
-	HTTPIndexField           = "fieldName"
-	HTTPAliasName            = "aliasName"
-	HTTPRequestData          = "data"
-	DefaultDbName            = "default"
-	DefaultIndexName         = "vector_idx"
-	DefaultAliasName         = "the_alias"
-	DefaultOutputFields      = "*"
-	HTTPHeaderAllowInt64     = "Accept-Type-Allow-Int64"
-	HTTPHeaderRequestTimeout = "Request-Timeout"
-	HTTPDefaultTimeout       = 30 * time.Second
-	HTTPReturnCode           = "code"
-	HTTPReturnMessage        = "message"
-	HTTPReturnData           = "data"
-	HTTPReturnLoadState      = "loadState"
-	HTTPReturnLoadProgress   = "loadProgress"
+	HTTPCollectionName     = "collectionName"
+	HTTPCollectionID       = "collectionID"
+	HTTPDbName             = "dbName"
+	HTTPPartitionName      = "partitionName"
+	HTTPPartitionNames     = "partitionNames"
+	HTTPUserName           = "userName"
+	HTTPRoleName           = "roleName"
+	HTTPIndexName          = "indexName"
+	HTTPIndexField         = "fieldName"
+	HTTPAliasName          = "aliasName"
+	HTTPRequestData        = "data"
+	DefaultDbName          = "default"
+	DefaultIndexName       = "vector_idx"
+	DefaultAliasName       = "the_alias"
+	DefaultOutputFields    = "*"
+	HTTPReturnLoadState    = "loadState"
+	HTTPReturnLoadProgress = "loadProgress"
 
 	HTTPReturnHas = "has"
 

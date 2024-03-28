@@ -144,7 +144,7 @@ func authenticate(c *gin.Context) {
 		}
 		log.Warn("fail to verify apikey", zap.Error(err))
 	}
-	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{httpserver.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), httpserver.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+	c.AbortWithStatusJSON(http.StatusUnauthorized, gin.H{management.HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), management.HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 }
 
 // registerHTTPServer register the http server, panic when failed
@@ -196,12 +196,12 @@ func (s *Server) startHTTPServer(errChan chan error) {
 	})
 	ginHandler.Use(ginLogger, gin.Recovery())
 	ginHandler.Use(func(c *gin.Context) {
-		_, err := strconv.ParseBool(c.Request.Header.Get(httpserver.HTTPHeaderAllowInt64))
+		_, err := strconv.ParseBool(c.Request.Header.Get(management.HTTPHeaderAllowInt64))
 		if err != nil {
 			if paramtable.Get().HTTPCfg.AcceptTypeAllowInt64.GetAsBool() {
-				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "true")
+				c.Request.Header.Set(management.HTTPHeaderAllowInt64, "true")
 			} else {
-				c.Request.Header.Set(httpserver.HTTPHeaderAllowInt64, "false")
+				c.Request.Header.Set(management.HTTPHeaderAllowInt64, "false")
 			}
 		}
 		c.Writer.Header().Set("Access-Control-Allow-Origin", "*")

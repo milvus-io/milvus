@@ -7,6 +7,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	mhttp "github.com/milvus-io/milvus/internal/http"
 )
 
 type DatabaseReq struct {
@@ -350,14 +351,14 @@ func (req *AliasCollectionReq) GetAliasName() string {
 }
 
 func wrapperReturnHas(has bool) gin.H {
-	return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{HTTPReturnHas: has}}
+	return gin.H{mhttp.HTTPReturnCode: http.StatusOK, mhttp.HTTPReturnData: gin.H{HTTPReturnHas: has}}
 }
 
 func wrapperReturnList(names []string) gin.H {
 	if names == nil {
-		return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []string{}}
+		return gin.H{mhttp.HTTPReturnCode: http.StatusOK, mhttp.HTTPReturnData: []string{}}
 	}
-	return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: names}
+	return gin.H{mhttp.HTTPReturnCode: http.StatusOK, mhttp.HTTPReturnData: names}
 }
 
 func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
@@ -369,11 +370,11 @@ func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
 	}
 	rowCount, err := strconv.ParseInt(rowCountValue, 10, 64)
 	if err != nil {
-		return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{HTTPReturnRowCount: rowCountValue}}
+		return gin.H{mhttp.HTTPReturnCode: http.StatusOK, mhttp.HTTPReturnData: gin.H{HTTPReturnRowCount: rowCountValue}}
 	}
-	return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{HTTPReturnRowCount: rowCount}}
+	return gin.H{mhttp.HTTPReturnCode: http.StatusOK, mhttp.HTTPReturnData: gin.H{HTTPReturnRowCount: rowCount}}
 }
 
 func wrapperReturnDefault() gin.H {
-	return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}}
+	return gin.H{mhttp.HTTPReturnCode: http.StatusOK, mhttp.HTTPReturnData: gin.H{}}
 }
