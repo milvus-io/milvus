@@ -16,10 +16,6 @@
 
 package datacoord
 
-import (
-	"github.com/milvus-io/milvus/internal/kv"
-)
-
 // ChannelPolicyFactory is the abstract factory that creates policies for channel manager.
 type ChannelPolicyFactory interface {
 	// NewRegisterPolicy creates a new register policy.
@@ -35,13 +31,11 @@ type ChannelPolicyFactory interface {
 }
 
 // ChannelPolicyFactoryV1 equal to policy batch
-type ChannelPolicyFactoryV1 struct {
-	kv kv.TxnKV
-}
+type ChannelPolicyFactoryV1 struct{}
 
 // NewChannelPolicyFactoryV1 helper function creates a Channel policy factory v1 from kv.
-func NewChannelPolicyFactoryV1(kv kv.TxnKV) *ChannelPolicyFactoryV1 {
-	return &ChannelPolicyFactoryV1{kv: kv}
+func NewChannelPolicyFactoryV1() *ChannelPolicyFactoryV1 {
+	return &ChannelPolicyFactoryV1{}
 }
 
 // NewRegisterPolicy implementing ChannelPolicyFactory returns BufferChannelAssignPolicy.

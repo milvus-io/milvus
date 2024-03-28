@@ -17,12 +17,10 @@
 package datacoord
 
 import (
-	"fmt"
 	"path"
 	"strconv"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -179,20 +177,6 @@ func (c *channelStateTimer) resetIfExist(channel string, interval time.Duration)
 // because it's meaningless, since we cannot guarantee the following add/delete node operations
 func (c *channelStateTimer) hasRunningTimers() bool {
 	return c.runningTimerCount.Load() != 0
-}
-
-func parseWatchInfo(key string, data []byte) (*datapb.ChannelWatchInfo, error) {
-	watchInfo := datapb.ChannelWatchInfo{}
-	if err := proto.Unmarshal(data, &watchInfo); err != nil {
-		return nil, fmt.Errorf("invalid event data: fail to parse ChannelWatchInfo, key: %s, err: %v", key, err)
-	}
-
-	if watchInfo.Vchan == nil {
-		return nil, fmt.Errorf("invalid event: ChannelWatchInfo with nil VChannelInfo, key: %s", key)
-	}
-	reviseVChannelInfo(watchInfo.GetVchan())
-
-	return &watchInfo, nil
 }
 
 // parseAckEvent transfers key-values from etcd into ackEvent

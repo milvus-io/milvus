@@ -189,9 +189,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			log.Warn("cannot get collection schema", zap.Error(err))
 		}
 
-		// Add the channel to cluster for watching.
-		s.cluster.Watch(ctx, r.ChannelName, r.CollectionID)
-
 		// Have segment manager allocate and return the segment allocation info.
 		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
@@ -1242,20 +1239,14 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := &channelMeta{
-			Name:            channelName,
-			CollectionID:    req.GetCollectionID(),
-			StartPositions:  req.GetStartPositions(),
-			Schema:          req.GetSchema(),
-			CreateTimestamp: req.GetCreateTimestamp(),
-		}
+		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp())
 		err := s.channelManager.Watch(ctx, ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		if err := s.meta.catalog.MarkChannelAdded(ctx, ch.Name); err != nil {
+		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			log.Error("failed to mark channel added", zap.Error(err))
 			resp.Status = merr.Status(err)

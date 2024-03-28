@@ -36,25 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 )
 
-type ChannelManager interface {
-	Startup(ctx context.Context, nodes []int64) error
-	Close()
-
-	AddNode(nodeID int64) error
-	DeleteNode(nodeID int64) error
-	Watch(ctx context.Context, ch RWChannel) error
-	RemoveChannel(channelName string) error
-	Release(nodeID UniqueID, channelName string) error
-
-	Match(nodeID int64, channel string) bool
-	FindWatcher(channel string) (int64, error)
-
-	GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string
-	GetChannelsByCollectionID(collectionID UniqueID) []RWChannel
-	GetCollectionIDByChannel(channel string) (bool, UniqueID)
-	GetNodeIDByChannelName(channel string) (bool, UniqueID)
-}
-
 // ChannelManagerImpl manages the allocation and the balance between channels and data nodes.
 type ChannelManagerImpl struct {
 	ctx              context.Context
@@ -66,8 +47,8 @@ type ChannelManagerImpl struct {
 	deregisterPolicy DeregisterPolicy
 	assignPolicy     ChannelAssignPolicy
 	reassignPolicy   ChannelReassignPolicy
-	bgChecker        ChannelBGChecker
 	balancePolicy    BalanceChannelPolicy
+	bgChecker        ChannelBGChecker
 	msgstreamFactory msgstream.Factory
 
 	stateChecker channelStateChecker
@@ -105,7 +86,7 @@ func NewChannelManager(
 	c := &ChannelManagerImpl{
 		ctx:        context.TODO(),
 		h:          h,
-		factory:    NewChannelPolicyFactoryV1(kv),
+		factory:    NewChannelPolicyFactoryV1(),
 		store:      NewChannelStore(kv),
 		stateTimer: newChannelStateTimer(kv),
 	}
@@ -128,7 +109,7 @@ func NewChannelManager(
 }
 
 // Startup adjusts the channel store according to current cluster states.
-func (c *ChannelManagerImpl) Startup(ctx context.Context, nodes []int64) error {
+func (c *ChannelManagerImpl) Startup(ctx context.Context, legacyNodes, allNodes []int64) error {
 	c.ctx = ctx
 	channels := c.store.GetNodesChannels()
 	// Retrieve the current old nodes.
@@ -138,13 +119,13 @@ func (c *ChannelManagerImpl) Startup(ctx context.Context, nodes []int64) error {
 	}
 
 	// Process watch states for old nodes.
-	oldOnLines := c.getOldOnlines(nodes, oNodes)
+	oldOnLines := c.getOldOnlines(allNodes, oNodes)
 	if err := c.checkOldNodes(oldOnLines); err != nil {
 		return err
 	}
 
 	// Add new online nodes to the cluster.
-	newOnLines := c.getNewOnLines(nodes, oNodes)
+	newOnLines := c.getNewOnLines(allNodes, oNodes)
 	for _, n := range newOnLines {
 		if err := c.AddNode(n); err != nil {
 			return err
@@ -152,7 +133,7 @@ func (c *ChannelManagerImpl) Startup(ctx context.Context, nodes []int64) error {
 	}
 
 	// Remove new offline nodes from the cluster.
-	offLines := c.getOffLines(nodes, oNodes)
+	offLines := c.getOffLines(allNodes, oNodes)
 	for _, n := range offLines {
 		if err := c.DeleteNode(n); err != nil {
 			return err
@@ -176,7 +157,7 @@ func (c *ChannelManagerImpl) Startup(ctx context.Context, nodes []int64) error {
 	}
 
 	log.Info("cluster start up",
-		zap.Int64s("nodes", nodes),
+		zap.Int64s("nodes", allNodes),
 		zap.Int64s("oNodes", oNodes),
 		zap.Int64s("old onlines", oldOnLines),
 		zap.Int64s("new onlines", newOnLines),
@@ -247,7 +228,7 @@ func (c *ChannelManagerImpl) checkOldNodes(nodes []UniqueID) error {
 
 // unwatchDroppedChannels removes drops channel that are marked to drop.
 func (c *ChannelManagerImpl) unwatchDroppedChannels() {
-	nodeChannels := c.store.GetChannels()
+	nodeChannels := c.store.GetNodesChannels()
 	for _, nodeChannel := range nodeChannels {
 		for _, ch := range nodeChannel.Channels {
 			if !c.isMarkedDrop(ch.GetName()) {
@@ -284,9 +265,14 @@ func (c *ChannelManagerImpl) bgCheckChannelsWork(ctx context.Context) {
 			if !c.isSilent() {
 				log.Info("ChannelManager is not silent, skip channel balance this round")
 			} else {
-				toReleases := c.balancePolicy(c.store, time.Now())
-				log.Info("channel manager bg check balance", zap.Array("toReleases", toReleases))
-				if err := c.updateWithTimer(toReleases, datapb.ChannelWatchState_ToRelease); err != nil {
+				currCluster := c.store.GetNodesChannels()
+				updates := c.balancePolicy(currCluster)
+				if updates == nil {
+					continue
+				}
+
+				log.Info("channel manager bg check balance", zap.Array("toReleases", updates))
+				if err := c.updateWithTimer(updates, datapb.ChannelWatchState_ToRelease); err != nil {
 					log.Warn("channel store update error", zap.Error(err))
 				}
 			}
@@ -345,7 +331,7 @@ func (c *ChannelManagerImpl) AddNode(nodeID int64) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.store.Add(nodeID)
+	c.store.AddNode(nodeID)
 
 	bufferedUpdates, balanceUpdates := c.registerPolicy(c.store, nodeID)
 
@@ -386,6 +372,7 @@ func (c *ChannelManagerImpl) DeleteNode(nodeID int64) error {
 
 	nodeChannelInfo := c.store.GetNode(nodeID)
 	if nodeChannelInfo == nil {
+		c.store.RemoveNode(nodeID)
 		return nil
 	}
 
@@ -393,6 +380,7 @@ func (c *ChannelManagerImpl) DeleteNode(nodeID int64) error {
 
 	updates := c.deregisterPolicy(c.store, nodeID)
 	if updates == nil {
+		c.store.RemoveNode(nodeID)
 		return nil
 	}
 	log.Info("deregister node", zap.Int64("nodeID", nodeID), zap.Array("updates", updates))
@@ -417,8 +405,8 @@ func (c *ChannelManagerImpl) DeleteNode(nodeID int64) error {
 	}
 
 	// No channels will be return
-	_, err := c.store.Delete(nodeID)
-	return err
+	c.store.RemoveNode(nodeID)
+	return nil
 }
 
 // unsubAttempt attempts to unsubscribe node-channel info from the channel.
@@ -643,7 +631,7 @@ type ackEvent struct {
 func (c *ChannelManagerImpl) updateWithTimer(updates *ChannelOpSet, state datapb.ChannelWatchState) error {
 	channelsWithTimer := []string{}
 	for _, op := range updates.Collect() {
-		if op.Type == Add {
+		if op.Type != Delete {
 			channelsWithTimer = append(channelsWithTimer, c.fillChannelWatchInfoWithState(op, state)...)
 		}
 	}
@@ -810,14 +798,9 @@ func (c *ChannelManagerImpl) Reassign(originNodeID UniqueID, channelName string)
 	reallocates := &NodeChannelInfo{originNodeID, []RWChannel{ch}}
 	isDropped := c.isMarkedDrop(channelName)
 
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	ch = c.getChannelByNodeAndName(originNodeID, channelName)
-	if ch == nil {
-		return fmt.Errorf("fail to find matching nodeID: %d with channelName: %s", originNodeID, channelName)
-	}
-
 	if isDropped {
+		c.mu.Lock()
+		defer c.mu.Unlock()
 		if err := c.remove(originNodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
@@ -828,6 +811,8 @@ func (c *ChannelManagerImpl) Reassign(originNodeID UniqueID, channelName string)
 		return nil
 	}
 
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	// Reassign policy won't choose the original node when a reassigning a channel.
 	updates := c.reassignPolicy(c.store, []*NodeChannelInfo{reallocates})
 	if updates == nil {
@@ -867,11 +852,6 @@ func (c *ChannelManagerImpl) CleanupAndReassign(nodeID UniqueID, channelName str
 
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	chToCleanUp = c.getChannelByNodeAndName(nodeID, channelName)
-	if chToCleanUp == nil {
-		return fmt.Errorf("failed to find matching channel: %s and node: %d", channelName, nodeID)
-	}
-
 	if isDropped {
 		if err := c.remove(nodeID, chToCleanUp); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", chToCleanUp, err.Error())
@@ -903,8 +883,6 @@ func (c *ChannelManagerImpl) CleanupAndReassign(nodeID UniqueID, channelName str
 }
 
 func (c *ChannelManagerImpl) getChannelByNodeAndName(nodeID UniqueID, channelName string) RWChannel {
-	var ret RWChannel
-
 	nodeChannelInfo := c.store.GetNode(nodeID)
 	if nodeChannelInfo == nil {
 		return nil
@@ -912,11 +890,10 @@ func (c *ChannelManagerImpl) getChannelByNodeAndName(nodeID UniqueID, channelNam
 
 	for _, channel := range nodeChannelInfo.Channels {
 		if channel.GetName() == channelName {
-			ret = channel
-			break
+			return channel
 		}
 	}
-	return ret
+	return nil
 }
 
 func (c *ChannelManagerImpl) GetCollectionIDByChannel(channel string) (bool, UniqueID) {
@@ -930,15 +907,29 @@ func (c *ChannelManagerImpl) GetCollectionIDByChannel(channel string) (bool, Uni
 	return false, 0
 }
 
-func (c *ChannelManagerImpl) GetNodeIDByChannelName(channel string) (bool, UniqueID) {
+func (c *ChannelManagerImpl) GetNodeIDByChannelName(channel string) (UniqueID, bool) {
 	for _, nodeChannel := range c.GetAssignedChannels() {
 		for _, ch := range nodeChannel.Channels {
 			if ch.GetName() == channel {
-				return true, nodeChannel.NodeID
+				return nodeChannel.NodeID, true
 			}
 		}
 	}
-	return false, 0
+	return 0, false
+}
+
+func (c *ChannelManagerImpl) GetChannel(nodeID int64, channel string) (RWChannel, bool) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	info := c.store.GetNode(nodeID)
+	if info == nil {
+		return nil, false
+	}
+
+	return lo.Find(info.Channels, func(ch RWChannel) bool {
+		return ch.GetName() == channel
+	})
 }
 
 func (c *ChannelManagerImpl) isMarkedDrop(channel string) bool {

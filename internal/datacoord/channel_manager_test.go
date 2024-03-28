@@ -481,7 +481,7 @@ func TestChannelManager(t *testing.T) {
 
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, bufferID, bufferCh, collectionID)
 
-		chManager.store.Add(nodeID)
+		chManager.store.AddNode(nodeID)
 		err = chManager.Watch(context.TODO(), &channelMeta{Name: chanToAdd, CollectionID: collectionID})
 		assert.NoError(t, err)
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, nodeID, chanToAdd, collectionID)
@@ -533,7 +533,7 @@ func TestChannelManager(t *testing.T) {
 
 		// prepare tests
 		for _, test := range tests {
-			chManager.store.Add(test.nodeID)
+			chManager.store.AddNode(test.nodeID)
 			ops := getTestOps(test.nodeID, &channelMeta{Name: test.chName, CollectionID: collectionID, WatchInfo: &datapb.ChannelWatchInfo{}})
 			err = chManager.store.Update(ops)
 			require.NoError(t, err)
@@ -546,7 +546,7 @@ func TestChannelManager(t *testing.T) {
 		remainTest, reassignTest := tests[0], tests[1]
 		err = chManager.Reassign(reassignTest.nodeID, reassignTest.chName)
 		assert.NoError(t, err)
-		chManager.stateTimer.stopIfExist(&ackEvent{releaseSuccessAck, reassignTest.chName, reassignTest.nodeID})
+		chManager.stateTimer.stopIfExist(&ackEvent{watchSuccessAck, reassignTest.chName, reassignTest.nodeID})
 
 		// test nodes of reassignTest contains no channel
 		// test all channels are assgined to node of remainTest
@@ -576,6 +576,7 @@ func TestChannelManager(t *testing.T) {
 
 	t.Run("test Reassign with dropped channel", func(t *testing.T) {
 		collectionID := UniqueID(5)
+		watchkv.RemoveWithPrefix("")
 		handler := NewNMockHandler(t)
 		handler.EXPECT().
 			CheckShouldDropChannel(mock.Anything).
@@ -584,7 +585,7 @@ func TestChannelManager(t *testing.T) {
 		chManager, err := NewChannelManager(watchkv, handler)
 		require.NoError(t, err)
 
-		chManager.store.Add(1)
+		chManager.store.AddNode(1)
 		ops := getTestOps(1, &channelMeta{Name: "chan", CollectionID: collectionID, WatchInfo: &datapb.ChannelWatchInfo{}})
 		err = chManager.store.Update(ops)
 		require.NoError(t, err)
@@ -599,24 +600,16 @@ func TestChannelManager(t *testing.T) {
 		var chManager *ChannelManagerImpl
 		var err error
 		handler := NewNMockHandler(t)
-		handler.EXPECT().
-			CheckShouldDropChannel(mock.Anything).
-			Run(func(channel string) {
-				channels, err := chManager.store.Delete(1)
-				assert.NoError(t, err)
-				assert.Equal(t, 1, len(channels))
-			}).Return(true).Once()
-
 		chManager, err = NewChannelManager(watchkv, handler)
 		require.NoError(t, err)
 
-		chManager.store.Add(1)
+		chManager.store.AddNode(1)
 		ops := getTestOps(1, &channelMeta{Name: "chan", CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
 		err = chManager.store.Update(ops)
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, chManager.store.GetNodeChannelCount(1))
-		err = chManager.Reassign(1, "chan")
+		err = chManager.Reassign(2, "chan")
 		assert.Error(t, err)
 	})
 
@@ -624,24 +617,18 @@ func TestChannelManager(t *testing.T) {
 		var chManager *ChannelManagerImpl
 		var err error
 		handler := NewNMockHandler(t)
-		handler.EXPECT().
-			CheckShouldDropChannel(mock.Anything).
-			Run(func(channel string) {
-				channels, err := chManager.store.Delete(1)
-				assert.NoError(t, err)
-				assert.Equal(t, 1, len(channels))
-			}).Return(true).Once()
 
+		watchkv.RemoveWithPrefix("")
 		chManager, err = NewChannelManager(watchkv, handler)
 		require.NoError(t, err)
 
-		chManager.store.Add(1)
+		chManager.store.AddNode(1)
 		ops := getTestOps(1, &channelMeta{Name: "chan", CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
 		err = chManager.store.Update(ops)
 		require.NoError(t, err)
 
 		assert.Equal(t, 1, chManager.store.GetNodeChannelCount(1))
-		err = chManager.CleanupAndReassign(1, "chan")
+		err = chManager.CleanupAndReassign(2, "chan")
 		assert.Error(t, err)
 	})
 
@@ -659,10 +646,11 @@ func TestChannelManager(t *testing.T) {
 			CheckShouldDropChannel(mock.Anything).
 			Return(true)
 		handler.EXPECT().FinishDropChannel(mock.Anything).Return(nil)
+		watchkv.RemoveWithPrefix("")
 		chManager, err := NewChannelManager(watchkv, handler)
 		require.NoError(t, err)
 
-		chManager.store.Add(1)
+		chManager.store.AddNode(1)
 		ops := getTestOps(1, &channelMeta{Name: "chan", CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
 		err = chManager.store.Update(ops)
 		require.NoError(t, err)
@@ -719,7 +707,7 @@ func TestChannelManager(t *testing.T) {
 
 		// prepare tests
 		for _, test := range tests {
-			chManager.store.Add(test.nodeID)
+			chManager.store.AddNode(test.nodeID)
 			ops := getTestOps(test.nodeID, &channelMeta{Name: test.chName, CollectionID: collectionID, WatchInfo: &datapb.ChannelWatchInfo{}})
 			err = chManager.store.Update(ops)
 			require.NoError(t, err)
@@ -767,7 +755,7 @@ func TestChannelManager(t *testing.T) {
 		ch := chManager.getChannelByNodeAndName(nodeID, channelName)
 		assert.Nil(t, ch)
 
-		chManager.store.Add(nodeID)
+		chManager.store.AddNode(nodeID)
 		ch = chManager.getChannelByNodeAndName(nodeID, channelName)
 		assert.Nil(t, ch)
 
@@ -828,7 +816,7 @@ func TestChannelManager(t *testing.T) {
 
 		chManager, err := NewChannelManager(watchkv, newMockHandler())
 		require.NoError(t, err)
-		chManager.store.Add(nodeID)
+		chManager.store.AddNode(nodeID)
 
 		opSet := NewChannelOpSet(NewAddOp(nodeID, &channelMeta{Name: channelName, CollectionID: collectionID}))
 
@@ -855,7 +843,7 @@ func TestChannelManager(t *testing.T) {
 		chManager, err := NewChannelManager(watchkv, newMockHandler(), withBgChecker())
 		require.NoError(t, err)
 		assert.NotNil(t, chManager.bgChecker)
-		chManager.Startup(ctx, []int64{nodeID})
+		chManager.Startup(ctx, nil, []int64{nodeID})
 
 		// 2. test isSilent function running correctly
 		Params.Save(Params.DataCoordCfg.ChannelBalanceSilentDuration.Key, "3")
@@ -1040,7 +1028,7 @@ func TestChannelManager_Reload(t *testing.T) {
 
 		cm2, err := NewChannelManager(watchkv, newMockHandler())
 		assert.NoError(t, err)
-		assert.Nil(t, cm2.Startup(ctx, []int64{3}))
+		assert.Nil(t, cm2.Startup(ctx, nil, []int64{3}))
 
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, 3, "channel1", 1)
 		waitAndCheckState(t, watchkv, datapb.ChannelWatchState_ToWatch, 3, "channel2", 1)

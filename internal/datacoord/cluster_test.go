@@ -67,8 +67,8 @@ func (suite *ClusterSuite) TestStartup() {
 		{NodeID: 4, Address: "addr4"},
 	}
 	suite.mockSession.EXPECT().AddSession(mock.Anything).Return().Times(len(nodes))
-	suite.mockChManager.EXPECT().Startup(mock.Anything, mock.Anything).
-		RunAndReturn(func(ctx context.Context, nodeIDs []int64) error {
+	suite.mockChManager.EXPECT().Startup(mock.Anything, mock.Anything, mock.Anything).
+		RunAndReturn(func(ctx context.Context, legacys []int64, nodeIDs []int64) error {
 			suite.ElementsMatch(lo.Map(nodes, func(info *NodeInfo, _ int) int64 { return info.NodeID }), nodeIDs)
 			return nil
 		}).Once()
@@ -122,17 +122,19 @@ func (suite *ClusterSuite) TestWatch() {
 		}).Once()
 
 	cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
-	err := cluster.Watch(context.Background(), ch, collectionID)
+	err := cluster.Watch(context.Background(), getChannel(ch, collectionID))
 	suite.NoError(err)
 }
 
 func (suite *ClusterSuite) TestFlush() {
-	suite.mockChManager.EXPECT().Match(mock.Anything, mock.Anything).
-		RunAndReturn(func(nodeID int64, channel string) bool {
-			return nodeID != 1
+	suite.mockChManager.EXPECT().GetChannel(mock.Anything, mock.Anything).
+		RunAndReturn(func(nodeID int64, channel string) (RWChannel, bool) {
+			if nodeID == 1 {
+				return nil, false
+			}
+			return getChannel("ch-1", 2), true
 		}).Twice()
 
-	suite.mockChManager.EXPECT().GetCollectionIDByChannel(mock.Anything).Return(true, 100).Once()
 	suite.mockSession.EXPECT().Flush(mock.Anything, mock.Anything, mock.Anything).Once()
 
 	cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)

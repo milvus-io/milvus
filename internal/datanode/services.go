@@ -352,18 +352,21 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 }
 
 func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.ChannelOperationsRequest) (*commonpb.Status, error) {
-	log.Ctx(ctx).Info("DataNode receives NotifyChannelOperation",
-		zap.Int("operation count", len(req.GetInfos())))
+	log := log.Ctx(ctx).With(zap.Int64("nodeID", node.GetNodeID()), zap.Int("operation count", len(req.GetInfos())))
+	log.Info("DataNode receives NotifyChannelOperation")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.NotifyChannelOperation failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
+		log.Warn("DataNode NotifyChannelOperation failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
 	for _, info := range req.GetInfos() {
 		err := node.channelManager.Submit(info)
 		if err != nil {
-			log.Warn("Submit error", zap.Error(err))
+			log.Warn("Submit error",
+				zap.String("channel", info.GetVchan().GetChannelName()),
+				zap.String("operation", info.GetState().String()),
+				zap.Error(err))
 			return merr.Status(err), nil
 		}
 	}
@@ -373,6 +376,7 @@ func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.Ch
 
 func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *datapb.ChannelWatchInfo) (*datapb.ChannelOperationProgressResponse, error) {
 	log := log.Ctx(ctx).With(
+		zap.Int64("opID", req.GetOpID()),
 		zap.String("channel", req.GetVchan().GetChannelName()),
 		zap.String("operation", req.GetState().String()),
 	)
@@ -384,7 +388,10 @@ func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *da
 			Status: merr.Status(err),
 		}, nil
 	}
-	return node.channelManager.GetProgress(req), nil
+
+	resp := node.channelManager.GetProgress(req)
+	log.Info("DataNode ChannelOperationProgress", zap.String("Current state", resp.GetState().String()))
+	return resp, nil
 }
 
 func (node *DataNode) FlushChannels(ctx context.Context, req *datapb.FlushChannelsRequest) (*commonpb.Status, error) {

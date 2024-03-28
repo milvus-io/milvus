@@ -2501,6 +2501,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 type dataCoordConfig struct {
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	EnableBalanceChannelWithRPC  ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
@@ -2591,6 +2592,15 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
 
+	p.EnableBalanceChannelWithRPC = ParamItem{
+		Key:          "dataCoord.channel.balanceWithRpc",
+		Version:      "2.3.5",
+		DefaultValue: "true",
+		Doc:          "Whether to enable balance with RPC, default to use etcd watch",
+		Export:       true,
+	}
+	p.EnableBalanceChannelWithRPC.Init(base.mgr)
+
 	p.ChannelBalanceSilentDuration = ParamItem{
 		Key:          "dataCoord.channel.balanceSilentDuration",
 		Version:      "2.2.3",
@@ -2612,7 +2622,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval = ParamItem{
 		Key:          "dataCoord.channel.checkInterval",
 		Version:      "2.4.0",
-		DefaultValue: "10",
+		DefaultValue: "1",
 		Doc:          "The interval in seconds with which the channel manager advances channel states",
 		Export:       true,
 	}

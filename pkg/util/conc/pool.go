@@ -81,9 +81,8 @@ func (pool *Pool[T]) Submit(method func() (T, error)) *Future[T] {
 		res, err := method()
 		if err != nil {
 			future.err = err
-		} else {
-			future.value = res
 		}
+		future.value = res
 	})
 	if err != nil {
 		future.err = err
