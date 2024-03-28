@@ -313,7 +313,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
 	if !ok {
-		node.compactionExecutor.clearTasksByChannel(req.GetChannelName())
+		node.compactionExecutor.discardPlan(req.GetChannelName())
 		err := merr.WrapErrChannelNotFound(req.GetChannelName())
 		log.Warn("failed to sync segments", zap.Error(err))
 		return merr.Status(err), nil
