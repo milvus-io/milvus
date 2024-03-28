@@ -95,7 +95,7 @@ type Proxy struct {
 	dataCoord  types.DataCoordClient
 	queryCoord types.QueryCoordClient
 
-	multiRateLimiter *MultiRateLimiter
+	simpleLimiter *SimpleLimiter
 
 	chMgr channelsMgr
 
@@ -149,7 +149,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		factory:                factory,
 		searchResultCh:         make(chan *internalpb.SearchResults, n),
 		shardMgr:               mgr,
-		multiRateLimiter:       NewMultiRateLimiter(),
+		simpleLimiter:          NewSimpleLimiter(),
 		lbPolicy:               lbPolicy,
 		resourceManager:        resourceManager,
 		replicateStreamManager: replicateStreamManager,
@@ -199,7 +199,7 @@ func (node *Proxy) initSession() error {
 // initRateCollector creates and starts rateCollector in Proxy.
 func (node *Proxy) initRateCollector() error {
 	var err error
-	rateCol, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity)
+	rateCol, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity, true)
 	if err != nil {
 		return err
 	}
@@ -545,10 +545,10 @@ func (node *Proxy) SetQueryNodeCreator(f func(ctx context.Context, addr string, 
 
 // GetRateLimiter returns the rateLimiter in Proxy.
 func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
-	if node.multiRateLimiter == nil {
+	if node.simpleLimiter == nil {
 		return nil, fmt.Errorf("nil rate limiter in Proxy")
 	}
-	return node.multiRateLimiter, nil
+	return node.simpleLimiter, nil
 }
 
 func (node *Proxy) startReportCollectionStorage() {

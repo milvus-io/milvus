@@ -648,3 +648,14 @@ func (c *Client) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRe
 	}
 	return ret.(*milvuspb.ListDatabasesResponse), err
 }
+
+func (c *Client) DescribeDatabase(ctx context.Context, req *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	req = typeutil.Clone(req)
+	commonpbutil.UpdateMsgBase(
+		req.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*rootcoordpb.DescribeDatabaseResponse, error) {
+		return client.DescribeDatabase(ctx, req)
+	})
+}

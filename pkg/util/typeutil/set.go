@@ -109,6 +109,14 @@ func (set Set[T]) Len() int {
 	return len(set)
 }
 
+func (set Set[T]) Range(f func(element T) bool) {
+	for elem := range set {
+		if !f(elem) {
+			return
+		}
+	}
+}
+
 type ConcurrentSet[T comparable] struct {
 	inner sync.Map
 }

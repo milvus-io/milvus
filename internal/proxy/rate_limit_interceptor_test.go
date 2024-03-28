@@ -38,7 +38,7 @@ type limiterMock struct {
 	quotaStateReasons []commonpb.ErrorCode
 }
 
-func (l *limiterMock) Check(collection []int64, rt internalpb.RateType, n int) error {
+func (l *limiterMock) Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
 	if l.rate == 0 {
 		return merr.ErrServiceQuotaExceeded
 	}
@@ -51,119 +51,173 @@ func (l *limiterMock) Check(collection []int64, rt internalpb.RateType, n int) e
 func TestRateLimitInterceptor(t *testing.T) {
 	t.Run("test getRequestInfo", func(t *testing.T) {
 		mockCache := NewMockCache(t)
-		mockCache.On("GetCollectionID",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(int64(0), nil)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
+			name:                "p1",
+			partitionID:         10,
+			createdTimestamp:    10001,
+			createdUtcTimestamp: 10002,
+		}, nil)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID:             100,
+			createdTimestamp: 1,
+		}, nil)
 		globalMetaCache = mockCache
-		collection, rt, size, err := getRequestInfo(&milvuspb.InsertRequest{})
+		database, col2part, rt, size, err := getRequestInfo(&milvuspb.InsertRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.True(t, len(col2part) == 1)
+		assert.Equal(t, int64(10), col2part[1][0])
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.UpsertRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.UpsertRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLUpsert, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.True(t, len(col2part) == 1)
+		assert.Equal(t, int64(10), col2part[1][0])
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DeleteRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.DeleteRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.DeleteRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLDelete, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.True(t, len(col2part) == 1)
+		assert.Equal(t, int64(10), col2part[1][0])
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ImportRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.ImportRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, proto.Size(&milvuspb.ImportRequest{}), size)
 		assert.Equal(t, internalpb.RateType_DMLBulkLoad, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.True(t, len(col2part) == 1)
+		assert.Equal(t, int64(10), col2part[1][0])
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.SearchRequest{Nq: 5})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.SearchRequest{
+			Nq: 5,
+			PartitionNames: []string{
+				"p1",
+			},
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, 5, size)
 		assert.Equal(t, internalpb.RateType_DQLSearch, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 1, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.QueryRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.QueryRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DQLQuery, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.CreateCollectionRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.CreateCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.LoadCollectionRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.LoadCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ReleaseCollectionRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.ReleaseCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DropCollectionRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.DropCollectionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCollection, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.CreatePartitionRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.CreatePartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.LoadPartitionsRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.LoadPartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ReleasePartitionsRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.ReleasePartitionsRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DropPartitionRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.DropPartitionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLPartition, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.CreateIndexRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.CreateIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.DropIndexRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.DropIndexRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLIndex, rt)
-		assert.ElementsMatch(t, collection, []int64{int64(0)})
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
+		assert.Equal(t, 0, len(col2part[1]))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.FlushRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.FlushRequest{
+			CollectionNames: []string{
+				"col1",
+			},
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLFlush, rt)
-		assert.Len(t, collection, 0)
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
 
-		collection, rt, size, err = getRequestInfo(&milvuspb.ManualCompactionRequest{})
+		database, _, rt, size, err = getRequestInfo(&milvuspb.ManualCompactionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCompaction, rt)
-		assert.Len(t, collection, 0)
+		assert.Equal(t, database, int64(100))
+
+		_, _, _, _, err = getRequestInfo(nil)
+		assert.Error(t, err)
+
+		_, _, _, _, err = getRequestInfo(&milvuspb.CalcDistanceRequest{})
+		assert.Error(t, err)
 	})
 
 	t.Run("test getFailedResponse", func(t *testing.T) {
@@ -190,11 +244,17 @@ func TestRateLimitInterceptor(t *testing.T) {
 
 	t.Run("test RateLimitInterceptor", func(t *testing.T) {
 		mockCache := NewMockCache(t)
-		mockCache.On("GetCollectionID",
-			mock.Anything, // context.Context
-			mock.AnythingOfType("string"),
-			mock.AnythingOfType("string"),
-		).Return(int64(0), nil)
+		mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+		mockCache.EXPECT().GetPartitionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(&partitionInfo{
+			name:                "p1",
+			partitionID:         10,
+			createdTimestamp:    10001,
+			createdUtcTimestamp: 10002,
+		}, nil)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{
+			dbID:             100,
+			createdTimestamp: 1,
+		}, nil)
 		globalMetaCache = mockCache
 
 		limiter := limiterMock{rate: 100}

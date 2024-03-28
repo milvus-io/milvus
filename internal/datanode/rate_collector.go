@@ -47,7 +47,7 @@ func initGlobalRateCollector() error {
 
 // newRateCollector returns a new rateCollector.
 func newRateCollector() (*rateCollector, error) {
-	rc, err := ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity)
+	rc, err := ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity, false)
 	if err != nil {
 		return nil, err
 	}

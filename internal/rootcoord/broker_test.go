@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -239,6 +240,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(collMeta, nil)
+		mockGetDatabase(meta)
 		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
@@ -256,6 +258,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(collMeta, nil)
+		mockGetDatabase(meta)
 		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
@@ -273,6 +276,7 @@ func TestServerBroker_BroadcastAlteredCollection(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(collMeta, nil)
+		mockGetDatabase(meta)
 		c.meta = meta
 		b := newServerBroker(c)
 		ctx := context.Background()
@@ -326,4 +330,12 @@ func TestServerBroker_GcConfirm(t *testing.T) {
 		broker := newServerBroker(c)
 		assert.True(t, broker.GcConfirm(context.Background(), 100, 10000))
 	})
+}
+
+func mockGetDatabase(meta *mockrootcoord.IMetaTable) {
+	db := model.NewDatabase(1, "default", pb.DatabaseState_DatabaseCreated)
+	meta.EXPECT().GetDatabaseByName(mock.Anything, mock.Anything, mock.Anything).
+		Return(db, nil).Maybe()
+	meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
+		Return(db, nil).Maybe()
 }

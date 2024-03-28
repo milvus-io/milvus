@@ -817,6 +817,49 @@ func TestMetaCache_Database(t *testing.T) {
 	assert.Equal(t, CheckDatabase(ctx, dbName), true)
 }
 
+func TestGetDatabaseInfo(t *testing.T) {
+	t.Run("success", func(t *testing.T) {
+		ctx := context.Background()
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		queryCoord := &mocks.MockQueryCoordClient{}
+		shardMgr := newShardClientMgr()
+		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+
+		rootCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{
+			Status: merr.Success(),
+			DbID:   1,
+			DbName: "default",
+		}, nil).Once()
+		{
+			dbInfo, err := cache.GetDatabaseInfo(ctx, "default")
+			assert.NoError(t, err)
+			assert.Equal(t, UniqueID(1), dbInfo.dbID)
+		}
+
+		{
+			dbInfo, err := cache.GetDatabaseInfo(ctx, "default")
+			assert.NoError(t, err)
+			assert.Equal(t, UniqueID(1), dbInfo.dbID)
+		}
+	})
+
+	t.Run("error", func(t *testing.T) {
+		ctx := context.Background()
+		rootCoord := mocks.NewMockRootCoordClient(t)
+		queryCoord := &mocks.MockQueryCoordClient{}
+		shardMgr := newShardClientMgr()
+		cache, err := NewMetaCache(rootCoord, queryCoord, shardMgr)
+		assert.NoError(t, err)
+
+		rootCoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{
+			Status: merr.Status(errors.New("mock error: describe database")),
+		}, nil).Once()
+		_, err = cache.GetDatabaseInfo(ctx, "default")
+		assert.Error(t, err)
+	})
+}
+
 func TestMetaCache_AllocID(t *testing.T) {
 	ctx := context.Background()
 	queryCoord := &mocks.MockQueryCoordClient{}
@@ -935,9 +978,9 @@ func TestGlobalMetaCache_UpdateDBInfo(t *testing.T) {
 		}, nil).Once()
 		err := cache.updateDBInfo(ctx)
 		assert.NoError(t, err)
-		assert.Len(t, cache.dbInfo, 1)
-		assert.Len(t, cache.dbInfo["db1"], 1)
-		assert.Equal(t, "collection1", cache.dbInfo["db1"][1])
+		assert.Len(t, cache.dbCollectionInfo, 1)
+		assert.Len(t, cache.dbCollectionInfo["db1"], 1)
+		assert.Equal(t, "collection1", cache.dbCollectionInfo["db1"][1])
 	})
 }
 
