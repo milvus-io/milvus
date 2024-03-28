@@ -104,21 +104,19 @@ type compactionPlanHandler struct {
 	quit             chan struct{}
 	wg               sync.WaitGroup
 	flushCh          chan UniqueID
-	// segRefer         *SegmentReferenceManager
-	parallelCh map[int64]chan struct{}
+	parallelCh       map[int64]chan struct{}
 }
 
 func newCompactionPlanHandler(sessions SessionManager, cm *ChannelManager, meta *meta,
 	allocator allocator, flush chan UniqueID,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
-		plans:     make(map[int64]*compactionTask),
-		chManager: cm,
-		meta:      meta,
-		sessions:  sessions,
-		allocator: allocator,
-		flushCh:   flush,
-		// segRefer:   segRefer,
+		plans:      make(map[int64]*compactionTask),
+		chManager:  cm,
+		meta:       meta,
+		sessions:   sessions,
+		allocator:  allocator,
+		flushCh:    flush,
 		parallelCh: make(map[int64]chan struct{}),
 	}
 }
@@ -344,17 +342,38 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	for _, task := range executingTasks {
-		log := log.With(zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
-		// stateResult, ok := planStates[task.plan.PlanID]
-		// state := stateResult.GetState()
+		log := log.With(
+			zap.Int64("planID", task.plan.PlanID),
+			zap.Int64("nodeID", task.dataNodeID),
+			zap.String("channel", task.plan.GetChannel()))
 		planID := task.plan.PlanID
 		cachedPlans = append(cachedPlans, planID)
+
 		if nodePlan, ok := planStates[planID]; ok {
 			planResult := nodePlan.B
 
 			switch planResult.GetState() {
 			case commonpb.CompactionState_Completed:
 				log.Info("start to complete compaction")
+
+				// channels are balanced to other nodes, yet the old datanode still have the compaction results
+				// task.dataNodeID == planState.A, but
+				// task.dataNodeID not match with channel
+				// Mark this compaction as failure and skip processing the meta
+				if !c.chManager.Match(task.dataNodeID, task.plan.GetChannel()) {
+					// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
+					// without changing the meta
+					log.Warn("compaction failed for channel nodeID not match")
+					if err := c.sessions.SyncSegments(task.dataNodeID, &datapb.SyncSegmentsRequest{PlanID: planID}); err != nil {
+						log.Warn("compaction failed to sync segments with node", zap.Error(err))
+						continue
+					}
+					c.plans[planID] = c.plans[planID].shadowClone(setState(failed))
+					c.setSegmentsCompacting(task.plan, false)
+					c.executingTaskNum--
+					c.releaseQueue(task.dataNodeID)
+				}
+
 				if err := c.completeCompaction(planResult.GetResult()); err != nil {
 					log.Warn("fail to complete compaction", zap.Error(err))
 				}
@@ -381,7 +400,11 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	// need to wait for DataNode reporting failure and
 	// clean the status.
 	for _, task := range timeoutTasks {
-		log := log.With(zap.Int64("planID", task.plan.PlanID), zap.Int64("nodeID", task.dataNodeID))
+		log := log.With(
+			zap.Int64("planID", task.plan.PlanID),
+			zap.Int64("nodeID", task.dataNodeID),
+			zap.String("channel", task.plan.GetChannel()),
+		)
 
 		planID := task.plan.PlanID
 		cachedPlans = append(cachedPlans, planID)
@@ -405,20 +428,16 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		return planState.B.GetState() == commonpb.CompactionState_Completed
 	})
 
-	unkonwnPlansInWorker, _ := lo.Difference(lo.Keys(completedPlans), cachedPlans)
-	for _, planID := range unkonwnPlansInWorker {
-		if nodeUnKnownPlan, ok := completedPlans[planID]; ok {
-			nodeID := nodeUnKnownPlan.A
+	unknownPlansInWorker, _ := lo.Difference(lo.Keys(completedPlans), cachedPlans)
+	for _, planID := range unknownPlansInWorker {
+		if nodeInvalidPlan, ok := completedPlans[planID]; ok {
+			nodeID := nodeInvalidPlan.A
 			log := log.With(zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
 
 			// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
 			// without changing the meta
-			req := &datapb.SyncSegmentsRequest{
-				PlanID: planID,
-			}
-
 			log.Info("compaction syncing unknown plan with node")
-			if err := c.sessions.SyncSegments(nodeID, req); err != nil {
+			if err := c.sessions.SyncSegments(nodeID, &datapb.SyncSegmentsRequest{PlanID: planID}); err != nil {
 				log.Warn("compaction failed to sync segments with node", zap.Error(err))
 				return err
 			}

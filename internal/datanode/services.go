@@ -368,9 +368,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	)
 
 	for _, fromSegment := range req.GetCompactedFrom() {
-		log := log.With(
-			zap.Int64("segment", fromSegment),
-		)
+		log := log.With(zap.Int64("segment", fromSegment))
 		channel, err = node.flowgraphManager.getChannel(fromSegment)
 		if err != nil {
 			log.Warn("fail to get the channel", zap.Error(err))
