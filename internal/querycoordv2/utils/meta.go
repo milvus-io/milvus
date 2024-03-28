@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -107,7 +108,7 @@ func RecoverReplicaOfCollection(m *meta.Meta, collectionID typeutil.UniqueID) {
 	logger := log.With(zap.Int64("collectionID", collectionID))
 	rgNames := m.ReplicaManager.GetResourceGroupByCollection(collectionID)
 	if rgNames.Len() == 0 {
-		logger.Error("no resource group found for collection")
+		logger.Error("no resource group found for collection", zap.Int64("collectionID", collectionID))
 		return
 	}
 	rgs, err := m.ResourceManager.GetNodesOfMultiRG(rgNames.Collect())

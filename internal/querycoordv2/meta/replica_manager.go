@@ -195,8 +195,12 @@ func (m *ReplicaManager) getSrcReplicasAndCheckIfTransferable(collectionID typeu
 	// Check if replica in srcRGName is enough.
 	srcReplicas := m.getByCollectionAndRG(collectionID, srcRGName)
 	if len(srcReplicas) < replicaNum {
-		err := merr.WrapErrParameterInvalid("NumReplica not greater than the number of replica in source resource group", fmt.Sprintf("only found [%d] replicas in source resource group[%s]",
-			replicaNum, srcRGName))
+		err := merr.WrapErrParameterInvalid(
+			"NumReplica not greater than the number of replica in source resource group", fmt.Sprintf("only found [%d] replicas of collection [%d] in source resource group [%s], but %d require",
+				len(srcReplicas),
+				collectionID,
+				srcRGName,
+				replicaNum))
 		return nil, err
 	}
 	return srcReplicas, nil
@@ -224,7 +228,7 @@ func (m *ReplicaManager) GetByCollection(collectionID typeutil.UniqueID) []*Repl
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	replicas := make([]*Replica, 0, 3)
+	replicas := make([]*Replica, 0)
 	if m.collIDToReplicaIDs[collectionID] != nil {
 		for replicaID := range m.collIDToReplicaIDs[collectionID] {
 			replicas = append(replicas, m.replicas[replicaID])
@@ -327,6 +331,11 @@ func (m *ReplicaManager) RecoverNodesInCollection(collectionID typeutil.UniqueID
 			mutableReplica.AddRONode(roNodes...)          // rw -> ro
 			mutableReplica.AddRWNode(recoverableNodes...) // ro -> rw
 			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
+			log.Info(
+				"new replica recovery found",
+				zap.Int64s("newRONodes", roNodes),
+				zap.Int64s("roToRWNodes", recoverableNodes),
+				zap.Int64s("newIncomingNodes", incomingNode))
 			modifiedReplicas = append(modifiedReplicas, mutableReplica.IntoReplica())
 		})
 	})
@@ -353,7 +362,7 @@ func (m *ReplicaManager) getCollectionAssignmentHelper(collectionID typeutil.Uni
 	// check if the collection is exist.
 	replicaIDs, ok := m.collIDToReplicaIDs[collectionID]
 	if !ok {
-		return nil, errors.New("collection not loaded")
+		return nil, errors.Errorf("collection %d not loaded", collectionID)
 	}
 
 	rgToReplicas := make(map[string][]*Replica)
