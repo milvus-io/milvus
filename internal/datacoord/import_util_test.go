@@ -322,38 +322,53 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 		deltaPrefix  = "mock-delta-binlog-prefix"
 	)
 
-	segmentInsertPaths := []string{
-		// segment 435978159261483008
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008",
-		// segment 435978159261483009
-		"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009",
-	}
-
-	segmentDeltaPaths := []string{
-		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483008",
-		"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009",
-	}
-
-	ctx := context.Background()
-	cm := mocks2.NewChunkManager(t)
-	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
-	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
-
-	file := &internalpb.ImportFile{
-		Id:    1,
-		Paths: []string{insertPrefix, deltaPrefix},
-	}
-
-	files, err := ListBinlogsAndGroupBySegment(ctx, cm, file)
-	assert.NoError(t, err)
-	assert.Equal(t, 2, len(files))
-	for _, f := range files {
-		assert.Equal(t, 2, len(f.GetPaths()))
-		for _, p := range f.GetPaths() {
-			segmentID := path.Base(p)
-			assert.True(t, segmentID == "435978159261483008" || segmentID == "435978159261483009")
+	t.Run("normal case", func(t *testing.T) {
+		segmentInsertPaths := []string{
+			// segment 435978159261483008
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483008",
+			// segment 435978159261483009
+			"backup/bak1/data/insert_log/435978159196147009/435978159196147010/435978159261483009",
 		}
-	}
+
+		segmentDeltaPaths := []string{
+			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483008",
+			"backup/bak1/data/delta_log/435978159196147009/435978159196147010/435978159261483009",
+		}
+
+		cm := mocks2.NewChunkManager(t)
+		cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(segmentInsertPaths, nil, nil)
+		cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(segmentDeltaPaths, nil, nil)
+
+		file := &internalpb.ImportFile{
+			Id:    1,
+			Paths: []string{insertPrefix, deltaPrefix},
+		}
+
+		files, err := ListBinlogsAndGroupBySegment(context.Background(), cm, file)
+		assert.NoError(t, err)
+		assert.Equal(t, 2, len(files))
+		for _, f := range files {
+			assert.Equal(t, 2, len(f.GetPaths()))
+			for _, p := range f.GetPaths() {
+				segmentID := path.Base(p)
+				assert.True(t, segmentID == "435978159261483008" || segmentID == "435978159261483009")
+			}
+		}
+	})
+
+	t.Run("invalid input", func(t *testing.T) {
+		file := &internalpb.ImportFile{
+			Paths: []string{},
+		}
+		_, err := ListBinlogsAndGroupBySegment(context.Background(), nil, file)
+		assert.Error(t, err)
+		t.Logf("%s", err)
+
+		file.Paths = []string{insertPrefix, deltaPrefix, "dummy_prefix"}
+		_, err = ListBinlogsAndGroupBySegment(context.Background(), nil, file)
+		assert.Error(t, err)
+		t.Logf("%s", err)
+	})
 }
 
 func TestImportUtil_GetImportProgress(t *testing.T) {

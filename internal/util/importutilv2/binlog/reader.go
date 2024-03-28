@@ -70,8 +70,12 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
-	if len(paths) < 1 {
+	if len(paths) == 0 {
 		return merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(paths) > 2 {
+		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", paths))
 	}
 	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0])
 	if err != nil {

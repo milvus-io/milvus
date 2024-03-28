@@ -384,6 +384,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2*time.Second, Params.ImportCheckIntervalHigh.GetAsDuration(time.Second))
 		assert.Equal(t, 120*time.Second, Params.ImportCheckIntervalLow.GetAsDuration(time.Second))
 		assert.Equal(t, 1024, Params.MaxFilesPerImportReq.GetAsInt())
+		assert.Equal(t, true, Params.WaitForIndex.GetAsBool())
 
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
