@@ -69,8 +69,6 @@ func NewRocksdbKV(name string) (*RocksdbKV, error) {
 func NewRocksdbKVWithOpts(name string, opts *gorocksdb.Options) (*RocksdbKV, error) {
 	ro := gorocksdb.NewDefaultReadOptions()
 	wo := gorocksdb.NewDefaultWriteOptions()
-
-	// only has one columnn families
 	db, err := gorocksdb.OpenDb(opts, name)
 	if err != nil {
 		return nil, err

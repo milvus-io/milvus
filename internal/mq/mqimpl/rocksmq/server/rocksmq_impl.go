@@ -13,6 +13,7 @@ package server
 
 import (
 	"fmt"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -54,6 +55,8 @@ const (
 	DefaultMessageID UniqueID = -1
 
 	kvSuffix = "_meta_kv"
+
+	LockFileName = "LOCK"
 
 	//  topic_begin_id/topicName
 	// topic begin id record a topic is valid, create when topic is created, cleaned up on destroy topic
@@ -203,7 +206,29 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 	kvName := name + kvSuffix
 	kv, err := rocksdbkv.NewRocksdbKVWithOpts(kvName, optsKV)
 	if err != nil {
-		return nil, err
+		log.Info("failed to new rocks kv", zap.String("name", name), zap.Error(err))
+		// when process try and open the one rocksdb, will create lock file
+		// if another process open the same db, fails with “db/LOCK: Resource temporarily unavailable”
+		// try to clean it before open, related with https://github.com/milvus-io/milvus/issues/30501
+		if !strings.Contains(err.Error(), "LOCK: Resource temporarily unavailable") {
+			return nil, err
+		}
+
+		lockFilePath := kvName + "/" + LockFileName
+		_, err := os.Stat(lockFilePath)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("lock file exist", zap.String("lockFilePath", lockFilePath))
+		err = os.Remove(lockFilePath)
+		if err != nil {
+			return nil, err
+		}
+
+		kv, err = rocksdbkv.NewRocksdbKVWithOpts(kvName, optsKV)
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	// finish rocks mq store initialization, rocks mq store has to set the prefix extractor
@@ -227,7 +252,29 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 	giveColumnFamilies := []string{"default", "properties"}
 	db, cfHandles, err := gorocksdb.OpenDbColumnFamilies(optsStore, name, giveColumnFamilies, []*gorocksdb.Options{optsStore, optsStore})
 	if err != nil {
-		return nil, err
+		log.Info("failed to new db", zap.String("name", name), zap.Error(err))
+		// when process try and open the one rocksdb, will create lock file
+		// if another process open the same db, fails with “db/LOCK: Resource temporarily unavailable”
+		// try to clean it before open, related with https://github.com/milvus-io/milvus/issues/30501
+		if !strings.Contains(err.Error(), "LOCK: Resource temporarily unavailable") {
+			return nil, err
+		}
+
+		lockFilePath := name + "/" + LockFileName
+		_, err := os.Stat(lockFilePath)
+		if err != nil {
+			return nil, err
+		}
+		log.Info("lock file exist", zap.String("lockFilePath", lockFilePath))
+		err = os.Remove(lockFilePath)
+		if err != nil {
+			return nil, err
+		}
+
+		db, cfHandles, err = gorocksdb.OpenDbColumnFamilies(optsStore, name, giveColumnFamilies, []*gorocksdb.Options{optsStore, optsStore})
+		if err != nil {
+			return nil, err
+		}
 	}
 
 	var mqIDAllocator allocator.Interface
