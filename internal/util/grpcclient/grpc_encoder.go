@@ -21,7 +21,7 @@ import (
 	"bytes"
 	"io"
 
-	"github.com/klauspost/compress/zstd"
+	"github.com/DataDog/zstd" // Import Datadog's zstd package
 	"google.golang.org/grpc/encoding"
 )
 
@@ -30,30 +30,20 @@ const (
 	Zstd = "zstd"
 )
 
-type grpcCompressor struct {
-	encoder *zstd.Encoder
-	decoder *zstd.Decoder
-}
+type grpcCompressor struct{}
 
 func init() {
-	enc, _ := zstd.NewWriter(nil)
-	dec, _ := zstd.NewReader(nil)
-	c := &grpcCompressor{
-		encoder: enc,
-		decoder: dec,
-	}
+	c := &grpcCompressor{}
 	encoding.RegisterCompressor(c)
 }
 
 func (c *grpcCompressor) Compress(w io.Writer) (io.WriteCloser, error) {
 	return &zstdWriteCloser{
-		enc:    c.encoder,
 		writer: w,
 	}, nil
 }
 
 type zstdWriteCloser struct {
-	enc    *zstd.Encoder
 	writer io.Writer    // Compressed data will be written here.
 	buf    bytes.Buffer // Buffer uncompressed data here, compress on Close.
 }
@@ -63,8 +53,12 @@ func (z *zstdWriteCloser) Write(p []byte) (int, error) {
 }
 
 func (z *zstdWriteCloser) Close() error {
-	compressed := z.enc.EncodeAll(z.buf.Bytes(), nil)
-	_, err := io.Copy(z.writer, bytes.NewReader(compressed))
+	// prefer faster compression decompression rather than compression ratio
+	compressed, err := zstd.CompressLevel(nil, z.buf.Bytes(), 3)
+	if err != nil {
+		return err
+	}
+	_, err = z.writer.Write(compressed)
 	return err
 }
 
@@ -74,7 +68,8 @@ func (c *grpcCompressor) Decompress(r io.Reader) (io.Reader, error) {
 		return nil, err
 	}
 
-	uncompressed, err := c.decoder.DecodeAll(compressed, nil)
+	// Use Datadog's API to decompress data
+	uncompressed, err := zstd.Decompress(nil, compressed)
 	if err != nil {
 		return nil, err
 	}
