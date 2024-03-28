@@ -2440,6 +2440,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel).Inc()
 
+	limiter, _ := node.GetRateLimiter()
 	dr := &deleteRunner{
 		req:             request,
 		idAllocator:     node.rowIDAllocator,
@@ -2448,6 +2449,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		chTicker:        node.chTicker,
 		queue:           node.sched.dmQueue,
 		lb:              node.lbPolicy,
+		limiter:         limiter,
 	}
 
 	log.Debug("init delete runner in Proxy")

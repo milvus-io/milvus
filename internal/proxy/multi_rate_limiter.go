@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -57,6 +58,9 @@ type MultiRateLimiter struct {
 	collectionLimiters map[int64]*rateLimiter
 	// for DDL
 	globalDDLLimiter *rateLimiter
+	// for alloc
+	AllocWaitInterval time.Duration
+	AllocRetryTimes   uint
 }
 
 // NewMultiRateLimiter returns a new MultiRateLimiter.
@@ -64,8 +68,17 @@ func NewMultiRateLimiter() *MultiRateLimiter {
 	m := &MultiRateLimiter{
 		collectionLimiters: make(map[int64]*rateLimiter, 0),
 		globalDDLLimiter:   newRateLimiter(true),
+		AllocWaitInterval:  paramtable.Get().QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond),
+		AllocRetryTimes:    paramtable.Get().QuotaConfig.AllocRetryTimes.GetAsUint(),
 	}
 	return m
+}
+
+// Alloc will retry till check pass or out of times.
+func (m *MultiRateLimiter) Alloc(ctx context.Context, collectionIDs []int64, rt internalpb.RateType, n int) error {
+	return retry.Do(ctx, func() error {
+		return m.Check(collectionIDs, rt, n)
+	}, retry.Sleep(m.AllocWaitInterval), retry.Attempts(m.AllocRetryTimes))
 }
 
 // Check checks if request would be limited or denied.
