@@ -147,7 +147,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	suite.Eventually(func() bool {
 		replica0 := suite.meta.ReplicaManager.Get(10000)
 		replica1 := suite.meta.ReplicaManager.Get(10001)
-		return suite.Contains(replica0.GetNodes(), int64(3)) && suite.NotContains(replica1.GetNodes(), int64(3)) && suite.Len(replica1.GetNodes(), 1)
+		return (replica0.Contains(3) || replica0.ContainRONode(3)) && suite.NotContains(replica1.GetNodes(), int64(3)) && suite.Len(replica1.GetNodes(), 1)
 	}, 6*time.Second, 2*time.Second)
 
 	suite.distMgr.ChannelDistManager.Update(3)
@@ -156,7 +156,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	suite.Eventually(func() bool {
 		replica0 := suite.meta.ReplicaManager.Get(10000)
 		replica1 := suite.meta.ReplicaManager.Get(10001)
-		return suite.NotContains(replica0.GetNodes(), int64(3)) && suite.Contains(replica1.GetNodes(), int64(3)) && suite.Len(replica1.GetNodes(), 2)
+		return (!replica0.Contains(3) && !replica0.ContainRONode(3)) && suite.Contains(replica1.GetNodes(), int64(3)) && suite.Len(replica1.GetNodes(), 2)
 	}, 6*time.Second, 2*time.Second)
 }
 

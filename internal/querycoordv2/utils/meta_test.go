@@ -93,14 +93,14 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 
 		{
 			name:           "test 3 replica on 2 rg",
-			args:           args{m, 1000, []string{"rg1", "rg2"}, 3},
+			args:           args{m, 1001, []string{"rg1", "rg2"}, 3},
 			wantReplicaNum: 0,
 			wantErr:        true,
 		},
 
 		{
 			name:           "test 3 replica on 3 rg",
-			args:           args{m, 1000, []string{"rg1", "rg2", "rg3"}, 3},
+			args:           args{m, 1002, []string{"rg1", "rg2", "rg3"}, 3},
 			wantReplicaNum: 3,
 			wantErr:        false,
 		},
@@ -127,6 +127,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
 	store.EXPECT().SaveReplica(mock.Anything).Return(nil).Times(4)
 	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 	m.ResourceManager.AddResourceGroup("rg")
@@ -174,7 +175,7 @@ func TestAddNodesToCollectionsInRGFailed(t *testing.T) {
 
 	storeErr := errors.New("store error")
 	store.EXPECT().SaveReplica(mock.Anything).Return(storeErr)
-	AddNodesToCollectionsInRG(m, "rg", []int64{1, 2, 3, 4}...)
+	RecoverAllCollection(m)
 
 	assert.Len(t, m.ReplicaManager.Get(1).GetNodes(), 0)
 	assert.Len(t, m.ReplicaManager.Get(2).GetNodes(), 0)
@@ -188,7 +189,9 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 	store := mocks.NewQueryCoordCatalog(t)
 	store.EXPECT().SaveCollection(mock.Anything).Return(nil)
 	store.EXPECT().SaveReplica(mock.Anything).Return(nil)
+	store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
 	store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
+	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 	m.ResourceManager.AddResourceGroup("rg")
@@ -233,8 +236,33 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 		},
 		typeutil.NewUniqueSet(),
 	))
-
-	AddNodesToCollectionsInRG(m, "rg", []int64{1, 2, 3, 4}...)
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  1,
+		Address: "localhost",
+	}))
+	_, err := m.ResourceManager.HandleNodeUp(1)
+	assert.NoError(t, err)
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  2,
+		Address: "localhost",
+	}))
+	_, err = m.ResourceManager.HandleNodeUp(2)
+	assert.NoError(t, err)
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  3,
+		Address: "localhost",
+	}))
+	_, err = m.ResourceManager.HandleNodeUp(3)
+	assert.NoError(t, err)
+	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:  4,
+		Address: "localhost",
+	}))
+	_, err = m.ResourceManager.HandleNodeUp(4)
+	assert.NoError(t, err)
+	_, err = m.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg", 4)
+	assert.NoError(t, err)
+	RecoverAllCollection(m)
 
 	assert.Len(t, m.ReplicaManager.Get(1).GetNodes(), 2)
 	assert.Len(t, m.ReplicaManager.Get(2).GetNodes(), 2)

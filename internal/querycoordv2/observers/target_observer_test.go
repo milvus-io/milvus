@@ -92,9 +92,9 @@ func (suite *TargetObserverSuite) SetupTest() {
 	suite.NoError(err)
 	err = suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, 1, meta.DefaultResourceGroupName)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1})
 	suite.NoError(err)
-	replicas[0].AddNode(2)
+	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(replicas...)
 	suite.NoError(err)
 
@@ -276,9 +276,9 @@ func (suite *TargetObserverCheckSuite) SetupTest() {
 	suite.NoError(err)
 	err = suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collectionID, suite.partitionID))
 	suite.NoError(err)
-	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, 1, meta.DefaultResourceGroupName)
+	replicas, err := suite.meta.ReplicaManager.Spawn(suite.collectionID, map[string]int{meta.DefaultResourceGroupName: 1})
 	suite.NoError(err)
-	replicas[0].AddNode(2)
+	replicas[0].AddRWNode(2)
 	err = suite.meta.ReplicaManager.Put(replicas...)
 	suite.NoError(err)
 }

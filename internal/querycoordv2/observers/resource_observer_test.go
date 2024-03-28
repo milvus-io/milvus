@@ -91,7 +91,7 @@ func (suite *ResourceObserverSuite) SetupTest() {
 
 func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 	suite.store.EXPECT().SaveCollection(mock.Anything).Return(nil)
-	suite.store.EXPECT().SaveReplica(mock.Anything).Return(nil)
+	suite.store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
 	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
 	suite.meta.ReplicaManager.Put(meta.NewReplica(
 		&querypb.Replica{
@@ -176,7 +176,7 @@ func (suite *ResourceObserverSuite) TestRecoverResourceGroupFailed() {
 
 func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
 	suite.store.EXPECT().SaveCollection(mock.Anything).Return(nil)
-	suite.store.EXPECT().SaveReplica(mock.Anything).Return(nil).Times(2)
+	suite.store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Times(2)
 	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
 	suite.meta.ReplicaManager.Put(meta.NewReplica(
 		&querypb.Replica{
@@ -199,7 +199,7 @@ func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
 		typeutil.NewUniqueSet(),
 	))
 
-	suite.store.EXPECT().SaveReplica(mock.Anything).Return(errors.New("store error"))
+	suite.store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(errors.New("store error"))
 	suite.meta.ResourceManager.AddResourceGroup("rg")
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   int64(100),
