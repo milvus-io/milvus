@@ -125,10 +125,10 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 	_, _, _, err = TransferColumnBasedInsertDataToRowBased(data)
 	assert.Error(t, err)
 
-	rowIdsF := &Int64FieldData{
+	rowIDsF := &Int64FieldData{
 		Data: []int64{1, 2, 3, 4},
 	}
-	data.Data[common.RowIDField] = rowIdsF
+	data.Data[common.RowIDField] = rowIDsF
 
 	// row num mismatch
 	_, _, _, err = TransferColumnBasedInsertDataToRowBased(data)
@@ -193,10 +193,10 @@ func TestTransferColumnBasedInsertDataToRowBased(t *testing.T) {
 	data.Data[111] = f11
 	data.Data[112] = f12
 
-	utss, rowIds, rows, err := TransferColumnBasedInsertDataToRowBased(data)
+	utss, rowIDs, rows, err := TransferColumnBasedInsertDataToRowBased(data)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, []uint64{1, 2, 3}, utss)
-	assert.ElementsMatch(t, []int64{1, 2, 3}, rowIds)
+	assert.ElementsMatch(t, []int64{1, 2, 3}, rowIDs)
 	assert.Equal(t, 3, len(rows))
 	// b := []byte("1")[0]
 	if common.Endian == binary.LittleEndian {
@@ -991,6 +991,15 @@ func TestRowBasedInsertMsgToInsertData(t *testing.T) {
 			assert.Equal(t, fData.GetRow(j), column[j])
 		}
 	}
+}
+
+func TestRowBasedTransferInsertMsgToInsertRecord(t *testing.T) {
+	numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim := 10, 8, 8, 8, 8
+	schema, _, _ := genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim, false)
+	msg, _, _ := genRowBasedInsertMsg(numRows, fVecDim, bVecDim, f16VecDim, bf16VecDim)
+
+	_, err := TransferInsertMsgToInsertRecord(schema, msg)
+	assert.NoError(t, err)
 }
 
 func TestRowBasedInsertMsgToInsertFloat16VectorDataError(t *testing.T) {

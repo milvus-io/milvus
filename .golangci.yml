@@ -140,6 +140,8 @@ issues:
     - which can be annoying to use
     # Binds to all network interfaces
     - G102
+    # Use of unsafe calls should be audited
+    - G103
     # Errors unhandled
     - G104
     # file/folder Permission
@@ -164,4 +166,5 @@ issues:
   max-same-issues: 0
 
 service:
-  golangci-lint-version: 1.55.2 # use the fixed version to not introduce new linters unexpectedly
+  # use the fixed version to not introduce new linters unexpectedly
+  golangci-lint-version: 1.55.2

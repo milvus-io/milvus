@@ -307,6 +307,37 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			}
 			fmt.Println()
 		}
+	case schemapb.DataType_Float16Vector:
+		val, dim, err := reader.GetFloat16VectorFromPayload()
+		if err != nil {
+			return err
+		}
+		dim = dim * 2
+		length := len(val) / dim
+		for i := 0; i < length; i++ {
+			fmt.Printf("\t\t%d :", i)
+			for j := 0; j < dim; j++ {
+				idx := i*dim + j
+				fmt.Printf(" %02x", val[idx])
+			}
+			fmt.Println()
+		}
+	case schemapb.DataType_BFloat16Vector:
+		val, dim, err := reader.GetBFloat16VectorFromPayload()
+		if err != nil {
+			return err
+		}
+		dim = dim * 2
+		length := len(val) / dim
+		for i := 0; i < length; i++ {
+			fmt.Printf("\t\t%d :", i)
+			for j := 0; j < dim; j++ {
+				idx := i*dim + j
+				fmt.Printf(" %02x", val[idx])
+			}
+			fmt.Println()
+		}
+
 	case schemapb.DataType_FloatVector:
 		val, dim, err := reader.GetFloatVectorFromPayload()
 		if err != nil {

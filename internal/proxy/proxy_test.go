@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/util/componentutil"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -1085,7 +1086,7 @@ func TestProxy(t *testing.T) {
 		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	var insertedIds []int64
+	var insertedIDs []int64
 	wg.Add(1)
 	t.Run("insert", func(t *testing.T) {
 		defer wg.Done()
@@ -1100,7 +1101,7 @@ func TestProxy(t *testing.T) {
 
 		switch field := resp.GetIDs().GetIdField().(type) {
 		case *schemapb.IDs_IntId:
-			insertedIds = field.IntId.GetData()
+			insertedIDs = field.IntId.GetData()
 		default:
 			t.Fatalf("Unexpected ID type")
 		}
@@ -1611,7 +1612,7 @@ func TestProxy(t *testing.T) {
 	nq = 10
 
 	constructPrimaryKeysPlaceholderGroup := func() *commonpb.PlaceholderGroup {
-		expr := fmt.Sprintf("%v in [%v]", int64Field, insertedIds[0])
+		expr := fmt.Sprintf("%v in [%v]", int64Field, insertedIDs[0])
 		exprBytes := []byte(expr)
 
 		return &commonpb.PlaceholderGroup{
@@ -4802,4 +4803,228 @@ func TestUnhealthProxy_GetIndexStatistics(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetStatus().GetErrorCode())
 	})
+}
+
+func TestProxy_ReportCollectionStorage(t *testing.T) {
+	t.Run("nil datacoord", func(t *testing.T) {
+		proxy := &Proxy{}
+		err := proxy.reportCollectionStorage()
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to get metric", func(t *testing.T) {
+		datacoord := mocks.NewMockDataCoordClient(t)
+		datacoord.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Code:      500,
+			},
+		}, nil).Once()
+
+		ctx := context.Background()
+		proxy := &Proxy{
+			ctx:       ctx,
+			dataCoord: datacoord,
+		}
+		err := proxy.reportCollectionStorage()
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to unmarshal metric", func(t *testing.T) {
+		datacoord := mocks.NewMockDataCoordClient(t)
+		datacoord.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Response: "invalid",
+		}, nil).Once()
+
+		ctx := context.Background()
+		proxy := &Proxy{
+			ctx:       ctx,
+			dataCoord: datacoord,
+		}
+		err := proxy.reportCollectionStorage()
+		assert.Error(t, err)
+	})
+
+	t.Run("empty metric", func(t *testing.T) {
+		datacoord := mocks.NewMockDataCoordClient(t)
+
+		r, _ := json.Marshal(&metricsinfo.DataCoordTopology{
+			Cluster: metricsinfo.DataClusterTopology{
+				Self: metricsinfo.DataCoordInfos{},
+			},
+		})
+
+		datacoord.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Response:      string(r),
+			ComponentName: "DataCoord",
+		}, nil).Once()
+
+		ctx := context.Background()
+		proxy := &Proxy{
+			ctx:       ctx,
+			dataCoord: datacoord,
+		}
+		err := proxy.reportCollectionStorage()
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to get cache", func(t *testing.T) {
+		origin := globalMetaCache
+		defer func() {
+			globalMetaCache = origin
+		}()
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+
+		datacoord := mocks.NewMockDataCoordClient(t)
+		r, _ := json.Marshal(&metricsinfo.DataCoordTopology{
+			Cluster: metricsinfo.DataClusterTopology{
+				Self: metricsinfo.DataCoordInfos{
+					QuotaMetrics: &metricsinfo.DataCoordQuotaMetrics{
+						TotalBinlogSize: 200,
+						CollectionBinlogSize: map[int64]int64{
+							1: 100,
+							2: 50,
+							3: 50,
+						},
+					},
+				},
+			},
+		})
+
+		datacoord.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Response:      string(r),
+			ComponentName: "DataCoord",
+		}, nil).Once()
+		mockCache.EXPECT().GetCollectionNamesByID(mock.Anything, mock.Anything).Return(nil, nil, errors.New("mock get collection names by id error")).Once()
+
+		ctx := context.Background()
+		proxy := &Proxy{
+			ctx:       ctx,
+			dataCoord: datacoord,
+		}
+		err := proxy.reportCollectionStorage()
+		assert.Error(t, err)
+	})
+
+	t.Run("not match data", func(t *testing.T) {
+		origin := globalMetaCache
+		defer func() {
+			globalMetaCache = origin
+		}()
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+
+		datacoord := mocks.NewMockDataCoordClient(t)
+		r, _ := json.Marshal(&metricsinfo.DataCoordTopology{
+			Cluster: metricsinfo.DataClusterTopology{
+				Self: metricsinfo.DataCoordInfos{
+					QuotaMetrics: &metricsinfo.DataCoordQuotaMetrics{
+						TotalBinlogSize: 200,
+						CollectionBinlogSize: map[int64]int64{
+							1: 100,
+							2: 50,
+							3: 50,
+						},
+					},
+				},
+			},
+		})
+
+		datacoord.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Response:      string(r),
+			ComponentName: "DataCoord",
+		}, nil).Once()
+		mockCache.EXPECT().GetCollectionNamesByID(mock.Anything, mock.Anything).Return(
+			[]string{"db1", "db1"}, []string{"col1", "col2"}, nil).Once()
+
+		ctx := context.Background()
+		proxy := &Proxy{
+			ctx:       ctx,
+			dataCoord: datacoord,
+		}
+		err := proxy.reportCollectionStorage()
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		origin := globalMetaCache
+		defer func() {
+			globalMetaCache = origin
+		}()
+		mockCache := NewMockCache(t)
+		globalMetaCache = mockCache
+
+		datacoord := mocks.NewMockDataCoordClient(t)
+		r, _ := json.Marshal(&metricsinfo.DataCoordTopology{
+			Cluster: metricsinfo.DataClusterTopology{
+				Self: metricsinfo.DataCoordInfos{
+					QuotaMetrics: &metricsinfo.DataCoordQuotaMetrics{
+						TotalBinlogSize: 200,
+						CollectionBinlogSize: map[int64]int64{
+							1: 100,
+							2: 50,
+							3: 50,
+						},
+					},
+				},
+			},
+		})
+
+		datacoord.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(&milvuspb.GetMetricsResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_Success,
+			},
+			Response:      string(r),
+			ComponentName: "DataCoord",
+		}, nil).Once()
+		mockCache.EXPECT().GetCollectionNamesByID(mock.Anything, mock.Anything).Return(
+			[]string{"db1", "db1", "db2"}, []string{"col1", "col2", "col3"}, nil).Once()
+
+		originExtension := Extension
+		defer func() {
+			Extension = originExtension
+		}()
+		hasCheck := false
+		Extension = CheckExtension{
+			reportChecker: func(info any) {
+				infoMap := info.(map[string]any)
+				storage := infoMap[hookutil.StorageDetailKey].(map[string]any)
+				log.Info("storage map", zap.Any("storage", storage))
+				assert.EqualValues(t, 150, storage["db1"])
+				assert.EqualValues(t, 50, storage["db2"])
+				hasCheck = true
+			},
+		}
+
+		ctx := context.Background()
+		proxy := &Proxy{
+			ctx:       ctx,
+			dataCoord: datacoord,
+		}
+		err := proxy.reportCollectionStorage()
+		assert.NoError(t, err)
+		assert.True(t, hasCheck)
+	})
+}
+
+type CheckExtension struct {
+	reportChecker func(info any)
+}
+
+func (c CheckExtension) Report(info any) int {
+	c.reportChecker(info)
+	return 0
 }

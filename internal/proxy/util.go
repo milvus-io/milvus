@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -65,10 +66,10 @@ const (
 	defaultMaxSearchRequest = 1024
 
 	// DefaultArithmeticIndexType name of default index type for scalar field
-	DefaultArithmeticIndexType = "INVERTED"
+	DefaultArithmeticIndexType = indexparamcheck.IndexINVERTED
 
 	// DefaultStringIndexType name of default index type for varChar/string field
-	DefaultStringIndexType = "INVERTED"
+	DefaultStringIndexType = indexparamcheck.IndexINVERTED
 
 	defaultRRFParamsValue = 60
 	maxRRFParamsValue     = 16384
@@ -685,15 +686,15 @@ func autoGenPrimaryFieldData(fieldSchema *schemapb.FieldSchema, data interface{}
 				},
 			}
 		case schemapb.DataType_VarChar:
-			strIds := make([]string, len(data))
+			strIDs := make([]string, len(data))
 			for i, v := range data {
-				strIds[i] = strconv.FormatInt(v, 10)
+				strIDs[i] = strconv.FormatInt(v, 10)
 			}
 			fieldData.Field = &schemapb.FieldData_Scalars{
 				Scalars: &schemapb.ScalarField{
 					Data: &schemapb.ScalarField_StringData{
 						StringData: &schemapb.StringArray{
-							Data: strIds,
+							Data: strIDs,
 						},
 					},
 				},
@@ -881,25 +882,12 @@ func ValidatePrivilege(entity string) error {
 }
 
 func GetCurUserFromContext(ctx context.Context) (string, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return "", fmt.Errorf("fail to get md from the context")
-	}
-	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
-	if !ok || len(authorization) < 1 {
-		return "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
-	}
-	token := authorization[0]
-	rawToken, err := crypto.Base64Decode(token)
-	if err != nil {
-		return "", fmt.Errorf("fail to decode the token, token: %s", token)
-	}
-	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
-	if len(secrets) < 2 {
-		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
-	}
-	username := secrets[0]
-	return username, nil
+	return contextutil.GetCurUserFromContext(ctx)
+}
+
+func GetCurUserFromContextOrDefault(ctx context.Context) string {
+	username, _ := GetCurUserFromContext(ctx)
+	return username
 }
 
 func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
@@ -1632,4 +1620,17 @@ func CheckDatabase(ctx context.Context, dbName string) bool {
 		return globalMetaCache.HasDatabase(ctx, dbName)
 	}
 	return false
+}
+
+func SetReportValue(status *commonpb.Status, value int) {
+	if value <= 0 {
+		return
+	}
+	if !merr.Ok(status) {
+		return
+	}
+	if status.ExtraInfo == nil {
+		status.ExtraInfo = make(map[string]string)
+	}
+	status.ExtraInfo["report_value"] = strconv.Itoa(value)
 }

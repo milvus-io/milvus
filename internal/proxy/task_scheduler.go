@@ -472,7 +472,6 @@ func (sched *taskScheduler) processTask(t task, q taskQueue) {
 
 	span.AddEvent("scheduler process PostExecute")
 	err = t.PostExecute(ctx)
-
 	if err != nil {
 		span.RecordError(err)
 		log.Ctx(ctx).Warn("Failed to post-execute task: ", zap.Error(err))

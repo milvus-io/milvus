@@ -117,6 +117,7 @@ func reduceSearchResultDataWithGroupBy(ctx context.Context, subSearchResultData 
 			zap.Int64("topk", sData.TopK),
 			zap.Int("length of pks", pkLength),
 			zap.Int("length of FieldsData", len(sData.FieldsData)))
+		ret.Results.AllSearchCount += sData.GetAllSearchCount()
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
 			return ret, err
@@ -280,6 +281,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			zap.Int64("topk", sData.TopK),
 			zap.Int("length of pks", pkLength),
 			zap.Int("length of FieldsData", len(sData.FieldsData)))
+		ret.Results.AllSearchCount += sData.GetAllSearchCount()
 		if err := checkSearchResultData(sData, nq, topk); err != nil {
 			log.Ctx(ctx).Warn("invalid search results", zap.Error(err))
 			return ret, err

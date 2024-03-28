@@ -232,7 +232,6 @@ func (c *SessionManagerImpl) SyncSegments(nodeID int64, req *datapb.SyncSegments
 		}
 		return nil
 	})
-
 	if err != nil {
 		log.Warn("failed to sync segments after retry", zap.Error(err))
 		return err

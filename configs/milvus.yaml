@@ -358,6 +358,7 @@ queryNode:
       maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
   mmap:
     mmapEnabled: false # enable mmap global, if set true, will use mmap to load segment data
+  lazyloadEnabled: false
 
   # can specify ip for example
   # ip: 127.0.0.1

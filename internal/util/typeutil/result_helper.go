@@ -13,7 +13,7 @@ func appendFieldData(result RetrieveResults, fieldData *schemapb.FieldData) {
 	result.AppendFieldData(fieldData)
 }
 
-func FillRetrieveResultIfEmpty(result RetrieveResults, outputFieldIds []int64, schema *schemapb.CollectionSchema) error {
+func FillRetrieveResultIfEmpty(result RetrieveResults, outputFieldIDs []int64, schema *schemapb.CollectionSchema) error {
 	if !result.ResultEmpty() {
 		return nil
 	}
@@ -24,7 +24,7 @@ func FillRetrieveResultIfEmpty(result RetrieveResults, outputFieldIds []int64, s
 	if err != nil {
 		return err
 	}
-	for _, outputFieldID := range outputFieldIds {
+	for _, outputFieldID := range outputFieldIDs {
 		field, err := helper.GetFieldFromID(outputFieldID)
 		if err != nil {
 			return err

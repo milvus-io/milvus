@@ -9,6 +9,7 @@ require (
 	github.com/Azure/azure-sdk-for-go/sdk/storage/azblob v1.1.0
 	github.com/aliyun/credentials-go v1.2.7
 	github.com/antlr/antlr4/runtime/Go/antlr v0.0.0-20210826220005-b48c857c3a0e
+	github.com/apache/arrow/go/v12 v12.0.1
 	github.com/apache/pulsar-client-go v0.6.1-0.20210728062540-29414db801a7
 	github.com/bits-and-blooms/bloom/v3 v3.0.1
 	github.com/blang/semver/v4 v4.0.0
@@ -17,6 +18,7 @@ require (
 	github.com/cockroachdb/errors v1.9.1
 	github.com/containerd/cgroups/v3 v3.0.3 // indirect
 	github.com/gin-gonic/gin v1.9.1
+	github.com/go-playground/validator/v10 v10.14.0
 	github.com/gofrs/flock v0.8.1
 	github.com/gogo/protobuf v1.3.2
 	github.com/golang/protobuf v1.5.3
@@ -26,9 +28,11 @@ require (
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.4-0.20240317125658-67a0f065c1de
 	github.com/minio/minio-go/v7 v7.0.61
+	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/prometheus/client_golang v1.14.0
 	github.com/prometheus/client_model v0.3.0
 	github.com/prometheus/common v0.42.0
+	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/samber/lo v1.27.0
 	github.com/sbinet/npyio v0.6.0
 	github.com/soheilhy/cmux v0.1.5
@@ -36,6 +40,7 @@ require (
 	github.com/spf13/viper v1.8.1
 	github.com/stretchr/testify v1.8.4
 	github.com/tecbot/gorocksdb v0.0.0-20191217155057-f0fad39f321c
+	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
 	github.com/tidwall/gjson v1.14.4
 	github.com/tikv/client-go/v2 v2.0.4
 	go.etcd.io/etcd/api/v3 v3.5.5
@@ -49,6 +54,7 @@ require (
 	go.uber.org/zap v1.24.0
 	golang.org/x/crypto v0.16.0
 	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
+	golang.org/x/net v0.19.0
 	golang.org/x/oauth2 v0.8.0
 	golang.org/x/sync v0.5.0
 	golang.org/x/text v0.14.0
@@ -56,18 +62,9 @@ require (
 	google.golang.org/grpc/examples v0.0.0-20220617181431-3e7b97febc7f
 )
 
-require github.com/apache/arrow/go/v12 v12.0.1
-
 require github.com/milvus-io/milvus-storage/go v0.0.0-20231227072638-ebd0b8e56d70
 
-require (
-	github.com/go-playground/validator/v10 v10.14.0
-	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
-	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
-	github.com/quasilyte/go-ruleguard/dsl v0.3.22
-	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
-	golang.org/x/net v0.19.0
-)
+require github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 
 require (
 	cloud.google.com/go/compute v1.20.1 // indirect
@@ -203,6 +200,7 @@ require (
 	github.com/twmb/murmur3 v1.1.3 // indirect
 	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
+	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect

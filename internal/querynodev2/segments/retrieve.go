@@ -67,7 +67,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			defer wg.Done()
 
 			var err error
-			if seg.LoadStatus() == LoadStatusMeta {
+			if seg.IsLazyLoad() {
 				err = mgr.DiskCache.Do(seg.ID(), retriever)
 			} else {
 				err = retriever(seg)
@@ -118,9 +118,10 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 
 			if len(result.GetOffset()) != 0 {
 				if err = svr.Send(&internalpb.RetrieveResults{
-					Status:     merr.Success(),
-					Ids:        result.GetIds(),
-					FieldsData: result.GetFieldsData(),
+					Status:           merr.Success(),
+					Ids:              result.GetIds(),
+					FieldsData:       result.GetFieldsData(),
+					AllRetrieveCount: result.GetAllRetrieveCount(),
 				}); err != nil {
 					errs[i] = err
 				}
