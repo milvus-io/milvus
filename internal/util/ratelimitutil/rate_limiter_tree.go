@@ -17,6 +17,7 @@
 package ratelimitutil
 
 import (
+	"fmt"
 	"sync"
 	"time"
 
@@ -97,7 +98,7 @@ func (rln *RateLimiterNode) GetQuotaExceededError(rt internalpb.RateType) error 
 			return merr.WrapErrServiceQuotaExceeded(ratelimitutil.GetQuotaErrorString(errCode))
 		}
 	}
-	return nil
+	return merr.WrapErrServiceQuotaExceeded(fmt.Sprintf("rate type: %s", rt.String()))
 }
 
 func (rln *RateLimiterNode) GetRateLimitError(rate float64) error {

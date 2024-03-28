@@ -96,7 +96,7 @@ func (r *RateCollector) removeSubLabel(labelInfo lo.Tuple2[string, string]) {
 
 	deleteCollectionSubLabelWithPrefix := func(dbName string) {
 		for key := range r.values {
-			if strings.HasPrefix(key, GetCollectionSubLabel(dbName, "")) {
+			if strings.HasPrefix(key, FormatSubLabel(label, GetCollectionSubLabel(dbName, ""))) {
 				removeKeys = append(removeKeys, key)
 			}
 		}
@@ -109,14 +109,14 @@ func (r *RateCollector) removeSubLabel(labelInfo lo.Tuple2[string, string]) {
 				// remove the last dot
 				partitionSubLabel = partitionSubLabel[:len(partitionSubLabel)-1]
 			}
-			if strings.HasPrefix(key, partitionSubLabel) {
+			if strings.HasPrefix(key, FormatSubLabel(label, partitionSubLabel)) {
 				removeKeys = append(removeKeys, key)
 			}
 		}
 	}
 
 	parts := strings.Split(subLabel, ".")
-	if strings.HasPrefix(subLabel, "db.") {
+	if strings.HasPrefix(subLabel, GetDBSubLabel("")) {
 		dbName := parts[1]
 		deleteCollectionSubLabelWithPrefix(dbName)
 		deletePartitionSubLabelWithPrefix(dbName, "")
@@ -169,16 +169,16 @@ func GetDBFromSubLabel(label, fullLabel string) (string, bool) {
 	return fullLabel[len(FormatSubLabel(label, GetDBSubLabel(""))):], true
 }
 
-func GetCollectionFromSubLabel(label, fullLabel string) (string, bool) {
+func GetCollectionFromSubLabel(label, fullLabel string) (string, string, bool) {
 	if !strings.HasPrefix(fullLabel, FormatSubLabel(label, "")) {
-		return "", false
+		return "", "", false
 	}
 	subLabels := strings.Split(fullLabel[len(FormatSubLabel(label, "")):], ".")
 	if len(subLabels) != 3 || subLabels[0] != "collection" {
-		return "", false
+		return "", "", false
 	}
 
-	return subLabels[2], true
+	return subLabels[1], subLabels[2], true
 }
 
 func (r *RateCollector) DeregisterSubLabel(label, subLabel string) {

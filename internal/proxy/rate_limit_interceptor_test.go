@@ -95,13 +95,18 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.True(t, len(col2part) == 1)
 		assert.Equal(t, int64(10), col2part[1][0])
 
-		database, col2part, rt, size, err = getRequestInfo(&milvuspb.SearchRequest{Nq: 5})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.SearchRequest{
+			Nq: 5,
+			PartitionNames: []string{
+				"p1",
+			},
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, 5, size)
 		assert.Equal(t, internalpb.RateType_DQLSearch, rt)
 		assert.Equal(t, database, int64(100))
 		assert.Equal(t, 1, len(col2part))
-		assert.Equal(t, 0, len(col2part[1]))
+		assert.Equal(t, 1, len(col2part[1]))
 
 		database, col2part, rt, size, err = getRequestInfo(&milvuspb.QueryRequest{})
 		assert.NoError(t, err)
@@ -191,16 +196,28 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Equal(t, 1, len(col2part))
 		assert.Equal(t, 0, len(col2part[1]))
 
-		_, _, rt, size, err = getRequestInfo(&milvuspb.FlushRequest{})
+		database, col2part, rt, size, err = getRequestInfo(&milvuspb.FlushRequest{
+			CollectionNames: []string{
+				"col1",
+			},
+		})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLFlush, rt)
+		assert.Equal(t, database, int64(100))
+		assert.Equal(t, 1, len(col2part))
 
 		database, _, rt, size, err = getRequestInfo(&milvuspb.ManualCompactionRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, 1, size)
 		assert.Equal(t, internalpb.RateType_DDLCompaction, rt)
 		assert.Equal(t, database, int64(100))
+
+		_, _, _, _, err = getRequestInfo(nil)
+		assert.Error(t, err)
+
+		_, _, _, _, err = getRequestInfo(&milvuspb.CalcDistanceRequest{})
+		assert.Error(t, err)
 	})
 
 	t.Run("test getFailedResponse", func(t *testing.T) {

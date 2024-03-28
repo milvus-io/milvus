@@ -85,9 +85,9 @@ func getCollectionAndPartitionIDs(r reqPartNames) (int64, map[int64][]int64) {
 	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
 	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 	parts := make([]int64, len(r.GetPartitionNames()))
-	for _, s := range r.GetPartitionNames() {
+	for i, s := range r.GetPartitionNames() {
 		part, _ := globalMetaCache.GetPartitionInfo(context.TODO(), r.GetDbName(), r.GetCollectionName(), s)
-		parts = append(parts, part.partitionID)
+		parts[i] = part.partitionID
 	}
 
 	return db.dbID, map[int64][]int64{collectionID: parts}
