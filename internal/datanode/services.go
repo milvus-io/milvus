@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -308,29 +307,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 			Status: merr.Status(err),
 		}, nil
 	}
-	results := make([]*datapb.CompactionStateResult, 0)
-	node.compactionExecutor.executing.Range(func(planID int64, task compactor) bool {
-		results = append(results, &datapb.CompactionStateResult{
-			State:  commonpb.CompactionState_Executing,
-			PlanID: planID,
-		})
-		return true
-	})
-	node.compactionExecutor.completed.Range(func(planID int64, result *datapb.CompactionResult) bool {
-		results = append(results, &datapb.CompactionStateResult{
-			State:  commonpb.CompactionState_Completed,
-			PlanID: planID,
-			Result: result,
-		})
-		return true
-	})
-
-	if len(results) > 0 {
-		planIDs := lo.Map(results, func(result *datapb.CompactionStateResult, i int) UniqueID {
-			return result.GetPlanID()
-		})
-		log.Info("Compaction results", zap.Int64s("planIDs", planIDs))
-	}
+	results := node.compactionExecutor.getAllCompactionResults()
 	return &datapb.CompactionStateResponse{
 		Status:  merr.Success(),
 		Results: results,
