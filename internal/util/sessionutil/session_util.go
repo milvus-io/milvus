@@ -296,6 +296,7 @@ func (s *Session) String() string {
 
 // Register will process keepAliveResponse to keep alive with etcd.
 func (s *Session) Register() {
+	log := s.logger(context.Background())
 	ch, err := s.registerService()
 	if err != nil {
 		log.Error("Register failed", zap.Error(err))
@@ -307,6 +308,14 @@ func (s *Session) Register() {
 }
 
 var serverIDMu sync.Mutex
+
+func (s *Session) logger(ctx context.Context) *log.MLogger {
+	return log.Ctx(ctx).With(
+		zap.String("serverName", s.ServerName),
+		zap.Int64("serverID", s.ServerID),
+		zap.String("activeKey", s.activeKey),
+	)
+}
 
 func (s *Session) getServerID() (int64, error) {
 	serverIDMu.Lock()
@@ -428,6 +437,7 @@ func (s *Session) initWatchSessionCh(ctx context.Context) error {
 // Exclusive means whether this service can exist two at the same time, if so,
 // it is false. Otherwise, set it to true.
 func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, error) {
+	log := s.logger(context.Background())
 	if s.enableActiveStandBy {
 		s.updateStandby(true)
 	}
@@ -487,8 +497,9 @@ func (s *Session) registerService() (<-chan *clientv3.LeaseKeepAliveResponse, er
 // This should be only a fast path for coordinator
 // If we find previous session have same address as current , simply purge the old one so the recovery can be much faster
 func (s *Session) handleRestart(key string) {
+	log := s.logger(context.Background())
 	resp, err := s.etcdCli.Get(s.ctx, key)
-	log := log.With(zap.String("key", key))
+	log = log.With(zap.String("key", key))
 	if err != nil {
 		log.Warn("failed to read old session from etcd, ignore", zap.Error(err))
 		return
@@ -516,6 +527,7 @@ func (s *Session) handleRestart(key string) {
 // processKeepAliveResponse processes the response of etcd keepAlive interface
 // If keepAlive fails for unexpected error, it will send a signal to the channel.
 func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveResponse) {
+	log := s.logger(context.Background())
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
@@ -535,7 +547,7 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 						return
 					}
 
-					log.Info("keepAlive channel close caused by etcd, try to KeepAliveOnce", zap.String("serverName", s.ServerName))
+					log.Info("keepAlive channel close caused by etcd, try to KeepAliveOnce")
 					s.keepAliveLock.Lock()
 					defer s.keepAliveLock.Unlock()
 					// have to KeepAliveOnce before KeepAlive because KeepAlive won't throw error even when lease OT
@@ -550,11 +562,11 @@ func (s *Session) processKeepAliveResponse(ch <-chan *clientv3.LeaseKeepAliveRes
 						return err
 					}, retry.Attempts(3))
 					if err != nil {
-						log.Warn("fail to retry keepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("LeaseID", int64(*s.LeaseID)), zap.Error(err))
+						log.Warn("fail to retry keepAliveOnce", zap.Int64("LeaseID", int64(*s.LeaseID)), zap.Error(err))
 						s.safeCloseLiveCh()
 						return
 					}
-					log.Info("succeed to KeepAliveOnce", zap.String("serverName", s.ServerName), zap.Int64("LeaseID", int64(*s.LeaseID)), zap.Any("resp", keepAliveOnceResp))
+					log.Info("succeed to KeepAliveOnce", zap.Int64("LeaseID", int64(*s.LeaseID)), zap.Any("resp", keepAliveOnceResp))
 
 					var chNew <-chan *clientv3.LeaseKeepAliveResponse
 					keepAliveFunc := func() error {
@@ -656,6 +668,7 @@ func (s *Session) GetSessionsWithVersionRange(prefix string, r semver.Range) (ma
 }
 
 func (s *Session) GoingStop() error {
+	log := s.logger(context.Background())
 	if s == nil || s.etcdCli == nil || s.LeaseID == nil {
 		return errors.New("the session hasn't been init")
 	}
@@ -665,9 +678,10 @@ func (s *Session) GoingStop() error {
 	}
 
 	completeKey := s.getCompleteKey()
+	log = log.With(zap.String("completeKey", completeKey))
 	resp, err := s.etcdCli.Get(s.ctx, completeKey, clientv3.WithCountOnly())
 	if err != nil {
-		log.Error("fail to get the session", zap.String("key", completeKey), zap.Error(err))
+		log.Error("fail to get the session", zap.Error(err))
 		return err
 	}
 	if resp.Count == 0 {
@@ -676,12 +690,12 @@ func (s *Session) GoingStop() error {
 	s.Stopping = true
 	sessionJSON, err := json.Marshal(s)
 	if err != nil {
-		log.Error("fail to marshal the session", zap.String("key", completeKey))
+		log.Error("fail to marshal the session", zap.Error(err))
 		return err
 	}
 	_, err = s.etcdCli.Put(s.ctx, completeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))
 	if err != nil {
-		log.Error("fail to update the session to stopping state", zap.String("key", completeKey))
+		log.Error("fail to update the session to stopping state", zap.Error(err))
 		return err
 	}
 	return nil
@@ -953,10 +967,11 @@ func (s *Session) Stop() {
 
 // Revoke revokes the internal LeaseID for the session key
 func (s *Session) Revoke(timeout time.Duration) {
+	log := s.logger(context.Background())
 	if s == nil {
 		return
 	}
-	log.Info("start to revoke session", zap.String("sessionKey", s.activeKey))
+	log.Info("start to revoke session")
 	if s.etcdCli == nil || s.LeaseID == nil {
 		log.Warn("skip remove session",
 			zap.String("sessionKey", s.activeKey),
@@ -966,7 +981,7 @@ func (s *Session) Revoke(timeout time.Duration) {
 		return
 	}
 	if s.Disconnected() {
-		log.Warn("skip remove session, connection is disconnected", zap.String("sessionKey", s.activeKey))
+		log.Warn("skip remove session, connection is disconnected")
 		return
 	}
 	// can NOT use s.ctx, it may be Done here
@@ -975,9 +990,9 @@ func (s *Session) Revoke(timeout time.Duration) {
 	// ignores resp & error, just do best effort to revoke
 	_, err := s.etcdCli.Revoke(ctx, *s.LeaseID)
 	if err != nil {
-		log.Warn("failed to revoke session", zap.String("sessionKey", s.activeKey), zap.Error(err))
+		log.Warn("failed to revoke session", zap.Error(err))
 	}
-	log.Info("revoke session successfully", zap.String("sessionKey", s.activeKey))
+	log.Info("revoke session successfully")
 }
 
 // UpdateRegistered update the state of registered.
@@ -1035,6 +1050,7 @@ func (s *Session) safeCloseLiveCh() {
 //
 // activateFunc is the function to re-active the service.
 func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
+	log := s.logger(context.Background())
 	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
 
 	// try to register to the active_key.
@@ -1122,6 +1138,7 @@ func (s *Session) ProcessActiveStandBy(activateFunc func() error) error {
 }
 
 func (s *Session) ForceActiveStandby(activateFunc func() error) error {
+	log := s.logger(context.Background())
 	s.activeKey = path.Join(s.metaRoot, DefaultServiceRoot, s.ServerName)
 
 	// force register to the active_key.
