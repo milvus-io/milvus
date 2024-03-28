@@ -43,6 +43,8 @@ var (
 	dynOnce  sync.Once
 	loadPool atomic.Pointer[conc.Pool[any]]
 	loadOnce sync.Once
+	ccp      atomic.Pointer[conc.Pool[any]]
+	ccOnce   sync.Once
 )
 
 // initSQPool initialize
@@ -96,6 +98,19 @@ func initLoadPool() {
 	})
 }
 
+func initChunkCachePool() {
+	ccOnce.Do(func() {
+		pool := conc.NewPool[any](
+			hardware.GetCPUNum(),
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+		)
+
+		ccp.Store(pool)
+	})
+}
+
 // GetSQPool returns the singleton pool instance for search/query operations.
 func GetSQPool() *conc.Pool[any] {
 	initSQPool()
@@ -111,6 +126,11 @@ func GetDynamicPool() *conc.Pool[any] {
 func GetLoadPool() *conc.Pool[any] {
 	initLoadPool()
 	return loadPool.Load()
+}
+
+func GetChunkCachePool() *conc.Pool[any] {
+	initChunkCachePool()
+	return ccp.Load()
 }
 
 func ResizeSQPool(evt *config.Event) {
