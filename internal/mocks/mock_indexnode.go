@@ -30,6 +30,61 @@ func (_m *MockIndexNode) EXPECT() *MockIndexNode_Expecter {
 	return &MockIndexNode_Expecter{mock: &_m.Mock}
 }
 
+// Analysis provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) Analysis(_a0 context.Context, _a1 *indexpb.AnalysisRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalysisRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalysisRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.AnalysisRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNode_Analysis_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Analysis'
+type MockIndexNode_Analysis_Call struct {
+	*mock.Call
+}
+
+// Analysis is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.AnalysisRequest
+func (_e *MockIndexNode_Expecter) Analysis(_a0 interface{}, _a1 interface{}) *MockIndexNode_Analysis_Call {
+	return &MockIndexNode_Analysis_Call{Call: _e.mock.On("Analysis", _a0, _a1)}
+}
+
+func (_c *MockIndexNode_Analysis_Call) Run(run func(_a0 context.Context, _a1 *indexpb.AnalysisRequest)) *MockIndexNode_Analysis_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.AnalysisRequest))
+	})
+	return _c
+}
+
+func (_c *MockIndexNode_Analysis_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNode_Analysis_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNode_Analysis_Call) RunAndReturn(run func(context.Context, *indexpb.AnalysisRequest) (*commonpb.Status, error)) *MockIndexNode_Analysis_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateJob provides a mock function with given fields: _a0, _a1
 func (_m *MockIndexNode) CreateJob(_a0 context.Context, _a1 *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -81,6 +136,61 @@ func (_c *MockIndexNode_CreateJob_Call) Return(_a0 *commonpb.Status, _a1 error) 
 }
 
 func (_c *MockIndexNode_CreateJob_Call) RunAndReturn(run func(context.Context, *indexpb.CreateJobRequest) (*commonpb.Status, error)) *MockIndexNode_CreateJob_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropAnalysisTasks provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) DropAnalysisTasks(_a0 context.Context, _a1 *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropAnalysisTasksRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.DropAnalysisTasksRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNode_DropAnalysisTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropAnalysisTasks'
+type MockIndexNode_DropAnalysisTasks_Call struct {
+	*mock.Call
+}
+
+// DropAnalysisTasks is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.DropAnalysisTasksRequest
+func (_e *MockIndexNode_Expecter) DropAnalysisTasks(_a0 interface{}, _a1 interface{}) *MockIndexNode_DropAnalysisTasks_Call {
+	return &MockIndexNode_DropAnalysisTasks_Call{Call: _e.mock.On("DropAnalysisTasks", _a0, _a1)}
+}
+
+func (_c *MockIndexNode_DropAnalysisTasks_Call) Run(run func(_a0 context.Context, _a1 *indexpb.DropAnalysisTasksRequest)) *MockIndexNode_DropAnalysisTasks_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.DropAnalysisTasksRequest))
+	})
+	return _c
+}
+
+func (_c *MockIndexNode_DropAnalysisTasks_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNode_DropAnalysisTasks_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNode_DropAnalysisTasks_Call) RunAndReturn(run func(context.Context, *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error)) *MockIndexNode_DropAnalysisTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -438,6 +548,61 @@ func (_c *MockIndexNode_Init_Call) Return(_a0 error) *MockIndexNode_Init_Call {
 }
 
 func (_c *MockIndexNode_Init_Call) RunAndReturn(run func() error) *MockIndexNode_Init_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryAnalysisResult provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) QueryAnalysisResult(_a0 context.Context, _a1 *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *indexpb.QueryAnalysisResultResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryAnalysisResultRequest) *indexpb.QueryAnalysisResultResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexpb.QueryAnalysisResultResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.QueryAnalysisResultRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNode_QueryAnalysisResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryAnalysisResult'
+type MockIndexNode_QueryAnalysisResult_Call struct {
+	*mock.Call
+}
+
+// QueryAnalysisResult is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.QueryAnalysisResultRequest
+func (_e *MockIndexNode_Expecter) QueryAnalysisResult(_a0 interface{}, _a1 interface{}) *MockIndexNode_QueryAnalysisResult_Call {
+	return &MockIndexNode_QueryAnalysisResult_Call{Call: _e.mock.On("QueryAnalysisResult", _a0, _a1)}
+}
+
+func (_c *MockIndexNode_QueryAnalysisResult_Call) Run(run func(_a0 context.Context, _a1 *indexpb.QueryAnalysisResultRequest)) *MockIndexNode_QueryAnalysisResult_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.QueryAnalysisResultRequest))
+	})
+	return _c
+}
+
+func (_c *MockIndexNode_QueryAnalysisResult_Call) Return(_a0 *indexpb.QueryAnalysisResultResponse, _a1 error) *MockIndexNode_QueryAnalysisResult_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNode_QueryAnalysisResult_Call) RunAndReturn(run func(context.Context, *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error)) *MockIndexNode_QueryAnalysisResult_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -27,6 +27,7 @@ const (
 	ImportJobPrefix           = MetaPrefix + "/import-job"
 	ImportTaskPrefix          = MetaPrefix + "/import-task"
 	PreImportTaskPrefix       = MetaPrefix + "/preimport-task"
+	AnalysisTaskPrefix        = MetaPrefix + "/analysis-task"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"
