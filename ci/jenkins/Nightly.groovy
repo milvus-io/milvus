@@ -8,7 +8,7 @@ String cron_string = BRANCH_NAME == "2.3" ? "50 4 * * * " : ""
 // Make timeout 4 hours so that we can run two nightly during the ci
 int total_timeout_minutes = 7 * 60
 def imageTag=''
-def chart_version='4.0.6'
+def chart_version='4.1.27'
 pipeline {
     triggers {
         cron """${cron_timezone}
