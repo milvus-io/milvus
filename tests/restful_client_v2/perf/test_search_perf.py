@@ -25,7 +25,7 @@ class MilvusUser(HttpUser):
             # print(resp.json()["code"])
             if resp.status_code != 200 or resp.json()["code"] != 200:
                 # print(resp.text)
-                resp.failure("search failed")
+                resp.failure(f"search failed with error {resp.text}")
 
 
 class StagesShape(LoadTestShape):

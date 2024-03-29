@@ -26,7 +26,7 @@ class MilvusUser(HttpUser):
                               catch_response=True
                               ) as resp:
             if resp.status_code != 200 or resp.json()["code"] != 200:
-                resp.failure("insert failed")
+                resp.failure(f"insert failed with error {resp.text}")
 
 
 class StagesShape(LoadTestShape):
