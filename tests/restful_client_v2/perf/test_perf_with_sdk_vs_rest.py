@@ -83,14 +83,10 @@ def main(host="127.0.0.1"):
                                         {
                                             "data": [random.random() for _ in range(768)],
                                             "annsField": "text_emb",
-                                            "limit": 100,
-                                            "outputFields": ["*"]
                                         },
                                         {
                                             "data": [random.random() for _ in range(768)],
                                             "annsField": "image_emb",
-                                            "limit": 100,
-                                            "outputFields": ["*"]
                                         },
                                     ],
                                     "rerank": {
@@ -125,6 +121,7 @@ def main(host="127.0.0.1"):
             t1 = time.time()
             tt = t1 - t0
             time_list_restful.append(tt)
+            logger.info(f"{op} cost  {tt:.4f} seconds with response {response.text[:200]}...")
 
         mean_time_sdk = sum(time_list_sdk) / len(time_list_sdk)
         mean_time_restful = sum(time_list_restful) / len(time_list_restful)
