@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -217,6 +218,75 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 
 	tasks := checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
+}
+
+func (suite *IndexCheckerSuite) TestCreateNewIndex() {
+	checker := suite.checker
+
+	// meta
+	coll := utils.CreateTestCollection(1, 1)
+	coll.FieldIndexID = map[int64]int64{101: 1000}
+	checker.meta.CollectionManager.PutCollection(coll)
+	checker.meta.ReplicaManager.Put(utils.CreateTestReplica(200, 1, []int64{1, 2}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
+	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+
+	// dist
+	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
+	segment.IndexInfo = map[int64]*querypb.FieldIndexInfo{101: &querypb.FieldIndexInfo{
+		FieldID:     101,
+		IndexID:     1000,
+		EnableIndex: true,
+	}}
+	checker.dist.SegmentDistManager.Update(1, segment)
+
+	// broker
+	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Call.Return(
+		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
+			return []*indexpb.IndexInfo{
+				{
+					FieldID: 101,
+					IndexID: 1000,
+				},
+				{
+					FieldID: 102,
+					IndexID: 1001,
+				},
+			}, nil
+		},
+	)
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), mock.AnythingOfType("int64")).Call.
+		Return(func(ctx context.Context, collectionID, segmentID int64) []*querypb.FieldIndexInfo {
+			return []*querypb.FieldIndexInfo{
+				{
+					FieldID:        101,
+					IndexID:        1000,
+					EnableIndex:    true,
+					IndexFilePaths: []string{"index"},
+				},
+				{
+					FieldID:        102,
+					IndexID:        1001,
+					EnableIndex:    true,
+					IndexFilePaths: []string{"index"},
+				},
+			}
+		}, nil)
+
+	tasks := checker.Check(context.Background())
+	suite.Len(tasks, 1)
+	suite.Len(tasks[0].Actions(), 1)
+	suite.Equal(tasks[0].Actions()[0].(*task.SegmentAction).Type(), task.ActionTypeUpdate)
 }
 
 func TestIndexChecker(t *testing.T) {
