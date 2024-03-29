@@ -32,4 +32,12 @@ minio:
   mode: standalone
 pulsar:
   enabled: false
-       
+
+extraConfigFiles:
+  user.yaml: |+
+    dataCoord:
+      compaction:
+        indexBasedCompaction: false
+    indexCoord:
+      scheduler:
+        interval: 100        
