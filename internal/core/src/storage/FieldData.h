@@ -94,17 +94,6 @@ class FieldData<BinaryVector> : public FieldDataImpl<uint8_t, false> {
     int64_t binary_dim_;
 };
 
-template <>
-class FieldData<Float16Vector> : public FieldDataImpl<float16, false> {
- public:
-    explicit FieldData(int64_t dim,
-                       DataType data_type,
-                       int64_t buffered_num_rows = 0)
-        : FieldDataImpl<float16, false>::FieldDataImpl(
-              dim, data_type, buffered_num_rows) {
-    }
-};
-
 using FieldDataPtr = std::shared_ptr<FieldDataBase>;
 using FieldDataChannel = Channel<storage::FieldDataPtr>;
 using FieldDataChannelPtr = std::shared_ptr<FieldDataChannel>;

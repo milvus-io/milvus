@@ -1869,7 +1869,7 @@ class TestIndexDiskann(TestcaseBase):
         collection_w.create_index(default_binary_vec_field_name, ct.default_diskann_index, index_name=binary_field_name,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 65535,
-                                               ct.err_msg: "float or float16 vector are only supported"})
+                                               ct.err_msg: "float vector are only supported"})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_diskann_index_multithread(self):

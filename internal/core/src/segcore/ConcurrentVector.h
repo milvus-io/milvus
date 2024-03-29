@@ -150,14 +150,12 @@ class ConcurrentVectorImpl : public VectorBase {
     ConcurrentVectorImpl&
     operator=(const ConcurrentVectorImpl&) = delete;
 
-    using TraitType = std::conditional_t<
-        is_scalar,
-        Type,
-        std::conditional_t<std::is_same_v<Type, float>,
-                           FloatVector,
-                           std::conditional_t<std::is_same_v<Type, float16>,
-                                              Float16Vector,
-                                              BinaryVector>>>;
+    using TraitType =
+        std::conditional_t<is_scalar,
+                           Type,
+                           std::conditional_t<std::is_same_v<Type, float>,
+                                              FloatVector,
+                                              BinaryVector>>;
 
  public:
     explicit ConcurrentVectorImpl(ssize_t dim, int64_t size_per_chunk)
@@ -386,15 +384,4 @@ class ConcurrentVector<BinaryVector>
         AssertInfo(dim % 8 == 0, "dim is not a multiple of 8, dim={}", dim);
     }
 };
-
-template <>
-class ConcurrentVector<Float16Vector>
-    : public ConcurrentVectorImpl<float16, false> {
- public:
-    ConcurrentVector(int64_t dim, int64_t size_per_chunk)
-        : ConcurrentVectorImpl<float16, false>::ConcurrentVectorImpl(
-              dim, size_per_chunk) {
-    }
-};
-
 }  // namespace milvus::segcore

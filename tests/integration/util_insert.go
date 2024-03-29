@@ -119,21 +119,6 @@ func NewFloatVectorFieldData(fieldName string, numRows, dim int) *schemapb.Field
 	}
 }
 
-func NewFloat16VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
-	return &schemapb.FieldData{
-		Type:      schemapb.DataType_Float16Vector,
-		FieldName: fieldName,
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_Float16Vector{
-					Float16Vector: GenerateFloat16Vectors(numRows, dim),
-				},
-			},
-		},
-	}
-}
-
 func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_BinaryVector,
@@ -176,16 +161,6 @@ func GenerateFloatVectors(numRows, dim int) []float32 {
 
 func GenerateBinaryVectors(numRows, dim int) []byte {
 	total := (numRows * dim) / 8
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
-func GenerateFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim * 2
 	ret := make([]byte, total)
 	_, err := rand.Read(ret)
 	if err != nil {

@@ -223,16 +223,6 @@ func readBinaryVectors(blobReaders []io.Reader, dim int) []byte {
 	return ret
 }
 
-func readFloat16Vectors(blobReaders []io.Reader, dim int) []byte {
-	ret := make([]byte, 0)
-	for _, r := range blobReaders {
-		v := make([]byte, dim*2)
-		ReadBinary(r, &v, schemapb.DataType_Float16Vector)
-		ret = append(ret, v...)
-	}
-	return ret
-}
-
 func readBoolArray(blobReaders []io.Reader) []bool {
 	ret := make([]bool, 0)
 	for _, r := range blobReaders {
@@ -326,19 +316,6 @@ func RowBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *schemap
 
 			vecs := readFloatVectors(blobReaders, dim)
 			idata.Data[field.FieldID] = &FloatVectorFieldData{
-				Data: vecs,
-				Dim:  dim,
-			}
-
-		case schemapb.DataType_Float16Vector:
-			dim, err := GetDimFromParams(field.TypeParams)
-			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
-				return nil, err
-			}
-
-			vecs := readFloat16Vectors(blobReaders, dim)
-			idata.Data[field.FieldID] = &Float16VectorFieldData{
 				Data: vecs,
 				Dim:  dim,
 			}
@@ -450,23 +427,6 @@ func ColumnBasedInsertMsgToInsertData(msg *msgstream.InsertMsg, collSchema *sche
 			srcData := srcFields[field.FieldID].GetVectors().GetBinaryVector()
 
 			fieldData := &BinaryVectorFieldData{
-				Data: make([]byte, 0, len(srcData)),
-				Dim:  dim,
-			}
-			fieldData.Data = append(fieldData.Data, srcData...)
-
-			idata.Data[field.FieldID] = fieldData
-
-		case schemapb.DataType_Float16Vector:
-			dim, err := GetDimFromParams(field.TypeParams)
-			if err != nil {
-				log.Error("failed to get dim", zap.Error(err))
-				return nil, err
-			}
-
-			srcData := srcFields[field.FieldID].GetVectors().GetFloat16Vector()
-
-			fieldData := &Float16VectorFieldData{
 				Data: make([]byte, 0, len(srcData)),
 				Dim:  dim,
 			}
@@ -739,18 +699,6 @@ func mergeFloatVectorField(data *InsertData, fid FieldID, field *FloatVectorFiel
 	fieldData.Data = append(fieldData.Data, field.Data...)
 }
 
-func mergeFloat16VectorField(data *InsertData, fid FieldID, field *Float16VectorFieldData) {
-	if _, ok := data.Data[fid]; !ok {
-		fieldData := &Float16VectorFieldData{
-			Data: nil,
-			Dim:  field.Dim,
-		}
-		data.Data[fid] = fieldData
-	}
-	fieldData := data.Data[fid].(*Float16VectorFieldData)
-	fieldData.Data = append(fieldData.Data, field.Data...)
-}
-
 // MergeFieldData merge field into data.
 func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 	if field == nil {
@@ -781,8 +729,6 @@ func MergeFieldData(data *InsertData, fid FieldID, field FieldData) {
 		mergeBinaryVectorField(data, fid, field)
 	case *FloatVectorFieldData:
 		mergeFloatVectorField(data, fid, field)
-	case *Float16VectorFieldData:
-		mergeFloat16VectorField(data, fid, field)
 	}
 }
 

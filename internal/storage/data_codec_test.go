@@ -32,24 +32,23 @@ import (
 )
 
 const (
-	CollectionID       = 1
-	PartitionID        = 1
-	SegmentID          = 1
-	RowIDField         = 0
-	TimestampField     = 1
-	BoolField          = 100
-	Int8Field          = 101
-	Int16Field         = 102
-	Int32Field         = 103
-	Int64Field         = 104
-	FloatField         = 105
-	DoubleField        = 106
-	StringField        = 107
-	BinaryVectorField  = 108
-	FloatVectorField   = 109
-	ArrayField         = 110
-	JSONField          = 111
-	Float16VectorField = 112
+	CollectionID      = 1
+	PartitionID       = 1
+	SegmentID         = 1
+	RowIDField        = 0
+	TimestampField    = 1
+	BoolField         = 100
+	Int8Field         = 101
+	Int16Field        = 102
+	Int32Field        = 103
+	Int64Field        = 104
+	FloatField        = 105
+	DoubleField       = 106
+	StringField       = 107
+	BinaryVectorField = 108
+	FloatVectorField  = 109
+	ArrayField        = 110
+	JSONField         = 111
 )
 
 func genTestCollectionMeta() *etcdpb.CollectionMeta {
@@ -161,18 +160,6 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 						},
 					},
 				},
-				{
-					FieldID:     Float16VectorField,
-					Name:        "field_float16_vector",
-					Description: "float16_vector",
-					DataType:    schemapb.DataType_Float16Vector,
-					TypeParams: []*commonpb.KeyValuePair{
-						{
-							Key:   common.DimKey,
-							Value: "4",
-						},
-					},
-				},
 			},
 		},
 	}
@@ -242,11 +229,6 @@ func TestInsertCodec(t *testing.T) {
 					[]byte(`{"key":"world"}`),
 				},
 			},
-			Float16VectorField: &Float16VectorFieldData{
-				// length = 2 * Dim * numRows(2) = 16
-				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
-				Dim:  4,
-			},
 		},
 	}
 
@@ -290,11 +272,6 @@ func TestInsertCodec(t *testing.T) {
 				Data: []float32{0, 1, 2, 3, 0, 1, 2, 3},
 				Dim:  4,
 			},
-			Float16VectorField: &Float16VectorFieldData{
-				// length = 2 * Dim * numRows(2) = 16
-				Data: []byte{0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255, 0, 255},
-				Dim:  4,
-			},
 			ArrayField: &ArrayFieldData{
 				ElementType: schemapb.DataType_Int32,
 				Data: []*schemapb.ScalarField{
@@ -321,21 +298,20 @@ func TestInsertCodec(t *testing.T) {
 
 	insertDataEmpty := &InsertData{
 		Data: map[int64]FieldData{
-			RowIDField:         &Int64FieldData{[]int64{}},
-			TimestampField:     &Int64FieldData{[]int64{}},
-			BoolField:          &BoolFieldData{[]bool{}},
-			Int8Field:          &Int8FieldData{[]int8{}},
-			Int16Field:         &Int16FieldData{[]int16{}},
-			Int32Field:         &Int32FieldData{[]int32{}},
-			Int64Field:         &Int64FieldData{[]int64{}},
-			FloatField:         &FloatFieldData{[]float32{}},
-			DoubleField:        &DoubleFieldData{[]float64{}},
-			StringField:        &StringFieldData{[]string{}},
-			BinaryVectorField:  &BinaryVectorFieldData{[]byte{}, 8},
-			FloatVectorField:   &FloatVectorFieldData{[]float32{}, 4},
-			Float16VectorField: &Float16VectorFieldData{[]byte{}, 4},
-			ArrayField:         &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}},
-			JSONField:          &JSONFieldData{[][]byte{}},
+			RowIDField:        &Int64FieldData{[]int64{}},
+			TimestampField:    &Int64FieldData{[]int64{}},
+			BoolField:         &BoolFieldData{[]bool{}},
+			Int8Field:         &Int8FieldData{[]int8{}},
+			Int16Field:        &Int16FieldData{[]int16{}},
+			Int32Field:        &Int32FieldData{[]int32{}},
+			Int64Field:        &Int64FieldData{[]int64{}},
+			FloatField:        &FloatFieldData{[]float32{}},
+			DoubleField:       &DoubleFieldData{[]float64{}},
+			StringField:       &StringFieldData{[]string{}},
+			BinaryVectorField: &BinaryVectorFieldData{[]byte{}, 8},
+			FloatVectorField:  &FloatVectorFieldData{[]float32{}, 4},
+			ArrayField:        &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}},
+			JSONField:         &JSONFieldData{[][]byte{}},
 		},
 	}
 	b, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
@@ -376,12 +352,6 @@ func TestInsertCodec(t *testing.T) {
 	assert.Equal(t, []string{"1", "2", "3", "4"}, resultData.Data[StringField].(*StringFieldData).Data)
 	assert.Equal(t, []byte{0, 255, 0, 255}, resultData.Data[BinaryVectorField].(*BinaryVectorFieldData).Data)
 	assert.Equal(t, []float32{0, 1, 2, 3, 0, 1, 2, 3, 4, 5, 6, 7, 4, 5, 6, 7}, resultData.Data[FloatVectorField].(*FloatVectorFieldData).Data)
-	assert.Equal(t, []byte{
-		0, 255, 0, 255, 0, 255, 0, 255,
-		0, 255, 0, 255, 0, 255, 0, 255,
-		0, 255, 0, 255, 0, 255, 0, 255,
-		0, 255, 0, 255, 0, 255, 0, 255,
-	}, resultData.Data[Float16VectorField].(*Float16VectorFieldData).Data)
 
 	int32ArrayList := [][]int32{{1, 2, 3}, {4, 5, 6}, {3, 2, 1}, {6, 5, 4}}
 	resultArrayList := [][]int32{}

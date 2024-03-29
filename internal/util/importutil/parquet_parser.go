@@ -241,11 +241,6 @@ func convertArrowSchemaToDataType(field arrow.Field, isList bool) (schemapb.Data
 		return schemapb.DataType_Int32, false
 	case arrow.INT64:
 		return schemapb.DataType_Int64, false
-	case arrow.FLOAT16:
-		if isList {
-			return schemapb.DataType_Float16Vector, false
-		}
-		return schemapb.DataType_None, false
 	case arrow.FLOAT32:
 		return schemapb.DataType_Float, false
 	case arrow.FLOAT64:
@@ -290,8 +285,6 @@ func isConvertible(src, dst schemapb.DataType, isList bool) bool {
 		return typeutil.IsJSONType(dst)
 	case schemapb.DataType_BinaryVector:
 		return dst == schemapb.DataType_BinaryVector
-	case schemapb.DataType_Float16Vector:
-		return dst == schemapb.DataType_Float16Vector
 	default:
 		return false
 	}

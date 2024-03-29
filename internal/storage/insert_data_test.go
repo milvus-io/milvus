@@ -47,7 +47,6 @@ func (s *InsertDataSuite) TestInsertData() {
 		}{
 			{"binary vector without dim", schemapb.DataType_BinaryVector},
 			{"float vector without dim", schemapb.DataType_FloatVector},
-			{"float16 vector without dim", schemapb.DataType_Float16Vector},
 		}
 
 		for _, test := range tests {
@@ -79,15 +78,15 @@ func (s *InsertDataSuite) TestInsertData() {
 	s.Run("init by New", func() {
 		s.True(s.iDataEmpty.IsEmpty())
 		s.Equal(0, s.iDataEmpty.GetRowNum())
-		s.Equal(12, s.iDataEmpty.GetMemorySize())
+		s.Equal(8, s.iDataEmpty.GetMemorySize())
 
 		s.False(s.iDataOneRow.IsEmpty())
 		s.Equal(1, s.iDataOneRow.GetRowNum())
-		s.Equal(139, s.iDataOneRow.GetMemorySize())
+		s.Equal(127, s.iDataOneRow.GetMemorySize())
 
 		s.False(s.iDataTwoRows.IsEmpty())
 		s.Equal(2, s.iDataTwoRows.GetRowNum())
-		s.Equal(266, s.iDataTwoRows.GetMemorySize())
+		s.Equal(246, s.iDataTwoRows.GetMemorySize())
 
 		for _, field := range s.iDataTwoRows.Data {
 			s.Equal(2, field.RowNum())
@@ -113,7 +112,6 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[ArrayField].GetMemorySize(), 0)
 	s.Equal(s.iDataEmpty.Data[BinaryVectorField].GetMemorySize(), 4)
 	s.Equal(s.iDataEmpty.Data[FloatVectorField].GetMemorySize(), 4)
-	s.Equal(s.iDataEmpty.Data[Float16VectorField].GetMemorySize(), 4)
 
 	s.Equal(s.iDataOneRow.Data[RowIDField].GetMemorySize(), 8)
 	s.Equal(s.iDataOneRow.Data[TimestampField].GetMemorySize(), 8)
@@ -129,7 +127,6 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[ArrayField].GetMemorySize(), 3*4)
 	s.Equal(s.iDataOneRow.Data[BinaryVectorField].GetMemorySize(), 5)
 	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetMemorySize(), 20)
-	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetMemorySize(), 12)
 
 	s.Equal(s.iDataTwoRows.Data[RowIDField].GetMemorySize(), 16)
 	s.Equal(s.iDataTwoRows.Data[TimestampField].GetMemorySize(), 16)
@@ -144,7 +141,6 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[ArrayField].GetMemorySize(), 24)
 	s.Equal(s.iDataTwoRows.Data[BinaryVectorField].GetMemorySize(), 6)
 	s.Equal(s.iDataTwoRows.Data[FloatVectorField].GetMemorySize(), 36)
-	s.Equal(s.iDataTwoRows.Data[Float16VectorField].GetMemorySize(), 20)
 }
 
 func (s *InsertDataSuite) SetupTest() {
@@ -153,22 +149,21 @@ func (s *InsertDataSuite) SetupTest() {
 	s.Require().NoError(err)
 	s.True(s.iDataEmpty.IsEmpty())
 	s.Equal(0, s.iDataEmpty.GetRowNum())
-	s.Equal(12, s.iDataEmpty.GetMemorySize())
+	s.Equal(8, s.iDataEmpty.GetMemorySize())
 
 	row1 := map[FieldID]interface{}{
-		RowIDField:         int64(3),
-		TimestampField:     int64(3),
-		BoolField:          true,
-		Int8Field:          int8(3),
-		Int16Field:         int16(3),
-		Int32Field:         int32(3),
-		Int64Field:         int64(3),
-		FloatField:         float32(3),
-		DoubleField:        float64(3),
-		StringField:        "str",
-		BinaryVectorField:  []byte{0},
-		FloatVectorField:   []float32{4, 5, 6, 7},
-		Float16VectorField: []byte{0, 0, 0, 0, 255, 255, 255, 255},
+		RowIDField:        int64(3),
+		TimestampField:    int64(3),
+		BoolField:         true,
+		Int8Field:         int8(3),
+		Int16Field:        int16(3),
+		Int32Field:        int32(3),
+		Int64Field:        int64(3),
+		FloatField:        float32(3),
+		DoubleField:       float64(3),
+		StringField:       "str",
+		BinaryVectorField: []byte{0},
+		FloatVectorField:  []float32{4, 5, 6, 7},
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
@@ -187,19 +182,18 @@ func (s *InsertDataSuite) SetupTest() {
 	}
 
 	row2 := map[FieldID]interface{}{
-		RowIDField:         int64(1),
-		TimestampField:     int64(1),
-		BoolField:          false,
-		Int8Field:          int8(1),
-		Int16Field:         int16(1),
-		Int32Field:         int32(1),
-		Int64Field:         int64(1),
-		FloatField:         float32(1),
-		DoubleField:        float64(1),
-		StringField:        string("str"),
-		BinaryVectorField:  []byte{0},
-		FloatVectorField:   []float32{4, 5, 6, 7},
-		Float16VectorField: []byte{1, 2, 3, 4, 5, 6, 7, 8},
+		RowIDField:        int64(1),
+		TimestampField:    int64(1),
+		BoolField:         false,
+		Int8Field:         int8(1),
+		Int16Field:        int16(1),
+		Int32Field:        int32(1),
+		Int64Field:        int64(1),
+		FloatField:        float32(1),
+		DoubleField:       float64(1),
+		StringField:       string("str"),
+		BinaryVectorField: []byte{0},
+		FloatVectorField:  []float32{4, 5, 6, 7},
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},

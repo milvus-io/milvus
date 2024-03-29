@@ -1108,13 +1108,7 @@ func TestSearchV2(t *testing.T) {
 	collSchema := generateCollectionSchema(schemapb.DataType_Int64)
 	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
 	binaryVectorField.Name = "binaryVector"
-	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
-	float16VectorField.Name = "float16Vector"
-	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
-	bfloat16VectorField.Name = "bfloat16Vector"
 	collSchema.Fields = append(collSchema.Fields, &binaryVectorField)
-	collSchema.Fields = append(collSchema.Fields, &float16VectorField)
-	collSchema.Fields = append(collSchema.Fields, &bfloat16VectorField)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         collSchema,

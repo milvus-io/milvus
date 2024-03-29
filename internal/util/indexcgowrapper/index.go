@@ -113,8 +113,6 @@ func (index *CgoIndex) Build(dataset *Dataset) error {
 		return fmt.Errorf("build index on supported data type: %s", dataset.DType.String())
 	case schemapb.DataType_FloatVector:
 		return index.buildFloatVecIndex(dataset)
-	case schemapb.DataType_Float16Vector:
-		return fmt.Errorf("build index on supported data type: %s", dataset.DType.String())
 	case schemapb.DataType_BinaryVector:
 		return index.buildBinaryVecIndex(dataset)
 	case schemapb.DataType_Bool:

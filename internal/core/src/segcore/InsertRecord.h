@@ -335,11 +335,6 @@ struct InsertRecord {
                     this->append_field_data<BinaryVector>(
                         field_id, field_meta.get_dim(), size_per_chunk);
                     continue;
-                } else if (field_meta.get_data_type() ==
-                           DataType::VECTOR_FLOAT16) {
-                    this->append_field_data<Float16Vector>(
-                        field_id, field_meta.get_dim(), size_per_chunk);
-                    continue;
                 } else {
                     PanicInfo(DataTypeInvalid,
                               "unsupported vector type",

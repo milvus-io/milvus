@@ -33,7 +33,6 @@ enum ArithOpType {
 enum VectorType {
   BinaryVector = 0;
   FloatVector = 1;
-  Float16Vector = 2;
 };
 
 message GenericValue {
