@@ -198,9 +198,7 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 
 	sealed := suite.sealed.(*LocalSegment)
 
-	sealed.ptrLock.RLock()
-	suite.False(sealed.isValid())
-	sealed.ptrLock.RUnlock()
+	suite.False(sealed.ptrLock.RLockIfNotReleased())
 	suite.EqualValues(0, sealed.RowNum())
 	suite.EqualValues(0, sealed.MemSize())
 	suite.False(sealed.HasRawData(101))

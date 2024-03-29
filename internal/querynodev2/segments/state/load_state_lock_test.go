@@ -163,5 +163,18 @@ func TestStartReleaseAll(t *testing.T) {
 		t.Errorf("should not be blocked")
 	}
 	assert.Equal(t, LoadStateReleased, l.state)
-	assert.True(t, l.IsReleased())
+}
+
+func TestRLock(t *testing.T) {
+	l := NewLoadStateLock(LoadStateOnlyMeta)
+	assert.True(t, l.RLockIfNotReleased())
+	l.RUnlock()
+
+	l = NewLoadStateLock(LoadStateDataLoaded)
+	assert.True(t, l.RLockIfNotReleased())
+	l.RUnlock()
+
+	l = NewLoadStateLock(LoadStateOnlyMeta)
+	l.StartReleaseAll().Done(nil)
+	assert.False(t, l.RLockIfNotReleased())
 }

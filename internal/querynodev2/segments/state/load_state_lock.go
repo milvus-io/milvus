@@ -63,9 +63,14 @@ type LoadStateLock struct {
 	state loadStateEnum
 }
 
-// IsReleased returns if segment is released.
-func (ls *LoadStateLock) IsReleased() bool {
-	return ls.state == LoadStateReleased
+// RLockIfNotReleased locks the segment if the state is not released.
+func (ls *LoadStateLock) RLockIfNotReleased() bool {
+	ls.RLock()
+	if ls.state == LoadStateReleased {
+		ls.RUnlock()
+		return false
+	}
+	return true
 }
 
 // StartLoadData starts load segment data
