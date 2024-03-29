@@ -243,7 +243,7 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 
 	// dist
 	segment := utils.CreateTestSegment(1, 1, 2, 1, 1, "test-insert-channel")
-	segment.IndexInfo = map[int64]*querypb.FieldIndexInfo{101: &querypb.FieldIndexInfo{
+	segment.IndexInfo = map[int64]*querypb.FieldIndexInfo{101: {
 		FieldID:     101,
 		IndexID:     1000,
 		EnableIndex: true,
