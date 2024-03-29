@@ -1,0 +1,28 @@
+name: Publish Milvus ARM GPU Image
+on:
+  workflow_dispatch:
+    inputs:
+      tagName:
+        description: 'Tag to check out'
+        required: true
+        default: 'v2.4.0'
+
+jobs:
+  build-gpu-arm-image:
+    runs-on: [ubuntu-latest, ARM64]
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.tagName }}
+    - name: Login to Docker Hub
+      if: github.event_name != 'pull_request'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKERHUB_USER }}
+        password: ${{ secrets.DOCKERHUB_TOKEN }}
+    - name: docker build
+      run: |
+        docker run -v $(pwd):/root/milvus  -w /root/milvus  milvusdb/milvus-env:0.0.4-master-gpu -- make milvus-gpu
+    - name: docker package
+      run: |
+        docker build -t milvusdb/milvus:${{ github.event.inputs.tagName }}-gpu-arm64 -f build/docker/milvus/gpu/ubuntu22.04/Dockerfile . --push
