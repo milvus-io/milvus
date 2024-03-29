@@ -690,7 +690,7 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 			}
 		}
 
-		plans := t.majorCompactionManager.generateMajorCompactionPlans(group.segments, clusteringKeyField.FieldID, ct)
+		plans := t.majorCompactionManager.fillMajorCompactionPlans(group.segments, clusteringKeyField.FieldID, ct)
 		// mark all segments prepare for major compaction
 		// todo： for now, no need to set compacting = false, as they will be set after compaction done or failed
 		// however, if we split major compaction into multi sub compaction task and support retry fail sub task,

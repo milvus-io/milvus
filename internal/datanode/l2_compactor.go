@@ -399,7 +399,7 @@ func (t *level2CompactionTask) mapping(ctx context.Context,
 		return nil, nil, err
 	}
 
-	// first spill all in memory data to disk, actually we don't need to do this, just for ease
+	// force spill all buffers
 	err := t.forceSpillAll(ctx)
 	if err != nil {
 		return nil, nil, err
@@ -626,7 +626,8 @@ func (t *level2CompactionTask) writeToBuffer(ctx context.Context, clusterBuffer 
 	totalBufferSize := t.totalBufferSize.Add(int64(rowSize))
 
 	// trigger spill
-	if clusterBuffer.bufferRowNum > t.plan.L2SegmentMaxRows {
+	if clusterBuffer.bufferRowNum > t.plan.GetMaxSegmentRows() ||
+		clusterBuffer.bufferSize > int64(Params.DataNodeCfg.BinLogMaxSize.GetAsInt()) {
 		t.spillChan <- SpillSignal{
 			buffer: clusterBuffer,
 		}
@@ -691,7 +692,6 @@ func (t *level2CompactionTask) backgroundSpill(ctx context.Context) {
 }
 
 func (t *level2CompactionTask) spillLargestBuffers(ctx context.Context) error {
-	log.Debug("spillLargestBuffers")
 	bufferIDs := make([]int, 0)
 	for _, buffer := range t.clusterBuffers {
 		bufferIDs = append(bufferIDs, buffer.id)
@@ -794,7 +794,7 @@ func (t *level2CompactionTask) spill(ctx context.Context, buffer *ClusterBuffer)
 	t.clusterBufferLocks.Lock(buffer)
 	defer t.clusterBufferLocks.Unlock(buffer)
 
-	if buffer.currentSpillRowNum+buffer.bufferRowNum > t.plan.L2SegmentMaxRows {
+	if buffer.currentSpillRowNum > t.plan.GetMaxSegmentRows() {
 		t.packBuffersToSegments(ctx, buffer)
 	}
 
@@ -1043,27 +1043,20 @@ func (t *level2CompactionTask) scalarPlan(dict map[interface{}]int64) [][]interf
 	buckets := make([][]interface{}, 0)
 	currentBucket := make([]interface{}, 0)
 	var currentBucketSize int64 = 0
-	maxTres := t.plan.L2SegmentMaxRows
-	minTres := t.plan.L2SegmentMaxRows / 2
+	maxRows := t.plan.MaxSegmentRows
+	preferRows := t.plan.PreferSegmentRows
 	for _, key := range keys {
 		// todo can optimize
-		if dict[key] > minTres {
-			//if currentBucketSize + dict[key] < maxTres {
-			//	currentBucket = append(currentBucket, key)
-			//	buckets = append(buckets, currentBucket)
-			//} else {
-			//	buckets = append(buckets, currentBucket)
-			//	buckets = append(buckets, []interface{}{key})
-			//}
+		if dict[key] > preferRows {
 			buckets = append(buckets, currentBucket)
 			buckets = append(buckets, []interface{}{key})
 			currentBucket = make([]interface{}, 0)
 			currentBucketSize = 0
-		} else if currentBucketSize+dict[key] > maxTres {
+		} else if currentBucketSize+dict[key] > maxRows {
 			buckets = append(buckets, currentBucket)
 			currentBucket = []interface{}{key}
 			currentBucketSize = dict[key]
-		} else if currentBucketSize+dict[key] > minTres {
+		} else if currentBucketSize+dict[key] > preferRows {
 			currentBucket = append(currentBucket, key)
 			buckets = append(buckets, currentBucket)
 			currentBucket = make([]interface{}, 0)

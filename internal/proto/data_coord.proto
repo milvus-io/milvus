@@ -522,9 +522,10 @@ message CompactionPlan {
   int64 collection_ttl = 8;
   int64 total_rows = 9;
   int64 clustering_key_id = 10;
-  int64 l2_segment_max_rows = 11;
-  string analyze_result_path = 12;
-  repeated int64 analyze_segment_ids = 13;
+  int64 max_segment_rows = 11;
+  int64 prefer_segment_rows = 12;
+  string analyze_result_path = 13;
+  repeated int64 analyze_segment_ids = 14;
 }
 
 message CompactionSegment {
