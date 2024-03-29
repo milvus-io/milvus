@@ -216,10 +216,10 @@ func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	}
 }
 
-func (s *SegmentInfo) IsDeltaLogExists(filePath string) bool {
+func (s *SegmentInfo) IsDeltaLogExists(logID int64) bool {
 	for _, deltaLogs := range s.GetDeltalogs() {
 		for _, l := range deltaLogs.GetBinlogs() {
-			if l.GetLogPath() == filePath {
+			if l.GetLogID() == logID {
 				return true
 			}
 		}
@@ -227,10 +227,10 @@ func (s *SegmentInfo) IsDeltaLogExists(filePath string) bool {
 	return false
 }
 
-func (s *SegmentInfo) IsStatsLogExists(filePath string) bool {
+func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
 	for _, statsLogs := range s.GetStatslogs() {
 		for _, l := range statsLogs.GetBinlogs() {
-			if l.GetLogPath() == filePath {
+			if l.GetLogID() == logID {
 				return true
 			}
 		}

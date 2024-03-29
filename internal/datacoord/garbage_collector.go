@@ -244,14 +244,24 @@ func (gc *garbageCollector) recycleUnusedBinlogFiles() {
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentStatslogPath),
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
-				return segment != nil && segment.IsStatsLogExists(objectInfo.FilePath)
+				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
+				if err != nil {
+					log.Warn("garbageCollector find dirty stats log", zap.String("filePath", objectInfo.FilePath), zap.Error(err))
+					return false
+				}
+				return segment != nil && segment.IsStatsLogExists(logID)
 			},
 			label: metrics.StatFileLabel,
 		},
 		{
 			prefix: path.Join(gc.option.cli.RootPath(), common.SegmentDeltaLogPath),
 			checker: func(objectInfo *storage.ChunkObjectInfo, segment *SegmentInfo) bool {
-				return segment != nil && segment.IsDeltaLogExists(objectInfo.FilePath)
+				logID, err := binlog.GetLogIDFromBingLogPath(objectInfo.FilePath)
+				if err != nil {
+					log.Warn("garbageCollector find dirty dleta log", zap.String("filePath", objectInfo.FilePath), zap.Error(err))
+					return false
+				}
+				return segment != nil && segment.IsDeltaLogExists(logID)
 			},
 			label: metrics.DeleteFileLabel,
 		},

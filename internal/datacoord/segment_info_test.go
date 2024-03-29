@@ -104,20 +104,20 @@ func TestIsDeltaLogExists(t *testing.T) {
 				{
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "test",
+							LogID: 1,
 						},
 						{
-							LogPath: "test2",
+							LogID: 2,
 						},
 					},
 				},
 			},
 		},
 	}
-	assert.True(t, segment.IsDeltaLogExists("test"))
-	assert.True(t, segment.IsDeltaLogExists("test2"))
-	assert.False(t, segment.IsDeltaLogExists("test3"))
-	assert.False(t, segment.IsDeltaLogExists(""))
+	assert.True(t, segment.IsDeltaLogExists(1))
+	assert.True(t, segment.IsDeltaLogExists(2))
+	assert.False(t, segment.IsDeltaLogExists(3))
+	assert.False(t, segment.IsDeltaLogExists(0))
 }
 
 func TestIsStatsLogExists(t *testing.T) {
@@ -127,18 +127,18 @@ func TestIsStatsLogExists(t *testing.T) {
 				{
 					Binlogs: []*datapb.Binlog{
 						{
-							LogPath: "test",
+							LogID: 1,
 						},
 						{
-							LogPath: "test2",
+							LogID: 2,
 						},
 					},
 				},
 			},
 		},
 	}
-	assert.True(t, segment.IsStatsLogExists("test"))
-	assert.True(t, segment.IsStatsLogExists("test2"))
-	assert.False(t, segment.IsStatsLogExists("test3"))
-	assert.False(t, segment.IsStatsLogExists(""))
+	assert.True(t, segment.IsStatsLogExists(1))
+	assert.True(t, segment.IsStatsLogExists(2))
+	assert.False(t, segment.IsStatsLogExists(3))
+	assert.False(t, segment.IsStatsLogExists(0))
 }

@@ -84,14 +84,7 @@ func CompressFieldBinlogs(fieldBinlogs []*datapb.FieldBinlog) error {
 		for _, binlog := range fieldBinlog.Binlogs {
 			logPath := binlog.GetLogPath()
 			if len(logPath) != 0 {
-				var logID int64
-				idx := strings.LastIndex(logPath, "/")
-				if idx == -1 {
-					return merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid binlog path: %s", logPath))
-				}
-				var err error
-				logPathStr := logPath[(idx + 1):]
-				logID, err = strconv.ParseInt(logPathStr, 10, 64)
+				logID, err := GetLogIDFromBingLogPath(logPath)
 				if err != nil {
 					return err
 				}
@@ -183,4 +176,20 @@ func buildLogPath(binlogType storage.BinlogType, collectionID, partitionID, segm
 	}
 	// should not happen
 	return "", merr.WrapErrParameterInvalidMsg("invalid binlog type")
+}
+
+// GetLogIDFromBingLogPath get log id from binlog path
+func GetLogIDFromBingLogPath(logPath string) (int64, error) {
+	var logID int64
+	idx := strings.LastIndex(logPath, "/")
+	if idx == -1 {
+		return 0, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("invalid binlog path: %s", logPath))
+	}
+	var err error
+	logPathStr := logPath[(idx + 1):]
+	logID, err = strconv.ParseInt(logPathStr, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	return logID, nil
 }
