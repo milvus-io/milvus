@@ -86,13 +86,21 @@ service QueryCoord {
         returns (DescribeResourceGroupResponse) {
     }
 
-    // ops interfaces
-    rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {
-    }
-    rpc ActivateChecker(ActivateCheckerRequest) returns (common.Status) {
-    }
-    rpc DeactivateChecker(DeactivateCheckerRequest) returns (common.Status) {
-    }
+
+  // ops interfaces
+  rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {}
+  rpc ActivateChecker(ActivateCheckerRequest) returns (common.Status) {}
+  rpc DeactivateChecker(DeactivateCheckerRequest) returns (common.Status) {}
+    
+  rpc ListQueryNode(ListQueryNodeRequest) returns (ListQueryNodeResponse) {}
+  rpc GetQueryNodeDistribution(GetQueryNodeDistributionRequest) returns (GetQueryNodeDistributionResponse) {}
+  rpc SuspendBalance(SuspendBalanceRequest) returns (common.Status)  {}
+  rpc ResumeBalance(ResumeBalanceRequest) returns (common.Status)  {}
+  rpc SuspendNode(SuspendNodeRequest) returns (common.Status) {}
+  rpc ResumeNode(ResumeNodeRequest) returns (common.Status) {}
+  rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
+  rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
+  rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -793,3 +801,75 @@ message CollectionTarget {
   repeated ChannelTarget Channel_targets = 2;
   int64 version = 3;
 }
+message NodeInfo {
+  int64 ID = 2;
+  string address = 3;
+  string state = 4;
+}
+
+message ListQueryNodeRequest {
+  common.MsgBase base = 1;
+}
+
+message ListQueryNodeResponse {
+  common.Status status = 1;
+  repeated NodeInfo nodeInfos = 2;
+}
+
+message GetQueryNodeDistributionRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+}
+
+message GetQueryNodeDistributionResponse {
+  common.Status status = 1;
+  int64 ID = 2;
+  repeated string channel_names = 3;
+  repeated int64 sealed_segmentIDs = 4;
+}
+
+message SuspendBalanceRequest {
+  common.MsgBase base = 1;
+}
+
+message ResumeBalanceRequest {
+  common.MsgBase base = 1;
+}
+
+message SuspendNodeRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+}
+
+message ResumeNodeRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+}
+
+message TransferSegmentRequest {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+  int64 source_nodeID = 3;
+  int64 target_nodeID = 4;
+  bool transfer_all = 5;
+  bool to_all_nodes = 6;
+  bool copy_mode = 7;
+}
+
+message TransferChannelRequest {
+  common.MsgBase base = 1;
+  string channel_name = 2;
+  int64 source_nodeID = 3;
+  int64 target_nodeID = 4;
+  bool transfer_all = 5;
+  bool to_all_nodes = 6;
+  bool copy_mode = 7;
+}
+
+message CheckQueryNodeDistributionRequest {
+  common.MsgBase base = 1;
+  int64 source_nodeID = 3;
+  int64 target_nodeID = 4;
+}
+
+

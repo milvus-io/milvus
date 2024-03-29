@@ -158,6 +158,33 @@ func Test_NewClient(t *testing.T) {
 
 		r30, err := client.DeactivateChecker(ctx, nil)
 		retCheck(retNotNil, r30, err)
+
+		r31, err := client.ListQueryNode(ctx, nil)
+		retCheck(retNotNil, r31, err)
+
+		r32, err := client.GetQueryNodeDistribution(ctx, nil)
+		retCheck(retNotNil, r32, err)
+
+		r33, err := client.SuspendBalance(ctx, nil)
+		retCheck(retNotNil, r33, err)
+
+		r34, err := client.ResumeBalance(ctx, nil)
+		retCheck(retNotNil, r34, err)
+
+		r35, err := client.SuspendNode(ctx, nil)
+		retCheck(retNotNil, r35, err)
+
+		r36, err := client.ResumeNode(ctx, nil)
+		retCheck(retNotNil, r36, err)
+
+		r37, err := client.TransferSegment(ctx, nil)
+		retCheck(retNotNil, r37, err)
+
+		r38, err := client.TransferChannel(ctx, nil)
+		retCheck(retNotNil, r38, err)
+
+		r39, err := client.CheckQueryNodeDistribution(ctx, nil)
+		retCheck(retNotNil, r39, err)
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[querypb.QueryCoordClient]{

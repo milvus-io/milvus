@@ -171,6 +171,76 @@ func (_c *MockQueryCoordClient_CheckHealth_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// CheckQueryNodeDistribution provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) CheckQueryNodeDistribution(ctx context.Context, in *querypb.CheckQueryNodeDistributionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.CheckQueryNodeDistributionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_CheckQueryNodeDistribution_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckQueryNodeDistribution'
+type MockQueryCoordClient_CheckQueryNodeDistribution_Call struct {
+	*mock.Call
+}
+
+// CheckQueryNodeDistribution is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.CheckQueryNodeDistributionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) CheckQueryNodeDistribution(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_CheckQueryNodeDistribution_Call {
+	return &MockQueryCoordClient_CheckQueryNodeDistribution_Call{Call: _e.mock.On("CheckQueryNodeDistribution",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_CheckQueryNodeDistribution_Call) Run(run func(ctx context.Context, in *querypb.CheckQueryNodeDistributionRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_CheckQueryNodeDistribution_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.CheckQueryNodeDistributionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_CheckQueryNodeDistribution_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_CheckQueryNodeDistribution_Call) RunAndReturn(run func(context.Context, *querypb.CheckQueryNodeDistributionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_CheckQueryNodeDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with given fields:
 func (_m *MockQueryCoordClient) Close() error {
 	ret := _m.Called()
@@ -702,6 +772,76 @@ func (_c *MockQueryCoordClient_GetPartitionStates_Call) RunAndReturn(run func(co
 	return _c
 }
 
+// GetQueryNodeDistribution provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) GetQueryNodeDistribution(ctx context.Context, in *querypb.GetQueryNodeDistributionRequest, opts ...grpc.CallOption) (*querypb.GetQueryNodeDistributionResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *querypb.GetQueryNodeDistributionResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryNodeDistributionRequest, ...grpc.CallOption) (*querypb.GetQueryNodeDistributionResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.GetQueryNodeDistributionRequest, ...grpc.CallOption) *querypb.GetQueryNodeDistributionResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.GetQueryNodeDistributionResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.GetQueryNodeDistributionRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_GetQueryNodeDistribution_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetQueryNodeDistribution'
+type MockQueryCoordClient_GetQueryNodeDistribution_Call struct {
+	*mock.Call
+}
+
+// GetQueryNodeDistribution is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.GetQueryNodeDistributionRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) GetQueryNodeDistribution(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_GetQueryNodeDistribution_Call {
+	return &MockQueryCoordClient_GetQueryNodeDistribution_Call{Call: _e.mock.On("GetQueryNodeDistribution",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_GetQueryNodeDistribution_Call) Run(run func(ctx context.Context, in *querypb.GetQueryNodeDistributionRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_GetQueryNodeDistribution_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.GetQueryNodeDistributionRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_GetQueryNodeDistribution_Call) Return(_a0 *querypb.GetQueryNodeDistributionResponse, _a1 error) *MockQueryCoordClient_GetQueryNodeDistribution_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_GetQueryNodeDistribution_Call) RunAndReturn(run func(context.Context, *querypb.GetQueryNodeDistributionRequest, ...grpc.CallOption) (*querypb.GetQueryNodeDistributionResponse, error)) *MockQueryCoordClient_GetQueryNodeDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetReplicas provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryCoordClient) GetReplicas(ctx context.Context, in *milvuspb.GetReplicasRequest, opts ...grpc.CallOption) (*milvuspb.GetReplicasResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -1118,6 +1258,76 @@ func (_c *MockQueryCoordClient_ListCheckers_Call) Return(_a0 *querypb.ListChecke
 }
 
 func (_c *MockQueryCoordClient_ListCheckers_Call) RunAndReturn(run func(context.Context, *querypb.ListCheckersRequest, ...grpc.CallOption) (*querypb.ListCheckersResponse, error)) *MockQueryCoordClient_ListCheckers_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListQueryNode provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) ListQueryNode(ctx context.Context, in *querypb.ListQueryNodeRequest, opts ...grpc.CallOption) (*querypb.ListQueryNodeResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *querypb.ListQueryNodeResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListQueryNodeRequest, ...grpc.CallOption) (*querypb.ListQueryNodeResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ListQueryNodeRequest, ...grpc.CallOption) *querypb.ListQueryNodeResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*querypb.ListQueryNodeResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ListQueryNodeRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_ListQueryNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListQueryNode'
+type MockQueryCoordClient_ListQueryNode_Call struct {
+	*mock.Call
+}
+
+// ListQueryNode is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.ListQueryNodeRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) ListQueryNode(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ListQueryNode_Call {
+	return &MockQueryCoordClient_ListQueryNode_Call{Call: _e.mock.On("ListQueryNode",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_ListQueryNode_Call) Run(run func(ctx context.Context, in *querypb.ListQueryNodeRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_ListQueryNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ListQueryNodeRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ListQueryNode_Call) Return(_a0 *querypb.ListQueryNodeResponse, _a1 error) *MockQueryCoordClient_ListQueryNode_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ListQueryNode_Call) RunAndReturn(run func(context.Context, *querypb.ListQueryNodeRequest, ...grpc.CallOption) (*querypb.ListQueryNodeResponse, error)) *MockQueryCoordClient_ListQueryNode_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1542,6 +1752,146 @@ func (_c *MockQueryCoordClient_ReleasePartitions_Call) RunAndReturn(run func(con
 	return _c
 }
 
+// ResumeBalance provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) ResumeBalance(ctx context.Context, in *querypb.ResumeBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeBalanceRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeBalanceRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ResumeBalanceRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_ResumeBalance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResumeBalance'
+type MockQueryCoordClient_ResumeBalance_Call struct {
+	*mock.Call
+}
+
+// ResumeBalance is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.ResumeBalanceRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) ResumeBalance(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ResumeBalance_Call {
+	return &MockQueryCoordClient_ResumeBalance_Call{Call: _e.mock.On("ResumeBalance",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_ResumeBalance_Call) Run(run func(ctx context.Context, in *querypb.ResumeBalanceRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_ResumeBalance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ResumeBalanceRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ResumeBalance_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_ResumeBalance_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ResumeBalance_Call) RunAndReturn(run func(context.Context, *querypb.ResumeBalanceRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_ResumeBalance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResumeNode provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) ResumeNode(ctx context.Context, in *querypb.ResumeNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeNodeRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.ResumeNodeRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.ResumeNodeRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_ResumeNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResumeNode'
+type MockQueryCoordClient_ResumeNode_Call struct {
+	*mock.Call
+}
+
+// ResumeNode is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.ResumeNodeRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) ResumeNode(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_ResumeNode_Call {
+	return &MockQueryCoordClient_ResumeNode_Call{Call: _e.mock.On("ResumeNode",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_ResumeNode_Call) Run(run func(ctx context.Context, in *querypb.ResumeNodeRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_ResumeNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.ResumeNodeRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ResumeNode_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_ResumeNode_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_ResumeNode_Call) RunAndReturn(run func(context.Context, *querypb.ResumeNodeRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_ResumeNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ShowCollections provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryCoordClient) ShowCollections(ctx context.Context, in *querypb.ShowCollectionsRequest, opts ...grpc.CallOption) (*querypb.ShowCollectionsResponse, error) {
 	_va := make([]interface{}, len(opts))
@@ -1752,6 +2102,146 @@ func (_c *MockQueryCoordClient_ShowPartitions_Call) RunAndReturn(run func(contex
 	return _c
 }
 
+// SuspendBalance provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) SuspendBalance(ctx context.Context, in *querypb.SuspendBalanceRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendBalanceRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendBalanceRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SuspendBalanceRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_SuspendBalance_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SuspendBalance'
+type MockQueryCoordClient_SuspendBalance_Call struct {
+	*mock.Call
+}
+
+// SuspendBalance is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.SuspendBalanceRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) SuspendBalance(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_SuspendBalance_Call {
+	return &MockQueryCoordClient_SuspendBalance_Call{Call: _e.mock.On("SuspendBalance",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_SuspendBalance_Call) Run(run func(ctx context.Context, in *querypb.SuspendBalanceRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_SuspendBalance_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.SuspendBalanceRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_SuspendBalance_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_SuspendBalance_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_SuspendBalance_Call) RunAndReturn(run func(context.Context, *querypb.SuspendBalanceRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_SuspendBalance_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SuspendNode provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) SuspendNode(ctx context.Context, in *querypb.SuspendNodeRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendNodeRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.SuspendNodeRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.SuspendNodeRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_SuspendNode_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SuspendNode'
+type MockQueryCoordClient_SuspendNode_Call struct {
+	*mock.Call
+}
+
+// SuspendNode is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.SuspendNodeRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) SuspendNode(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_SuspendNode_Call {
+	return &MockQueryCoordClient_SuspendNode_Call{Call: _e.mock.On("SuspendNode",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_SuspendNode_Call) Run(run func(ctx context.Context, in *querypb.SuspendNodeRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_SuspendNode_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.SuspendNodeRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_SuspendNode_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_SuspendNode_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_SuspendNode_Call) RunAndReturn(run func(context.Context, *querypb.SuspendNodeRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_SuspendNode_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // SyncNewCreatedPartition provides a mock function with given fields: ctx, in, opts
 func (_m *MockQueryCoordClient) SyncNewCreatedPartition(ctx context.Context, in *querypb.SyncNewCreatedPartitionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
@@ -1818,6 +2308,76 @@ func (_c *MockQueryCoordClient_SyncNewCreatedPartition_Call) Return(_a0 *commonp
 }
 
 func (_c *MockQueryCoordClient_SyncNewCreatedPartition_Call) RunAndReturn(run func(context.Context, *querypb.SyncNewCreatedPartitionRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_SyncNewCreatedPartition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TransferChannel provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) TransferChannel(ctx context.Context, in *querypb.TransferChannelRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferChannelRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferChannelRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.TransferChannelRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_TransferChannel_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransferChannel'
+type MockQueryCoordClient_TransferChannel_Call struct {
+	*mock.Call
+}
+
+// TransferChannel is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.TransferChannelRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) TransferChannel(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_TransferChannel_Call {
+	return &MockQueryCoordClient_TransferChannel_Call{Call: _e.mock.On("TransferChannel",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_TransferChannel_Call) Run(run func(ctx context.Context, in *querypb.TransferChannelRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_TransferChannel_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.TransferChannelRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_TransferChannel_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_TransferChannel_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_TransferChannel_Call) RunAndReturn(run func(context.Context, *querypb.TransferChannelRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_TransferChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1958,6 +2518,76 @@ func (_c *MockQueryCoordClient_TransferReplica_Call) Return(_a0 *commonpb.Status
 }
 
 func (_c *MockQueryCoordClient_TransferReplica_Call) RunAndReturn(run func(context.Context, *querypb.TransferReplicaRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_TransferReplica_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TransferSegment provides a mock function with given fields: ctx, in, opts
+func (_m *MockQueryCoordClient) TransferSegment(ctx context.Context, in *querypb.TransferSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferSegmentRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.TransferSegmentRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.TransferSegmentRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoordClient_TransferSegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TransferSegment'
+type MockQueryCoordClient_TransferSegment_Call struct {
+	*mock.Call
+}
+
+// TransferSegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *querypb.TransferSegmentRequest
+//   - opts ...grpc.CallOption
+func (_e *MockQueryCoordClient_Expecter) TransferSegment(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_TransferSegment_Call {
+	return &MockQueryCoordClient_TransferSegment_Call{Call: _e.mock.On("TransferSegment",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockQueryCoordClient_TransferSegment_Call) Run(run func(ctx context.Context, in *querypb.TransferSegmentRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_TransferSegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*querypb.TransferSegmentRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockQueryCoordClient_TransferSegment_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoordClient_TransferSegment_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoordClient_TransferSegment_Call) RunAndReturn(run func(context.Context, *querypb.TransferSegmentRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_TransferSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

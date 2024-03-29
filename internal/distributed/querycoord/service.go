@@ -446,3 +446,39 @@ func (s *Server) DeactivateChecker(ctx context.Context, req *querypb.DeactivateC
 func (s *Server) ListCheckers(ctx context.Context, req *querypb.ListCheckersRequest) (*querypb.ListCheckersResponse, error) {
 	return s.queryCoord.ListCheckers(ctx, req)
 }
+
+func (s *Server) ListQueryNode(ctx context.Context, req *querypb.ListQueryNodeRequest) (*querypb.ListQueryNodeResponse, error) {
+	return s.queryCoord.ListQueryNode(ctx, req)
+}
+
+func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQueryNodeDistributionRequest) (*querypb.GetQueryNodeDistributionResponse, error) {
+	return s.queryCoord.GetQueryNodeDistribution(ctx, req)
+}
+
+func (s *Server) SuspendBalance(ctx context.Context, req *querypb.SuspendBalanceRequest) (*commonpb.Status, error) {
+	return s.queryCoord.SuspendBalance(ctx, req)
+}
+
+func (s *Server) ResumeBalance(ctx context.Context, req *querypb.ResumeBalanceRequest) (*commonpb.Status, error) {
+	return s.queryCoord.ResumeBalance(ctx, req)
+}
+
+func (s *Server) SuspendNode(ctx context.Context, req *querypb.SuspendNodeRequest) (*commonpb.Status, error) {
+	return s.queryCoord.SuspendNode(ctx, req)
+}
+
+func (s *Server) ResumeNode(ctx context.Context, req *querypb.ResumeNodeRequest) (*commonpb.Status, error) {
+	return s.queryCoord.ResumeNode(ctx, req)
+}
+
+func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegmentRequest) (*commonpb.Status, error) {
+	return s.queryCoord.TransferSegment(ctx, req)
+}
+
+func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChannelRequest) (*commonpb.Status, error) {
+	return s.queryCoord.TransferChannel(ctx, req)
+}
+
+func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.CheckQueryNodeDistributionRequest) (*commonpb.Status, error) {
+	return s.queryCoord.CheckQueryNodeDistribution(ctx, req)
+}
