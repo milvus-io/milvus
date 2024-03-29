@@ -7,11 +7,13 @@ class MilvusUser(HttpUser):
 
     @task
     def query(self):
+        payload = {"collectionName": "test_restful_perf",
+                   "filter": 'text like "1%"',
+                   "outputFields": ["*"],
+                   "limit": 100
+                   }
         with self.client.post("/v2/vectordb/entities/query",
-                              json={"collectionName": "test_restful_perf",
-                                    "filter": 'text like "1%"',
-                                    "outputFields": ["text"]
-                                    },
+                              json=payload,
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
                               catch_response=True
                               ) as resp:
@@ -20,7 +22,7 @@ class MilvusUser(HttpUser):
             # print(resp.json()["code"])
             if resp.status_code != 200 or resp.json()["code"] != 200 or len(resp.json()["data"]) == 0:
                 # print(resp.text)
-                resp.failure(f"query failed with error {resp.text}")
+                resp.failure(f"query failed with error {resp.text} for payload {payload}")
 
 
 class StagesShape(LoadTestShape):

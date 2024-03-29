@@ -13,7 +13,6 @@ class MilvusUser(HttpUser):
                               json={"collectionName": "test_restful_perf",
                                     "annsField": "text_emb",
                                     "data": [self.vectors_to_search[random_id]],
-                                    "filter": "id > 0",
                                     "outputFields": ["*"],
                                     },
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
