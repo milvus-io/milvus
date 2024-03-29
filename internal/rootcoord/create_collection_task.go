@@ -182,6 +182,15 @@ func hasSystemFields(schema *schemapb.CollectionSchema, systemFields []string) b
 	return false
 }
 
+func validateFieldDataType(schema *schemapb.CollectionSchema) error {
+	for _, field := range schema.GetFields() {
+		if _, ok := schemapb.DataType_name[int32(field.GetDataType())]; !ok || field.GetDataType() == schemapb.DataType_None {
+			return merr.WrapErrParameterInvalid("valid field", fmt.Sprintf("field data type: %s is not supported", field.GetDataType()))
+		}
+	}
+	return nil
+}
+
 func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema) error {
 	log.With(zap.String("CollectionName", t.Req.CollectionName))
 	if t.Req.GetCollectionName() != schema.GetName() {
@@ -204,7 +213,7 @@ func (t *createCollectionTask) validateSchema(schema *schemapb.CollectionSchema)
 		msg := fmt.Sprintf("schema contains system field: %s, %s, %s", RowIDFieldName, TimeStampFieldName, MetaFieldName)
 		return merr.WrapErrParameterInvalid("schema don't contains system field", "contains", msg)
 	}
-	return nil
+	return validateFieldDataType(schema)
 }
 
 func (t *createCollectionTask) assignFieldID(schema *schemapb.CollectionSchema) {
