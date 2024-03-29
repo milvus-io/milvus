@@ -19,8 +19,8 @@ from pymilvus import (
 @pytest.mark.L0
 class TestCreateIndex(TestBase):
 
-    @pytest.mark.parametrize("metric_type", ["L2"])
-    @pytest.mark.parametrize("index_type", ["AUTOINDEX", "HNSW"])
+    @pytest.mark.parametrize("metric_type", ["L2", "IP", "COSINE"])
+    @pytest.mark.parametrize("index_type", ["AUTOINDEX", "HNSW", "FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"])
     @pytest.mark.parametrize("dim", [128])
     def test_index_e2e(self, dim, metric_type, index_type):
         """
@@ -75,6 +75,14 @@ class TestCreateIndex(TestBase):
             payload["indexParams"][0]["indexConfig"] = {"index_type": "HNSW", "M": "16", "efConstruction": "200"}
         if index_type == "AUTOINDEX":
             payload["indexParams"][0]["indexConfig"] = {"index_type": "AUTOINDEX"}
+        if index_type == "FLAT":
+            payload["indexParams"][0]["indexConfig"] = {"index_type": "FLAT"}
+        if index_type == "IVF_FLAT":
+            payload["indexParams"][0]["indexConfig"] = {"index_type": "IVF_FLAT", "nlist": "128"}
+        if index_type == "IVF_SQ8":
+            payload["indexParams"][0]["indexConfig"] = {"index_type": "IVF_SQ8", "nlist": "128"}
+        if index_type == "IVF_PQ":
+            payload["indexParams"][0]["indexConfig"] = {"index_type": "IVF_PQ", "nlist": "128", "m": "16", "nbits": "8"}
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 200
         time.sleep(10)
