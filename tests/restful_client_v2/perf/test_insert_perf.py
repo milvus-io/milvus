@@ -26,7 +26,6 @@ class MilvusUser(HttpUser):
                               catch_response=True
                               ) as resp:
             if resp.status_code != 200 or resp.json()["code"] != 200:
-                print(resp.text)
                 resp.failure("insert failed")
 
 
