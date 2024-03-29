@@ -106,6 +106,7 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
 
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+		needUpdatedVersion: atomic.NewInt64(0),
 	}
 }
 
