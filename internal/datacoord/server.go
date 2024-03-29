@@ -272,7 +272,7 @@ func (s *Server) Register() error {
 	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.DataCoordRole).Inc()
 	log.Info("DataCoord Register Finished")
 
-	s.session.LivenessCheck(s.serverLoopCtx, func() {
+	s.session.LivenessCheck(s.ctx, func() {
 		logutil.Logger(s.ctx).Error("disconnected from etcd and exited", zap.Int64("serverID", s.session.GetServerID()))
 		os.Exit(1)
 	})
