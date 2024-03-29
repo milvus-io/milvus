@@ -363,17 +363,11 @@ func NewSegmentV2(
 	return segment, nil
 }
 
-func (s *LocalSegment) isValid() bool {
-	return !s.ptrLock.IsReleased()
-}
-
 // RLock acquires the `ptrLock` and returns true if the pointer is valid
 // Provide ONLY the read lock operations,
 // don't make `ptrLock` public to avoid abusing of the mutex.
 func (s *LocalSegment) RLock() error {
-	s.ptrLock.RLock()
-	if !s.isValid() {
-		s.ptrLock.RUnlock()
+	if !s.ptrLock.RLockIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	return nil
@@ -391,13 +385,11 @@ func (s *LocalSegment) InsertCount() int64 {
 }
 
 func (s *LocalSegment) RowNum() int64 {
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if !s.isValid() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		log.Warn("segment is not valid", zap.Int64("segmentID", s.ID()))
 		return 0
 	}
+	defer s.ptrLock.RUnlock()
 
 	rowNum := s.rowNum.Load()
 	if rowNum < 0 {
@@ -414,12 +406,10 @@ func (s *LocalSegment) RowNum() int64 {
 }
 
 func (s *LocalSegment) MemSize() int64 {
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if !s.isValid() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return 0
 	}
+	defer s.ptrLock.RUnlock()
 
 	memSize := s.memSize.Load()
 	if memSize < 0 {
@@ -457,11 +447,11 @@ func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 }
 
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-	if !s.isValid() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return false
 	}
+	defer s.ptrLock.RUnlock()
+
 	ret := C.HasRawData(s.ptr, C.int64_t(fieldID))
 	return bool(ret)
 }
@@ -490,13 +480,11 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),
 	)
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
+		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	traceCtx := ParseCTraceContext(ctx)
 
@@ -529,13 +517,11 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
+		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -626,13 +612,10 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	if s.Type() != SegmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
-
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	offset, err := s.preInsert(ctx, len(rowIDs))
 	if err != nil {
@@ -686,13 +669,10 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	if len(primaryKeys) == 0 {
 		return nil
 	}
-
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	cOffset := C.int64_t(0) // depre
 	cSize := C.int64_t(len(primaryKeys))
@@ -753,12 +733,10 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
 func (s *LocalSegment) LoadMultiFieldData(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -857,15 +835,13 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 
 	s.loadStatus.Store(string(options.LoadStatus))
 
-	s.ptrLock.RLock()
+	if !s.ptrLock.RLockIfNotReleased() {
+		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
 	defer s.ptrLock.RUnlock()
 
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadFieldData-%d-%d", s.ID(), fieldID))
 	defer sp.End()
-
-	if s.ptrLock.IsReleased() {
-		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -1021,12 +997,10 @@ func (s *LocalSegment) LoadDeltaData2(ctx context.Context, schema *schemapb.Coll
 }
 
 func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -1076,12 +1050,10 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	pks, tss := deltaData.Pks, deltaData.Tss
 	rowNum := deltaData.RowCount
 
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
@@ -1234,12 +1206,10 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", indexInfo.FieldID),
 	)
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
+	defer s.ptrLock.RUnlock()
 
 	var status C.CStatus
 	GetDynamicPool().Submit(func() (any, error) {
@@ -1273,12 +1243,10 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", fieldID),
 	)
-	s.ptrLock.RLock()
-	defer s.ptrLock.RUnlock()
-
-	if s.ptrLock.IsReleased() {
+	if !s.ptrLock.RLockIfNotReleased() {
 		return
 	}
+	defer s.ptrLock.RUnlock()
 
 	var status C.CStatus
 
@@ -1297,11 +1265,11 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 		}).Await()
 	case "async":
 		GetLoadPool().Submit(func() (any, error) {
-			s.ptrLock.RLock()
-			defer s.ptrLock.RUnlock()
-			if s.ptrLock.IsReleased() {
+			if !s.ptrLock.RLockIfNotReleased() {
 				return nil, nil
 			}
+			defer s.ptrLock.RUnlock()
+
 			cFieldID := C.int64_t(fieldID)
 			status = C.WarmupChunkCache(s.ptr, cFieldID)
 			if err := HandleCStatus(ctx, &status, ""); err != nil {
