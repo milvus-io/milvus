@@ -177,8 +177,6 @@ func (s *ImportCheckerSuite) TestCheckJob() {
 			s.Equal(true, segment.GetIsImporting())
 		}
 	}
-	sm := s.checker.sm.(*MockManager)
-	sm.EXPECT().FlushImportSegments(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, mock.Anything, mock.Anything).Return(nil)
