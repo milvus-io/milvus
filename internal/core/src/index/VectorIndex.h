@@ -123,16 +123,15 @@ class VectorIndex : public IndexBase {
         search_cfg[knowhere::meta::TOPK] = search_info.topk_;
 
         // save trace context into search conf
-        // TODO caiyd: will enable this after adding switch for trace
-        // if (search_info.trace_ctx_.traceID != nullptr &&
-        //     search_info.trace_ctx_.spanID != nullptr) {
-        //     search_cfg[knowhere::meta::TRACE_ID] =
-        //         tracer::GetTraceIDAsHex(&search_info.trace_ctx_);
-        //     search_cfg[knowhere::meta::SPAN_ID] =
-        //         tracer::GetSpanIDAsHex(&search_info.trace_ctx_);
-        //     search_cfg[knowhere::meta::TRACE_FLAGS] =
-        //         search_info.trace_ctx_.traceFlags;
-        // }
+        if (search_info.trace_ctx_.traceID != nullptr &&
+            search_info.trace_ctx_.spanID != nullptr) {
+            search_cfg[knowhere::meta::TRACE_ID] =
+                tracer::GetTraceIDAsVector(&search_info.trace_ctx_);
+            search_cfg[knowhere::meta::SPAN_ID] =
+                tracer::GetSpanIDAsVector(&search_info.trace_ctx_);
+            search_cfg[knowhere::meta::TRACE_FLAGS] =
+                search_info.trace_ctx_.traceFlags;
+        }
 
         return search_cfg;
     }
