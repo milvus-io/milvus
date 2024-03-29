@@ -6,7 +6,6 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
@@ -275,10 +274,8 @@ func (g *getStatisticsTask) getStatisticsFromQueryNode(ctx context.Context) erro
 }
 
 func (g *getStatisticsTask) getStatisticsShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	nodeReq := proto.Clone(g.GetStatisticsRequest).(*internalpb.GetStatisticsRequest)
-	nodeReq.Base.TargetID = nodeID
 	req := &querypb.GetStatisticsRequest{
-		Req:         nodeReq,
+		Req:         g.GetStatisticsRequest,
 		DmlChannels: []string{channel},
 		Scope:       querypb.DataScope_All,
 	}

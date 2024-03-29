@@ -88,9 +88,7 @@ func (w *remoteWorker) ReleaseSegments(ctx context.Context, req *querypb.Release
 }
 
 func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) error {
-	log := log.Ctx(ctx).With(
-		zap.Int64("workerID", req.GetBase().GetTargetID()),
-	)
+	log := log.Ctx(ctx)
 	status, err := w.client.Delete(ctx, req)
 	if err := merr.CheckRPCCall(status, err); err != nil {
 		if errors.Is(err, merr.ErrServiceUnimplemented) {

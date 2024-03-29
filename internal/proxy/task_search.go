@@ -490,10 +490,8 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 }
 
 func (t *searchTask) searchShard(ctx context.Context, nodeID int64, qn types.QueryNodeClient, channel string) error {
-	searchReq := typeutil.Clone(t.SearchRequest)
-	searchReq.GetBase().TargetID = nodeID
 	req := &querypb.SearchRequest{
-		Req:             searchReq,
+		Req:             t.SearchRequest,
 		DmlChannels:     []string{channel},
 		Scope:           querypb.DataScope_All,
 		TotalChannelNum: int32(1),

@@ -115,9 +115,7 @@ func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 	// load empty
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
 	req := &querypb.LoadSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			TargetID: suite.node.session.GetServerID(),
-		},
+		Base:         &commonpb.MsgBase{},
 		CollectionID: suite.collectionID,
 		Infos: lo.Map(suite.segmentIDs, func(segID int64, _ int) *querypb.SegmentLoadInfo {
 			return &querypb.SegmentLoadInfo{
@@ -135,9 +133,7 @@ func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 
 func (suite *LocalWorkerTestSuite) TestReleaseSegment() {
 	req := &querypb.ReleaseSegmentsRequest{
-		Base: &commonpb.MsgBase{
-			TargetID: suite.node.session.GetServerID(),
-		},
+		Base:         &commonpb.MsgBase{},
 		CollectionID: suite.collectionID,
 		SegmentIDs:   suite.segmentIDs,
 	}

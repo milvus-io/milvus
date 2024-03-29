@@ -971,7 +971,6 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 		Scope:        querypb.DataScope_All,
 		NeedTransfer: true,
 	}
-	req.Base.TargetID = 1
 	err = s.delegator.ReleaseSegments(ctx, req, false)
 	s.NoError(err)
 }
