@@ -678,10 +678,6 @@ struct ElementWiseBitsetPolicy {
            const size_t start_left,
            const size_t start_right,
            const size_t size) {
-        if (size == 0) {
-            return;
-        }
-
         op_func(left,
                 right,
                 start_left,
@@ -775,10 +771,9 @@ struct ElementWiseBitsetPolicy {
                       const T* const __restrict t,
                       const U* const __restrict u,
                       const size_type size) {
-        for (size_type i = 0; i < size; i++) {
-            get_proxy(data, start + i) =
-                CompareOperator<Op>::compare(t[i], u[i]);
-        }
+        op_func(data, start, size, [t, u](const size_type bit_idx) {
+            return CompareOperator<Op>::compare(t[bit_idx], u[bit_idx]);
+        });
     }
 
     //
@@ -789,10 +784,9 @@ struct ElementWiseBitsetPolicy {
                    const T* const __restrict t,
                    const size_type size,
                    const T& value) {
-        for (size_type i = 0; i < size; i++) {
-            get_proxy(data, start + i) =
-                CompareOperator<Op>::compare(t[i], value);
-        }
+        op_func(data, start, size, [t, value](const size_type bit_idx) {
+            return CompareOperator<Op>::compare(t[bit_idx], value);
+        });
     }
 
     //
@@ -804,10 +798,11 @@ struct ElementWiseBitsetPolicy {
                            const T* const __restrict upper,
                            const T* const __restrict values,
                            const size_type size) {
-        for (size_type i = 0; i < size; i++) {
-            get_proxy(data, start + i) =
-                RangeOperator<Op>::within_range(lower[i], upper[i], values[i]);
-        }
+        op_func(
+            data, start, size, [lower, upper, values](const size_type bit_idx) {
+                return RangeOperator<Op>::within_range(
+                    lower[bit_idx], upper[bit_idx], values[bit_idx]);
+            });
     }
 
     //
@@ -819,10 +814,11 @@ struct ElementWiseBitsetPolicy {
                         const T& upper,
                         const T* const __restrict values,
                         const size_type size) {
-        for (size_type i = 0; i < size; i++) {
-            get_proxy(data, start + i) =
-                RangeOperator<Op>::within_range(lower, upper, values[i]);
-        }
+        op_func(
+            data, start, size, [lower, upper, values](const size_type bit_idx) {
+                return RangeOperator<Op>::within_range(
+                    lower, upper, values[bit_idx]);
+            });
     }
 
     //
@@ -834,11 +830,13 @@ struct ElementWiseBitsetPolicy {
                      const ArithHighPrecisionType<T>& right_operand,
                      const ArithHighPrecisionType<T>& value,
                      const size_type size) {
-        for (size_type i = 0; i < size; i++) {
-            get_proxy(data, start + i) =
-                ArithCompareOperator<AOp, CmpOp>::compare(
-                    src[i], right_operand, value);
-        }
+        op_func(data,
+                start,
+                size,
+                [src, right_operand, value](const size_type bit_idx) {
+                    return ArithCompareOperator<AOp, CmpOp>::compare(
+                        src[bit_idx], right_operand, value);
+                });
     }
 
     //
@@ -970,6 +968,85 @@ struct ElementWiseBitsetPolicy {
 
             const data_type result_v = func(left_v, right_v);
             op_write(left, start_left + size_b, size - size_b, result_v);
+        }
+    }
+
+    // bool Func(const size_type bit_idx);
+    template <typename Func>
+    static inline void
+    op_func(data_type* const __restrict data,
+            const size_type start,
+            const size_t size,
+            Func func) {
+        if (size == 0) {
+            return;
+        }
+
+        auto start_element = get_element(start);
+        const auto end_element = get_element(start + size);
+
+        const auto start_shift = get_shift(start);
+        const auto end_shift = get_shift(start + size);
+
+        if (start_element == end_element) {
+            data_type bits = 0;
+            for (size_type j = 0; j < size; j++) {
+                const bool bit = func(j);
+                // // a curious example where the compiler does not optimize the code properly
+                // bits |= (bit ? (data_type(1) << j) : 0);
+                //
+                // use the following code
+                bits |= (data_type(bit ? 1 : 0) << j);
+            }
+
+            op_write(data, start, size, bits);
+            return;
+        }
+
+        //
+        uintptr_t ptr_offset = 0;
+
+        // process the first element
+        if (start_shift != 0) {
+            const size_type n_bits = data_bits - start_shift;
+
+            data_type bits = 0;
+            for (size_type j = 0; j < n_bits; j++) {
+                const bool bit = func(j);
+                bits |= (data_type(bit ? 1 : 0) << j);
+            }
+
+            op_write(data, start, n_bits, bits);
+
+            // start from the next element
+            start_element += 1;
+            ptr_offset += n_bits;
+        }
+
+        // process the middle
+        {
+            for (size_type i = start_element; i < end_element; i++) {
+                data_type bits = 0;
+                for (size_type j = 0; j < data_bits; j++) {
+                    const bool bit = func(ptr_offset + j);
+                    bits |= (data_type(bit ? 1 : 0) << j);
+                }
+
+                data[i] = bits;
+                ptr_offset += data_bits;
+            }
+        }
+
+        // process the last element
+        if (end_shift != 0) {
+            data_type bits = 0;
+            for (size_type j = 0; j < end_shift; j++) {
+                const bool bit = func(ptr_offset + j);
+                bits |= (data_type(bit ? 1 : 0) << j);
+            }
+
+            const size_t starting_bit_idx = end_element * data_bits;
+            op_write(data, starting_bit_idx, end_shift, bits);
         }
     }
 };
