@@ -338,19 +338,19 @@ func TestImportUtil_ListBinlogsAndGroupBySegment(t *testing.T) {
 
 		cm := mocks2.NewChunkManager(t)
 		cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string, b bool, f func(*storage.ChunkObjectInfo) error) error {
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
 				for _, p := range segmentInsertPaths {
-					if err := f(&storage.ChunkObjectInfo{FilePath: p}); err != nil {
-						return err
+					if !cowf(&storage.ChunkObjectInfo{FilePath: p}) {
+						return nil
 					}
 				}
 				return nil
 			})
 		cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string, b bool, f func(*storage.ChunkObjectInfo) error) error {
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
 				for _, p := range segmentDeltaPaths {
-					if err := f(&storage.ChunkObjectInfo{FilePath: p}); err != nil {
-						return err
+					if !cowf(&storage.ChunkObjectInfo{FilePath: p}) {
+						return nil
 					}
 				}
 				return nil

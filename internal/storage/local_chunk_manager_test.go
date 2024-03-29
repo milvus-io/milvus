@@ -612,14 +612,14 @@ func TestLocalCM(t *testing.T) {
 func readAllChunkWithPrefix(ctx context.Context, manager ChunkManager, prefix string) ([]string, [][]byte, error) {
 	var paths []string
 	var contents [][]byte
-	if err := manager.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) error {
+	if err := manager.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) bool {
 		paths = append(paths, object.FilePath)
 		content, err := manager.Read(ctx, object.FilePath)
 		if err != nil {
-			return err
+			return false
 		}
 		contents = append(contents, content)
-		return nil
+		return true
 	}); err != nil {
 		return nil, nil, err
 	}

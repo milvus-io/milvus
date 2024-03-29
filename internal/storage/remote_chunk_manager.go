@@ -45,13 +45,20 @@ const (
 	CloudProviderTencent = "tencent"
 )
 
+// ChunkObjectWalkFunc is the callback function for walking objects.
+// If return false, WalkWithObjects will stop.
+// Otherwise, WalkWithObjects will continue until reach the last object.
+type ChunkObjectWalkFunc func(chunkObjectInfo *ChunkObjectInfo) bool
+
 type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
 	StatObject(ctx context.Context, bucketName, objectName string) (int64, error)
-	// WalkWithPrefix walks all objects with prefix @prefix, and call cb for each object.
-	// If cb return error, underlying walking failed or context canceled, WalkWithObjects will stop and return that error.
-	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, cb func(chunkObjectInfo *ChunkObjectInfo) error) error
+	// WalkWithPrefix walks all objects with prefix @prefix, and call walker for each object.
+	// WalkWithPrefix will stop if following conditions met:
+	// 1. cb return false or reach the last object, WalkWithPrefix will stop and return nil.
+	// 2. underlying walking failed or context canceled, WalkWithPrefix will stop and return a error.
+	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
 }
 
@@ -284,7 +291,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 	// removeObject in parallel.
 	runningGroup, groupCtx := errgroup.WithContext(ctx)
 	runningGroup.SetLimit(10)
-	err := mcm.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) error {
+	err := mcm.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) bool {
 		key := object.FilePath
 		runningGroup.Go(func() error {
 			err := mcm.removeObject(groupCtx, mcm.bucketName, key)
@@ -293,7 +300,7 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 			}
 			return err
 		})
-		return nil
+		return true
 	})
 	// wait all goroutines done.
 	if err := runningGroup.Wait(); err != nil {
@@ -303,17 +310,17 @@ func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix stri
 	return err
 }
 
-func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(*ChunkObjectInfo) error) (err error) {
-	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.TotalLabel).Inc()
+func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
 	logger := log.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
 
 	logger.Info("start list objects")
-	if err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, recursive, cb); err != nil {
-		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.FailLabel).Inc()
+	if err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, recursive, walkFunc); err != nil {
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.FailLabel).Inc()
 		logger.Warn("failed to list objects", zap.Error(err))
 		return err
 	}
-	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.SuccessLabel).Inc()
 	logger.Info("start list objects", zap.Error(err))
 	return nil
 }

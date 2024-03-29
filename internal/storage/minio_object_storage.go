@@ -194,7 +194,11 @@ func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bu
 	return info.Size, checkObjectStorageError(objectName, err)
 }
 
-func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, cb func(*ChunkObjectInfo) error) (err error) {
+func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
+	// if minio has lots of objects under the provided path
+	// recursive = true may timeout during the recursive browsing the objects.
+	// See also: https://github.com/milvus-io/milvus/issues/19095
+	// So we can change the `ListObjectsMaxKeys` to limit the max keys by batch to avoid timeout.
 	in := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
 		Prefix:    prefix,
 		Recursive: recursive,
@@ -205,8 +209,8 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 		if object.Err != nil {
 			return object.Err
 		}
-		if err := cb(&ChunkObjectInfo{FilePath: object.Key, ModifyTime: object.LastModified}); err != nil {
-			return err
+		if !walkFunc(&ChunkObjectInfo{FilePath: object.Key, ModifyTime: object.LastModified}) {
+			return nil
 		}
 	}
 	return nil

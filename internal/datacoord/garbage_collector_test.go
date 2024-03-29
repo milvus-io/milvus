@@ -730,9 +730,9 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string, b bool, cb func(*storage.ChunkObjectInfo) error) error {
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
 				for _, file := range []string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"} {
-					cb(&storage.ChunkObjectInfo{FilePath: file})
+					cowf(&storage.ChunkObjectInfo{FilePath: file})
 				}
 				return nil
 			})
@@ -753,7 +753,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string, b bool, cb func(*storage.ChunkObjectInfo) error) error {
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
 				return errors.New("error")
 			})
 		gc := newGarbageCollector(
@@ -770,9 +770,9 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string, b bool, cb func(*storage.ChunkObjectInfo) error) error {
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
 				for _, file := range []string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"} {
-					cb(&storage.ChunkObjectInfo{FilePath: file})
+					cowf(&storage.ChunkObjectInfo{FilePath: file})
 				}
 				return nil
 			})
@@ -791,9 +791,9 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
 		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
-			func(ctx context.Context, s string, b bool, cb func(*storage.ChunkObjectInfo) error) error {
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
 				for _, file := range []string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"} {
-					cb(&storage.ChunkObjectInfo{FilePath: file})
+					cowf(&storage.ChunkObjectInfo{FilePath: file})
 				}
 				return nil
 			})

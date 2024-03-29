@@ -232,10 +232,10 @@ func TestMinioObjectStorage(t *testing.T) {
 func listAllObjectsWithPrefixAtBucket(ctx context.Context, objectStorage ObjectStorage, bucket string, prefix string, recursive bool) ([]string, []time.Time, error) {
 	var dirs []string
 	var mods []time.Time
-	if err := objectStorage.WalkWithObjects(ctx, bucket, prefix, recursive, func(chunkObjectInfo *ChunkObjectInfo) error {
+	if err := objectStorage.WalkWithObjects(ctx, bucket, prefix, recursive, func(chunkObjectInfo *ChunkObjectInfo) bool {
 		dirs = append(dirs, chunkObjectInfo.FilePath)
 		mods = append(mods, chunkObjectInfo.ModifyTime)
-		return nil
+		return true
 	}); err != nil {
 		return nil, nil, err
 	}

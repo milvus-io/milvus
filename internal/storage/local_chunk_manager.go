@@ -133,7 +133,7 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 	return results, el
 }
 
-func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(chunkInfo *ChunkObjectInfo) error) (err error) {
+func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
 	logger := log.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
 	defer logger.Info("finish list objects", zap.Error(err))
 	logger.Info("start list objects")
@@ -146,8 +146,8 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 				if err != nil {
 					return err
 				}
-				if err := cb(&ChunkObjectInfo{FilePath: filePath, ModifyTime: modTime}); err != nil {
-					return err
+				if !walkFunc(&ChunkObjectInfo{FilePath: filePath, ModifyTime: modTime}) {
+					return nil
 				}
 			}
 			return nil
@@ -163,8 +163,8 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 		if err != nil {
 			return err
 		}
-		if err := cb(&ChunkObjectInfo{FilePath: filePath, ModifyTime: modTime}); err != nil {
-			return err
+		if !walkFunc(&ChunkObjectInfo{FilePath: filePath, ModifyTime: modTime}) {
+			return nil
 		}
 	}
 	return nil
@@ -234,9 +234,17 @@ func (lcm *LocalChunkManager) RemoveWithPrefix(ctx context.Context, prefix strin
 		log.Warn(errMsg)
 		return merr.WrapErrParameterInvalidMsg(errMsg)
 	}
-	return lcm.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *ChunkObjectInfo) error {
-		return lcm.MultiRemove(ctx, []string{chunkInfo.FilePath})
-	})
+	var removeErr error
+	if err := lcm.WalkWithPrefix(ctx, prefix, true, func(chunkInfo *ChunkObjectInfo) bool {
+		err := lcm.MultiRemove(ctx, []string{chunkInfo.FilePath})
+		if err != nil {
+			removeErr = err
+		}
+		return true
+	}); err != nil {
+		return err
+	}
+	return removeErr
 }
 
 func (lcm *LocalChunkManager) getModTime(filepath string) (time.Time, error) {

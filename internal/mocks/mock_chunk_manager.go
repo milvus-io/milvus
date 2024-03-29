@@ -674,13 +674,13 @@ func (_c *ChunkManager_Size_Call) RunAndReturn(run func(context.Context, string)
 	return _c
 }
 
-// WalkWithPrefix provides a mock function with given fields: ctx, prefix, recursive, cb
-func (_m *ChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(*storage.ChunkObjectInfo) error) error {
-	ret := _m.Called(ctx, prefix, recursive, cb)
+// WalkWithPrefix provides a mock function with given fields: ctx, prefix, recursive, walkFunc
+func (_m *ChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
+	ret := _m.Called(ctx, prefix, recursive, walkFunc)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, bool, func(*storage.ChunkObjectInfo) error) error); ok {
-		r0 = rf(ctx, prefix, recursive, cb)
+	if rf, ok := ret.Get(0).(func(context.Context, string, bool, storage.ChunkObjectWalkFunc) error); ok {
+		r0 = rf(ctx, prefix, recursive, walkFunc)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -697,14 +697,14 @@ type ChunkManager_WalkWithPrefix_Call struct {
 //   - ctx context.Context
 //   - prefix string
 //   - recursive bool
-//   - cb func(*storage.ChunkObjectInfo) error
-func (_e *ChunkManager_Expecter) WalkWithPrefix(ctx interface{}, prefix interface{}, recursive interface{}, cb interface{}) *ChunkManager_WalkWithPrefix_Call {
-	return &ChunkManager_WalkWithPrefix_Call{Call: _e.mock.On("WalkWithPrefix", ctx, prefix, recursive, cb)}
+//   - walkFunc storage.ChunkObjectWalkFunc
+func (_e *ChunkManager_Expecter) WalkWithPrefix(ctx interface{}, prefix interface{}, recursive interface{}, walkFunc interface{}) *ChunkManager_WalkWithPrefix_Call {
+	return &ChunkManager_WalkWithPrefix_Call{Call: _e.mock.On("WalkWithPrefix", ctx, prefix, recursive, walkFunc)}
 }
 
-func (_c *ChunkManager_WalkWithPrefix_Call) Run(run func(ctx context.Context, prefix string, recursive bool, cb func(*storage.ChunkObjectInfo) error)) *ChunkManager_WalkWithPrefix_Call {
+func (_c *ChunkManager_WalkWithPrefix_Call) Run(run func(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc)) *ChunkManager_WalkWithPrefix_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(bool), args[3].(func(*storage.ChunkObjectInfo) error))
+		run(args[0].(context.Context), args[1].(string), args[2].(bool), args[3].(storage.ChunkObjectWalkFunc))
 	})
 	return _c
 }
@@ -714,7 +714,7 @@ func (_c *ChunkManager_WalkWithPrefix_Call) Return(_a0 error) *ChunkManager_Walk
 	return _c
 }
 
-func (_c *ChunkManager_WalkWithPrefix_Call) RunAndReturn(run func(context.Context, string, bool, func(*storage.ChunkObjectInfo) error) error) *ChunkManager_WalkWithPrefix_Call {
+func (_c *ChunkManager_WalkWithPrefix_Call) RunAndReturn(run func(context.Context, string, bool, storage.ChunkObjectWalkFunc) error) *ChunkManager_WalkWithPrefix_Call {
 	_c.Call.Return(run)
 	return _c
 }

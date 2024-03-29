@@ -197,7 +197,7 @@ func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bu
 	return *info.ContentLength, nil
 }
 
-func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, cb func(*ChunkObjectInfo) error) error {
+func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error {
 	if recursive {
 		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
 			Prefix: &prefix,
@@ -208,8 +208,8 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 				return err
 			}
 			for _, blob := range pageResp.Segment.BlobItems {
-				if err := cb(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}); err != nil {
-					return err
+				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}) {
+					return nil
 				}
 			}
 		}
@@ -224,13 +224,13 @@ func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Contex
 			}
 
 			for _, blob := range pageResp.Segment.BlobItems {
-				if err := cb(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}); err != nil {
-					return err
+				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}) {
+					return nil
 				}
 			}
 			for _, blob := range pageResp.Segment.BlobPrefixes {
-				if err := cb(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: time.Now()}); err != nil {
-					return err
+				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: time.Now()}) {
+					return nil
 				}
 			}
 		}

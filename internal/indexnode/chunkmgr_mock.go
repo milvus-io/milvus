@@ -136,7 +136,7 @@ func (c *mockChunkmgr) MultiRead(ctx context.Context, filePaths []string) ([][]b
 	return nil, errNotImplErr
 }
 
-func (c *mockChunkmgr) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, cb func(*storage.ChunkObjectInfo) error) error {
+func (c *mockChunkmgr) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc storage.ChunkObjectWalkFunc) error {
 	return errNotImplErr
 }
 
