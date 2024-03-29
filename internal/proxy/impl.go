@@ -2638,10 +2638,10 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
 		}
-		return false, err
+		return false, nil
 	})
 	if err2 != nil {
-		err = err2
+		rsp.Status = merr.Status(err2)
 	}
 	return rsp, err
 }
@@ -2832,10 +2832,10 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		if errors.Is(merr.Error(rsp.GetStatus()), merr.ErrInconsistentRequery) {
 			return true, merr.Error(rsp.GetStatus())
 		}
-		return false, err
+		return false, nil
 	})
 	if err2 != nil {
-		err = err2
+		rsp.Status = merr.Status(err2)
 	}
 	return rsp, err
 }
