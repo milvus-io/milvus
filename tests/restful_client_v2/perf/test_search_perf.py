@@ -14,6 +14,7 @@ class MilvusUser(HttpUser):
                                     "annsField": "text_emb",
                                     "data": [self.vectors_to_search[random_id]],
                                     "outputFields": ["*"],
+                                    "limit": 100
                                     },
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
                               catch_response=True

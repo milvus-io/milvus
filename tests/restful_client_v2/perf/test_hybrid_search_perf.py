@@ -32,7 +32,7 @@ class MilvusUser(HttpUser):
                                             "k": 10,
                                         }
                                     },
-                                    "limit": 10,
+                                    "limit": 100,
                                     "outputFields": ["*"]
                                     },
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
