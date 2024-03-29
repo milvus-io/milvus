@@ -278,10 +278,11 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 	node.handleWatchInfo(e, string(evt.Kv.Key), evt.Kv.Value)
 }
 
-// tryToReleaseFlowgraph tries to release a flowgraph
-func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
-	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
-	node.flowgraphManager.release(vChanName)
+// tryToReleaseFlowgraph tries to release a flowgraph and tidy channel related meta
+func (node *DataNode) tryToReleaseFlowgraph(channel string) {
+	log.Info("try to release flowgraph", zap.String("channel", channel))
+	node.compactionExecutor.discardPlan(channel)
+	node.flowgraphManager.release(channel)
 }
 
 // BackGroundGC runs in background to release datanode resources

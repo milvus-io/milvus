@@ -18,9 +18,11 @@ package datanode
 
 import (
 	"context"
+	"sync"
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -36,6 +38,10 @@ type compactionExecutor struct {
 	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionResult] // planID to CompactionResult
 	taskCh             chan compactor
 	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
+
+	// To prevent concurrency of release channel and compaction get results
+	// all released channel's compaction tasks will be discarded
+	resultGuard sync.RWMutex
 }
 
 func newCompactionExecutor() *compactionExecutor {
@@ -120,22 +126,71 @@ func (c *compactionExecutor) channelValidateForCompaction(vChannelName string) b
 	return !c.dropped.Contain(vChannelName)
 }
 
-func (c *compactionExecutor) stopExecutingtaskByVChannelName(vChannelName string) {
-	c.dropped.Insert(vChannelName)
+func (c *compactionExecutor) discardByDroppedChannel(channel string) {
+	c.dropped.Insert(channel)
+	c.discardPlan(channel)
+}
+
+func (c *compactionExecutor) discardPlan(channel string) {
+	c.resultGuard.Lock()
+	defer c.resultGuard.Unlock()
+
 	c.executing.Range(func(planID int64, task compactor) bool {
-		if task.getChannelName() == vChannelName {
+		if task.getChannelName() == channel {
 			c.stopTask(planID)
 		}
 		return true
 	})
-	// remove all completed plans for vChannelName
+
+	// remove all completed plans for channel
 	c.completed.Range(func(planID int64, result *datapb.CompactionResult) bool {
-		if result.GetChannel() == vChannelName {
+		if result.GetChannel() == channel {
 			c.injectDone(planID, true)
-			log.Info("remove compaction results for dropped channel",
-				zap.String("channel", vChannelName),
+			log.Info("remove compaction plan",
+				zap.String("channel", channel),
 				zap.Int64("planID", planID))
 		}
 		return true
 	})
+}
+
+func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionStateResult {
+	c.resultGuard.RLock()
+	defer c.resultGuard.RUnlock()
+
+	var (
+		executing []int64
+		completed []int64
+	)
+	results := make([]*datapb.CompactionStateResult, 0)
+	// get executing results
+	c.executing.Range(func(planID int64, task compactor) bool {
+		executing = append(executing, planID)
+		results = append(results, &datapb.CompactionStateResult{
+			State:  commonpb.CompactionState_Executing,
+			PlanID: planID,
+		})
+		return true
+	})
+
+	// get completed results
+	c.completed.Range(func(planID int64, result *datapb.CompactionResult) bool {
+		completed = append(completed, planID)
+		results = append(results, &datapb.CompactionStateResult{
+			State:  commonpb.CompactionState_Completed,
+			PlanID: planID,
+			Result: result,
+		})
+
+		return true
+	})
+
+	if len(results) > 0 {
+		log.Info("DataNode Compaction results",
+			zap.Int64s("executing", executing),
+			zap.Int64s("completed", completed),
+		)
+	}
+
+	return results
 }
