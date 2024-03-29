@@ -11896,9 +11896,9 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
         # 4. hybrid search 
-        res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)
-        is_sorted_decrease = lambda lst: all(lst[i]['distance'] >= lst[i+1]['distance'] for i in range(len(lst)-1))
-        assert is_sorted_decrease(res[0])
+        res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)[0]
+        is_sorted_ascend = lambda lst: all(lst[i] <= lst[i+1] for i in range(len(lst)-1))
+        assert is_sorted_ascend(res[0].distances)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_result_order(self):
@@ -11927,6 +11927,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
         # 4. hybrid search 
-        res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)
-        is_sorted_ascend = lambda lst: all(lst[i]['distance'] <= lst[i+1]['distance'] for i in range(len(lst)-1))
-        assert is_sorted_ascend(res[0])
+        res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)[0]
+        is_sorted_descend = lambda lst: all(lst[i] >= lst[i+1] for i in range(len(lst)-1))
+        assert is_sorted_descend(res[0].distances)
