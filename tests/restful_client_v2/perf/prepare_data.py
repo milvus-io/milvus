@@ -2,7 +2,7 @@ import random
 from pymilvus import (
     connections, list_collections,
     FieldSchema, CollectionSchema, DataType,
-    Collection, RemoteBulkWriter, BulkInsertState, utility
+    Collection, RemoteBulkWriter, BulkInsertState, BulkFileType, utility
 )
 import time
 import argparse
@@ -36,6 +36,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
     logger.info(f"collection {collection_name} created")
     with RemoteBulkWriter(
         schema=schema,
+        file_type=BulkFileType.NUMPY,
         remote_path="bulk_data",
         connect_param=RemoteBulkWriter.S3ConnectParam(
             endpoint=f"{minio_host}:9000",
