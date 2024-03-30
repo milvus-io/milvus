@@ -114,14 +114,6 @@ var simpleBinVecField = vecFieldParam{
 	fieldName:  "binVectorField",
 }
 
-var simpleFloat16VecField = vecFieldParam{
-	id:         112,
-	dim:        defaultDim,
-	metricType: defaultMetricType,
-	vecType:    schemapb.DataType_Float16Vector,
-	fieldName:  "float16VectorField",
-}
-
 var simpleBoolField = constFieldParam{
 	id:        102,
 	dataType:  schemapb.DataType_Bool,
@@ -448,16 +440,6 @@ func generateBinaryVectors(numRows, dim int) []byte {
 	return ret
 }
 
-func generateFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
 func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID int64, numRows int) *schemapb.FieldData {
 	ret := &schemapb.FieldData{
 		Type:      dType,
@@ -612,16 +594,6 @@ func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID i
 					FloatVector: &schemapb.FloatArray{
 						Data: generateFloatVectors(numRows, dim),
 					},
-				},
-			},
-		}
-	case schemapb.DataType_Float16Vector:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_Float16Vector{
-					Float16Vector: generateFloat16Vectors(numRows, dim),
 				},
 			},
 		}
@@ -798,12 +770,6 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 			dim := simpleFloatVecField.dim // if no dim specified, use simpleFloatVecField's dim
 			insertData.Data[f.FieldID] = &storage.FloatVectorFieldData{
 				Data: generateFloatVectors(msgLength, dim),
-				Dim:  dim,
-			}
-		case schemapb.DataType_Float16Vector:
-			dim := simpleFloat16VecField.dim
-			insertData.Data[f.FieldID] = &storage.Float16VectorFieldData{
-				Data: generateFloat16Vectors(msgLength, dim),
 				Dim:  dim,
 			}
 		case schemapb.DataType_BinaryVector:
@@ -1083,7 +1049,7 @@ func genBruteForceDSL(schema *schemapb.CollectionSchema, topK int64, roundDecima
 	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
 	var fieldID int64
 	for _, f := range schema.Fields {
-		if f.DataType == schemapb.DataType_FloatVector || f.DataType == schemapb.DataType_Float16Vector {
+		if f.DataType == schemapb.DataType_FloatVector {
 			vecFieldName = f.Name
 			fieldID = f.FieldID
 			for _, p := range f.IndexParams {
@@ -1234,9 +1200,6 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_BinaryVector:
 			dim := simpleBinVecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
-		case schemapb.DataType_Float16Vector:
-			dim := simpleFloat16VecField.dim // if no dim specified, use simpleFloatVecField's dim
 			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
 		default:
 			err := errors.New("data type not supported")
@@ -1467,20 +1430,6 @@ func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, 
 						FloatVector: &schemapb.FloatArray{
 							Data: fieldValue.([]float32),
 						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_Float16Vector:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Float16Vector,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: dim,
-					Data: &schemapb.VectorField_Float16Vector{
-						Float16Vector: fieldValue.([]byte),
 					},
 				},
 			},

@@ -121,13 +121,6 @@ func TestDataSorter(t *testing.T) {
 					Description:  "description_11",
 					DataType:     schemapb.DataType_FloatVector,
 				},
-				{
-					FieldID:      110,
-					Name:         "field_float16_vector",
-					IsPrimaryKey: false,
-					Description:  "description_12",
-					DataType:     schemapb.DataType_Float16Vector,
-				},
 			},
 		},
 	}
@@ -172,10 +165,6 @@ func TestDataSorter(t *testing.T) {
 			109: &FloatVectorFieldData{
 				Data: []float32{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23},
 				Dim:  8,
-			},
-			110: &Float16VectorFieldData{
-				Data: []byte{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23},
-				Dim:  4,
 			},
 		},
 	}
@@ -238,7 +227,6 @@ func TestDataSorter(t *testing.T) {
 	assert.Equal(t, []string{"5", "3", "4"}, dataSorter.InsertData.Data[107].(*StringFieldData).Data)
 	assert.Equal(t, []byte{128, 0, 255}, dataSorter.InsertData.Data[108].(*BinaryVectorFieldData).Data)
 	assert.Equal(t, []float32{16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, dataSorter.InsertData.Data[109].(*FloatVectorFieldData).Data)
-	assert.Equal(t, []byte{16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15}, dataSorter.InsertData.Data[110].(*Float16VectorFieldData).Data)
 }
 
 func TestDataSorter_Len(t *testing.T) {

@@ -146,7 +146,7 @@ func CheckCtxValid(ctx context.Context) bool {
 func GetVecFieldIDs(schema *schemapb.CollectionSchema) []int64 {
 	var vecFieldIDs []int64
 	for _, field := range schema.Fields {
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector || field.DataType == schemapb.DataType_Float16Vector {
+		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector {
 			vecFieldIDs = append(vecFieldIDs, field.FieldID)
 		}
 	}
@@ -260,17 +260,6 @@ func GetNumRowsOfBinaryVectorField(bDatas []byte, dim int64) (uint64, error) {
 	return uint64((8 * int64(l)) / dim), nil
 }
 
-func GetNumRowsOfFloat16VectorField(f16Datas []byte, dim int64) (uint64, error) {
-	if dim <= 0 {
-		return 0, fmt.Errorf("dim(%d) should be greater than 0", dim)
-	}
-	l := len(f16Datas)
-	if int64(l)%dim != 0 {
-		return 0, fmt.Errorf("the length(%d) of float data should divide the dim(%d)", l, dim)
-	}
-	return uint64((int64(l)) / dim / 2), nil
-}
-
 func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 	var fieldNumRows uint64
 	var err error
@@ -309,12 +298,6 @@ func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 		case *schemapb.VectorField_BinaryVector:
 			dim := vectorField.GetDim()
 			fieldNumRows, err = GetNumRowsOfBinaryVectorField(vectorField.GetBinaryVector(), dim)
-			if err != nil {
-				return 0, err
-			}
-		case *schemapb.VectorField_Float16Vector:
-			dim := vectorField.GetDim()
-			fieldNumRows, err = GetNumRowsOfFloat16VectorField(vectorField.GetFloat16Vector(), dim)
 			if err != nil {
 				return 0, err
 			}

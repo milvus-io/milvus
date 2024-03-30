@@ -97,30 +97,6 @@ ShowPlanNodeVisitor::visit(BinaryVectorANNS& node) {
 }
 
 void
-ShowPlanNodeVisitor::visit(Float16VectorANNS& node) {
-    assert(!ret_);
-    auto& info = node.search_info_;
-    Json json_body{
-        {"node_type", "Float16VectorANNS"},          //
-        {"metric_type", info.metric_type_},          //
-        {"field_id_", info.field_id_.get()},         //
-        {"topk", info.topk_},                        //
-        {"search_params", info.search_params_},      //
-        {"placeholder_tag", node.placeholder_tag_},  //
-    };
-    if (node.predicate_.has_value()) {
-        ShowExprVisitor expr_show;
-        AssertInfo(node.predicate_.value(),
-                   "[ShowPlanNodeVisitor]Can't get value from node predict");
-        json_body["predicate"] =
-            expr_show.call_child(node.predicate_->operator*());
-    } else {
-        json_body["predicate"] = "None";
-    }
-    ret_ = json_body;
-}
-
-void
 ShowPlanNodeVisitor::visit(RetrievePlanNode& node) {
 }
 

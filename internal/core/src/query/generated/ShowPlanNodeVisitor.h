@@ -29,9 +29,6 @@ class ShowPlanNodeVisitor : public PlanNodeVisitor {
     visit(BinaryVectorANNS& node) override;
 
     void
-    visit(Float16VectorANNS& node) override;
-
-    void
     visit(RetrievePlanNode& node) override;
 
  public:

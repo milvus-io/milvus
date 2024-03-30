@@ -152,12 +152,6 @@ func (w *NativePayloadWriter) AddDataToPayload(data interface{}, dim ...int) err
 				return errors.New("incorrect data type")
 			}
 			return w.AddFloatVectorToPayload(val, dim[0])
-		case schemapb.DataType_Float16Vector:
-			val, ok := data.([]byte)
-			if !ok {
-				return errors.New("incorrect data type")
-			}
-			return w.AddFloat16VectorToPayload(val, dim[0])
 		default:
 			return errors.New("incorrect datatype")
 		}
@@ -419,31 +413,6 @@ func (w *NativePayloadWriter) AddFloatVectorToPayload(data []float32, dim int) e
 	return nil
 }
 
-func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int) error {
-	if w.finished {
-		return errors.New("can't append data to finished writer")
-	}
-
-	if len(data) == 0 {
-		return errors.New("can't add empty msgs into payload")
-	}
-
-	builder, ok := w.builder.(*array.FixedSizeBinaryBuilder)
-	if !ok {
-		return errors.New("failed to cast ArrayBuilder")
-	}
-
-	byteLength := dim * 2
-	length := len(data) / byteLength
-
-	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data[i*byteLength : (i+1)*byteLength])
-	}
-
-	return nil
-}
-
 func (w *NativePayloadWriter) FinishPayloadWriter() error {
 	if w.finished {
 		return errors.New("can't reuse a finished writer")
@@ -534,10 +503,6 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, dim int) arrow.DataTy
 	case schemapb.DataType_BinaryVector:
 		return &arrow.FixedSizeBinaryType{
 			ByteWidth: dim / 8,
-		}
-	case schemapb.DataType_Float16Vector:
-		return &arrow.FixedSizeBinaryType{
-			ByteWidth: dim * 2,
 		}
 	default:
 		panic("unsupported data type")

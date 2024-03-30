@@ -260,13 +260,6 @@ func milvusDataTypeToArrowType(dataType schemapb.DataType, isBinary bool) arrow.
 			Nullable: true,
 			Metadata: arrow.Metadata{},
 		})
-	case schemapb.DataType_Float16Vector:
-		return arrow.ListOfField(arrow.Field{
-			Name:     "item",
-			Type:     &arrow.Float16Type{},
-			Nullable: true,
-			Metadata: arrow.Metadata{},
-		})
 	default:
 		panic("unsupported data type")
 	}
@@ -1059,9 +1052,6 @@ func Test_convertArrowSchemaToDataType(t *testing.T) {
 		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Uint8Type{}})}, schemapb.DataType_BinaryVector, true},
 		{arrow.Field{Type: &arrow.Uint8Type{}}, schemapb.DataType_None, false},
 
-		{arrow.Field{Type: &arrow.Float16Type{}}, schemapb.DataType_None, false},
-		{arrow.Field{Type: arrow.ListOfField(arrow.Field{Type: &arrow.Float16Type{}})}, schemapb.DataType_Float16Vector, true},
-
 		{arrow.Field{Type: &arrow.DayTimeIntervalType{}}, schemapb.DataType_None, false},
 	}
 
@@ -1161,8 +1151,6 @@ func Test_isConvertible(t *testing.T) {
 		{schemapb.DataType_VarChar, schemapb.DataType_Float, false, false},
 		{schemapb.DataType_VarChar, schemapb.DataType_FloatVector, false, false},
 
-		{schemapb.DataType_Float16Vector, schemapb.DataType_Float16Vector, true, true},
-		{schemapb.DataType_Float16Vector, schemapb.DataType_Float16Vector, false, true},
 		{schemapb.DataType_BinaryVector, schemapb.DataType_BinaryVector, true, true},
 		{schemapb.DataType_BinaryVector, schemapb.DataType_BinaryVector, false, true},
 

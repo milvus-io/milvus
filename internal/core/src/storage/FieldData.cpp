@@ -145,7 +145,6 @@ FieldDataImpl<Type, is_scalar>::FillFieldData(
             return FillFieldData(values.data(), element_count);
         }
         case DataType::VECTOR_FLOAT:
-        case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BINARY: {
             auto array_info =
                 GetDataInfoFromArray<arrow::FixedSizeBinaryArray,
@@ -178,6 +177,5 @@ template class FieldDataImpl<Array, true>;
 // vector data
 template class FieldDataImpl<int8_t, false>;
 template class FieldDataImpl<float, false>;
-template class FieldDataImpl<float16, false>;
 
 }  // namespace milvus::storage

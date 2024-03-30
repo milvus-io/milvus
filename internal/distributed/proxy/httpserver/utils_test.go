@@ -135,8 +135,7 @@ func generateIndexes() []*milvuspb.IndexDescription {
 }
 
 func generateVectorFieldData(vectorType schemapb.DataType) schemapb.FieldData {
-	switch vectorType {
-	case schemapb.DataType_BinaryVector:
+	if vectorType == schemapb.DataType_BinaryVector {
 		return schemapb.FieldData{
 			Type:      schemapb.DataType_BinaryVector,
 			FieldName: FieldBookIntro,
@@ -145,34 +144,6 @@ func generateVectorFieldData(vectorType schemapb.DataType) schemapb.FieldData {
 					Dim: 8,
 					Data: &schemapb.VectorField_BinaryVector{
 						BinaryVector: []byte{byte(0), byte(1), byte(2)},
-					},
-				},
-			},
-			IsDynamic: false,
-		}
-	case schemapb.DataType_Float16Vector:
-		return schemapb.FieldData{
-			Type:      schemapb.DataType_Float16Vector,
-			FieldName: FieldBookIntro,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: 8,
-					Data: &schemapb.VectorField_Float16Vector{
-						Float16Vector: []byte{byte(0), byte(0), byte(1), byte(1), byte(2), byte(2)},
-					},
-				},
-			},
-			IsDynamic: false,
-		}
-	case schemapb.DataType_BFloat16Vector:
-		return schemapb.FieldData{
-			Type:      schemapb.DataType_BFloat16Vector,
-			FieldName: FieldBookIntro,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: 8,
-					Data: &schemapb.VectorField_Bfloat16Vector{
-						Bfloat16Vector: []byte{byte(0), byte(0), byte(1), byte(1), byte(2), byte(2)},
 					},
 				},
 			},
@@ -492,10 +463,6 @@ func TestInsertWithoutVector(t *testing.T) {
 	floatVectorField.Name = "floatVector"
 	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
 	binaryVectorField.Name = "binaryVector"
-	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
-	float16VectorField.Name = "float16Vector"
-	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
-	bfloat16VectorField.Name = "bfloat16Vector"
 	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
@@ -509,24 +476,6 @@ func TestInsertWithoutVector(t *testing.T) {
 		Name: DefaultCollectionName,
 		Fields: []*schemapb.FieldSchema{
 			&primaryField, &binaryVectorField,
-		},
-		EnableDynamicField: true,
-	})
-	assert.Error(t, err)
-	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
-		Name: DefaultCollectionName,
-		Fields: []*schemapb.FieldSchema{
-			&primaryField, &float16VectorField,
-		},
-		EnableDynamicField: true,
-	})
-	assert.Error(t, err)
-	assert.Equal(t, true, strings.HasPrefix(err.Error(), "missing vector field"))
-	err, _ = checkAndSetData(body, &schemapb.CollectionSchema{
-		Name: DefaultCollectionName,
-		Fields: []*schemapb.FieldSchema{
-			&primaryField, &bfloat16VectorField,
 		},
 		EnableDynamicField: true,
 	})
@@ -575,7 +524,7 @@ func TestSerialize(t *testing.T) {
 	})
 	assert.Nil(t, err)
 	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(bytes)) // todo
-	for _, dataType := range []schemapb.DataType{schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
+	for _, dataType := range []schemapb.DataType{schemapb.DataType_BinaryVector} {
 		request := map[string]interface{}{
 			HTTPRequestData: []interface{}{
 				[]byte{1, 2},
@@ -1028,12 +977,6 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 	case schemapb.DataType_FloatVector:
 		vectorField := generateVectorFieldData(firstFieldType)
 		return []*schemapb.FieldData{&vectorField}
-	case schemapb.DataType_Float16Vector:
-		vectorField := generateVectorFieldData(firstFieldType)
-		return []*schemapb.FieldData{&vectorField}
-	case schemapb.DataType_BFloat16Vector:
-		vectorField := generateVectorFieldData(firstFieldType)
-		return []*schemapb.FieldData{&vectorField}
 	case schemapb.DataType_Array:
 		return []*schemapb.FieldData{&fieldData10}
 	case schemapb.DataType_JSON:
@@ -1223,28 +1166,20 @@ func TestArray(t *testing.T) {
 func TestVector(t *testing.T) {
 	floatVector := "vector-float"
 	binaryVector := "vector-binary"
-	float16Vector := "vector-float16"
-	bfloat16Vector := "vector-bfloat16"
 	row1 := map[string]interface{}{
-		FieldBookID:    int64(1),
-		floatVector:    []float32{0.1, 0.11},
-		binaryVector:   []byte{1},
-		float16Vector:  []byte{1, 1, 11, 11},
-		bfloat16Vector: []byte{1, 1, 11, 11},
+		FieldBookID:  int64(1),
+		floatVector:  []float32{0.1, 0.11},
+		binaryVector: []byte{1},
 	}
 	row2 := map[string]interface{}{
-		FieldBookID:    int64(2),
-		floatVector:    []float32{0.2, 0.22},
-		binaryVector:   []byte{2},
-		float16Vector:  []byte{2, 2, 22, 22},
-		bfloat16Vector: []byte{2, 2, 22, 22},
+		FieldBookID:  int64(2),
+		floatVector:  []float32{0.2, 0.22},
+		binaryVector: []byte{2},
 	}
 	row3 := map[string]interface{}{
-		FieldBookID:    int64(3),
-		floatVector:    []float32{0.3, 0.33},
-		binaryVector:   []byte{3},
-		float16Vector:  []byte{3, 3, 33, 33},
-		bfloat16Vector: []byte{3, 3, 33, 33},
+		FieldBookID:  int64(3),
+		floatVector:  []float32{0.3, 0.33},
+		binaryVector: []byte{3},
 	}
 	body, _ := wrapRequestBody([]map[string]interface{}{row1, row2, row3})
 	primaryField := generatePrimaryField(schemapb.DataType_Int64)
@@ -1252,16 +1187,12 @@ func TestVector(t *testing.T) {
 	floatVectorField.Name = floatVector
 	binaryVectorField := generateVectorFieldSchema(schemapb.DataType_BinaryVector)
 	binaryVectorField.Name = binaryVector
-	float16VectorField := generateVectorFieldSchema(schemapb.DataType_Float16Vector)
-	float16VectorField.Name = float16Vector
-	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
-	bfloat16VectorField.Name = bfloat16Vector
 	collectionSchema := &schemapb.CollectionSchema{
 		Name:        DefaultCollectionName,
 		Description: "",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, &floatVectorField, &binaryVectorField, &float16VectorField, &bfloat16VectorField,
+			&primaryField, &floatVectorField, &binaryVectorField,
 		},
 		EnableDynamicField: true,
 	}
@@ -1269,21 +1200,11 @@ func TestVector(t *testing.T) {
 	assert.Equal(t, nil, err)
 	for _, row := range rows {
 		assert.Equal(t, 1, len(row[binaryVector].([]byte)))
-		assert.Equal(t, 4, len(row[float16Vector].([]byte)))
-		assert.Equal(t, 4, len(row[bfloat16Vector].([]byte)))
 	}
 	data, err := anyToColumns(rows, collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
 
-	row1[bfloat16Vector] = []int64{99999999, -99999999}
-	body, _ = wrapRequestBody([]map[string]interface{}{row1})
-	err, _ = checkAndSetData(string(body), collectionSchema)
-	assert.Error(t, err)
-	row1[float16Vector] = []int64{99999999, -99999999}
-	body, _ = wrapRequestBody([]map[string]interface{}{row1})
-	err, _ = checkAndSetData(string(body), collectionSchema)
-	assert.Error(t, err)
 	row1[binaryVector] = []int64{99999999, -99999999}
 	body, _ = wrapRequestBody([]map[string]interface{}{row1})
 	err, _ = checkAndSetData(string(body), collectionSchema)
@@ -1305,7 +1226,7 @@ func TestBuildQueryResps(t *testing.T) {
 	}
 
 	dataTypes := []schemapb.DataType{
-		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector,
 		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
 		schemapb.DataType_Float, schemapb.DataType_Double,
 		schemapb.DataType_String, schemapb.DataType_VarChar,

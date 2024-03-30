@@ -152,7 +152,6 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
                 builder, double_data, length);
             break;
         }
-        case DataType::VECTOR_FLOAT16:
         case DataType::VECTOR_BINARY:
         case DataType::VECTOR_FLOAT: {
             add_vector_payload(builder, const_cast<uint8_t*>(raw_data), length);
@@ -249,11 +248,6 @@ CreateArrowBuilder(DataType data_type, int dim) {
             return std::make_shared<arrow::FixedSizeBinaryBuilder>(
                 arrow::fixed_size_binary(dim / 8));
         }
-        case DataType::VECTOR_FLOAT16: {
-            AssertInfo(dim > 0, "invalid dim value");
-            return std::make_shared<arrow::FixedSizeBinaryBuilder>(
-                arrow::fixed_size_binary(dim * sizeof(float16)));
-        }
         default: {
             PanicInfo(
                 DataTypeInvalid,
@@ -315,11 +309,6 @@ CreateArrowSchema(DataType data_type, int dim) {
             return arrow::schema(
                 {arrow::field("val", arrow::fixed_size_binary(dim / 8))});
         }
-        case DataType::VECTOR_FLOAT16: {
-            AssertInfo(dim > 0, "invalid dim value");
-            return arrow::schema({arrow::field(
-                "val", arrow::fixed_size_binary(dim * sizeof(float16)))});
-        }
         default: {
             PanicInfo(
                 DataTypeInvalid,
@@ -337,9 +326,6 @@ GetDimensionFromFileMetaData(const parquet::ColumnDescriptor* schema,
         }
         case DataType::VECTOR_BINARY: {
             return schema->type_length() * 8;
-        }
-        case DataType::VECTOR_FLOAT16: {
-            return schema->type_length() / sizeof(float16);
         }
         default:
             PanicInfo(DataTypeInvalid, "unsupported data type {}", data_type);
@@ -650,9 +636,6 @@ CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
                 dim, type, total_num_rows);
         case DataType::VECTOR_BINARY:
             return std::make_shared<FieldData<BinaryVector>>(
-                dim, type, total_num_rows);
-        case DataType::VECTOR_FLOAT16:
-            return std::make_shared<FieldData<Float16Vector>>(
                 dim, type, total_num_rows);
         default:
             throw SegcoreError(

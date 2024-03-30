@@ -182,8 +182,6 @@ GenTermPlan(const FieldMeta& fvec_meta,
         vector_type = proto::plan::VectorType::FloatVector;
     } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
         vector_type = proto::plan::VectorType::BinaryVector;
-    } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-        vector_type = proto::plan::VectorType::Float16Vector;
     }
 
     auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
@@ -226,8 +224,6 @@ GenAlwaysFalsePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
         vector_type = proto::plan::VectorType::FloatVector;
     } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
         vector_type = proto::plan::VectorType::BinaryVector;
-    } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-        vector_type = proto::plan::VectorType::Float16Vector;
     }
     auto anns =
         GenAnns(always_false_expr, vector_type, fvec_meta.get_id().get(), "$0");
@@ -245,8 +241,6 @@ GenAlwaysTruePlan(const FieldMeta& fvec_meta, const FieldMeta& str_meta) {
         vector_type = proto::plan::VectorType::FloatVector;
     } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
         vector_type = proto::plan::VectorType::BinaryVector;
-    } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-        vector_type = proto::plan::VectorType::Float16Vector;
     }
     auto anns =
         GenAnns(always_true_expr, vector_type, fvec_meta.get_id().get(), "$0");
@@ -376,8 +370,6 @@ TEST(StringExpr, Compare) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
             vector_type = proto::plan::VectorType::BinaryVector;
-        } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-            vector_type = proto::plan::VectorType::Float16Vector;
         }
         auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
 
@@ -483,8 +475,6 @@ TEST(StringExpr, UnaryRange) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
             vector_type = proto::plan::VectorType::BinaryVector;
-        } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-            vector_type = proto::plan::VectorType::Float16Vector;
         }
         auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
 
@@ -582,8 +572,6 @@ TEST(StringExpr, BinaryRange) {
             vector_type = proto::plan::VectorType::FloatVector;
         } else if (fvec_meta.get_data_type() == DataType::VECTOR_BINARY) {
             vector_type = proto::plan::VectorType::BinaryVector;
-        } else if (fvec_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-            vector_type = proto::plan::VectorType::Float16Vector;
         }
         auto anns = GenAnns(expr, vector_type, fvec_meta.get_id().get(), "$0");
 

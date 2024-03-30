@@ -246,11 +246,6 @@ CreateIndex(const FieldMeta& field_meta,
                                                          field_index_meta,
                                                          segment_max_row_count,
                                                          segcore_config);
-        } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
-            return std::make_unique<VectorFieldIndexing>(field_meta,
-                                                         field_index_meta,
-                                                         segment_max_row_count,
-                                                         segcore_config);
         } else {
             PanicInfo(DataTypeInvalid,
                       "unsupported vector type in index: {}",

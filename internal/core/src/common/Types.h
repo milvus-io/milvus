@@ -52,33 +52,6 @@ using offset_t = int32_t;
 using date_t = int32_t;
 using distance_t = float;
 
-union float16 {
-    unsigned short bits;
-    struct {
-        unsigned short mantissa : 10;
-        unsigned short exponent : 5;
-        unsigned short sign : 1;
-    } parts;
-    float16() {
-    }
-    float16(float f) {
-        unsigned int i = *(unsigned int*)&f;
-        unsigned int sign = (i >> 31) & 0x0001;
-        unsigned int exponent = ((i >> 23) & 0xff) - 127 + 15;
-        unsigned int mantissa = (i >> 13) & 0x3ff;
-        parts.sign = sign;
-        parts.exponent = exponent;
-        parts.mantissa = mantissa;
-    }
-    operator float() const {
-        unsigned int sign = parts.sign << 31;
-        unsigned int exponent = (parts.exponent - 15 + 127) << 23;
-        unsigned int mantissa = parts.mantissa << 13;
-        unsigned int bits = sign | exponent | mantissa;
-        return *(float*)&bits;
-    }
-};
-
 enum class DataType {
     NONE = 0,
     BOOL = 1,
@@ -97,7 +70,6 @@ enum class DataType {
 
     VECTOR_BINARY = 100,
     VECTOR_FLOAT = 101,
-    VECTOR_FLOAT16 = 102,
 };
 
 using Timestamp = uint64_t;  // TODO: use TiKV-like timestamp
@@ -231,9 +203,6 @@ struct fmt::formatter<milvus::DataType> : formatter<string_view> {
                 break;
             case milvus::DataType::VECTOR_FLOAT:
                 name = "VECTOR_FLOAT";
-                break;
-            case milvus::DataType::VECTOR_FLOAT16:
-                name = "VECTOR_FLOAT16";
                 break;
         }
         return formatter<string_view>::format(name, ctx);

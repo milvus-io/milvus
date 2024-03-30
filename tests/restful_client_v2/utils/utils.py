@@ -159,42 +159,6 @@ def gen_binary_vectors(num, dim):
     return raw_vectors, binary_vectors
 
 
-def gen_fp16_vectors(num, dim):
-    """
-    generate float16 vector data
-    raw_vectors : the vectors
-    fp16_vectors: the bytes used for insert
-    return: raw_vectors and fp16_vectors
-    """
-    raw_vectors = []
-    fp16_vectors = []
-    for _ in range(num):
-        raw_vector = [random.random() for _ in range(dim)]
-        raw_vectors.append(raw_vector)
-        fp16_vector = np.array(raw_vector, dtype=np.float16).view(np.uint8).tolist()
-        fp16_vectors.append(bytes(fp16_vector))
-
-    return raw_vectors, fp16_vectors
-
-
-def gen_bf16_vectors(num, dim):
-    """
-    generate brain float16 vector data
-    raw_vectors : the vectors
-    bf16_vectors: the bytes used for insert
-    return: raw_vectors and bf16_vectors
-    """
-    raw_vectors = []
-    bf16_vectors = []
-    for _ in range(num):
-        raw_vector = [random.random() for _ in range(dim)]
-        raw_vectors.append(raw_vector)
-        bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
-        bf16_vectors.append(bytes(bf16_vector))
-
-    return raw_vectors, bf16_vectors
-
-
 def gen_vector(datatype="float_vector", dim=128, binary_data=False):
     value = None
     if datatype == "FloatVector":
