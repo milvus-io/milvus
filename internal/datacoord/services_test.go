@@ -1430,40 +1430,190 @@ func (s *GcControlServiceSuite) TestUnknownCmd() {
 	})
 	s.NoError(err)
 	s.False(merr.Ok(resp))
+
+	resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+		Command: datapb.GcCommand_Pause,
+		Params: []*commonpb.KeyValuePair{
+			{Key: "scope", Value: "segment"},
+		},
+	})
+	s.NoError(err)
+	s.False(merr.Ok(resp))
 }
 
 func (s *GcControlServiceSuite) TestPause() {
-	resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
-		Command: datapb.GcCommand_Pause,
-	})
-	s.Nil(err)
-	s.False(merr.Ok(resp))
+	s.Run("scope_global", func() {
+		resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+		})
+		s.Nil(err)
+		s.False(merr.Ok(resp))
 
-	resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "not_int"},
-		},
-	})
-	s.Nil(err)
-	s.False(merr.Ok(resp))
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "global"},
+				{Key: "duration", Value: "not_int"},
+			},
+		})
+		s.Nil(err)
+		s.False(merr.Ok(resp))
 
-	resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "60"},
-		},
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "global"},
+				{Key: "duration", Value: "60"},
+			},
+		})
+		s.True(merr.Ok(resp))
+		s.NoError(err)
+		s.NotZero(s.server.garbageCollector.pauseUntil.Load())
 	})
-	s.Nil(err)
-	s.True(merr.Ok(resp))
+
+	s.Run("scope_collection", func() {
+		resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "collection"},
+				{Key: "duration", Value: "60"},
+			},
+		})
+		s.Nil(err)
+		s.False(merr.Ok(resp))
+
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "collection"},
+				{Key: "duration", Value: "60"},
+				{Key: "collection", Value: "not_int"},
+			},
+		})
+		s.Nil(err)
+		s.False(merr.Ok(resp))
+
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "collection"},
+				{Key: "duration", Value: "60"},
+				{Key: "collection", Value: "1000"},
+			},
+		})
+		s.True(merr.Ok(resp))
+		s.NoError(err)
+		val, ok := s.server.garbageCollector.pausedCollection.Get(1000)
+		s.True(ok)
+		s.NotZero(val)
+	})
+
+	s.Run("scope_database", func() {
+		resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "database"},
+				{Key: "duration", Value: "60"},
+			},
+		})
+		s.Nil(err)
+		s.False(merr.Ok(resp))
+
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Pause,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "database"},
+				{Key: "duration", Value: "60"},
+				{Key: "database", Value: "default"},
+			},
+		})
+		s.True(merr.Ok(resp))
+		s.NoError(err)
+		val, ok := s.server.garbageCollector.pausedDatabase.Get("default")
+		s.True(ok)
+		s.NotZero(val)
+	})
 }
 
 func (s *GcControlServiceSuite) TestResume() {
-	resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
-		Command: datapb.GcCommand_Resume,
+	s.Run("scope_global", func() {
+		resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+		})
+		s.NoError(err)
+		s.True(merr.Ok(resp))
+
+		s.server.garbageCollector.pauseUntil.Store(time.Now().Add(time.Minute))
+
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "global"},
+			},
+		})
+		s.True(merr.Ok(resp))
+		s.NoError(err)
+		s.Zero(s.server.garbageCollector.pauseUntil.Load())
 	})
-	s.Nil(err)
-	s.True(merr.Ok(resp))
+
+	s.Run("scope_collection", func() {
+		s.server.garbageCollector.pausedCollection.Insert(1000, time.Now().Add(time.Minute))
+		resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "collection"},
+			},
+		})
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+		s.True(s.server.garbageCollector.pausedCollection.Contain(1000))
+
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "collection"},
+				{Key: "collection", Value: "not_int"},
+			},
+		})
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+		s.True(s.server.garbageCollector.pausedCollection.Contain(1000))
+
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "collection"},
+				{Key: "collection", Value: "1000"},
+			},
+		})
+		s.NoError(err)
+		s.True(merr.Ok(resp))
+		s.False(s.server.garbageCollector.pausedCollection.Contain(1000))
+	})
+
+	s.Run("scope_database", func() {
+		s.server.garbageCollector.pausedDatabase.Insert("default", time.Now().Add(time.Minute))
+		resp, err := s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "database"},
+			},
+		})
+		s.Nil(err)
+		s.False(merr.Ok(resp))
+		s.True(s.server.garbageCollector.pausedDatabase.Contain("default"))
+
+		resp, err = s.server.GcControl(context.TODO(), &datapb.GcControlRequest{
+			Command: datapb.GcCommand_Resume,
+			Params: []*commonpb.KeyValuePair{
+				{Key: "scope", Value: "database"},
+				{Key: "database", Value: "default"},
+			},
+		})
+		s.True(merr.Ok(resp))
+		s.NoError(err)
+		s.False(s.server.garbageCollector.pausedDatabase.Contain("default"))
+	})
 }
 
 func (s *GcControlServiceSuite) TestTimeoutCtx() {

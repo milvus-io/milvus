@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
@@ -163,6 +164,28 @@ func (s *ProxyManagementSuite) TestResumeDatacoordGC() {
 
 		s.Equal(http.StatusInternalServerError, recorder.Code)
 	})
+}
+
+func (s *ProxyManagementSuite) TestGCParseParams() {
+	req, err := http.NewRequest(http.MethodGet, mgrRouteGcPause+"?scope=A&database=B&collection=C", nil)
+	s.Require().NoError(err)
+
+	kvs := parseGCParams(req)
+	getKV := func(key string) *commonpb.KeyValuePair {
+		return lo.FindOrElse(kvs, nil, func(kv *commonpb.KeyValuePair) bool { return kv.Key == key })
+	}
+
+	kv := getKV("scope")
+	s.Require().NotNil(kv)
+	s.Equal("A", kv.Value)
+
+	kv = getKV("database")
+	s.Require().NotNil(kv)
+	s.Equal("B", kv.Value)
+
+	kv = getKV("collection")
+	s.Require().NotNil(kv)
+	s.Equal("C", kv.Value)
 }
 
 func (s *ProxyManagementSuite) TestListQueryNode() {

@@ -25,12 +25,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/minio/minio-go/v7"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -62,22 +64,39 @@ type garbageCollector struct {
 	option  GcOption
 	meta    *meta
 	handler Handler
+	broker  broker.Broker
 
-	startOnce  sync.Once
-	stopOnce   sync.Once
-	wg         sync.WaitGroup
-	closeCh    chan struct{}
-	cmdCh      chan gcCmd
-	pauseUntil atomic.Time
+	startOnce sync.Once
+	stopOnce  sync.Once
+	wg        sync.WaitGroup
+	closeCh   chan struct{}
+
+	// control related
+	cmdCh            chan gcCmd
+	pauseUntil       atomic.Time
+	pausedDatabase   typeutil.ConcurrentMap[string, time.Time]
+	pausedCollection typeutil.ConcurrentMap[int64, time.Time]
 }
+
+type gcCmdScope int
+
+const (
+	gcCmdScopeGlobal gcCmdScope = iota + 1
+	gcCmdScopeDatabase
+	gcCmdScopeCollection
+)
+
 type gcCmd struct {
-	cmdType  datapb.GcCommand
-	duration time.Duration
-	done     chan struct{}
+	cmdType      datapb.GcCommand
+	duration     time.Duration
+	done         chan struct{}
+	scope        gcCmdScope
+	database     string
+	collectionID int64
 }
 
 // newGarbageCollector create garbage collector with meta and option
-func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageCollector {
+func newGarbageCollector(meta *meta, handler Handler, broker broker.Broker, opt GcOption) *garbageCollector {
 	log.Info("GC with option",
 		zap.Bool("enabled", opt.enabled),
 		zap.Duration("interval", opt.checkInterval),
@@ -89,6 +108,7 @@ func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageColl
 		meta:    meta,
 		handler: handler,
 		option:  opt,
+		broker:  broker,
 		closeCh: make(chan struct{}),
 		cmdCh:   make(chan gcCmd),
 	}
@@ -108,18 +128,57 @@ func (gc *garbageCollector) start() {
 	}
 }
 
-func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Duration) error {
+func (gc *garbageCollector) pauseCmd(ctx context.Context, cmd gcCmd) error {
 	if !gc.option.enabled {
 		log.Info("garbage collection not enabled")
 		return nil
 	}
 	done := make(chan struct{})
+	cmd.done = done
+	cmd.cmdType = datapb.GcCommand_Pause
 	select {
-	case gc.cmdCh <- gcCmd{
-		cmdType:  datapb.GcCommand_Pause,
+	case gc.cmdCh <- cmd:
+		<-done
+		return nil
+	case <-ctx.Done():
+		return ctx.Err()
+	}
+}
+
+func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Duration) error {
+	return gc.pauseCmd(ctx, gcCmd{
 		duration: pauseDuration,
-		done:     done,
-	}:
+		scope:    gcCmdScopeGlobal,
+	})
+}
+
+func (gc *garbageCollector) PauseCollection(ctx context.Context, collectionID int64, pauseDuration time.Duration) error {
+	return gc.pauseCmd(ctx, gcCmd{
+		duration:     pauseDuration,
+		scope:        gcCmdScopeCollection,
+		collectionID: collectionID,
+	})
+}
+
+func (gc *garbageCollector) PauseDatabase(ctx context.Context, dbName string, pauseDuration time.Duration) error {
+	return gc.pauseCmd(ctx, gcCmd{
+		duration: pauseDuration,
+		scope:    gcCmdScopeDatabase,
+		database: dbName,
+	})
+}
+
+func (gc *garbageCollector) resumeCmd(ctx context.Context, cmd gcCmd) error {
+	if !gc.option.enabled {
+		log.Warn("garbage collection not enabled, cannot resume")
+		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
+	}
+
+	done := make(chan struct{})
+	cmd.cmdType = datapb.GcCommand_Resume
+	cmd.done = done
+	select {
+	case gc.cmdCh <- cmd:
 		<-done
 		return nil
 	case <-ctx.Done():
@@ -128,21 +187,69 @@ func (gc *garbageCollector) Pause(ctx context.Context, pauseDuration time.Durati
 }
 
 func (gc *garbageCollector) Resume(ctx context.Context) error {
-	if !gc.option.enabled {
-		log.Warn("garbage collection not enabled, cannot resume")
-		return merr.WrapErrServiceUnavailable("garbage collection not enabled")
+	return gc.resumeCmd(ctx, gcCmd{
+		scope: gcCmdScopeGlobal,
+	})
+}
+
+func (gc *garbageCollector) ResumeCollection(ctx context.Context, collectionID int64) error {
+	return gc.resumeCmd(ctx, gcCmd{
+		scope:        gcCmdScopeCollection,
+		collectionID: collectionID,
+	})
+}
+
+func (gc *garbageCollector) ResumeDatabase(ctx context.Context, dbName string) error {
+	return gc.resumeCmd(ctx, gcCmd{
+		scope:    gcCmdScopeDatabase,
+		database: dbName,
+	})
+}
+
+func (gc *garbageCollector) handleCmd(cmd gcCmd) {
+	switch cmd.cmdType {
+	case datapb.GcCommand_Pause:
+		pauseUntil := time.Now().Add(cmd.duration)
+
+		switch cmd.scope {
+		case gcCmdScopeGlobal:
+			if pauseUntil.After(gc.pauseUntil.Load()) {
+				log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
+				gc.pauseUntil.Store(pauseUntil)
+			} else {
+				log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
+			}
+		case gcCmdScopeDatabase:
+			value, loaded := gc.pausedDatabase.GetOrInsert(cmd.database, pauseUntil)
+			if loaded && pauseUntil.After(value) {
+				gc.pausedDatabase.Insert(cmd.database, pauseUntil)
+				value = pauseUntil
+			}
+			log.Info("garbage collection paused for database", zap.String("database", cmd.database), zap.Time("pauseUntil", value))
+		case gcCmdScopeCollection:
+			value, loaded := gc.pausedCollection.GetOrInsert(cmd.collectionID, pauseUntil)
+			if loaded && pauseUntil.After(value) {
+				gc.pausedCollection.Insert(cmd.collectionID, pauseUntil)
+				value = pauseUntil
+			}
+			log.Info("garbage collection paused for collection", zap.Int64("collection", cmd.collectionID), zap.Time("pauseUntil", value))
+		}
+
+	case datapb.GcCommand_Resume:
+		switch cmd.scope {
+		case gcCmdScopeGlobal:
+			// reset to zero value
+			gc.pauseUntil.Store(time.Time{})
+			log.Info("garbage collection resumed")
+		case gcCmdScopeDatabase:
+			gc.pausedDatabase.Remove(cmd.database)
+			log.Info("garbage collection resumed for database", zap.String("database", cmd.database))
+		case gcCmdScopeCollection:
+			gc.pausedCollection.Remove(cmd.collectionID)
+			log.Info("garbage collection resumed for collection", zap.Int64("collection", cmd.collectionID))
+		}
 	}
-	done := make(chan struct{})
-	select {
-	case gc.cmdCh <- gcCmd{
-		cmdType: datapb.GcCommand_Resume,
-		done:    done,
-	}:
-		<-done
-		return nil
-	case <-ctx.Done():
-		return ctx.Err()
-	}
+	close(cmd.done)
 }
 
 // work contains actual looping check logic
@@ -167,21 +274,7 @@ func (gc *garbageCollector) work() {
 			log.Info("Garbage collector start to scan interrupted write residue")
 			gc.scan()
 		case cmd := <-gc.cmdCh:
-			switch cmd.cmdType {
-			case datapb.GcCommand_Pause:
-				pauseUntil := time.Now().Add(cmd.duration)
-				if pauseUntil.After(gc.pauseUntil.Load()) {
-					log.Info("garbage collection paused", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil))
-					gc.pauseUntil.Store(pauseUntil)
-				} else {
-					log.Info("new pause until before current value", zap.Duration("duration", cmd.duration), zap.Time("pauseUntil", pauseUntil), zap.Time("oldPauseUntil", gc.pauseUntil.Load()))
-				}
-			case datapb.GcCommand_Resume:
-				// reset to zero value
-				gc.pauseUntil.Store(time.Time{})
-				log.Info("garbage collection resumed")
-			}
-			close(cmd.done)
+			gc.handleCmd(cmd)
 		case <-gc.closeCh:
 			log.Warn("garbage collector quit")
 			return
@@ -330,79 +423,109 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 	return true
 }
 
+func (gc *garbageCollector) CollectionGCPaused(collectionID int64) (bool, error) {
+	if until, ok := gc.pausedCollection.Get(collectionID); ok && until.After(time.Now()) {
+		return true, nil
+	}
+	resp, err := gc.broker.DescribeCollectionInternal(context.Background(), collectionID)
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		// collection dropped, database paused not applied
+		if errors.Is(err, merr.ErrCollectionNotFound) {
+			return false, nil
+		}
+		return false, err
+	}
+	until, ok := gc.pausedDatabase.Get(resp.GetDbName())
+	return ok && until.After(time.Now()), nil
+}
+
 func (gc *garbageCollector) clearEtcd() {
 	all := gc.meta.SelectSegments(func(si *SegmentInfo) bool { return true })
-	drops := make(map[int64]*SegmentInfo, 0)
-	compactTo := make(map[int64]*SegmentInfo)
-	channels := typeutil.NewSet[string]()
-	for _, segment := range all {
-		cloned := segment.Clone()
-		binlog.DecompressBinLogs(cloned.SegmentInfo)
-		if cloned.GetState() == commonpb.SegmentState_Dropped {
-			drops[cloned.GetID()] = cloned
-			channels.Insert(cloned.GetInsertChannel())
-			// continue
-			// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
+	groups := lo.GroupBy(all, func(segment *SegmentInfo) int64 { return segment.GetCollectionID() })
+	for collectionID, segments := range groups {
+		log := log.With(zap.Int64("collectionID", collectionID))
+		paused, err := gc.CollectionGCPaused(collectionID)
+		if err != nil {
+			log.Warn("failed to check whether collection gc is paused", zap.Error(err))
+			continue
 		}
-		for _, from := range cloned.GetCompactionFrom() {
-			compactTo[from] = cloned
-		}
-	}
-
-	droppedCompactTo := make(map[*SegmentInfo]struct{})
-	for id := range drops {
-		if to, ok := compactTo[id]; ok {
-			droppedCompactTo[to] = struct{}{}
-		}
-	}
-	indexedSegments := FilterInIndexedSegments(gc.handler, gc.meta, lo.Keys(droppedCompactTo)...)
-	indexedSet := make(typeutil.UniqueSet)
-	for _, segment := range indexedSegments {
-		indexedSet.Insert(segment.GetID())
-	}
-
-	channelCPs := make(map[string]uint64)
-	for channel := range channels {
-		pos := gc.meta.GetChannelCheckpoint(channel)
-		channelCPs[channel] = pos.GetTimestamp()
-	}
-
-	dropIDs := lo.Keys(drops)
-	sort.Slice(dropIDs, func(i, j int) bool {
-		return dropIDs[i] < dropIDs[j]
-	})
-
-	log.Info("start to GC segments", zap.Int("drop_num", len(dropIDs)))
-	for _, segmentID := range dropIDs {
-		segment, ok := drops[segmentID]
-		if !ok {
-			log.Warn("segmentID is not in drops", zap.Int64("segmentID", segmentID))
+		if paused {
+			log.Info("GC paused for collection")
 			continue
 		}
 
-		segInsertChannel := segment.GetInsertChannel()
-		if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
-			continue
-		}
-
-		logs := getLogs(segment)
-		log.Info("GC segment", zap.Int64("segmentID", segment.GetID()),
-			zap.Int("insert_logs", len(segment.GetBinlogs())),
-			zap.Int("delta_logs", len(segment.GetDeltalogs())),
-			zap.Int("stats_logs", len(segment.GetStatslogs())))
-		if gc.removeLogs(logs) {
-			err := gc.meta.DropSegment(segment.GetID())
-			if err != nil {
-				log.Info("GC segment meta failed to drop segment", zap.Int64("segment id", segment.GetID()), zap.Error(err))
-			} else {
-				log.Info("GC segment meta drop semgent", zap.Int64("segment id", segment.GetID()))
+		drops := make(map[int64]*SegmentInfo, 0)
+		compactTo := make(map[int64]*SegmentInfo)
+		channels := typeutil.NewSet[string]()
+		for _, segment := range segments {
+			cloned := segment.Clone()
+			binlog.DecompressBinLogs(cloned.SegmentInfo)
+			if cloned.GetState() == commonpb.SegmentState_Dropped {
+				drops[cloned.GetID()] = cloned
+				channels.Insert(cloned.GetInsertChannel())
+				// continue
+				// A(indexed), B(indexed) -> C(no indexed), D(no indexed) -> E(no indexed), A, B can not be GC
+			}
+			for _, from := range cloned.GetCompactionFrom() {
+				compactTo[from] = cloned
 			}
 		}
-		if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
-			!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
-			log.Info("empty channel found during gc, manually cleanup channel checkpoints", zap.String("vChannel", segInsertChannel))
-			if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
-				log.Info("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
+
+		droppedCompactTo := make(map[*SegmentInfo]struct{})
+		for id := range drops {
+			if to, ok := compactTo[id]; ok {
+				droppedCompactTo[to] = struct{}{}
+			}
+		}
+		indexedSegments := FilterInIndexedSegments(gc.handler, gc.meta, lo.Keys(droppedCompactTo)...)
+		indexedSet := make(typeutil.UniqueSet)
+		for _, segment := range indexedSegments {
+			indexedSet.Insert(segment.GetID())
+		}
+
+		channelCPs := make(map[string]uint64)
+		for channel := range channels {
+			pos := gc.meta.GetChannelCheckpoint(channel)
+			channelCPs[channel] = pos.GetTimestamp()
+		}
+
+		dropIDs := lo.Keys(drops)
+		sort.Slice(dropIDs, func(i, j int) bool {
+			return dropIDs[i] < dropIDs[j]
+		})
+
+		log.Info("start to GC segments", zap.Int("drop_num", len(dropIDs)))
+		for _, segmentID := range dropIDs {
+			segment, ok := drops[segmentID]
+			if !ok {
+				log.Warn("segmentID is not in drops", zap.Int64("segmentID", segmentID))
+				continue
+			}
+
+			segInsertChannel := segment.GetInsertChannel()
+			if !gc.checkDroppedSegmentGC(segment, compactTo[segment.GetID()], indexedSet, channelCPs[segInsertChannel]) {
+				continue
+			}
+
+			logs := getLogs(segment)
+			log.Info("GC segment", zap.Int64("segmentID", segment.GetID()),
+				zap.Int("insert_logs", len(segment.GetBinlogs())),
+				zap.Int("delta_logs", len(segment.GetDeltalogs())),
+				zap.Int("stats_logs", len(segment.GetStatslogs())))
+			if gc.removeLogs(logs) {
+				err := gc.meta.DropSegment(segment.GetID())
+				if err != nil {
+					log.Info("GC segment meta failed to drop segment", zap.Int64("segment id", segment.GetID()), zap.Error(err))
+				} else {
+					log.Info("GC segment meta drop semgent", zap.Int64("segment id", segment.GetID()))
+				}
+			}
+			if segList := gc.meta.GetSegmentsByChannel(segInsertChannel); len(segList) == 0 &&
+				!gc.meta.catalog.ChannelExists(context.Background(), segInsertChannel) {
+				log.Info("empty channel found during gc, manually cleanup channel checkpoints", zap.String("vChannel", segInsertChannel))
+				if err := gc.meta.DropChannelCheckpoint(segInsertChannel); err != nil {
+					log.Info("failed to drop channel check point during segment garbage collection", zap.String("vchannel", segInsertChannel), zap.Error(err))
+				}
 			}
 		}
 	}

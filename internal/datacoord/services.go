@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -1596,45 +1597,97 @@ func (s *Server) GcConfirm(ctx context.Context, request *datapb.GcConfirmRequest
 }
 
 func (s *Server) GcControl(ctx context.Context, request *datapb.GcControlRequest) (*commonpb.Status, error) {
-	status := &commonpb.Status{}
+	// status := &commonpb.Status{}
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
 
+	getKV := func(key string) *commonpb.KeyValuePair {
+		return lo.FindOrElse(request.GetParams(), nil, func(kv *commonpb.KeyValuePair) bool {
+			return kv.GetKey() == key
+		})
+	}
+
+	var collectionID int64
+	var database string
+	scope := gcCmdScopeGlobal
+	scopeKV := getKV("scope")
+	// if nil, treat as global
+	if scopeKV != nil {
+		switch strings.ToLower(scopeKV.GetValue()) {
+		case "global":
+			scope = gcCmdScopeGlobal
+		case "collection":
+			scope = gcCmdScopeCollection
+			collKV := getKV("collection")
+			if collKV == nil {
+				return merr.Status(merr.WrapErrParameterMissing("collection id")), nil
+			}
+			var err error
+			collectionID, err = strconv.ParseInt(collKV.GetValue(), 10, 64)
+			if err != nil {
+				return merr.Status(merr.WrapErrParameterInvalidMsg("failed to parse collection id, %s", err.Error())), nil
+			}
+		case "database":
+			scope = gcCmdScopeDatabase
+			dbKV := getKV("database")
+			if dbKV == nil {
+				return merr.Status(merr.WrapErrParameterMissing("collection id")), nil
+			}
+			database = dbKV.GetValue()
+		default:
+			return merr.Status(merr.WrapErrParameterInvalidMsg("unknown scope", scopeKV.GetValue())), nil
+		}
+	}
+
+	var fn func() error
+
 	switch request.GetCommand() {
 	case datapb.GcCommand_Pause:
-		kv := lo.FindOrElse(request.GetParams(), nil, func(kv *commonpb.KeyValuePair) bool {
-			return kv.GetKey() == "duration"
-		})
+		kv := getKV("duration")
 		if kv == nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = "pause duration param not found"
-			return status, nil
+			return merr.Status(merr.WrapErrParameterMissing("pause duration")), nil
 		}
 		pauseSeconds, err := strconv.ParseInt(kv.GetValue(), 10, 64)
 		if err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("pause duration not valid, %s", err.Error())
-			return status, nil
+			return merr.Status(merr.WrapErrParameterInvalidMsg("failed to parse pause duration, %s", err.Error())), nil
 		}
-		if err := s.garbageCollector.Pause(ctx, time.Duration(pauseSeconds)*time.Second); err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
-			return status, nil
+		switch scope {
+		case gcCmdScopeGlobal:
+			fn = func() error { return s.garbageCollector.Pause(ctx, time.Duration(pauseSeconds)*time.Second) }
+		case gcCmdScopeCollection:
+			fn = func() error {
+				return s.garbageCollector.PauseCollection(ctx, collectionID, time.Duration(pauseSeconds)*time.Second)
+			}
+		case gcCmdScopeDatabase:
+			fn = func() error {
+				return s.garbageCollector.PauseDatabase(ctx, database, time.Duration(pauseSeconds)*time.Second)
+			}
 		}
 	case datapb.GcCommand_Resume:
-		if err := s.garbageCollector.Resume(ctx); err != nil {
-			status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-			status.Reason = fmt.Sprintf("failed to pause gc, %s", err.Error())
-			return status, nil
+		switch scope {
+		case gcCmdScopeGlobal:
+			fn = func() error { return s.garbageCollector.Resume(ctx) }
+		case gcCmdScopeCollection:
+			fn = func() error {
+				return s.garbageCollector.ResumeCollection(ctx, collectionID)
+			}
+		case gcCmdScopeDatabase:
+			fn = func() error {
+				return s.garbageCollector.ResumeDatabase(ctx, database)
+			}
 		}
 	default:
-		status.ErrorCode = commonpb.ErrorCode_UnexpectedError
-		status.Reason = fmt.Sprintf("unknown gc command: %d", request.GetCommand())
-		return status, nil
+		return merr.Status(merr.WrapErrParameterInvalidMsg("unknown gc command: %d", request.GetCommand())), nil
 	}
 
-	return status, nil
+	if fn != nil {
+		if err := fn(); err != nil {
+			return merr.Status(err), nil
+		}
+	}
+
+	return merr.Success(), nil
 }
 
 func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInternal) (*internalpb.ImportResponse, error) {

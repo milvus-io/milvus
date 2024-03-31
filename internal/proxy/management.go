@@ -100,22 +100,44 @@ func RegisterMgrRoute(proxy *Proxy) {
 	})
 }
 
+func parseGCParams(req *http.Request) []*commonpb.KeyValuePair {
+	kvs := make([]*commonpb.KeyValuePair, 0, 3)
+	scope := req.URL.Query().Get("scope")
+	database := req.URL.Query().Get("database")
+	collection := req.URL.Query().Get("collection")
+
+	if len(scope) > 0 {
+		kvs = append(kvs, &commonpb.KeyValuePair{Key: "scope", Value: scope})
+	}
+	if len(database) > 0 {
+		kvs = append(kvs, &commonpb.KeyValuePair{Key: "database", Value: database})
+	}
+	if len(collection) > 0 {
+		kvs = append(kvs, &commonpb.KeyValuePair{Key: "collection", Value: collection})
+	}
+
+	return kvs
+}
+
 func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 	pauseSeconds := req.URL.Query().Get("pause_seconds")
 
-	resp, err := node.dataCoord.GcControl(req.Context(), &datapb.GcControlRequest{
+	request := &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Pause,
 		Params: []*commonpb.KeyValuePair{
 			{Key: "duration", Value: pauseSeconds},
 		},
-	})
+	}
+	request.Params = append(request.Params, parseGCParams(req)...)
+
+	resp, err := node.dataCoord.GcControl(req.Context(), request)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
 		return
 	}
-	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
+	if !merr.Ok(resp) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, resp.GetReason())))
 		return
@@ -125,16 +147,19 @@ func (node *Proxy) PauseDatacoordGC(w http.ResponseWriter, req *http.Request) {
 }
 
 func (node *Proxy) ResumeDatacoordGC(w http.ResponseWriter, req *http.Request) {
-	resp, err := node.dataCoord.GcControl(req.Context(), &datapb.GcControlRequest{
+	request := &datapb.GcControlRequest{
 		Base:    commonpbutil.NewMsgBase(),
 		Command: datapb.GcCommand_Resume,
-	})
+	}
+	request.Params = append(request.Params, parseGCParams(req)...)
+
+	resp, err := node.dataCoord.GcControl(req.Context(), request)
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, err.Error())))
 		return
 	}
-	if resp.GetErrorCode() != commonpb.ErrorCode_Success {
+	if !merr.Ok(resp) {
 		w.WriteHeader(http.StatusInternalServerError)
 		w.Write([]byte(fmt.Sprintf(`{"msg": "failed to pause garbage collection, %s"}`, resp.GetReason())))
 		return

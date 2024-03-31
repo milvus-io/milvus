@@ -38,8 +38,10 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	kvmocks "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -51,6 +53,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -64,8 +67,16 @@ func Test_garbageCollector_basic(t *testing.T) {
 	meta, err := newMemoryMeta()
 	assert.NoError(t, err)
 
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
+
 	t.Run("normal gc", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -82,7 +93,7 @@ func Test_garbageCollector_basic(t *testing.T) {
 	})
 
 	t.Run("with nil cli", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              nil,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -118,8 +129,16 @@ func Test_garbageCollector_scan(t *testing.T) {
 	meta, err := newMemoryMeta()
 	assert.NoError(t, err)
 
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
+
 	t.Run("key is reference", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -137,7 +156,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("missing all but save tolerance", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -163,7 +182,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(context.TODO(), segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -192,7 +211,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		err = meta.AddSegment(context.TODO(), segment)
 		require.NoError(t, err)
 
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -209,7 +228,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("missing gc all", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -231,7 +250,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("list object with error", func(t *testing.T) {
-		gc := newGarbageCollector(meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(meta, newMockHandler(), broker, GcOption{
 			cli:              cli,
 			enabled:          true,
 			checkInterval:    time.Minute * 30,
@@ -417,6 +436,14 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 }
 
 func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
+
 	t.Run("success", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.On("DropIndex",
@@ -424,7 +451,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
+		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, broker, GcOption{})
 		gc.recycleUnusedIndexes()
 	})
 
@@ -435,7 +462,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
+		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, broker, GcOption{})
 		gc.recycleUnusedIndexes()
 	})
 }
@@ -557,6 +584,14 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 }
 
 func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
+
 	t.Run("success", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.On("DropSegmentIndex",
@@ -566,7 +601,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, broker, GcOption{})
 		gc.recycleUnusedSegIndexes()
 	})
 
@@ -579,7 +614,7 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, broker, GcOption{})
 		gc.recycleUnusedSegIndexes()
 	})
 }
@@ -723,6 +758,14 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 }
 
 func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
+
 	t.Run("success", func(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
@@ -732,6 +775,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
+			broker,
 			GcOption{
 				cli: cm,
 			})
@@ -746,6 +790,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
+			broker,
 			GcOption{
 				cli: cm,
 			})
@@ -761,6 +806,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
+			broker,
 			GcOption{
 				cli: cm,
 			})
@@ -776,6 +822,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
+			broker,
 			GcOption{
 				cli: cm,
 			})
@@ -1311,11 +1358,20 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		m.segments.SetSegment(segID, segment)
 	}
 
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
+
 	cm := &mocks.ChunkManager{}
 	cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 	gc := newGarbageCollector(
 		m,
 		newMockHandlerWithMeta(m),
+		broker,
 		GcOption{
 			cli:           cm,
 			dropTolerance: 1,
@@ -1405,10 +1461,18 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 
 func TestGarbageCollector_removelogs(t *testing.T) {
 	paramtable.Init()
+	broker := broker.NewMockBroker(t)
+	broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
 	cm := &mocks.ChunkManager{}
 	gc := newGarbageCollector(
 		nil,
 		nil,
+		broker,
 		GcOption{
 			cli:           cm,
 			dropTolerance: 1,
@@ -1465,7 +1529,8 @@ type GarbageCollectorSuite struct {
 	delta   []string
 	others  []string
 
-	meta *meta
+	meta   *meta
+	broker *broker.MockBroker
 }
 
 func (s *GarbageCollectorSuite) SetupTest() {
@@ -1478,6 +1543,14 @@ func (s *GarbageCollectorSuite) SetupTest() {
 
 	s.meta, err = newMemoryMeta()
 	s.Require().NoError(err)
+
+	s.broker = broker.NewMockBroker(s.T())
+	s.broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, collectionID int64) (*milvuspb.DescribeCollectionResponse, error) {
+		return &milvuspb.DescribeCollectionResponse{
+			DbName:       "default",
+			CollectionID: collectionID,
+		}, nil
+	}).Maybe()
 }
 
 func (s *GarbageCollectorSuite) TearDownTest() {
@@ -1486,7 +1559,7 @@ func (s *GarbageCollectorSuite) TearDownTest() {
 
 func (s *GarbageCollectorSuite) TestPauseResume() {
 	s.Run("not_enabled", func() {
-		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
 			cli:              s.cli,
 			enabled:          false,
 			checkInterval:    time.Millisecond * 10,
@@ -1508,7 +1581,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 	})
 
 	s.Run("pause_then_resume", func() {
-		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
 			cli:              s.cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -1533,7 +1606,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 	})
 
 	s.Run("pause_before_until", func() {
-		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
 			cli:              s.cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -1561,7 +1634,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 	})
 
 	s.Run("pause_resume_timeout", func() {
-		gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
 			cli:              s.cli,
 			enabled:          true,
 			checkInterval:    time.Millisecond * 10,
@@ -1571,7 +1644,7 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		})
 
 		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
-		defer cancel()
+		cancel()
 		err := gc.Pause(ctx, time.Minute)
 		s.Error(err)
 
@@ -1581,6 +1654,455 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 		s.Error(err)
 
 		s.Zero(gc.pauseUntil.Load())
+	})
+}
+
+func (s *GarbageCollectorSuite) TestPauseResumeCollection() {
+	s.Run("not_enabled", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          false,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 24 * 7,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseCollection(ctx, 1, time.Second)
+		s.NoError(err)
+
+		err = gc.ResumeCollection(ctx, 1)
+		s.Error(err)
+	})
+
+	s.Run("pause_then_resume", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseCollection(ctx, 1, time.Minute)
+		s.NoError(err)
+
+		val, ok := gc.pausedCollection.Get(1)
+		s.True(ok)
+		s.NotZero(val)
+
+		err = gc.ResumeCollection(ctx, 1)
+		s.NoError(err)
+
+		_, ok = gc.pausedCollection.Get(1)
+		s.False(ok)
+	})
+
+	s.Run("pause_before_until", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseCollection(ctx, 1, time.Minute)
+		s.NoError(err)
+
+		until, ok := gc.pausedCollection.Get(1)
+		s.True(ok)
+		s.NotZero(until)
+
+		err = gc.PauseCollection(ctx, 1, time.Second)
+		s.NoError(err)
+
+		second, ok := gc.pausedCollection.Get(1)
+		s.True(ok)
+		s.Equal(until, second)
+	})
+
+	s.Run("pause_overwrite", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseCollection(ctx, 1, time.Second)
+		s.NoError(err)
+
+		until, ok := gc.pausedCollection.Get(1)
+		s.True(ok)
+		s.NotZero(until)
+
+		err = gc.PauseCollection(ctx, 1, time.Minute)
+		s.NoError(err)
+
+		second, ok := gc.pausedCollection.Get(1)
+		s.True(ok)
+		s.True(second.After(until))
+	})
+
+	s.Run("pause_resume_timeout", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		cancel()
+		err := gc.PauseCollection(ctx, 1, time.Minute)
+		s.Error(err)
+
+		s.False(gc.pausedCollection.Contain(1))
+
+		err = gc.ResumeCollection(ctx, 1)
+		s.Error(err)
+
+		s.False(gc.pausedCollection.Contain(1))
+	})
+}
+
+func (s *GarbageCollectorSuite) TestPauseResumeDatabase() {
+	s.Run("not_enabled", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          false,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 24 * 7,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseDatabase(ctx, "database1", time.Second)
+		s.NoError(err)
+
+		err = gc.ResumeDatabase(ctx, "database1")
+		s.Error(err)
+	})
+
+	s.Run("pause_then_resume", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseDatabase(ctx, "database1", time.Second)
+		s.NoError(err)
+
+		val, ok := gc.pausedDatabase.Get("database1")
+		s.True(ok)
+		s.NotZero(val)
+
+		err = gc.ResumeDatabase(ctx, "database1")
+		s.NoError(err)
+
+		_, ok = gc.pausedDatabase.Get("database1")
+		s.False(ok)
+	})
+
+	s.Run("pause_before_until", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseDatabase(ctx, "database1", time.Minute)
+		s.NoError(err)
+
+		until, ok := gc.pausedDatabase.Get("database1")
+		s.True(ok)
+		s.NotZero(until)
+
+		err = gc.PauseDatabase(ctx, "database1", time.Second)
+		s.NoError(err)
+
+		second, ok := gc.pausedDatabase.Get("database1")
+		s.True(ok)
+		s.Equal(until, second)
+	})
+
+	s.Run("pause_overwrite", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.start()
+		defer gc.close()
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		err := gc.PauseDatabase(ctx, "database1", time.Second)
+		s.NoError(err)
+
+		until, ok := gc.pausedDatabase.Get("database1")
+		s.True(ok)
+		s.NotZero(until)
+
+		err = gc.PauseDatabase(ctx, "database1", time.Minute)
+		s.NoError(err)
+
+		second, ok := gc.pausedDatabase.Get("database1")
+		s.True(ok)
+		s.True(second.After(until))
+	})
+
+	s.Run("pause_resume_timeout", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond)
+		cancel()
+		err := gc.PauseDatabase(ctx, "database1", time.Minute)
+		s.Error(err)
+
+		s.False(gc.pausedDatabase.Contain("database1"))
+
+		err = gc.ResumeDatabase(ctx, "database1")
+		s.Error(err)
+
+		s.False(gc.pausedDatabase.Contain("database1"))
+	})
+}
+
+func (s *GarbageCollectorSuite) TestCollectionGCPaused() {
+	s.Run("no_pause", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+		paused, err := gc.CollectionGCPaused(1)
+		s.NoError(err)
+		s.False(paused)
+	})
+
+	s.Run("collection_paused", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+		gc.pausedCollection.Insert(1, time.Now().Add(time.Minute))
+		paused, err := gc.CollectionGCPaused(1)
+		s.NoError(err)
+		s.True(paused, "pause still effective")
+
+		gc.pausedCollection.Insert(1, time.Now().Add(-time.Minute))
+		paused, err = gc.CollectionGCPaused(1)
+		s.NoError(err)
+		s.False(paused, "pause expired")
+	})
+
+	s.Run("database_paused", func() {
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+		gc.pausedDatabase.Insert("default", time.Now().Add(time.Minute))
+		paused, err := gc.CollectionGCPaused(1)
+		s.NoError(err)
+		s.True(paused, "pause still effective")
+
+		gc.pausedDatabase.Insert("default", time.Now().Add(-time.Minute))
+		paused, err = gc.CollectionGCPaused(1)
+		s.NoError(err)
+		s.False(paused, "pause expired")
+	})
+
+	s.Run("collection_dropped", func() {
+		broker := broker.NewMockBroker(s.T())
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(2)).Return(&milvuspb.DescribeCollectionResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(2)),
+		}, nil).Once()
+		gc := newGarbageCollector(s.meta, newMockHandler(), broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+		paused, err := gc.CollectionGCPaused(2)
+		s.NoError(err, "collection not found error shall not be treated as error here")
+		s.False(paused, "collection meta dropped, not database pause logic shall applied")
+	})
+
+	s.Run("describe_fail", func() {
+		broker := broker.NewMockBroker(s.T())
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, int64(2)).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
+		gc := newGarbageCollector(s.meta, newMockHandler(), broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+		_, err := gc.CollectionGCPaused(2)
+		s.Error(err)
+	})
+}
+
+func (s *GarbageCollectorSuite) TestCleanEtcdWithPaused() {
+	s.Run("collection_paused", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		coll1 := int64(1001)
+		coll2 := int64(1002)
+		seg1 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  coll1,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     5000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+			},
+		}
+		seg2 := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 1,
+				CollectionID:  coll2,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     5000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+			},
+		}
+		s.meta.AddSegment(ctx, seg1)
+		s.meta.AddSegment(ctx, seg2)
+
+		gc := newGarbageCollector(s.meta, newMockHandler(), s.broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.pausedCollection.Insert(coll1, time.Now().Add(time.Minute))
+		gc.clearEtcd()
+
+		val := s.meta.GetSegment(segID)
+		s.NotNil(val)
+		val = s.meta.GetSegment(segID + 1)
+		s.Nil(val)
+	})
+
+	s.Run("describe_failed", func() {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		collID := int64(1001)
+		seg := &SegmentInfo{
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     5000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+			},
+		}
+		s.meta.AddSegment(ctx, seg)
+
+		broker := broker.NewMockBroker(s.T())
+		broker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("mocked"))
+
+		gc := newGarbageCollector(s.meta, newMockHandler(), broker, GcOption{
+			cli:              s.cli,
+			enabled:          true,
+			checkInterval:    time.Millisecond * 10,
+			scanInterval:     time.Hour * 7 * 24,
+			missingTolerance: time.Hour * 24,
+			dropTolerance:    time.Hour * 24,
+		})
+
+		gc.clearEtcd()
+
+		val := s.meta.GetSegment(segID)
+		s.NotNil(val)
 	})
 }
 
