@@ -1424,9 +1424,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		return merr.Status(err), nil
 	}
 
+	// in case of target node offline, when try to remove segment from leader's distribution, use wildcardNodeID(-1) to skip nodeID check
 	for _, action := range removeActions {
 		shardDelegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
-			NodeID:       action.GetNodeID(),
+			NodeID:       -1,
 			SegmentIDs:   []int64{action.GetSegmentID()},
 			Scope:        querypb.DataScope_Historical,
 			CollectionID: req.GetCollectionID(),
