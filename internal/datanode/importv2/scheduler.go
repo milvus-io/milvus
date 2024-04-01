@@ -136,10 +136,7 @@ func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
 		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
 			if f.Done() {
 				_, err := f.Await()
-				if err != nil {
-					return true
-				}
-				return false
+				return err != nil
 			}
 			return true
 		})
