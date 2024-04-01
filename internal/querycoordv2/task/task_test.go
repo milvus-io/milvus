@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -56,6 +58,7 @@ type distribution struct {
 
 type TaskSuite struct {
 	suite.Suite
+	testutils.EmbedEtcdUtil
 
 	// Data
 	collection      int64
@@ -85,6 +88,11 @@ type TaskSuite struct {
 
 func (suite *TaskSuite) SetupSuite() {
 	paramtable.Init()
+	addressList, err := suite.SetupEtcd()
+	suite.Require().NoError(err)
+	params := paramtable.Get()
+	params.Save(params.EtcdCfg.Endpoints.Key, strings.Join(addressList, ","))
+
 	suite.collection = 1000
 	suite.replica = newReplicaDefaultRG(10)
 	suite.subChannels = []string{
@@ -123,6 +131,11 @@ func (suite *TaskSuite) SetupSuite() {
 			segments: typeutil.NewSet[int64](),
 		},
 	}
+}
+
+func (suite *TaskSuite) TearDownSuite() {
+	suite.TearDownEmbedEtcd()
+	paramtable.Get().Reset(paramtable.Get().EtcdCfg.Endpoints.Key)
 }
 
 func (suite *TaskSuite) SetupTest() {
