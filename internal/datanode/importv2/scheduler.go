@@ -134,7 +134,14 @@ func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
 	for k, fs := range futures {
 		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
-			return !f.Done()
+			if f.Done() {
+				_, err := f.Await()
+				if err != nil {
+					return true
+				}
+				return false
+			}
+			return true
 		})
 		futures[k] = fs
 	}
