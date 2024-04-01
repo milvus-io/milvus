@@ -2,6 +2,7 @@ package delegator
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 
@@ -18,12 +19,12 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
-
-const defaultFilterRatio float64 = 0.5
 
 type PruneInfo struct {
 	filterRatio float64
@@ -102,11 +103,18 @@ func PruneSegments(ctx context.Context,
 			item.Segments = newSegments
 			sealedSegments[idx] = item
 		}
+		filterRate := float64(len(filteredSegments) / totalSegNum)
 		log.RatedInfo(30, "Pruned segment for search/query",
 			zap.Int("filtered_segment_num[excluded]", len(filteredSegments)),
 			zap.Int("total_segment_num", totalSegNum),
-			zap.Float32("filtered_rate", float32(len(filteredSegments)/totalSegNum)),
+			zap.Float64("filtered_rate", filterRate),
 		)
+		opType := metrics.SearchLabel
+		if queryReq != nil {
+			opType = metrics.QueryLabel
+		}
+		metrics.QueryNodeSegmentPrunedRate.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), opType).
+			Set(filterRate)
 	}
 }
 

@@ -692,6 +692,17 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	QueryNodeSegmentPrunedRate = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_pruned_rate",
+			Help:      "ratio of segments pruned when searching",
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -753,6 +764,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
+	registry.MustRegister(QueryNodeSegmentPrunedRate)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

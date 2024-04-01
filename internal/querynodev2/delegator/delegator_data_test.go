@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/cluster"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
@@ -984,6 +985,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 
 func (s *DelegatorDataSuite) TestLoadPartitionStats() {
 	segStats := make(map[UniqueID]storage.SegmentStats)
+	params.Params.Save(params.Params.QueryNodeCfg.EnableSegmentPrune.Key, "true")
 	centroid := []float32{1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0}
 	var segID int64 = 1
 	rows := 1990

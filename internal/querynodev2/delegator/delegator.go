@@ -765,6 +765,9 @@ func (sd *shardDelegator) Close() {
 // loading partitionStats will be a try-best process and will skip+logError when running across errors rather than
 // return an error status
 func (sd *shardDelegator) maybeReloadPartitionStats(ctx context.Context, partIDs ...UniqueID) {
+	if !paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
+		return
+	}
 	var partsToReload []UniqueID
 	if len(partIDs) > 0 {
 		partsToReload = partIDs
