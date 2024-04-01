@@ -119,7 +119,7 @@ func (at *analysisTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	err = analysisInfo.AppendSegmentSize(Params.DataCoordCfg.L2CompactionPreferSegmentSize.GetAsInt64())
+	err = analysisInfo.AppendSegmentSize(Params.DataCoordCfg.L2CompactionPreferSegmentSize.GetAsSize())
 	if err != nil {
 		log.Warn("append segment size failed", zap.Error(err))
 		return err

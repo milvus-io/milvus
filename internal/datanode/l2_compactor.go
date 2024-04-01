@@ -791,6 +791,8 @@ func (t *level2CompactionTask) packBuffersToSegments(ctx context.Context, buffer
 		return err
 	}
 	buffer.currentSegmentID = segmentID
+	buffer.currentSpillBinlogs = make(map[UniqueID]*datapb.FieldBinlog, 0)
+	buffer.currentSpillStatslogs = make([]*datapb.FieldBinlog, 0)
 	return nil
 }
 

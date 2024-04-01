@@ -57,7 +57,7 @@ func PruneSegments(ctx context.Context,
 	if typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
 		// parse searched vectors
 		var vectorsHolder commonpb.PlaceholderGroup
-		err := proto.Unmarshal(expr, &vectorsHolder)
+		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
 		if err != nil || len(vectorsHolder.GetPlaceholders()) == 0 {
 			return
 		}
@@ -98,12 +98,16 @@ func PruneSegments(ctx context.Context,
 
 	// 2. remove filtered segments from sealed segment list
 	if len(filteredSegments) > 0 {
+		var realFilteredSegments = 0
 		totalSegNum := 0
 		for idx, item := range sealedSegments {
 			newSegments := make([]SegmentEntry, 0)
 			totalSegNum += len(item.Segments)
 			for _, segment := range item.Segments {
-				if _, ok := filteredSegments[segment.SegmentID]; !ok {
+				_, exist := filteredSegments[segment.SegmentID]
+				if exist {
+					realFilteredSegments++
+				} else {
 					newSegments = append(newSegments, segment)
 				}
 			}
@@ -111,7 +115,7 @@ func PruneSegments(ctx context.Context,
 			sealedSegments[idx] = item
 		}
 		log.RatedInfo(30, "Pruned segment for search/query",
-			zap.Int("filtered_segment_num[excluded]", len(filteredSegments)),
+			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
 			zap.Float32("filtered_rate", float32(len(filteredSegments)/totalSegNum)),
 		)
@@ -160,6 +164,7 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 					}
 					// currently, we only support float vector and only one center one segment
 					if disErr != nil {
+						log.Error("calculate distance error", zap.Error(disErr))
 						neededSegments[segId] = struct{}{}
 						break
 					}
