@@ -20,6 +20,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -120,8 +121,14 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 		zap.Int64("leaderViewID", leaderView.ID),
 	)
 	ret := make([]task.Task, 0)
-	dist = utils.FindMaxVersionSegments(dist)
-	for _, s := range dist {
+
+	// skip set segment on stopping node to leader view
+	aliveNodeDist := lo.Filter(dist, func(s *meta.Segment, _ int) bool {
+		nodeInfo := c.nodeMgr.Get(s.Node)
+		return nodeInfo != nil && nodeInfo.GetState() != session.NodeStateStopping
+	})
+	latestNodeDist := utils.FindMaxVersionSegments(aliveNodeDist)
+	for _, s := range latestNodeDist {
 		segment := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
 		existInTarget := segment != nil
 		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
@@ -130,12 +137,14 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 			continue
 		}
 
+		// when segment's version in leader view doesn't match segment's version in dist
+		// which means leader view store wrong segment location in leader view, then we should update segment location and segment's version
 		version, ok := leaderView.Segments[s.GetID()]
-		if !ok || version.GetVersion() < s.Version {
+		if !ok || version.GetVersion() != s.Version {
 			log.RatedDebug(10, "leader checker append a segment to set",
 				zap.Int64("segmentID", s.GetID()),
 				zap.Int64("nodeID", s.Node))
-			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), s.Version)
+			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), time.Now().UnixNano())
 			t := task.NewLeaderTask(
 				ctx,
 				params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
@@ -145,8 +154,9 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 				leaderView.ID,
 				action,
 			)
-			// index task shall have lower or equal priority than balance task
-			t.SetPriority(task.TaskPriorityHigh)
+
+			// leader task shouldn't replace executing segment task
+			t.SetPriority(task.TaskPriorityLow)
 			t.SetReason("add segment to leader view")
 			ret = append(ret, t)
 		}
@@ -192,7 +202,8 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 			action,
 		)
 
-		t.SetPriority(task.TaskPriorityHigh)
+		// leader task shouldn't replace executing segment task
+		t.SetPriority(task.TaskPriorityLow)
 		t.SetReason("remove segment from leader view")
 		ret = append(ret, t)
 	}
