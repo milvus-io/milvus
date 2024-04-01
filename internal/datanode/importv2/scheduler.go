@@ -33,17 +33,16 @@ import (
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-type Executor interface {
+type Scheduler interface {
 	Start()
 	Slots() int64
 	Close()
 }
 
-type executor struct {
+type scheduler struct {
 	manager TaskManager
 	syncMgr syncmgr.SyncManager
 	cm      storage.ChunkManager
@@ -54,13 +53,12 @@ type executor struct {
 	closeChan chan struct{}
 }
 
-func NewExecutor(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.ChunkManager) Executor {
+func NewScheduler(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.ChunkManager) Scheduler {
 	pool := conc.NewPool[any](
-		hardware.GetCPUNum()*2,
-		conc.WithPreAlloc(false),
-		conc.WithDisablePurge(false),
+		paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt(),
+		conc.WithPreAlloc(true),
 	)
-	return &executor{
+	return &scheduler{
 		manager:   manager,
 		syncMgr:   syncMgr,
 		cm:        cm,
@@ -69,8 +67,8 @@ func NewExecutor(manager TaskManager, syncMgr syncmgr.SyncManager, cm storage.Ch
 	}
 }
 
-func (e *executor) Start() {
-	log.Info("start import executor")
+func (s *scheduler) Start() {
+	log.Info("start import scheduler")
 	var (
 		exeTicker = time.NewTicker(1 * time.Second)
 		logTicker = time.NewTicker(10 * time.Minute)
@@ -79,39 +77,46 @@ func (e *executor) Start() {
 	defer logTicker.Stop()
 	for {
 		select {
-		case <-e.closeChan:
-			log.Info("import executor exited")
+		case <-s.closeChan:
+			log.Info("import scheduler exited")
 			return
 		case <-exeTicker.C:
-			tasks := e.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
-			wg := &sync.WaitGroup{}
+			tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending))
+			futures := make(map[int64][]*conc.Future[any])
 			for _, task := range tasks {
-				wg.Add(1)
-				go func(task Task) {
-					defer wg.Done()
-					switch task.GetType() {
-					case PreImportTaskType:
-						e.PreImport(task)
-					case ImportTaskType:
-						e.Import(task)
-					}
-				}(task)
+				switch task.GetType() {
+				case PreImportTaskType:
+					fs := s.PreImport(task)
+					futures[task.GetTaskID()] = fs
+					tryFreeFutures(futures)
+				case ImportTaskType:
+					fs := s.Import(task)
+					futures[task.GetTaskID()] = fs
+					tryFreeFutures(futures)
+				}
 			}
-			wg.Wait()
+			for taskID, fs := range futures {
+				err := conc.AwaitAll(fs...)
+				if err != nil {
+					return
+				}
+				s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
+				log.Info("preimport/import done", zap.Int64("taskID", taskID))
+			}
 		case <-logTicker.C:
-			LogStats(e.manager)
+			LogStats(s.manager)
 		}
 	}
 }
 
-func (e *executor) Slots() int64 {
-	tasks := e.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress))
+func (s *scheduler) Slots() int64 {
+	tasks := s.manager.GetBy(WithStates(datapb.ImportTaskStateV2_Pending, datapb.ImportTaskStateV2_InProgress))
 	return paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64() - int64(len(tasks))
 }
 
-func (e *executor) Close() {
-	e.closeOnce.Do(func() {
-		close(e.closeChan)
+func (s *scheduler) Close() {
+	s.closeOnce.Do(func() {
+		close(s.closeChan)
 	})
 }
 
@@ -126,33 +131,46 @@ func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
 	return res
 }
 
-func (e *executor) handleErr(task Task, err error, msg string) {
-	log.Warn(msg, WrapLogFields(task, zap.Error(err))...)
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+func tryFreeFutures(futures map[int64][]*conc.Future[any]) {
+	for k, fs := range futures {
+		fs = lo.Filter(fs, func(f *conc.Future[any], _ int) bool {
+			if f.Done() {
+				_, err := f.Await()
+				return err != nil
+			}
+			return true
+		})
+		futures[k] = fs
+	}
 }
 
-func (e *executor) PreImport(task Task) {
+func (s *scheduler) handleErr(task Task, err error, msg string) {
+	log.Warn(msg, WrapLogFields(task, zap.Error(err))...)
+	s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+}
+
+func (s *scheduler) PreImport(task Task) []*conc.Future[any] {
 	bufferSize := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt()
 	log.Info("start to preimport", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 	files := lo.Map(task.(*PreImportTask).GetFileStats(),
 		func(fileStat *datapb.ImportFileStats, _ int) *internalpb.ImportFile {
 			return fileStat.GetImportFile()
 		})
 
 	fn := func(i int, file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
+		reader, err := importutilv2.NewReader(task.GetCtx(), s.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
 		if err != nil {
-			e.handleErr(task, err, "new reader failed")
+			s.handleErr(task, err, "new reader failed")
 			return err
 		}
 		defer reader.Close()
 		start := time.Now()
-		err = e.readFileStat(reader, task, i)
+		err = s.readFileStat(reader, task, i)
 		if err != nil {
-			e.handleErr(task, err, "preimport failed")
+			s.handleErr(task, err, "preimport failed")
 			return err
 		}
 		log.Info("read file stat done", WrapLogFields(task, zap.Strings("files", file.GetPaths()),
@@ -164,23 +182,16 @@ func (e *executor) PreImport(task Task) {
 	for i, file := range files {
 		i := i
 		file := file
-		f := e.pool.Submit(func() (any, error) {
+		f := s.pool.Submit(func() (any, error) {
 			err := fn(i, file)
 			return err, err
 		})
 		futures = append(futures, f)
 	}
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		return
-	}
-
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
-	log.Info("executor preimport done",
-		WrapLogFields(task, zap.Any("fileStats", task.(*PreImportTask).GetFileStats()))...)
+	return futures
 }
 
-func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
+func (s *scheduler) readFileStat(reader importutilv2.Reader, task Task, fileIdx int) error {
 	fileSize, err := reader.Size()
 	if err != nil {
 		return err
@@ -225,30 +236,30 @@ func (e *executor) readFileStat(reader importutilv2.Reader, task Task, fileIdx i
 		TotalMemorySize: int64(totalSize),
 		HashedStats:     hashedStats,
 	}
-	e.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
+	s.manager.Update(task.GetTaskID(), UpdateFileStat(fileIdx, stat))
 	return nil
 }
 
-func (e *executor) Import(task Task) {
+func (s *scheduler) Import(task Task) []*conc.Future[any] {
 	bufferSize := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt()
 	log.Info("start to import", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
+	s.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
 	req := task.(*ImportTask).req
 
 	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(task.GetCtx(), e.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
+		reader, err := importutilv2.NewReader(task.GetCtx(), s.cm, task.GetSchema(), file, task.GetOptions(), bufferSize)
 		if err != nil {
-			e.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
+			s.handleErr(task, err, fmt.Sprintf("new reader failed, file: %s", file.String()))
 			return err
 		}
 		defer reader.Close()
 		start := time.Now()
-		err = e.importFile(reader, task)
+		err = s.importFile(reader, task)
 		if err != nil {
-			e.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", file.String()))
+			s.handleErr(task, err, fmt.Sprintf("do import failed, file: %s", file.String()))
 			return err
 		}
 		log.Info("import file done", WrapLogFields(task, zap.Strings("files", file.GetPaths()),
@@ -259,24 +270,18 @@ func (e *executor) Import(task Task) {
 	futures := make([]*conc.Future[any], 0, len(req.GetFiles()))
 	for _, file := range req.GetFiles() {
 		file := file
-		f := e.pool.Submit(func() (any, error) {
+		f := s.pool.Submit(func() (any, error) {
 			err := fn(file)
 			return err, err
 		})
 		futures = append(futures, f)
 	}
-	err := conc.AwaitAll(futures...)
-	if err != nil {
-		return
-	}
-
-	e.manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Completed))
-	log.Info("import done", WrapLogFields(task)...)
+	return futures
 }
 
-func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
+func (s *scheduler) importFile(reader importutilv2.Reader, task Task) error {
 	iTask := task.(*ImportTask)
-	futures := make([]*conc.Future[error], 0)
+	syncFutures := make([]*conc.Future[error], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
 		data, err := reader.Read()
@@ -294,14 +299,14 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		if err != nil {
 			return err
 		}
-		fs, sts, err := e.Sync(iTask, hashedData)
+		fs, sts, err := s.Sync(iTask, hashedData)
 		if err != nil {
 			return err
 		}
-		futures = append(futures, fs...)
+		syncFutures = append(syncFutures, fs...)
 		syncTasks = append(syncTasks, sts...)
 	}
-	err := conc.AwaitAll(futures...)
+	err := conc.AwaitAll(syncFutures...)
 	if err != nil {
 		return err
 	}
@@ -310,13 +315,13 @@ func (e *executor) importFile(reader importutilv2.Reader, task Task) error {
 		if err != nil {
 			return err
 		}
-		e.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
+		s.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
 		log.Info("sync import data done", WrapLogFields(task, zap.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
 }
 
-func (e *executor) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future[error], []syncmgr.Task, error) {
+func (s *scheduler) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future[error], []syncmgr.Task, error) {
 	log.Info("start to sync import data", WrapLogFields(task)...)
 	futures := make([]*conc.Future[error], 0)
 	syncTasks := make([]syncmgr.Task, 0)
@@ -335,7 +340,7 @@ func (e *executor) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future
 				return nil, nil, err
 			}
 			segmentImportedSizes[segmentID] += size
-			future := e.syncMgr.SyncData(task.GetCtx(), syncTask)
+			future := s.syncMgr.SyncData(task.GetCtx(), syncTask)
 			futures = append(futures, future)
 			syncTasks = append(syncTasks, syncTask)
 		}

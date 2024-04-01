@@ -65,24 +65,24 @@ type mockReader struct {
 	io.Seeker
 }
 
-type ExecutorSuite struct {
+type SchedulerSuite struct {
 	suite.Suite
 
 	numRows int
 	schema  *schemapb.CollectionSchema
 
-	cm       storage.ChunkManager
-	reader   *importutilv2.MockReader
-	syncMgr  *syncmgr.MockSyncManager
-	manager  TaskManager
-	executor *executor
+	cm        storage.ChunkManager
+	reader    *importutilv2.MockReader
+	syncMgr   *syncmgr.MockSyncManager
+	manager   TaskManager
+	scheduler *scheduler
 }
 
-func (s *ExecutorSuite) SetupSuite() {
+func (s *SchedulerSuite) SetupSuite() {
 	paramtable.Init()
 }
 
-func (s *ExecutorSuite) SetupTest() {
+func (s *SchedulerSuite) SetupTest() {
 	s.numRows = 100
 	s.schema = &schemapb.CollectionSchema{
 		Fields: []*schemapb.FieldSchema{
@@ -116,7 +116,7 @@ func (s *ExecutorSuite) SetupTest() {
 
 	s.manager = NewTaskManager()
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
-	s.executor = NewExecutor(s.manager, s.syncMgr, nil).(*executor)
+	s.scheduler = NewScheduler(s.manager, s.syncMgr, nil).(*scheduler)
 }
 
 func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount int) *storage.InsertData {
@@ -226,7 +226,7 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 	return insertData
 }
 
-func (s *ExecutorSuite) TestExecutor_Slots() {
+func (s *SchedulerSuite) TestScheduler_Slots() {
 	preimportReq := &datapb.PreImportRequest{
 		JobID:        1,
 		TaskID:       2,
@@ -239,11 +239,11 @@ func (s *ExecutorSuite) TestExecutor_Slots() {
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
 
-	slots := s.executor.Slots()
+	slots := s.scheduler.Slots()
 	s.Equal(paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt64()-1, slots)
 }
 
-func (s *ExecutorSuite) TestExecutor_Start_Preimport() {
+func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
 	content := &sampleContent{
 		Rows: make([]sampleRow, 0),
 	}
@@ -262,7 +262,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport() {
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.executor.cm = cm
+	s.scheduler.cm = cm
 
 	preimportReq := &datapb.PreImportRequest{
 		JobID:        1,
@@ -276,14 +276,14 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport() {
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
 
-	go s.executor.Start()
-	defer s.executor.Close()
+	go s.scheduler.Start()
+	defer s.scheduler.Close()
 	s.Eventually(func() bool {
 		return s.manager.Get(preimportTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Completed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
-func (s *ExecutorSuite) TestExecutor_Start_Preimport_Failed() {
+func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 	content := &sampleContent{
 		Rows: make([]sampleRow, 0),
 	}
@@ -316,7 +316,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport_Failed() {
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.executor.cm = cm
+	s.scheduler.cm = cm
 
 	preimportReq := &datapb.PreImportRequest{
 		JobID:        1,
@@ -330,14 +330,14 @@ func (s *ExecutorSuite) TestExecutor_Start_Preimport_Failed() {
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
 
-	go s.executor.Start()
-	defer s.executor.Close()
+	go s.scheduler.Start()
+	defer s.scheduler.Close()
 	s.Eventually(func() bool {
 		return s.manager.Get(preimportTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Failed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
-func (s *ExecutorSuite) TestExecutor_Start_Import() {
+func (s *SchedulerSuite) TestScheduler_Start_Import() {
 	content := &sampleContent{
 		Rows: make([]sampleRow, 0),
 	}
@@ -355,7 +355,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Import() {
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.executor.cm = cm
+	s.scheduler.cm = cm
 
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
 		future := conc.Go(func() (error, error) {
@@ -391,14 +391,14 @@ func (s *ExecutorSuite) TestExecutor_Start_Import() {
 	importTask := NewImportTask(importReq)
 	s.manager.Add(importTask)
 
-	go s.executor.Start()
-	defer s.executor.Close()
+	go s.scheduler.Start()
+	defer s.scheduler.Close()
 	s.Eventually(func() bool {
 		return s.manager.Get(importTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Completed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
-func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
+func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 	content := &sampleContent{
 		Rows: make([]sampleRow, 0),
 	}
@@ -416,7 +416,7 @@ func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.executor.cm = cm
+	s.scheduler.cm = cm
 
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
 		future := conc.Go(func() (error, error) {
@@ -452,14 +452,14 @@ func (s *ExecutorSuite) TestExecutor_Start_Import_Failed() {
 	importTask := NewImportTask(importReq)
 	s.manager.Add(importTask)
 
-	go s.executor.Start()
-	defer s.executor.Close()
+	go s.scheduler.Start()
+	defer s.scheduler.Close()
 	s.Eventually(func() bool {
 		return s.manager.Get(importTask.GetTaskID()).GetState() == datapb.ImportTaskStateV2_Failed
 	}, 10*time.Second, 100*time.Millisecond)
 }
 
-func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
+func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 	importFile := &internalpb.ImportFile{
 		Paths: []string{"dummy.json"},
 	}
@@ -489,11 +489,11 @@ func (s *ExecutorSuite) TestExecutor_ReadFileStat() {
 	}
 	preimportTask := NewPreImportTask(preimportReq)
 	s.manager.Add(preimportTask)
-	err := s.executor.readFileStat(s.reader, preimportTask, 0)
+	err := s.scheduler.readFileStat(s.reader, preimportTask, 0)
 	s.NoError(err)
 }
 
-func (s *ExecutorSuite) TestExecutor_ImportFile() {
+func (s *SchedulerSuite) TestScheduler_ImportFile() {
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
 		future := conc.Go(func() (error, error) {
 			return nil, nil
@@ -540,10 +540,10 @@ func (s *ExecutorSuite) TestExecutor_ImportFile() {
 	}
 	importTask := NewImportTask(importReq)
 	s.manager.Add(importTask)
-	err := s.executor.importFile(s.reader, importTask)
+	err := s.scheduler.importFile(s.reader, importTask)
 	s.NoError(err)
 }
 
-func TestExecutor(t *testing.T) {
-	suite.Run(t, new(ExecutorSuite))
+func TestScheduler(t *testing.T) {
+	suite.Run(t, new(SchedulerSuite))
 }

@@ -375,7 +375,7 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 		PartitionID:    partitionID,
 		InsertChannel:  channelName,
 		NumOfRows:      0,
-		State:          commonpb.SegmentState_Flushed,
+		State:          commonpb.SegmentState_Importing,
 		MaxRowNum:      0,
 		Level:          datapb.SegmentLevel_L1,
 		LastExpireTime: math.MaxUint64,
