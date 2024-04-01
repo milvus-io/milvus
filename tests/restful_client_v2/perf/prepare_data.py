@@ -12,7 +12,7 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="127.0.0.1"):
+def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="127.0.0.1", inverted_index=True):
 
     connections.connect(
         host=host,
@@ -76,7 +76,8 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
     logger.info(f"inserted {data_size} vectors")
     collection.create_index("text_emb", index_params=index_params)
     collection.create_index("image_emb", index_params=index_params)
-    collection.create_index("text", index_params={"index_type": "INVERTED"})
+    if inverted_index:
+        collection.create_index("text", index_params={"index_type": "INVERTED"})
     index_list = utility.list_indexes(collection_name=collection_name)
     for index_name in index_list:
         progress = utility.index_building_progress(collection_name=collection_name, index_name=index_name)
@@ -95,6 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--minio_host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=19530)
+    parser.add_argument("--inverted_index", type=bool, default=False)
     parser.add_argument("--data_size", type=int, default=1000000)
     args = parser.parse_args()
-    prepare_data(host=args.host, port=args.port, data_size=args.data_size, minio_host=args.minio_host)
+    prepare_data(host=args.host, port=args.port, data_size=args.data_size, minio_host=args.minio_host, inverted_index=args.inverted_index)
