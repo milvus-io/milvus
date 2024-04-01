@@ -113,18 +113,18 @@ type collectionInfo struct {
 // with extra fields mapping and methods
 type schemaInfo struct {
 	*schemapb.CollectionSchema
-	fieldMap             *typeutil.ConcurrentMap[string, int64] // field name to id mapping
+	fieldMap             *typeutil.ConcurrentMap[string, *schemapb.FieldSchema] // field name to id mapping
 	hasPartitionKeyField bool
 	pkField              *schemapb.FieldSchema
 	schemaHelper         *typeutil.SchemaHelper
 }
 
 func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
-	fieldMap := typeutil.NewConcurrentMap[string, int64]()
+	fieldMap := typeutil.NewConcurrentMap[string, *schemapb.FieldSchema]()
 	hasPartitionkey := false
 	var pkField *schemapb.FieldSchema
 	for _, field := range schema.GetFields() {
-		fieldMap.Insert(field.GetName(), field.GetFieldID())
+		fieldMap.Insert(field.GetName(), field)
 		if field.GetIsPartitionKey() {
 			hasPartitionkey = true
 		}
@@ -144,6 +144,11 @@ func newSchemaInfo(schema *schemapb.CollectionSchema) *schemaInfo {
 }
 
 func (s *schemaInfo) MapFieldID(name string) (int64, bool) {
+	field, ok := s.GetFieldByName(name)
+	return field.GetFieldID(), ok
+}
+
+func (s *schemaInfo) GetFieldByName(name string) (*schemapb.FieldSchema, bool) {
 	return s.fieldMap.Get(name)
 }
 

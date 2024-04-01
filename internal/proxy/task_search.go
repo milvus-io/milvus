@@ -62,6 +62,7 @@ type searchTask struct {
 	requery                bool
 	partitionKeyMode       bool
 	enableMaterializedView bool
+	annsFieldName          string
 
 	userOutputFields []string
 
@@ -339,7 +340,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 
 	err = initSearchRequest(ctx, t, false)
 	if err != nil {
-		log.Debug("init search request failed", zap.Error(err))
+		log.Warn("init search request failed", zap.Error(err))
 		return err
 	}
 

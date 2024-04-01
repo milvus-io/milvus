@@ -21,6 +21,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+func processPlaceholderGroup(t *searchTask) ([]byte, error) {
+	annsField, ok := t.schema.GetFieldByName(t.annsFieldName)
+	if !ok {
+		return nil, merr.WrapErrParameterInvalidMsg("Search %s field does not exist in collection schema", t.annsFieldName)
+	}
+
+	fieldType := annsField.GetDataType()
+
+	phg := &commonpb.PlaceholderGroup{}
+	phgBytes := t.request.GetPlaceholderGroup()
+	err := proto.Unmarshal(phgBytes, phg)
+	if err != nil {
+		return nil, err
+	}
+	for _, phv := range phg.GetPlaceholders() {
+		// TODO fp32, fp16 and bf16 can be converted here
+		if int32(phv.GetType()) != int32(fieldType) {
+			return nil, merr.WrapErrParameterInvalidMsg("ANNS field %s type %s cannot be searched by input %s", t.annsFieldName, fieldType.String(), phv.GetType().String)
+		}
+	}
+	return phgBytes, nil
+}
+
 func initSearchRequest(ctx context.Context, t *searchTask, isHybrid bool) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
@@ -76,6 +99,7 @@ func initSearchRequest(ctx context.Context, t *searchTask, isHybrid bool) error 
 
 			annsFieldName = vecFields[0].Name
 		}
+		t.annsFieldName = annsFieldName
 		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams(), t.schema.CollectionSchema)
 		annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 		if queryInfo.GetGroupByFieldId() != -1 && isHybrid {
@@ -152,6 +176,11 @@ func initSearchRequest(ctx context.Context, t *searchTask, isHybrid bool) error 
 			return err
 		}
 
+		t.SearchRequest.PlaceholderGroup, err = processPlaceholderGroup(t)
+		if err != nil {
+			return err
+		}
+
 		log.Debug("proxy init search request",
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
@@ -160,8 +189,6 @@ func initSearchRequest(ctx context.Context, t *searchTask, isHybrid bool) error 
 	if deadline, ok := t.TraceCtx().Deadline(); ok {
 		t.SearchRequest.TimeoutTimestamp = tsoutil.ComposeTSByTime(deadline, 0)
 	}
-
-	t.SearchRequest.PlaceholderGroup = t.request.PlaceholderGroup
 
 	// Set username of this search request for feature like task scheduling.
 	if username, _ := GetCurUserFromContext(ctx); username != "" {
