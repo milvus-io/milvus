@@ -12,7 +12,7 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="127.0.0.1", inverted_index=True):
+def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="127.0.0.1", inverted_index=False):
 
     connections.connect(
         host=host,
