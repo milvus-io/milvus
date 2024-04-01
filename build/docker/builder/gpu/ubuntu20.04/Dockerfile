@@ -25,7 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends wget curl ca-ce
 RUN pip3 install conan==1.61.0
 
 RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    wget -qO- vcpkg.tar.gz https://github.com/milvus-io/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
 
 ENV VCPKG_FORCE_SYSTEM_BINARIES 1
@@ -81,9 +81,8 @@ COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
 RUN ls -la /entrypoint.sh
 
-RUN wget -qO- "https://github.com/jeffoverflow/autouseradd/releases/download/1.2.0/autouseradd-1.2.0-amd64.tar.gz" | tar xz -C / --strip-components 1
 
-RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini && \
+RUN wget -O /tini https://github.com/krallin/tini/releases/download/v0.19.0/tini-$TARGETARCH && \
     chmod +x /tini
 
 RUN curl https://sh.rustup.rs -sSf | \
@@ -91,5 +90,5 @@ RUN curl https://sh.rustup.rs -sSf | \
 
 ENV PATH=/root/.cargo/bin:$PATH
 
-ENTRYPOINT [ "/tini", "--", "autouseradd", "--user", "milvus", "--", "/entrypoint.sh" ]
-CMD ["tail", "-f", "/dev/null"]
+
+ENTRYPOINT ["/tini", "--"]
