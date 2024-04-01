@@ -382,8 +382,8 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 			}
 
 			clonedInfo := info.Clone()
-			clonedChild := child.Clone()
 			if child != nil {
+				clonedChild := child.Clone()
 				// child segment should decompress binlog path
 				binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
 				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, clonedChild.GetDeltalogs()...)
