@@ -841,4 +841,9 @@ SegmentGrowingImpl::mask_with_timestamps(BitsetType& bitset_chunk,
     // DO NOTHING
 }
 
+size_t
+SegmentGrowingImpl::GetMemoryUsageInBytes() const override {
+    return stats_.mem_size;
+}
+
 }  // namespace milvus::segcore

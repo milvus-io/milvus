@@ -1134,6 +1134,11 @@ SegmentSealedImpl::ClearData() {
     vector_indexings_.clear();
     insert_record_.clear();
     fields_.clear();
+
+    // only delete_record_ will be kept after clear data.
+    // TODO: we cannot keep consistent with delete_record_.mem_size now.
+    // mem_size operation should be changed into calculate at runtime but not a counter.
+    stats_.mem_size = deleted_record_.mem_size();
     auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
@@ -1459,13 +1464,17 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     for (int i = 0; i < size; i++) {
         ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
     }
-    auto end =
-        std::remove_if(ordering.begin(),
-                       ordering.end(),
-                       [&](const std::tuple<Timestamp, PkType>& record) {
-                           return !insert_record_.contain(std::get<1>(record));
-                       });
-    size = end - ordering.begin();
+    // if insert_record_ is empty (may be only-load meta but not data for cache), 
+    // skip the filtering.
+    if (!insert_record_.empty()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+    }
     ordering.resize(size);
     if (size == 0) {
         return SegcoreError::success();
@@ -1642,6 +1651,11 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
         LOG_WARN("fail to generate binlog index, because {}", e.what());
         return false;
     }
+}
+
+size_t
+SegmentGrowingImpl::GetMemoryUsageInBytes() const override {
+    return stats_.mem_size;
 }
 
 }  // namespace milvus::segcore

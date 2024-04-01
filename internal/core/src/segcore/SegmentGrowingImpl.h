@@ -305,6 +305,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable DeletedRecord deleted_record_;
 
     int64_t id_;
+
+    SegmentStats stats_;
 };
 
 const static IndexMetaPtr empty_index_meta =
