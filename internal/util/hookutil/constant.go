@@ -21,16 +21,15 @@ package hookutil
 var (
 	// WARN: Please DO NOT modify all constants.
 
-	OpTypeKey        = "op_type"
-	DatabaseKey      = "database"
-	UsernameKey      = "username"
-	DataSizeKey      = "data_size"
-	SuccessCntKey    = "success_cnt"
-	FailCntKey       = "fail_cnt"
-	RelatedCntKey    = "related_cnt"
-	StorageDetailKey = "storage_detail"
-	NodeIDKey        = "id"
-	DimensionKey     = "dim"
+	OpTypeKey     = "op_type"
+	DatabaseKey   = "database"
+	UsernameKey   = "username"
+	DataSizeKey   = "data_size"
+	SuccessCntKey = "success_cnt"
+	FailCntKey    = "fail_cnt"
+	RelatedCntKey = "related_cnt"
+	NodeIDKey     = "id"
+	DimensionKey  = "dim"
 
 	OpTypeInsert       = "insert"
 	OpTypeDelete       = "delete"
@@ -38,6 +37,5 @@ var (
 	OpTypeQuery        = "query"
 	OpTypeSearch       = "search"
 	OpTypeHybridSearch = "hybrid_search"
-	OpTypeStorage      = "storage"
 	OpTypeNodeID       = "node_id"
 )
