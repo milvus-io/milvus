@@ -117,6 +117,47 @@ func (_c *MockSegment_Collection_Call) RunAndReturn(run func() int64) *MockSegme
 	return _c
 }
 
+// DatabaseName provides a mock function with given fields:
+func (_m *MockSegment) DatabaseName() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockSegment_DatabaseName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DatabaseName'
+type MockSegment_DatabaseName_Call struct {
+	*mock.Call
+}
+
+// DatabaseName is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) DatabaseName() *MockSegment_DatabaseName_Call {
+	return &MockSegment_DatabaseName_Call{Call: _e.mock.On("DatabaseName")}
+}
+
+func (_c *MockSegment_DatabaseName_Call) Run(run func()) *MockSegment_DatabaseName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_DatabaseName_Call) Return(_a0 string) *MockSegment_DatabaseName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_DatabaseName_Call) RunAndReturn(run func() string) *MockSegment_DatabaseName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Delete provides a mock function with given fields: ctx, primaryKeys, timestamps
 func (_m *MockSegment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []uint64) error {
 	ret := _m.Called(ctx, primaryKeys, timestamps)
@@ -907,6 +948,47 @@ func (_c *MockSegment_Release_Call) Return() *MockSegment_Release_Call {
 }
 
 func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *MockSegment_Release_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResourceGroup provides a mock function with given fields:
+func (_m *MockSegment) ResourceGroup() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockSegment_ResourceGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResourceGroup'
+type MockSegment_ResourceGroup_Call struct {
+	*mock.Call
+}
+
+// ResourceGroup is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) ResourceGroup() *MockSegment_ResourceGroup_Call {
+	return &MockSegment_ResourceGroup_Call{Call: _e.mock.On("ResourceGroup")}
+}
+
+func (_c *MockSegment_ResourceGroup_Call) Run(run func()) *MockSegment_ResourceGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_ResourceGroup_Call) Return(_a0 string) *MockSegment_ResourceGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_ResourceGroup_Call) RunAndReturn(run func() string) *MockSegment_ResourceGroup_Call {
 	_c.Call.Return(run)
 	return _c
 }

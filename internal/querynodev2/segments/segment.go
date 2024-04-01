@@ -118,6 +118,14 @@ func (s *baseSegment) Partition() int64 {
 	return s.loadInfo.GetPartitionID()
 }
 
+func (s *baseSegment) DatabaseName() string {
+	return s.collection.GetDBName()
+}
+
+func (s *baseSegment) ResourceGroup() string {
+	return s.collection.GetResourceGroup()
+}
+
 func (s *baseSegment) Shard() string {
 	return s.loadInfo.GetInsertChannel()
 }

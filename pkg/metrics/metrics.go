@@ -82,6 +82,7 @@ const (
 	queryTypeLabelName       = "query_type"
 	collectionName           = "collection_name"
 	databaseLabelName        = "db_name"
+	resourceGroupLabelName   = "rg"
 	indexName                = "index_name"
 	isVectorIndex            = "is_vector_index"
 	segmentStateLabelName    = "segment_state"
