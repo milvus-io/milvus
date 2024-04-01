@@ -179,7 +179,9 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 		log.Debug("leader checker append a segment to remove",
 			zap.Int64("segmentID", sid),
 			zap.Int64("nodeID", s.NodeID))
-		action := task.NewLeaderAction(leaderView.ID, s.NodeID, task.ActionTypeReduce, leaderView.Channel, sid, 0)
+		// reduce leader action won't be execute on worker, in  order to remove segment from delegator success even when worker done
+		// set workerID to leader view's node
+		action := task.NewLeaderAction(leaderView.ID, leaderView.ID, task.ActionTypeReduce, leaderView.Channel, sid, 0)
 		t := task.NewLeaderTask(
 			ctx,
 			paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
