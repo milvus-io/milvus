@@ -8,7 +8,7 @@ class MilvusUser(HttpUser):
     @task
     def query(self):
         payload = {"collectionName": "test_restful_perf",
-                   "filter": 'text like "1%"',
+                   "filter": 'text like "99%"',
                    "outputFields": ["id"],
                    "limit": 100
                    }

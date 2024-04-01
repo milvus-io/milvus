@@ -48,7 +48,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
         for i in range(data_size):
             row = {
                 "id": i,
-                "text": str(i%10)+fake.text(max_nb_chars=1000),
+                "text": str(i%100)+fake.text(max_nb_chars=1000),
                 "text_emb": [random.random() for _ in range(768)],
                 "image_emb": [random.random() for _ in range(768)]
             }
