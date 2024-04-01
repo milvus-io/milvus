@@ -87,6 +87,9 @@ type collectionStates = map[milvuspb.QuotaState]commonpb.ErrorCode
 //
 // If necessary, user can also manually force to deny RW requests.
 type QuotaCenter struct {
+	ctx    context.Context
+	cancel context.CancelFunc
+
 	// clients
 	proxies    proxyutil.ProxyClientManagerInterface
 	queryCoord types.QueryCoordClient
@@ -112,11 +115,16 @@ type QuotaCenter struct {
 
 	stopOnce sync.Once
 	stopChan chan struct{}
+	wg       sync.WaitGroup
 }
 
 // NewQuotaCenter returns a new QuotaCenter.
 func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord types.QueryCoordClient, dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable) *QuotaCenter {
+	ctx, cancel := context.WithCancel(context.TODO())
+
 	return &QuotaCenter{
+		ctx:                 ctx,
+		cancel:              cancel,
 		proxies:             proxies,
 		queryCoord:          queryCoord,
 		dataCoord:           dataCoord,
@@ -132,8 +140,15 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord ty
 	}
 }
 
+func (q *QuotaCenter) Start() {
+	q.wg.Add(1)
+	go q.run()
+}
+
 // run starts the service of QuotaCenter.
 func (q *QuotaCenter) run() {
+	defer q.wg.Done()
+
 	interval := time.Duration(Params.QuotaConfig.QuotaCenterCollectInterval.GetAsFloat() * float64(time.Second))
 	log.Info("Start QuotaCenter", zap.Duration("collectInterval", interval))
 	ticker := time.NewTicker(interval)
@@ -165,9 +180,13 @@ func (q *QuotaCenter) run() {
 
 // stop would stop the service of QuotaCenter.
 func (q *QuotaCenter) stop() {
+	log.Info("stop quota center")
 	q.stopOnce.Do(func() {
-		q.stopChan <- struct{}{}
+		// cancel all blocking request to coord
+		q.cancel()
+		close(q.stopChan)
 	})
+	q.wg.Wait()
 }
 
 // clearMetrics removes all metrics stored in QuotaCenter.
@@ -182,7 +201,7 @@ func (q *QuotaCenter) syncMetrics() error {
 	oldDataNodes := typeutil.NewSet(lo.Keys(q.dataNodeMetrics)...)
 	oldQueryNodes := typeutil.NewSet(lo.Keys(q.queryNodeMetrics)...)
 	q.clearMetrics()
-	ctx, cancel := context.WithTimeout(context.Background(), GetMetricsTimeout)
+	ctx, cancel := context.WithTimeout(q.ctx, GetMetricsTimeout)
 	defer cancel()
 
 	group := &errgroup.Group{}
@@ -798,7 +817,7 @@ func (q *QuotaCenter) checkDiskQuota() {
 
 // setRates notifies Proxies to set rates for different rate types.
 func (q *QuotaCenter) setRates() error {
-	ctx, cancel := context.WithTimeout(context.Background(), SetRatesTimeout)
+	ctx, cancel := context.WithTimeout(q.ctx, SetRatesTimeout)
 	defer cancel()
 
 	toCollectionRate := func(collection int64, currentRates map[internalpb.RateType]ratelimitutil.Limit) *proxypb.CollectionRate {
