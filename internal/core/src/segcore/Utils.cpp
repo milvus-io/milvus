@@ -558,6 +558,15 @@ MergeDataArray(
                 auto obj = vector_array->mutable_float_vector();
                 obj->mutable_data()->Add(data + src_offset * dim,
                                          data + (src_offset + 1) * dim);
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                auto data = VEC_FIELD_DATA(src_field_data, float16);
+                auto obj = vector_array->mutable_float16_vector();
+                obj->assign(data, dim * sizeof(float16));
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                auto data = VEC_FIELD_DATA(src_field_data, bfloat16);
+                auto obj = vector_array->mutable_bfloat16_vector();
+                obj->assign(data, dim * sizeof(bfloat16));
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                 AssertInfo(
                     dim % 8 == 0,

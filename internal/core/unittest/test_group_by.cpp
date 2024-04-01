@@ -520,6 +520,10 @@ TEST(GroupBY, Reduce) {
     auto vec_fid = schema->AddDebugField(
         "fakevec", DataType::VECTOR_FLOAT, dim, knowhere::metric::L2);
     auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
+    auto fp16_fid = schema->AddDebugField(
+        "fakevec_fp16", DataType::VECTOR_FLOAT16, dim, knowhere::metric::L2);
+    auto bf16_fid = schema->AddDebugField(
+        "fakevec_bf16", DataType::VECTOR_BFLOAT16, dim, knowhere::metric::L2);
     schema->set_primary_field_id(int64_fid);
     auto segment1 = CreateSealedSegment(schema);
     auto segment2 = CreateSealedSegment(schema);
