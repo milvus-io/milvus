@@ -24,7 +24,7 @@ def main(host="127.0.0.1"):
     ]
     search_params = {"metric_type": "L2", "params": {"ef": 150}}
     nb = 1000
-    insert_data = [{"id": random.randint(0, 1000), "text": fake.text(), "text_emb": [random.random() for _ in range(768)], "image_emb": [random.random() for _ in range(768)]} for _ in range(nb)]
+    insert_data = [{"id": random.randint(0, 1000), "text_no_index": fake.text(), "text": fake.text(), "text_emb": [random.random() for _ in range(768)], "image_emb": [random.random() for _ in range(768)]} for _ in range(nb)]
 
     headers = {
         'Content-Type': 'application/json',
