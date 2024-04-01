@@ -28,6 +28,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -67,9 +68,44 @@ func TestQuotaCenter(t *testing.T) {
 
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
-		go quotaCenter.run()
+		quotaCenter.Start()
 		time.Sleep(10 * time.Millisecond)
 		quotaCenter.stop()
+	})
+
+	t.Run("test QuotaCenter stop", func(t *testing.T) {
+		qc := mocks.NewMockQueryCoordClient(t)
+		meta := mockrootcoord.NewIMetaTable(t)
+
+		paramtable.Get().Save(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key, "1")
+		defer paramtable.Get().Reset(paramtable.Get().QuotaConfig.QuotaCenterCollectInterval.Key)
+
+		qc.ExpectedCalls = nil
+		// mock query coord stuck for  at most 10s
+		qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gmr *milvuspb.GetMetricsRequest, co ...grpc.CallOption) (*milvuspb.GetMetricsResponse, error) {
+			counter := 0
+			for {
+				select {
+				case <-ctx.Done():
+					return nil, merr.ErrCollectionNotFound
+				default:
+					if counter < 10 {
+						time.Sleep(1 * time.Second)
+						counter++
+					}
+				}
+			}
+		})
+
+		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
+		quotaCenter.Start()
+		time.Sleep(3 * time.Second)
+
+		// assert stop won't stuck more than 5s
+		start := time.Now()
+		quotaCenter.stop()
+		assert.True(t, time.Since(start).Seconds() <= 5)
 	})
 
 	t.Run("test syncMetrics", func(t *testing.T) {

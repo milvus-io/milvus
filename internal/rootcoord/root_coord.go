@@ -697,7 +697,7 @@ func (c *Core) startInternal() error {
 	}
 
 	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		go c.quotaCenter.run()
+		c.quotaCenter.Start()
 	}
 
 	c.scheduler.Start()
