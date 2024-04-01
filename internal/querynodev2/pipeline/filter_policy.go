@@ -141,6 +141,7 @@ func (s *ExcludedSegments) CleanInvalid(ts uint64) {
 
 	for _, segmentID := range invalidExcludedInfos {
 		delete(s.segments, segmentID)
+		log.Info("clean segment excluded info", zap.Int64("segmentID", segmentID), zap.Uint64("ts", ts))
 	}
 	s.lastClean.Store(time.Now())
 }
