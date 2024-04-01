@@ -3,6 +3,7 @@ import time
 import pytest
 from pymilvus import DataType, RemoteBulkWriter, BulkFileType
 import numpy as np
+import random
 from pathlib import Path
 from faker import Faker
 from base.client_base import TestcaseBase
@@ -993,7 +994,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.array_float_field: [1.0, 2.0],
                     df.array_string_field: ["string1", "string2"],
                     df.array_bool_field: [True, False],
-                    df.vec_field: cf.gen_vectors(1, dim)[1][0]
+                    df.vec_field: [random.random() for _ in range(dim)]
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -1047,8 +1048,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
 
-
-
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
@@ -1087,7 +1086,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.float_field: 1.0,
                     df.string_field: "string",
                     df.json_field: {"key": "value"},
-                    df.vec_field: cf.gen_vectors(1, dim)[1][0]
+                    df.vec_field: [random.random() for _ in range(dim)]
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -1174,7 +1173,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 access_key="minioadmin",
                 secret_key="minioadmin",
             ),
-            file_type=BulkFileType.JSON,
+            file_type=BulkFileType.PARQUET,
         ) as remote_writer:
             for i in range(entities):
                 row = {
@@ -1187,7 +1186,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     df.array_float_field: [1.0, 2.0],
                     df.array_string_field: ["string1", "string2"],
                     df.array_bool_field: [True, False],
-                    df.vec_field: cf.gen_vectors(1, dim)[1][0]
+                    df.vec_field: [random.random() for _ in range(dim)]
                 }
                 if auto_id:
                     row.pop(df.pk_field)
