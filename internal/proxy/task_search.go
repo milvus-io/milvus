@@ -337,7 +337,7 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	log.Debug("translate output fields",
 		zap.Strings("output fields", t.request.GetOutputFields()))
 
-	err = initSearchRequest(ctx, t)
+	err = initSearchRequest(ctx, t, false)
 	if err != nil {
 		log.Debug("init search request failed", zap.Error(err))
 		return err

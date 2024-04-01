@@ -211,7 +211,7 @@ func (t *hybridSearchTask) PreExecute(ctx context.Context) error {
 			partitionKeyMode: t.partitionKeyMode,
 			resultBuf:        typeutil.NewConcurrentSet[*internalpb.SearchResults](),
 		}
-		err := initSearchRequest(ctx, t.searchTasks[index])
+		err := initSearchRequest(ctx, t.searchTasks[index], true)
 		if err != nil {
 			log.Debug("init hybrid search request failed", zap.Error(err))
 			return err
