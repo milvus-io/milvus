@@ -38,6 +38,7 @@
 #include "common/FieldDataInterface.h"
 #include "common/Array.h"
 #include "knowhere/dataset.h"
+#include "storage/prometheus_client.h"
 
 namespace milvus {
 
@@ -56,7 +57,8 @@ class ColumnBase {
     ColumnBase(size_t reserve, const FieldMeta& field_meta)
         : type_size_(datatype_is_sparse_vector(field_meta.get_data_type())
                          ? 1
-                         : field_meta.get_sizeof()) {
+                         : field_meta.get_sizeof()),
+          is_map_anonymous_(true) {
         SetPaddingSize(field_meta.get_data_type());
 
         if (datatype_is_variable(field_meta.get_data_type())) {
@@ -66,8 +68,9 @@ class ColumnBase {
         cap_size_ = type_size_ * reserve;
 
         // use anon mapping so we are able to free these memory with munmap only
+        size_t mapped_size = cap_size_ + padding_;
         data_ = static_cast<char*>(mmap(nullptr,
-                                        cap_size_ + padding_,
+                                        mapped_size,
                                         PROT_READ | PROT_WRITE,
                                         MAP_PRIVATE | MAP_ANON,
                                         -1,
@@ -75,7 +78,9 @@ class ColumnBase {
         AssertInfo(data_ != MAP_FAILED,
                    "failed to create anon map: {}, map_size={}",
                    strerror(errno),
-                   cap_size_ + padding_);
+                   mapped_size);
+
+        UpdateMetricWhenMmap(mapped_size);
     }
 
     // mmap mode ctor
@@ -83,21 +88,21 @@ class ColumnBase {
         : type_size_(datatype_is_sparse_vector(field_meta.get_data_type())
                          ? 1
                          : field_meta.get_sizeof()),
+          is_map_anonymous_(false),
           num_rows_(size / type_size_) {
         SetPaddingSize(field_meta.get_data_type());
 
         size_ = size;
         cap_size_ = size;
-        data_ = static_cast<char*>(mmap(nullptr,
-                                        cap_size_ + padding_,
-                                        PROT_READ,
-                                        MAP_SHARED,
-                                        file.Descriptor(),
-                                        0));
+        size_t mapped_size = cap_size_ + padding_;
+        data_ = static_cast<char*>(mmap(
+            nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
                    "failed to create file-backed map, err: {}",
                    strerror(errno));
-        madvise(data_, cap_size_ + padding_, MADV_WILLNEED);
+        madvise(data_, mapped_size, MADV_WILLNEED);
+
+        UpdateMetricWhenMmap(mapped_size);
     }
 
     // mmap mode ctor
@@ -108,27 +113,29 @@ class ColumnBase {
         : type_size_(datatype_sizeof(data_type, dim)),
           num_rows_(size / datatype_sizeof(data_type, dim)),
           size_(size),
-          cap_size_(size) {
+          cap_size_(size),
+          is_map_anonymous_(false) {
         SetPaddingSize(data_type);
 
-        data_ = static_cast<char*>(mmap(nullptr,
-                                        cap_size_ + padding_,
-                                        PROT_READ,
-                                        MAP_SHARED,
-                                        file.Descriptor(),
-                                        0));
+        size_t mapped_size = cap_size_ + padding_;
+        data_ = static_cast<char*>(mmap(
+            nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
                    "failed to create file-backed map, err: {}",
                    strerror(errno));
+
+        UpdateMetricWhenMmap(mapped_size);
     }
 
     virtual ~ColumnBase() {
         if (data_ != nullptr) {
-            if (munmap(data_, cap_size_ + padding_)) {
+            size_t mapped_size = cap_size_ + padding_;
+            if (munmap(data_, mapped_size)) {
                 AssertInfo(true,
                            "failed to unmap variable field, err={}",
                            strerror(errno));
             }
+            UpdateMetricWhenMunmap(mapped_size);
         }
     }
 
@@ -226,12 +233,14 @@ class ColumnBase {
             return;
         }
 
+        size_t new_mapped_size = new_size + padding_;
         auto data = static_cast<char*>(mmap(nullptr,
-                                            new_size + padding_,
+                                            new_mapped_size,
                                             PROT_READ | PROT_WRITE,
                                             MAP_PRIVATE | MAP_ANON,
                                             -1,
                                             0));
+        UpdateMetricWhenMmap(true, new_mapped_size);
 
         AssertInfo(data != MAP_FAILED,
                    "failed to expand map: {}, new_map_size={}",
@@ -242,7 +251,9 @@ class ColumnBase {
             std::memcpy(data, data_, size_);
             if (munmap(data_, cap_size_ + padding_)) {
                 auto err = errno;
-                munmap(data, new_size + padding_);
+                size_t mapped_size = new_size + padding_;
+                munmap(data, mapped_size);
+                UpdateMetricWhenMunmap(mapped_size);
 
                 AssertInfo(
                     false,
@@ -250,10 +261,12 @@ class ColumnBase {
                     strerror(err),
                     cap_size_ + padding_);
             }
+            UpdateMetricWhenMunmap(cap_size_ + padding_);
         }
 
         data_ = data;
         cap_size_ = new_size;
+        is_map_anonymous_ = true;
     }
 
     char* data_{nullptr};
@@ -265,6 +278,42 @@ class ColumnBase {
 
     // length in bytes
     size_t size_{0};
+
+ private:
+    void
+    UpdateMetricWhenMmap(size_t mmaped_size) {
+        UpdateMetricWhenMmap(is_map_anonymous_, mmaped_size);
+    }
+
+    void
+    UpdateMetricWhenMmap(bool is_map_anonymous, size_t mapped_size) {
+        if (is_map_anonymous) {
+            milvus::storage::internal_mmap_allocated_space_bytes_anon.Observe(
+                mapped_size);
+            milvus::storage::internal_mmap_in_used_space_bytes_anon.Increment(
+                mapped_size);
+        } else {
+            milvus::storage::internal_mmap_allocated_space_bytes_file.Observe(
+                mapped_size);
+            milvus::storage::internal_mmap_in_used_space_bytes_file.Increment(
+                mapped_size);
+        }
+    }
+
+    void
+    UpdateMetricWhenMunmap(size_t mapped_size) {
+        if (is_map_anonymous_) {
+            milvus::storage::internal_mmap_in_used_space_bytes_anon.Decrement(
+                mapped_size);
+        } else {
+            milvus::storage::internal_mmap_in_used_space_bytes_file.Decrement(
+                mapped_size);
+        }
+    }
+
+ private:
+    // is MAP_ANONYMOUS
+    bool is_map_anonymous_;
 };
 
 class Column : public ColumnBase {
