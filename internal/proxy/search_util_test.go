@@ -21,11 +21,12 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/stretchr/testify/suite"
 )
 
 type ProcessPlaceholderGroupSuite struct {
@@ -39,11 +40,13 @@ func (s *ProcessPlaceholderGroupSuite) SetupSuite() {
 		Fields: []*schemapb.FieldSchema{
 			{
 				Name:         "id",
+				FieldID:      100,
 				DataType:     schemapb.DataType_Int64,
 				IsPrimaryKey: true,
 			},
 			{
 				Name:     "float32",
+				FieldID:  101,
 				DataType: schemapb.DataType_FloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.DimKey, Value: "128"},
@@ -51,6 +54,7 @@ func (s *ProcessPlaceholderGroupSuite) SetupSuite() {
 			},
 			{
 				Name:     "float16",
+				FieldID:  102,
 				DataType: schemapb.DataType_Float16Vector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.DimKey, Value: "128"},
@@ -58,6 +62,7 @@ func (s *ProcessPlaceholderGroupSuite) SetupSuite() {
 			},
 			{
 				Name:     "bfloat16",
+				FieldID:  103,
 				DataType: schemapb.DataType_BFloat16Vector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.DimKey, Value: "128"},
@@ -65,6 +70,7 @@ func (s *ProcessPlaceholderGroupSuite) SetupSuite() {
 			},
 			{
 				Name:     "binary",
+				FieldID:  104,
 				DataType: schemapb.DataType_BinaryVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.DimKey, Value: "128"},
@@ -72,6 +78,7 @@ func (s *ProcessPlaceholderGroupSuite) SetupSuite() {
 			},
 			{
 				Name:     "sparse",
+				FieldID:  105,
 				DataType: schemapb.DataType_SparseFloatVector,
 				TypeParams: []*commonpb.KeyValuePair{
 					{Key: common.DimKey, Value: "128"},
@@ -180,6 +187,19 @@ func (s *ProcessPlaceholderGroupSuite) TestBadCase() {
 
 	s.Run("corrupted_placeholder_bytes", func() {
 		phgBytes := []byte("\x123\x456")
+		task := &searchTask{
+			request: &milvuspb.SearchRequest{
+				PlaceholderGroup: phgBytes,
+			},
+			schema:        newSchemaInfo(s.schema),
+			annsFieldName: "float32",
+		}
+		_, err := processPlaceholderGroup(task)
+		s.Error(err)
+	})
+
+	s.Run("vector_length_not_match", func() {
+		phgBytes := s.getVector(schemapb.DataType_FloatVector, 32)
 		task := &searchTask{
 			request: &milvuspb.SearchRequest{
 				PlaceholderGroup: phgBytes,

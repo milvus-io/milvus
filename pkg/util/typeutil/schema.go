@@ -1483,3 +1483,18 @@ func SparseFloatRowDim(row []byte) int64 {
 	}
 	return int64(SparseFloatRowIndexAt(row, SparseFloatRowElementCount(row)-1)) + 1
 }
+
+func VectorBytesLength(dataType schemapb.DataType, dim int) int {
+	switch dataType {
+	case schemapb.DataType_FloatVector:
+		return 4 * dim
+	case schemapb.DataType_Float16Vector:
+		return 2 * dim
+	case schemapb.DataType_BFloat16Vector:
+		return 2 * dim
+	case schemapb.DataType_BinaryVector:
+		return dim / 8
+	}
+
+	return 0
+}

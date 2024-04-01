@@ -27,11 +27,15 @@ func processPlaceholderGroup(t *searchTask) ([]byte, error) {
 		return nil, merr.WrapErrParameterInvalidMsg("Search %s field does not exist in collection schema", t.annsFieldName)
 	}
 
+	dim, err := t.schema.schemaHelper.GetVectorDimFromID(annsField.GetFieldID())
+	if err != nil {
+		return nil, err
+	}
 	fieldType := annsField.GetDataType()
 
 	phg := &commonpb.PlaceholderGroup{}
 	phgBytes := t.request.GetPlaceholderGroup()
-	err := proto.Unmarshal(phgBytes, phg)
+	err = proto.Unmarshal(phgBytes, phg)
 	if err != nil {
 		return nil, err
 	}
@@ -39,6 +43,16 @@ func processPlaceholderGroup(t *searchTask) ([]byte, error) {
 		// TODO fp32, fp16 and bf16 can be converted here
 		if int32(phv.GetType()) != int32(fieldType) {
 			return nil, merr.WrapErrParameterInvalidMsg("ANNS field %s type %s cannot be searched by input %s", t.annsFieldName, fieldType.String(), phv.GetType().String)
+		}
+		// sparse vector length is variable
+		if fieldType != schemapb.DataType_SparseFloatVector {
+			expectLength := typeutil.VectorBytesLength(fieldType, dim)
+			for _, value := range phv.Values {
+				if expectLength != len(value) {
+					return nil, merr.WrapErrParameterInvalidMsg("ANNS vector length not valid for %s, dim=%d, expect %d bytes, get %d bytes",
+						annsField.GetName(), dim, expectLength, len(value))
+				}
+			}
 		}
 	}
 	return phgBytes, nil
