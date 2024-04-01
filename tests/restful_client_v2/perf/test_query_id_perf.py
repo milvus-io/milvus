@@ -9,7 +9,7 @@ class MilvusUser(HttpUser):
     def query(self):
         payload = {"collectionName": "test_restful_perf",
                    "filter": f"id in {self.id_to_get}",
-                   "outputFields": ["*"],
+                   "outputFields": ["id"],
                    "limit": 100
                    }
         with self.client.post("/v2/vectordb/entities/query",

@@ -12,7 +12,7 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="127.0.0.1", inverted_index=False):
+def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="127.0.0.1", inverted_index=True):
 
     connections.connect(
         host=host,
@@ -96,7 +96,7 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="127.0.0.1")
     parser.add_argument("--minio_host", type=str, default="127.0.0.1")
     parser.add_argument("--port", type=int, default=19530)
-    parser.add_argument("--inverted_index", type=bool, default=False)
+    parser.add_argument("--inverted_index", type=bool, default=True)
     parser.add_argument("--data_size", type=int, default=1000000)
     args = parser.parse_args()
     prepare_data(host=args.host, port=args.port, data_size=args.data_size, minio_host=args.minio_host, inverted_index=args.inverted_index)
