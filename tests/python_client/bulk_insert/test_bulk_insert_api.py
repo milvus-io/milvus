@@ -1138,7 +1138,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             )
             task_ids.append(task_id)
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=90
+            task_ids=task_ids, timeout=90
         )
         log.info(f"bulk insert state:{success}")
 
