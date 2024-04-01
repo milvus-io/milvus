@@ -145,7 +145,6 @@ func (m *meta) reloadFromKV() error {
 			metrics.FlushedSegmentFileNum.WithLabelValues(metrics.DeleteFileLabel).Observe(float64(deleteFileNum))
 		}
 	}
-	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(numStoredRows))
 
 	channelCPs, err := m.catalog.ListChannelCheckpoint(m.ctx)
 	if err != nil {
@@ -1430,7 +1429,6 @@ func (s *segMetricMutation) commit() {
 			metrics.DataCoordNumSegments.WithLabelValues(state, level).Add(float64(change))
 		}
 	}
-	metrics.DataCoordNumStoredRowsCounter.WithLabelValues().Add(float64(s.rowCountAccChange))
 }
 
 // append updates current segMetricMutation when segment state change happens.
