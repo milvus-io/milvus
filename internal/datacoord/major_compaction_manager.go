@@ -222,7 +222,7 @@ func (t *MajorCompactionManager) runCompactionJob(job *MajorCompactionJob) error
 			return err
 		}
 		plan.PlanID = planId
-		plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32()
+		plan.TimeoutInSeconds = Params.DataCoordCfg.L2CompactionTimeoutInSeconds.GetAsInt32()
 
 		// major compaction firstly analyze the plan, then decide whether to execute compaction
 		if typeutil.IsVectorType(job.clusteringKeyType) {

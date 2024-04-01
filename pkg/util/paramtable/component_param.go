@@ -2559,6 +2559,7 @@ type dataCoordConfig struct {
 	L2CompactionPreferSegmentSize     ParamItem `refreshable:"true"`
 	L2CompactionMaxSegmentSize        ParamItem `refreshable:"true"`
 	L2CompactionMaxTrainSize          ParamItem `refreshable:"true"`
+	L2CompactionTimeoutInSeconds      ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -2970,6 +2971,13 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "512m",
 	}
 	p.L2CompactionNewDataSizeThreshold.Init(base.mgr)
+
+	p.L2CompactionTimeoutInSeconds = ParamItem{
+		Key:          "dataCoord.compaction.l2.timeout",
+		Version:      "2.4.0",
+		DefaultValue: "3600",
+	}
+	p.L2CompactionTimeoutInSeconds.Init(base.mgr)
 
 	p.L2CompactionDropTolerance = ParamItem{
 		Key:          "dataCoord.compaction.l2.dropTolerance",

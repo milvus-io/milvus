@@ -208,6 +208,8 @@ func (t *level2CompactionTask) init() error {
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTs = tsoutil.GetCurrentTime()
+	log.Info("l2 compaction memory buffer", zap.Int64("size", t.getMemoryBufferSize()))
+
 	return nil
 }
 
