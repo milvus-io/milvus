@@ -47,7 +47,11 @@ ParsePlaceholderGroup(const Plan* plan,
         auto& field_meta = plan->schema_[field_id];
         AssertInfo(static_cast<int>(field_meta.get_data_type()) ==
                        static_cast<int>(info.type()),
-                   "vector type must be the same");
+                   "vector type must be the same, field {} - type {}, search "
+                   "info type {}",
+                   field_meta.get_name().get(),
+                   field_meta.get_data_type(),
+                   static_cast<DataType>(info.type()));
         element.num_of_queries_ = info.values_size();
         AssertInfo(element.num_of_queries_ > 0, "must have queries");
         if (info.type() ==
