@@ -43,7 +43,7 @@ struct BuildIndexInfo {
     milvus::OptFieldT opt_fields;
 };
 
-struct AnalysisInfo {
+struct AnalyzeInfo {
     int64_t collection_id;
     int64_t partition_id;
     // int64_t segment_id;  // no use
@@ -53,6 +53,7 @@ struct AnalysisInfo {
     int64_t version;
     std::map<int64_t, std::vector<std::string>> insert_files; // segment_id->files
     //    std::vector<std::string> insert_files;
+    std::map<int64_t, int64_t> num_rows;
     milvus::storage::StorageConfig storage_config;
     milvus::Config config;
     std::string field_name;

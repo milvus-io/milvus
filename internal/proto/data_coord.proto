@@ -856,5 +856,5 @@ message ClusteringCompactionInfo {
   repeated CompactionPlan completedPlans = 11;
   repeated CompactionPlan failedPlans = 12;
   repeated CompactionPlan timeoutPlans = 13;
-  int64 analysisTaskID = 14;
+  int64 analyzeTaskID = 14;
 }

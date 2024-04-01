@@ -140,104 +140,86 @@ func (i *IndexNode) deleteAllIndexTasks() []*indexTaskInfo {
 	return deleted
 }
 
-type analysisTaskInfo struct {
-	cancel                context.CancelFunc
-	state                 commonpb.IndexState
-	failReason            string
-	centroidsFile         string
-	segmentsOffsetMapping map[int64]string
-	indexStoreVersion     int64
+type analyzeTaskInfo struct {
+	cancel            context.CancelFunc
+	state             indexpb.JobState
+	failReason        string
+	indexStoreVersion int64
 }
 
-func (i *IndexNode) loadOrStoreAnalysisTask(clusterID string, taskID UniqueID, info *analysisTaskInfo) *analysisTaskInfo {
+func (i *IndexNode) loadOrStoreAnalyzeTask(clusterID string, taskID UniqueID, info *analyzeTaskInfo) *analyzeTaskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	key := taskKey{ClusterID: clusterID, BuildID: taskID}
-	oldInfo, ok := i.analysisTasks[key]
+	oldInfo, ok := i.analyzeTasks[key]
 	if ok {
 		return oldInfo
 	}
-	i.analysisTasks[key] = info
+	i.analyzeTasks[key] = info
 	return nil
 }
 
-func (i *IndexNode) loadAnalysisTaskState(clusterID string, taskID UniqueID) commonpb.IndexState {
+func (i *IndexNode) loadAnalyzeTaskState(clusterID string, taskID UniqueID) indexpb.JobState {
 	key := taskKey{ClusterID: clusterID, BuildID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	task, ok := i.analysisTasks[key]
+	task, ok := i.analyzeTasks[key]
 	if !ok {
-		return commonpb.IndexState_IndexStateNone
+		return indexpb.JobState_JobStateNone
 	}
 	return task.state
 }
 
-func (i *IndexNode) storeAnalysisTaskState(clusterID string, taskID UniqueID, state commonpb.IndexState, failReason string) {
+func (i *IndexNode) storeAnalyzeTaskState(clusterID string, taskID UniqueID, state indexpb.JobState, failReason string) {
 	key := taskKey{ClusterID: clusterID, BuildID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	if task, ok := i.analysisTasks[key]; ok {
-		log.Info("IndexNode store analysis task state", zap.String("clusterID", clusterID), zap.Int64("taskID", taskID),
+	if task, ok := i.analyzeTasks[key]; ok {
+		log.Info("IndexNode store analyze task state", zap.String("clusterID", clusterID), zap.Int64("taskID", taskID),
 			zap.String("state", state.String()), zap.String("fail reason", failReason))
 		task.state = state
 		task.failReason = failReason
 	}
 }
 
-func (i *IndexNode) foreachAnalysisTaskInfo(fn func(clusterID string, taskID UniqueID, info *analysisTaskInfo)) {
+func (i *IndexNode) foreachAnalyzeTaskInfo(fn func(clusterID string, taskID UniqueID, info *analyzeTaskInfo)) {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	for key, info := range i.analysisTasks {
+	for key, info := range i.analyzeTasks {
 		fn(key.ClusterID, key.BuildID, info)
 	}
 }
 
-func (i *IndexNode) getAnalysisTaskInfo(clusterID string, taskID UniqueID) *analysisTaskInfo {
+func (i *IndexNode) getAnalyzeTaskInfo(clusterID string, taskID UniqueID) *analyzeTaskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 
-	return i.analysisTasks[taskKey{ClusterID: clusterID, BuildID: taskID}]
+	return i.analyzeTasks[taskKey{ClusterID: clusterID, BuildID: taskID}]
 }
 
-func (i *IndexNode) storeAnalysisStatistic(
-	clusterID string,
-	taskID UniqueID,
-	centroidsFile string,
-	segmentsOffsetMapping map[int64]string,
-) {
-	key := taskKey{ClusterID: clusterID, BuildID: taskID}
+func (i *IndexNode) deleteAnalyzeTaskInfos(ctx context.Context, keys []taskKey) []*analyzeTaskInfo {
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
-	if info, ok := i.analysisTasks[key]; ok {
-		info.centroidsFile = centroidsFile
-		info.segmentsOffsetMapping = segmentsOffsetMapping
-		return
-	}
-}
-
-func (i *IndexNode) deleteAnalysisTaskInfos(ctx context.Context, keys []taskKey) []*analysisTaskInfo {
-	i.stateLock.Lock()
-	defer i.stateLock.Unlock()
-	deleted := make([]*analysisTaskInfo, 0, len(keys))
+	deleted := make([]*analyzeTaskInfo, 0, len(keys))
 	for _, key := range keys {
-		info, ok := i.analysisTasks[key]
+		info, ok := i.analyzeTasks[key]
 		if ok {
 			deleted = append(deleted, info)
-			delete(i.analysisTasks, key)
-			log.Ctx(ctx).Info("delete analysis task infos",
+			delete(i.analyzeTasks, key)
+			log.Ctx(ctx).Info("delete analyze task infos",
 				zap.String("clusterID", key.ClusterID), zap.Int64("taskID", key.BuildID))
 		}
 	}
 	return deleted
 }
 
-func (i *IndexNode) deleteAllAnalysisTasks() []*analysisTaskInfo {
+func (i *IndexNode) deleteAllAnalyzeTasks() []*analyzeTaskInfo {
 	i.stateLock.Lock()
-	deletedTasks := i.analysisTasks
-	i.analysisTasks = make(map[taskKey]*analysisTaskInfo)
+	deletedTasks := i.analyzeTasks
+	i.analyzeTasks = make(map[taskKey]*analyzeTaskInfo)
 	i.stateLock.Unlock()
 
-	deleted := make([]*analysisTaskInfo, 0, len(deletedTasks))
+	deleted := make([]*analyzeTaskInfo, 0, len(deletedTasks))
 	for _, info := range deletedTasks {
 		deleted = append(deleted, info)
 	}
@@ -253,8 +235,8 @@ func (i *IndexNode) hasInProgressTask() bool {
 		}
 	}
 
-	for _, info := range i.analysisTasks {
-		if info.state == commonpb.IndexState_InProgress {
+	for _, info := range i.analyzeTasks {
+		if info.state == indexpb.JobState_JobStateInProgress {
 			return true
 		}
 	}
@@ -285,8 +267,8 @@ func (i *IndexNode) waitTaskFinish() {
 					log.Warn("progress task", zap.Any("info", info))
 				}
 			}
-			for _, info := range i.analysisTasks {
-				if info.state == commonpb.IndexState_InProgress {
+			for _, info := range i.analyzeTasks {
+				if info.state == indexpb.JobState_JobStateInProgress {
 					log.Warn("progress task", zap.Any("info", info))
 				}
 			}

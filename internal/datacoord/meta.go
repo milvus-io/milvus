@@ -71,7 +71,8 @@ type meta struct {
 	chunkManager          storage.ChunkManager
 	clusteringCompactions map[string]*datapb.ClusteringCompactionInfo
 
-	indexMeta *indexMeta
+	indexMeta   *indexMeta
+	analyzeMeta *analyzeMeta
 }
 
 type channelCPs struct {
@@ -1594,7 +1595,7 @@ func (m *meta) GetClonedClusteringCompactionInfos() []*datapb.ClusteringCompacti
 			CompletedPlans:  info.GetCompletedPlans(),
 			FailedPlans:     info.GetFailedPlans(),
 			TimeoutPlans:    info.GetTimeoutPlans(),
-			AnalysisTaskID:  info.GetAnalysisTaskID(),
+			AnalyzeTaskID:   info.GetAnalyzeTaskID(),
 		}
 		infos = append(infos, cloneInfo)
 	}

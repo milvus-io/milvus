@@ -693,7 +693,8 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 }
 
 func TestMeta_GetSegmentIndexes(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	m := createMeta(catalog, nil, createIndexMeta(catalog))
 
 	t.Run("success", func(t *testing.T) {
 		segIndexes := m.indexMeta.getSegmentIndexes(segID)

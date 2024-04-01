@@ -332,7 +332,7 @@ func TestIndexBuildTaskV2Suite(t *testing.T) {
 	suite.Run(t, new(IndexBuildTaskV2Suite))
 }
 
-type AnalysisTaskSuite struct {
+type AnalyzeTaskSuite struct {
 	suite.Suite
 	schema       *schemapb.CollectionSchema
 	collectionID int64
@@ -342,7 +342,7 @@ type AnalysisTaskSuite struct {
 	taskID       int64
 }
 
-func (suite *AnalysisTaskSuite) SetupSuite() {
+func (suite *AnalyzeTaskSuite) SetupSuite() {
 	paramtable.Init()
 	suite.collectionID = 1000
 	suite.partitionID = 1001
@@ -351,7 +351,7 @@ func (suite *AnalysisTaskSuite) SetupSuite() {
 	suite.taskID = 1004
 }
 
-func (suite *AnalysisTaskSuite) SetupTest() {
+func (suite *AnalyzeTaskSuite) SetupTest() {
 	suite.schema = &schemapb.CollectionSchema{
 		Name:        "test",
 		Description: "test",
@@ -366,7 +366,7 @@ func (suite *AnalysisTaskSuite) SetupTest() {
 	}
 }
 
-func (suite *AnalysisTaskSuite) serializeData() ([]*storage.Blob, error) {
+func (suite *AnalyzeTaskSuite) serializeData() ([]*storage.Blob, error) {
 	insertCodec := storage.NewInsertCodecWithSchema(&etcdpb.CollectionMeta{
 		Schema: suite.schema,
 	})
@@ -382,9 +382,9 @@ func (suite *AnalysisTaskSuite) serializeData() ([]*storage.Blob, error) {
 	})
 }
 
-func (suite *AnalysisTaskSuite) TestAnalysis() {
+func (suite *AnalyzeTaskSuite) TestAnalyze() {
 	ctx, cancel := context.WithCancel(context.Background())
-	req := &indexpb.AnalysisRequest{
+	req := &indexpb.AnalyzeRequest{
 		ClusterID:    "test",
 		TaskID:       1,
 		CollectionID: suite.collectionID,
@@ -417,7 +417,7 @@ func (suite *AnalysisTaskSuite) TestAnalysis() {
 	err = cm.Write(ctx, dataPath, blobs[0].Value)
 	suite.NoError(err)
 
-	t := &analysisTask{
+	t := &analyzeTask{
 		ident:    "",
 		cancel:   cancel,
 		ctx:      ctx,
@@ -435,6 +435,6 @@ func (suite *AnalysisTaskSuite) TestAnalysis() {
 	//suite.NoError(err)
 }
 
-func TestAnalysisTaskSuite(t *testing.T) {
-	suite.Run(t, new(AnalysisTaskSuite))
+func TestAnalyzeTaskSuite(t *testing.T) {
+	suite.Run(t, new(AnalyzeTaskSuite))
 }

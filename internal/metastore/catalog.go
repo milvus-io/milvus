@@ -153,9 +153,9 @@ type DataCoordCatalog interface {
 	SaveClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
 	DropClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
 
-	ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error)
-	SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error
-	DropAnalysisTask(ctx context.Context, taskID typeutil.UniqueID) error
+	ListAnalyzeTasks(ctx context.Context) ([]*model.AnalyzeTask, error)
+	SaveAnalyzeTask(ctx context.Context, task *model.AnalyzeTask) error
+	DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error
 }
 
 type QueryCoordCatalog interface {

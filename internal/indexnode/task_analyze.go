@@ -22,24 +22,23 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-	"github.com/milvus-io/milvus/internal/util/analysiscgowrapper"
+	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
-type analysisTask struct {
+type analyzeTask struct {
 	ident  string
 	ctx    context.Context
 	cancel context.CancelFunc
-	req    *indexpb.AnalysisRequest
+	req    *indexpb.AnalyzeRequest
 
 	tr       *timerecord.TimeRecorder
 	queueDur time.Duration
 	node     *IndexNode
-	analysis analysiscgowrapper.CodecAnalysis
+	analyze  analyzecgowrapper.CodecAnalyze
 
 	segmentIDs []int64
 	dataPaths  map[int64][]string
@@ -47,19 +46,19 @@ type analysisTask struct {
 	endTime    int64
 }
 
-func (at *analysisTask) Ctx() context.Context {
+func (at *analyzeTask) Ctx() context.Context {
 	return at.ctx
 }
-func (at *analysisTask) Name() string {
+func (at *analyzeTask) Name() string {
 	return at.ident
 }
 
-func (at *analysisTask) Prepare(ctx context.Context) error {
+func (at *analyzeTask) Prepare(ctx context.Context) error {
 	at.queueDur = at.tr.RecordSpan()
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
-	log.Info("Begin to prepare analysis task")
+	log.Info("Begin to prepare analyze task")
 
 	at.segmentIDs = make([]int64, 0)
 	at.dataPaths = make(map[int64][]string)
@@ -73,36 +72,36 @@ func (at *analysisTask) Prepare(ctx context.Context) error {
 		}
 	}
 
-	log.Info("Successfully prepare analysis task", zap.Any("dataPaths", at.dataPaths))
+	log.Info("Successfully prepare analyze task", zap.Any("dataPaths", at.dataPaths))
 	return nil
 }
 
-func (at *analysisTask) LoadData(ctx context.Context) error {
+func (at *analyzeTask) LoadData(ctx context.Context) error {
 	// Load data in segcore
 	return nil
 }
-func (at *analysisTask) BuildIndex(ctx context.Context) error {
+func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 	var err error
-	var analysisInfo *analysiscgowrapper.AnalysisInfo
+	var analyzeInfo *analyzecgowrapper.AnalyzeInfo
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 
-	log.Info("Begin to build analysis task")
-	analysisInfo, err = analysiscgowrapper.NewAnalysisInfo(at.req.GetStorageConfig())
-	defer analysiscgowrapper.DeleteAnalysisInfo(analysisInfo)
+	log.Info("Begin to build analyze task")
+	analyzeInfo, err = analyzecgowrapper.NewAnalyzeInfo(at.req.GetStorageConfig())
+	defer analyzecgowrapper.DeleteAnalyzeInfo(analyzeInfo)
 	if err != nil {
-		log.Warn("create analysis info failed", zap.Error(err))
+		log.Warn("create analyze info failed", zap.Error(err))
 		return err
 	}
-	err = analysisInfo.AppendAnalysisFieldMetaInfo(at.req.GetCollectionID(), at.req.GetPartitionID(),
+	err = analyzeInfo.AppendAnalyzeFieldMetaInfo(at.req.GetCollectionID(), at.req.GetPartitionID(),
 		at.req.GetFieldID(), at.req.GetFieldType(), at.req.GetFieldName(), at.req.GetDim())
 	if err != nil {
 		log.Warn("append field meta failed", zap.Error(err))
 		return err
 	}
 
-	err = analysisInfo.AppendAnalysisInfo(at.req.GetTaskID(), at.req.GetVersion())
+	err = analyzeInfo.AppendAnalyzeInfo(at.req.GetTaskID(), at.req.GetVersion())
 	if err != nil {
 		log.Warn("append index meta failed", zap.Error(err))
 		return err
@@ -110,7 +109,7 @@ func (at *analysisTask) BuildIndex(ctx context.Context) error {
 
 	for segID, paths := range at.dataPaths {
 		for _, path := range paths {
-			err = analysisInfo.AppendSegmentInsertFile(segID, path)
+			err = analyzeInfo.AppendSegmentInsertFile(segID, path)
 			if err != nil {
 				log.Warn("append insert binlog path failed", zap.Error(err))
 				return err
@@ -118,44 +117,44 @@ func (at *analysisTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	err = analysisInfo.AppendSegmentSize(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())
+	err = analyzeInfo.AppendSegmentSize(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())
 	if err != nil {
 		log.Warn("append segment size failed", zap.Error(err))
 		return err
 	}
 
-	err = analysisInfo.AppendTrainSize(Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize())
+	err = analyzeInfo.AppendTrainSize(Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize())
 	if err != nil {
 		log.Warn("append train size failed", zap.Error(err))
 		return err
 	}
 
-	at.analysis, err = analysiscgowrapper.Analysis(ctx, analysisInfo)
+	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
 	if err != nil {
-		if at.analysis != nil && at.analysis.CleanLocalData() != nil {
-			log.Error("failed to clean cached data on disk after analysis failed",
+		if at.analyze != nil && at.analyze.CleanLocalData() != nil {
+			log.Error("failed to clean cached data on disk after analyze failed",
 				zap.Int64("buildID", at.req.GetTaskID()),
 				zap.Int64("index version", at.req.GetVersion()))
 		}
-		log.Error("failed to analysis data", zap.Error(err))
+		log.Error("failed to analyze data", zap.Error(err))
 		return err
 	}
 
-	analysisLatency := at.tr.RecordSpan()
-	log.Info("analysis done", zap.Int64("analysis cost", analysisLatency.Milliseconds()))
+	analyzeLatency := at.tr.RecordSpan()
+	log.Info("analyze done", zap.Int64("analyze cost", analyzeLatency.Milliseconds()))
 	return nil
 }
 
-func (at *analysisTask) SaveIndexFiles(ctx context.Context) error {
+func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 	gc := func() {
-		if err := at.analysis.Delete(); err != nil {
+		if err := at.analyze.Delete(); err != nil {
 			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-	centroidsFile, segmentsOffsetMapping, err := at.analysis.UpLoad(at.segmentIDs)
+	err := at.analyze.UpLoad()
 	if err != nil {
 		log.Error("failed to upload index", zap.Error(err))
 		gc()
@@ -164,36 +163,35 @@ func (at *analysisTask) SaveIndexFiles(ctx context.Context) error {
 	//encodeIndexFileDur := at.tr.Record("index serialize and upload done")
 	//metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
 
-	// early release analysis for gc, and we can ensure that Delete is idempotent.
+	// early release analyze for gc, and we can ensure that Delete is idempotent.
 	gc()
 
 	at.endTime = time.Now().UnixMicro()
-	at.node.storeAnalysisStatistic(at.req.GetClusterID(), at.req.GetTaskID(), centroidsFile, segmentsOffsetMapping)
 	//saveIndexFileDur := at.tr.RecordSpan()
 	//metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
 	at.tr.Elapse("index building all done")
-	log.Info("Successfully save analysis files")
+	log.Info("Successfully save analyze files")
 	return nil
 }
 
-func (at *analysisTask) OnEnqueue(ctx context.Context) error {
+func (at *analyzeTask) OnEnqueue(ctx context.Context) error {
 	at.queueDur = 0
 	at.tr.RecordSpan()
 	at.startTime = time.Now().UnixMicro()
-	log.Ctx(ctx).Info("IndexNode analysisTask enqueued", zap.String("clusterID", at.req.GetClusterID()),
+	log.Ctx(ctx).Info("IndexNode analyzeTask enqueued", zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("taskID", at.req.GetTaskID()))
 	return nil
 }
 
-func (at *analysisTask) SetState(state commonpb.IndexState, failReason string) {
-	at.node.storeAnalysisTaskState(at.req.GetClusterID(), at.req.GetTaskID(), state, failReason)
+func (at *analyzeTask) SetState(state indexpb.JobState, failReason string) {
+	at.node.storeAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID(), state, failReason)
 }
 
-func (at *analysisTask) GetState() commonpb.IndexState {
-	return at.node.loadAnalysisTaskState(at.req.GetClusterID(), at.req.GetTaskID())
+func (at *analyzeTask) GetState() indexpb.JobState {
+	return at.node.loadAnalyzeTaskState(at.req.GetClusterID(), at.req.GetTaskID())
 }
 
-func (at *analysisTask) Reset() {
+func (at *analyzeTask) Reset() {
 	at.ident = ""
 	at.ctx = nil
 	at.cancel = nil

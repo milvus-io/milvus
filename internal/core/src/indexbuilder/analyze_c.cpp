@@ -15,7 +15,7 @@
 #include <malloc.h>
 #endif
 
-#include "analysis_c.h"
+#include "analyze_c.h"
 #include "common/type_c.h"
 #include "type_c.h"
 #include "types.h"
@@ -27,18 +27,18 @@
 using namespace milvus;
 
 CStatus
-Analysis(CAnalysis* res_analysis, CAnalysisInfo c_analysis_info) {
+Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
     try {
-        auto analysis_info = (AnalysisInfo*)c_analysis_info;
-        auto field_type = analysis_info->field_type;
+        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
+        auto field_type = analyze_info->field_type;
 
         milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = analysis_info->field_type;
+        index_info.field_type = analyze_info->field_type;
 
-        auto& config = analysis_info->config;
-        config["insert_files"] = analysis_info->insert_files;
-        config["segment_size"] = analysis_info->segment_size;
-        config["train_size"] = analysis_info->train_size;
+        auto& config = analyze_info->config;
+        config["insert_files"] = analyze_info->insert_files;
+        config["segment_size"] = analyze_info->segment_size;
+        config["train_size"] = analyze_info->train_size;
 
         // get index type
         //        auto index_type = milvus::index::GetValueFromConfig<std::string>(
@@ -46,7 +46,7 @@ Analysis(CAnalysis* res_analysis, CAnalysisInfo c_analysis_info) {
         //        AssertInfo(index_type.has_value(), "index type is empty");
         //        index_info.index_type = index_type.value();
 
-        auto engine_version = analysis_info->index_engine_version;
+        auto engine_version = analyze_info->index_engine_version;
 
         //        index_info.index_engine_version = engine_version;
         config[milvus::index::INDEX_ENGINE_VERSION] =
@@ -61,17 +61,17 @@ Analysis(CAnalysis* res_analysis, CAnalysisInfo c_analysis_info) {
         //        }
 
         // init file manager
-        milvus::storage::FieldDataMeta field_meta{analysis_info->collection_id,
-                                                  analysis_info->partition_id,
+        milvus::storage::FieldDataMeta field_meta{analyze_info->collection_id,
+                                                  analyze_info->partition_id,
                                                   0,
-                                                  analysis_info->field_id};
+                                                  analyze_info->field_id};
 
         milvus::storage::IndexMeta index_meta{0,
-                                              analysis_info->field_id,
-                                              analysis_info->task_id,
-                                              analysis_info->version};
+                                              analyze_info->field_id,
+                                              analyze_info->task_id,
+                                              analyze_info->version};
         auto chunk_manager =
-            milvus::storage::CreateChunkManager(analysis_info->storage_config);
+            milvus::storage::CreateChunkManager(analyze_info->storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
@@ -79,9 +79,9 @@ Analysis(CAnalysis* res_analysis, CAnalysisInfo c_analysis_info) {
         auto compactionJob =
             milvus::indexbuilder::IndexFactory::GetInstance()
                 .CreateCompactionJob(
-                    analysis_info->field_type, config, fileManagerContext);
+                    analyze_info->field_type, config, fileManagerContext);
         compactionJob->Train();
-        *res_analysis = compactionJob.release();
+        *res_analyze = compactionJob.release();
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -95,14 +95,13 @@ Analysis(CAnalysis* res_analysis, CAnalysisInfo c_analysis_info) {
 }
 
 CStatus
-DeleteAnalysis(CAnalysis analysis) {
+DeleteAnalyze(CAnalyze analyze) {
     auto status = CStatus();
     try {
-        AssertInfo(analysis,
-                   "failed to delete analysis, passed index was null");
-        auto real_analysis =
-            reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analysis);
-        delete real_analysis;
+        AssertInfo(analyze, "failed to delete analyze, passed index was null");
+        auto real_analyze =
+            reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analyze);
+        delete real_analyze;
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -113,15 +112,15 @@ DeleteAnalysis(CAnalysis analysis) {
 }
 
 CStatus
-CleanAnalysisLocalData(CAnalysis analysis) {
+CleanAnalyzeLocalData(CAnalyze analyze) {
     auto status = CStatus();
     try {
-        AssertInfo(analysis, "failed to build analysis, passed index was null");
-        auto real_analysis =
-            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(analysis);
-        auto cAnalysis =
-            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_analysis);
-        cAnalysis->CleanLocalData();
+        AssertInfo(analyze, "failed to build analyze, passed index was null");
+        auto real_analyze =
+            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(analyze);
+        auto cAnalyze =
+            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_analyze);
+        cAnalyze->CleanLocalData();
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -132,11 +131,10 @@ CleanAnalysisLocalData(CAnalysis analysis) {
 }
 
 CStatus
-NewAnalysisInfo(CAnalysisInfo* c_analysis_info,
-                CStorageConfig c_storage_config) {
+NewAnalyzeInfo(CAnalyzeInfo* c_analyze_info, CStorageConfig c_storage_config) {
     try {
-        auto analysis_info = std::make_unique<AnalysisInfo>();
-        auto& storage_config = analysis_info->storage_config;
+        auto analyze_info = std::make_unique<AnalyzeInfo>();
+        auto& storage_config = analyze_info->storage_config;
         storage_config.address = std::string(c_storage_config.address);
         storage_config.bucket_name = std::string(c_storage_config.bucket_name);
         storage_config.access_key_id =
@@ -158,7 +156,7 @@ NewAnalysisInfo(CAnalysisInfo* c_analysis_info,
         storage_config.useVirtualHost = c_storage_config.useVirtualHost;
         storage_config.requestTimeoutMs = c_storage_config.requestTimeoutMs;
 
-        *c_analysis_info = analysis_info.release();
+        *c_analyze_info = analyze_info.release();
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -172,27 +170,27 @@ NewAnalysisInfo(CAnalysisInfo* c_analysis_info,
 }
 
 void
-DeleteAnalysisInfo(CAnalysisInfo c_analysis_info) {
-    auto info = (AnalysisInfo*)c_analysis_info;
+DeleteAnalyzeInfo(CAnalyzeInfo c_analyze_info) {
+    auto info = (AnalyzeInfo*)c_analyze_info;
     delete info;
 }
 
 CStatus
-AppendAnalysisFieldMetaInfo(CAnalysisInfo c_analysis_info,
-                            int64_t collection_id,
+AppendAnalyzeFieldMetaInfo(CAnalyzeInfo c_analyze_info,
+                           int64_t collection_id,
                             int64_t partition_id,
                     int64_t field_id,
                     const char* field_name,
                     enum CDataType field_type,
                     int64_t dim) {
     try {
-        auto analysis_info = (AnalysisInfo*)c_analysis_info;
-        analysis_info->collection_id = collection_id;
-        analysis_info->partition_id = partition_id;
-        analysis_info->field_id = field_id;
-        analysis_info->field_type = milvus::DataType(field_type);
-        analysis_info->field_name = field_name;
-        analysis_info->dim = dim;
+        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
+        analyze_info->collection_id = collection_id;
+        analyze_info->partition_id = partition_id;
+        analyze_info->field_id = field_id;
+        analyze_info->field_type = milvus::DataType(field_type);
+        analyze_info->field_name = field_name;
+        analyze_info->dim = dim;
 
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -201,13 +199,13 @@ AppendAnalysisFieldMetaInfo(CAnalysisInfo c_analysis_info,
 }
 
 CStatus
-AppendAnalysisInfo(CAnalysisInfo c_analysis_info,
-                   int64_t task_id,
+AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
+                  int64_t task_id,
                    int64_t version) {
     try {
-        auto analysis_info = (AnalysisInfo*)c_analysis_info;
-        analysis_info->task_id = task_id;
-        analysis_info->version = version;
+        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
+        analyze_info->task_id = task_id;
+        analyze_info->version = version;
 
         auto status = CStatus();
         status.error_code = Success;
@@ -222,10 +220,10 @@ AppendAnalysisInfo(CAnalysisInfo c_analysis_info,
 }
 
 CStatus
-AppendSegmentID(CAnalysisInfo c_analysis_info, int64_t segment_id) {
+AppendSegmentID(CAnalyzeInfo c_analyze_info, int64_t segment_id) {
     try {
-        auto analysis_info = (AnalysisInfo*)c_analysis_info;
-        //        analysis_info->segment_ids.emplace_back(segment_id);
+        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
+        //        analyze_info->segment_ids.emplace_back(segment_id);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -237,14 +235,14 @@ AppendSegmentID(CAnalysisInfo c_analysis_info, int64_t segment_id) {
 }
 
 CStatus
-AppendSegmentInsertFile(CAnalysisInfo c_analysis_info,
+AppendSegmentInsertFile(CAnalyzeInfo c_analyze_info,
                         int64_t segID,
                         const char* c_file_path) {
     try {
-        auto analysis_info = (AnalysisInfo*)c_analysis_info;
+        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
         std::string insert_file_path(c_file_path);
-        analysis_info->insert_files[segID].emplace_back(insert_file_path);
-        //        analysis_info->insert_files.emplace_back(insert_file_path);
+        analyze_info->insert_files[segID].emplace_back(insert_file_path);
+        //        analyze_info->insert_files.emplace_back(insert_file_path);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -256,10 +254,10 @@ AppendSegmentInsertFile(CAnalysisInfo c_analysis_info,
 }
 
 CStatus
-AppendSegmentSize(CAnalysisInfo c_analysis_info, int64_t size) {
+AppendSegmentSize(CAnalyzeInfo c_analyze_info, int64_t size) {
     try {
-        auto analysis_info = (AnalysisInfo*)c_analysis_info;
-        analysis_info->segment_size = size;
+        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
+        analyze_info->segment_size = size;
 
         auto status = CStatus();
         status.error_code = Success;
@@ -271,10 +269,10 @@ AppendSegmentSize(CAnalysisInfo c_analysis_info, int64_t size) {
 }
 
 CStatus
-AppendTrainSize(CAnalysisInfo c_analysis_info, int64_t size) {
+AppendTrainSize(CAnalyzeInfo c_analyze_info, int64_t size) {
     try {
-        auto analysis_info = (AnalysisInfo*)c_analysis_info;
-        analysis_info->train_size = size;
+        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
+        analyze_info->train_size = size;
 
         auto status = CStatus();
         status.error_code = Success;
@@ -286,16 +284,16 @@ AppendTrainSize(CAnalysisInfo c_analysis_info, int64_t size) {
 }
 
 CStatus
-SerializeAnalysisAndUpLoad(CAnalysis analysis) {
+SerializeAnalyzeAndUpLoad(CAnalyze analyze) {
     auto status = CStatus();
     try {
-        AssertInfo(analysis,
-                   "failed to serialize analysis to binary set, passed index "
+        AssertInfo(analyze,
+                   "failed to serialize analyze to binary set, passed index "
                    "was null");
-        auto real_analysis =
-            reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analysis);
+        auto real_analyze =
+            reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analyze);
         auto binary =
-            std::make_unique<knowhere::BinarySet>(real_analysis->Upload());
+            std::make_unique<knowhere::BinarySet>(real_analyze->Upload());
         //        *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";
