@@ -28,7 +28,7 @@ const (
 	ImportTaskPrefix               = MetaPrefix + "/import-task"
 	PreImportTaskPrefix            = MetaPrefix + "/preimport-task"
 	ClusteringCompactionInfoPrefix = MetaPrefix + "/clustering-compaction"
-	AnalysisTaskPrefix             = MetaPrefix + "/analysis-task"
+	AnalyzeTaskPrefix              = MetaPrefix + "/analyze-task"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

@@ -21,28 +21,27 @@ extern "C" {
 #include "indexbuilder/type_c.h"
 
 CStatus
-Analysis(CAnalysis* res_analysis, CAnalysisInfo c_analysis_info);
+Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info);
 
 //CStatus
-//CreateMajorCompaction(CAnalysis* res_analysis,
+//CreateMajorCompaction(CAnalyze* res_analyze,
 //                      CBuildIndexInfo c_build_index_info);
 
 CStatus
-DeleteAnalysis(CAnalysis analysis);
+DeleteAnalyze(CAnalyze analyze);
 
 CStatus
-CleanAnalysisLocalData(CAnalysis analysis);
+CleanAnalyzeLocalData(CAnalyze analyze);
 
 CStatus
-NewAnalysisInfo(CAnalysisInfo* c_analysis_info,
-                CStorageConfig c_storage_config);
+NewAnalyzeInfo(CAnalyzeInfo* c_analyze_info, CStorageConfig c_storage_config);
 
 void
-DeleteAnalysisInfo(CAnalysisInfo c_analysis_info);
+DeleteAnalyzeInfo(CAnalyzeInfo c_analyze_info);
 
 CStatus
-AppendAnalysisFieldMetaInfo(CAnalysisInfo c_analysis_info,
-                            int64_t collection_id,
+AppendAnalyzeFieldMetaInfo(CAnalyzeInfo c_analyze_info,
+                           int64_t collection_id,
                             int64_t partition_id,
                             int64_t field_id,
                             const char* field_name,
@@ -50,27 +49,27 @@ AppendAnalysisFieldMetaInfo(CAnalysisInfo c_analysis_info,
                             int64_t dim);
 
 CStatus
-AppendAnalysisInfo(CAnalysisInfo c_analysis_info,
-                   int64_t task_id,
+AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
+                  int64_t task_id,
                    int64_t version);
 
 // no use
 CStatus
-AppendSegmentID(CAnalysisInfo c_analysis_info, int64_t segment_id);
+AppendSegmentID(CAnalyzeInfo c_analyze_info, int64_t segment_id);
 
 CStatus
-AppendSegmentInsertFile(CAnalysisInfo c_analysis_info,
+AppendSegmentInsertFile(CAnalyzeInfo c_analyze_info,
                         int64_t segID,
                         const char* file_path);
 
 CStatus
-AppendSegmentSize(CAnalysisInfo c_analysis_info, int64_t size);
+AppendSegmentSize(CAnalyzeInfo c_analyze_info, int64_t size);
 
 CStatus
-AppendTrainSize(CAnalysisInfo c_analysis_info, int64_t size);
+AppendTrainSize(CAnalyzeInfo c_analyze_info, int64_t size);
 
 CStatus
-SerializeAnalysisAndUpLoad(CAnalysis analysis);
+SerializeAnalyzeAndUpLoad(CAnalyze analyze);
 
 CStatus
 GetCentroidsFile(const char* file);

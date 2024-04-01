@@ -20,9 +20,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/stretchr/testify/suite"
-
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/types/known/anypb"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -152,16 +152,16 @@ func (suite *IndexNodeServiceSuite) Test_AbnormalIndexNode() {
 	err = merr.CheckRPCCall(configurationResp, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 
-	status, err = in.Analysis(ctx, &indexpb.AnalysisRequest{})
+	status, err = in.CreateJobV2(ctx, &indexpb.CreateJobV2Request{})
 	err = merr.CheckRPCCall(status, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 
-	queryAnalysisResultResp, err := in.QueryAnalysisResult(ctx, &indexpb.QueryAnalysisResultRequest{})
-	err = merr.CheckRPCCall(queryAnalysisResultResp, err)
+	queryAnalyzeResultResp, err := in.QueryJobsV2(ctx, &indexpb.QueryJobsV2Request{})
+	err = merr.CheckRPCCall(queryAnalyzeResultResp, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 
-	dropAnalysisTasksResp, err := in.DropAnalysisTasks(ctx, &indexpb.DropAnalysisTasksRequest{})
-	err = merr.CheckRPCCall(dropAnalysisTasksResp, err)
+	dropAnalyzeTasksResp, err := in.DropJobsV2(ctx, &indexpb.DropJobsV2Request{})
+	err = merr.CheckRPCCall(dropAnalyzeTasksResp, err)
 	suite.ErrorIs(err, merr.ErrServiceNotReady)
 }
 
@@ -173,8 +173,8 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 
 	in.UpdateStateCode(commonpb.StateCode_Healthy)
 
-	suite.Run("Analysis", func() {
-		req := &indexpb.AnalysisRequest{
+	suite.Run("CreateJobV2", func() {
+		req := &indexpb.AnalyzeRequest{
 			ClusterID:    suite.cluster,
 			TaskID:       suite.taskID,
 			CollectionID: suite.collectionID,
@@ -190,29 +190,41 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 			StorageConfig: nil,
 		}
 
-		resp, err := in.Analysis(ctx, req)
+		anyParams, err := anypb.New(req)
+		suite.NoError(err)
+
+		resp, err := in.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
+			ClusterID: suite.cluster,
+			TaskID:    suite.taskID,
+			Job: &indexpb.JobDescriptor{
+				JobType:    indexpb.JobType_JobTypeAnalyzeJob,
+				Parameters: anyParams,
+			},
+		})
 		err = merr.CheckRPCCall(resp, err)
 		suite.NoError(err)
 	})
 
-	suite.Run("QueryAnalysisTask", func() {
-		req := &indexpb.QueryAnalysisResultRequest{
+	suite.Run("QueryJobsV2", func() {
+		req := &indexpb.QueryJobsV2Request{
 			ClusterID: suite.cluster,
 			TaskIDs:   []int64{suite.taskID},
+			JobType:   indexpb.JobType_JobTypeIndexJob,
 		}
 
-		resp, err := in.QueryAnalysisResult(ctx, req)
+		resp, err := in.QueryJobsV2(ctx, req)
 		err = merr.CheckRPCCall(resp, err)
 		suite.NoError(err)
 	})
 
-	suite.Run("DropAnalysisTask", func() {
-		req := &indexpb.DropAnalysisTasksRequest{
+	suite.Run("DropJobsV2", func() {
+		req := &indexpb.DropJobsV2Request{
 			ClusterID: suite.cluster,
 			TaskIDs:   []int64{suite.taskID},
+			JobType:   indexpb.JobType_JobTypeIndexJob,
 		}
 
-		resp, err := in.DropAnalysisTasks(ctx, req)
+		resp, err := in.DropJobsV2(ctx, req)
 		err = merr.CheckRPCCall(resp, err)
 		suite.NoError(err)
 	})

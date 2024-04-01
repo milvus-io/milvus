@@ -14,33 +14,27 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package datacoord
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
-	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/types"
 )
 
-var (
-	errCancel      = fmt.Errorf("canceled")
-	diskUsageRatio = 4.0
-)
-
-type Blob = storage.Blob
-
-type task interface {
-	Ctx() context.Context
-	Name() string
-	Prepare(context.Context) error
-	LoadData(context.Context) error
-	BuildIndex(context.Context) error
-	SaveIndexFiles(context.Context) error
-	OnEnqueue(context.Context) error
+type Task interface {
+	GetTaskID() int64
+	GetNodeID() int64
+	ResetNodeID()
+	CheckTaskHealthy(mt *meta) bool
 	SetState(state indexpb.JobState, failReason string)
 	GetState() indexpb.JobState
-	Reset()
+	GetFailReason() string
+	UpdateVersion(ctx context.Context, meta *meta) error
+	UpdateMetaBuildingState(nodeID int64, meta *meta) error
+	AssignTask(ctx context.Context, client types.IndexNodeClient, dependency *taskScheduler) bool
+	QueryResult(ctx context.Context, client types.IndexNodeClient)
+	DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool
+	SetJobInfo(meta *meta) error
 }

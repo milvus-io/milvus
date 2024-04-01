@@ -23,10 +23,11 @@ import (
 	"sync"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
+
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -45,7 +46,7 @@ type ClusteringCompactionManager struct {
 	allocator         allocator
 	compactionHandler compactionPlanContext
 	scheduler         Scheduler
-	analysisScheduler *analysisTaskScheduler
+	analyzeScheduler  *taskScheduler
 
 	forceMu sync.Mutex
 	quit    chan struct{}
@@ -61,14 +62,14 @@ func newClusteringCompactionManager(
 	meta *meta,
 	allocator allocator,
 	compactionHandler compactionPlanContext,
-	analysisScheduler *analysisTaskScheduler,
+	analyzeScheduler *taskScheduler,
 ) *ClusteringCompactionManager {
 	return &ClusteringCompactionManager{
 		ctx:               ctx,
 		meta:              meta,
 		allocator:         allocator,
 		compactionHandler: compactionHandler,
-		analysisScheduler: analysisScheduler,
+		analyzeScheduler:  analyzeScheduler,
 	}
 }
 
@@ -258,7 +259,7 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 	for _, plan := range plans {
 		segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
 		start := time.Now()
-		planId, analysisTaskID, err := t.allocator.allocN(2)
+		planId, analyzeTaskID, err := t.allocator.allocN(2)
 		if err != nil {
 			return err
 		}
@@ -267,34 +268,40 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 
 		// clustering compaction firstly analyze the plan, then decide whether to execute compaction
 		if typeutil.IsVectorType(job.clusteringKeyType) {
-			newAnalysisTask := &model.AnalysisTask{
+			newAnalyzeTask := &model.AnalyzeTask{
 				CollectionID: job.collectionID,
 				PartitionID:  plan.SegmentBinlogs[0].PartitionID,
 				FieldID:      job.clusteringKeyID,
 				FieldName:    job.clusteringKeyName,
 				FieldType:    job.clusteringKeyType,
 				SegmentIDs:   segIDs,
-				TaskID:       analysisTaskID,
+				TaskID:       analyzeTaskID,
 			}
-			err = t.analysisScheduler.analysisMeta.AddAnalysisTask(newAnalysisTask)
+			err = t.meta.analyzeMeta.AddAnalyzeTask(newAnalyzeTask)
 			if err != nil {
-				log.Warn("failed to create analysis task", zap.Int64("planID", plan.PlanID), zap.Error(err))
+				log.Warn("failed to create analyze task", zap.Int64("planID", plan.PlanID), zap.Error(err))
 				return err
 			}
-			t.analysisScheduler.enqueue(analysisTaskID)
-			log.Info("submit analysis task", zap.Int64("id", analysisTaskID))
+			t.analyzeScheduler.enqueue(&analyzeTask{
+				taskID: analyzeTaskID,
+				taskInfo: &indexpb.AnalyzeResult{
+					TaskID: analyzeTaskID,
+					State:  indexpb.JobState_JobStateInit,
+				},
+			})
+			log.Info("submit analyze task", zap.Int64("id", analyzeTaskID))
 
-			var analysisTask *model.AnalysisTask
-			analysisFinished := func() bool {
-				analysisTask = t.analysisScheduler.analysisMeta.GetTask(analysisTaskID)
-				log.Debug("check analysis task state", zap.Int64("id", analysisTaskID), zap.String("state", analysisTask.State.String()))
-				if analysisTask.State == commonpb.IndexState_Finished ||
-					analysisTask.State == commonpb.IndexState_Failed {
+			var analyzeTask *model.AnalyzeTask
+			analyzeFinished := func() bool {
+				analyzeTask = t.meta.analyzeMeta.GetTask(analyzeTaskID)
+				log.Debug("check analyze task state", zap.Int64("id", analyzeTaskID), zap.String("state", analyzeTask.State.String()))
+				if analyzeTask.State == indexpb.JobState_JobStateFinished ||
+					analyzeTask.State == indexpb.JobState_JobStateFailed {
 					return true
 				}
 				return false
 			}
-			for !analysisFinished() {
+			for !analyzeFinished() {
 				// respect context deadline/cancel
 				select {
 				case <-t.ctx.Done():
@@ -303,12 +310,12 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 				}
 				time.Sleep(1 * time.Second)
 			}
-			log.Info("get analysisTask", zap.Any("analysisTask", analysisTask))
-			if analysisTask.State == commonpb.IndexState_Finished {
-				//version := int64(0) // analysisTask.Version
-				plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analysisTask.TaskID, analysisTask.Version))
+			log.Info("get analyzeTask", zap.Any("analyzeTask", analyzeTask))
+			if analyzeTask.State == indexpb.JobState_JobStateFinished {
+				//version := int64(0) // analyzeTask.Version
+				plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analyzeTask.TaskID, analyzeTask.Version))
 				offSetSegmentIDs := make([]int64, 0)
-				for segID, _ := range analysisTask.SegmentOffsetMappingFiles {
+				for _, segID := range analyzeTask.SegmentIDs {
 					offSetSegmentIDs = append(offSetSegmentIDs, segID)
 				}
 				plan.AnalyzeSegmentIds = offSetSegmentIDs
@@ -355,7 +362,7 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 	return err
 }
 
-//func (t *ClusteringCompactionManager) shouldDoClusteringCompaction(analyzeResult *indexpb.AnalysisResult) (bool, error) {
+//func (t *MajorCompactionManager) shouldDoMajorCompaction(analyzeResult *indexpb.AnalyzeResult) (bool, error) {
 //	return true, nil
 //}
 

@@ -267,12 +267,12 @@ func (it *indexBuildTask) Name() string {
 	return it.ident
 }
 
-func (it *indexBuildTask) SetState(state commonpb.IndexState, failReason string) {
-	it.node.storeIndexTaskState(it.ClusterID, it.BuildID, state, failReason)
+func (it *indexBuildTask) SetState(state indexpb.JobState, failReason string) {
+	it.node.storeIndexTaskState(it.ClusterID, it.BuildID, commonpb.IndexState(state), failReason)
 }
 
-func (it *indexBuildTask) GetState() commonpb.IndexState {
-	return it.node.loadIndexTaskState(it.ClusterID, it.BuildID)
+func (it *indexBuildTask) GetState() indexpb.JobState {
+	return indexpb.JobState(it.node.loadIndexTaskState(it.ClusterID, it.BuildID))
 }
 
 // OnEnqueue enqueues indexing tasks.

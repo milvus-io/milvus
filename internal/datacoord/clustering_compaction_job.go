@@ -40,7 +40,7 @@ type ClusteringCompactionJob struct {
 	completedPlans  []*datapb.CompactionPlan
 	failedPlans     []*datapb.CompactionPlan
 	timeoutPlans    []*datapb.CompactionPlan
-	analysisTaskID  UniqueID
+	analyzeTaskID   UniqueID
 }
 
 func convertClusteringCompactionJob(info *datapb.ClusteringCompactionInfo) *ClusteringCompactionJob {
@@ -58,7 +58,7 @@ func convertClusteringCompactionJob(info *datapb.ClusteringCompactionInfo) *Clus
 		completedPlans:    info.CompletedPlans,
 		failedPlans:       info.FailedPlans,
 		timeoutPlans:      info.TimeoutPlans,
-		analysisTaskID:    info.GetAnalysisTaskID(),
+		analyzeTaskID:     info.GetAnalyzeTaskID(),
 	}
 	return job
 }
@@ -78,7 +78,7 @@ func convertFromClusteringCompactionJob(job *ClusteringCompactionJob) *datapb.Cl
 		CompletedPlans:    job.completedPlans,
 		FailedPlans:       job.failedPlans,
 		TimeoutPlans:      job.timeoutPlans,
-		AnalysisTaskID:    job.analysisTaskID,
+		AnalyzeTaskID:     job.analyzeTaskID,
 	}
 	return info
 }

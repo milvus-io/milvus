@@ -30,7 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
-type AnalysisMetaSuite struct {
+type AnalyzeMetaSuite struct {
 	suite.Suite
 
 	collectionID int64
@@ -39,25 +39,25 @@ type AnalysisMetaSuite struct {
 	segmentIDs   []int64
 }
 
-func (s *AnalysisMetaSuite) initParams() {
+func (s *AnalyzeMetaSuite) initParams() {
 	s.collectionID = 100
 	s.partitionID = 101
 	s.fieldID = 102
 	s.segmentIDs = []int64{1000, 1001, 1002, 1003}
 }
 
-func (s *AnalysisMetaSuite) Test_analysisMeta() {
+func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	s.initParams()
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListAnalysisTasks(mock.Anything).Return([]*model.AnalysisTask{
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*model.AnalyzeTask{
 		{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
 			FieldID:      s.fieldID,
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       1,
-			State:        commonpb.IndexState_IndexStateNone,
+			State:        indexpb.JobState_JobStateNone,
 		},
 		{
 			CollectionID: s.collectionID,
@@ -65,7 +65,7 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 			FieldID:      s.fieldID,
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       2,
-			State:        commonpb.IndexState_Unissued,
+			State:        indexpb.JobState_JobStateInit,
 		},
 		{
 			CollectionID: s.collectionID,
@@ -73,7 +73,7 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 			FieldID:      s.fieldID,
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       3,
-			State:        commonpb.IndexState_InProgress,
+			State:        indexpb.JobState_JobStateInProgress,
 		},
 		{
 			CollectionID: s.collectionID,
@@ -81,7 +81,7 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 			FieldID:      s.fieldID,
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       4,
-			State:        commonpb.IndexState_Retry,
+			State:        indexpb.JobState_JobStateRetry,
 		},
 		{
 			CollectionID: s.collectionID,
@@ -89,7 +89,7 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 			FieldID:      s.fieldID,
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       5,
-			State:        commonpb.IndexState_Finished,
+			State:        indexpb.JobState_JobStateFinished,
 		},
 		{
 			CollectionID: s.collectionID,
@@ -97,16 +97,16 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 			FieldID:      s.fieldID,
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       6,
-			State:        commonpb.IndexState_Failed,
+			State:        indexpb.JobState_JobStateFailed,
 		},
 	}, nil)
 
-	catalog.EXPECT().SaveAnalysisTask(mock.Anything, mock.Anything).Return(nil)
-	catalog.EXPECT().DropAnalysisTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(nil)
 
 	ctx := context.Background()
 
-	am, err := newAnalysisMeta(ctx, catalog)
+	am, err := newAnalyzeMeta(ctx, catalog)
 	s.NoError(err)
 	s.Equal(6, len(am.GetAllTasks()))
 
@@ -118,8 +118,8 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 		s.Nil(t)
 	})
 
-	s.Run("AddAnalysisTask", func() {
-		t := &model.AnalysisTask{
+	s.Run("AddAnalyzeTask", func() {
+		t := &model.AnalyzeTask{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
 			FieldID:      s.fieldID,
@@ -127,17 +127,17 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 			TaskID:       7,
 		}
 
-		err := am.AddAnalysisTask(t)
+		err := am.AddAnalyzeTask(t)
 		s.NoError(err)
 		s.Equal(7, len(am.GetAllTasks()))
 
-		err = am.AddAnalysisTask(t)
+		err = am.AddAnalyzeTask(t)
 		s.NoError(err)
 		s.Equal(7, len(am.GetAllTasks()))
 	})
 
-	s.Run("DropAnalysisTask", func() {
-		err := am.DropAnalysisTask(7)
+	s.Run("DropAnalyzeTask", func() {
+		err := am.DropAnalyzeTask(7)
 		s.NoError(err)
 		s.Equal(6, len(am.GetAllTasks()))
 	})
@@ -155,47 +155,44 @@ func (s *AnalysisMetaSuite) Test_analysisMeta() {
 	})
 
 	s.Run("FinishTask", func() {
-		err := am.FinishTask(1, &indexpb.AnalysisResult{
-			TaskID:                    1,
-			State:                     commonpb.IndexState_Finished,
-			CentroidsFile:             "a/b/c",
-			SegmentOffsetMappingFiles: map[int64]string{1000: "1000/a", 1001: "1001/a", 1002: "1002/a", 1003: "1003/a"},
+		err := am.FinishTask(1, &indexpb.AnalyzeResult{
+			TaskID: 1,
+			State:  indexpb.JobState_JobStateFinished,
 		})
 		s.NoError(err)
 		s.Equal(commonpb.IndexState_Finished, am.GetTask(1).State)
-		s.Equal("a/b/c", am.GetTask(1).CentroidsFile)
 	})
 }
 
-func (s *AnalysisMetaSuite) Test_failCase() {
+func (s *AnalyzeMetaSuite) Test_failCase() {
 	s.initParams()
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListAnalysisTasks(mock.Anything).Return(nil, errors.New("error")).Once()
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return(nil, errors.New("error")).Once()
 	ctx := context.Background()
-	am, err := newAnalysisMeta(ctx, catalog)
+	am, err := newAnalyzeMeta(ctx, catalog)
 	s.Error(err)
 	s.Nil(am)
 
-	catalog.EXPECT().ListAnalysisTasks(mock.Anything).Return([]*model.AnalysisTask{
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*model.AnalyzeTask{
 		{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
 			FieldID:      s.fieldID,
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       1,
-			State:        commonpb.IndexState_Unissued,
+			State:        indexpb.JobState_JobStateInit,
 		},
 	}, nil)
-	am, err = newAnalysisMeta(ctx, catalog)
+	am, err = newAnalyzeMeta(ctx, catalog)
 	s.NoError(err)
 	s.NotNil(am)
 	s.Equal(1, len(am.GetAllTasks()))
 
-	catalog.EXPECT().SaveAnalysisTask(mock.Anything, mock.Anything).Return(errors.New("error"))
-	catalog.EXPECT().DropAnalysisTask(mock.Anything, mock.Anything).Return(errors.New("error"))
-	s.Run("AddAnalysisTask", func() {
-		t := &model.AnalysisTask{
+	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
+	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
+	s.Run("AddAnalyzeTask", func() {
+		t := &model.AnalyzeTask{
 			TenantID:     "",
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
@@ -203,13 +200,13 @@ func (s *AnalysisMetaSuite) Test_failCase() {
 			SegmentIDs:   s.segmentIDs,
 			TaskID:       1111,
 		}
-		err := am.AddAnalysisTask(t)
+		err := am.AddAnalyzeTask(t)
 		s.Error(err)
 		s.Nil(am.GetTask(1111))
 	})
 
-	s.Run("DropAnalysisTask", func() {
-		err := am.DropAnalysisTask(1)
+	s.Run("DropAnalyzeTask", func() {
+		err := am.DropAnalyzeTask(1)
 		s.Error(err)
 		s.NotNil(am.GetTask(1))
 	})
@@ -237,19 +234,15 @@ func (s *AnalysisMetaSuite) Test_failCase() {
 		err := am.FinishTask(777, nil)
 		s.Error(err)
 
-		err = am.FinishTask(1, &indexpb.AnalysisResult{
-			TaskID:                    1,
-			State:                     commonpb.IndexState_Finished,
-			CentroidsFile:             "a/b/c",
-			SegmentOffsetMappingFiles: map[int64]string{1000: "1000/a", 1001: "1001/a", 1002: "1002/a", 1003: "1003/a"},
+		err = am.FinishTask(1, &indexpb.AnalyzeResult{
+			TaskID: 1,
+			State:  indexpb.JobState_JobStateFinished,
 		})
 		s.Error(err)
 		s.Equal(commonpb.IndexState_Unissued, am.GetTask(1).State)
-		s.Equal("", am.GetTask(1).CentroidsFile)
-		s.Equal(0, len(am.GetTask(1).SegmentOffsetMappingFiles))
 	})
 }
 
-func TestAnalysisMeta(t *testing.T) {
-	suite.Run(t, new(AnalysisMetaSuite))
+func TestAnalyzeMeta(t *testing.T) {
+	suite.Run(t, new(AnalyzeMetaSuite))
 }

@@ -289,16 +289,16 @@ func (s *Server) GetMetrics(ctx context.Context, request *milvuspb.GetMetricsReq
 	return s.indexnode.GetMetrics(ctx, request)
 }
 
-func (s *Server) Analysis(ctx context.Context, request *indexpb.AnalysisRequest) (*commonpb.Status, error) {
-	return s.indexnode.Analysis(ctx, request)
+func (s *Server) CreateJobV2(ctx context.Context, request *indexpb.CreateJobV2Request) (*commonpb.Status, error) {
+	return s.indexnode.CreateJobV2(ctx, request)
 }
 
-func (s *Server) QueryAnalysisResult(ctx context.Context, request *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error) {
-	return s.indexnode.QueryAnalysisResult(ctx, request)
+func (s *Server) QueryJobsV2(ctx context.Context, request *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error) {
+	return s.indexnode.QueryJobsV2(ctx, request)
 }
 
-func (s *Server) DropAnalysisTasks(ctx context.Context, request *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error) {
-	return s.indexnode.DropAnalysisTasks(ctx, request)
+func (s *Server) DropJobsV2(ctx context.Context, request *indexpb.DropJobsV2Request) (*commonpb.Status, error) {
+	return s.indexnode.DropJobsV2(ctx, request)
 }
 
 // NewServer create a new IndexNode grpc server.

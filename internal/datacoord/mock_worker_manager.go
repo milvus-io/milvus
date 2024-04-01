@@ -201,6 +201,59 @@ func (_c *MockWorkerManager_GetClientByID_Call) RunAndReturn(run func(int64) (ty
 	return _c
 }
 
+// PickClient provides a mock function with given fields:
+func (_m *MockWorkerManager) PickClient() (int64, types.IndexNodeClient) {
+	ret := _m.Called()
+
+	var r0 int64
+	var r1 types.IndexNodeClient
+	if rf, ok := ret.Get(0).(func() (int64, types.IndexNodeClient)); ok {
+		return rf()
+	}
+	if rf, ok := ret.Get(0).(func() int64); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(int64)
+	}
+
+	if rf, ok := ret.Get(1).(func() types.IndexNodeClient); ok {
+		r1 = rf()
+	} else {
+		if ret.Get(1) != nil {
+			r1 = ret.Get(1).(types.IndexNodeClient)
+		}
+	}
+
+	return r0, r1
+}
+
+// MockWorkerManager_PickClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PickClient'
+type MockWorkerManager_PickClient_Call struct {
+	*mock.Call
+}
+
+// PickClient is a helper method to define mock.On call
+func (_e *MockWorkerManager_Expecter) PickClient() *MockWorkerManager_PickClient_Call {
+	return &MockWorkerManager_PickClient_Call{Call: _e.mock.On("PickClient")}
+}
+
+func (_c *MockWorkerManager_PickClient_Call) Run(run func()) *MockWorkerManager_PickClient_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockWorkerManager_PickClient_Call) Return(_a0 int64, _a1 types.IndexNodeClient) *MockWorkerManager_PickClient_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockWorkerManager_PickClient_Call) RunAndReturn(run func() (int64, types.IndexNodeClient)) *MockWorkerManager_PickClient_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RemoveNode provides a mock function with given fields: nodeID
 func (_m *MockWorkerManager) RemoveNode(nodeID int64) {
 	_m.Called(nodeID)
@@ -230,48 +283,6 @@ func (_c *MockWorkerManager_RemoveNode_Call) Return() *MockWorkerManager_RemoveN
 }
 
 func (_c *MockWorkerManager_RemoveNode_Call) RunAndReturn(run func(int64)) *MockWorkerManager_RemoveNode_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// SelectNodeAndAssignTask provides a mock function with given fields: assignTask
-func (_m *MockWorkerManager) SelectNodeAndAssignTask(assignTask func(int64, types.IndexNodeClient) error) error {
-	ret := _m.Called(assignTask)
-
-	var r0 error
-	if rf, ok := ret.Get(0).(func(func(int64, types.IndexNodeClient) error) error); ok {
-		r0 = rf(assignTask)
-	} else {
-		r0 = ret.Error(0)
-	}
-
-	return r0
-}
-
-// MockWorkerManager_SelectNodeAndAssignTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SelectNodeAndAssignTask'
-type MockWorkerManager_SelectNodeAndAssignTask_Call struct {
-	*mock.Call
-}
-
-// SelectNodeAndAssignTask is a helper method to define mock.On call
-//   - assignTask func(int64 , types.IndexNodeClient) error
-func (_e *MockWorkerManager_Expecter) SelectNodeAndAssignTask(assignTask interface{}) *MockWorkerManager_SelectNodeAndAssignTask_Call {
-	return &MockWorkerManager_SelectNodeAndAssignTask_Call{Call: _e.mock.On("SelectNodeAndAssignTask", assignTask)}
-}
-
-func (_c *MockWorkerManager_SelectNodeAndAssignTask_Call) Run(run func(assignTask func(int64, types.IndexNodeClient) error)) *MockWorkerManager_SelectNodeAndAssignTask_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(func(int64, types.IndexNodeClient) error))
-	})
-	return _c
-}
-
-func (_c *MockWorkerManager_SelectNodeAndAssignTask_Call) Return(_a0 error) *MockWorkerManager_SelectNodeAndAssignTask_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockWorkerManager_SelectNodeAndAssignTask_Call) RunAndReturn(run func(func(int64, types.IndexNodeClient) error) error) *MockWorkerManager_SelectNodeAndAssignTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

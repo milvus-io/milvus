@@ -111,23 +111,23 @@ func TestIndexNodeServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("Analysis", func(t *testing.T) {
-		req := &indexpb.AnalysisRequest{}
-		resp, err := server.Analysis(ctx, req)
+	t.Run("CreateJobV2", func(t *testing.T) {
+		req := &indexpb.CreateJobV2Request{}
+		resp, err := server.CreateJobV2(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})
 
-	t.Run("QueryAnalysisResult", func(t *testing.T) {
-		req := &indexpb.QueryAnalysisResultRequest{}
-		resp, err := server.QueryAnalysisResult(ctx, req)
+	t.Run("QueryJobsV2", func(t *testing.T) {
+		req := &indexpb.QueryJobsV2Request{}
+		resp, err := server.QueryJobsV2(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
-	t.Run("DropAnalysisTasks", func(t *testing.T) {
-		req := &indexpb.DropAnalysisTasksRequest{}
-		resp, err := server.DropAnalysisTasks(ctx, req)
+	t.Run("DropJobsV2", func(t *testing.T) {
+		req := &indexpb.DropJobsV2Request{}
+		resp, err := server.DropJobsV2(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
 	})

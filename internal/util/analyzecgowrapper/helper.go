@@ -14,13 +14,13 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package analysiscgowrapper
+package analyzecgowrapper
 
 /*
 #cgo pkg-config: milvus_indexbuilder
 
 #include <stdlib.h>	// free
-#include "indexbuilder/analysis_c.h"
+#include "indexbuilder/analyze_c.h"
 */
 import "C"
 
@@ -44,20 +44,4 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
 	log.Warn(logMsg)
 	return merr.WrapErrSegcore(int32(errorCode), logMsg)
-}
-
-func GetCentroidsFile() (string, error) {
-	// need malloc size
-	//var path unsafe.Pointer
-	//return C.GoString((*C.char)(C.GetCentroidsFile(path))), nil
-	return "centroids", nil
-}
-
-func GetSegmentOffsetMapping(segID int64) (string, error) {
-	// need malloc size
-
-	//var path unsafe.Pointer
-	//cSegID := C.int64_t(segID)
-	//return C.GoString((*C.char)(C.GetSegmentOffsetMapping(cSegID, path))), nil
-	return fmt.Sprintf("offsets-mapping-%d", segID), nil
 }
