@@ -89,6 +89,7 @@ type level2CompactionTask struct {
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
 
+	memoryBufferSize   int64
 	clusterBuffers     []*ClusterBuffer
 	clusterBufferLocks *lock.KeyLock[interface{}]
 	// scalar
@@ -208,7 +209,8 @@ func (t *level2CompactionTask) init() error {
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTs = tsoutil.GetCurrentTime()
-	log.Info("l2 compaction memory buffer", zap.Int64("size", t.getMemoryBufferSize()))
+	t.memoryBufferSize = t.getMemoryBufferSize()
+	log.Info("l2 compaction memory buffer", zap.Int64("size", t.memoryBufferSize))
 
 	return nil
 }
@@ -633,7 +635,7 @@ func (t *level2CompactionTask) writeToBuffer(ctx context.Context, clusterBuffer 
 		t.spillChan <- SpillSignal{
 			buffer: clusterBuffer,
 		}
-	} else if totalBufferSize >= t.getMemoryBufferSize() {
+	} else if totalBufferSize >= t.memoryBufferSize {
 		t.spillChan <- SpillSignal{}
 		// block here, wait for memory release by spill
 	loop:
@@ -666,7 +668,7 @@ func (t *level2CompactionTask) getMemoryBufferSize() int64 {
 }
 
 func (t *level2CompactionTask) getSpillMemorySizeThreshold() int64 {
-	return int64(float64(t.getMemoryBufferSize()) * 0.8)
+	return int64(float64(t.memoryBufferSize) * 0.8)
 }
 
 func (t *level2CompactionTask) backgroundSpill(ctx context.Context) {
@@ -709,7 +711,7 @@ func (t *level2CompactionTask) spillLargestBuffers(ctx context.Context) error {
 			return err
 		}
 		spilledSize += spillSize
-		if spilledSize >= t.getMemoryBufferSize()/2 {
+		if spilledSize >= t.memoryBufferSize/2 {
 			break
 		}
 	}
