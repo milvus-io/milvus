@@ -87,6 +87,12 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
 		if growing == nil {
+			// check whether segment has been excluded
+			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
+				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
+				continue
+			}
+
 			var err error
 			// TODO: It's a wired implementation that growing segment have load info.
 			// we should separate the growing segment and sealed segment by type system.
@@ -906,4 +912,18 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 
 func (sd *shardDelegator) GetTargetVersion() int64 {
 	return sd.distribution.getTargetVersion()
+}
+
+func (sd *shardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {
+	sd.excludedSegments.Insert(excludeInfo)
+}
+
+func (sd *shardDelegator) VerifyExcludedSegments(segmentID int64, ts uint64) bool {
+	return sd.excludedSegments.Verify(segmentID, ts)
+}
+
+func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
+	if sd.excludedSegments.ShouldClean() {
+		sd.excludedSegments.CleanInvalid(ts)
+	}
 }

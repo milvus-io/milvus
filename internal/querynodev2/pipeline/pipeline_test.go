@@ -119,6 +119,10 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
 	//	mock delegator
+	suite.delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
+	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
+	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
+
 	suite.delegator.EXPECT().ProcessInsert(mock.Anything).Run(
 		func(insertRecords map[int64]*delegator.InsertData) {
 			for segmentID := range insertRecords {
