@@ -550,48 +550,42 @@ func (mgr *segmentManager) Empty() bool {
 	return len(mgr.growingSegments)+len(mgr.sealedSegments) == 0
 }
 
-// returns true if the segment exists,
-// false otherwise
+// return released growing/sealed segment count
+// Notice: Never release manager's lock before remove segment. which will produce a invalid segment in manager
 func (mgr *segmentManager) Remove(segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int) {
 	mgr.mu.Lock()
+	defer mgr.mu.Unlock()
+
+	removeGrowingMeta := func() int {
+		growing := mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID)
+		if growing != nil {
+			remove(growing)
+			return 1
+		}
+		return 0
+	}
+
+	removeSealedMeta := func() int {
+		sealed := mgr.removeSegmentWithType(SegmentTypeSealed, segmentID)
+		if sealed != nil {
+			remove(sealed)
+			return 1
+		}
+		return 0
+	}
 
 	var removeGrowing, removeSealed int
-	var growing, sealed Segment
 	switch scope {
 	case querypb.DataScope_Streaming:
-		growing = mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID)
-		if growing != nil {
-			removeGrowing = 1
-		}
-
+		removeGrowing = removeGrowingMeta()
 	case querypb.DataScope_Historical:
-		sealed = mgr.removeSegmentWithType(SegmentTypeSealed, segmentID)
-		if sealed != nil {
-			removeSealed = 1
-		}
-
+		removeSealed = removeSealedMeta()
 	case querypb.DataScope_All:
-		growing = mgr.removeSegmentWithType(SegmentTypeGrowing, segmentID)
-		if growing != nil {
-			removeGrowing = 1
-		}
-
-		sealed = mgr.removeSegmentWithType(SegmentTypeSealed, segmentID)
-		if sealed != nil {
-			removeSealed = 1
-		}
+		removeGrowing = removeGrowingMeta()
+		removeSealed = removeSealedMeta()
 	}
+
 	mgr.updateMetric()
-	mgr.mu.Unlock()
-
-	if growing != nil {
-		remove(growing)
-	}
-
-	if sealed != nil {
-		remove(sealed)
-	}
-
 	return removeGrowing, removeSealed
 }
 
