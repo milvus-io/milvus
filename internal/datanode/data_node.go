@@ -94,7 +94,8 @@ type DataNode struct {
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
-	importManager      *importv2.Manager
+	importTaskMgr      importv2.TaskManager
+	importScheduler    importv2.Scheduler
 
 	clearSignal              chan string // vchannel name
 	segmentCache             *Cache
@@ -290,8 +291,8 @@ func (node *DataNode) Init() error {
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
-		node.importManager = importv2.NewManager(node.syncMgr, node.chunkManager)
-
+		node.importTaskMgr = importv2.NewTaskManager()
+		node.importScheduler = importv2.NewScheduler(node.importTaskMgr, node.syncMgr, node.chunkManager)
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 
 		log.Info("init datanode done", zap.String("Address", node.address))
@@ -386,7 +387,7 @@ func (node *DataNode) Start() error {
 
 		go node.compactionExecutor.start(node.ctx)
 
-		go node.importManager.Start()
+		go node.importScheduler.Start()
 
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
 			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID,
@@ -459,8 +460,8 @@ func (node *DataNode) Stop() error {
 			node.channelCheckpointUpdater.close()
 		}
 
-		if node.importManager != nil {
-			node.importManager.Close()
+		if node.importScheduler != nil {
+			node.importScheduler.Close()
 		}
 
 		node.cancel()

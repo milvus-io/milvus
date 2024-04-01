@@ -1328,3 +1328,19 @@ func TestRemoveSegmentIndex(t *testing.T) {
 		assert.Equal(t, len(m.buildID2SegmentIndex), 0)
 	})
 }
+
+func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
+	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+
+	// normal case
+	segmentIDs := make([]int64, 0, 11)
+	for i := 0; i <= 10; i++ {
+		segmentIDs = append(segmentIDs, segID+int64(i))
+	}
+	unindexed := m.indexMeta.GetUnindexedSegments(collID, segmentIDs)
+	assert.Equal(t, 8, len(unindexed))
+
+	// no index
+	unindexed = m.indexMeta.GetUnindexedSegments(collID+1, segmentIDs)
+	assert.Equal(t, 0, len(unindexed))
+}

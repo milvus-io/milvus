@@ -25,6 +25,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -884,4 +885,23 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 	}
 
 	return ret
+}
+
+func (m *indexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64) []int64 {
+	indexes := m.GetIndexesForCollection(collectionID, "")
+	if len(indexes) == 0 {
+		// doesn't have index
+		return nil
+	}
+	indexed := make([]int64, 0, len(segmentIDs))
+	segIndexStates := m.getSegmentsIndexStates(collectionID, segmentIDs)
+	for segmentID, states := range segIndexStates {
+		indexStates := lo.Filter(lo.Values(states), func(state *indexpb.SegmentIndexState, _ int) bool {
+			return state.GetState() == commonpb.IndexState_Finished
+		})
+		if len(indexStates) == len(indexes) {
+			indexed = append(indexed, segmentID)
+		}
+	}
+	return lo.Without(segmentIDs, indexed...)
 }
