@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -70,16 +71,12 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 		return nil
 	}
 
-	segmentMap := make(map[int64]*SegmentInfo)
-	collectionSegments := make(map[int64][]int64)
+	collectionSegments := lo.GroupBy(segments, func(segment *SegmentInfo) int64 {
+		return segment.GetCollectionID()
+	})
 
-	vecFieldIDs := make(map[int64][]int64)
-	for _, segment := range segments {
-		collectionID := segment.GetCollectionID()
-		segmentMap[segment.GetID()] = segment
-		collectionSegments[collectionID] = append(collectionSegments[collectionID], segment.GetID())
-	}
-	for collection := range collectionSegments {
+	ret := make([]*SegmentInfo, 0)
+	for collection, segmentList := range collectionSegments {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 		coll, err := handler.GetCollection(ctx, collection)
 		cancel()
@@ -87,32 +84,32 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 			log.Warn("failed to get collection schema", zap.Error(err))
 			continue
 		}
+
+		// get vector field id
+		vecFieldIDs := make([]int64, 0)
 		for _, field := range coll.Schema.GetFields() {
 			if typeutil.IsVectorType(field.GetDataType()) {
-				vecFieldIDs[collection] = append(vecFieldIDs[collection], field.GetFieldID())
+				vecFieldIDs = append(vecFieldIDs, field.GetFieldID())
+			}
+		}
+
+		// get indexed segments which finish build index on all vector field
+		indexed := mt.indexMeta.GetIndexedSegments(collection, vecFieldIDs)
+		if len(indexed) > 0 {
+			indexedSet := typeutil.NewUniqueSet(indexed...)
+			for _, segment := range segmentList {
+				if !isFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
+					continue
+				}
+
+				if indexedSet.Contain(segment.GetID()) {
+					ret = append(ret, segment)
+				}
 			}
 		}
 	}
 
-	indexedSegments := make([]*SegmentInfo, 0)
-	for _, segment := range segments {
-		if !isFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
-			continue
-		}
-
-		hasUnindexedVecField := false
-		for _, fieldID := range vecFieldIDs[segment.GetCollectionID()] {
-			segmentIndexState := mt.indexMeta.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), fieldID)
-			if segmentIndexState.State != commonpb.IndexState_Finished {
-				hasUnindexedVecField = true
-			}
-		}
-		if !hasUnindexedVecField {
-			indexedSegments = append(indexedSegments, segment)
-		}
-	}
-
-	return indexedSegments
+	return ret
 }
 
 func getZeroTime() time.Time {
