@@ -146,7 +146,9 @@ TEST_F(StorageTest, GetStorageMetrics) {
             std::vector<string> res = split(currentLine, " ");
             EXPECT_EQ(4, res.size());
             familyName = res[2];
-            EXPECT_EQ(true, res[3] == "counter" || res[3] == "histogram");
+            EXPECT_EQ(true,
+                      res[3] == "gauge" || res[3] == "counter" ||
+                          res[3] == "histogram");
             continue;
         }
         EXPECT_EQ(true, familyName.length() > 0);

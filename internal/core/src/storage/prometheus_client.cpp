@@ -31,6 +31,22 @@ const prometheus::Histogram::BucketBoundaries buckets = {1,
                                                          32768,
                                                          65536};
 
+const prometheus::Histogram::BucketBoundaries bytesBuckets = {
+    1024,         // 1k
+    8192,         // 8k
+    65536,        // 64k
+    262144,       // 256k
+    524288,       // 512k
+    1048576,      // 1M
+    4194304,      // 4M
+    8388608,      // 8M
+    16777216,     // 16M
+    67108864,     // 64M
+    134217728,    // 128M
+    268435456,    // 256M
+    536870912,    // 512M
+    1073741824};  // 1G
+
 const std::unique_ptr<PrometheusClient> prometheusClient =
     std::make_unique<PrometheusClient>();
 
@@ -131,4 +147,32 @@ DEFINE_PROMETHEUS_COUNTER(internal_storage_op_count_remove_suc,
 DEFINE_PROMETHEUS_COUNTER(internal_storage_op_count_remove_fail,
                           internal_storage_op_count,
                           removeFailMap)
+
+// mmap metrics
+std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
+    {"type", "anon"}};
+std::map<std::string, std::string> mmapAllocatedSpaceFileLabel = {
+    {"type", "file"}};
+
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_mmap_allocated_space_bytes,
+                                   "[cpp]mmap allocated space stats")
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_mmap_allocated_space_bytes_anon,
+    internal_mmap_allocated_space_bytes,
+    mmapAllocatedSpaceAnonLabel,
+    bytesBuckets)
+DEFINE_PROMETHEUS_HISTOGRAM_WITH_BUCKETS(
+    internal_mmap_allocated_space_bytes_file,
+    internal_mmap_allocated_space_bytes,
+    mmapAllocatedSpaceFileLabel,
+    bytesBuckets)
+
+DEFINE_PROMETHEUS_GAUGE_FAMILY(internal_mmap_in_used_space_bytes,
+                               "[cpp]mmap in used space stats")
+DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon,
+                        internal_mmap_in_used_space_bytes,
+                        mmapAllocatedSpaceAnonLabel)
+DEFINE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file,
+                        internal_mmap_in_used_space_bytes,
+                        mmapAllocatedSpaceFileLabel)
 }  // namespace milvus::storage
