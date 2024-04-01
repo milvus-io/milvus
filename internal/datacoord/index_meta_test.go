@@ -533,7 +533,7 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 	})
 }
 
-func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
+func TestMeta_GetIndexedSegment(t *testing.T) {
 	var (
 		collID     = UniqueID(1)
 		partID     = UniqueID(2)
@@ -614,23 +614,18 @@ func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID, segID, fieldID)
-		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
+		segments := m.GetIndexedSegments(collID, []int64{fieldID})
+		assert.Len(t, segments, 1)
 	})
 
 	t.Run("no index on field", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID, segID, fieldID+1)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
+		segments := m.GetIndexedSegments(collID, []int64{fieldID + 1})
+		assert.Len(t, segments, 0)
 	})
 
 	t.Run("no index", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID+1, segID, fieldID+1)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
-	})
-
-	t.Run("segment not exist", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID, segID+1, fieldID)
-		assert.Equal(t, commonpb.IndexState_Unissued, state.GetState())
+		segments := m.GetIndexedSegments(collID+1, []int64{fieldID})
+		assert.Len(t, segments, 0)
 	})
 }
 
