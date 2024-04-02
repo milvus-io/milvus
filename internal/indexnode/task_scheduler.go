@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
+	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -224,7 +225,10 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 			if errors.Is(err, errCancel) {
 				log.Ctx(t.Ctx()).Warn("index build task canceled, retry it", zap.String("task", t.Name()))
 				t.SetState(commonpb.IndexState_Retry, err.Error())
-			} else if errors.Is(err, merr.ErrIoKeyNotFound) {
+			} else if errors.Is(err, merr.ErrIoKeyNotFound) ||
+				(merr.Code(err) == 2000 && strings.Contains(err.Error(), "segcoreCode=2100")) {
+				// NoSuchKey or knowhere error
+				log.Ctx(t.Ctx()).Warn("couldn't create index", zap.Error(err))
 				t.SetState(commonpb.IndexState_Failed, err.Error())
 			} else {
 				t.SetState(commonpb.IndexState_Retry, err.Error())

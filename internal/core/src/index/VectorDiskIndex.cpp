@@ -59,8 +59,13 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create<T>(
+    auto get_index_node = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
+    if (get_index_node.has_value()) {
+        index_ = get_index_node.value();
+    } else {
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_node.what());
+    }
 }
 
 template <typename T>
@@ -88,8 +93,13 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create<T>(
+    auto get_index_node = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
+    if (get_index_node.has_value()) {
+        index_ = get_index_node.value();
+    } else {
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_node.what());
+    }
 }
 
 template <typename T>
