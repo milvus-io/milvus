@@ -72,8 +72,13 @@ VectorMemIndex<T>::VectorMemIndex(
         AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     }
     CheckCompatible(version);
-    index_ =
+    auto get_index_node =
         knowhere::IndexFactory::Instance().Create<T>(GetIndexType(), version);
+    if (get_index_node.has_value()) {
+        index_ = get_index_node.value();
+    } else {
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_node.what());
+    }
 }
 
 template <typename T>
@@ -95,8 +100,13 @@ VectorMemIndex<T>::VectorMemIndex(
     }
     auto version = create_index_info.index_engine_version;
     CheckCompatible(version);
-    index_ =
+    auto get_index_node =
         knowhere::IndexFactory::Instance().Create<T>(GetIndexType(), version);
+    if (get_index_node.has_value()) {
+        index_ = get_index_node.value();
+    } else {
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_node.what());
+    }
 }
 
 template <typename T>
