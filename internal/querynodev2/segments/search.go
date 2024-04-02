@@ -20,12 +20,15 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -78,7 +81,12 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			}
 			var err error
 			if seg.IsLazyLoad() {
-				err = mgr.DiskCache.Do(seg.ID(), searcher)
+				timeout, err := lazyloadWaitTimeout(ctx)
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
 			} else {
 				err = searcher(seg)
 			}
@@ -107,6 +115,20 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	}
 
 	return searchResults, nil
+}
+
+func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
+	timeout := params.Params.QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
+	deadline, ok := ctx.Deadline()
+	if ok {
+		remain := deadline.Sub(time.Now())
+		if remain <= 0 {
+			return -1, merr.WrapErrServiceInternal("search context deadline exceeded")
+		} else if remain < timeout {
+			timeout = remain
+		}
+	}
+	return timeout, nil
 }
 
 // search will search on the historical segments the target segments in historical.
