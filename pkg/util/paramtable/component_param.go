@@ -722,17 +722,17 @@ like the old password verification when updating the credential`,
 	p.MaxBloomFalsePositive.Init(base.mgr)
 
 	p.UsePartitionKeyAsClusteringKey = ParamItem{
-		Key:          "common.l2compaction.usePartitionKeyAsClusteringKey",
+		Key:          "common.usePartitionKeyAsClusteringKey",
 		Version:      "2.4.0",
-		Doc:          "if true, do major compaction on partition key field",
+		Doc:          "if true, do major compaction and segment prune on partition key field",
 		DefaultValue: "false",
 	}
 	p.UsePartitionKeyAsClusteringKey.Init(base.mgr)
 
 	p.UseVectorAsClusteringKey = ParamItem{
-		Key:          "common.l2compaction.useVectorAsClusteringKey",
+		Key:          "common.useVectorAsClusteringKey",
 		Version:      "2.4.0",
-		Doc:          "if true, do major compaction on vector field",
+		Doc:          "if true, do major compaction and segment prune on vector field",
 		DefaultValue: "false",
 	}
 	p.UseVectorAsClusteringKey.Init(base.mgr)
@@ -2548,18 +2548,18 @@ type dataCoordConfig struct {
 	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 	ChannelCheckpointMaxLag           ParamItem `refreshable:"true"`
 
-	// L2 Compaction
-	L2CompactionEnable                ParamItem `refreshable:"true"`
-	L2CompactionAutoEnable            ParamItem `refreshable:"true"`
-	L2CompactionMinInterval           ParamItem `refreshable:"true"`
-	L2CompactionMaxInterval           ParamItem `refreshable:"true"`
-	L2CompactionNewDataRatioThreshold ParamItem `refreshable:"true"`
-	L2CompactionNewDataSizeThreshold  ParamItem `refreshable:"true"`
-	L2CompactionDropTolerance         ParamItem `refreshable:"true"`
-	L2CompactionPreferSegmentSize     ParamItem `refreshable:"true"`
-	L2CompactionMaxSegmentSize        ParamItem `refreshable:"true"`
-	L2CompactionMaxTrainSize          ParamItem `refreshable:"true"`
-	L2CompactionTimeoutInSeconds      ParamItem `refreshable:"true"`
+	// Major Compaction
+	MajorCompactionEnable                ParamItem `refreshable:"true"`
+	MajorCompactionAutoEnable            ParamItem `refreshable:"true"`
+	MajorCompactionMinInterval           ParamItem `refreshable:"true"`
+	MajorCompactionMaxInterval           ParamItem `refreshable:"true"`
+	MajorCompactionNewDataRatioThreshold ParamItem `refreshable:"true"`
+	MajorCompactionNewDataSizeThreshold  ParamItem `refreshable:"true"`
+	MajorCompactionDropTolerance         ParamItem `refreshable:"true"`
+	MajorCompactionPreferSegmentSize     ParamItem `refreshable:"true"`
+	MajorCompactionMaxSegmentSize        ParamItem `refreshable:"true"`
+	MajorCompactionMaxTrainSize          ParamItem `refreshable:"true"`
+	MajorCompactionTimeoutInSeconds      ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -2922,97 +2922,97 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
 
-	p.L2CompactionEnable = ParamItem{
-		Key:          "dataCoord.compaction.l2.enable",
+	p.MajorCompactionEnable = ParamItem{
+		Key:          "dataCoord.compaction.major.enable",
 		Version:      "2.4.0",
 		DefaultValue: "false",
 		Doc:          "Enable major compaction",
 		Export:       true,
 	}
-	p.L2CompactionEnable.Init(base.mgr)
+	p.MajorCompactionEnable.Init(base.mgr)
 
-	p.L2CompactionAutoEnable = ParamItem{
-		Key:          "dataCoord.compaction.l2.autoEnable",
+	p.MajorCompactionAutoEnable = ParamItem{
+		Key:          "dataCoord.compaction.major.autoEnable",
 		Version:      "2.4.0",
 		DefaultValue: "false",
 		Doc:          "Enable auto major compaction",
 		Export:       true,
 	}
-	p.L2CompactionAutoEnable.Init(base.mgr)
+	p.MajorCompactionAutoEnable.Init(base.mgr)
 
-	p.L2CompactionMinInterval = ParamItem{
-		Key:          "dataCoord.compaction.l2.minInterval",
+	p.MajorCompactionMinInterval = ParamItem{
+		Key:          "dataCoord.compaction.major.minInterval",
 		Version:      "2.4.0",
 		Doc:          "The minimum interval between major compaction executions of one collection, to avoid redundant compaction",
 		DefaultValue: "3600",
 	}
-	p.L2CompactionMinInterval.Init(base.mgr)
+	p.MajorCompactionMinInterval.Init(base.mgr)
 
-	p.L2CompactionMaxInterval = ParamItem{
-		Key:          "dataCoord.compaction.l2.maxInterval",
+	p.MajorCompactionMaxInterval = ParamItem{
+		Key:          "dataCoord.compaction.major.maxInterval",
 		Version:      "2.4.0",
 		Doc:          "If a collection haven't been major compacted for longer than maxInterval, force compact",
 		DefaultValue: "86400",
 	}
-	p.L2CompactionMaxInterval.Init(base.mgr)
+	p.MajorCompactionMaxInterval.Init(base.mgr)
 
-	p.L2CompactionNewDataRatioThreshold = ParamItem{
-		Key:          "dataCoord.compaction.l2.newDataRatioThreshold",
+	p.MajorCompactionNewDataRatioThreshold = ParamItem{
+		Key:          "dataCoord.compaction.major.newDataRatioThreshold",
 		Version:      "2.4.0",
 		Doc:          "If new data ratio is large than newDataRatioThreshold, execute major compaction",
 		DefaultValue: "0.2",
 	}
-	p.L2CompactionNewDataRatioThreshold.Init(base.mgr)
+	p.MajorCompactionNewDataRatioThreshold.Init(base.mgr)
 
-	p.L2CompactionNewDataSizeThreshold = ParamItem{
-		Key:          "dataCoord.compaction.l2.newDataSizeThreshold",
+	p.MajorCompactionNewDataSizeThreshold = ParamItem{
+		Key:          "dataCoord.compaction.major.newDataSizeThreshold",
 		Version:      "2.4.0",
 		Doc:          "If new data size is large than newDataSizeThreshold, execute major compaction",
 		DefaultValue: "512m",
 	}
-	p.L2CompactionNewDataSizeThreshold.Init(base.mgr)
+	p.MajorCompactionNewDataSizeThreshold.Init(base.mgr)
 
-	p.L2CompactionTimeoutInSeconds = ParamItem{
-		Key:          "dataCoord.compaction.l2.timeout",
+	p.MajorCompactionTimeoutInSeconds = ParamItem{
+		Key:          "dataCoord.compaction.major.timeout",
 		Version:      "2.4.0",
 		DefaultValue: "3600",
 	}
-	p.L2CompactionTimeoutInSeconds.Init(base.mgr)
+	p.MajorCompactionTimeoutInSeconds.Init(base.mgr)
 
-	p.L2CompactionDropTolerance = ParamItem{
-		Key:          "dataCoord.compaction.l2.dropTolerance",
+	p.MajorCompactionDropTolerance = ParamItem{
+		Key:          "dataCoord.compaction.major.dropTolerance",
 		Version:      "2.4.0",
 		Doc:          "If major compaction job is finished for a long time, gc it",
 		DefaultValue: "86400",
 	}
-	p.L2CompactionDropTolerance.Init(base.mgr)
+	p.MajorCompactionDropTolerance.Init(base.mgr)
 
-	p.L2CompactionPreferSegmentSize = ParamItem{
-		Key:          "dataCoord.compaction.l2.preferSegmentSize",
+	p.MajorCompactionPreferSegmentSize = ParamItem{
+		Key:          "dataCoord.compaction.major.preferSegmentSize",
 		Version:      "2.4.0",
 		DefaultValue: "64m",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.L2CompactionPreferSegmentSize.Init(base.mgr)
+	p.MajorCompactionPreferSegmentSize.Init(base.mgr)
 
-	p.L2CompactionMaxSegmentSize = ParamItem{
-		Key:          "dataCoord.compaction.l2.maxSegmentSize",
+	p.MajorCompactionMaxSegmentSize = ParamItem{
+		Key:          "dataCoord.compaction.major.maxSegmentSize",
 		Version:      "2.4.0",
 		DefaultValue: "128m",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.L2CompactionMaxSegmentSize.Init(base.mgr)
+	p.MajorCompactionMaxSegmentSize.Init(base.mgr)
 
-	p.L2CompactionMaxTrainSize = ParamItem{
-		Key:          "dataCoord.compaction.l2.maxTrainSize",
+	p.MajorCompactionMaxTrainSize = ParamItem{
+		Key:          "dataCoord.compaction.major.maxTrainSize",
 		Version:      "2.4.0",
 		DefaultValue: "26",
 		Doc:          "max data size in Kmeans train, if larger than it, will down sampling to meet this limit",
 		Export:       true,
 	}
-	p.L2CompactionMaxTrainSize.Init(base.mgr)
+	p.MajorCompactionMaxTrainSize.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",
@@ -3304,8 +3304,8 @@ type dataNodeConfig struct {
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 
-	// l2 compaction
-	L2CompactionMemoryBufferRatio ParamItem `refreshable:"true"`
+	// major compaction
+	MajorCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3587,7 +3587,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
-	p.L2CompactionMemoryBufferRatio = ParamItem{
+	p.MajorCompactionMemoryBufferRatio = ParamItem{
 		Key:          "datanode.majorCompaction.memoryBufferRatio",
 		Version:      "2.4.0",
 		Doc:          "The ratio of memory buffer of major compaction. Data larger than threshold will be spilled to storage.",
@@ -3595,7 +3595,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		PanicIfEmpty: false,
 		Export:       true,
 	}
-	p.L2CompactionMemoryBufferRatio.Init(base.mgr)
+	p.MajorCompactionMemoryBufferRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

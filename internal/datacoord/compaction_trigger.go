@@ -191,11 +191,11 @@ func (t *compactionTrigger) startMajorCompactionLoop() {
 	defer t.wg.Done()
 
 	// If MajorCompaction disabled, global loop will not start
-	if !Params.DataCoordCfg.L2CompactionEnable.GetAsBool() {
+	if !Params.DataCoordCfg.MajorCompactionEnable.GetAsBool() {
 		return
 	}
 	t.majorCompactionManager.start()
-	if !Params.DataCoordCfg.L2CompactionAutoEnable.GetAsBool() {
+	if !Params.DataCoordCfg.MajorCompactionAutoEnable.GetAsBool() {
 		return
 	}
 	for {
@@ -599,7 +599,7 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
 
-	if !Params.DataCoordCfg.L2CompactionEnable.GetAsBool() {
+	if !Params.DataCoordCfg.MajorCompactionEnable.GetAsBool() {
 		err := merr.WrapErrMajorCompactionClusterNotSupport()
 		log.Warn(err.Error())
 		return err

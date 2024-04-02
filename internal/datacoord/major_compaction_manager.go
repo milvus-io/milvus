@@ -136,7 +136,7 @@ func (t *MajorCompactionManager) checkAllJobState() error {
 
 func (t *MajorCompactionManager) checkJobState(job *MajorCompactionJob) error {
 	if job.state == completed || job.state == failed || job.state == timeout {
-		if time.Since(tsoutil.PhysicalTime(job.startTime)) > Params.DataCoordCfg.L2CompactionDropTolerance.GetAsDuration(time.Second) {
+		if time.Since(tsoutil.PhysicalTime(job.startTime)) > Params.DataCoordCfg.MajorCompactionDropTolerance.GetAsDuration(time.Second) {
 			// skip handle this error, try best to delete meta
 			t.dropMajorCompactionJob(job)
 		}
@@ -222,7 +222,7 @@ func (t *MajorCompactionManager) runCompactionJob(job *MajorCompactionJob) error
 			return err
 		}
 		plan.PlanID = planId
-		plan.TimeoutInSeconds = Params.DataCoordCfg.L2CompactionTimeoutInSeconds.GetAsInt32()
+		plan.TimeoutInSeconds = Params.DataCoordCfg.MajorCompactionTimeoutInSeconds.GetAsInt32()
 
 		// major compaction firstly analyze the plan, then decide whether to execute compaction
 		if typeutil.IsVectorType(job.clusteringKeyType) {
@@ -339,11 +339,11 @@ func (t *MajorCompactionManager) setSegmentsCompacting(plan *datapb.CompactionPl
 func (t *MajorCompactionManager) fillMajorCompactionPlans(segments []*SegmentInfo, clusteringKeyId int64, compactTime *compactTime) []*datapb.CompactionPlan {
 	plan := segmentsToPlan(segments, datapb.CompactionType_MajorCompaction, compactTime)
 	plan.ClusteringKeyId = clusteringKeyId
-	l2MaxSegmentSize := paramtable.Get().DataCoordCfg.L2CompactionMaxSegmentSize.GetAsSize()
-	l2PreferSegmentSize := paramtable.Get().DataCoordCfg.L2CompactionPreferSegmentSize.GetAsSize()
+	majorMaxSegmentSize := paramtable.Get().DataCoordCfg.MajorCompactionMaxSegmentSize.GetAsSize()
+	majorPreferSegmentSize := paramtable.Get().DataCoordCfg.MajorCompactionPreferSegmentSize.GetAsSize()
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	plan.MaxSegmentRows = segments[0].MaxRowNum * l2MaxSegmentSize / segmentMaxSize
-	plan.PreferSegmentRows = segments[0].MaxRowNum * l2PreferSegmentSize / segmentMaxSize
+	plan.MaxSegmentRows = segments[0].MaxRowNum * majorMaxSegmentSize / segmentMaxSize
+	plan.PreferSegmentRows = segments[0].MaxRowNum * majorPreferSegmentSize / segmentMaxSize
 	return []*datapb.CompactionPlan{
 		plan,
 	}
@@ -385,7 +385,7 @@ func triggerMajorCompactionPolicy(ctx context.Context, meta *meta, collectionID 
 		for _, seg := range segments {
 			newDataSize += seg.getSegmentSize()
 		}
-		if newDataSize > Params.DataCoordCfg.L2CompactionNewDataSizeThreshold.GetAsSize() {
+		if newDataSize > Params.DataCoordCfg.MajorCompactionNewDataSizeThreshold.GetAsSize() {
 			log.Info("New data is larger than threshold, do compaction", zap.Int64("newDataSize", newDataSize))
 			return true, nil
 		}
@@ -394,11 +394,11 @@ func triggerMajorCompactionPolicy(ctx context.Context, meta *meta, collectionID 
 	}
 
 	pTime, _ := tsoutil.ParseTS(uint64(version))
-	if time.Since(pTime) < Params.DataCoordCfg.L2CompactionMinInterval.GetAsDuration(time.Second) {
+	if time.Since(pTime) < Params.DataCoordCfg.MajorCompactionMinInterval.GetAsDuration(time.Second) {
 		log.Info("Too short time before last major compaction, skip compaction")
 		return false, nil
 	}
-	if time.Since(pTime) > Params.DataCoordCfg.L2CompactionMaxInterval.GetAsDuration(time.Second) {
+	if time.Since(pTime) > Params.DataCoordCfg.MajorCompactionMaxInterval.GetAsDuration(time.Second) {
 		log.Info("It is a long time after last major compaction, do compaction")
 		return true, nil
 	}
@@ -426,7 +426,7 @@ func triggerMajorCompactionPolicy(ctx context.Context, meta *meta, collectionID 
 
 	// ratio based
 	//ratio := float64(uncompactedSegmentSize) / float64(compactedSegmentSize)
-	//if ratio > Params.DataCoordCfg.L2CompactionNewDataRatioThreshold.GetAsFloat() {
+	//if ratio > Params.DataCoordCfg.MajorCompactionNewDataRatioThreshold.GetAsFloat() {
 	//	log.Info("New data is larger than threshold, do compaction", zap.Float64("ratio", ratio))
 	//	return true, nil
 	//}
@@ -434,7 +434,7 @@ func triggerMajorCompactionPolicy(ctx context.Context, meta *meta, collectionID 
 	//return false, nil
 
 	// size based
-	if uncompactedSegmentSize > Params.DataCoordCfg.L2CompactionNewDataSizeThreshold.GetAsSize() {
+	if uncompactedSegmentSize > Params.DataCoordCfg.MajorCompactionNewDataSizeThreshold.GetAsSize() {
 		log.Info("New data is larger than threshold, do compaction", zap.Int64("newDataSize", uncompactedSegmentSize))
 		return true, nil
 	}

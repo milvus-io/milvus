@@ -389,21 +389,21 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
 		params.Save("dataCoord.compaction.major.enable", "true")
-		assert.Equal(t, true, Params.L2CompactionEnable.GetAsBool())
+		assert.Equal(t, true, Params.MajorCompactionEnable.GetAsBool())
 		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10")
-		assert.Equal(t, int64(10), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		assert.Equal(t, int64(10), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10k")
-		assert.Equal(t, int64(10*1024), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		assert.Equal(t, int64(10*1024), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		assert.Equal(t, int64(10*1024*1024), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10g")
-		assert.Equal(t, int64(10*1024*1024*1024), Params.L2CompactionNewDataSizeThreshold.GetAsSize())
+		assert.Equal(t, int64(10*1024*1024*1024), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
 		params.Save("dataCoord.compaction.major.dropTolerance", "86400")
-		assert.Equal(t, int64(86400), Params.L2CompactionDropTolerance.GetAsInt64())
+		assert.Equal(t, int64(86400), Params.MajorCompactionDropTolerance.GetAsInt64())
 		params.Save("dataCoord.l2Compaction.preferSegmentSizeMax", "100m")
-		assert.Equal(t, int64(100*1024*1024), Params.L2CompactionMaxSegmentSize.GetAsSize())
+		assert.Equal(t, int64(100*1024*1024), Params.MajorCompactionMaxSegmentSize.GetAsSize())
 		params.Save("dataCoord.l2Compaction.preferSegmentSizeMin", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.L2CompactionPreferSegmentSize.GetAsSize())
+		assert.Equal(t, int64(10*1024*1024), Params.MajorCompactionPreferSegmentSize.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -457,8 +457,8 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
 		// l2 compaction
-		params.Save("datanode.l2Compaction.memoryBufferRatio", "0.1")
-		assert.Equal(t, 0.1, Params.L2CompactionMemoryBufferRatio.GetAsFloat())
+		params.Save("datanode.majorCompaction.memoryBufferRatio", "0.1")
+		assert.Equal(t, 0.1, Params.MajorCompactionMemoryBufferRatio.GetAsFloat())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

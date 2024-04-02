@@ -2908,7 +2908,7 @@ func Test_compactionTrigger_major(t *testing.T) {
 		},
 	}
 
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L2CompactionEnable.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.MajorCompactionEnable.Key, "false")
 	tr := &compactionTrigger{
 		handler:                      newMockHandlerWithMeta(meta),
 		allocator:                    &MockAllocator0{},
@@ -2919,7 +2919,7 @@ func Test_compactionTrigger_major(t *testing.T) {
 	_, err := tr.triggerManualCompaction(1, true)
 	assert.Error(t, err)
 	assert.True(t, errors.Is(err, merr.ErrMajorCompactionClusterNotSupport))
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.L2CompactionEnable.Key, "true")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.MajorCompactionEnable.Key, "true")
 	_, err2 := tr.triggerManualCompaction(1, true)
 	assert.Error(t, err2)
 	assert.True(t, errors.Is(err2, merr.ErrMajorCompactionCollectionNotSupport))
