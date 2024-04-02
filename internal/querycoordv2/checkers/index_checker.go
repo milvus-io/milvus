@@ -23,6 +23,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -75,6 +76,12 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 	var tasks []task.Task
 
 	for _, collectionID := range collectionIDs {
+		indexInfos, err := c.broker.ListIndexes(ctx, collectionID)
+		if err != nil {
+			log.Warn("failed to list indexes", zap.Int64("collection", collectionID), zap.Error(err))
+			continue
+		}
+
 		collection := c.meta.CollectionManager.GetCollection(collectionID)
 		if collection == nil {
 			log.Warn("collection released during check index", zap.Int64("collection", collectionID))
@@ -82,14 +89,14 @@ func (c *IndexChecker) Check(ctx context.Context) []task.Task {
 		}
 		replicas := c.meta.ReplicaManager.GetByCollection(collectionID)
 		for _, replica := range replicas {
-			tasks = append(tasks, c.checkReplica(ctx, collection, replica)...)
+			tasks = append(tasks, c.checkReplica(ctx, collection, replica, indexInfos)...)
 		}
 	}
 
 	return tasks
 }
 
-func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collection, replica *meta.Replica) []task.Task {
+func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collection, replica *meta.Replica, indexInfos []*indexpb.IndexInfo) []task.Task {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", collection.GetCollectionID()),
 	)
@@ -104,7 +111,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 		if ok, _ := c.nodeMgr.IsStoppingNode(segment.Node); ok {
 			continue
 		}
-		missing := c.checkSegment(ctx, segment, collection)
+		missing := c.checkSegment(ctx, segment, indexInfos)
 		if len(missing) > 0 {
 			targets[segment.GetID()] = missing
 			idSegments[segment.GetID()] = segment
@@ -135,9 +142,10 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	return tasks
 }
 
-func (c *IndexChecker) checkSegment(ctx context.Context, segment *meta.Segment, collection *meta.Collection) (fieldIDs []int64) {
+func (c *IndexChecker) checkSegment(ctx context.Context, segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
 	var result []int64
-	for fieldID, indexID := range collection.GetFieldIndexID() {
+	for _, indexInfo := range indexInfos {
+		fieldID, indexID := indexInfo.FieldID, indexInfo.IndexID
 		info, ok := segment.IndexInfo[fieldID]
 		if !ok {
 			result = append(result, fieldID)
