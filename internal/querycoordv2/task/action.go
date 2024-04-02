@@ -191,6 +191,10 @@ func (action *LeaderAction) Version() typeutil.UniqueID {
 	return action.version
 }
 
+func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
+	return action.leaderID
+}
+
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	views := distMgr.LeaderViewManager.GetLeaderView(action.leaderID)
 	view := views[action.Shard()]

@@ -822,19 +822,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 
 			// expected to balance channel first
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, c.collectionID)
-			suite.Len(segmentPlans, 0)
-			suite.Len(channelPlans, 2)
-
-			// mock new distribution after channel balance
-			balancer.dist.ChannelDistManager.Update(1, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel1"}, Node: 1})
-			balancer.dist.ChannelDistManager.Update(2, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel2"}, Node: 2})
-			balancer.dist.ChannelDistManager.Update(3, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel3"}, Node: 3})
-			balancer.dist.ChannelDistManager.Update(4, &meta.DmChannel{VchannelInfo: &datapb.VchannelInfo{CollectionID: 1, ChannelName: "channel4"}, Node: 4})
-
-			// expected to balance segment
-			segmentPlans, channelPlans = suite.getCollectionBalancePlans(balancer, c.collectionID)
 			suite.Len(segmentPlans, 2)
-			suite.Len(channelPlans, 0)
+			suite.Len(channelPlans, 2)
 		})
 	}
 }

@@ -206,17 +206,13 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
 		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, onlineNodes, offlineNodes)...)
-		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes)...)
-		}
+		segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes)...)
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
 			channelPlans = append(channelPlans, b.genChannelPlan(replica, onlineNodes)...)
 		}
 
-		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, onlineNodes)...)
-		}
+		segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, onlineNodes)...)
 	}
 
 	return segmentPlans, channelPlans
