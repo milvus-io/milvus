@@ -3,7 +3,7 @@ from locust import HttpUser, task, LoadTestShape
 
 class MilvusUser(HttpUser):
     host = "http://127.0.0.1:19530"
-    id_range = (10**6) * 0.01
+    id_range = int((10**6) * 0.01)
 
     @task
     def query(self):
