@@ -49,19 +49,21 @@ type Worker interface {
 // remoteWorker wraps grpc QueryNode client as Worker.
 type remoteWorker struct {
 	client types.QueryNodeClient
+	nodeID int64
 }
 
 // NewRemoteWorker creates a grpcWorker.
-func NewRemoteWorker(client types.QueryNodeClient) Worker {
+func NewRemoteWorker(client types.QueryNodeClient, nodeID int64) Worker {
 	return &remoteWorker{
 		client: client,
+		nodeID: nodeID,
 	}
 }
 
 // LoadSegments implements Worker.
 func (w *remoteWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error {
 	log := log.Ctx(ctx).With(
-		zap.Int64("workerID", req.GetDstNodeID()),
+		zap.Int64("workerID", w.nodeID),
 	)
 	status, err := w.client.LoadSegments(ctx, req)
 	if err = merr.CheckRPCCall(status, err); err != nil {
@@ -75,7 +77,7 @@ func (w *remoteWorker) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 
 func (w *remoteWorker) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) error {
 	log := log.Ctx(ctx).With(
-		zap.Int64("workerID", req.GetNodeID()),
+		zap.Int64("workerID", w.nodeID),
 	)
 	status, err := w.client.ReleaseSegments(ctx, req)
 	if err = merr.CheckRPCCall(status, err); err != nil {
@@ -89,7 +91,7 @@ func (w *remoteWorker) ReleaseSegments(ctx context.Context, req *querypb.Release
 
 func (w *remoteWorker) Delete(ctx context.Context, req *querypb.DeleteRequest) error {
 	log := log.Ctx(ctx).With(
-		zap.Int64("workerID", req.GetBase().GetTargetID()),
+		zap.Int64("workerID", w.nodeID),
 	)
 	status, err := w.client.Delete(ctx, req)
 	if err := merr.CheckRPCCall(status, err); err != nil {
@@ -164,6 +166,6 @@ func (w *remoteWorker) IsHealthy() bool {
 
 func (w *remoteWorker) Stop() {
 	if err := w.client.Close(); err != nil {
-		log.Warn("failed to call Close via grpc worker", zap.Error(err))
+		log.Warn("failed to call Close via grpc worker", zap.Int64("nodeID", w.nodeID), zap.Error(err))
 	}
 }

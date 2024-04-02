@@ -172,12 +172,13 @@ func (sd *shardDelegator) SyncDistribution(ctx context.Context, entries ...Segme
 }
 
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
-	nodeReq := proto.Clone(req).(*querypb.SearchRequest)
-	nodeReq.Scope = scope
-	nodeReq.Req.Base.TargetID = targetID
-	nodeReq.SegmentIDs = segmentIDs
-	nodeReq.FromShardLeader = true
-	nodeReq.DmlChannels = []string{sd.vchannelName}
+	nodeReq := &querypb.SearchRequest{
+		Req:             req.Req,
+		Scope:           scope,
+		SegmentIDs:      segmentIDs,
+		FromShardLeader: true,
+		DmlChannels:     []string{sd.vchannelName},
+	}
 	return nodeReq
 }
 
@@ -328,6 +329,9 @@ func (sd *shardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridS
 	futures := make([]*conc.Future[*internalpb.SearchResults], len(req.GetReq().GetReqs()))
 	for index := range req.GetReq().GetReqs() {
 		request := req.GetReq().Reqs[index]
+		if request.GetMvccTimestamp() == 0 {
+			request.MvccTimestamp = tSafe
+		}
 		future := conc.Go(func() (*internalpb.SearchResults, error) {
 			searchReq := &querypb.SearchRequest{
 				Req:             request,
@@ -337,9 +341,6 @@ func (sd *shardDelegator) HybridSearch(ctx context.Context, req *querypb.HybridS
 			}
 			searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
 			searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()
-			if searchReq.GetReq().GetMvccTimestamp() == 0 {
-				searchReq.GetReq().MvccTimestamp = tSafe
-			}
 
 			results, err := sd.search(ctx, searchReq, sealed, growing)
 			if err != nil {
