@@ -34,7 +34,7 @@ func TestFlushTaskRunner(t *testing.T) {
 
 	task.init(func(*segmentFlushPack) {
 		saveFlag = true
-	}, func(pack *segmentFlushPack, i postInjectionFunc) {}, signal)
+	}, func(pack *segmentFlushPack, i postInjectionFunc, isFlush bool) {}, signal)
 
 	go func() {
 		<-task.finishSignal
@@ -70,7 +70,7 @@ func TestFlushTaskRunner_FailError(t *testing.T) {
 		if pack.err != nil {
 			errFlag = true
 		}
-	}, func(pack *segmentFlushPack, i postInjectionFunc) {}, signal)
+	}, func(pack *segmentFlushPack, i postInjectionFunc, isFlush bool) {}, signal)
 
 	go func() {
 		<-task.finishSignal
@@ -118,7 +118,7 @@ func TestFlushTaskRunner_Injection(t *testing.T) {
 	task.init(func(pack *segmentFlushPack) {
 		assert.EqualValues(t, 2, pack.segmentID)
 		saveFlag = true
-	}, func(pack *segmentFlushPack, i postInjectionFunc) {
+	}, func(pack *segmentFlushPack, i postInjectionFunc, isFlush bool) {
 		if i != nil {
 			i(pack)
 		}

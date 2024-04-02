@@ -200,7 +200,7 @@ func (t *flushTaskRunner) waitFinish(notifyFunc notifyMetaFunc, postFunc taskPos
 		}
 	default:
 	}
-	postFunc(pack, postInjection)
+	postFunc(pack, postInjection, true)
 
 	// execution done, dequeue and make count --
 	notifyFunc(pack)
