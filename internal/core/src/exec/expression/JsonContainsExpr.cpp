@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "JsonContainsExpr.h"
+#include "common/Types.h"
 
 namespace milvus {
 namespace exec {
@@ -45,7 +46,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
     switch (expr_->op_) {
         case proto::plan::JSONContainsExpr_JSONOp_Contains:
         case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
-            if (datatype_is_array(data_type)) {
+            if (IsArrayDataType(data_type)) {
                 auto val_type = expr_->vals_[0].val_case();
                 switch (val_type) {
                     case proto::plan::GenericValue::kBoolVal: {
@@ -96,7 +97,7 @@ PhyJsonContainsFilterExpr::EvalJsonContainsForDataSegment() {
             break;
         }
         case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
-            if (datatype_is_array(data_type)) {
+            if (IsArrayDataType(data_type)) {
                 auto val_type = expr_->vals_[0].val_case();
                 switch (val_type) {
                     case proto::plan::GenericValue::kBoolVal: {

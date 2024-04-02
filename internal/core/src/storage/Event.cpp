@@ -14,16 +14,16 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/Event.h"
+#include "common/Array.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldMeta.h"
+#include "common/Json.h"
 #include "fmt/format.h"
 #include "nlohmann/json.hpp"
+#include "storage/Event.h"
 #include "storage/PayloadReader.h"
 #include "storage/PayloadWriter.h"
-#include "common/EasyAssert.h"
-#include "common/Json.h"
-#include "common/Consts.h"
-#include "common/FieldMeta.h"
-#include "common/Array.h"
 
 namespace milvus::storage {
 
@@ -215,8 +215,8 @@ std::vector<uint8_t>
 BaseEventData::Serialize() {
     auto data_type = field_data->get_data_type();
     std::shared_ptr<PayloadWriter> payload_writer;
-    if (milvus::datatype_is_vector(data_type) &&
-        data_type != DataType::VECTOR_SPARSE_FLOAT) {
+    if (IsVectorDataType(data_type) &&
+        !IsSparseFloatVectorDataType(data_type)) {
         payload_writer =
             std::make_unique<PayloadWriter>(data_type, field_data->get_dim());
     } else {
