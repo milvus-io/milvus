@@ -91,7 +91,7 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
-	channels := c.dist.ChannelDistManager.GetAll()
+	channels := c.dist.ChannelDistManager.GetByFilter()
 	released := utils.FilterReleased(channels, collectionIDs)
 	releaseTasks := c.createChannelReduceTasks(ctx, released, meta.NilReplica)
 	task.SetReason("collection released", releaseTasks...)
@@ -163,7 +163,7 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel {
 	dist := make([]*meta.DmChannel, 0)
 	for _, nodeID := range replica.GetNodes() {
-		dist = append(dist, c.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)...)
+		dist = append(dist, c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(nodeID))...)
 	}
 	return dist
 }
