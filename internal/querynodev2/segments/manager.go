@@ -214,6 +214,8 @@ func NewManager() *Manager {
 		segment.Release(WithReleaseScope(ReleaseScopeData))
 		return nil
 	}).WithReloader(func(key int64) (Segment, bool) {
+		segMgr.mu.RLock()
+		defer segMgr.mu.RUnlock()
 		segment, ok := segMgr.sealedSegments[key]
 		if !ok {
 			// the segment has been released, just ignore it
