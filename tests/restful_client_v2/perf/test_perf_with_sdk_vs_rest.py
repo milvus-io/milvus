@@ -48,7 +48,7 @@ def main(host="127.0.0.1"):
             elif op == "query_id":
                 res = collection.query(expr=f"id in {[x for x in range(100)]}", output_fields=["*"], limit=100)
             elif op == "query_varchar":
-                res = collection.query(expr='text like "1%"', output_fields=["*"], limit=100)
+                res = collection.query(expr='text like "9999%"', output_fields=["*"], limit=100)
             elif op == "insert":
                 insert_collection = Collection(name="test_restful_insert_perf")
                 res = insert_collection.insert(data=insert_data)
@@ -57,7 +57,7 @@ def main(host="127.0.0.1"):
             t1 = time.time()
             tt = t1 - t0
             time_list_sdk.append(tt)
-            logger.info(f"{op} cost  {tt:.4f} seconds")
+            logger.info(f"{op} cost  {tt:.4f} seconds with response {res}...")
 
         logger.info("start restful test")
         path = op
@@ -103,13 +103,13 @@ def main(host="127.0.0.1"):
             elif op == "query_id":
                 payload = json.dumps({"collectionName": "test_restful_perf",
                                       "outputFields": ["*"],
-                                      "expr": f"id in {[x for x in range(100)]}",
+                                      "filter": f"id in {[x for x in range(100)]}",
                                       })
                 response = requests.request("POST", url, headers=headers, data=payload)
             elif op == "query_varchar":
                 payload = json.dumps({"collectionName": "test_restful_perf",
                                       "outputFields": ["*"],
-                                      "expr": 'text like "1%"',
+                                      "filter": 'text like "9999%"',
                                       })
                 response = requests.request("POST", url, headers=headers, data=payload)
             elif op == "insert":
@@ -118,6 +118,7 @@ def main(host="127.0.0.1"):
                 response = requests.request("POST", url, headers=headers, data=payload)
             else:
                 raise Exception(f"unsupported op {op}")
+            assert response.json()["code"] == 200
             t1 = time.time()
             tt = t1 - t0
             time_list_restful.append(tt)
