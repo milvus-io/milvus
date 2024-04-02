@@ -874,8 +874,8 @@ func (_c *MockSegment_Partition_Call) RunAndReturn(run func() int64) *MockSegmen
 	return _c
 }
 
-// RLock provides a mock function with given fields:
-func (_m *MockSegment) RLock() error {
+// PinIfNotReleased provides a mock function with given fields:
+func (_m *MockSegment) PinIfNotReleased() error {
 	ret := _m.Called()
 
 	var r0 error
@@ -915,8 +915,8 @@ func (_c *MockSegment_RLock_Call) RunAndReturn(run func() error) *MockSegment_RL
 	return _c
 }
 
-// RUnlock provides a mock function with given fields:
-func (_m *MockSegment) RUnlock() {
+// Unpin provides a mock function with given fields:
+func (_m *MockSegment) Unpin() {
 	_m.Called()
 }
 
