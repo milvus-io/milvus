@@ -2,24 +2,18 @@ metrics:
   serviceMonitor:
     enabled: true
 proxy:
-  nodeSelector:
-    nvidia.com/gpu.present: 'true'
   resources:
     requests:
       cpu: "0.1"
       memory: "256Mi"
 
 rootCoordinator:
-  nodeSelector:
-    nvidia.com/gpu.present: 'true'
   resources:
     requests:
       cpu: "0.1"
       memory: "256Mi"
 
 queryCoordinator:
-  nodeSelector:
-    nvidia.com/gpu.present: 'true'
   resources:
     requests:
       cpu: "0.4"
@@ -33,15 +27,13 @@ queryNode:
       value: "0,1"
   resources:
     requests:
-      nvidia.com/gpu: 2
+      nvidia.com/gpu: 1
       cpu: "0.5"
       memory: "500Mi"
     limits:
-      nvidia.com/gpu: 2
+      nvidia.com/gpu: 1
 
 indexCoordinator:
-  nodeSelector:
-    nvidia.com/gpu.present: 'true'
   resources:
     requests:
       cpu: "0.1"
@@ -55,23 +47,19 @@ indexNode:
       value: "0,1"
   resources:
     requests:
-      nvidia.com/gpu: 2
+      nvidia.com/gpu: 1
       cpu: "0.5"
       memory: "500Mi"
     limits:
-      nvidia.com/gpu: 2
+      nvidia.com/gpu: 1
 
 dataCoordinator:
-  nodeSelector:
-    nvidia.com/gpu.present: 'true'
   resources:
     requests:
       cpu: "0.1"
       memory: "50Mi"
 
 dataNode:
-  nodeSelector:
-    nvidia.com/gpu.present: 'true'
   resources:
     requests:
       cpu: "0.5"
@@ -192,6 +180,9 @@ minio:
       cpu: "0.3"
       memory: "512Mi"
 standalone:
+  persistence:
+    persistentVolumeClaim:
+       storageClass: "local-path"
   nodeSelector:
     nvidia.com/gpu.present: 'true'
   resources:
