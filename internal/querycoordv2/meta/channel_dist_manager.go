@@ -25,6 +25,32 @@ import (
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+type ChannelDistFilter = func(ch *DmChannel) bool
+
+func WithCollectionID2Channel(collectionID int64) ChannelDistFilter {
+	return func(ch *DmChannel) bool {
+		return ch.GetCollectionID() == collectionID
+	}
+}
+
+func WithNodeID2Channel(nodeID int64) ChannelDistFilter {
+	return func(ch *DmChannel) bool {
+		return ch.Node == nodeID
+	}
+}
+
+func WithReplica2Channel(replica *Replica) ChannelDistFilter {
+	return func(ch *DmChannel) bool {
+		return ch.GetCollectionID() == replica.GetCollectionID() && replica.Contains(ch.Node)
+	}
+}
+
+func WithChannelName2Channel(channelName string) ChannelDistFilter {
+	return func(ch *DmChannel) bool {
+		return ch.GetChannelName() == channelName
+	}
+}
+
 type DmChannel struct {
 	*datapb.VchannelInfo
 	Node    int64
@@ -58,33 +84,7 @@ func NewChannelDistManager() *ChannelDistManager {
 	}
 }
 
-func (m *ChannelDistManager) GetByNode(nodeID UniqueID) []*DmChannel {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	return m.getByNode(nodeID)
-}
-
-func (m *ChannelDistManager) getByNode(nodeID UniqueID) []*DmChannel {
-	channels, ok := m.channels[nodeID]
-	if !ok {
-		return nil
-	}
-
-	return channels
-}
-
-func (m *ChannelDistManager) GetAll() []*DmChannel {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	result := make([]*DmChannel, 0)
-	for _, channels := range m.channels {
-		result = append(result, channels...)
-	}
-	return result
-}
-
+// todo by liuwei: should consider the case of duplicate leader exists
 // GetShardLeader returns the node whthin the given replicaNodes and subscribing the given shard,
 // returns (0, false) if not found.
 func (m *ChannelDistManager) GetShardLeader(replica *Replica, shard string) (int64, bool) {
@@ -103,6 +103,7 @@ func (m *ChannelDistManager) GetShardLeader(replica *Replica, shard string) (int
 	return 0, false
 }
 
+// todo by liuwei: should consider the case of duplicate leader exists
 func (m *ChannelDistManager) GetShardLeadersByReplica(replica *Replica) map[string]int64 {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
@@ -119,54 +120,30 @@ func (m *ChannelDistManager) GetShardLeadersByReplica(replica *Replica) map[stri
 	return ret
 }
 
-func (m *ChannelDistManager) GetChannelDistByReplica(replica *Replica) map[string][]int64 {
+// return all channels in list which match all given filters
+func (m *ChannelDistManager) GetByFilter(filters ...ChannelDistFilter) []*DmChannel {
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	ret := make(map[string][]int64)
-	for _, node := range replica.GetNodes() {
-		channels := m.channels[node]
-		for _, dmc := range channels {
-			if dmc.GetCollectionID() == replica.GetCollectionID() {
-				channelName := dmc.GetChannelName()
-				_, ok := ret[channelName]
-				if !ok {
-					ret[channelName] = make([]int64, 0)
-				}
-				ret[channelName] = append(ret[channelName], node)
+	mergedFilters := func(ch *DmChannel) bool {
+		for _, fn := range filters {
+			if fn != nil && !fn(ch) {
+				return false
 			}
 		}
-	}
-	return ret
-}
 
-func (m *ChannelDistManager) GetByCollection(collectionID UniqueID) []*DmChannel {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
+		return true
+	}
 
 	ret := make([]*DmChannel, 0)
 	for _, channels := range m.channels {
 		for _, channel := range channels {
-			if channel.CollectionID == collectionID {
+			if mergedFilters(channel) {
 				ret = append(ret, channel)
 			}
 		}
 	}
 	return ret
-}
-
-func (m *ChannelDistManager) GetByCollectionAndNode(collectionID, nodeID UniqueID) []*DmChannel {
-	m.rwmutex.RLock()
-	defer m.rwmutex.RUnlock()
-
-	channels := make([]*DmChannel, 0)
-	for _, channel := range m.getByNode(nodeID) {
-		if channel.CollectionID == collectionID {
-			channels = append(channels, channel)
-		}
-	}
-
-	return channels
 }
 
 func (m *ChannelDistManager) Update(nodeID UniqueID, channels ...*DmChannel) {

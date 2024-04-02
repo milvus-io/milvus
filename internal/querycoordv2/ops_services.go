@@ -147,7 +147,7 @@ func (s *Server) GetQueryNodeDistribution(ctx context.Context, req *querypb.GetQ
 	}
 
 	segments := s.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(req.GetNodeID()))
-	channels := s.dist.ChannelDistManager.GetByNode(req.NodeID)
+	channels := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetNodeID()))
 	return &querypb.GetQueryNodeDistributionResponse{
 		Status:           merr.Success(),
 		ChannelNames:     lo.Map(channels, func(c *meta.DmChannel, _ int) string { return c.GetChannelName() }),
@@ -364,7 +364,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		dstNodeSet.Remove(srcNode)
 
 		// check sealed segment list
-		channels := s.dist.ChannelDistManager.GetByCollectionAndNode(replica.CollectionID, srcNode)
+		channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(srcNode))
 		toBalance := typeutil.NewSet[*meta.DmChannel]()
 		if req.GetTransferAll() {
 			toBalance.Insert(channels...)
@@ -421,8 +421,8 @@ func (s *Server) CheckQueryNodeDistribution(ctx context.Context, req *querypb.Ch
 	}
 
 	// check channel list
-	channelOnSrc := s.dist.ChannelDistManager.GetByNode(req.GetSourceNodeID())
-	channelOnDst := s.dist.ChannelDistManager.GetByNode(req.GetTargetNodeID())
+	channelOnSrc := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetSourceNodeID()))
+	channelOnDst := s.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(req.GetTargetNodeID()))
 	channelDstMap := lo.SliceToMap(channelOnDst, func(ch *meta.DmChannel) (string, *meta.DmChannel) {
 		return ch.GetChannelName(), ch
 	})

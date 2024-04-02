@@ -14,23 +14,37 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package importv2
+package testutils
 
 import (
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
-	"github.com/milvus-io/milvus/internal/storage"
+	"os"
+
+	"go.etcd.io/etcd/server/v3/embed"
+
+	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
-type Manager struct {
-	TaskManager
-	Executor
+type EmbedEtcdUtil struct {
+	server  *embed.Etcd
+	tempDir string
 }
 
-func NewManager(syncMgr syncmgr.SyncManager, cm storage.ChunkManager) *Manager {
-	tm := NewTaskManager()
-	e := NewExecutor(tm, syncMgr, cm)
-	return &Manager{
-		TaskManager: tm,
-		Executor:    e,
+func (util *EmbedEtcdUtil) SetupEtcd() ([]string, error) {
+	// init embed etcd
+	embedetcdServer, tempDir, err := etcd.StartTestEmbedEtcdServer()
+	if err != nil {
+		return nil, err
+	}
+	util.server, util.tempDir = embedetcdServer, tempDir
+
+	return etcd.GetEmbedEtcdEndpoints(embedetcdServer), nil
+}
+
+func (util *EmbedEtcdUtil) TearDownEmbedEtcd() {
+	if util.server != nil {
+		util.server.Close()
+	}
+	if util.tempDir != "" {
+		os.RemoveAll(util.tempDir)
 	}
 }

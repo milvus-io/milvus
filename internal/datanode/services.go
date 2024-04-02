@@ -72,54 +72,37 @@ func (node *DataNode) GetComponentStates(ctx context.Context, req *milvuspb.GetC
 	return states, nil
 }
 
-// FlushSegments packs flush messages into flowGraph through flushChan.
-//
-//	 DataCoord calls FlushSegments if the segment is seal&flush only.
-//		If DataNode receives a valid segment to flush, new flush message for the segment should be ignored.
-//		So if receiving calls to flush segment A, DataNode should guarantee the segment to be flushed.
 func (node *DataNode) FlushSegments(ctx context.Context, req *datapb.FlushSegmentsRequest) (*commonpb.Status, error) {
-	metrics.DataNodeFlushReqCounter.WithLabelValues(
-		fmt.Sprint(node.GetNodeID()),
-		metrics.TotalLabel).Inc()
+	serverID := node.GetNodeID()
+	metrics.DataNodeFlushReqCounter.WithLabelValues(fmt.Sprint(serverID), metrics.TotalLabel).Inc()
 
-	log := log.Ctx(ctx)
+	log := log.Ctx(ctx).With(
+		zap.Int64("nodeID", serverID),
+		zap.Int64("collectionID", req.GetCollectionID()),
+		zap.String("channelName", req.GetChannelName()),
+		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
+	)
+	log.Info("receive FlushSegments request")
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
-		log.Warn("DataNode.FlushSegments failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
+		log.Warn("failed to FlushSegments", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	serverID := node.GetSession().ServerID
 	if req.GetBase().GetTargetID() != serverID {
-		log.Warn("flush segment target id not matched",
-			zap.Int64("targetID", req.GetBase().GetTargetID()),
-			zap.Int64("serverID", serverID),
-		)
-
+		log.Warn("faled to FlushSegments, target node not match", zap.Int64("targetID", req.GetBase().GetTargetID()))
 		return merr.Status(merr.WrapErrNodeNotMatch(req.GetBase().GetTargetID(), serverID)), nil
 	}
 
-	segmentIDs := req.GetSegmentIDs()
-	log = log.With(
-		zap.Int64("collectionID", req.GetCollectionID()),
-		zap.String("channelName", req.GetChannelName()),
-		zap.Int64s("segmentIDs", segmentIDs),
-	)
-
-	log.Info("receiving FlushSegments request")
-
-	err := node.writeBufferManager.SealSegments(ctx, req.GetChannelName(), segmentIDs)
+	err := node.writeBufferManager.SealSegments(ctx, req.GetChannelName(), req.GetSegmentIDs())
 	if err != nil {
-		log.Warn("failed to flush segments", zap.Error(err))
+		log.Warn("failed to FlushSegments", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
-	// Log success flushed segments.
-	log.Info("sending segments to WriteBuffer Manager")
+	log.Info("success to FlushSegments")
 
-	metrics.DataNodeFlushReqCounter.WithLabelValues(
-		fmt.Sprint(node.GetNodeID()),
-		metrics.SuccessLabel).Inc()
+	metrics.DataNodeFlushReqCounter.WithLabelValues(fmt.Sprint(serverID), metrics.SuccessLabel).Inc()
 	return merr.Success(), nil
 }
 
@@ -425,7 +408,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 	}
 
 	task := importv2.NewPreImportTask(req)
-	node.importManager.Add(task)
+	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added preimport task")
 	return merr.Success(), nil
@@ -444,7 +427,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 		return merr.Status(err), nil
 	}
 	task := importv2.NewImportTask(req)
-	node.importManager.Add(task)
+	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added import task")
 	return merr.Success(), nil
@@ -458,7 +441,7 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 		return &datapb.QueryPreImportResponse{Status: merr.Status(err)}, nil
 	}
 	status := merr.Success()
-	task := node.importManager.Get(req.GetTaskID())
+	task := node.importTaskMgr.Get(req.GetTaskID())
 	if task == nil || task.GetType() != importv2.PreImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.PreImportTaskType))
 	}
@@ -487,12 +470,12 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 	if req.GetQuerySlot() {
 		return &datapb.QueryImportResponse{
 			Status: status,
-			Slots:  node.importManager.Slots(),
+			Slots:  node.importScheduler.Slots(),
 		}, nil
 	}
 
 	// query import
-	task := node.importManager.Get(req.GetTaskID())
+	task := node.importTaskMgr.Get(req.GetTaskID())
 	if task == nil || task.GetType() != importv2.ImportTaskType {
 		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.ImportTaskType))
 	}
@@ -515,7 +498,7 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 		return merr.Status(err), nil
 	}
 
-	node.importManager.Remove(req.GetTaskID())
+	node.importTaskMgr.Remove(req.GetTaskID())
 
 	log.Info("datanode drop import done")
 

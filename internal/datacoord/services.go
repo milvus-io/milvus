@@ -383,10 +383,11 @@ func (s *Server) GetSegmentInfo(ctx context.Context, req *datapb.GetSegmentInfoR
 
 			clonedInfo := info.Clone()
 			if child != nil {
+				clonedChild := child.Clone()
 				// child segment should decompress binlog path
-				binlog.DecompressBinLog(storage.DeleteBinlog, child.GetCollectionID(), child.GetPartitionID(), child.GetID(), child.GetDeltalogs())
-				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, child.GetDeltalogs()...)
-				clonedInfo.DmlPosition = child.GetDmlPosition()
+				binlog.DecompressBinLog(storage.DeleteBinlog, clonedChild.GetCollectionID(), clonedChild.GetPartitionID(), clonedChild.GetID(), clonedChild.GetDeltalogs())
+				clonedInfo.Deltalogs = append(clonedInfo.Deltalogs, clonedChild.GetDeltalogs()...)
+				clonedInfo.DmlPosition = clonedChild.GetDmlPosition()
 			}
 			segmentutil.ReCalcRowCount(info.SegmentInfo, clonedInfo.SegmentInfo)
 			infos = append(infos, clonedInfo.SegmentInfo)
@@ -1656,17 +1657,14 @@ func (s *Server) ImportV2(ctx context.Context, in *internalpb.ImportRequestInter
 	var timeoutTs uint64 = math.MaxUint64
 	timeoutStr, err := funcutil.GetAttrByKeyFromRepeatedKV("timeout", in.GetOptions())
 	if err == nil {
+		// Specifies the timeout duration for import, such as "300s", "1.5h" or "1h45m".
 		dur, err := time.ParseDuration(timeoutStr)
 		if err != nil {
 			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("parse import timeout failed, err=%w", err)))
 			return resp, nil
 		}
-		ts, err := s.allocator.allocTimestamp(ctx)
-		if err != nil {
-			resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprint("alloc ts failed, err=%w", err)))
-			return resp, nil
-		}
-		timeoutTs = tsoutil.AddPhysicalDurationOnTs(ts, dur)
+		curTs := tsoutil.GetCurrentTime()
+		timeoutTs = tsoutil.AddPhysicalDurationOnTs(curTs, dur)
 	}
 
 	files := in.GetFiles()
