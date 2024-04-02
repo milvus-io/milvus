@@ -66,11 +66,11 @@ func NewL0Segment(collection *Collection,
 	return segment, nil
 }
 
-func (s *L0Segment) RLock() error {
+func (s *L0Segment) PinIfNotReleased() error {
 	return nil
 }
 
-func (s *L0Segment) RUnlock() {}
+func (s *L0Segment) Unpin() {}
 
 func (s *L0Segment) InsertCount() int64 {
 	return 0

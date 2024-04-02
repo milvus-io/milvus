@@ -94,10 +94,13 @@ func (suite *SegmentSuite) SetupTest() {
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
+	g, err := suite.sealed.(*LocalSegment).StartLoadData()
+	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
 		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
+	g.Done(nil)
 
 	suite.growing, err = NewSegment(ctx,
 		suite.collection,
@@ -198,7 +201,7 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 
 	sealed := suite.sealed.(*LocalSegment)
 
-	suite.False(sealed.ptrLock.RLockIfNotReleased())
+	suite.False(sealed.ptrLock.PinIfNotReleased())
 	suite.EqualValues(0, sealed.RowNum())
 	suite.EqualValues(0, sealed.MemSize())
 	suite.False(sealed.HasRawData(101))

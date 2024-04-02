@@ -33,7 +33,7 @@ func TestLoadStateLoadData(t *testing.T) {
 
 	for _, s := range []loadStateEnum{
 		LoadStateDataLoading,
-		LoadStateReleasing,
+		LoadStateDataReleasing,
 		LoadStateReleased,
 	} {
 		l.state = s
@@ -54,7 +54,7 @@ func TestStartReleaseData(t *testing.T) {
 	// never roll back on current using.
 	l.state = LoadStateDataLoaded
 	g = l.StartReleaseData()
-	assert.Equal(t, LoadStateReleasing, l.state)
+	assert.Equal(t, LoadStateDataReleasing, l.state)
 	assert.NotNil(t, g)
 	g.Done(errors.New("test"))
 	assert.Equal(t, LoadStateDataLoaded, l.state)
@@ -62,7 +62,7 @@ func TestStartReleaseData(t *testing.T) {
 	// success
 	l.state = LoadStateDataLoaded
 	g = l.StartReleaseData()
-	assert.Equal(t, LoadStateReleasing, l.state)
+	assert.Equal(t, LoadStateDataReleasing, l.state)
 	assert.NotNil(t, g)
 	g.Done(nil)
 	assert.Equal(t, LoadStateOnlyMeta, l.state)
@@ -108,7 +108,7 @@ func TestStartReleaseAll(t *testing.T) {
 	// Test Release All, nothing to do on only meta.
 	g := l.StartReleaseAll()
 	assert.NotNil(t, g)
-	assert.Equal(t, LoadStateReleasing, l.state)
+	assert.Equal(t, LoadStateReleased, l.state)
 	g.Done(nil)
 	assert.Equal(t, LoadStateReleased, l.state)
 
@@ -116,7 +116,7 @@ func TestStartReleaseAll(t *testing.T) {
 	// never roll back on current using.
 	l.state = LoadStateDataLoaded
 	g = l.StartReleaseData()
-	assert.Equal(t, LoadStateReleasing, l.state)
+	assert.Equal(t, LoadStateDataReleasing, l.state)
 	assert.NotNil(t, g)
 	g.Done(errors.New("test"))
 	assert.Equal(t, LoadStateDataLoaded, l.state)
@@ -124,7 +124,7 @@ func TestStartReleaseAll(t *testing.T) {
 	// success
 	l.state = LoadStateDataLoaded
 	g = l.StartReleaseAll()
-	assert.Equal(t, LoadStateReleasing, l.state)
+	assert.Equal(t, LoadStateReleased, l.state)
 	assert.NotNil(t, g)
 	g.Done(nil)
 	assert.Equal(t, LoadStateReleased, l.state)
@@ -167,14 +167,58 @@ func TestStartReleaseAll(t *testing.T) {
 
 func TestRLock(t *testing.T) {
 	l := NewLoadStateLock(LoadStateOnlyMeta)
-	assert.True(t, l.RLockIfNotReleased())
+	assert.True(t, l.RLockIf(IsNotReleased))
 	l.RUnlock()
+	assert.False(t, l.RLockIf(IsDataLoaded))
 
 	l = NewLoadStateLock(LoadStateDataLoaded)
-	assert.True(t, l.RLockIfNotReleased())
+	assert.True(t, l.RLockIf(IsNotReleased))
+	l.RUnlock()
+	assert.True(t, l.RLockIf(IsDataLoaded))
 	l.RUnlock()
 
 	l = NewLoadStateLock(LoadStateOnlyMeta)
 	l.StartReleaseAll().Done(nil)
-	assert.False(t, l.RLockIfNotReleased())
+	assert.False(t, l.RLockIf(IsNotReleased))
+	assert.False(t, l.RLockIf(IsDataLoaded))
+}
+
+func TestPin(t *testing.T) {
+	l := NewLoadStateLock(LoadStateOnlyMeta)
+	assert.True(t, l.PinIfNotReleased())
+	l.Unpin()
+
+	l.StartReleaseAll().Done(nil)
+	assert.False(t, l.PinIfNotReleased())
+
+	l = NewLoadStateLock(LoadStateDataLoaded)
+	assert.True(t, l.PinIfNotReleased())
+
+	ch := make(chan struct{})
+	go func() {
+		l.StartReleaseAll().Done(nil)
+		close(ch)
+	}()
+
+	select {
+	case <-ch:
+		t.Errorf("should be blocked")
+	case <-time.After(500 * time.Millisecond):
+	}
+
+	// should be blocked until refcnt is zero.
+	assert.True(t, l.PinIfNotReleased())
+	l.Unpin()
+	select {
+	case <-ch:
+		t.Errorf("should be blocked")
+	case <-time.After(500 * time.Millisecond):
+	}
+	l.Unpin()
+	<-ch
+
+	assert.Panics(t, func() {
+		// too much unpin
+		l.Unpin()
+	})
 }

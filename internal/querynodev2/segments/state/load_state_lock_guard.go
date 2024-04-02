@@ -1,23 +1,27 @@
 package state
 
+type LoadStateLockGuard interface {
+	Done(err error)
+}
+
 // newLoadStateLockGuard creates a LoadStateGuard.
-func newLoadStateLockGuard(ls *LoadStateLock, original loadStateEnum, target loadStateEnum) *LoadStateLockGuard {
-	return &LoadStateLockGuard{
+func newLoadStateLockGuard(ls *LoadStateLock, original loadStateEnum, target loadStateEnum) *loadStateLockGuard {
+	return &loadStateLockGuard{
 		ls:       ls,
 		original: original,
 		target:   target,
 	}
 }
 
-// LoadStateLockGuard is a guard to update the state of LoadState.
-type LoadStateLockGuard struct {
+// loadStateLockGuard is a guard to update the state of LoadState.
+type loadStateLockGuard struct {
 	ls       *LoadStateLock
 	original loadStateEnum
 	target   loadStateEnum
 }
 
 // Done updates the state of LoadState to target state.
-func (g *LoadStateLockGuard) Done(err error) {
+func (g *loadStateLockGuard) Done(err error) {
 	g.ls.cv.L.Lock()
 	g.ls.cv.Broadcast()
 	defer g.ls.cv.L.Unlock()
@@ -28,3 +32,14 @@ func (g *LoadStateLockGuard) Done(err error) {
 	}
 	g.ls.state = g.target
 }
+
+// newNopLoadStateLockGuard creates a LoadStateLockGuard that does nothing.
+func newNopLoadStateLockGuard() LoadStateLockGuard {
+	return nopLockGuard{}
+}
+
+// nopLockGuard is a guard that does nothing.
+type nopLockGuard struct{}
+
+// Done does nothing.
+func (nopLockGuard) Done(err error) {}
