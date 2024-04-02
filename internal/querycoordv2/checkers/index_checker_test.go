@@ -251,7 +251,7 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 	checker.dist.SegmentDistManager.Update(1, segment)
 
 	// broker
-	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Call.Return(
+	suite.broker.EXPECT().ListIndexes(mock.Anything, mock.Anything).Call.Return(
 		func(ctx context.Context, collectionID int64) ([]*indexpb.IndexInfo, error) {
 			return []*indexpb.IndexInfo{
 				{
