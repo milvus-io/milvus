@@ -20,7 +20,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func initSearchRequest(ctx context.Context, t *searchTask) error {
+func initSearchRequest(ctx context.Context, t *searchTask, isHybrid bool) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init search request")
 	defer sp.End()
 
@@ -77,6 +77,9 @@ func initSearchRequest(ctx context.Context, t *searchTask) error {
 		}
 		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams(), t.schema.CollectionSchema)
 		annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
+		if queryInfo.GetGroupByFieldId() != -1 && isHybrid {
+			return errors.New("not support search_group_by operation in the hybrid search")
+		}
 		if queryInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 			return errors.New("not support search_group_by operation based on binary vector column")
 		}
