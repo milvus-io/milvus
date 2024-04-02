@@ -263,6 +263,15 @@ var (
 			Help:      "count of bytes sent back to sdk",
 		}, []string{nodeIDLabelName})
 
+	// ProxyReportValue records value about the request
+	ProxyReportValue = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.ProxyRole,
+			Name:      "report_value",
+			Help:      "report value about the request",
+		}, []string{nodeIDLabelName, msgTypeLabelName, databaseLabelName, usernameLabelName})
+
 	// ProxyLimiterRate records rates of rateLimiter in Proxy.
 	ProxyLimiterRate = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -373,6 +382,7 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxyRateLimitReqCount)
 
 	registry.MustRegister(ProxySlowQueryCount)
+	registry.MustRegister(ProxyReportValue)
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {

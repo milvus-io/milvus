@@ -91,7 +91,7 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 				reportInfo := report.(map[string]any)
 				log.Info("insert report info", zap.Any("reportInfo", reportInfo))
 				s.Equal(hookutil.OpTypeInsert, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.RequestDataSizeKey])
 				return
 			}
 		}
@@ -177,7 +177,8 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 				reportInfo := report.(map[string]any)
 				log.Info("search report info", zap.Any("reportInfo", reportInfo))
 				s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
 				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
 				return
 			}
@@ -200,7 +201,8 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 				reportInfo := report.(map[string]any)
 				log.Info("query report info", zap.Any("reportInfo", reportInfo))
 				s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
-				s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.ResultDataSizeKey])
+				s.NotEqualValues(0, reportInfo[hookutil.RelatedDataSizeKey])
 				s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
 				return
 			}

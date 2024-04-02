@@ -54,7 +54,6 @@ type queryTask struct {
 	collectionName string
 	queryParams    *queryParams
 	schema         *schemaInfo
-	dimension      int64
 
 	userOutputFields []string
 
@@ -66,8 +65,9 @@ type queryTask struct {
 	channelsMvcc     map[string]Timestamp
 	fastSkip         bool
 
-	reQuery     bool
-	allQueryCnt int64
+	reQuery              bool
+	allQueryCnt          int64
+	totalRelatedDataSize int64
 }
 
 type queryParams struct {
@@ -341,11 +341,6 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 	t.schema = schema
-	t.dimension, err = typeutil.GetCollectionDim(t.schema.CollectionSchema)
-	if err != nil {
-		log.Warn("get collection dimension failed", zap.Error(err))
-		return err
-	}
 
 	if t.ids != nil {
 		pkField := ""
@@ -481,6 +476,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 
 	toReduceResults := make([]*internalpb.RetrieveResults, 0)
 	t.allQueryCnt = 0
+	t.totalRelatedDataSize = 0
 	select {
 	case <-t.TraceCtx().Done():
 		log.Warn("proxy", zap.Int64("Query: wait to finish failed, timeout!, msgID:", t.ID()))
@@ -490,6 +486,7 @@ func (t *queryTask) PostExecute(ctx context.Context) error {
 		t.resultBuf.Range(func(res *internalpb.RetrieveResults) bool {
 			toReduceResults = append(toReduceResults, res)
 			t.allQueryCnt += res.GetAllRetrieveCount()
+			t.totalRelatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
 			log.Debug("proxy receives one query result", zap.Int64("sourceID", res.GetBase().GetSourceID()))
 			return true
 		})

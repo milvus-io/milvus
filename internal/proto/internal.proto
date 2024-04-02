@@ -141,6 +141,7 @@ message CostAggregation {
   int64 responseTime = 1;
   int64 serviceTime = 2;
   int64 totalNQ = 3;
+  int64 totalRelatedDataSize = 4;
 }
 
 message RetrieveRequest {
