@@ -1003,19 +1003,20 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            files = remote_writer.batch_files[0]
-        # import data
-        t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
-        logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
-        tt = time.time() - t0
-        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
-        assert success
+            batch_files = remote_writer.batch_files[0]
+        for files in batch_files:
+            # import data
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=files
+            )
+            logging.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert success
         num_entities = self.collection_wrap.num_entities
         log.info(f" collection entities: {num_entities}")
         assert num_entities == entities
@@ -1095,19 +1096,20 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            files = remote_writer.batch_files[0]
-        # import data
-        t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
-        logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
-        tt = time.time() - t0
-        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
-        assert success
+            batch_files = remote_writer.batch_files
+        for files in batch_files:
+            # import data
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=files
+            )
+            logging.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert success
         num_entities = self.collection_wrap.num_entities
         log.info(f" collection entities: {num_entities}")
         assert num_entities == entities
@@ -1195,19 +1197,20 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            files = remote_writer.batch_files[0]
-        # import data
-        t0 = time.time()
-        task_id, _ = self.utility_wrap.do_bulk_insert(
-            collection_name=c_name, files=files
-        )
-        logging.info(f"bulk insert task ids:{task_id}")
-        success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
-        )
-        tt = time.time() - t0
-        log.info(f"bulk insert state:{success} in {tt} with states:{states}")
-        assert success
+            batch_files = remote_writer.batch_files[0]
+        for files in batch_files:
+            # import data
+            t0 = time.time()
+            task_id, _ = self.utility_wrap.do_bulk_insert(
+                collection_name=c_name, files=files
+            )
+            logging.info(f"bulk insert task ids:{task_id}")
+            success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
+                task_ids=[task_id], timeout=300
+            )
+            tt = time.time() - t0
+            log.info(f"bulk insert state:{success} in {tt} with states:{states}")
+            assert success
         num_entities = self.collection_wrap.num_entities
         log.info(f" collection entities: {num_entities}")
         assert num_entities == entities
