@@ -1003,7 +1003,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            files = remote_writer.batch_files
+            files = remote_writer.batch_files[0]
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
@@ -1095,7 +1095,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            files = remote_writer.batch_files
+            files = remote_writer.batch_files[0]
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
@@ -1195,7 +1195,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            files = remote_writer.batch_files
+            files = remote_writer.batch_files[0]
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
