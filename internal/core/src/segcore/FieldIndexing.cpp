@@ -259,7 +259,7 @@ VectorFieldIndexing::AppendSegmentIndexDense(int64_t reserved_offset,
 knowhere::Json
 VectorFieldIndexing::get_build_params() const {
     auto config = config_->GetBuildBaseParams();
-    if (!datatype_is_sparse_vector(field_meta_.get_data_type())) {
+    if (!IsSparseFloatVectorDataType(field_meta_.get_data_type())) {
         config[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
     }
     config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
