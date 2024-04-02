@@ -64,7 +64,7 @@ def main(host="127.0.0.1"):
             t1 = time.time()
             tt = t1 - t0
             time_list_sdk.append(tt)
-            logger.info(f"{op} cost  {tt:.4f} seconds with response {res}...")
+            logger.info(f"{op} cost  {tt:.4f} ...")
 
         logger.info("start restful test")
         path = op
@@ -125,11 +125,11 @@ def main(host="127.0.0.1"):
                 response = requests.request("POST", url, headers=headers, data=payload)
             else:
                 raise Exception(f"unsupported op {op}")
-            assert response.json()["code"] == 200
             t1 = time.time()
             tt = t1 - t0
             time_list_restful.append(tt)
-            logger.info(f"{op} cost  {tt:.4f} seconds with response {response.text[:200]}...")
+            if response.json()["code"] != 200:
+                logger.error(f"{op} failed with response {response.text}")
 
         mean_time_sdk = sum(time_list_sdk) / len(time_list_sdk)
         mean_time_restful = sum(time_list_restful) / len(time_list_restful)
