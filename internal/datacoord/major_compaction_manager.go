@@ -80,7 +80,7 @@ func newMajorCompactionManager(
 
 func (t *MajorCompactionManager) start() {
 	t.quit = make(chan struct{})
-	t.ticker = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	t.ticker = time.NewTicker(Params.DataCoordCfg.MajorCompactionCheckInterval.GetAsDuration(time.Second))
 	t.wg.Add(1)
 	go t.startMajorCompactionLoop()
 }

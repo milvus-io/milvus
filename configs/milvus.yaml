@@ -438,6 +438,7 @@ dataCoord:
     major:
       enable: true
       autoEnable: false
+      checkInterval: 10
       minInterval: 3600
       maxInterval: 86400
       newDataRatioThreshold: 0.2
