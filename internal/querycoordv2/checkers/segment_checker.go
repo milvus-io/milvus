@@ -95,7 +95,7 @@ func (c *SegmentChecker) Check(ctx context.Context) []task.Task {
 	}
 
 	// find already released segments which are not contained in target
-	segments := c.dist.SegmentDistManager.GetByFilter(nil)
+	segments := c.dist.SegmentDistManager.GetByFilter()
 	released := utils.FilterReleased(segments, collectionIDs)
 	reduceTasks := c.createSegmentReduceTasks(ctx, released, meta.NilReplica, querypb.DataScope_Historical)
 	task.SetReason("collection released", reduceTasks...)
@@ -150,7 +150,6 @@ func (c *SegmentChecker) getGrowingSegmentDiff(collectionID int64,
 		zap.Int64("replicaID", replica.ID))
 
 	leaders := c.dist.ChannelDistManager.GetShardLeadersByReplica(replica)
-	//	distMgr.LeaderViewManager.
 	for channelName, node := range leaders {
 		view := c.dist.LeaderViewManager.GetLeaderShardView(node, channelName)
 		if view == nil {
