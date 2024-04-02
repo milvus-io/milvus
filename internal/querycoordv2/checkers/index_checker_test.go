@@ -115,6 +115,13 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 			},
 		}, nil)
 
+	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+		},
+	}, nil)
+
 	tasks := checker.Check(context.Background())
 	suite.Require().Len(tasks, 1)
 
@@ -183,6 +190,13 @@ func (suite *IndexCheckerSuite) TestIndexInfoNotMatch() {
 			return nil
 		}, nil)
 
+	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+		},
+	}, nil)
+
 	tasks := checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
 }
@@ -215,6 +229,12 @@ func (suite *IndexCheckerSuite) TestGetIndexInfoFailed() {
 	// broker
 	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), mock.AnythingOfType("int64")).
 		Return(nil, errors.New("mocked error"))
+	suite.broker.EXPECT().ListIndexes(mock.Anything, int64(1)).Return([]*indexpb.IndexInfo{
+		{
+			FieldID: 101,
+			IndexID: 1000,
+		},
+	}, nil)
 
 	tasks := checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
@@ -265,7 +285,7 @@ func (suite *IndexCheckerSuite) TestCreateNewIndex() {
 			}, nil
 		},
 	)
-	suite.broker.EXPECT().GetIndexInfo(mock.Anything, int64(1), mock.AnythingOfType("int64")).Call.
+	suite.broker.EXPECT().GetIndexInfo(mock.Anything, mock.Anything, mock.AnythingOfType("int64")).Call.
 		Return(func(ctx context.Context, collectionID, segmentID int64) []*querypb.FieldIndexInfo {
 			return []*querypb.FieldIndexInfo{
 				{
