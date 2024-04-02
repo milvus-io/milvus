@@ -136,6 +136,28 @@ func TestHybridSearchTask_PreExecute(t *testing.T) {
 		task.request.OutputFields = []string{testFloatVecField}
 		assert.NoError(t, task.PreExecute(ctx))
 	})
+
+	t.Run("hybrid search with group_by", func(t *testing.T) {
+		collName := "hybrid_search_with_group_by" + funcutil.GenRandomStr()
+		createCollWithMultiVecField(t, collName, rc)
+
+		task := genHybridSearchTaskWithNq(t, collName, []*milvuspb.SearchRequest{
+			{Nq: 1, DslType: commonpb.DslType_BoolExprV1, SearchParams: []*commonpb.KeyValuePair{
+				{Key: AnnsFieldKey, Value: "fvec"},
+				{Key: TopKKey, Value: "10"},
+				{Key: GroupByFieldKey, Value: "bool"},
+			}},
+		})
+
+		ctxTimeout, cancel := context.WithTimeout(ctx, time.Second)
+		defer cancel()
+
+		task.ctx = ctxTimeout
+		task.request.OutputFields = []string{testFloatVecField}
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.Equal(t, "not support search_group_by operation in the hybrid search", err.Error())
+	})
 }
 
 func TestHybridSearchTask_ErrExecute(t *testing.T) {
