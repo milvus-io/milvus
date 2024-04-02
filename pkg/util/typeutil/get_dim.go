@@ -27,14 +27,3 @@ func GetDim(field *schemapb.FieldSchema) (int64, error) {
 	}
 	return int64(dim), nil
 }
-
-func GetCollectionDim(collection *schemapb.CollectionSchema) (int64, error) {
-	for _, fieldSchema := range collection.GetFields() {
-		dim, err := GetDim(fieldSchema)
-		if err != nil {
-			continue
-		}
-		return dim, nil
-	}
-	return 0, fmt.Errorf("dim not found")
-}

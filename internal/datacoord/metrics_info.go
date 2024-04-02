@@ -73,7 +73,7 @@ func (s *Server) getCollectionMetrics(ctx context.Context) *metricsinfo.DataCoor
 			ret.Collections[collectionID].IndexInfo = append(ret.Collections[collectionID].IndexInfo, &metricsinfo.DataCoordIndexInfo{
 				NumEntitiesIndexed: info.GetIndexedRows(),
 				IndexName:          info.GetIndexName(),
-				FieldID:            info.GetIndexID(),
+				FieldID:            info.GetFieldID(),
 			})
 		}
 	}

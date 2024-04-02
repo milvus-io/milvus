@@ -12,6 +12,7 @@
 package paramtable
 
 import (
+	"strconv"
 	"sync"
 	"time"
 )
@@ -57,6 +58,10 @@ func SetNodeID(newID UniqueID) {
 
 func GetNodeID() UniqueID {
 	return params.RuntimeConfig.NodeID.GetAsInt64()
+}
+
+func GetStringNodeID() string {
+	return strconv.FormatInt(GetNodeID(), 10)
 }
 
 func SetRole(role string) {

@@ -21,15 +21,16 @@ package hookutil
 var (
 	// WARN: Please DO NOT modify all constants.
 
-	OpTypeKey     = "op_type"
-	DatabaseKey   = "database"
-	UsernameKey   = "username"
-	DataSizeKey   = "data_size"
-	SuccessCntKey = "success_cnt"
-	FailCntKey    = "fail_cnt"
-	RelatedCntKey = "related_cnt"
-	NodeIDKey     = "id"
-	DimensionKey  = "dim"
+	OpTypeKey          = "op_type"
+	DatabaseKey        = "database"
+	UsernameKey        = "username"
+	RequestDataSizeKey = "request_data_size"
+	ResultDataSizeKey  = "result_data_size"
+	RelatedDataSizeKey = "related_data_size"
+	SuccessCntKey      = "success_cnt"
+	FailCntKey         = "fail_cnt"
+	RelatedCntKey      = "related_cnt"
+	NodeIDKey          = "id"
 
 	OpTypeInsert       = "insert"
 	OpTypeDelete       = "delete"
