@@ -124,7 +124,8 @@ func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
 		remain := deadline.Sub(time.Now())
 		if remain <= 0 {
 			return -1, merr.WrapErrServiceInternal("search context deadline exceeded")
-		} else if remain < timeout {
+		}
+		if remain < timeout {
 			timeout = remain
 		}
 	}
