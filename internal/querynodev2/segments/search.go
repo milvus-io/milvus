@@ -110,7 +110,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 }
 
 const (
-	defaultStreamConcurrency = 2
+	defaultStreamConcurrency = 1
 )
 
 // searchSegmentsStreamly performs search on listed segments in a stream mode instead of a batch mode
@@ -118,34 +118,37 @@ const (
 func searchSegmentsStreamly(ctx context.Context,
 	mgr *Manager,
 	segments []Segment,
-	segType SegmentType,
 	searchReq *SearchRequest,
-	resultStream chan *SearchResult,
-	errStream chan error,
-) {
+	streamReduce func(result *SearchResult) error,
+) error {
 	var (
-		wg sync.WaitGroup
-		// For log only
+		wg                   sync.WaitGroup
 		mu                   sync.Mutex
 		segmentsWithoutIndex []int64
 	)
 
 	searchLabel := metrics.SealedSegmentLabel
-	if segType == commonpb.SegmentState_Growing {
-		searchLabel = metrics.GrowingSegmentLabel
-	}
-
 	streamCredits := make(chan int, defaultStreamConcurrency)
 	for i := 0; i < defaultStreamConcurrency; i++ {
 		streamCredits <- i
 	}
 	defer close(streamCredits)
+	searchResultsToClear := make([]*SearchResult, 0)
 	searcher := func(seg Segment) error {
 		// record search time
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
 		searchResult, err := seg.Search(ctx, searchReq)
-		errStream <- err
-		resultStream <- searchResult
+		log.Debug("after stream searcher doing search", zap.Int64("segID", seg.ID()), zap.Error(err))
+		if err != nil {
+			return err
+		}
+		searchResultsToClear = append(searchResultsToClear, searchResult)
+		log.Debug("before doing stream reduce", zap.Int64("segID", seg.ID()), zap.Error(err))
+		reducedErr := streamReduce(searchResult)
+		log.Debug("after doing stream reduce", zap.Int64("segID", seg.ID()), zap.Error(err))
+		if reducedErr != nil {
+			return err
+		}
 		// update metrics
 		elapsed := tr.ElapseSpan().Milliseconds()
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
@@ -155,6 +158,7 @@ func searchSegmentsStreamly(ctx context.Context,
 		return nil
 	}
 
+	errs := make([]error, len(segments))
 	// calling segment search in goroutines
 	for i, segment := range segments {
 		wg.Add(1)
@@ -166,10 +170,16 @@ func searchSegmentsStreamly(ctx context.Context,
 				mu.Unlock()
 			}
 			<-streamCredits
-			if seg.LoadStatus() == LoadStatusMeta {
-				mgr.DiskCache.Do(seg.ID(), searcher)
+			var err error
+			if seg.IsLazyLoad() {
+				log.Debug("before doing stream search in DiskCache", zap.Int64("segID", seg.ID()))
+				err = mgr.DiskCache.Do(seg.ID(), searcher)
+				log.Debug("after doing stream search in DiskCache", zap.Int64("segID", seg.ID()), zap.Error(err))
 			} else {
-				searcher(seg)
+				err = searcher(seg)
+			}
+			if err != nil {
+				errs[i] = err
 			}
 			defer func() {
 				streamCredits <- 1
@@ -177,8 +187,14 @@ func searchSegmentsStreamly(ctx context.Context,
 		}(segment, i)
 	}
 	wg.Wait()
-	defer close(resultStream)
-	defer close(errStream)
+
+	for _, err := range errs {
+		if err != nil {
+			DeleteSearchResults(searchResultsToClear)
+			return err
+		}
+	}
+	return nil
 }
 
 // search will search on the historical segments the target segments in historical.
@@ -206,12 +222,15 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 }
 
 func SearchHistoricalStreamly(ctx context.Context, manager *Manager, searchReq *SearchRequest,
-	collID int64, partIDs []int64, segIDs []int64, streamingResults chan *SearchResult, errStream chan error,
+	collID int64, partIDs []int64, segIDs []int64, streamReduce func(result *SearchResult) error,
 ) ([]Segment, error) {
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return segments, err
 	}
-	searchSegmentsStreamly(ctx, manager, segments, SegmentTypeSealed, searchReq, streamingResults, errStream)
+	err = searchSegmentsStreamly(ctx, manager, segments, searchReq, streamReduce)
+	if err != nil {
+		return segments, err
+	}
 	return segments, nil
 }
