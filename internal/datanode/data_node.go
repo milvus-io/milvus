@@ -228,6 +228,9 @@ func (node *DataNode) initRateCollector() error {
 }
 
 func (node *DataNode) GetNodeID() int64 {
+	if node.serverID == 0 && node.session != nil {
+		return node.session.ServerID
+	}
 	return node.serverID
 }
 
@@ -243,24 +246,25 @@ func (node *DataNode) Init() error {
 			return
 		}
 
-		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, node.GetNodeID())
+		serverID := node.session.ServerID
+		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
+
+		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, serverID)
 
 		err := node.initRateCollector()
 		if err != nil {
-			log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", node.GetNodeID()), zap.Error(err))
+			log.Error("DataNode server init rateCollector failed", zap.Error(err))
 			initError = err
 			return
 		}
-		log.Info("DataNode server init rateCollector done", zap.Int64("node ID", node.GetNodeID()))
+		log.Info("DataNode server init rateCollector done")
 
-		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, node.GetNodeID())
-		log.Info("DataNode server init dispatcher client done", zap.Int64("node ID", node.GetNodeID()))
+		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, serverID)
+		log.Info("DataNode server init dispatcher client done")
 
-		alloc, err := allocator.New(context.Background(), node.rootCoord, node.GetNodeID())
+		alloc, err := allocator.New(context.Background(), node.rootCoord, serverID)
 		if err != nil {
-			log.Error("failed to create id allocator",
-				zap.Error(err),
-				zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", node.GetNodeID()))
+			log.Error("failed to create id allocator", zap.Error(err))
 			initError = err
 			return
 		}
@@ -291,7 +295,7 @@ func (node *DataNode) Init() error {
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr, node.syncMgr, node.chunkManager)
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 
-		log.Info("init datanode done", zap.Int64("nodeID", node.GetNodeID()), zap.String("Address", node.address))
+		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError
 }
