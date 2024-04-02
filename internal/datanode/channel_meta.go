@@ -697,6 +697,12 @@ func (c *ChannelMeta) mergeFlushedSegments(ctx context.Context, seg *Segment, pl
 
 	c.segMu.Lock()
 	defer c.segMu.Unlock()
+
+	if _, ok := c.segments[seg.segmentID]; ok {
+		log.Info("merge flushed segments exist, return")
+		return nil
+	}
+
 	var inValidSegments []UniqueID
 	for _, segID := range compactedFrom {
 		seg, ok := c.segments[segID]
