@@ -1003,7 +1003,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            batch_files = remote_writer.batch_files[0]
+            batch_files = remote_writer.batch_files
         for files in batch_files:
             # import data
             t0 = time.time()
@@ -1197,7 +1197,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     row["address"] = fake.address()
                 remote_writer.append_row(row)
             remote_writer.commit()
-            batch_files = remote_writer.batch_files[0]
+            batch_files = remote_writer.batch_files
         for files in batch_files:
             # import data
             t0 = time.time()
