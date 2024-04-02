@@ -10,6 +10,8 @@ class MilvusUser(HttpUser):
     nb = 100
     vectors_to_insert = [
         {"id": i,
+         "doc_id": i,
+         "text_no_index": fake.text(max_nb_chars=1000),
          "text": fake.text(max_nb_chars=1000),
          "text_emb": [random.random() for _ in range(768)],
          "image_emb": [random.random() for _ in range(768)]

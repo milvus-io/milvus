@@ -25,6 +25,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
         Collection(name=collection_name).drop()
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
+        FieldSchema(name="doc_id", dtype=DataType.INT64),
         FieldSchema(name="text_no_index", dtype=DataType.VARCHAR, max_length=10000),
         FieldSchema(name="text", dtype=DataType.VARCHAR, max_length=10000),
         FieldSchema(name="text_emb", dtype=DataType.FLOAT_VECTOR, dim=768),
@@ -49,6 +50,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
         for i in range(data_size):
             row = {
                 "id": i,
+                "doc_id": i,
                 "text_no_index": str(i % 10000) + fake.text(max_nb_chars=1000),
                 "text": str(i%10000)+fake.text(max_nb_chars=1000),
                 "text_emb": [random.random() for _ in range(768)],
@@ -79,6 +81,7 @@ def prepare_data(host="127.0.0.1", port=19530, data_size=1000000, minio_host="12
     collection.create_index("text_emb", index_params=index_params)
     collection.create_index("image_emb", index_params=index_params)
     collection.create_index("text", index_params={"index_type": "INVERTED"})
+    collection.create_index("doc_id", index_params={"index_type": "INVERTED"})
     index_list = utility.list_indexes(collection_name=collection_name)
     for index_name in index_list:
         progress = utility.index_building_progress(collection_name=collection_name, index_name=index_name)
