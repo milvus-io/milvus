@@ -71,7 +71,10 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
-	defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key)
+}
+
+func (s *DelegatorDataSuite) TearDownSuite() {
+	paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key)
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
@@ -1155,8 +1158,8 @@ func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
 		1: 3,
 	})
 
-	s.True(s.delegator.VerifyExcludedSegments(1, 1))
-	s.False(s.delegator.VerifyExcludedSegments(1, 5))
+	s.False(s.delegator.VerifyExcludedSegments(1, 1))
+	s.True(s.delegator.VerifyExcludedSegments(1, 5))
 
 	time.Sleep(time.Second * 1)
 	s.delegator.TryCleanExcludedSegments(4)
