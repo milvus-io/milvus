@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -48,7 +47,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
@@ -426,7 +424,6 @@ func (node *Proxy) Start() error {
 		hookutil.OpTypeKey: hookutil.OpTypeNodeID,
 		hookutil.NodeIDKey: paramtable.GetNodeID(),
 	})
-	node.startReportCollectionStorage()
 
 	log.Debug("update state code", zap.String("role", typeutil.ProxyRole), zap.String("State", commonpb.StateCode_Healthy.String()))
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -549,88 +546,4 @@ func (node *Proxy) GetRateLimiter() (types.Limiter, error) {
 		return nil, fmt.Errorf("nil rate limiter in Proxy")
 	}
 	return node.multiRateLimiter, nil
-}
-
-func (node *Proxy) startReportCollectionStorage() {
-	go func() {
-		tick := time.NewTicker(30 * time.Second)
-		defer tick.Stop()
-		for {
-			select {
-			case <-node.ctx.Done():
-				return
-			case <-tick.C:
-				_ = node.reportCollectionStorage()
-			}
-		}
-	}()
-}
-
-func (node *Proxy) reportCollectionStorage() error {
-	if node.dataCoord == nil {
-		return errors.New("nil datacoord")
-	}
-	req, err := metricsinfo.ConstructRequestByMetricType(metricsinfo.CollectionStorageMetrics)
-	if err != nil {
-		return err
-	}
-
-	rsp, err := node.dataCoord.GetMetrics(node.ctx, req)
-	if err = merr.CheckRPCCall(rsp, err); err != nil {
-		log.Warn("failed to get metrics", zap.Error(err))
-		return err
-	}
-
-	dataCoordTopology := &metricsinfo.DataCoordTopology{}
-	err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), dataCoordTopology)
-	if err != nil {
-		log.Warn("failed to unmarshal topology", zap.Error(err))
-		return err
-	}
-
-	quotaMetric := dataCoordTopology.Cluster.Self.QuotaMetrics
-	if quotaMetric == nil {
-		log.Warn("quota metric is nil")
-		return errors.New("quota metric is nil")
-	}
-
-	ctx, cancelFunc := context.WithTimeout(node.ctx, 5*time.Second)
-	defer cancelFunc()
-
-	ids := lo.Keys(quotaMetric.CollectionBinlogSize)
-	dbNames, collectionNames, err := globalMetaCache.GetCollectionNamesByID(ctx, ids)
-	if err != nil {
-		log.Warn("failed to get collection names", zap.Error(err))
-		return err
-	}
-
-	if len(ids) != len(dbNames) || len(ids) != len(collectionNames) {
-		log.Warn("failed to get collection names",
-			zap.Int("len(ids)", len(ids)),
-			zap.Int("len(dbNames)", len(dbNames)),
-			zap.Int("len(collectionNames)", len(collectionNames)))
-		return errors.New("failed to get collection names")
-	}
-
-	nameInfos := make(map[typeutil.UniqueID]lo.Tuple2[string, string])
-	for i, k := range ids {
-		nameInfos[k] = lo.Tuple2[string, string]{A: dbNames[i], B: collectionNames[i]}
-	}
-
-	storeInfo := make(map[string]int64)
-	for collectionID, dataSize := range quotaMetric.CollectionBinlogSize {
-		nameTuple, ok := nameInfos[collectionID]
-		if !ok {
-			continue
-		}
-		storeInfo[nameTuple.A] += dataSize
-	}
-
-	if len(storeInfo) > 0 {
-		Extension.Report(map[string]any{
-			hookutil.OpTypeKey:        hookutil.OpTypeStorage,
-			hookutil.StorageDetailKey: lo.MapValues(storeInfo, func(v int64, _ string) any { return v }),
-		})
-	}
-	return nil
 }

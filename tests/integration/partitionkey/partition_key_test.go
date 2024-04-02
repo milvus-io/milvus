@@ -197,9 +197,6 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 				case report := <-c.Extension.GetReportChan():
 					reportInfo := report.(map[string]any)
 					log.Info("search report info", zap.Any("reportInfo", reportInfo))
-					if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
-						continue
-					}
 					s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
 					s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
 					s.EqualValues(rowNum*3, reportInfo[hookutil.RelatedCntKey])
@@ -239,9 +236,6 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 				case report := <-c.Extension.GetReportChan():
 					reportInfo := report.(map[string]any)
 					log.Info("search report info", zap.Any("reportInfo", reportInfo))
-					if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
-						continue
-					}
 					s.Equal(hookutil.OpTypeSearch, reportInfo[hookutil.OpTypeKey])
 					s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
 					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
@@ -272,9 +266,6 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 				case report := <-c.Extension.GetReportChan():
 					reportInfo := report.(map[string]any)
 					log.Info("query report info", zap.Any("reportInfo", reportInfo))
-					if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
-						continue
-					}
 					s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
 					s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
 					s.EqualValues(3*rowNum, reportInfo[hookutil.RelatedCntKey])
@@ -309,9 +300,6 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 				case report := <-c.Extension.GetReportChan():
 					reportInfo := report.(map[string]any)
 					log.Info("query report info", zap.Any("reportInfo", reportInfo))
-					if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
-						continue
-					}
 					s.Equal(hookutil.OpTypeQuery, reportInfo[hookutil.OpTypeKey])
 					s.NotEqualValues(0, reportInfo[hookutil.DataSizeKey])
 					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
@@ -346,9 +334,6 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 				case report := <-c.Extension.GetReportChan():
 					reportInfo := report.(map[string]any)
 					log.Info("delete report info", zap.Any("reportInfo", reportInfo))
-					if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
-						continue
-					}
 					s.Equal(hookutil.OpTypeDelete, reportInfo[hookutil.OpTypeKey])
 					s.EqualValues(rowNum, reportInfo[hookutil.SuccessCntKey])
 					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])
@@ -382,9 +367,6 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 				case report := <-c.Extension.GetReportChan():
 					reportInfo := report.(map[string]any)
 					log.Info("delete report info", zap.Any("reportInfo", reportInfo))
-					if reportInfo[hookutil.OpTypeKey] == hookutil.OpTypeStorage {
-						continue
-					}
 					s.Equal(hookutil.OpTypeDelete, reportInfo[hookutil.OpTypeKey])
 					s.EqualValues(rowNum, reportInfo[hookutil.SuccessCntKey])
 					s.EqualValues(rowNum, reportInfo[hookutil.RelatedCntKey])

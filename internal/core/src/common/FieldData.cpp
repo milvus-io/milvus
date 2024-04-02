@@ -175,7 +175,7 @@ FieldDataImpl<Type, is_type_entire_row>::FillFieldData(
             throw SegcoreError(DataTypeInvalid,
                                GetName() + "::FillFieldData" +
                                    " not support data type " +
-                                   datatype_name(data_type_));
+                                   GetDataTypeName(data_type_));
         }
     }
 }
@@ -225,7 +225,7 @@ InitScalarFieldData(const DataType& type, int64_t cap_rows) {
         default:
             throw NotSupportedDataTypeException(
                 "InitScalarFieldData not support data type " +
-                datatype_name(type));
+                GetDataTypeName(type));
     }
 }
 

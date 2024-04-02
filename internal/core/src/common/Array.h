@@ -126,7 +126,7 @@ class Array {
         delete[] data_;
         data_ = new char[size];
         std::copy(data, data + size, data_);
-        if (datatype_is_variable(element_type_)) {
+        if (IsVariableDataType(element_type_)) {
             length_ = offsets_.size();
         } else {
             // int8, int16, int32 are all promoted to int32
@@ -134,7 +134,7 @@ class Array {
                 element_type_ == DataType::INT16) {
                 length_ = size / sizeof(int32_t);
             } else {
-                length_ = size / datatype_sizeof(element_type_);
+                length_ = size / GetDataTypeSize(element_type_);
             }
         }
     }
@@ -445,7 +445,7 @@ class ArrayView {
           element_type_(element_type),
           offsets_(std::move(element_offsets)) {
         data_ = data;
-        if (datatype_is_variable(element_type_)) {
+        if (IsVariableDataType(element_type_)) {
             length_ = offsets_.size();
         } else {
             // int8, int16, int32 are all promoted to int32
@@ -453,7 +453,7 @@ class ArrayView {
                 element_type_ == DataType::INT16) {
                 length_ = size / sizeof(int32_t);
             } else {
-                length_ = size / datatype_sizeof(element_type_);
+                length_ = size / GetDataTypeSize(element_type_);
             }
         }
     }

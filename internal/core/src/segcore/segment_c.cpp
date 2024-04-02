@@ -306,8 +306,8 @@ LoadFieldRawData(CSegmentInterface c_segment,
             auto field_meta = segment->get_schema()[milvus::FieldId(field_id)];
             data_type = field_meta.get_data_type();
 
-            if (milvus::datatype_is_vector(data_type) &&
-                !milvus::datatype_is_sparse_vector(data_type)) {
+            if (milvus::IsVectorDataType(data_type) &&
+                !milvus::IsSparseFloatVectorDataType(data_type)) {
                 dim = field_meta.get_dim();
             }
         }
