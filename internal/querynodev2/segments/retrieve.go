@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -74,7 +75,8 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}()
 
 			if seg.IsLazyLoad() {
-				timeout, err := lazyloadWaitTimeout(ctx)
+				var timeout time.Duration
+				timeout, err = lazyloadWaitTimeout(ctx)
 				if err != nil {
 					errs[i] = err
 					return

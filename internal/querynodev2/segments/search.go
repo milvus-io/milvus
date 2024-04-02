@@ -86,7 +86,8 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				accessRecord.Finish(err)
 			}()
 			if seg.IsLazyLoad() {
-				timeout, err := lazyloadWaitTimeout(ctx)
+				var timeout time.Duration
+				timeout, err = lazyloadWaitTimeout(ctx)
 				if err != nil {
 					errs[i] = err
 					return
@@ -213,7 +214,7 @@ func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
 	timeout := params.Params.QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
 	deadline, ok := ctx.Deadline()
 	if ok {
-		remain := deadline.Sub(time.Now())
+		remain := time.Until(deadline)
 		if remain <= 0 {
 			return -1, merr.WrapErrServiceInternal("search context deadline exceeded")
 		}
