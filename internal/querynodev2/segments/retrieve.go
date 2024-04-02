@@ -74,11 +74,12 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}()
 
 			if seg.IsLazyLoad() {
-				var missing bool
-				missing, err = mgr.DiskCache.Do(seg.ID(), retriever)
-				if missing {
-					accessRecord.CacheMissing()
+				timeout, err := lazyloadWaitTimeout(ctx)
+				if err != nil {
+					errs[i] = err
+					return
 				}
+				err = mgr.DiskCache.DoWait(seg.ID(), timeout, retriever)
 			} else {
 				err = retriever(seg)
 			}
