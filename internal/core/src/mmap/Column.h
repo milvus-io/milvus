@@ -54,12 +54,12 @@ class ColumnBase {
  public:
     // memory mode ctor
     ColumnBase(size_t reserve, const FieldMeta& field_meta)
-        : type_size_(datatype_is_sparse_vector(field_meta.get_data_type())
+        : type_size_(IsSparseFloatVectorDataType(field_meta.get_data_type())
                          ? 1
                          : field_meta.get_sizeof()) {
         SetPaddingSize(field_meta.get_data_type());
 
-        if (datatype_is_variable(field_meta.get_data_type())) {
+        if (IsVariableDataType(field_meta.get_data_type())) {
             return;
         }
 
@@ -80,7 +80,7 @@ class ColumnBase {
 
     // mmap mode ctor
     ColumnBase(const File& file, size_t size, const FieldMeta& field_meta)
-        : type_size_(datatype_is_sparse_vector(field_meta.get_data_type())
+        : type_size_(IsSparseFloatVectorDataType(field_meta.get_data_type())
                          ? 1
                          : field_meta.get_sizeof()),
           num_rows_(size / type_size_) {
@@ -105,8 +105,8 @@ class ColumnBase {
                size_t size,
                int dim,
                const DataType& data_type)
-        : type_size_(datatype_sizeof(data_type, dim)),
-          num_rows_(size / datatype_sizeof(data_type, dim)),
+        : type_size_(GetDataTypeSize(data_type, dim)),
+          num_rows_(size / GetDataTypeSize(data_type, dim)),
           size_(size),
           cap_size_(size) {
         SetPaddingSize(data_type);

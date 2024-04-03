@@ -76,6 +76,9 @@ func initSearchRequest(ctx context.Context, t *searchTask, isHybrid bool) error 
 			annsFieldName = vecFields[0].Name
 		}
 		queryInfo, offset, err := parseSearchInfo(t.request.GetSearchParams(), t.schema.CollectionSchema)
+		if err != nil {
+			return err
+		}
 		annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
 		if queryInfo.GetGroupByFieldId() != -1 && isHybrid {
 			return errors.New("not support search_group_by operation in the hybrid search")
@@ -84,9 +87,6 @@ func initSearchRequest(ctx context.Context, t *searchTask, isHybrid bool) error 
 			return errors.New("not support search_group_by operation based on binary vector column")
 		}
 
-		if err != nil {
-			return err
-		}
 		t.offset = offset
 
 		plan, err := planparserv2.CreateSearchPlan(t.schema.schemaHelper, t.request.Dsl, annsFieldName, queryInfo)

@@ -198,6 +198,12 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 
 	// Get shard leader for the given replica and segment
 	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+	if replica == nil {
+		msg := "node doesn't belong to any replica"
+		err := merr.WrapErrNodeNotAvailable(action.Node())
+		log.Warn(msg, zap.Error(err))
+		return err
+	}
 	view := ex.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, action.Shard())
 	if view == nil {
 		msg := "no shard leader for the segment to execute loading"
@@ -255,6 +261,12 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 			// 	return
 			// }
 			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+			if replica == nil {
+				msg := "node doesn't belong to any replica"
+				err := merr.WrapErrNodeNotAvailable(action.Node())
+				log.Warn(msg, zap.Error(err))
+				return
+			}
 			view := ex.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, action.Shard())
 			if view == nil {
 				msg := "no shard leader for the segment to execute releasing"

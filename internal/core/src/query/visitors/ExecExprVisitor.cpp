@@ -3393,7 +3393,7 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
     switch (expr.op_) {
         case proto::plan::JSONContainsExpr_JSONOp_Contains:
         case proto::plan::JSONContainsExpr_JSONOp_ContainsAny: {
-            if (datatype_is_array(data_type)) {
+            if (IsArrayDataType(data_type)) {
                 switch (expr.val_case_) {
                     case proto::plan::GenericValue::kBoolVal: {
                         res = ExecArrayContains<bool>(expr);
@@ -3451,7 +3451,7 @@ ExecExprVisitor::visit(JsonContainsExpr& expr) {
             break;
         }
         case proto::plan::JSONContainsExpr_JSONOp_ContainsAll: {
-            if (datatype_is_array(data_type)) {
+            if (IsArrayDataType(data_type)) {
                 switch (expr.val_case_) {
                     case proto::plan::GenericValue::kBoolVal: {
                         res = ExecArrayContainsAll<bool>(expr);

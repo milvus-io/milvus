@@ -147,7 +147,8 @@ var (
 	ErrInvalidStreamObj     = newMilvusError("invalid stream object", 1903, false)
 
 	// Segcore related
-	ErrSegcore = newMilvusError("segcore error", 2000, false)
+	ErrSegcore            = newMilvusError("segcore error", 2000, false)
+	ErrSegcoreUnsupported = newMilvusError("segcore unsupported error", 2001, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
