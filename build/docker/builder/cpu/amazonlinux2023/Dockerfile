@@ -25,7 +25,7 @@ RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.g
 
 # https://github.com/microsoft/vcpkg/pull/35084
 RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/refs/tags/2023.11.20.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    wget -qO- vcpkg.tar.gz https://github.com/milvus-io/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
 
 ENV VCPKG_FORCE_SYSTEM_BINARIES 1
