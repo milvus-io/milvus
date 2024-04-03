@@ -231,7 +231,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveIndexFiles}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			log.Ctx(t.Ctx()).Warn("proces task failed", zap.Error(err))
+			log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))
 			t.SetState(getStateFromError(err), err.Error())
 			return
 		}
