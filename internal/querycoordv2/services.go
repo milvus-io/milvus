@@ -956,8 +956,10 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		addrs := make([]string, 0, len(leaders))
 		for _, leader := range readableLeaders {
 			info := s.nodeMgr.Get(leader.ID)
-			ids = append(ids, info.ID())
-			addrs = append(addrs, info.Addr())
+			if info != nil {
+				ids = append(ids, info.ID())
+				addrs = append(addrs, info.Addr())
+			}
 		}
 
 		resp.Shards = append(resp.Shards, &querypb.ShardLeadersList{
