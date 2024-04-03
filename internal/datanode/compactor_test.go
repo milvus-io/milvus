@@ -116,17 +116,16 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		}
 
 		// make sure all new data types missed to handle would throw unexpected error
-		// todo(yah01): enable this after the BF16 vector type ready
-		// for typeName, typeValue := range schemapb.DataType_value {
-		// 	tests = append(tests, struct {
-		// 		isvalid bool
+		for typeName, typeValue := range schemapb.DataType_value {
+			tests = append(tests, struct {
+				isvalid bool
 
-		// 		tp      schemapb.DataType
-		// 		content []interface{}
+				tp      schemapb.DataType
+				content []interface{}
 
-		// 		description string
-		// 	}{false, schemapb.DataType(typeValue), []interface{}{nil, nil}, "invalid " + typeName})
-		// }
+				description string
+			}{false, schemapb.DataType(typeValue), []interface{}{nil, nil}, "invalid " + typeName})
+		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
@@ -136,7 +135,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 					assert.Equal(t, 2, fd.RowNum())
 				} else {
 					fd, err := interface2FieldData(test.tp, test.content, 2)
-					assert.ErrorIs(t, err, errTransferType)
+					assert.True(t, errors.Is(err, errTransferType) || errors.Is(err, errUnknownDataType))
 					assert.Nil(t, fd)
 				}
 			})
