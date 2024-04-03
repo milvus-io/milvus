@@ -661,6 +661,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				Type:      schemapb.DataType_FloatVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
+						Dim: 8,
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
 								Data: generateFloatVectors(10, 8),
@@ -674,6 +675,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				Type:      schemapb.DataType_BinaryVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
+						Dim: 8,
 						Data: &schemapb.VectorField_BinaryVector{
 							BinaryVector: generateBinaryVectors(10, 8),
 						},
