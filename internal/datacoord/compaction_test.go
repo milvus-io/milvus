@@ -687,31 +687,38 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 		2: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 2, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 2}}}},
 		3: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 3, State: commonpb.CompactionState_Executing}},
 		5: {A: 222, B: &datapb.CompactionPlanResult{PlanID: 5, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 5}}}},
+		6: {A: 111, B: &datapb.CompactionPlanResult{Channel: "ch-2", PlanID: 5, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 6}}}},
 	}, nil)
 
 	inPlans := map[int64]*compactionTask{
 		1: {
 			triggerInfo: &compactionSignal{},
-			plan:        &datapb.CompactionPlan{PlanID: 1},
+			plan:        &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1"},
 			state:       executing,
 			dataNodeID:  111,
 		},
 		2: {
 			triggerInfo: &compactionSignal{},
-			plan:        &datapb.CompactionPlan{PlanID: 2},
+			plan:        &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1"},
 			state:       executing,
 			dataNodeID:  111,
 		},
 		3: {
 			triggerInfo: &compactionSignal{},
-			plan:        &datapb.CompactionPlan{PlanID: 3},
+			plan:        &datapb.CompactionPlan{PlanID: 3, Channel: "ch-1"},
 			state:       timeout,
 			dataNodeID:  111,
 		},
 		4: {
 			triggerInfo: &compactionSignal{},
-			plan:        &datapb.CompactionPlan{PlanID: 4},
+			plan:        &datapb.CompactionPlan{PlanID: 4, Channel: "ch-1"},
 			state:       timeout,
+			dataNodeID:  111,
+		},
+		6: {
+			triggerInfo: &compactionSignal{},
+			plan:        &datapb.CompactionPlan{PlanID: 6, Channel: "ch-2"},
+			state:       executing,
 			dataNodeID:  111,
 		},
 	}
@@ -723,6 +730,9 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 		s.EqualValues(5, req.GetPlanID())
 		return nil
 	}).Once()
+	s.mockSessMgr.EXPECT().SyncSegments(int64(111), mock.Anything).Return(nil)
+	s.mockCm.EXPECT().Match(int64(111), "ch-1").Return(true)
+	s.mockCm.EXPECT().Match(int64(111), "ch-2").Return(false).Once()
 
 	handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 	handler.plans = inPlans
@@ -743,6 +753,9 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.Equal(timeout, task.state)
 
 	task = handler.plans[4]
+	s.Equal(failed, task.state)
+
+	task = handler.plans[6]
 	s.Equal(failed, task.state)
 }
 

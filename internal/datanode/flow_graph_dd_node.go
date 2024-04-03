@@ -154,7 +154,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				ddn.dropMode.Store(true)
 
 				log.Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
-				ddn.compactionExecutor.clearTasksByChannel(ddn.vChannelName)
+				ddn.compactionExecutor.discardByDroppedChannel(ddn.vChannelName)
 				fgMsg.dropCollection = true
 
 				pChan := funcutil.ToPhysicalChannel(ddn.vChannelName)
