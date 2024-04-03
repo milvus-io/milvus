@@ -1940,6 +1940,7 @@ type queryNodeConfig struct {
 	EnableDisk             ParamItem `refreshable:"true"`
 	DiskCapacityLimit      ParamItem `refreshable:"true"`
 	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
+	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
 
 	// cache limit
 	CacheEnabled     ParamItem `refreshable:"false"`
@@ -2342,6 +2343,18 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Export: true,
 	}
 	p.MaxDiskUsagePercentage.Init(base.mgr)
+
+	p.DiskCacheCapacityLimit = ParamItem{
+		Key:     "queryNode.diskCacheCapacityLimit",
+		Version: "2.4.1",
+		Formatter: func(v string) string {
+			if len(v) == 0 {
+				return strconv.FormatInt(int64(float64(p.DiskCapacityLimit.GetAsInt64())*p.MaxDiskUsagePercentage.GetAsFloat()), 10)
+			}
+			return v
+		},
+	}
+	p.DiskCacheCapacityLimit.Init(base.mgr)
 
 	p.MaxTimestampLag = ParamItem{
 		Key:          "queryNode.scheduler.maxTimestampLag",
