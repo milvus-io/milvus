@@ -66,6 +66,9 @@ const (
 	ReduceSegments = "segments"
 	ReduceShards   = "shards"
 
+	BatchReduce  = "batch_reduce"
+	StreamReduce = "stream_reduce"
+
 	Pending   = "pending"
 	Executing = "executing"
 	Done      = "done"
@@ -96,6 +99,7 @@ const (
 	requestScope             = "scope"
 	fullMethodLabelName      = "full_method"
 	reduceLevelName          = "reduce_level"
+	reduceType               = "reduce_type"
 	lockName                 = "lock_name"
 	lockSource               = "lock_source"
 	lockType                 = "lock_type"

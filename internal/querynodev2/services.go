@@ -793,7 +793,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		return resp, nil
 	}
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.
+		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
@@ -891,7 +892,8 @@ func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSear
 	resp.ChannelsMvcc = channelsMvcc
 
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.HybridSearchLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()),
+		metrics.HybridSearchLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
@@ -1047,7 +1049,8 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()),
+		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	if !req.FromShardLeader {
