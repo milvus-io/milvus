@@ -3,6 +3,9 @@ name: Code Checker
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
+  schedule:
+    # Runs at 00:00 UTC every day
+    - cron: '0 0 * * *'
   push:
     branches:
       - master
@@ -88,8 +91,8 @@ jobs:
 
   rockylinux:
     name: Code Checker rockylinux8
-    # Run in amazonlinux docker
     runs-on: ubuntu-latest
+    if: github.event_name == 'schedule'
     timeout-minutes: 180
     steps:
       - name: Maximize build space
