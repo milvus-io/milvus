@@ -160,7 +160,7 @@ KmeansMajorCompaction<T>::Train() {
     AssertInfo(segment_size.has_value(),
                "segment size is empty when major compaction");
     auto train_size =
-        milvus::index::GetValueFromConfig<uint64_t>(config_, "train_size");
+        milvus::index::GetValueFromConfig<int64_t>(config_, "train_size");
     AssertInfo(train_size.has_value(),
                "train size is empty when major compaction");
 
@@ -175,7 +175,7 @@ KmeansMajorCompaction<T>::Train() {
                            offsets.size()));
     auto data_num = data_size / sizeof(T) / dim;
 
-    auto train_num = train_size.value() * 1024 * 1024 * 1024 / sizeof(T) / dim;
+    auto train_num = train_size.value() / sizeof(T) / dim;
 
     // make train num equal to data num
     if (train_num >= data_num) {
@@ -187,7 +187,7 @@ KmeansMajorCompaction<T>::Train() {
 
     // get num of clusters by whole data size / segment size
     int num_clusters =
-        DIV_ROUND_UP(data_size, (segment_size.value() * 1024 * 1024));
+        DIV_ROUND_UP(data_size, segment_size.value());
     auto res =
         knowhere::kmeans::ClusteringMajorCompaction<T>(*dataset, num_clusters);
     if (!res.has_value()) {
