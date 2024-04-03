@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"go.uber.org/atomic"
 	"sync"
 	"time"
 
@@ -138,55 +139,43 @@ func searchSegmentsStreamly(ctx context.Context,
 	searchReq *SearchRequest,
 	streamReduce func(result *SearchResult) error,
 ) error {
-	var (
-		wg                   sync.WaitGroup
-		mu                   sync.Mutex
-		segmentsWithoutIndex []int64
-	)
-
 	searchLabel := metrics.SealedSegmentLabel
-	streamCredits := make(chan int, defaultStreamConcurrency)
-	for i := 0; i < defaultStreamConcurrency; i++ {
-		streamCredits <- i
-	}
-	defer close(streamCredits)
 	searchResultsToClear := make([]*SearchResult, 0)
+	var reduceMutex sync.Mutex
+	var sumReduceDuration atomic.Duration
 	searcher := func(seg Segment) error {
 		// record search time
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
-		searchResult, err := seg.Search(ctx, searchReq)
-		log.Debug("after stream searcher doing search", zap.Int64("segID", seg.ID()), zap.Error(err))
-		if err != nil {
-			return err
+		searchResult, searchErr := seg.Search(ctx, searchReq)
+		searchDuration := tr.RecordSpan()
+		if searchErr != nil {
+			return searchErr
 		}
 		searchResultsToClear = append(searchResultsToClear, searchResult)
-		log.Debug("before doing stream reduce", zap.Int64("segID", seg.ID()), zap.Error(err))
+		reduceMutex.Lock()
 		reducedErr := streamReduce(searchResult)
-		log.Debug("after doing stream reduce", zap.Int64("segID", seg.ID()), zap.Error(err))
+		reduceMutex.Unlock()
+		reduceDuration := tr.RecordSpan()
 		if reducedErr != nil {
-			return err
+			return reducedErr
 		}
+		sumReduceDuration.Add(reduceDuration)
 		// update metrics
-		elapsed := tr.ElapseSpan().Milliseconds()
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed))
+			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration))
 		metrics.QueryNodeSegmentSearchLatencyPerVector.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.SearchLabel, searchLabel).Observe(float64(elapsed) / float64(searchReq.getNumOfQuery()))
+			metrics.SearchLabel, searchLabel).Observe(float64(searchDuration) / float64(searchReq.getNumOfQuery()))
 		return nil
 	}
 
 	errs := make([]error, len(segments))
 	// calling segment search in goroutines
+	var wg sync.WaitGroup
+	log := log.Ctx(ctx)
 	for i, segment := range segments {
 		wg.Add(1)
 		go func(seg Segment, i int) {
 			defer wg.Done()
-			if !seg.ExistIndex(searchReq.searchFieldID) {
-				mu.Lock()
-				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
-				mu.Unlock()
-			}
-			<-streamCredits
 			var err error
 			accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
 			defer func() {
@@ -201,6 +190,10 @@ func searchSegmentsStreamly(ctx context.Context,
 				}
 				var missing bool
 				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
+				if err != nil {
+					errs[i] = err
+					return
+				}
 				if missing {
 					accessRecord.CacheMissing()
 				}
@@ -211,9 +204,6 @@ func searchSegmentsStreamly(ctx context.Context,
 			if err != nil {
 				errs[i] = err
 			}
-			defer func() {
-				streamCredits <- 1
-			}()
 		}(segment, i)
 	}
 	wg.Wait()
@@ -224,6 +214,11 @@ func searchSegmentsStreamly(ctx context.Context,
 			return err
 		}
 	}
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.SearchLabel,
+		metrics.ReduceSegments,
+		metrics.StreamReduce).Observe(float64(sumReduceDuration.Load().Milliseconds()))
+	log.Debug("stream reduce sum duration:", zap.Duration("duration", sumReduceDuration.Load()))
 	return nil
 }
 

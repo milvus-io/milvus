@@ -226,7 +226,8 @@ func (t *SearchTask) Execute() error {
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(t.GetNodeID()),
 		metrics.SearchLabel,
-		metrics.ReduceSegments).
+		metrics.ReduceSegments,
+		metrics.BatchReduce).
 		Observe(float64(tr.RecordSpan().Milliseconds()))
 	for i := range t.originNqs {
 		blob, err := segments.GetSearchResultDataBlob(t.ctx, blobs, i)
@@ -480,7 +481,8 @@ func (t *StreamingSearchTask) Execute() error {
 		metrics.QueryNodeReduceLatency.WithLabelValues(
 			fmt.Sprint(t.GetNodeID()),
 			metrics.SearchLabel,
-			metrics.ReduceSegments).
+			metrics.ReduceSegments,
+			metrics.BatchReduce).
 			Observe(float64(tr.RecordSpan().Milliseconds()))
 	}
 	defer t.segmentManager.Segment.Unpin(pinnedSegments)
