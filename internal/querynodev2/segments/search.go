@@ -86,7 +86,8 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				accessRecord.Finish(err)
 			}()
 			if seg.IsLazyLoad() {
-				timeout, err := lazyloadWaitTimeout(ctx)
+				var timeout time.Duration
+				timeout, err = lazyloadWaitTimeout(ctx)
 				if err != nil {
 					errs[i] = err
 					return
@@ -194,7 +195,8 @@ func searchSegmentsStreamly(ctx context.Context,
 			}()
 			if seg.IsLazyLoad() {
 				log.Debug("before doing stream search in DiskCache", zap.Int64("segID", seg.ID()))
-				timeout, err := lazyloadWaitTimeout(ctx)
+				var timeout time.Duration
+				timeout, err = lazyloadWaitTimeout(ctx)
 				if err != nil {
 					errs[i] = err
 					return
