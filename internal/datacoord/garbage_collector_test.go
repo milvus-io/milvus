@@ -1308,6 +1308,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 				},
 			},
 		},
+		// cannot dropped for not expired.
 		segID + 6: {
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:             segID + 6,
@@ -1339,6 +1340,24 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 				CompactionFrom: nil,
 				DmlPosition: &msgpb.MsgPosition{
 					Timestamp: 1200,
+				},
+				Compacted: true,
+			},
+		},
+		// can be dropped for expired and compacted
+		segID + 8: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 8,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      uint64(time.Now().Add(-7 * 24 * time.Hour).UnixNano()),
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
 				},
 				Compacted: true,
 			},
@@ -1390,9 +1409,11 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segF := gc.meta.GetSegment(segID + 5)
 	assert.NotNil(t, segF)
 	segG := gc.meta.GetSegment(segID + 6)
-	assert.Nil(t, segG)
+	assert.NotNil(t, segG)
 	segH := gc.meta.GetSegment(segID + 7)
 	assert.NotNil(t, segH)
+	segG = gc.meta.GetSegment(segID + 8)
+	assert.Nil(t, segG)
 	err := gc.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
 		SegmentID:    segID + 4,
 		CollectionID: collID,

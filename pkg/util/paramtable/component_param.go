@@ -1976,7 +1976,8 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 	MmapEnabled      ParamItem `refreshable:"false"`
 
-	LazyLoadEnabled ParamItem `refreshable:"false"`
+	LazyLoadEnabled     ParamItem `refreshable:"false"`
+	LazyLoadWaitTimeout ParamItem `refreshable:"false"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -2027,6 +2028,7 @@ type queryNodeConfig struct {
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	UseStreamComputing                      ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2219,6 +2221,13 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.LazyLoadEnabled.Init(base.mgr)
+	p.LazyLoadWaitTimeout = ParamItem{
+		Key:          "queryNode.lazyloadWaitTimeout",
+		Version:      "2.4.0",
+		DefaultValue: "30000",
+		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
+	}
+	p.LazyLoadWaitTimeout.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",
@@ -2551,6 +2560,13 @@ user-task-polling:
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
+	p.UseStreamComputing = ParamItem{
+		Key:          "queryNode.useStreamComputing",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "use stream search mode when searching or querying",
+	}
+	p.UseStreamComputing.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

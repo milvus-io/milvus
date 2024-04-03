@@ -598,6 +598,11 @@ struct InsertRecord {
         fields_data_.clear();
     }
 
+    bool
+    empty() const {
+        return pk2offset_->empty();
+    }
+
  public:
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<idx_t> row_ids_;

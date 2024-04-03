@@ -26,6 +26,7 @@ set(MILVUS_TEST_FILES
         test_concurrent_vector.cpp
         test_c_api.cpp
         test_expr_materialized_view.cpp
+        test_c_stream_reduce.cpp
         test_expr.cpp
         test_float16.cpp
         test_growing.cpp
@@ -34,7 +35,6 @@ set(MILVUS_TEST_FILES
         test_index_c_api.cpp
         test_index_wrapper.cpp
         test_init.cpp
-        test_parquet_c.cpp
         test_query.cpp
         test_reduce.cpp
         test_reduce_c.cpp

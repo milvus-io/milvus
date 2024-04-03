@@ -77,10 +77,35 @@ CreateDataArrayFrom(const void* data_raw,
                     const FieldMeta& field_meta);
 
 // TODO remove merge dataArray, instead fill target entity when get data slice
+struct MergeBase {
+ private:
+    std::map<FieldId, std::unique_ptr<milvus::DataArray>>* output_fields_data_;
+    size_t offset_;
+
+ public:
+    MergeBase() {
+    }
+
+    MergeBase(std::map<FieldId, std::unique_ptr<milvus::DataArray>>*
+                  output_fields_data,
+              size_t offset)
+        : output_fields_data_(output_fields_data), offset_(offset) {
+    }
+
+    size_t
+    getOffset() const {
+        return offset_;
+    }
+
+    milvus::DataArray*
+    get_field_data(FieldId fieldId) const {
+        return (*output_fields_data_)[fieldId].get();
+    }
+};
+
 std::unique_ptr<DataArray>
-MergeDataArray(
-    std::vector<std::pair<milvus::SearchResult*, int64_t>>& result_offsets,
-    const FieldMeta& field_meta);
+MergeDataArray(std::vector<MergeBase>& merge_bases,
+               const FieldMeta& field_meta);
 
 template <bool is_sealed>
 std::shared_ptr<DeletedRecord::TmpBitmap>

@@ -236,7 +236,7 @@ func (suite *QueryNodeSuite) TestStop() {
 		},
 	)
 	suite.NoError(err)
-	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, segment)
+	suite.node.manager.Segment.Put(context.Background(), segments.SegmentTypeSealed, segment)
 	err = suite.node.Stop()
 	suite.NoError(err)
 	suite.True(suite.node.manager.Segment.Empty())

@@ -234,7 +234,8 @@ struct GeneratedData {
             uint64_t seed,
             uint64_t ts_offset,
             int repeat_count,
-            int array_len);
+            int array_len,
+            bool random_pk);
     friend GeneratedData
     DataGenForJsonArray(SchemaPtr schema,
                         int64_t N,
@@ -292,9 +293,10 @@ inline GeneratedData DataGen(SchemaPtr schema,
                              uint64_t seed = 42,
                              uint64_t ts_offset = 0,
                              int repeat_count = 1,
-                             int array_len = 10) {
+                             int array_len = 10,
+                             bool random_pk = false) {
     using std::vector;
-    std::default_random_engine er(seed);
+    std::default_random_engine random(seed);
     std::normal_distribution<> distr(0, 1);
     int offset = 0;
 
@@ -343,7 +345,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 Assert(dim % 8 == 0);
                 vector<uint8_t> data(dim / 8 * N);
                 for (auto& x : data) {
-                    x = er();
+                    x = random();
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -352,7 +354,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 auto dim = field_meta.get_dim();
                 vector<float16> final(dim * N);
                 for (auto& x : final) {
-                    x = float16(distr(er) + offset);
+                    x = float16(distr(random) + offset);
                 }
                 insert_cols(final, N, field_meta);
                 break;
@@ -371,7 +373,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 auto dim = field_meta.get_dim();
                 vector<bfloat16> final(dim * N);
                 for (auto& x : final) {
-                    x = bfloat16(distr(er) + offset);
+                    x = bfloat16(distr(random) + offset);
                 }
                 insert_cols(final, N, field_meta);
                 break;
@@ -387,7 +389,12 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::INT64: {
                 vector<int64_t> data(N);
                 for (int i = 0; i < N; i++) {
-                    data[i] = i / repeat_count;
+                    if (random_pk && schema->get_primary_field_id()->get() ==
+                                         field_id.get()) {
+                        data[i] = random();
+                    } else {
+                        data[i] = i / repeat_count;
+                    }
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -395,7 +402,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::INT32: {
                 vector<int> data(N);
                 for (auto& x : data) {
-                    x = er() % (2 * N);
+                    x = random() % (2 * N);
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -403,7 +410,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::INT16: {
                 vector<int16_t> data(N);
                 for (auto& x : data) {
-                    x = er() % (2 * N);
+                    x = random() % (2 * N);
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -411,7 +418,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::INT8: {
                 vector<int8_t> data(N);
                 for (auto& x : data) {
-                    x = er() % (2 * N);
+                    x = random() % (2 * N);
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -419,7 +426,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::FLOAT: {
                 vector<float> data(N);
                 for (auto& x : data) {
-                    x = distr(er);
+                    x = distr(random);
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -427,7 +434,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::DOUBLE: {
                 vector<double> data(N);
                 for (auto& x : data) {
-                    x = distr(er);
+                    x = distr(random);
                 }
                 insert_cols(data, N, field_meta);
                 break;
@@ -435,7 +442,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::VARCHAR: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    auto str = std::to_string(er());
+                    auto str = std::to_string(random());
                     for (int j = 0; j < repeat_count; j++) {
                         data[i * repeat_count + j] = str;
                     }
@@ -446,11 +453,12 @@ inline GeneratedData DataGen(SchemaPtr schema,
             case DataType::JSON: {
                 vector<std::string> data(N);
                 for (int i = 0; i < N / repeat_count; i++) {
-                    auto str =
-                        R"({"int":)" + std::to_string(er()) + R"(,"double":)" +
-                        std::to_string(static_cast<double>(er())) +
-                        R"(,"string":")" + std::to_string(er()) +
-                        R"(","bool": true)" + R"(, "array": [1,2,3])" + "}";
+                    auto str = R"({"int":)" + std::to_string(random()) +
+                               R"(,"double":)" +
+                               std::to_string(static_cast<double>(random())) +
+                               R"(,"string":")" + std::to_string(random()) +
+                               R"(","bool": true)" + R"(, "array": [1,2,3])" +
+                               "}";
                     data[i] = str;
                 }
                 insert_cols(data, N, field_meta);
@@ -465,7 +473,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
 
                             for (int j = 0; j < array_len; j++) {
                                 field_data.mutable_bool_data()->add_data(
-                                    static_cast<bool>(er()));
+                                    static_cast<bool>(random()));
                             }
                             data[i] = field_data;
                         }
@@ -479,7 +487,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
 
                             for (int j = 0; j < array_len; j++) {
                                 field_data.mutable_int_data()->add_data(
-                                    static_cast<int>(er()));
+                                    static_cast<int>(random()));
                             }
                             data[i] = field_data;
                         }
@@ -490,7 +498,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                             milvus::proto::schema::ScalarField field_data;
                             for (int j = 0; j < array_len; j++) {
                                 field_data.mutable_long_data()->add_data(
-                                    static_cast<int64_t>(er()));
+                                    static_cast<int64_t>(random()));
                             }
                             data[i] = field_data;
                         }
@@ -503,7 +511,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
 
                             for (int j = 0; j < array_len; j++) {
                                 field_data.mutable_string_data()->add_data(
-                                    std::to_string(er()));
+                                    std::to_string(random()));
                             }
                             data[i] = field_data;
                         }
@@ -515,7 +523,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
 
                             for (int j = 0; j < array_len; j++) {
                                 field_data.mutable_float_data()->add_data(
-                                    static_cast<float>(er()));
+                                    static_cast<float>(random()));
                             }
                             data[i] = field_data;
                         }
@@ -527,7 +535,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
 
                             for (int j = 0; j < array_len; j++) {
                                 field_data.mutable_double_data()->add_data(
-                                    static_cast<double>(er()));
+                                    static_cast<double>(random()));
                             }
                             data[i] = field_data;
                         }
@@ -1221,6 +1229,23 @@ NewCollection(const char* schema_proto_blob,
         field_index_meta->set_fieldid(field.first.get());
     }
 
+    collection->set_index_meta(
+        std::make_shared<CollectionIndexMeta>(col_index_meta));
+    return (void*)collection.release();
+}
+
+inline CCollection
+NewCollection(const milvus::proto::schema::CollectionSchema* schema,
+              MetricType metric_type = knowhere::metric::L2) {
+    auto collection = std::make_unique<milvus::segcore::Collection>(schema);
+    milvus::proto::segcore::CollectionIndexMeta col_index_meta;
+    for (auto field : collection->get_schema()->get_fields()) {
+        auto field_index_meta = col_index_meta.add_index_metas();
+        auto index_param = field_index_meta->add_index_params();
+        index_param->set_key("metric_type");
+        index_param->set_value(metric_type);
+        field_index_meta->set_fieldid(field.first.get());
+    }
     collection->set_index_meta(
         std::make_shared<CollectionIndexMeta>(col_index_meta));
     return (void*)collection.release();
