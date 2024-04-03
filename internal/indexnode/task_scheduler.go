@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"runtime/debug"
-	"strings"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -202,6 +201,16 @@ func (sched *TaskScheduler) scheduleIndexBuildTask() []task {
 	return ret
 }
 
+func getStateFromError(err error) commonpb.IndexState {
+	if errors.Is(err, errCancel) {
+		return commonpb.IndexState_Retry
+	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) {
+		// NoSuchKey or unsupported error
+		return commonpb.IndexState_Failed
+	}
+	return commonpb.IndexState_Retry
+}
+
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	wrap := func(fn func(ctx context.Context) error) error {
 		select {
@@ -222,17 +231,8 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveIndexFiles}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
-			if errors.Is(err, errCancel) {
-				log.Ctx(t.Ctx()).Warn("index build task canceled, retry it", zap.String("task", t.Name()))
-				t.SetState(commonpb.IndexState_Retry, err.Error())
-			} else if errors.Is(err, merr.ErrIoKeyNotFound) ||
-				(merr.Code(err) == 2000 && strings.Contains(err.Error(), "segcoreCode=2100")) {
-				// NoSuchKey or knowhere error
-				log.Ctx(t.Ctx()).Warn("couldn't create index", zap.Error(err))
-				t.SetState(commonpb.IndexState_Failed, err.Error())
-			} else {
-				t.SetState(commonpb.IndexState_Retry, err.Error())
-			}
+			log.Ctx(t.Ctx()).Warn("proces task failed", zap.Error(err))
+			t.SetState(getStateFromError(err), err.Error())
 			return
 		}
 	}

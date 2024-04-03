@@ -377,7 +377,7 @@ generate_index(void* raw_data,
     CreateIndexInfo create_index_info{
         field_type, index_type, metric_type, engine_version};
     auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
-            create_index_info, milvus::storage::FileManagerContext());
+        create_index_info, milvus::storage::FileManagerContext());
 
     auto database = knowhere::GenDataSet(N, dim, raw_data);
     auto build_config = generate_build_conf(index_type, metric_type);
@@ -1961,10 +1961,10 @@ TEST(CApiTest, LoadIndexInfo) {
 
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto get_index_node = knowhere::IndexFactory::Instance().Create<float>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<float>(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
         knowhere::Version::GetCurrentVersion().VersionNumber());
-    auto indexing = get_index_node.value();
+    auto indexing = get_index_obj.value();
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -2012,10 +2012,10 @@ TEST(CApiTest, LoadIndexSearch) {
     auto N = 1024 * 10;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto get_index_node = knowhere::IndexFactory::Instance().Create<float>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<float>(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
         knowhere::Version::GetCurrentVersion().VersionNumber());
-    auto indexing = get_index_node.value();
+    auto indexing = get_index_obj.value();
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},

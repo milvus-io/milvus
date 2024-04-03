@@ -59,12 +59,16 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    auto get_index_node = knowhere::IndexFactory::Instance().Create<T>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
-    if (get_index_node.has_value()) {
-        index_ = get_index_node.value();
+    if (get_index_obj.has_value()) {
+        index_ = get_index_obj.value();
     } else {
-        throw SegcoreError(ErrorCode::KnowhereError, get_index_node.what());
+        auto err = get_index_obj.error();
+        if (err == knowhere::Status::invalid_index_error) {
+            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+        }
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
@@ -93,12 +97,16 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    auto get_index_node = knowhere::IndexFactory::Instance().Create<T>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
-    if (get_index_node.has_value()) {
-        index_ = get_index_node.value();
+    if (get_index_obj.has_value()) {
+        index_ = get_index_obj.value();
     } else {
-        throw SegcoreError(ErrorCode::KnowhereError, get_index_node.what());
+        auto err = get_index_obj.error();
+        if (err == knowhere::Status::invalid_index_error) {
+            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+        }
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
     }
 }
 
