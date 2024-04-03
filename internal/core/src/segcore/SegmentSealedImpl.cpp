@@ -1459,13 +1459,17 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     for (int i = 0; i < size; i++) {
         ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
     }
-    auto end =
-        std::remove_if(ordering.begin(),
-                       ordering.end(),
-                       [&](const std::tuple<Timestamp, PkType>& record) {
-                           return !insert_record_.contain(std::get<1>(record));
-                       });
-    size = end - ordering.begin();
+    // if insert_record_ is empty (may be only-load meta but not data for cache), 
+    // skip the filtering.
+    if (!insert_record_.empty()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+    }
     ordering.resize(size);
     if (size == 0) {
         return SegcoreError::success();

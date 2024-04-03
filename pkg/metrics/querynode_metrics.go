@@ -175,6 +175,8 @@ var (
 		}, []string{
 			nodeIDLabelName,
 			queryTypeLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
 		})
 
 	QueryNodeSQPerUserLatencyInQueue = prometheus.NewHistogramVec(
@@ -502,6 +504,132 @@ var (
 		}, []string{
 			nodeIDLabelName,
 		})
+
+	// QueryNodeSegmentAccessTotal records the total number of search or query segments accessed.
+	QueryNodeSegmentAccessTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_access_total",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+			queryTypeLabelName,
+		},
+	)
+
+	// QueryNodeSegmentAccessDuration records the total time cost of accessing segments including cache loads.
+	QueryNodeSegmentAccessDuration = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_access_duration",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+			queryTypeLabelName,
+		},
+	)
+
+	// QueryNodeSegmentAccessWaitCacheTotal records the number of search or query segments that have to wait for loading access.
+	QueryNodeSegmentAccessWaitCacheTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_access_wait_cache_total",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+			queryTypeLabelName,
+		})
+
+	// QueryNodeSegmentAccessWaitCacheDuration records the total time cost of waiting for loading access.
+	QueryNodeSegmentAccessWaitCacheDuration = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_access_wait_cache_duration",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+			queryTypeLabelName,
+		})
+
+	// QueryNodeDiskCacheLoadTotal records the number of real segments loaded from disk cache.
+	QueryNodeDiskCacheLoadTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_load_total",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+		})
+
+	// QueryNodeDiskCacheLoadBytes records the number of bytes loaded from disk cache.
+	QueryNodeDiskCacheLoadBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_load_bytes",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+		})
+
+	// QueryNodeDiskCacheLoadDuration records the total time cost of loading segments from disk cache.
+	QueryNodeDiskCacheLoadDuration = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_load_duration",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+		})
+
+	// QueryNodeDiskCacheEvictTotal records the number of real segments evicted from disk cache.
+	QueryNodeDiskCacheEvictTotal = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_evict_total",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+		})
+
+	// QueryNodeDiskCacheEvictBytes records the number of bytes evicted from disk cache.
+	QueryNodeDiskCacheEvictBytes = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_evict_bytes",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+		})
+
+	// QueryNodeDiskCacheEvictDuration records the total time cost of evicting segments from disk cache.
+	QueryNodeDiskCacheEvictDuration = prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_evict_duration",
+		}, []string{
+			nodeIDLabelName,
+			databaseLabelName,
+			resourceGroupLabelName,
+		})
 )
 
 // RegisterQueryNode registers QueryNode metrics
@@ -549,6 +677,16 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(StoppingBalanceSegmentNum)
 	registry.MustRegister(QueryNodeLoadSegmentConcurrency)
 	registry.MustRegister(QueryNodeLoadIndexLatency)
+	registry.MustRegister(QueryNodeSegmentAccessTotal)
+	registry.MustRegister(QueryNodeSegmentAccessDuration)
+	registry.MustRegister(QueryNodeSegmentAccessWaitCacheTotal)
+	registry.MustRegister(QueryNodeSegmentAccessWaitCacheDuration)
+	registry.MustRegister(QueryNodeDiskCacheLoadTotal)
+	registry.MustRegister(QueryNodeDiskCacheLoadBytes)
+	registry.MustRegister(QueryNodeDiskCacheLoadDuration)
+	registry.MustRegister(QueryNodeDiskCacheEvictTotal)
+	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
+	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
