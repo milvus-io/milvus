@@ -375,7 +375,23 @@ func (loader *segmentLoaderV2) LoadSegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
 	loadstatus LoadStatus,
-) error {
+) (err error) {
+	// TODO: we should create a transaction-like api to load segment for segment interface,
+	// but not do many things in segment loader.
+	stateLockGuard, err := segment.StartLoadData()
+	// segment can not do load now.
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// segment is already loaded.
+		// TODO: if stateLockGuard is nil, we should not call LoadSegment anymore.
+		// but current Load is not clear enough to do an actual state transition, keep previous logic to avoid introduced bug.
+		if stateLockGuard != nil {
+			stateLockGuard.Done(err)
+		}
+	}()
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
 		zap.Int64("partitionID", segment.Partition()),
@@ -1008,7 +1024,23 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
 	loadStatus LoadStatus,
-) error {
+) (err error) {
+	// TODO: we should create a transaction-like api to load segment for segment interface,
+	// but not do many things in segment loader.
+	stateLockGuard, err := segment.StartLoadData()
+	// segment can not do load now.
+	if err != nil {
+		return err
+	}
+	defer func() {
+		// segment is already loaded.
+		// TODO: if stateLockGuard is nil, we should not call LoadSegment anymore.
+		// but current Load is not clear enough to do an actual state transition, keep previous logic to avoid introduced bug.
+		if stateLockGuard != nil {
+			stateLockGuard.Done(err)
+		}
+	}()
+
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
 		zap.Int64("partitionID", segment.Partition()),
