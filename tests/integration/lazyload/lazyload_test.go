@@ -72,6 +72,13 @@ func (s *LazyloadTestSuite) TestLazyloadSearch() {
 	err = merr.Error(res.Status)
 	s.NoError(err)
 
+	resp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	s.NoError(err)
+	s.True(merr.Ok(resp.Status))
+
 	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
 		FieldName:      integration.FloatVecField,
