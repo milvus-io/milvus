@@ -371,18 +371,30 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 	return 0, fmt.Errorf("fieldID(%d) not has dim", fieldID)
 }
 
-// IsVectorType returns true if input is a vector type, otherwise false
-func IsVectorType(dataType schemapb.DataType) bool {
+func IsBinaryVectorType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_BinaryVector
+}
+
+func IsDenseFloatVectorType(dataType schemapb.DataType) bool {
 	switch dataType {
-	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
+	case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return true
 	default:
 		return false
 	}
 }
 
-func IsSparseVectorType(dataType schemapb.DataType) bool {
+func IsSparseFloatVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_SparseFloatVector
+}
+
+func IsFloatVectorType(dataType schemapb.DataType) bool {
+	return IsDenseFloatVectorType(dataType) || IsSparseFloatVectorType(dataType)
+}
+
+// IsVectorType returns true if input is a vector type, otherwise false
+func IsVectorType(dataType schemapb.DataType) bool {
+	return IsBinaryVectorType(dataType) || IsFloatVectorType(dataType)
 }
 
 // IsIntegerType returns true if input is an integer type, otherwise false

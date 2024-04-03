@@ -215,7 +215,7 @@ func newDescriptorEvent() *descriptorEvent {
 func newInsertEventWriter(dataType schemapb.DataType, dim ...int) (*insertEventWriter, error) {
 	var payloadWriter PayloadWriterInterface
 	var err error
-	if typeutil.IsVectorType(dataType) && !typeutil.IsSparseVectorType(dataType) {
+	if typeutil.IsVectorType(dataType) && !typeutil.IsSparseFloatVectorType(dataType) {
 		if len(dim) != 1 {
 			return nil, fmt.Errorf("incorrect input numbers")
 		}

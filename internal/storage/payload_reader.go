@@ -433,7 +433,7 @@ func (r *PayloadReader) GetFloatVectorFromPayload() ([]float32, int, error) {
 }
 
 func (r *PayloadReader) GetSparseFloatVectorFromPayload() (*SparseFloatVectorFieldData, int, error) {
-	if !typeutil.IsSparseVectorType(r.colType) {
+	if !typeutil.IsSparseFloatVectorType(r.colType) {
 		return nil, -1, fmt.Errorf("failed to get sparse float vector from datatype %v", r.colType.String())
 	}
 	values := make([]parquet.ByteArray, r.numRows)

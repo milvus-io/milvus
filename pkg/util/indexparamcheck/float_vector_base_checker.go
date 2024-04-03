@@ -5,6 +5,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type floatVectorBaseChecker struct {
@@ -28,8 +29,8 @@ func (c floatVectorBaseChecker) CheckTrain(params map[string]string) error {
 }
 
 func (c floatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if dType != schemapb.DataType_FloatVector && dType != schemapb.DataType_Float16Vector && dType != schemapb.DataType_BFloat16Vector {
-		return fmt.Errorf("float or float16 or bfloat16 vector are only supported")
+	if !typeutil.IsDenseFloatVectorType(dType) {
+		return fmt.Errorf("data type should be FloatVector, Float16Vector or BFloat16Vector")
 	}
 	return nil
 }
