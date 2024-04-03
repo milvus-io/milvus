@@ -125,7 +125,7 @@ func (at *analysisTask) BuildIndex(ctx context.Context) error {
 		return err
 	}
 
-	err = analysisInfo.AppendTrainSize(Params.DataCoordCfg.MajorCompactionMaxTrainSize.GetAsInt64())
+	err = analysisInfo.AppendTrainSize(Params.DataCoordCfg.MajorCompactionMaxTrainSize.GetAsSize())
 	if err != nil {
 		log.Warn("append train size failed", zap.Error(err))
 		return err
