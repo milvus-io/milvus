@@ -89,6 +89,7 @@ type majorCompactionTask struct {
 	clusteringKeyField    *schemapb.FieldSchema
 	primaryKeyField       *schemapb.FieldSchema
 
+	spillMutex         sync.Mutex
 	memoryBufferSize   int64
 	clusterBuffers     []*ClusterBuffer
 	clusterBufferLocks *lock.KeyLock[interface{}]
@@ -404,7 +405,7 @@ func (t *majorCompactionTask) mapping(ctx context.Context,
 	}
 
 	// force spill all buffers
-	err := t.forceSpillAll(ctx)
+	err := t.spillAll(ctx)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -566,6 +567,37 @@ func (t *majorCompactionTask) mappingSegment(
 				return err
 			}
 			remained++
+
+			// trigger spill
+			if clusterBuffer.bufferRowNum > t.plan.GetMaxSegmentRows() ||
+				clusterBuffer.bufferSize > int64(Params.DataNodeCfg.BinLogMaxSize.GetAsInt()) {
+				t.spillChan <- SpillSignal{
+					buffer: clusterBuffer,
+				}
+			} else if t.totalBufferSize.Load() >= t.memoryBufferSize {
+				t.spillChan <- SpillSignal{}
+			}
+			// block here, wait for memory release by spill
+			currentSize := t.totalBufferSize.Load()
+			if currentSize > t.getSpillMemorySizeThreshold() {
+			loop:
+				for {
+					select {
+					case <-ctx.Done():
+						log.Warn("stop waiting for memory buffer release as context done")
+						return nil
+					case <-t.done:
+						log.Warn("stop waiting for memory buffer release as task chan done")
+						return nil
+					default:
+						currentSize := t.totalBufferSize.Load()
+						if currentSize < t.getSpillMemorySizeThreshold() {
+							break loop
+						}
+						time.Sleep(time.Millisecond * 50)
+					}
+				}
+			}
 		}
 	}
 
@@ -627,38 +659,7 @@ func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *
 	clusterBuffer.bufferSize = clusterBuffer.bufferSize + int64(rowSize)
 	clusterBuffer.bufferRowNum = clusterBuffer.bufferRowNum + 1
 	clusterBuffer.currentPKStats.Update(pk)
-	totalBufferSize := t.totalBufferSize.Add(int64(rowSize))
-
-	// trigger spill
-	if clusterBuffer.bufferRowNum > t.plan.GetMaxSegmentRows() ||
-		clusterBuffer.bufferSize > int64(Params.DataNodeCfg.BinLogMaxSize.GetAsInt()) {
-		t.spillChan <- SpillSignal{
-			buffer: clusterBuffer,
-		}
-	} else if totalBufferSize >= t.memoryBufferSize {
-		t.spillChan <- SpillSignal{}
-		// block here, wait for memory release by spill
-	loop:
-		for {
-			select {
-			case <-ctx.Done():
-				log.Warn("stop waiting for memory buffer release as context done")
-				return nil
-			case <-t.done:
-				log.Warn("stop waiting for memory buffer release as task chan done")
-				return nil
-			default:
-				currentSize := t.totalBufferSize.Load()
-				if currentSize < t.getSpillMemorySizeThreshold() {
-					break loop
-				}
-				time.Sleep(time.Millisecond * 50)
-			}
-		}
-	} else if totalBufferSize >= t.getSpillMemorySizeThreshold() {
-		// if totalBufferSize reaches memorybufferSize * 0.8, trigger spill without block
-		t.spillChan <- SpillSignal{}
-	}
+	t.totalBufferSize.Add(int64(rowSize))
 	return nil
 }
 
@@ -685,7 +686,11 @@ func (t *majorCompactionTask) backgroundSpill(ctx context.Context) {
 			if signal.buffer == nil {
 				err = t.spillLargestBuffers(ctx)
 			} else {
-				err = t.spill(ctx, signal.buffer)
+				err = func() error {
+					t.clusterBufferLocks.Lock(signal.buffer)
+					defer t.clusterBufferLocks.Unlock(signal.buffer)
+					return t.spill(ctx, signal.buffer)
+				}()
 			}
 			if err != nil {
 				log.Warn("fail to spill data", zap.Error(err))
@@ -696,38 +701,53 @@ func (t *majorCompactionTask) backgroundSpill(ctx context.Context) {
 }
 
 func (t *majorCompactionTask) spillLargestBuffers(ctx context.Context) error {
+	// only one spillLargestBuffers or spillAll should do at the same time
+	t.spillMutex.Lock()
+	defer t.spillMutex.Unlock()
 	bufferIDs := make([]int, 0)
 	for _, buffer := range t.clusterBuffers {
 		bufferIDs = append(bufferIDs, buffer.id)
+		t.clusterBufferLocks.Lock(buffer)
 	}
+	defer func() {
+		for _, buffer := range t.clusterBuffers {
+			t.clusterBufferLocks.Unlock(buffer)
+		}
+	}()
 	sort.Slice(bufferIDs, func(i, j int) bool {
 		return t.clusterBuffers[i].bufferSize > t.clusterBuffers[j].bufferSize
 	})
-	var spilledSize int64 = 0
-	for _, id := range bufferIDs {
-		spillSize := t.clusterBuffers[id].bufferSize
+	for index, id := range bufferIDs {
 		err := t.spill(ctx, t.clusterBuffers[id])
 		if err != nil {
 			return err
 		}
-		spilledSize += spillSize
-		if spilledSize >= t.memoryBufferSize/2 {
+		if index >= len(bufferIDs) {
 			break
 		}
 	}
 	return nil
 }
 
-func (t *majorCompactionTask) forceSpillAll(ctx context.Context) error {
+func (t *majorCompactionTask) spillAll(ctx context.Context) error {
+	// only one spillLargestBuffers or spillAll should do at the same time
+	t.spillMutex.Lock()
+	defer t.spillMutex.Unlock()
 	for _, buffer := range t.clusterBuffers {
-		err := t.spill(ctx, buffer)
-		if err != nil {
-			log.Error("spill fail")
-			return err
+		t.clusterBufferLocks.Lock(buffer)
+	}
+	defer func() {
+		for _, buffer := range t.clusterBuffers {
+			t.clusterBufferLocks.Unlock(buffer)
 		}
-		err = func() error {
-			t.clusterBufferLocks.Lock(buffer)
-			defer t.clusterBufferLocks.Unlock(buffer)
+	}()
+	for _, buffer := range t.clusterBuffers {
+		err := func() error {
+			err := t.spill(ctx, buffer)
+			if err != nil {
+				log.Error("spill fail")
+				return err
+			}
 			err = t.packBuffersToSegments(ctx, buffer)
 			return err
 		}()
@@ -797,9 +817,6 @@ func (t *majorCompactionTask) packBuffersToSegments(ctx context.Context, buffer 
 }
 
 func (t *majorCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) error {
-	t.clusterBufferLocks.Lock(buffer)
-	defer t.clusterBufferLocks.Unlock(buffer)
-
 	if buffer.currentSpillRowNum > t.plan.GetMaxSegmentRows() {
 		t.packBuffersToSegments(ctx, buffer)
 	}
