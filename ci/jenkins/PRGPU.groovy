@@ -12,13 +12,13 @@ pipeline {
         // buildDiscarder logRotator(artifactDaysToKeepStr: '30')
         // parallelsAlwaysFailFast()
         // preserveStashes(buildCount: 5)
-        // disableConcurrentBuilds(abortPrevious: true)
+        disableConcurrentBuilds(abortPrevious: true)
 
     }
     agent {
             kubernetes {
-                inheritFrom 'default'
-                defaultContainer 'main'
+                cloud '4am'
+                inheritFrom 'milvus-e2e-4am'
                 yamlFile 'ci/jenkins/pod/rte-gpu.yaml'
                 customWorkspace '/home/jenkins/agent/workspace'
             }
@@ -116,7 +116,7 @@ pipeline {
                                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                                 sh """
                                                 MILVUS_CLUSTER_ENABLED=${clusterEnabled} \
-                                                MILVUS_HELM_REPO="http://nexus-nexus-repository-manager.nexus:8081/repository/milvus-proxy" \
+                                                MILVUS_HELM_REPO="https://nexus-ci.zilliz.cc/repository/milvus-proxy" \
                                                 TAG=${imageTag}\
                                                 ./e2e-k8s.sh \
                                                 --skip-export-logs \
@@ -133,6 +133,7 @@ pipeline {
                                                 --set indexNode.disk.enabled=true \
                                                 --set queryNode.disk.enabled=true \
                                                 --set standalone.disk.enabled=true \
+                                                --set "tolerations[0].key=node-role.kubernetes.io/gpu,tolerations[0].operator=Exists,tolerations[0].effect=NoSchedule" \
                                                 --version ${chart_version} \
                                                 -f values/ci/pr-gpu.yaml" 
                                                 """
@@ -152,6 +153,7 @@ pipeline {
                         }
                         agent {
                                 kubernetes {
+                                    cloud '4am'
                                     inheritFrom 'default'
                                     defaultContainer 'main'
                                     yamlFile 'ci/jenkins/pod/e2e.yaml'
@@ -177,7 +179,7 @@ pipeline {
                                             MILVUS_HELM_NAMESPACE="milvus-ci" \
                                             MILVUS_CLUSTER_ENABLED="${clusterEnabled}" \
                                             TEST_TIMEOUT="${e2e_timeout_seconds}" \
-                                            ./ci_e2e.sh  "--tags GPU -n 6 -x --timeout ${case_timeout_seconds}"
+                                            ./ci_e2e_4am.sh  "--tags GPU -n 6 -x --timeout ${case_timeout_seconds}"
                                             """
                             
                                         } else {
