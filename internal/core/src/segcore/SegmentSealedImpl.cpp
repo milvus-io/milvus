@@ -1125,9 +1125,9 @@ SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
 
 void
 SegmentSealedImpl::ClearData() {
-    field_data_ready_bitset_.clear();
-    index_ready_bitset_.clear();
-    binlog_index_bitset_.clear();
+    field_data_ready_bitset_.reset();
+    index_ready_bitset_.reset();
+    binlog_index_bitset_.reset();
     system_ready_count_ = 0;
     num_rows_ = 0;
     scalar_indexings_.clear();
