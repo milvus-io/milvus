@@ -188,6 +188,10 @@ func searchSegmentsStreamly(ctx context.Context,
 			}
 			<-streamCredits
 			var err error
+			accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
+			defer func() {
+				accessRecord.Finish(err)
+			}()
 			if seg.IsLazyLoad() {
 				log.Debug("before doing stream search in DiskCache", zap.Int64("segID", seg.ID()))
 				timeout, err := lazyloadWaitTimeout(ctx)
@@ -195,7 +199,11 @@ func searchSegmentsStreamly(ctx context.Context,
 					errs[i] = err
 					return
 				}
-				_, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
+				var missing bool
+				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
+				if missing {
+					accessRecord.CacheMissing()
+				}
 				log.Debug("after doing stream search in DiskCache", zap.Int64("segID", seg.ID()), zap.Error(err))
 			} else {
 				err = searcher(seg)
@@ -218,6 +226,7 @@ func searchSegmentsStreamly(ctx context.Context,
 	}
 	return nil
 }
+
 func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
 	timeout := params.Params.QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
 	deadline, ok := ctx.Deadline()
