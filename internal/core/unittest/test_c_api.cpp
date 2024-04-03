@@ -376,10 +376,8 @@ generate_index(void* raw_data,
         knowhere::Version::GetCurrentVersion().VersionNumber();
     CreateIndexInfo create_index_info{
         field_type, index_type, metric_type, engine_version};
-    auto get_index_node =
-        milvus::index::IndexFactory::GetInstance().CreateIndex(
+    auto indexing = milvus::index::IndexFactory::GetInstance().CreateIndex(
             create_index_info, milvus::storage::FileManagerContext());
-    auto indexing = get_index_node.value();
 
     auto database = knowhere::GenDataSet(N, dim, raw_data);
     auto build_config = generate_build_conf(index_type, metric_type);
