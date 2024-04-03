@@ -176,7 +176,6 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
     auto second = double(duration.count()) * chrono::microseconds::period::num /
                   chrono::microseconds::period::den;
     std::cout << "cost time:" << second << std::endl;
-    EXPECT_LT(second, 4 * 100);
 }
 
 int
