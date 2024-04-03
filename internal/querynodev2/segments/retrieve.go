@@ -81,7 +81,11 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 					errs[i] = err
 					return
 				}
-				err = mgr.DiskCache.DoWait(seg.ID(), timeout, retriever)
+				var missing bool
+				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, retriever)
+				if missing {
+					accessRecord.CacheMissing()
+				}
 			} else {
 				err = retriever(seg)
 			}

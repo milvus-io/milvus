@@ -92,7 +92,11 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 					errs[i] = err
 					return
 				}
-				err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
+				var missing bool
+				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
+				if missing {
+					accessRecord.CacheMissing()
+				}
 			} else {
 				err = searcher(seg)
 			}
