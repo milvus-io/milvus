@@ -193,6 +193,7 @@ func searchSegmentsStreamly(ctx context.Context,
 				var missing bool
 				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
 				if err != nil {
+					log.Error("failed to do search for disk cache", zap.Int64("seg_id", seg.ID()), zap.Error(err))
 					errs[i] = err
 					return
 				}
