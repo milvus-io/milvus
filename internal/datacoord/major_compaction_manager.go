@@ -266,7 +266,6 @@ func (t *MajorCompactionManager) runCompactionJob(job *MajorCompactionJob) error
 			if analysisTask.State == commonpb.IndexState_Finished {
 				//version := int64(0) // analysisTask.Version
 				plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analysisTask.TaskID, analysisTask.Version))
-				log.Info("wayblink debug", zap.String("analyze_result_path", plan.AnalyzeResultPath))
 				offSetSegmentIDs := make([]int64, 0)
 				for segID, _ := range analysisTask.SegmentOffsetMappingFiles {
 					offSetSegmentIDs = append(offSetSegmentIDs, segID)

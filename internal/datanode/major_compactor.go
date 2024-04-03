@@ -92,7 +92,7 @@ type majorCompactionTask struct {
 	spillMutex         sync.Mutex
 	memoryBufferSize   int64
 	clusterBuffers     []*ClusterBuffer
-	clusterBufferLocks *lock.KeyLock[interface{}]
+	clusterBufferLocks *lock.KeyLock[int]
 	// scalar
 	keyToBufferFunc func(interface{}) *ClusterBuffer
 	// vector
@@ -108,12 +108,11 @@ type ClusterBuffer struct {
 	bufferTimeStampFrom int64
 	bufferTimeStampTo   int64
 
-	currentSegmentID      int64
-	currentSpillSize      int64
-	currentSpillRowNum    int64
-	currentSpillBinlogs   map[UniqueID]*datapb.FieldBinlog
-	currentSpillStatslogs []*datapb.FieldBinlog
-	currentPKStats        *storage.PrimaryKeyStats
+	currentSegmentID    int64
+	currentSpillSize    int64
+	currentSpillRowNum  int64
+	currentSpillBinlogs map[UniqueID]*datapb.FieldBinlog
+	currentPKStats      *storage.PrimaryKeyStats
 
 	uploadedSegments     []*datapb.CompactionSegment
 	uploadedSegmentStats map[UniqueID]storage.SegmentStats
@@ -150,7 +149,7 @@ func newMajorCompactionTask(
 		spillChan:          make(chan SpillSignal, 100),
 		pool:               conc.NewPool[any](hardware.GetCPUNum() * 2),
 		clusterBuffers:     make([]*ClusterBuffer, 0),
-		clusterBufferLocks: lock.NewKeyLock[interface{}](),
+		clusterBufferLocks: lock.NewKeyLock[int](),
 	}
 }
 
@@ -348,7 +347,7 @@ func (t *majorCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	}
 
 	// 3, mapping
-	log.Info("L2 compaction start mapping")
+	log.Info("L2 compaction start mapping", zap.Int("bufferNum", len(t.clusterBuffers)))
 	uploadSegments, partitionStats, err := t.mapping(ctx, deltaPk2Ts)
 	if err != nil {
 		return nil, err
@@ -619,8 +618,8 @@ func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *
 	}
 	rowSize := int(reflect.TypeOf(row).Size())
 
-	t.clusterBufferLocks.Lock(clusterBuffer)
-	defer t.clusterBufferLocks.Unlock(clusterBuffer)
+	t.clusterBufferLocks.Lock(clusterBuffer.id)
+	defer t.clusterBufferLocks.Unlock(clusterBuffer.id)
 	// prepare
 	if clusterBuffer.currentSegmentID == 0 {
 		segmentID, err := t.allocator.AllocOne()
@@ -629,7 +628,6 @@ func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *
 		}
 		clusterBuffer.currentSegmentID = segmentID
 		clusterBuffer.currentSpillBinlogs = make(map[UniqueID]*datapb.FieldBinlog, 0)
-		clusterBuffer.currentSpillStatslogs = make([]*datapb.FieldBinlog, 0)
 		clusterBuffer.bufferTimeStampFrom = -1
 		clusterBuffer.bufferTimeStampTo = -1
 	}
@@ -687,8 +685,8 @@ func (t *majorCompactionTask) backgroundSpill(ctx context.Context) {
 				err = t.spillLargestBuffers(ctx)
 			} else {
 				err = func() error {
-					t.clusterBufferLocks.Lock(signal.buffer)
-					defer t.clusterBufferLocks.Unlock(signal.buffer)
+					t.clusterBufferLocks.Lock(signal.buffer.id)
+					defer t.clusterBufferLocks.Unlock(signal.buffer.id)
 					return t.spill(ctx, signal.buffer)
 				}()
 			}
@@ -707,11 +705,11 @@ func (t *majorCompactionTask) spillLargestBuffers(ctx context.Context) error {
 	bufferIDs := make([]int, 0)
 	for _, buffer := range t.clusterBuffers {
 		bufferIDs = append(bufferIDs, buffer.id)
-		t.clusterBufferLocks.Lock(buffer)
+		t.clusterBufferLocks.Lock(buffer.id)
 	}
 	defer func() {
 		for _, buffer := range t.clusterBuffers {
-			t.clusterBufferLocks.Unlock(buffer)
+			t.clusterBufferLocks.Unlock(buffer.id)
 		}
 	}()
 	sort.Slice(bufferIDs, func(i, j int) bool {
@@ -734,11 +732,11 @@ func (t *majorCompactionTask) spillAll(ctx context.Context) error {
 	t.spillMutex.Lock()
 	defer t.spillMutex.Unlock()
 	for _, buffer := range t.clusterBuffers {
-		t.clusterBufferLocks.Lock(buffer)
+		t.clusterBufferLocks.Lock(buffer.id)
 	}
 	defer func() {
 		for _, buffer := range t.clusterBuffers {
-			t.clusterBufferLocks.Unlock(buffer)
+			t.clusterBufferLocks.Unlock(buffer.id)
 		}
 	}()
 	for _, buffer := range t.clusterBuffers {
@@ -763,7 +761,6 @@ func (t *majorCompactionTask) packBuffersToSegments(ctx context.Context, buffer 
 	if len(buffer.currentSpillBinlogs) == 0 {
 		return nil
 	}
-
 	insertLogs := make([]*datapb.FieldBinlog, 0)
 	for _, fieldBinlog := range buffer.currentSpillBinlogs {
 		insertLogs = append(insertLogs, fieldBinlog)
@@ -800,8 +797,6 @@ func (t *majorCompactionTask) packBuffersToSegments(ctx context.Context, buffer 
 		NumRows: int(buffer.currentSpillRowNum),
 	}
 	buffer.uploadedSegmentStats[buffer.currentSegmentID] = segmentStats
-	log.Info("pack segment", zap.Int64("segID", buffer.currentSegmentID), zap.String("seg", seg.String()), zap.Any("segStats", segmentStats))
-
 	// refresh
 	buffer.currentSpillRowNum = 0
 	buffer.currentSpillSize = 0
@@ -812,15 +807,11 @@ func (t *majorCompactionTask) packBuffersToSegments(ctx context.Context, buffer 
 	}
 	buffer.currentSegmentID = segmentID
 	buffer.currentSpillBinlogs = make(map[UniqueID]*datapb.FieldBinlog, 0)
-	buffer.currentSpillStatslogs = make([]*datapb.FieldBinlog, 0)
+	log.Debug("finish pack segment", zap.Int64("segID", buffer.currentSegmentID), zap.String("seg", seg.String()), zap.Any("segStats", segmentStats))
 	return nil
 }
 
 func (t *majorCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) error {
-	if buffer.currentSpillRowNum > t.plan.GetMaxSegmentRows() {
-		t.packBuffersToSegments(ctx, buffer)
-	}
-
 	if buffer.buffer.IsEmpty() {
 		return nil
 	}
@@ -847,11 +838,14 @@ func (t *majorCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) 
 	buffer.currentSpillRowNum = buffer.currentSpillRowNum + buffer.bufferRowNum
 
 	// clean buffer
+	t.totalBufferSize.Add(-buffer.bufferSize)
 	buffer.buffer = nil
 	buffer.bufferSize = 0
 	buffer.bufferRowNum = 0
-	t.totalBufferSize.Add(-buffer.bufferSize)
 
+	if buffer.currentSpillRowNum > t.plan.GetMaxSegmentRows() {
+		t.packBuffersToSegments(ctx, buffer)
+	}
 	return nil
 }
 
