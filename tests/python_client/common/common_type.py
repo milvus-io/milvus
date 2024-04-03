@@ -48,6 +48,10 @@ default_float16_vec_field_name = "float16_vector"
 default_bfloat16_vec_field_name = "bfloat16_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
+float_type = "FLOAT_VECTOR"
+float16_type = "FLOAT16_VECTOR"
+bfloat16_type = "BFLOAT16_VECTOR"
+vector_data_type_all = [float_type, float16_type, bfloat16_type]
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
 default_resource_group_capacity = 1000000
@@ -104,6 +108,8 @@ in_cluster_env = "IN_CLUSTER"
 default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "COSINE"}
 default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
 default_count_output = "count(*)"
+
+rows_all_data_type_file_path = "/tmp/rows_all_data_type"
 
 """" List of parameters used to pass """
 get_invalid_strs = [

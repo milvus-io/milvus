@@ -2273,6 +2273,66 @@ class TestCollectionSearch(TestcaseBase):
                                              "limit": limit,
                                              "_async": _async})
 
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.GPU)
+    @pytest.mark.skip(reason="waiting for the address of bf16 data generation slow problem")
+    @pytest.mark.parametrize("index, params",
+                             zip(ct.all_index_types[:7],
+                                 ct.default_index_params[:7]))
+    def test_search_after_different_index_with_params_all_vector_type_multiple_vectors(self, index, params, auto_id,
+                                                                                       _async, enable_dynamic_field,
+                                                                                       scalar_index):
+        """
+        target: test search after different index
+        method: test search after different index and corresponding search params
+        expected: search successfully with limit(topK)
+        """
+        if index == "DISKANN":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/30793")
+        # 1. initialize with data
+        collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
+                                                                                  partition_num=1,
+                                                                                  is_all_data_type=True,
+                                                                                  auto_id=auto_id,
+                                                                                  dim=default_dim, is_index=False,
+                                                                                  enable_dynamic_field=enable_dynamic_field,
+                                                                                  multiple_dim_array=[default_dim, default_dim])[0:5]
+        # 2. create index on vector field and load
+        if params.get("m"):
+            if (default_dim % params["m"]) != 0:
+                params["m"] = default_dim // 4
+        if params.get("PQM"):
+            if (default_dim % params["PQM"]) != 0:
+                params["PQM"] = default_dim // 4
+        default_index = {"index_type": index, "params": params, "metric_type": "COSINE"}
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, default_index)
+        # 3. create index on scalar field
+        scalar_index_params = {"index_type": scalar_index, "params": {}}
+        collection_w.create_index(ct.default_int64_field_name, scalar_index_params)
+        collection_w.load()
+        # 4. search
+        search_params = cf.gen_search_param(index, "COSINE")
+        vectors = [[random.random() for _ in range(default_dim)] for _ in range(default_nq)]
+        for search_param in search_params:
+            log.info("Searching with search params: {}".format(search_param))
+            limit = default_limit
+            if index == "HNSW":
+                limit = search_param["params"]["ef"]
+                if limit > max_limit:
+                    limit = default_nb
+            if index == "DISKANN":
+                limit = search_param["params"]["search_list"]
+            collection_w.search(vectors[:default_nq], vector_name_list[0],
+                                search_param, limit,
+                                default_search_exp, _async=_async,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": default_nq,
+                                             "ids": insert_ids,
+                                             "limit": limit,
+                                             "_async": _async})
+
     @pytest.mark.tags(CaseLabel.GPU)
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[9:11],
@@ -3332,25 +3392,32 @@ class TestCollectionSearch(TestcaseBase):
         expected: search success
         """
         # 1. initialize with data
-        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb, is_all_data_type=True,
-                                                                      auto_id=auto_id, dim=dim)[0:4]
+        collection_w, _, _, insert_ids = self.init_collection_general(prefix, True, nb,
+                                                                      is_all_data_type=True,
+                                                                      auto_id=auto_id,
+                                                                      dim=dim,
+                                                                      enable_dynamic_field=enable_dynamic_field,
+                                                                      multiple_dim_array=[dim, dim])[0:4]
         # 2. search
         log.info("test_search_expression_all_data_type: Searching collection %s" %
                  collection_w.name)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         search_exp = "int64 >= 0 && int32 >= 0 && int16 >= 0 " \
                      "&& int8 >= 0 && float >= 0 && double >= 0"
-        res = collection_w.search(vectors[:nq], default_search_field,
-                                  default_search_params, default_limit,
-                                  search_exp, _async=_async,
-                                  output_fields=[default_int64_field_name,
-                                                 default_float_field_name,
-                                                 default_bool_field_name],
-                                  check_task=CheckTasks.check_search_results,
-                                  check_items={"nq": nq,
-                                               "ids": insert_ids,
-                                               "limit": default_limit,
-                                               "_async": _async})[0]
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        for search_field in vector_name_list:
+            vector_data_type = search_field[:-9].lstrip("multiple_vector_")
+            vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+            res = collection_w.search(vectors[:nq], search_field,
+                                      default_search_params, default_limit,
+                                      search_exp, _async=_async,
+                                      output_fields=[default_int64_field_name,
+                                                     default_float_field_name,
+                                                     default_bool_field_name],
+                                      check_task=CheckTasks.check_search_results,
+                                      check_items={"nq": nq,
+                                                   "ids": insert_ids,
+                                                   "limit": default_limit,
+                                                   "_async": _async})[0]
         if _async:
             res.done()
             res = res.result()
@@ -10643,6 +10710,64 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                    check_items={"nq": 1,
                                                 "ids": insert_ids,
                                                 "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
+    def test_hybrid_search_different_metric_type_each_field(self, primary_field, dim, auto_id, is_flush,
+                                                 enable_dynamic_field, metric_type):
+        """
+        target: test hybrid search for fields with different metric type
+        method: create connection, collection, insert and search
+        expected: hybrid search successfully with limit(topK)
+        """
+        # 1. initialize collection with data
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush, is_index=False,
+                                         primary_field=primary_field,
+                                         enable_dynamic_field=False, multiple_dim_array=[dim, dim])[0:5]
+        # 2. extract vector field name
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        log.debug(vector_name_list)
+        flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "L2"}
+        collection_w.create_index(vector_name_list[0], flat_index)
+        flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "IP"}
+        collection_w.create_index(vector_name_list[1], flat_index)
+        flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "COSINE"}
+        collection_w.create_index(vector_name_list[2], flat_index)
+        collection_w.load()
+        # 3. prepare search params
+        req_list = []
+        search_param = {
+            "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+            "anns_field": vector_name_list[0],
+            "param": {"metric_type": "L2", "offset": 0},
+            "limit": default_limit,
+            "expr": "int64 > 0"}
+        req = AnnSearchRequest(**search_param)
+        req_list.append(req)
+        search_param = {
+            "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+            "anns_field": vector_name_list[1],
+            "param": {"metric_type": "IP", "offset": 0},
+            "limit": default_limit,
+            "expr": "int64 > 0"}
+        req = AnnSearchRequest(**search_param)
+        req_list.append(req)
+        search_param = {
+            "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+            "anns_field": vector_name_list[2],
+            "param": {"metric_type": "COSINE", "offset": 0},
+            "limit": default_limit,
+            "expr": "int64 > 0"}
+        req = AnnSearchRequest(**search_param)
+        req_list.append(req)
+        # 4. hybrid search
+        hybrid_search = collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 1), default_limit,
+                                                   check_task=CheckTasks.check_search_results,
+                                                   check_items={"nq": 1,
+                                                                "ids": insert_ids,
+                                                                "limit": default_limit})[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])

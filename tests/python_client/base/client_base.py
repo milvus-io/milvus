@@ -263,7 +263,8 @@ class TestcaseBase(Base):
             default_schema = cf.gen_collection_schema_all_datatype(auto_id=auto_id, dim=dim,
                                                                    primary_field=primary_field,
                                                                    enable_dynamic_field=enable_dynamic_field,
-                                                                   with_json=with_json)
+                                                                   with_json=with_json,
+                                                                   multiple_dim_array=multiple_dim_array)
         log.info("init_collection_general: collection creation")
         collection_w = self.init_collection_wrap(name=collection_name, schema=default_schema, **kwargs)
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
@@ -273,8 +274,8 @@ class TestcaseBase(Base):
         # 3 insert data if specified
         if insert_data:
             collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp = \
-                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id, 
-                               dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json, 
+                cf.insert_data(collection_w, nb, is_binary, is_all_data_type, auto_id=auto_id,
+                               dim=dim, enable_dynamic_field=enable_dynamic_field, with_json=with_json,
                                random_primary_key=random_primary_key, multiple_dim_array=multiple_dim_array,
                                primary_field=primary_field, vector_data_type=vector_data_type)
             if is_flush:
@@ -286,10 +287,11 @@ class TestcaseBase(Base):
             if is_binary:
                 collection_w.create_index(ct.default_binary_vec_field_name, ct.default_bin_flat_index)
             else:
-                collection_w.create_index(ct.default_float_vec_field_name, ct.default_flat_index)
-                if len(multiple_dim_array) != 0 or is_all_data_type:
-                    for vector_name in vector_name_list:
-                        collection_w.create_index(vector_name, ct.default_flat_index)
+                if len(multiple_dim_array) == 0 or is_all_data_type == False:
+                    vector_name_list.append(ct.default_float_vec_field_name)
+                for vector_name in vector_name_list:
+                    collection_w.create_index(vector_name, ct.default_flat_index)
+
             collection_w.load()
 
         return collection_w, vectors, binary_raw_vectors, insert_ids, time_stamp
