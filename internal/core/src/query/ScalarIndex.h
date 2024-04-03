@@ -18,6 +18,7 @@
 
 #include "common/FieldMeta.h"
 #include "common/Span.h"
+#include "common/Types.h"
 
 namespace milvus::query {
 
@@ -39,7 +40,7 @@ generate_scalar_index(Span<std::string> data) {
 
 inline index::IndexBasePtr
 generate_scalar_index(SpanBase data, DataType data_type) {
-    Assert(!datatype_is_vector(data_type));
+    Assert(!IsVectorDataType(data_type));
     switch (data_type) {
         case DataType::BOOL:
             return generate_scalar_index(Span<bool>(data));

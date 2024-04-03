@@ -20,182 +20,10 @@
 #include <stdexcept>
 #include <string>
 
-#include "common/Types.h"
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 
 namespace milvus {
-
-inline size_t
-datatype_sizeof(DataType data_type, int dim = 1) {
-    switch (data_type) {
-        case DataType::BOOL:
-            return sizeof(bool);
-        case DataType::INT8:
-            return sizeof(int8_t);
-        case DataType::INT16:
-            return sizeof(int16_t);
-        case DataType::INT32:
-            return sizeof(int32_t);
-        case DataType::INT64:
-            return sizeof(int64_t);
-        case DataType::FLOAT:
-            return sizeof(float);
-        case DataType::DOUBLE:
-            return sizeof(double);
-        case DataType::VECTOR_FLOAT:
-            return sizeof(float) * dim;
-        case DataType::VECTOR_BINARY: {
-            AssertInfo(dim % 8 == 0, "dim={}", dim);
-            return dim / 8;
-        }
-        case DataType::VECTOR_FLOAT16: {
-            return sizeof(float16) * dim;
-        }
-        case DataType::VECTOR_BFLOAT16: {
-            return sizeof(bfloat16) * dim;
-        }
-        // Not supporting VECTOR_SPARSE_FLOAT here intentionally. We can't
-        // easily estimately the size of a sparse float vector. Caller of this
-        // method must handle this case themselves and must not pass
-        // VECTOR_SPARSE_FLOAT data_type.
-        default: {
-            throw SegcoreError(DataTypeInvalid,
-                               fmt::format("invalid type is {}", data_type));
-        }
-    }
-}
-
-// TODO: use magic_enum when available
-inline std::string
-datatype_name(DataType data_type) {
-    switch (data_type) {
-        case DataType::NONE:
-            return "none";
-        case DataType::BOOL:
-            return "bool";
-        case DataType::INT8:
-            return "int8_t";
-        case DataType::INT16:
-            return "int16_t";
-        case DataType::INT32:
-            return "int32_t";
-        case DataType::INT64:
-            return "int64_t";
-        case DataType::FLOAT:
-            return "float";
-        case DataType::DOUBLE:
-            return "double";
-        case DataType::STRING:
-            return "string";
-        case DataType::VARCHAR:
-            return "varChar";
-        case DataType::ARRAY:
-            return "array";
-        case DataType::JSON:
-            return "json";
-        case DataType::VECTOR_FLOAT:
-            return "vector_float";
-        case DataType::VECTOR_BINARY: {
-            return "vector_binary";
-        }
-        case DataType::VECTOR_FLOAT16: {
-            return "vector_float16";
-        }
-        case DataType::VECTOR_BFLOAT16: {
-            return "vector_bfloat16";
-        }
-        case DataType::VECTOR_SPARSE_FLOAT: {
-            return "vector_sparse_float";
-        }
-        default: {
-            PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
-        }
-    }
-}
-
-inline bool
-datatype_is_vector(DataType datatype) {
-    return datatype == DataType::VECTOR_BINARY ||
-           datatype == DataType::VECTOR_FLOAT ||
-           datatype == DataType::VECTOR_FLOAT16 ||
-           datatype == DataType::VECTOR_BFLOAT16 ||
-           datatype == DataType::VECTOR_SPARSE_FLOAT;
-}
-
-inline bool
-datatype_is_sparse_vector(DataType datatype) {
-    return datatype == DataType::VECTOR_SPARSE_FLOAT;
-}
-
-inline bool
-datatype_is_string(DataType datatype) {
-    switch (datatype) {
-        case DataType::VARCHAR:
-        case DataType::STRING:
-            return true;
-        default:
-            return false;
-    }
-}
-
-inline bool
-datatype_is_binary(DataType datatype) {
-    switch (datatype) {
-        case DataType::ARRAY:
-        case DataType::JSON:
-            return true;
-        default:
-            return false;
-    }
-}
-
-inline bool
-datatype_is_json(DataType datatype) {
-    return datatype == DataType::JSON;
-}
-
-inline bool
-datatype_is_array(DataType datatype) {
-    return datatype == DataType::ARRAY;
-}
-
-inline bool
-datatype_is_variable(DataType datatype) {
-    switch (datatype) {
-        case DataType::VARCHAR:
-        case DataType::STRING:
-        case DataType::ARRAY:
-        case DataType::JSON:
-        case DataType::VECTOR_SPARSE_FLOAT:
-            return true;
-        default:
-            return false;
-    }
-}
-
-inline bool
-datatype_is_integer(DataType datatype) {
-    switch (datatype) {
-        case DataType::INT8:
-        case DataType::INT16:
-        case DataType::INT32:
-        case DataType::INT64:
-            return true;
-        default:
-            return false;
-    }
-}
-
-inline bool
-datatype_is_floating(DataType datatype) {
-    switch (datatype) {
-        case DataType::FLOAT:
-        case DataType::DOUBLE:
-            return true;
-        default:
-            return false;
-    }
-}
 
 class FieldMeta {
  public:
@@ -209,7 +37,7 @@ class FieldMeta {
 
     FieldMeta(const FieldName& name, FieldId id, DataType type)
         : name_(name), id_(id), type_(type) {
-        Assert(!datatype_is_vector(type_));
+        Assert(!IsVectorDataType(type_));
     }
 
     FieldMeta(const FieldName& name,
@@ -220,7 +48,7 @@ class FieldMeta {
           id_(id),
           type_(type),
           string_info_(StringInfo{max_length}) {
-        Assert(datatype_is_string(type_));
+        Assert(IsStringDataType(type_));
     }
 
     FieldMeta(const FieldName& name,
@@ -228,7 +56,7 @@ class FieldMeta {
               DataType type,
               DataType element_type)
         : name_(name), id_(id), type_(type), element_type_(element_type) {
-        Assert(datatype_is_array(type_));
+        Assert(IsArrayDataType(type_));
     }
 
     // pass in any value for dim for sparse vector is ok as it'll never be used:
@@ -242,28 +70,28 @@ class FieldMeta {
           id_(id),
           type_(type),
           vector_info_(VectorInfo{dim, std::move(metric_type)}) {
-        Assert(datatype_is_vector(type_));
+        Assert(IsVectorDataType(type_));
     }
 
     int64_t
     get_dim() const {
-        Assert(datatype_is_vector(type_));
+        Assert(IsVectorDataType(type_));
         // should not attempt to get dim() of a sparse vector from schema.
-        Assert(!datatype_is_sparse_vector(type_));
+        Assert(!IsSparseFloatVectorDataType(type_));
         Assert(vector_info_.has_value());
         return vector_info_->dim_;
     }
 
     int64_t
     get_max_len() const {
-        Assert(datatype_is_string(type_));
+        Assert(IsStringDataType(type_));
         Assert(string_info_.has_value());
         return string_info_->max_length;
     }
 
     std::optional<knowhere::MetricType>
     get_metric_type() const {
-        Assert(datatype_is_vector(type_));
+        Assert(IsVectorDataType(type_));
         Assert(vector_info_.has_value());
         return vector_info_->metric_type_;
     }
@@ -290,29 +118,29 @@ class FieldMeta {
 
     bool
     is_vector() const {
-        return datatype_is_vector(type_);
+        return IsVectorDataType(type_);
     }
 
     bool
     is_string() const {
-        return datatype_is_string(type_);
+        return IsStringDataType(type_);
     }
 
     size_t
     get_sizeof() const {
-        AssertInfo(!datatype_is_sparse_vector(type_),
+        AssertInfo(!IsSparseFloatVectorDataType(type_),
                    "should not attempt to get_sizeof() of a sparse vector from "
                    "schema");
         static const size_t ARRAY_SIZE = 128;
         static const size_t JSON_SIZE = 512;
         if (is_vector()) {
-            return datatype_sizeof(type_, get_dim());
+            return GetDataTypeSize(type_, get_dim());
         } else if (is_string()) {
             return string_info_->max_length;
-        } else if (datatype_is_variable(type_)) {
+        } else if (IsVariableDataType(type_)) {
             return type_ == DataType::ARRAY ? ARRAY_SIZE : JSON_SIZE;
         } else {
-            return datatype_sizeof(type_);
+            return GetDataTypeSize(type_);
         }
     }
 

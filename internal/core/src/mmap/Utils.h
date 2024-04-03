@@ -13,6 +13,7 @@
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
+
 #pragma once
 
 #include <fcntl.h>
@@ -25,6 +26,7 @@
 #include <vector>
 
 #include "common/FieldMeta.h"
+#include "common/Types.h"
 #include "mmap/Types.h"
 #include "storage/Util.h"
 #include "common/File.h"
@@ -37,7 +39,7 @@ WriteFieldData(File& file,
                const FieldDataPtr& data,
                std::vector<std::vector<uint64_t>>& element_indices) {
     size_t total_written{0};
-    if (datatype_is_variable(data_type)) {
+    if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case DataType::VARCHAR:
             case DataType::STRING: {
@@ -87,7 +89,7 @@ WriteFieldData(File& file,
             default:
                 PanicInfo(DataTypeInvalid,
                           "not supported data type {}",
-                          datatype_name(data_type));
+                          GetDataTypeName(data_type));
         }
     } else {
         total_written += file.Write(data->Data(), data->Size());
