@@ -6,6 +6,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -37,13 +38,6 @@ func ConstructCollectionSchemaWithKeys(collectionName string,
 	return schema
 }
 
-func isVectorType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_FloatVector ||
-		dataType == schemapb.DataType_BinaryVector ||
-		dataType == schemapb.DataType_Float16Vector ||
-		dataType == schemapb.DataType_BFloat16Vector
-}
-
 func ConstructCollectionSchemaByDataType(collectionName string,
 	fieldName2DataType map[string]schemapb.DataType,
 	primaryFieldName string,
@@ -59,7 +53,7 @@ func ConstructCollectionSchemaByDataType(collectionName string,
 			FieldID:  fieldIdx,
 		}
 		fieldIdx += 1
-		if isVectorType(dataType) {
+		if typeutil.IsVectorType(dataType) {
 			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 				{
 					Key:   common.DimKey,
