@@ -2195,7 +2195,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "30000",
 		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
 	}
-	p.LazyLoadEnabled.Init(base.mgr)
+	p.LazyLoadWaitTimeout.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",
