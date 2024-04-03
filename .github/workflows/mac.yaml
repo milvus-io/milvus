@@ -2,6 +2,9 @@ name: Mac Code Checker
 
 # This workflow is triggered on pushes or pull request to the repository.
 on:
+  schedule:
+    # Runs at 00:00 UTC every day
+    - cron: '0 0 * * *'
   push:
     branches:
       - master
@@ -32,6 +35,7 @@ jobs:
   mac:
     name: Code Checker MacOS 12
     runs-on: macos-12
+    if: github.event_name == 'schedule'
     timeout-minutes: 300
     steps:
       - name: Checkout
