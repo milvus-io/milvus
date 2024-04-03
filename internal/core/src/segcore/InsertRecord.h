@@ -244,6 +244,7 @@ class OffsetOrderedArray : public OffsetMap {
     void
     clear() override {
         array_.clear();
+        is_sealed = false;
     }
 
  private:
