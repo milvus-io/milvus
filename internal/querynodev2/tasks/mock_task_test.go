@@ -5,6 +5,7 @@ import (
 	"math/rand"
 	"time"
 
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -112,6 +113,10 @@ func (t *MockTask) MergeWith(t2 Task) bool {
 		}
 	}
 	return false
+}
+
+func (t *MockTask) SearchResult() *internalpb.SearchResults {
+	return nil
 }
 
 func (t *MockTask) NQ() int64 {

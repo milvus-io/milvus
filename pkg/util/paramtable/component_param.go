@@ -1998,6 +1998,7 @@ type queryNodeConfig struct {
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	UseStreamComputing                      ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2494,6 +2495,13 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
+	p.UseStreamComputing = ParamItem{
+		Key:          "queryNode.useStreamComputing",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "use stream search mode when searching or querying",
+	}
+	p.UseStreamComputing.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
