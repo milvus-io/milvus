@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -74,8 +75,14 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}()
 
 			if seg.IsLazyLoad() {
+				var timeout time.Duration
+				timeout, err = lazyloadWaitTimeout(ctx)
+				if err != nil {
+					errs[i] = err
+					return
+				}
 				var missing bool
-				missing, err = mgr.DiskCache.Do(seg.ID(), retriever)
+				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, retriever)
 				if missing {
 					accessRecord.CacheMissing()
 				}

@@ -89,7 +89,7 @@ func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
 
 type Cache[K comparable, V any] interface {
 	Do(key K, doer func(V) error) (bool, error)
-	DoWait(key K, timeout time.Duration, doer func(V) error) error
+	DoWait(key K, timeout time.Duration, doer func(V) error) (bool, error)
 }
 
 type Waiter[K comparable] struct {
@@ -193,7 +193,7 @@ func (c *lruCache[K, V]) Do(key K, doer func(V) error) (bool, error) {
 	return missing, doer(item.value)
 }
 
-func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error) error {
+func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error) (bool, error) {
 	timedWait := func(cond *sync.Cond, timeout time.Duration) bool {
 		c := make(chan struct{})
 		go func() {
@@ -213,7 +213,7 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 	var ele *list.Element
 	start := time.Now()
 	for {
-		item, _, err := c.getAndPin(key)
+		item, missing, err := c.getAndPin(key)
 		if err == nil {
 			if ele != nil {
 				c.rwlock.Lock()
@@ -221,9 +221,9 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 				c.rwlock.Unlock()
 			}
 			defer c.Unpin(key)
-			return doer(item.value)
+			return missing, doer(item.value)
 		} else if err != ErrNotEnoughSpace {
-			return err
+			return missing, err
 		}
 		if ele == nil {
 			// If no enough space, enqueue the key
@@ -235,7 +235,7 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 		// Wait for the key to be available
 		timeLeft := time.Until(start.Add(timeout))
 		if timeLeft <= 0 || timedWait(ele.Value.(*Waiter[K]).c, timeLeft) {
-			return ErrTimeOut
+			return missing, ErrTimeOut
 		}
 	}
 }

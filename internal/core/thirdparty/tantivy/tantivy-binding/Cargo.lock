@@ -982,6 +982,7 @@ dependencies = [
  "libc",
  "scopeguard",
  "tantivy",
+ "zstd-sys",
 ]
 
 [[package]]

@@ -20,13 +20,16 @@ import (
 	"context"
 	"fmt"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -83,8 +86,13 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				accessRecord.Finish(err)
 			}()
 			if seg.IsLazyLoad() {
+				timeout, err := lazyloadWaitTimeout(ctx)
+				if err != nil {
+					errs[i] = err
+					return
+				}
 				var missing bool
-				missing, err = mgr.DiskCache.Do(seg.ID(), searcher)
+				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
 				if missing {
 					accessRecord.CacheMissing()
 				}
@@ -182,7 +190,12 @@ func searchSegmentsStreamly(ctx context.Context,
 			var err error
 			if seg.IsLazyLoad() {
 				log.Debug("before doing stream search in DiskCache", zap.Int64("segID", seg.ID()))
-				err = mgr.DiskCache.Do(seg.ID(), searcher)
+				timeout, err := lazyloadWaitTimeout(ctx)
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				_, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
 				log.Debug("after doing stream search in DiskCache", zap.Int64("segID", seg.ID()), zap.Error(err))
 			} else {
 				err = searcher(seg)
@@ -204,6 +217,19 @@ func searchSegmentsStreamly(ctx context.Context,
 		}
 	}
 	return nil
+}
+func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
+	timeout := params.Params.QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
+	deadline, ok := ctx.Deadline()
+	if ok {
+		remain := deadline.Sub(time.Now())
+		if remain <= 0 {
+			return -1, merr.WrapErrServiceInternal("search context deadline exceeded")
+		} else if remain < timeout {
+			timeout = remain
+		}
+	}
+	return timeout, nil
 }
 
 // search will search on the historical segments the target segments in historical.
