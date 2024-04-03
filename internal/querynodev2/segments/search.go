@@ -86,8 +86,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				accessRecord.Finish(err)
 			}()
 			if seg.IsLazyLoad() {
-				var timeout time.Duration
-				timeout, err = lazyloadWaitTimeout(ctx)
+				timeout, err := lazyloadWaitTimeout(ctx)
 				if err != nil {
 					errs[i] = err
 					return
@@ -191,7 +190,12 @@ func searchSegmentsStreamly(ctx context.Context,
 			var err error
 			if seg.IsLazyLoad() {
 				log.Debug("before doing stream search in DiskCache", zap.Int64("segID", seg.ID()))
-				err = mgr.DiskCache.Do(seg.ID(), searcher)
+				timeout, err := lazyloadWaitTimeout(ctx)
+				if err != nil {
+					errs[i] = err
+					return
+				}
+				_, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
 				log.Debug("after doing stream search in DiskCache", zap.Int64("segID", seg.ID()), zap.Error(err))
 			} else {
 				err = searcher(seg)
@@ -218,11 +222,10 @@ func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
 	timeout := params.Params.QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
 	deadline, ok := ctx.Deadline()
 	if ok {
-		remain := time.Until(deadline)
+		remain := deadline.Sub(time.Now())
 		if remain <= 0 {
 			return -1, merr.WrapErrServiceInternal("search context deadline exceeded")
-		}
-		if remain < timeout {
+		} else if remain < timeout {
 			timeout = remain
 		}
 	}
