@@ -15,6 +15,7 @@
 // limitations under the License.
 
 #include "ChunkCache.h"
+#include "common/Types.h"
 #include "mmap/Utils.h"
 
 namespace milvus::storage {
@@ -99,7 +100,7 @@ ChunkCache::Mmap(const std::filesystem::path& path,
 
     std::shared_ptr<ColumnBase> column{};
 
-    if (datatype_is_variable(data_type)) {
+    if (IsVariableDataType(data_type)) {
         AssertInfo(
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {

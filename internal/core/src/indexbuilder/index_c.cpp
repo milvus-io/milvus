@@ -107,7 +107,7 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
             std::to_string(engine_version);
 
         // get metric type
-        if (milvus::datatype_is_vector(field_type)) {
+        if (milvus::IsVectorDataType(field_type)) {
             auto metric_type = milvus::index::GetValueFromConfig<std::string>(
                 config, "metric_type");
             AssertInfo(metric_type.has_value(), "metric type is empty");
@@ -170,7 +170,7 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
             std::to_string(engine_version);
 
         // get metric type
-        if (milvus::datatype_is_vector(field_type)) {
+        if (milvus::IsVectorDataType(field_type)) {
             auto metric_type = milvus::index::GetValueFromConfig<std::string>(
                 config, "metric_type");
             AssertInfo(metric_type.has_value(), "metric type is empty");

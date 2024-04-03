@@ -1300,21 +1300,21 @@ TEST(Expr, TestExprPerformance) {
 
     auto build_unary_range_expr = [&](DataType data_type,
                                       int64_t value) -> expr::TypedExprPtr {
-        if (IsIntegral(data_type)) {
+        if (IsIntegerDataType(data_type)) {
             proto::plan::GenericValue val;
             val.set_int64_val(value);
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
                 val);
-        } else if (IsFloat(data_type)) {
+        } else if (IsFloatDataType(data_type)) {
             proto::plan::GenericValue val;
             val.set_float_val(float(value));
             return std::make_shared<expr::UnaryRangeFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type),
                 proto::plan::OpType::LessThan,
                 val);
-        } else if (IsString(data_type)) {
+        } else if (IsStringDataType(data_type)) {
             proto::plan::GenericValue val;
             val.set_string_val(std::to_string(value));
             return std::make_shared<expr::UnaryRangeFilterExpr>(
@@ -1329,7 +1329,7 @@ TEST(Expr, TestExprPerformance) {
     auto build_binary_range_expr = [&](DataType data_type,
                                        int64_t low,
                                        int64_t high) -> expr::TypedExprPtr {
-        if (IsIntegral(data_type)) {
+        if (IsIntegerDataType(data_type)) {
             proto::plan::GenericValue val1;
             val1.set_int64_val(low);
             proto::plan::GenericValue val2;
@@ -1340,7 +1340,7 @@ TEST(Expr, TestExprPerformance) {
                 val2,
                 true,
                 true);
-        } else if (IsFloat(data_type)) {
+        } else if (IsFloatDataType(data_type)) {
             proto::plan::GenericValue val1;
             val1.set_float_val(float(low));
             proto::plan::GenericValue val2;
@@ -1351,7 +1351,7 @@ TEST(Expr, TestExprPerformance) {
                 val2,
                 true,
                 true);
-        } else if (IsString(data_type)) {
+        } else if (IsStringDataType(data_type)) {
             proto::plan::GenericValue val1;
             val1.set_string_val(std::to_string(low));
             proto::plan::GenericValue val2;
@@ -1370,7 +1370,7 @@ TEST(Expr, TestExprPerformance) {
     auto build_term_expr =
         [&](DataType data_type,
             std::vector<int64_t> in_vals) -> expr::TypedExprPtr {
-        if (IsIntegral(data_type)) {
+        if (IsIntegerDataType(data_type)) {
             std::vector<proto::plan::GenericValue> vals;
             for (auto& v : in_vals) {
                 proto::plan::GenericValue val;
@@ -1379,7 +1379,7 @@ TEST(Expr, TestExprPerformance) {
             }
             return std::make_shared<expr::TermFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type), vals, false);
-        } else if (IsFloat(data_type)) {
+        } else if (IsFloatDataType(data_type)) {
             std::vector<proto::plan::GenericValue> vals;
             for (auto& v : in_vals) {
                 proto::plan::GenericValue val;
@@ -1388,7 +1388,7 @@ TEST(Expr, TestExprPerformance) {
             }
             return std::make_shared<expr::TermFilterExpr>(
                 expr::ColumnInfo(fids[data_type], data_type), vals, false);
-        } else if (IsString(data_type)) {
+        } else if (IsStringDataType(data_type)) {
             std::vector<proto::plan::GenericValue> vals;
             for (auto& v : in_vals) {
                 proto::plan::GenericValue val;
@@ -1403,8 +1403,8 @@ TEST(Expr, TestExprPerformance) {
     };
 
     auto build_compare_expr = [&](DataType data_type) -> expr::TypedExprPtr {
-        if (IsIntegral(data_type) || IsFloat(data_type) ||
-            IsString(data_type)) {
+        if (IsIntegerDataType(data_type) || IsFloatDataType(data_type) ||
+            IsStringDataType(data_type)) {
             return std::make_shared<expr::CompareExpr>(
                 fids[data_type],
                 fids[data_type],
@@ -1450,7 +1450,7 @@ TEST(Expr, TestExprPerformance) {
     auto build_arith_op_expr = [&](DataType data_type,
                                    int64_t right_val,
                                    int64_t val) -> expr::TypedExprPtr {
-        if (IsIntegral(data_type)) {
+        if (IsIntegerDataType(data_type)) {
             proto::plan::GenericValue val1;
             val1.set_int64_val(right_val);
             proto::plan::GenericValue val2;
@@ -1461,7 +1461,7 @@ TEST(Expr, TestExprPerformance) {
                 proto::plan::ArithOpType::Add,
                 val1,
                 val2);
-        } else if (IsFloat(data_type)) {
+        } else if (IsFloatDataType(data_type)) {
             proto::plan::GenericValue val1;
             val1.set_float_val(float(right_val));
             proto::plan::GenericValue val2;
