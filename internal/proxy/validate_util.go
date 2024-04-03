@@ -166,7 +166,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			}
 
 			if n != numRows {
-				return errNumRowsMismatch(field.GetFieldName(), n)
+				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
 			}
 
 		default:
