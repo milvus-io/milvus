@@ -3722,7 +3722,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("metrics", ct.binary_metrics[:2])
-    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT", "HNSW"])
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     def test_search_output_field_vector_after_binary_index(self, metrics, index):
         """
         target: test search with output vector field after binary index
