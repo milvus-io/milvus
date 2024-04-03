@@ -163,6 +163,8 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPoolBase) {
 TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
     auto thread_pool = std::make_shared<milvus::ThreadPool>(50, "test");
     std::vector<std::future<int>> futures;
+    std::cout << "CQX test thread pool" << thread_pool->GetMaxThreadNum()
+              << "\n";
     auto start = chrono::system_clock::now();
     for (int i = 0; i < 100; i++) {
         futures.push_back(
