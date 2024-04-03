@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"path"
-	"reflect"
 	"sort"
 	"strconv"
 	"sync"
@@ -525,6 +524,8 @@ func (t *majorCompactionTask) mappingSegment(
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
 			return err
 		}
+		// approximate row size
+		rowSize := pkIter.DataSize() / pkIter.RowNum()
 
 		var offset int64 = -1
 		for pkIter.HasNext() {
@@ -561,7 +562,7 @@ func (t *majorCompactionTask) mappingSegment(
 			} else {
 				clusterBuffer = t.keyToBufferFunc(clusteringKey)
 			}
-			err = t.writeToBuffer(ctx, clusterBuffer, v)
+			err = t.writeToBuffer(ctx, clusterBuffer, v, rowSize)
 			if err != nil {
 				return err
 			}
@@ -608,7 +609,7 @@ func (t *majorCompactionTask) mappingSegment(
 	return nil
 }
 
-func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *ClusterBuffer, value *storage.Value) error {
+func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *ClusterBuffer, value *storage.Value, rowSize int) error {
 	pk := value.PK
 	timestamp := value.Timestamp
 	row, ok := value.Value.(map[UniqueID]interface{})
@@ -616,7 +617,6 @@ func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *
 		log.Warn("transfer interface to map wrong")
 		return errors.New("unexpected error")
 	}
-	rowSize := int(reflect.TypeOf(row).Size())
 
 	t.clusterBufferLocks.Lock(clusterBuffer.id)
 	defer t.clusterBufferLocks.Unlock(clusterBuffer.id)
