@@ -463,6 +463,12 @@ func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 	return result
 }
 
+func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
+	for _, indexInfo := range s.Indexes() {
+		indexInfo.LazyLoad = lazyState
+	}
+}
+
 func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
 	/*
 		CStatus
@@ -1352,9 +1358,7 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	if options.Scope == ReleaseScopeData {
 		s.loadStatus.Store(string(LoadStatusMeta))
 		C.ClearSegmentData(ptr)
-		for _, indexInfo := range s.Indexes() {
-			indexInfo.LazyLoad = true
-		}
+		s.ResetIndexesLazyLoad(true)
 		log.Info("release segment data done and the field indexes info has been set lazy load=true")
 		return
 	}
