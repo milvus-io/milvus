@@ -1129,6 +1129,14 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		opt(options)
 	}
 
+	log := log.Ctx(ctx).With(
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("fieldID", indexInfo.GetFieldID()),
+		zap.Int64("indexID", indexInfo.GetIndexID()),
+	)
+
 	if options.LoadStatus == LoadStatusMeta {
 		s.addIndex(indexInfo.GetFieldID(), &IndexedFieldInfo{
 			FieldBinlog: &datapb.FieldBinlog{
@@ -1148,14 +1156,6 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadIndex-%d-%d", s.ID(), indexInfo.GetFieldID()))
 	defer sp.End()
-
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.Int64("fieldID", indexInfo.GetFieldID()),
-		zap.Int64("indexID", indexInfo.GetIndexID()),
-	)
 
 	loadIndexInfo, err := newLoadIndexInfo(ctx)
 	if err != nil {
@@ -1340,11 +1340,22 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	// release will never fail
 	defer stateLockGuard.Done(nil)
 
+	log := log.With(zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.String("segmentType", s.segmentType.String()),
+		zap.Int64("insertCount", s.InsertCount()),
+	)
+
 	// wait all read ops finished
 	ptr := s.ptr
 	if options.Scope == ReleaseScopeData {
 		s.loadStatus.Store(string(LoadStatusMeta))
 		C.ClearSegmentData(ptr)
+		for _, indexInfo := range s.Indexes() {
+			indexInfo.LazyLoad = true
+		}
+		log.Info("release segment data done and the field indexes info has been set lazy load=true")
 		return
 	}
 
@@ -1365,13 +1376,7 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 		metrics.QueryNodeDiskUsedSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(localDiskUsage) / 1024 / 1024) // in MB
 	}
 
-	log.Info("delete segment from memory",
-		zap.Int64("collectionID", s.Collection()),
-		zap.Int64("partitionID", s.Partition()),
-		zap.Int64("segmentID", s.ID()),
-		zap.String("segmentType", s.segmentType.String()),
-		zap.Int64("insertCount", s.InsertCount()),
-	)
+	log.Info("delete segment from memory")
 }
 
 // StartLoadData starts the loading process of the segment.
