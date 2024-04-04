@@ -183,6 +183,7 @@ usage:
   esac
 done
 
+echo "BUILD_WITHOUT_AZURE: ${BUILD_WITHOUT_AZURE}"
 if [ -z "$BUILD_WITHOUT_AZURE" ]; then
   AZURE_BUILD_DIR="${ROOT_DIR}/cmake_build/azure"
   if [ ! -d ${AZURE_BUILD_DIR} ]; then

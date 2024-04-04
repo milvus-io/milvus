@@ -39,6 +39,15 @@ use_opendal = OFF
 ifdef USE_OPENDAL
 	use_opendal = ${USE_OPENDAL}
 endif
+
+use_azure = false
+# Check if ENABLE_AZURE is defined
+ifdef ENABLE_AZURE
+    # If ENABLE_AZURE is defined, assign its value to use_azure
+    use_azure = $(ENABLE_AZURE)
+endif
+
+
 # golangci-lint
 GOLANGCI_LINT_VERSION := 1.55.2
 GOLANGCI_LINT_OUTPUT := $(shell $(INSTALL_PATH)/golangci-lint --version 2>/dev/null)
@@ -64,8 +73,10 @@ index_engine = knowhere
 
 export GIT_BRANCH=master
 
-ifeq (${ENABLE_AZURE}, false)
-	AZURE_OPTION := -Z
+# Check if use_azure is equal to 'false' (case-insensitive)
+ifeq ($(use_azure),false)
+    # If use_azure is 'false', set AZURE_OPTION to -Z
+    AZURE_OPTION := -Z
 endif
 
 milvus: build-cpp print-build-info
