@@ -458,34 +458,36 @@ type MultiTargetBalancer struct {
 
 func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	log := log.With(
-		zap.Int64("collection", replica.CollectionID),
-		zap.Int64("replica id", replica.Replica.GetID()),
-		zap.String("replica group", replica.Replica.GetResourceGroup()),
+		zap.Int64("collection", replica.GetCollectionID()),
+		zap.Int64("replica id", replica.GetID()),
+		zap.String("replica group", replica.GetResourceGroup()),
 	)
-	nodes := replica.GetNodes()
-	if len(nodes) == 0 {
+	if replica.NodesCount() == 0 {
 		return nil, nil
 	}
 
-	outboundNodes := b.meta.ResourceManager.CheckOutboundNodes(replica)
 	onlineNodes := make([]int64, 0)
 	offlineNodes := make([]int64, 0)
-	for _, nid := range nodes {
+
+	// read only nodes is offline in current replica.
+	if replica.RONodesCount() > 0 {
+		// if node is stop or transfer to other rg
+		log.RatedInfo(10, "meet read only node, try to move out all segment/channel", zap.Int64s("node", replica.GetRONodes()))
+		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
+	}
+
+	for _, nid := range replica.GetNodes() {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue
 		} else if isStopping {
-			offlineNodes = append(offlineNodes, nid)
-		} else if outboundNodes.Contain(nid) {
-			// if node is stop or transfer to other rg
-			log.RatedInfo(10, "meet outbound node, try to move out all segment/channel", zap.Int64("node", nid))
 			offlineNodes = append(offlineNodes, nid)
 		} else {
 			onlineNodes = append(onlineNodes, nid)
 		}
 	}
 
-	if len(nodes) == len(offlineNodes) || len(onlineNodes) == 0 {
+	if len(onlineNodes) == 0 {
 		// no available nodes to balance
 		return nil, nil
 	}
@@ -524,8 +526,8 @@ func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica) []SegmentAss
 	// get segments distribution on replica level and global level
 	nodeSegments := make(map[int64][]*meta.Segment)
 	globalNodeSegments := make(map[int64][]*meta.Segment)
-	for _, node := range replica.Nodes {
-		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.CollectionID), meta.WithNodeID(node))
+	for _, node := range replica.GetNodes() {
+		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&

@@ -23,7 +23,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type SegmentDistManagerSuite struct {
@@ -125,26 +124,20 @@ func (suite *SegmentDistManagerSuite) TestGetBy() {
 	suite.Len(segments, 0)
 
 	// Test GetBy With Wrong Replica
-	replica := &Replica{
-		Replica: &querypb.Replica{
-			ID:           1,
-			CollectionID: suite.collection + 1,
-			Nodes:        []int64{suite.nodes[0]},
-		},
-		nodes: typeutil.NewUniqueSet(suite.nodes[0]),
-	}
+	replica := newReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: suite.collection + 1,
+		Nodes:        []int64{suite.nodes[0]},
+	})
 	segments = dist.GetByFilter(WithReplica(replica))
 	suite.Len(segments, 0)
 
 	// Test GetBy With Correct Replica
-	replica = &Replica{
-		Replica: &querypb.Replica{
-			ID:           1,
-			CollectionID: suite.collection,
-			Nodes:        []int64{suite.nodes[0]},
-		},
-		nodes: typeutil.NewUniqueSet(suite.nodes[0]),
-	}
+	replica = newReplica(&querypb.Replica{
+		ID:           1,
+		CollectionID: suite.collection,
+		Nodes:        []int64{suite.nodes[0]},
+	})
 	segments = dist.GetByFilter(WithReplica(replica))
 	suite.Len(segments, 2)
 }

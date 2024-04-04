@@ -109,6 +109,24 @@ func (set Set[T]) Len() int {
 	return len(set)
 }
 
+// Range iterates over elements in the set
+func (set Set[T]) Range(f func(element T) bool) {
+	for elem := range set {
+		if !f(elem) {
+			break
+		}
+	}
+}
+
+// Clone returns a new set with the same elements
+func (set Set[T]) Clone() Set[T] {
+	ret := make(Set[T], set.Len())
+	for elem := range set {
+		ret.Insert(elem)
+	}
+	return ret
+}
+
 type ConcurrentSet[T comparable] struct {
 	inner sync.Map
 }
