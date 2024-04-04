@@ -1049,7 +1049,9 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	)
 	log.Info("start loading segment files",
 		zap.Int64("rowNum", loadInfo.GetNumOfRows()),
-		zap.String("segmentType", segment.Type().String()))
+		zap.String("segmentType", segment.Type().String()),
+		zap.String("loadStatus", string(loadStatus)),
+	)
 
 	collection := loader.manager.Collection.Get(segment.Collection())
 	if collection == nil {

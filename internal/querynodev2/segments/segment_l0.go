@@ -164,3 +164,6 @@ func (s *L0Segment) Release(opts ...releaseOption) {
 	s.pks = nil
 	s.tss = nil
 }
+
+func (s *L0Segment) ResetIndexesLazyLoad(lazyState bool) {
+}

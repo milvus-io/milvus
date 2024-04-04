@@ -223,6 +223,7 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 				c.rwlock.Unlock()
 			}
 			defer c.Unpin(key)
+			log.Info("success to get and pin cached item", zap.Any("key", key))
 			return missing, doer(item.value)
 		} else if err != ErrNotEnoughSpace {
 			return missing, err
@@ -289,6 +290,7 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], bool, error) {
 		// Try scavenge if there is room. If not, fail fast.
 		//	Note that the test is not accurate since we are not locking `loader` here.
 		if _, ok := c.tryScavenge(key); !ok {
+			log.Info("ErrNotEnoughSpace for key", zap.Any("key", key))
 			return nil, true, ErrNotEnoughSpace
 		}
 
