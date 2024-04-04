@@ -3,6 +3,8 @@ package cache
 import (
 	"container/list"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/log"
+	"go.uber.org/zap"
 	"sync"
 	"time"
 
@@ -235,6 +237,7 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 		// Wait for the key to be available
 		timeLeft := time.Until(start.Add(timeout))
 		if timeLeft <= 0 || timedWait(ele.Value.(*Waiter[K]).c, timeLeft) {
+			log.Error("failed to wait cached item", zap.Any("key", key))
 			return missing, ErrTimeOut
 		}
 	}
