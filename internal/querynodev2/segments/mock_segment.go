@@ -993,6 +993,39 @@ func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *Mo
 	return _c
 }
 
+// ResetIndexesLazyLoad provides a mock function with given fields: lazyState
+func (_m *MockSegment) ResetIndexesLazyLoad(lazyState bool) {
+	_m.Called(lazyState)
+}
+
+// MockSegment_ResetIndexesLazyLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResetIndexesLazyLoad'
+type MockSegment_ResetIndexesLazyLoad_Call struct {
+	*mock.Call
+}
+
+// ResetIndexesLazyLoad is a helper method to define mock.On call
+//   - lazyState bool
+func (_e *MockSegment_Expecter) ResetIndexesLazyLoad(lazyState interface{}) *MockSegment_ResetIndexesLazyLoad_Call {
+	return &MockSegment_ResetIndexesLazyLoad_Call{Call: _e.mock.On("ResetIndexesLazyLoad", lazyState)}
+}
+
+func (_c *MockSegment_ResetIndexesLazyLoad_Call) Run(run func(lazyState bool)) *MockSegment_ResetIndexesLazyLoad_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(bool))
+	})
+	return _c
+}
+
+func (_c *MockSegment_ResetIndexesLazyLoad_Call) Return() *MockSegment_ResetIndexesLazyLoad_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_ResetIndexesLazyLoad_Call) RunAndReturn(run func(bool)) *MockSegment_ResetIndexesLazyLoad_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ResourceGroup provides a mock function with given fields:
 func (_m *MockSegment) ResourceGroup() string {
 	ret := _m.Called()
