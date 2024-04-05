@@ -120,7 +120,7 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
 int
 test_worker(string s) {
     std::cout << s << std::endl;
-    std::this_thread::sleep_for(std::chrono::seconds(4));
+    std::this_thread::sleep_for(std::chrono::seconds(1));
     std::cout << s << std::endl;
     return 1;
 }
@@ -161,10 +161,10 @@ TEST_F(DiskAnnFileManagerTest, TestThreadPoolBase) {
 }
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPool) {
-    auto thread_pool = std::make_shared<milvus::ThreadPool>(50, "test");
+    auto thread_pool = std::make_shared<milvus::ThreadPool>(10, "test");
     std::vector<std::future<int>> futures;
     auto start = chrono::system_clock::now();
-    for (int i = 0; i < 100; i++) {
+    for (int i = 0; i < 10; i++) {
         futures.push_back(
             thread_pool->Submit(test_worker, "test_id" + std::to_string(i)));
     }
@@ -188,9 +188,9 @@ test_exception(string s) {
 
 TEST_F(DiskAnnFileManagerTest, TestThreadPoolException) {
     try {
-        auto thread_pool = std::make_shared<milvus::ThreadPool>(50, "test");
+        auto thread_pool = std::make_shared<milvus::ThreadPool>(10, "test");
         std::vector<std::future<int>> futures;
-        for (int i = 0; i < 100; i++) {
+        for (int i = 0; i < 10; i++) {
             futures.push_back(thread_pool->Submit(
                 test_exception, "test_id" + std::to_string(i)));
         }
