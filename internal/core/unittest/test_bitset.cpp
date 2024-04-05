@@ -119,7 +119,7 @@ static constexpr bool print_log = false;
 static constexpr bool print_timing = true;
 
 static constexpr size_t typical_sizes[] = {10000000};
-static constexpr size_t typical_offsets[] = {};
+static constexpr size_t typical_offsets[] = {1};
 static constexpr CompareOpType typical_compare_ops[] = {CompareOpType::EQ,
                                                         CompareOpType::GE,
                                                         CompareOpType::GT,
@@ -186,6 +186,7 @@ using Ttypes2 = ::testing::Types<
     std::tuple<int64_t, int64_t, uint8_t, uint8_t>,
     std::tuple<float, float, uint8_t, uint8_t>,
     std::tuple<double, double, uint8_t, uint8_t>,
+    std::tuple<std::string, std::string, uint8_t, uint8_t>,
 #endif
 
     std::tuple<int8_t, int8_t, uint64_t, uint8_t>,
@@ -193,7 +194,8 @@ using Ttypes2 = ::testing::Types<
     std::tuple<int32_t, int32_t, uint64_t, uint8_t>,
     std::tuple<int64_t, int64_t, uint64_t, uint8_t>,
     std::tuple<float, float, uint64_t, uint8_t>,
-    std::tuple<double, double, uint64_t, uint8_t>
+    std::tuple<double, double, uint64_t, uint8_t>,
+    std::tuple<std::string, std::string, uint64_t, uint8_t>
 
 #if FULL_TESTS == 1
     ,
@@ -203,13 +205,15 @@ using Ttypes2 = ::testing::Types<
     std::tuple<int64_t, int64_t, uint8_t, uint64_t>,
     std::tuple<float, float, uint8_t, uint64_t>,
     std::tuple<double, double, uint8_t, uint64_t>,
+    std::tuple<std::string, std::string, uint8_t, uint64_t>,
 
     std::tuple<int8_t, int8_t, uint64_t, uint64_t>,
     std::tuple<int16_t, int16_t, uint64_t, uint64_t>,
     std::tuple<int32_t, int32_t, uint64_t, uint64_t>,
     std::tuple<int64_t, int64_t, uint64_t, uint64_t>,
     std::tuple<float, float, uint64_t, uint64_t>,
-    std::tuple<double, double, uint64_t, uint64_t>
+    std::tuple<double, double, uint64_t, uint64_t>,
+    std::tuple<std::string, std::string, uint64_t, uint64_t>
 #endif
     >;
 
@@ -222,6 +226,7 @@ using Ttypes1 = ::testing::Types<
     std::tuple<int64_t, uint8_t, uint8_t>,
     std::tuple<float, uint8_t, uint8_t>,
     std::tuple<double, uint8_t, uint8_t>,
+    std::tuple<std::string, uint8_t, uint8_t>,
 #endif
 
     std::tuple<int8_t, uint64_t, uint8_t>,
@@ -229,7 +234,8 @@ using Ttypes1 = ::testing::Types<
     std::tuple<int32_t, uint64_t, uint8_t>,
     std::tuple<int64_t, uint64_t, uint8_t>,
     std::tuple<float, uint64_t, uint8_t>,
-    std::tuple<double, uint64_t, uint8_t>
+    std::tuple<double, uint64_t, uint8_t>,
+    std::tuple<std::string, uint64_t, uint8_t>
 
 #if FULL_TESTS == 1
     ,
@@ -239,13 +245,15 @@ using Ttypes1 = ::testing::Types<
     std::tuple<int64_t, uint8_t, uint64_t>,
     std::tuple<float, uint8_t, uint64_t>,
     std::tuple<double, uint8_t, uint64_t>,
+    std::tuple<std::string, uint8_t, uint64_t>,
 
     std::tuple<int8_t, uint64_t, uint64_t>,
     std::tuple<int16_t, uint64_t, uint64_t>,
     std::tuple<int32_t, uint64_t, uint64_t>,
     std::tuple<int64_t, uint64_t, uint64_t>,
     std::tuple<float, uint64_t, uint64_t>,
-    std::tuple<double, uint64_t, uint64_t>
+    std::tuple<double, uint64_t, uint64_t>,
+    std::tuple<std::string, uint64_t, uint64_t>
 #endif
     >;
 
@@ -284,6 +292,17 @@ FillRandom(std::vector<T>& t,
     }
 }
 
+template <>
+void
+FillRandom<std::string>(std::vector<std::string>& t,
+                        std::default_random_engine& rng,
+                        const size_t max_v) {
+    std::uniform_int_distribution<uint8_t> tt(0, max_v);
+    for (size_t i = 0; i < t.size(); i++) {
+        t[i] = std::to_string(tt(rng));
+    }
+}
+
 template <typename BitsetT>
 void
 FillRandom(BitsetT& bitset, std::default_random_engine& rng) {
@@ -291,6 +310,19 @@ FillRandom(BitsetT& bitset, std::default_random_engine& rng) {
     for (size_t i = 0; i < bitset.size(); i++) {
         bitset[i] = (tt(rng) == 0);
     }
+}
+
+//
+template <typename T>
+T
+from_i32(const int32_t i) {
+    return T(i);
+}
+
+template <>
+std::string
+from_i32(const int32_t i) {
+    return std::to_string(i);
 }
 
 //////////////////////////////////////////////////////////////////////////////////////////
@@ -396,8 +428,8 @@ TestInplaceCompareColumnImpl(BitsetT& bitset, CompareOpType op) {
     const size_t n = bitset.size();
     constexpr size_t max_v = 2;
 
-    std::vector<T> t(n, 0);
-    std::vector<U> u(n, 0);
+    std::vector<T> t(n, from_i32<T>(0));
+    std::vector<U> u(n, from_i32<T>(0));
 
     std::default_random_engine rng(123);
     FillRandom(t, rng, max_v);
@@ -597,9 +629,9 @@ void
 TestInplaceCompareValImpl(BitsetT& bitset, CompareOpType op) {
     const size_t n = bitset.size();
     constexpr size_t max_v = 3;
-    constexpr T value = 1;
+    const T value = from_i32<T>(1);
 
-    std::vector<T> t(n, 0);
+    std::vector<T> t(n, from_i32<T>(0));
 
     std::default_random_engine rng(123);
     FillRandom(t, rng, max_v);
@@ -783,11 +815,11 @@ TestInplaceWithinRangeColumnImpl(BitsetT& bitset, RangeType op) {
     const size_t n = bitset.size();
     constexpr size_t max_v = 3;
 
-    std::vector<T> range(n, 0);
-    std::vector<T> values(n, 0);
+    std::vector<T> range(n, from_i32<T>(0));
+    std::vector<T> values(n, from_i32<T>(0));
 
-    std::vector<T> lower(n, 0);
-    std::vector<T> upper(n, 0);
+    std::vector<T> lower(n, from_i32<T>(0));
+    std::vector<T> upper(n, from_i32<T>(0));
 
     std::default_random_engine rng(123);
     FillRandom(lower, rng, max_v);
@@ -977,10 +1009,10 @@ void
 TestInplaceWithinRangeValImpl(BitsetT& bitset, RangeType op) {
     const size_t n = bitset.size();
     constexpr size_t max_v = 10;
-    constexpr T lower_v = 3;
-    constexpr T upper_v = 7;
+    const T lower_v = from_i32<T>(3);
+    const T upper_v = from_i32<T>(7);
 
-    std::vector<T> values(n, 0);
+    std::vector<T> values(n, from_i32<T>(0));
 
     std::default_random_engine rng(123);
     FillRandom(values, rng, max_v);
@@ -1157,122 +1189,155 @@ INSTANTIATE_TYPED_TEST_SUITE_P(InplaceWithinRangeValTest,
 
 //////////////////////////////////////////////////////////////////////////////////////////
 
-//
 template <typename BitsetT, typename T>
-void
-TestInplaceArithCompareImpl(BitsetT& bitset,
-                            ArithOpType a_op,
-                            CompareOpType cmp_op) {
-    using HT = ArithHighPrecisionType<T>;
+struct TestInplaceArithCompareImplS {
+    static void
+    process(BitsetT& bitset, ArithOpType a_op, CompareOpType cmp_op) {
+        using HT = ArithHighPrecisionType<T>;
 
-    const size_t n = bitset.size();
-    constexpr size_t max_v = 10;
+        const size_t n = bitset.size();
+        constexpr size_t max_v = 10;
 
-    std::vector<T> left(n, 0);
-    HT right_operand = 2;
-    HT value = 5;
+        std::vector<T> left(n, 0);
+        const HT right_operand = from_i32<HT>(2);
+        const HT value = from_i32<HT>(5);
 
-    std::default_random_engine rng(123);
-    FillRandom(left, rng, max_v);
+        std::default_random_engine rng(123);
+        FillRandom(left, rng, max_v);
 
-    StopWatch sw;
-    bitset.inplace_arith_compare(
-        left.data(), right_operand, value, n, a_op, cmp_op);
+        StopWatch sw;
+        bitset.inplace_arith_compare(
+            left.data(), right_operand, value, n, a_op, cmp_op);
 
-    if (print_timing) {
-        printf("elapsed %f\n", sw.elapsed());
-    }
+        if (print_timing) {
+            printf("elapsed %f\n", sw.elapsed());
+        }
 
-    for (size_t i = 0; i < n; i++) {
-        if (a_op == ArithOpType::Add) {
-            if (cmp_op == CompareOpType::EQ) {
-                ASSERT_EQ((left[i] + right_operand) == value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GE) {
-                ASSERT_EQ((left[i] + right_operand) >= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GT) {
-                ASSERT_EQ((left[i] + right_operand) > value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LE) {
-                ASSERT_EQ((left[i] + right_operand) <= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LT) {
-                ASSERT_EQ((left[i] + right_operand) < value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::NE) {
-                ASSERT_EQ((left[i] + right_operand) != value, bitset[i]) << i;
+        for (size_t i = 0; i < n; i++) {
+            if (a_op == ArithOpType::Add) {
+                if (cmp_op == CompareOpType::EQ) {
+                    ASSERT_EQ((left[i] + right_operand) == value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GE) {
+                    ASSERT_EQ((left[i] + right_operand) >= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GT) {
+                    ASSERT_EQ((left[i] + right_operand) > value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LE) {
+                    ASSERT_EQ((left[i] + right_operand) <= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LT) {
+                    ASSERT_EQ((left[i] + right_operand) < value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::NE) {
+                    ASSERT_EQ((left[i] + right_operand) != value, bitset[i])
+                        << i;
+                } else {
+                    ASSERT_TRUE(false) << "Not implemented";
+                }
+            } else if (a_op == ArithOpType::Sub) {
+                if (cmp_op == CompareOpType::EQ) {
+                    ASSERT_EQ((left[i] - right_operand) == value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GE) {
+                    ASSERT_EQ((left[i] - right_operand) >= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GT) {
+                    ASSERT_EQ((left[i] - right_operand) > value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LE) {
+                    ASSERT_EQ((left[i] - right_operand) <= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LT) {
+                    ASSERT_EQ((left[i] - right_operand) < value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::NE) {
+                    ASSERT_EQ((left[i] - right_operand) != value, bitset[i])
+                        << i;
+                } else {
+                    ASSERT_TRUE(false) << "Not implemented";
+                }
+            } else if (a_op == ArithOpType::Mul) {
+                if (cmp_op == CompareOpType::EQ) {
+                    ASSERT_EQ((left[i] * right_operand) == value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GE) {
+                    ASSERT_EQ((left[i] * right_operand) >= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GT) {
+                    ASSERT_EQ((left[i] * right_operand) > value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LE) {
+                    ASSERT_EQ((left[i] * right_operand) <= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LT) {
+                    ASSERT_EQ((left[i] * right_operand) < value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::NE) {
+                    ASSERT_EQ((left[i] * right_operand) != value, bitset[i])
+                        << i;
+                } else {
+                    ASSERT_TRUE(false) << "Not implemented";
+                }
+            } else if (a_op == ArithOpType::Div) {
+                if (cmp_op == CompareOpType::EQ) {
+                    ASSERT_EQ((left[i] / right_operand) == value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GE) {
+                    ASSERT_EQ((left[i] / right_operand) >= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GT) {
+                    ASSERT_EQ((left[i] / right_operand) > value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LE) {
+                    ASSERT_EQ((left[i] / right_operand) <= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LT) {
+                    ASSERT_EQ((left[i] / right_operand) < value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::NE) {
+                    ASSERT_EQ((left[i] / right_operand) != value, bitset[i])
+                        << i;
+                } else {
+                    ASSERT_TRUE(false) << "Not implemented";
+                }
+            } else if (a_op == ArithOpType::Mod) {
+                if (cmp_op == CompareOpType::EQ) {
+                    ASSERT_EQ(fmod(left[i], right_operand) == value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GE) {
+                    ASSERT_EQ(fmod(left[i], right_operand) >= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::GT) {
+                    ASSERT_EQ(fmod(left[i], right_operand) > value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LE) {
+                    ASSERT_EQ(fmod(left[i], right_operand) <= value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::LT) {
+                    ASSERT_EQ(fmod(left[i], right_operand) < value, bitset[i])
+                        << i;
+                } else if (cmp_op == CompareOpType::NE) {
+                    ASSERT_EQ(fmod(left[i], right_operand) != value, bitset[i])
+                        << i;
+                } else {
+                    ASSERT_TRUE(false) << "Not implemented";
+                }
             } else {
                 ASSERT_TRUE(false) << "Not implemented";
             }
-        } else if (a_op == ArithOpType::Sub) {
-            if (cmp_op == CompareOpType::EQ) {
-                ASSERT_EQ((left[i] - right_operand) == value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GE) {
-                ASSERT_EQ((left[i] - right_operand) >= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GT) {
-                ASSERT_EQ((left[i] - right_operand) > value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LE) {
-                ASSERT_EQ((left[i] - right_operand) <= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LT) {
-                ASSERT_EQ((left[i] - right_operand) < value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::NE) {
-                ASSERT_EQ((left[i] - right_operand) != value, bitset[i]) << i;
-            } else {
-                ASSERT_TRUE(false) << "Not implemented";
-            }
-        } else if (a_op == ArithOpType::Mul) {
-            if (cmp_op == CompareOpType::EQ) {
-                ASSERT_EQ((left[i] * right_operand) == value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GE) {
-                ASSERT_EQ((left[i] * right_operand) >= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GT) {
-                ASSERT_EQ((left[i] * right_operand) > value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LE) {
-                ASSERT_EQ((left[i] * right_operand) <= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LT) {
-                ASSERT_EQ((left[i] * right_operand) < value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::NE) {
-                ASSERT_EQ((left[i] * right_operand) != value, bitset[i]) << i;
-            } else {
-                ASSERT_TRUE(false) << "Not implemented";
-            }
-        } else if (a_op == ArithOpType::Div) {
-            if (cmp_op == CompareOpType::EQ) {
-                ASSERT_EQ((left[i] / right_operand) == value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GE) {
-                ASSERT_EQ((left[i] / right_operand) >= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::GT) {
-                ASSERT_EQ((left[i] / right_operand) > value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LE) {
-                ASSERT_EQ((left[i] / right_operand) <= value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LT) {
-                ASSERT_EQ((left[i] / right_operand) < value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::NE) {
-                ASSERT_EQ((left[i] / right_operand) != value, bitset[i]) << i;
-            } else {
-                ASSERT_TRUE(false) << "Not implemented";
-            }
-        } else if (a_op == ArithOpType::Mod) {
-            if (cmp_op == CompareOpType::EQ) {
-                ASSERT_EQ(fmod(left[i], right_operand) == value, bitset[i])
-                    << i;
-            } else if (cmp_op == CompareOpType::GE) {
-                ASSERT_EQ(fmod(left[i], right_operand) >= value, bitset[i])
-                    << i;
-            } else if (cmp_op == CompareOpType::GT) {
-                ASSERT_EQ(fmod(left[i], right_operand) > value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::LE) {
-                ASSERT_EQ(fmod(left[i], right_operand) <= value, bitset[i])
-                    << i;
-            } else if (cmp_op == CompareOpType::LT) {
-                ASSERT_EQ(fmod(left[i], right_operand) < value, bitset[i]) << i;
-            } else if (cmp_op == CompareOpType::NE) {
-                ASSERT_EQ(fmod(left[i], right_operand) != value, bitset[i])
-                    << i;
-            } else {
-                ASSERT_TRUE(false) << "Not implemented";
-            }
-        } else {
-            ASSERT_TRUE(false) << "Not implemented";
         }
     }
-}
+};
+
+template <typename BitsetT>
+struct TestInplaceArithCompareImplS<BitsetT, std::string> {
+    static void
+    process(BitsetT&, ArithOpType, CompareOpType) {
+        // does nothing
+    }
+};
 
 template <typename BitsetT, typename T>
 void
@@ -1288,7 +1353,8 @@ TestInplaceArithCompareImpl() {
                         "Testing bitset, n=%zd, a_op=%zd\n", n, (size_t)a_op);
                 }
 
-                TestInplaceArithCompareImpl<BitsetT, T>(bitset, a_op, cmp_op);
+                TestInplaceArithCompareImplS<BitsetT, T>::process(
+                    bitset, a_op, cmp_op);
 
                 for (const size_t offset : typical_offsets) {
                     if (offset >= n) {
@@ -1308,7 +1374,7 @@ TestInplaceArithCompareImpl() {
                             (size_t)cmp_op);
                     }
 
-                    TestInplaceArithCompareImpl<decltype(view), T>(
+                    TestInplaceArithCompareImplS<decltype(view), T>::process(
                         view, a_op, cmp_op);
                 }
             }
