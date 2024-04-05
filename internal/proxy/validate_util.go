@@ -115,7 +115,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, passedNumRows)
 		return merr.WrapErrParameterInvalid(passedNumRows, numRows, msg)
 	}
-
+	errDimMismatch := func(fieldName string, dataDim int64, schemaDim int64) error {
+		msg := fmt.Sprintf("the dim (%d) of field data(%s) is not equal to schema dim (%d)", dataDim, fieldName, schemaDim)
+		return merr.WrapErrParameterInvalid(dataDim, schemaDim, msg)
+	}
 	for _, field := range data {
 		switch field.GetType() {
 		case schemapb.DataType_FloatVector:
@@ -133,6 +136,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if err != nil {
 				return err
 			}
+			dataDim := field.GetVectors().Dim
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
+			}
 
 			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n, numRows)
@@ -147,6 +154,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return err
+			}
+			dataDim := field.GetVectors().Dim
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
 			}
 
 			n, err := funcutil.GetNumRowsOfBinaryVectorField(field.GetVectors().GetBinaryVector(), dim)
