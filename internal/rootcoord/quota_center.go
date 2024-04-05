@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/tso"
@@ -196,6 +197,59 @@ func (q *QuotaCenter) clearMetrics() {
 	q.proxyMetrics = make(map[UniqueID]*metricsinfo.ProxyQuotaMetrics, 0)
 }
 
+func updateNumEntitiesLoaded(current map[int64]int64, qn *metricsinfo.QueryNodeCollectionMetrics) map[int64]int64 {
+	for collectionID, rowNum := range qn.CollectionRows {
+		current[collectionID] += rowNum
+	}
+	return current
+}
+
+func (q *QuotaCenter) reportNumEntitiesLoaded(numEntitiesLoaded map[int64]int64) {
+	for collectionID, num := range numEntitiesLoaded {
+		info, err := q.meta.GetCollectionByID(context.Background(), "", collectionID, typeutil.MaxTimestamp, false)
+		if err != nil {
+			log.Warn("failed to get collection info by its id, ignore to report loaded num entities",
+				zap.Int64("collection", collectionID),
+				zap.Int64("num_entities_loaded", num),
+				zap.Error(err),
+			)
+			continue
+		}
+		metrics.RootCoordNumEntities.WithLabelValues(info.Name, metrics.LoadedLabel).Set(float64(num))
+	}
+}
+
+func (q *QuotaCenter) reportDataCoordCollectionMetrics(dc *metricsinfo.DataCoordCollectionMetrics) {
+	for collectionID, collection := range dc.Collections {
+		info, err := q.meta.GetCollectionByID(context.Background(), "", collectionID, typeutil.MaxTimestamp, false)
+		if err != nil {
+			log.Warn("failed to get collection info by its id, ignore to report total_num_entities/indexed_entities",
+				zap.Int64("collection", collectionID),
+				zap.Int64("num_entities_total", collection.NumEntitiesTotal),
+				zap.Int("lenOfIndexedInfo", len(collection.IndexInfo)),
+				zap.Error(err),
+			)
+			continue
+		}
+		metrics.RootCoordNumEntities.WithLabelValues(info.Name, metrics.TotalLabel).Set(float64(collection.NumEntitiesTotal))
+		fields := lo.KeyBy(info.Fields, func(v *model.Field) int64 { return v.FieldID })
+		for _, indexInfo := range collection.IndexInfo {
+			if _, ok := fields[indexInfo.FieldID]; !ok {
+				log.Warn("field id not found, ignore to report indexed num entities",
+					zap.Int64("collection", collectionID),
+					zap.Int64("field", indexInfo.FieldID),
+				)
+				continue
+			}
+			field := fields[indexInfo.FieldID]
+			metrics.RootCoordIndexedNumEntities.WithLabelValues(
+				info.Name,
+				indexInfo.IndexName,
+				strconv.FormatBool(typeutil.IsVectorType(field.DataType))).Set(float64(indexInfo.NumEntitiesIndexed))
+		}
+	}
+}
+
 // syncMetrics sends GetMetrics requests to DataCoord and QueryCoord to sync the metrics in DataNodes and QueryNodes.
 func (q *QuotaCenter) syncMetrics() error {
 	oldDataNodes := typeutil.NewSet(lo.Keys(q.dataNodeMetrics)...)
@@ -209,6 +263,8 @@ func (q *QuotaCenter) syncMetrics() error {
 	if err != nil {
 		return err
 	}
+
+	numEntitiesLoaded := make(map[int64]int64)
 
 	// get Query cluster metrics
 	group.Go(func() error {
@@ -229,8 +285,12 @@ func (q *QuotaCenter) syncMetrics() error {
 				q.queryNodeMetrics[queryNodeMetric.ID] = queryNodeMetric.QuotaMetrics
 				collections.Insert(queryNodeMetric.QuotaMetrics.Effect.CollectionIDs...)
 			}
+			if queryNodeMetric.CollectionMetrics != nil {
+				numEntitiesLoaded = updateNumEntitiesLoaded(numEntitiesLoaded, queryNodeMetric.CollectionMetrics)
+			}
 		}
 		q.readableCollections = collections.Collect()
+		q.reportNumEntitiesLoaded(numEntitiesLoaded)
 		return nil
 	})
 	// get Data cluster metrics
@@ -243,6 +303,10 @@ func (q *QuotaCenter) syncMetrics() error {
 		err = metricsinfo.UnmarshalTopology(rsp.GetResponse(), dataCoordTopology)
 		if err != nil {
 			return err
+		}
+
+		if dataCoordTopology.Cluster.Self.CollectionMetrics != nil {
+			q.reportDataCoordCollectionMetrics(dataCoordTopology.Cluster.Self.CollectionMetrics)
 		}
 
 		collections := typeutil.NewUniqueSet()
@@ -867,14 +931,31 @@ func (q *QuotaCenter) setRates() error {
 func (q *QuotaCenter) recordMetrics() {
 	record := func(errorCode commonpb.ErrorCode) {
 		var hasException float64 = 0
-		for _, states := range q.quotaStates {
+		for collectionID, states := range q.quotaStates {
+			info, err := q.meta.GetCollectionByID(context.Background(), "", collectionID, typeutil.MaxTimestamp, false)
+			if err != nil {
+				log.Warn("failed to get collection info by its id, ignore to report quota states",
+					zap.Int64("collection", collectionID),
+					zap.Error(err),
+				)
+				continue
+			}
+			dbm, err := q.meta.GetDatabaseByID(context.Background(), info.DBID, typeutil.MaxTimestamp)
+			if err != nil {
+				log.Warn("failed to get database name info by its id, ignore to report quota states",
+					zap.Int64("collection", collectionID),
+					zap.Error(err),
+				)
+				continue
+			}
+
 			for _, state := range states {
 				if state == errorCode {
 					hasException = 1
 				}
 			}
+			metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String(), dbm.Name).Set(hasException)
 		}
-		metrics.RootCoordQuotaStates.WithLabelValues(errorCode.String()).Set(hasException)
 	}
 	record(commonpb.ErrorCode_MemoryQuotaExhausted)
 	record(commonpb.ErrorCode_DiskQuotaExhausted)
