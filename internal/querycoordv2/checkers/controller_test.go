@@ -99,8 +99,8 @@ func (suite *CheckerControllerSuite) TestBasic() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	suite.meta.ResourceManager.HandleNodeUp(1)
+	suite.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	channels := []*datapb.VchannelInfo{

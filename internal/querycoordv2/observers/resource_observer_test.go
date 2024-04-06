@@ -17,12 +17,12 @@ package observers
 
 import (
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdKV "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
@@ -85,7 +85,7 @@ func (suite *ResourceObserverSuite) SetupTest() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, int64(i))
+		suite.meta.ResourceManager.HandleNodeUp(int64(i))
 	}
 }
 
@@ -113,7 +113,10 @@ func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 		},
 		typeutil.NewUniqueSet(),
 	))
-	suite.meta.ResourceManager.AddResourceGroup("rg")
+	suite.meta.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
+	})
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   int64(100),
 		Address:  "localhost",
@@ -134,44 +137,32 @@ func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.AssignNode("rg", 100)
-	suite.meta.ResourceManager.AssignNode("rg", 101)
-	suite.meta.ResourceManager.AssignNode("rg", 102)
-	suite.meta.ResourceManager.AssignNode("rg", 103)
+	suite.meta.ResourceManager.HandleNodeUp(100)
+	suite.meta.ResourceManager.HandleNodeUp(101)
+	suite.meta.ResourceManager.HandleNodeUp(102)
+	suite.meta.ResourceManager.HandleNodeUp(103)
 	suite.meta.ResourceManager.HandleNodeDown(100)
 	suite.meta.ResourceManager.HandleNodeDown(101)
 
-	// before auto recover rg
-	suite.Eventually(func() bool {
-		lackNodesNum := suite.meta.ResourceManager.CheckLackOfNode("rg")
-		nodesInReplica := suite.meta.ReplicaManager.Get(2).GetNodes()
-		return lackNodesNum == 2 && len(nodesInReplica) == 0
-	}, 5*time.Second, 1*time.Second)
-
-	// after auto recover rg
-	suite.Eventually(func() bool {
-		lackNodesNum := suite.meta.ResourceManager.CheckLackOfNode("rg")
-		nodesInReplica := suite.meta.ReplicaManager.Get(2).GetNodes()
-		return lackNodesNum == 0 && len(nodesInReplica) == 2
-	}, 5*time.Second, 1*time.Second)
+	suite.Error(suite.meta.ResourceManager.MeetRequirement("rg"))
 }
 
 func (suite *ResourceObserverSuite) TestRecoverResourceGroupFailed() {
-	suite.meta.ResourceManager.AddResourceGroup("rg")
+	suite.meta.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
+	})
 	for i := 100; i < 200; i++ {
 		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 			NodeID:   int64(i),
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.AssignNode("rg", int64(i))
+		suite.meta.ResourceManager.HandleNodeUp(int64(i))
 		suite.meta.ResourceManager.HandleNodeDown(int64(i))
 	}
 
-	suite.Eventually(func() bool {
-		lackNodesNum := suite.meta.ResourceManager.CheckLackOfNode("rg")
-		return lackNodesNum == 90
-	}, 5*time.Second, 1*time.Second)
+	suite.Error(suite.meta.ResourceManager.MeetRequirement("rg"))
 }
 
 func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
@@ -199,8 +190,11 @@ func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
 		typeutil.NewUniqueSet(),
 	))
 
-	suite.store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(errors.New("store error"))
-	suite.meta.ResourceManager.AddResourceGroup("rg")
+	suite.store.EXPECT().SaveReplica(mock.Anything).Return(errors.New("store error"))
+	suite.meta.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
+	})
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   int64(100),
 		Address:  "localhost",
@@ -221,26 +215,14 @@ func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.AssignNode("rg", 100)
-	suite.meta.ResourceManager.AssignNode("rg", 101)
-	suite.meta.ResourceManager.AssignNode("rg", 102)
-	suite.meta.ResourceManager.AssignNode("rg", 103)
+	suite.meta.ResourceManager.HandleNodeUp(100)
+	suite.meta.ResourceManager.HandleNodeUp(101)
+	suite.meta.ResourceManager.HandleNodeUp(102)
+	suite.meta.ResourceManager.HandleNodeUp(103)
 	suite.meta.ResourceManager.HandleNodeDown(100)
 	suite.meta.ResourceManager.HandleNodeDown(101)
 
-	// before auto recover rg
-	suite.Eventually(func() bool {
-		lackNodesNum := suite.meta.ResourceManager.CheckLackOfNode("rg")
-		nodesInReplica := suite.meta.ReplicaManager.Get(2).GetNodes()
-		return lackNodesNum == 2 && len(nodesInReplica) == 0
-	}, 5*time.Second, 1*time.Second)
-
-	// after auto recover rg
-	suite.Eventually(func() bool {
-		lackNodesNum := suite.meta.ResourceManager.CheckLackOfNode("rg")
-		nodesInReplica := suite.meta.ReplicaManager.Get(2).GetNodes()
-		return lackNodesNum == 0 && len(nodesInReplica) == 0
-	}, 5*time.Second, 1*time.Second)
+	suite.Error(suite.meta.ResourceManager.MeetRequirement("rg"))
 }
 
 func (suite *ResourceObserverSuite) TearDownSuite() {

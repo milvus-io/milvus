@@ -477,7 +477,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
@@ -688,7 +688,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
@@ -831,11 +831,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 			}
 			// make node-3 outbound
-			err := balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-			suite.NoError(err)
-			err = balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
-			suite.NoError(err)
-			utils.RecoverAllCollection(balancer.meta)
+			balancer.meta.ResourceManager.HandleNodeUp(1)
+			balancer.meta.ResourceManager.HandleNodeUp(2)
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)
 			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
@@ -1063,7 +1060,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 
 			Params.Save(Params.QueryCoordCfg.AutoBalanceChannel.Key, fmt.Sprint(c.enableBalanceChannel))
@@ -1192,7 +1189,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 					nodeInfo.UpdateStats(session.WithChannelCnt(len(c.channelDist[nodes[i]])))
 					nodeInfo.SetState(c.states[i])
 					suite.balancer.nodeManager.Add(nodeInfo)
-					suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, nodes[i])
+					suite.balancer.meta.ResourceManager.HandleNodeUp(nodes[i])
 				}
 			}
 

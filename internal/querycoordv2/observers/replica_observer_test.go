@@ -21,6 +21,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
@@ -82,8 +83,14 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 }
 
 func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
-	suite.meta.ResourceManager.AddResourceGroup("rg1")
-	suite.meta.ResourceManager.AddResourceGroup("rg2")
+	suite.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
+	suite.meta.ResourceManager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost:8080",
@@ -104,14 +111,10 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 		Address:  "localhost:8080",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg1", 1)
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg1", 1)
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 3)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg2", 1)
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 4)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg2", 1)
+	suite.meta.ResourceManager.HandleNodeUp(1)
+	suite.meta.ResourceManager.HandleNodeUp(2)
+	suite.meta.ResourceManager.HandleNodeUp(3)
+	suite.meta.ResourceManager.HandleNodeUp(4)
 
 	err := suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 1))
 	suite.NoError(err)

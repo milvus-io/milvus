@@ -17,125 +17,126 @@
 package meta
 
 import (
+	"fmt"
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var (
-	ErrNodeAlreadyAssign            = errors.New("node already assign to other resource group")
-	ErrRGIsFull                     = errors.New("resource group is full")
-	ErrRGIsEmpty                    = errors.New("resource group is empty")
-	ErrRGAlreadyExist               = errors.New("resource group already exist")
-	ErrRGAssignNodeFailed           = errors.New("failed to assign node to resource group")
-	ErrRGUnAssignNodeFailed         = errors.New("failed to unassign node from resource group")
-	ErrSaveResourceGroupToStore     = errors.New("failed to save resource group to store")
-	ErrRemoveResourceGroupFromStore = errors.New("failed to remove resource group from store")
-	ErrRecoverResourceGroupToStore  = errors.New("failed to recover resource group to store")
-	ErrNodeNotAssignToRG            = errors.New("node hasn't been assign to any resource group")
-	ErrRGNameIsEmpty                = errors.New("resource group name couldn't be empty")
-	ErrDeleteDefaultRG              = errors.New("delete default rg is not permitted")
-	ErrDeleteNonEmptyRG             = errors.New("delete non-empty rg is not permitted")
-	ErrNodeStopped                  = errors.New("node has been stopped")
-	ErrRGLimit                      = errors.New("resource group num reach limit 1024")
-	ErrNodeNotEnough                = errors.New("nodes not enough")
+	ErrRGAlreadyExist                = errors.New("resource group already exist, but create with different config")
+	ErrRecoverResourceGroupFromStore = errors.New("failed to recover resource group from store")
+	ErrNodeNotAssignToRG             = errors.New("node hasn't been assign to any resource group")
+	ErrRGNameIsEmpty                 = errors.New("resource group name couldn't be empty")
+	ErrDeleteDefaultRG               = errors.New("delete default rg is not permitted")
+	ErrDeleteNonEmptyRG              = errors.New("delete non-empty rg is not permitted")
+	ErrDeleteInUsedRG                = errors.New("delete in used rg is not permitted")
+	ErrNodeStopped                   = errors.New("node has been stopped")
+	ErrRGLimit                       = errors.New("resource group num reach limit 1024")
+	ErrNodeNotEnough                 = errors.New("nodes not enough")
+	ErrAllRGReachLimits              = errors.New("all resource group reach limits")
+	ErrIllegalRGConfig               = errors.New("illegal resource group config")
 )
 
-var DefaultResourceGroupName = "__default_resource_group"
-
-var DefaultResourceGroupCapacity = 1000000
-
-type ResourceGroup struct {
-	nodes    *typeutil.ConcurrentSet[int64] // typeutil.UniqueSet
-	capacity int
-}
-
-func NewResourceGroup(capacity int) *ResourceGroup {
-	rg := &ResourceGroup{
-		nodes:    typeutil.NewConcurrentSet[int64](),
-		capacity: capacity,
-	}
-
-	return rg
-}
-
-// assign node to resource group
-func (rg *ResourceGroup) assignNode(id int64, deltaCapacity int) error {
-	if rg.containsNode(id) {
-		// add node to same rg more than once should be tolerable
-		return nil
-	}
-
-	rg.nodes.Insert(id)
-	rg.capacity += deltaCapacity
-
-	return nil
-}
-
-// unassign node from resource group
-func (rg *ResourceGroup) unassignNode(id int64, deltaCapacity int) error {
-	if !rg.containsNode(id) {
-		// remove non exist node should be tolerable
-		return nil
-	}
-
-	rg.nodes.Remove(id)
-	rg.capacity += deltaCapacity
-
-	return nil
-}
-
-func (rg *ResourceGroup) LackOfNodes() int {
-	return rg.capacity - len(rg.nodes.Collect())
-}
-
-func (rg *ResourceGroup) containsNode(id int64) bool {
-	return rg.nodes.Contain(id)
-}
-
-func (rg *ResourceGroup) GetNodes() []int64 {
-	return rg.nodes.Collect()
-}
-
-func (rg *ResourceGroup) GetCapacity() int {
-	return rg.capacity
-}
-
 type ResourceManager struct {
-	groups  map[string]*ResourceGroup
+	incomingNode typeutil.UniqueSet
+	groups       map[string]*ResourceGroup // primary index from resource group name to resource group
+	nodeIDMap    map[int64]string          // secondary index from node id to resource group
+
 	catalog metastore.QueryCoordCatalog
 	nodeMgr *session.NodeManager
 
-	rwmutex sync.RWMutex
+	rwmutex             sync.RWMutex
+	rgChangedNotifier   *syncutil.VersionedNotifier
+	nodeChangedNotifier *syncutil.VersionedNotifier
 }
 
+// NewResourceManager is used to create a ResourceManager instance.
 func NewResourceManager(catalog metastore.QueryCoordCatalog, nodeMgr *session.NodeManager) *ResourceManager {
-	groupMap := make(map[string]*ResourceGroup)
-	groupMap[DefaultResourceGroupName] = NewResourceGroup(DefaultResourceGroupCapacity)
+	groups := make(map[string]*ResourceGroup)
+	groups[DefaultResourceGroupName] = NewResourceGroup(DefaultResourceGroupName, &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 0,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: DefaultResourceGroupCapacity,
+		},
+	})
 	return &ResourceManager{
-		groups:  groupMap,
-		catalog: catalog,
-		nodeMgr: nodeMgr,
+		incomingNode: typeutil.NewUniqueSet(),
+		groups:       groups,
+		nodeIDMap:    make(map[int64]string),
+		catalog:      catalog,
+		nodeMgr:      nodeMgr,
+
+		rwmutex:             sync.RWMutex{},
+		rgChangedNotifier:   syncutil.NewVersionedNotifier(),
+		nodeChangedNotifier: syncutil.NewVersionedNotifier(),
 	}
 }
 
-func (rm *ResourceManager) AddResourceGroup(rgName string) error {
+// Recover recover resource group from meta, other interface of ResourceManager can be only called after recover is done.
+func (rm *ResourceManager) Recover() error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
+	rgs, err := rm.catalog.GetResourceGroups()
+	if err != nil {
+		return ErrRecoverResourceGroupFromStore
+	}
+
+	for _, meta := range rgs {
+		rg := NewResourceGroupFromMeta(meta)
+		rm.groups[rg.GetName()] = rg
+		for _, node := range rg.GetNodes() {
+			if _, ok := rm.nodeIDMap[node]; ok {
+				// unreachable code, should never happen.
+				panic(fmt.Sprintf("dirty meta, node has been assign to multi resource group, %s, %s", rm.nodeIDMap[node], rg.GetName()))
+			}
+			rm.nodeIDMap[node] = rg.GetName()
+		}
+		log.Info("Recover resource group",
+			zap.String("rgName", rg.GetName()),
+			zap.Int64s("nodes", rm.groups[rg.GetName()].GetNodes()),
+			zap.Any("config", rg.GetConfig()),
+		)
+	}
+	return nil
+}
+
+// AddResourceGroup create a new ResourceGroup.
+// Do no changed with node.
+func (rm *ResourceManager) AddResourceGroup(rgName string, cfg *rgpb.ResourceGroupConfig) error {
 	if len(rgName) == 0 {
 		return ErrRGNameIsEmpty
 	}
+	if rgName == DefaultResourceGroupName {
+		return ErrRGAlreadyExist
+	}
+	if cfg == nil {
+		// Use default config if not set.
+		// Compatible with old version.
+		cfg = DefaultResourceGroupConfig // use default config if not set.
+	}
 
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
 	if rm.groups[rgName] != nil {
+		// if resource group already exist, check if configuration is the same.
+		if proto.Equal(rm.groups[rgName].GetConfig(), cfg) {
+			return nil
+		}
 		return ErrRGAlreadyExist
 	}
 
@@ -143,43 +144,147 @@ func (rm *ResourceManager) AddResourceGroup(rgName string) error {
 		return ErrRGLimit
 	}
 
-	err := rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
-		Name:     rgName,
-		Capacity: 0,
-	})
-	if err != nil {
-		log.Info("failed to add resource group",
+	if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
+		return err
+	}
+
+	rg := NewResourceGroup(rgName, cfg)
+	if err := rm.catalog.SaveResourceGroup(rg.GetMeta()); err != nil {
+		log.Warn("failed to add resource group",
 			zap.String("rgName", rgName),
+			zap.Any("config", cfg),
 			zap.Error(err),
 		)
 		return err
 	}
-	rm.groups[rgName] = NewResourceGroup(0)
 
+	rm.groups[rgName] = rg
 	log.Info("add resource group",
 		zap.String("rgName", rgName),
+		zap.Any("config", cfg),
 	)
+
+	// notify that resource group has been changed.
+	rm.rgChangedNotifier.NotifyAll()
 	return nil
 }
 
+// UpdateResourceGroups update resource group configuration.
+// Only change the configuration, no change with node. all node will be reassign by auto recover.
+func (rm *ResourceManager) UpdateResourceGroups(rgs map[string]*rgpb.ResourceGroupConfig) error {
+	if len(rgs) == 0 {
+		return nil
+	}
+
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+	return rm.updateResourceGroups(rgs)
+}
+
+// updateResourceGroups update resource group configuration.
+func (rm *ResourceManager) updateResourceGroups(rgs map[string]*rgpb.ResourceGroupConfig) error {
+	modifiedRG := make([]*ResourceGroup, 0, len(rgs))
+	updates := make([]*querypb.ResourceGroup, 0, len(rgs))
+	for rgName, cfg := range rgs {
+		if _, ok := rm.groups[rgName]; !ok {
+			return merr.WrapErrResourceGroupNotFound(rgName)
+		}
+		// validateResourceGroupConfig must be called after lock, because it will check with other resource group.
+		if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
+			return err
+		}
+		// Update with copy on write.
+		mrg := rm.groups[rgName].CopyForWrite()
+		mrg.UpdateConfig(cfg)
+		rg := mrg.ToResourceGroup()
+
+		updates = append(updates, rg.GetMeta())
+		modifiedRG = append(modifiedRG, rg)
+	}
+
+	if err := rm.catalog.SaveResourceGroup(updates...); err != nil {
+		for rgName, cfg := range rgs {
+			log.Warn("failed to update resource group",
+				zap.String("rgName", rgName),
+				zap.Any("config", cfg),
+				zap.Error(err),
+			)
+		}
+		return err
+	}
+
+	// Commit updates to memory.
+	for _, rg := range modifiedRG {
+		log.Info("update resource group",
+			zap.String("rgName", rg.GetName()),
+			zap.Any("config", rg.GetConfig()),
+		)
+		rm.groups[rg.GetName()] = rg
+	}
+
+	// notify that resource group has been changed.
+	rm.rgChangedNotifier.NotifyAll()
+	return nil
+}
+
+// go:deprecated TransferNode transfer node from source resource group to target resource group.
+// Deprecated, use Imperative `UpdateResourceGroups` instead.
+func (rm *ResourceManager) TransferNode(sourceRGName string, targetRGName string, nodeNum int) error {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+
+	if rm.groups[sourceRGName] == nil {
+		return merr.WrapErrResourceGroupNotFound(sourceRGName)
+	}
+	if rm.groups[targetRGName] == nil {
+		return merr.WrapErrResourceGroupNotFound(targetRGName)
+	}
+
+	sourceRG := rm.groups[sourceRGName]
+	targetRG := rm.groups[targetRGName]
+
+	// Check if source resource group has enough node to transfer.
+	if sourceRG.GetConfig().Requests.NodeNum < int32(nodeNum) {
+		return ErrNodeNotEnough
+	}
+
+	sourceCfg := sourceRG.GetConfigCloned()
+	targetCfg := targetRG.GetConfigCloned()
+	sourceCfg.Requests.NodeNum -= int32(nodeNum)
+	targetCfg.Requests.NodeNum += int32(nodeNum)
+
+	return rm.updateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		sourceRGName: sourceCfg,
+		targetRGName: targetCfg,
+	})
+}
+
+// RemoveResourceGroup remove resource group.
 func (rm *ResourceManager) RemoveResourceGroup(rgName string) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
-	if rgName == DefaultResourceGroupName {
-		return ErrDeleteDefaultRG
-	}
 
 	if rm.groups[rgName] == nil {
 		// delete a non-exist rg should be tolerable
 		return nil
 	}
 
-	if rm.groups[rgName].GetCapacity() != 0 {
-		return ErrDeleteNonEmptyRG
+	// validateResourceGroupIsDeletable will check if rg is deletable.
+	if err := rm.validateResourceGroupIsDeletable(rgName); err != nil {
+		return err
 	}
 
-	err := rm.catalog.RemoveResourceGroup(rgName)
-	if err != nil {
+	// Nodes may be still assign to these group,
+	// recover the resource group from redundant status before remove it.
+	if rm.groups[rgName].NodeNum() > 0 {
+		if err := rm.recoverRedundantNodeRG(rgName); err != nil {
+			return err
+		}
+	}
+
+	// After recovering, all node assign to these rg, should be removed.
+	// Remove it from meta storage.
+	if err := rm.catalog.RemoveResourceGroup(rgName); err != nil {
 		log.Info("failed to remove resource group",
 			zap.String("rgName", rgName),
 			zap.Error(err),
@@ -187,128 +292,12 @@ func (rm *ResourceManager) RemoveResourceGroup(rgName string) error {
 		return err
 	}
 	delete(rm.groups, rgName)
-
 	log.Info("remove resource group",
 		zap.String("rgName", rgName),
 	)
-	return nil
-}
 
-func (rm *ResourceManager) AssignNode(rgName string, node int64) error {
-	rm.rwmutex.Lock()
-	defer rm.rwmutex.Unlock()
-	return rm.assignNode(rgName, node)
-}
-
-func (rm *ResourceManager) assignNode(rgName string, node int64) error {
-	if rm.groups[rgName] == nil {
-		return merr.WrapErrResourceGroupNotFound(rgName)
-	}
-
-	if rm.nodeMgr.Get(node) == nil {
-		return merr.WrapErrNodeNotFound(node)
-	}
-
-	if ok, _ := rm.nodeMgr.IsStoppingNode(node); ok {
-		return merr.WrapErrNodeNotAvailable(node)
-	}
-
-	rm.checkRGNodeStatus(rgName)
-
-	for name, group := range rm.groups {
-		// check whether node has been assign to other rg
-		if name != rgName && group.containsNode(node) {
-			return ErrNodeAlreadyAssign
-		}
-	}
-
-	newNodes := rm.groups[rgName].GetNodes()
-	newNodes = append(newNodes, node)
-	deltaCapacity := 1
-	if rgName == DefaultResourceGroupName {
-		// default rg capacity won't be changed
-		deltaCapacity = 0
-	}
-	err := rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
-		Name:     rgName,
-		Capacity: int32(rm.groups[rgName].GetCapacity() + deltaCapacity),
-		Nodes:    newNodes,
-	})
-	if err != nil {
-		log.Info("failed to add node to resource group",
-			zap.String("rgName", rgName),
-			zap.Int64("node", node),
-			zap.Error(err),
-		)
-		return err
-	}
-
-	rm.groups[rgName].assignNode(node, deltaCapacity)
-
-	log.Info("add node to resource group",
-		zap.String("rgName", rgName),
-		zap.Int64("node", node),
-	)
-
-	return nil
-}
-
-func (rm *ResourceManager) UnassignNode(rgName string, node int64) error {
-	rm.rwmutex.Lock()
-	defer rm.rwmutex.Unlock()
-
-	return rm.unassignNode(rgName, node)
-}
-
-func (rm *ResourceManager) unassignNode(rgName string, node int64) error {
-	if rm.groups[rgName] == nil {
-		return merr.WrapErrResourceGroupNotFound(rgName)
-	}
-
-	if !rm.groups[rgName].containsNode(node) {
-		// remove non exist node should be tolerable
-		return nil
-	}
-
-	newNodes := make([]int64, 0)
-	rm.groups[rgName].nodes.Range(func(nodeID int64) bool {
-		if nodeID != node {
-			newNodes = append(newNodes, nodeID)
-		}
-		return true
-	})
-
-	deltaCapacity := -1
-	if rgName == DefaultResourceGroupName {
-		// default rg capacity won't be changed
-		deltaCapacity = 0
-	}
-
-	err := rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
-		Name:     rgName,
-		Capacity: int32(rm.groups[rgName].GetCapacity() + deltaCapacity),
-		Nodes:    newNodes,
-	})
-	if err != nil {
-		log.Info("remove node from resource group",
-			zap.String("rgName", rgName),
-			zap.Int64("node", node),
-			zap.Error(err),
-		)
-		return err
-	}
-
-	rm.checkRGNodeStatus(rgName)
-	err = rm.groups[rgName].unassignNode(node, deltaCapacity)
-	if err != nil {
-		return err
-	}
-
-	log.Info("remove node from resource group",
-		zap.String("rgName", rgName),
-		zap.Int64("node", node),
-	)
-
+	// notify that resource group has been changed.
+	rm.rgChangedNotifier.NotifyAll()
 	return nil
 }
 
@@ -321,25 +310,22 @@ func (rm *ResourceManager) GetNodesOfMultiRG(rgName []string) (map[string]typeut
 		if rm.groups[name] == nil {
 			return nil, merr.WrapErrResourceGroupNotFound(name)
 		}
-		rm.checkRGNodeStatus(name)
 		ret[name] = typeutil.NewUniqueSet(rm.groups[name].GetNodes()...)
 	}
 	return ret, nil
 }
 
+// GetNodes return nodes of given resource group.
 func (rm *ResourceManager) GetNodes(rgName string) ([]int64, error) {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
 	if rm.groups[rgName] == nil {
 		return nil, merr.WrapErrResourceGroupNotFound(rgName)
 	}
-
-	rm.checkRGNodeStatus(rgName)
-
 	return rm.groups[rgName].GetNodes(), nil
 }
 
-// return outgoing node num on each rg from this replica
+// GetOutgoingNodeNumByReplica return outgoing node num on each rg from this replica.
 func (rm *ResourceManager) GetOutgoingNodeNumByReplica(replica *Replica) map[string]int32 {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
@@ -347,50 +333,56 @@ func (rm *ResourceManager) GetOutgoingNodeNumByReplica(replica *Replica) map[str
 	if rm.groups[replica.GetResourceGroup()] == nil {
 		return nil
 	}
-
 	rg := rm.groups[replica.GetResourceGroup()]
+
 	ret := make(map[string]int32)
 	replica.RangeOverRONodes(func(node int64) bool {
-		if !rg.containsNode(node) {
-			rgName, err := rm.findResourceGroupByNode(node)
-			if err == nil {
-				ret[rgName]++
-			}
+		// if rgOfNode is not equal to rg of replica, outgoing node found.
+		if rgOfNode := rm.getResourceGroupByNodeID(node); rgOfNode != nil && rgOfNode.GetName() != rg.GetName() {
+			ret[rgOfNode.GetName()]++
 		}
 		return true
 	})
 	return ret
 }
 
+// getResourceGroupByNodeID get resource group by node id.
+func (rm *ResourceManager) getResourceGroupByNodeID(nodeID int64) *ResourceGroup {
+	if rgName, ok := rm.nodeIDMap[nodeID]; ok {
+		return rm.groups[rgName]
+	}
+	return nil
+}
+
+// ContainsNode return whether given node is in given resource group.
 func (rm *ResourceManager) ContainsNode(rgName string, node int64) bool {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
 	if rm.groups[rgName] == nil {
 		return false
 	}
-
-	rm.checkRGNodeStatus(rgName)
-	return rm.groups[rgName].containsNode(node)
+	return rm.groups[rgName].ContainNode(node)
 }
 
+// ContainResourceGroup return whether given resource group is exist.
 func (rm *ResourceManager) ContainResourceGroup(rgName string) bool {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
 	return rm.groups[rgName] != nil
 }
 
-func (rm *ResourceManager) GetResourceGroup(rgName string) (*ResourceGroup, error) {
+// GetResourceGroup return resource group snapshot by name.
+func (rm *ResourceManager) GetResourceGroup(rgName string) *ResourceGroup {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
 
 	if rm.groups[rgName] == nil {
-		return nil, merr.WrapErrResourceGroupNotFound(rgName)
+		return nil
 	}
-
-	rm.checkRGNodeStatus(rgName)
-	return rm.groups[rgName], nil
+	return rm.groups[rgName].Snapshot()
 }
 
+// ListResourceGroups return all resource groups names.
 func (rm *ResourceManager) ListResourceGroups() []string {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
@@ -398,292 +390,509 @@ func (rm *ResourceManager) ListResourceGroups() []string {
 	return lo.Keys(rm.groups)
 }
 
-func (rm *ResourceManager) FindResourceGroupByNode(node int64) (string, error) {
+// MeetRequirement return whether resource group meet requirement.
+// Return error with reason if not meet requirement.
+func (rm *ResourceManager) MeetRequirement(rgName string) error {
 	rm.rwmutex.RLock()
 	defer rm.rwmutex.RUnlock()
-
-	return rm.findResourceGroupByNode(node)
-}
-
-func (rm *ResourceManager) findResourceGroupByNode(node int64) (string, error) {
-	for name, group := range rm.groups {
-		if group.containsNode(node) {
-			return name, nil
-		}
+	if rm.groups[rgName] == nil {
+		return nil
 	}
-
-	return "", ErrNodeNotAssignToRG
+	return rm.groups[rgName].MeetRequirement()
 }
 
-func (rm *ResourceManager) HandleNodeUp(node int64) (string, error) {
+// CheckIncomingNodeNum return incoming node num.
+func (rm *ResourceManager) CheckIncomingNodeNum() int {
+	rm.rwmutex.RLock()
+	defer rm.rwmutex.RUnlock()
+	return rm.incomingNode.Len()
+}
+
+// HandleNodeUp handle node when new node is incoming.
+func (rm *ResourceManager) HandleNodeUp(node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	if rm.nodeMgr.Get(node) == nil {
-		return "", merr.WrapErrNodeNotFound(node)
-	}
-
-	if ok, _ := rm.nodeMgr.IsStoppingNode(node); ok {
-		return "", ErrNodeStopped
-	}
-
-	// if node already assign to rg
-	rgName, err := rm.findResourceGroupByNode(node)
-	if err == nil {
-		log.Info("HandleNodeUp: node already assign to resource group",
-			zap.String("rgName", rgName),
-			zap.Int64("node", node),
-		)
-		return rgName, nil
-	}
-
-	// assign new node to default rg
-	newNodes := rm.groups[DefaultResourceGroupName].GetNodes()
-	newNodes = append(newNodes, node)
-	err = rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
-		Name:     DefaultResourceGroupName,
-		Capacity: int32(rm.groups[DefaultResourceGroupName].GetCapacity()),
-		Nodes:    newNodes,
-	})
-	if err != nil {
-		log.Info("failed to add node to resource group",
-			zap.String("rgName", DefaultResourceGroupName),
-			zap.Int64("node", node),
-			zap.Error(err),
-		)
-		return "", err
-	}
-	rm.groups[DefaultResourceGroupName].assignNode(node, 0)
-	log.Info("HandleNodeUp: add node to default resource group",
-		zap.String("rgName", DefaultResourceGroupName),
+	rm.incomingNode.Insert(node)
+	// Trigger assign incoming node right away.
+	// error can be ignored here, because `AssignPendingIncomingNode`` will retry assign node.
+	rgName, err := rm.assignIncomingNodeWithNodeCheck(node)
+	log.Info("HandleNodeUp: add node to resource group",
+		zap.String("rgName", rgName),
 		zap.Int64("node", node),
+		zap.Error(err),
 	)
-	return DefaultResourceGroupName, nil
 }
 
-func (rm *ResourceManager) HandleNodeDown(node int64) (string, error) {
+// HandleNodeDown handle the node when node is leave.
+func (rm *ResourceManager) HandleNodeDown(node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	rgName, err := rm.findResourceGroupByNode(node)
-	if err != nil {
-		return "", ErrNodeNotAssignToRG
-	}
-
-	newNodes := []int64{}
-	for _, nid := range rm.groups[rgName].GetNodes() {
-		if nid != node {
-			newNodes = append(newNodes, nid)
-		}
-	}
-	err = rm.catalog.SaveResourceGroup(&querypb.ResourceGroup{
-		Name:     rgName,
-		Capacity: int32(rm.groups[rgName].GetCapacity()),
-		Nodes:    newNodes,
-	})
-	if err != nil {
-		log.Info("failed to add node to resource group",
-			zap.String("rgName", rgName),
-			zap.Int64("node", node),
-			zap.Error(err),
-		)
-		return "", err
-	}
-
+	// failure of node down can be ignored, node down can be done by `RemoveAllDownNode`.
+	rm.incomingNode.Remove(node)
+	rgName, err := rm.unassignNode(node)
 	log.Info("HandleNodeDown: remove node from resource group",
 		zap.String("rgName", rgName),
 		zap.Int64("node", node),
+		zap.Error(err),
 	)
-	return rgName, rm.groups[rgName].unassignNode(node, 0)
 }
 
-func (rm *ResourceManager) TransferNode(from string, to string, numNode int) ([]int64, error) {
+// ListenResourceGroupChanged return a listener for resource group changed.
+func (rm *ResourceManager) ListenResourceGroupChanged() *syncutil.VersionedListener {
+	return rm.rgChangedNotifier.Listen(syncutil.VersionedListenAtEarliest)
+}
+
+// ListenNodeChanged return a listener for node changed.
+func (rm *ResourceManager) ListenNodeChanged() *syncutil.VersionedListener {
+	return rm.nodeChangedNotifier.Listen(syncutil.VersionedListenAtEarliest)
+}
+
+// AssignPendingIncomingNode assign incoming node to resource group.
+func (rm *ResourceManager) AssignPendingIncomingNode() {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	if rm.groups[from] == nil {
-		return nil, merr.WrapErrResourceGroupNotFound(from)
-	}
-	if rm.groups[to] == nil {
-		return nil, merr.WrapErrResourceGroupNotFound(to)
-	}
-
-	rm.checkRGNodeStatus(from)
-	rm.checkRGNodeStatus(to)
-	if len(rm.groups[from].nodes.Collect()) < numNode {
-		return nil, ErrNodeNotEnough
-	}
-
-	// todo: a better way to choose a node with least balance cost
-	movedNodes, err := rm.transferNodeInStore(from, to, numNode)
-	if err != nil {
-		return nil, err
-	}
-
-	deltaFromCapacity := -1
-	if from == DefaultResourceGroupName {
-		deltaFromCapacity = 0
-	}
-	deltaToCapacity := 1
-	if to == DefaultResourceGroupName {
-		deltaToCapacity = 0
-	}
-
-	for _, node := range movedNodes {
-		rm.groups[from].unassignNode(node, deltaFromCapacity)
-		rm.groups[to].assignNode(node, deltaToCapacity)
-
-		log.Info("transfer node",
-			zap.String("sourceRG", from),
-			zap.String("targetRG", to),
-			zap.Int64("nodeID", node),
+	for node := range rm.incomingNode {
+		rgName, err := rm.assignIncomingNodeWithNodeCheck(node)
+		log.Info("Pending HandleNodeUp: add node to resource group",
+			zap.String("rgName", rgName),
+			zap.Int64("node", node),
+			zap.Error(err),
 		)
 	}
-
-	return movedNodes, nil
 }
 
-func (rm *ResourceManager) transferNodeInStore(from string, to string, numNode int) ([]int64, error) {
-	availableNodes := rm.groups[from].GetNodes()
-	if len(availableNodes) < numNode {
-		return nil, ErrNodeNotEnough
-	}
-
-	movedNodes := make([]int64, 0, numNode)
-	fromNodeList := make([]int64, 0)
-	toNodeList := rm.groups[to].GetNodes()
-	for i := 0; i < len(availableNodes); i++ {
-		if i < numNode {
-			movedNodes = append(movedNodes, availableNodes[i])
-			toNodeList = append(toNodeList, availableNodes[i])
-		} else {
-			fromNodeList = append(fromNodeList, availableNodes[i])
-		}
-	}
-
-	fromCapacity := rm.groups[from].GetCapacity()
-	if from != DefaultResourceGroupName {
-		// default rg capacity won't be changed
-		fromCapacity = rm.groups[from].GetCapacity() - numNode
-	}
-
-	fromRG := &querypb.ResourceGroup{
-		Name:     from,
-		Capacity: int32(fromCapacity),
-		Nodes:    fromNodeList,
-	}
-
-	toCapacity := rm.groups[to].GetCapacity()
-	if to != DefaultResourceGroupName {
-		// default rg capacity won't be changed
-		toCapacity = rm.groups[to].GetCapacity() + numNode
-	}
-
-	toRG := &querypb.ResourceGroup{
-		Name:     to,
-		Capacity: int32(toCapacity),
-		Nodes:    toNodeList,
-	}
-
-	return movedNodes, rm.catalog.SaveResourceGroup(fromRG, toRG)
-}
-
-// auto recover rg, return recover used node num
-func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) ([]int64, error) {
+// RemoveAllDownNode remove all down node from resource group.
+func (rm *ResourceManager) RemoveAllDownNode() {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	if rm.groups[rgName] == nil {
-		return nil, merr.WrapErrResourceGroupNotFound(rgName)
-	}
-
-	ret := make([]int64, 0)
-
-	rm.checkRGNodeStatus(DefaultResourceGroupName)
-	rm.checkRGNodeStatus(rgName)
-	lackNodesNum := rm.groups[rgName].LackOfNodes()
-	nodesInDefault := rm.groups[DefaultResourceGroupName].GetNodes()
-	for i := 0; i < len(nodesInDefault) && i < lackNodesNum; i++ {
-		// todo: a better way to choose a node with least balance cost
-		node := nodesInDefault[i]
-		err := rm.unassignNode(DefaultResourceGroupName, node)
-		if err != nil {
-			// interrupt transfer, unreachable logic path
-			return ret, err
+	for nodeID := range rm.nodeIDMap {
+		if node := rm.nodeMgr.Get(nodeID); node == nil || node.IsStoppingState() {
+			// unassignNode failure can be skip.
+			rgName, err := rm.unassignNode(nodeID)
+			log.Info("remove down node from resource group",
+				zap.Bool("nodeExist", node != nil),
+				zap.Int64("nodeID", nodeID),
+				zap.String("rgName", rgName),
+				zap.Error(err),
+			)
 		}
-
-		err = rm.groups[rgName].assignNode(node, 0)
-		if err != nil {
-			// roll back, unreachable logic path
-			rm.assignNode(DefaultResourceGroupName, node)
-			return ret, err
-		}
-
-		log.Info("move node from default rg to recover",
-			zap.String("targetRG", rgName),
-			zap.Int64("nodeID", node),
-		)
-
-		ret = append(ret, node)
 	}
-
-	return ret, nil
 }
 
-func (rm *ResourceManager) Recover() error {
+// AutoRecoverResourceGroup auto recover rg, return recover used node num
+func (rm *ResourceManager) AutoRecoverResourceGroup(rgName string) error {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
-	rgs, err := rm.catalog.GetResourceGroups()
-	if err != nil {
-		return ErrRecoverResourceGroupToStore
+
+	rg := rm.groups[rgName]
+	if rg == nil {
+		return nil
 	}
 
-	for _, rg := range rgs {
-		if rg.GetName() == DefaultResourceGroupName {
-			rm.groups[rg.GetName()] = NewResourceGroup(DefaultResourceGroupCapacity)
-			for _, node := range rg.GetNodes() {
-				rm.groups[rg.GetName()].assignNode(node, 0)
-			}
-		} else {
-			rm.groups[rg.GetName()] = NewResourceGroup(int(rg.GetCapacity()))
-			for _, node := range rg.GetNodes() {
-				rm.groups[rg.GetName()].assignNode(node, 0)
-			}
-		}
-
-		log.Info("Recover resource group",
-			zap.String("rgName", rg.GetName()),
-			zap.Int64s("nodes", rm.groups[rg.GetName()].GetNodes()),
-			zap.Int("capacity", rm.groups[rg.GetName()].GetCapacity()),
-		)
+	if rg.MissingNumOfNodes() > 0 {
+		return rm.recoverMissingNodeRG(rgName)
 	}
 
+	// DefaultResourceGroup is the backup resource group of redundant recovery,
+	// So after all other resource group is reach the `limits`, rest redundant node will be transfer to DefaultResourceGroup.
+	if rg.RedundantNumOfNodes() > 0 {
+		return rm.recoverRedundantNodeRG(rgName)
+	}
 	return nil
 }
 
-// every operation which involves nodes access, should check nodes status first
-func (rm *ResourceManager) checkRGNodeStatus(rgName string) {
-	for _, node := range rm.groups[rgName].GetNodes() {
-		if rm.nodeMgr.Get(node) == nil {
-			log.Info("found node down, remove it",
-				zap.String("rgName", rgName),
-				zap.Int64("nodeID", node),
-			)
-
-			rm.groups[rgName].unassignNode(node, 0)
+// recoverMissingNodeRG recover resource group by transfer node from other resource group.
+func (rm *ResourceManager) recoverMissingNodeRG(rgName string) error {
+	for rm.groups[rgName].MissingNumOfNodes() > 0 {
+		rg := rm.groups[rgName]
+		sourceRG := rm.selectMissingRecoverSourceRG(rg)
+		if sourceRG == nil {
+			log.Warn("fail to select source resource group", zap.String("rgName", rg.GetName()))
+			return ErrNodeNotEnough
 		}
+		nodeID, err := rm.transferOneNodeFromRGToRG(sourceRG, rg)
+		if err != nil {
+			log.Warn("failed to recover missing node by transfer node from other resource group",
+				zap.String("sourceRG", sourceRG.GetName()),
+				zap.String("targetRG", rg.GetName()),
+				zap.Error(err))
+			return err
+		}
+		log.Info("recover missing node by transfer node from other resource group",
+			zap.String("sourceRG", sourceRG.GetName()),
+			zap.String("targetRG", rg.GetName()),
+			zap.Int64("nodeID", nodeID),
+		)
 	}
+	return nil
 }
 
-// return lack of nodes num
-func (rm *ResourceManager) CheckLackOfNode(rgName string) int {
-	rm.rwmutex.Lock()
-	defer rm.rwmutex.Unlock()
-	if rm.groups[rgName] == nil {
-		return 0
+// selectMissingRecoverSourceRG select source resource group for recover missing resource group.
+func (rm *ResourceManager) selectMissingRecoverSourceRG(rg *ResourceGroup) *ResourceGroup {
+	// First, Transfer node from most redundant resource group first. `len(nodes) > limits`
+	if redundantRG := rm.findMaxRGWithGivenFilter(
+		func(sourceRG *ResourceGroup) bool {
+			return rg.GetName() != sourceRG.GetName() && sourceRG.RedundantNumOfNodes() > 0
+		},
+		func(sourceRG *ResourceGroup) int {
+			return sourceRG.RedundantNumOfNodes()
+		},
+	); redundantRG != nil {
+		return redundantRG
 	}
 
-	rm.checkRGNodeStatus(rgName)
+	// Second, Transfer node from configured resource group.
+	if len(rg.GetConfig().GetTransferFrom()) > 0 {
+		if selectRG := rm.findMaxRGWithGivenFilter(
+			func(sourceRG *ResourceGroup) bool {
+				return rg.GetName() != sourceRG.GetName() && sourceRG.OversizedNumOfNodes() > 0 && rg.HasFrom(sourceRG.GetName())
+			},
+			func(sourceRG *ResourceGroup) int {
+				return sourceRG.OversizedNumOfNodes()
+			},
+		); selectRG != nil {
+			return selectRG
+		}
+	}
 
-	return rm.groups[rgName].LackOfNodes()
+	// Finally, Transfer node from most oversized resource group. `len(nodes) > requests`
+	return rm.findMaxRGWithGivenFilter(
+		func(sourceRG *ResourceGroup) bool {
+			return rg.GetName() != sourceRG.GetName() && sourceRG.OversizedNumOfNodes() > 0
+		},
+		func(sourceRG *ResourceGroup) int {
+			return sourceRG.OversizedNumOfNodes()
+		},
+	)
+}
+
+// recoverRedundantNodeRG recover resource group by transfer node to other resource group.
+func (rm *ResourceManager) recoverRedundantNodeRG(rgName string) error {
+	for rm.groups[rgName].RedundantNumOfNodes() > 0 {
+		rg := rm.groups[rgName]
+		targetRG := rm.selectRedundantRecoverTargetRG(rg)
+		if targetRG == nil {
+			log.Info("failed to select redundant recover target resource group, please check resource group configuration is as expected.",
+				zap.String("rgName", rg.GetName()))
+			return ErrAllRGReachLimits
+		}
+
+		nodeID, err := rm.transferOneNodeFromRGToRG(rg, targetRG)
+		if err != nil {
+			log.Warn("failed to recover redundant node by transfer node to other resource group",
+				zap.String("sourceRG", rg.GetName()),
+				zap.String("targetRG", targetRG.GetName()),
+				zap.Error(err))
+			return err
+		}
+		log.Info("recover redundant node by transfer node to other resource group",
+			zap.String("sourceRG", rg.GetName()),
+			zap.String("targetRG", targetRG.GetName()),
+			zap.Int64("nodeID", nodeID),
+		)
+	}
+	return nil
+}
+
+// selectRedundantRecoverTargetRG select target resource group for recover redundant resource group.
+func (rm *ResourceManager) selectRedundantRecoverTargetRG(rg *ResourceGroup) *ResourceGroup {
+	// First, Transfer node to most missing resource group first.
+	if missingRG := rm.findMaxRGWithGivenFilter(
+		func(targetRG *ResourceGroup) bool {
+			return rg.GetName() != targetRG.GetName() && targetRG.MissingNumOfNodes() > 0
+		},
+		func(targetRG *ResourceGroup) int {
+			return targetRG.MissingNumOfNodes()
+		},
+	); missingRG != nil {
+		return missingRG
+	}
+
+	// Second, Transfer node to configured resource group.
+	if len(rg.GetConfig().GetTransferTo()) > 0 {
+		if selectRG := rm.findMaxRGWithGivenFilter(
+			func(targetRG *ResourceGroup) bool {
+				return rg.GetName() != targetRG.GetName() && targetRG.ReachLimitNumOfNodes() > 0 && rg.HasTo(targetRG.GetName())
+			},
+			func(targetRG *ResourceGroup) int {
+				return targetRG.ReachLimitNumOfNodes()
+			},
+		); selectRG != nil {
+			return selectRG
+		}
+	}
+
+	// Third, Transfer node from most oversized resource group. `len(nodes) > requests`
+	if selectRG := rm.findMaxRGWithGivenFilter(
+		func(targetRG *ResourceGroup) bool {
+			return rg.GetName() != targetRG.GetName() && targetRG.ReachLimitNumOfNodes() > 0
+		},
+		func(targetRG *ResourceGroup) int {
+			return targetRG.ReachLimitNumOfNodes()
+		},
+	); selectRG != nil {
+		return selectRG
+	}
+
+	// Finally, Transfer node to default resource group.
+	if rg.GetName() != DefaultResourceGroupName {
+		return rm.groups[DefaultResourceGroupName]
+	}
+	return nil
+}
+
+// transferOneNodeFromRGToRG transfer one node from source resource group to target resource group.
+func (rm *ResourceManager) transferOneNodeFromRGToRG(sourceRG *ResourceGroup, targetRG *ResourceGroup) (int64, error) {
+	if sourceRG.NodeNum() == 0 {
+		return -1, ErrNodeNotEnough
+	}
+	// TODO: select node by some load strategy, such as segment loaded.
+	node := sourceRG.GetNodes()[0]
+	if err := rm.transferNode(targetRG.GetName(), node); err != nil {
+		return -1, err
+	}
+	return node, nil
+}
+
+// assignIncomingNodeWithNodeCheck assign node to resource group with node status check.
+func (rm *ResourceManager) assignIncomingNodeWithNodeCheck(node int64) (string, error) {
+	// node is on stopping or stopped, remove it from incoming node set.
+	if rm.nodeMgr.Get(node) == nil {
+		rm.incomingNode.Remove(node)
+		return "", merr.WrapErrNodeNotFound(node)
+	}
+	if ok, _ := rm.nodeMgr.IsStoppingNode(node); ok {
+		rm.incomingNode.Remove(node)
+		return "", ErrNodeStopped
+	}
+
+	rgName, err := rm.assignIncomingNode(node)
+	if err != nil {
+		return "", err
+	}
+	// node assignment is finished, remove the node from incoming node set.
+	rm.incomingNode.Remove(node)
+	return rgName, nil
+}
+
+// assignIncomingNode assign node to resource group.
+func (rm *ResourceManager) assignIncomingNode(node int64) (string, error) {
+	// If node already assign to rg.
+	rg := rm.getResourceGroupByNodeID(node)
+	if rg != nil {
+		log.Info("HandleNodeUp: node already assign to resource group",
+			zap.String("rgName", rg.GetName()),
+			zap.Int64("node", node),
+		)
+		return rg.GetName(), nil
+	}
+
+	// select a resource group to assign incoming node.
+	rg = rm.mustSelectAssignIncomingNodeTargetRG()
+	if err := rm.transferNode(rg.GetName(), node); err != nil {
+		return "", errors.Wrap(err, "at finally assign to default resource group")
+	}
+	return rg.GetName(), nil
+}
+
+// mustSelectAssignIncomingNodeTargetRG select resource group for assign incoming node.
+func (rm *ResourceManager) mustSelectAssignIncomingNodeTargetRG() *ResourceGroup {
+	// First, Assign it to rg with the most missing nodes at high priority.
+	if rg := rm.findMaxRGWithGivenFilter(
+		func(rg *ResourceGroup) bool {
+			return rg.MissingNumOfNodes() > 0
+		},
+		func(rg *ResourceGroup) int {
+			return rg.MissingNumOfNodes()
+		},
+	); rg != nil {
+		return rg
+	}
+
+	// Second, assign it to rg do not reach limit.
+	if rg := rm.findMaxRGWithGivenFilter(
+		func(rg *ResourceGroup) bool {
+			return rg.ReachLimitNumOfNodes() > 0
+		},
+		func(rg *ResourceGroup) int {
+			return rg.ReachLimitNumOfNodes()
+		},
+	); rg != nil {
+		return rg
+	}
+
+	// Finally, add node to default rg.
+	return rm.groups[DefaultResourceGroupName]
+}
+
+// findMaxRGWithGivenFilter find resource group with given filter and return the max one.
+// not efficient, but it's ok for low nodes and low resource group.
+func (rm *ResourceManager) findMaxRGWithGivenFilter(filter func(rg *ResourceGroup) bool, attr func(rg *ResourceGroup) int) *ResourceGroup {
+	var maxRG *ResourceGroup
+	for _, rg := range rm.groups {
+		if filter == nil || filter(rg) {
+			if maxRG == nil || attr(rg) > attr(maxRG) {
+				maxRG = rg
+			}
+		}
+	}
+	return maxRG
+}
+
+// transferNode transfer given node to given resource group.
+// if given node is assigned in given resource group, do nothing.
+// if given node is assigned to other resource group, it will be unassigned first.
+func (rm *ResourceManager) transferNode(rgName string, node int64) error {
+	if rm.groups[rgName] == nil {
+		return merr.WrapErrResourceGroupNotFound(rgName)
+	}
+
+	updates := make([]*querypb.ResourceGroup, 0, 2)
+	modifiedRG := make([]*ResourceGroup, 0, 2)
+	originalRG := "_"
+	// Check if node is already assign to rg.
+	if rg := rm.getResourceGroupByNodeID(node); rg != nil {
+		if rg.GetName() == rgName {
+			// node is already assign to rg.
+			log.Info("node already assign to resource group",
+				zap.String("rgName", rgName),
+				zap.Int64("node", node),
+			)
+			return nil
+		}
+		// Apply update.
+		mrg := rg.CopyForWrite()
+		mrg.UnassignNode(node)
+		rg := mrg.ToResourceGroup()
+
+		updates = append(updates, rg.GetMeta())
+		modifiedRG = append(modifiedRG, rg)
+		originalRG = rg.GetName()
+	}
+
+	// assign the node to rg.
+	mrg := rm.groups[rgName].CopyForWrite()
+	mrg.AssignNode(node)
+	rg := mrg.ToResourceGroup()
+	updates = append(updates, rg.GetMeta())
+	modifiedRG = append(modifiedRG, rg)
+
+	// Commit updates to meta storage.
+	if err := rm.catalog.SaveResourceGroup(updates...); err != nil {
+		log.Warn("failed to transfer node to resource group",
+			zap.String("rgName", rgName),
+			zap.String("originalRG", originalRG),
+			zap.Int64("node", node),
+			zap.Error(err),
+		)
+		return err
+	}
+
+	// Commit updates to memory.
+	for _, rg := range modifiedRG {
+		rm.groups[rg.GetName()] = rg
+	}
+	rm.nodeIDMap[node] = rgName
+	log.Info("transfer node to resource group",
+		zap.String("rgName", rgName),
+		zap.String("originalRG", originalRG),
+		zap.Int64("node", node),
+	)
+
+	// notify that node distribution has been changed.
+	rm.nodeChangedNotifier.NotifyAll()
+	return nil
+}
+
+// unassignNode remove a node from resource group where it belongs to.
+func (rm *ResourceManager) unassignNode(node int64) (string, error) {
+	if rg := rm.getResourceGroupByNodeID(node); rg != nil {
+		mrg := rg.CopyForWrite()
+		mrg.UnassignNode(node)
+		rg := mrg.ToResourceGroup()
+		if err := rm.catalog.SaveResourceGroup(rg.GetMeta()); err != nil {
+			log.Warn("unassign node from resource group",
+				zap.String("rgName", rg.GetName()),
+				zap.Int64("node", node),
+				zap.Error(err),
+			)
+			return "", err
+		}
+
+		// Commit updates to memory.
+		rm.groups[rg.GetName()] = rg
+		delete(rm.nodeIDMap, node)
+		log.Info("unassign node to resource group",
+			zap.String("rgName", rg.GetName()),
+			zap.Int64("node", node),
+		)
+
+		// notify that node distribution has been changed.
+		rm.nodeChangedNotifier.NotifyAll()
+		return rg.GetName(), nil
+	}
+	return "", nil
+}
+
+// validateResourceGroupConfig validate resource group config.
+func (rm *ResourceManager) validateResourceGroupConfig(rgName string, cfg *rgpb.ResourceGroupConfig) error {
+	if cfg.GetLimits() == nil || cfg.GetRequests() == nil {
+		return errors.Wrap(ErrIllegalRGConfig, "requests or limits is required")
+	}
+	if cfg.GetRequests().GetNodeNum() < 0 || cfg.GetLimits().GetNodeNum() < 0 {
+		return errors.Wrap(ErrIllegalRGConfig, "node num in `requests` or `limits` should not less than 0")
+	}
+	if cfg.GetLimits().GetNodeNum() < cfg.GetRequests().GetNodeNum() {
+		return errors.Wrap(ErrIllegalRGConfig, "limits node num should not less than requests node num")
+	}
+
+	for _, transferCfg := range cfg.GetTransferFrom() {
+		if transferCfg.GetResourceGroup() == rgName {
+			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `from` %s should not be itself", rgName)
+		}
+		if rm.groups[transferCfg.GetResourceGroup()] == nil {
+			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `from` %s not exist", transferCfg.GetResourceGroup())
+		}
+	}
+	for _, transferCfg := range cfg.GetTransferTo() {
+		if transferCfg.GetResourceGroup() == rgName {
+			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `to` %s should not be itself", rgName)
+		}
+		if rm.groups[transferCfg.GetResourceGroup()] == nil {
+			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `to` %s not exist", transferCfg.GetResourceGroup())
+		}
+	}
+	return nil
+}
+
+// validateResourceGroupIsDeletable validate a resource group is deletable.
+func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error {
+	// default rg is not deletable.
+	if rgName == DefaultResourceGroupName {
+		return ErrDeleteDefaultRG
+	}
+
+	// If rg is not empty, it's not deletable.
+	if rm.groups[rgName].GetConfig().GetLimits().GetNodeNum() != 0 {
+		return ErrDeleteNonEmptyRG
+	}
+
+	// If rg is used by other rg, it's not deletable.
+	for _, rg := range rm.groups {
+		for _, transferCfg := range rg.GetConfig().GetTransferFrom() {
+			if transferCfg.GetResourceGroup() == rgName {
+				return errors.Wrapf(ErrDeleteInUsedRG, "resource group %s is used by %s's `from`, remove that configuration first", rgName, rg.name)
+			}
+		}
+		for _, transferCfg := range rg.GetConfig().GetTransferTo() {
+			if transferCfg.GetResourceGroup() == rgName {
+				return errors.Wrapf(ErrDeleteInUsedRG, "resource group %s is used by %s's `in`, remove that configuration first", rgName, rg.name)
+			}
+		}
+	}
+	return nil
 }

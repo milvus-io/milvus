@@ -2394,6 +2394,61 @@ func (_c *MockQueryCoord_TransferSegment_Call) RunAndReturn(run func(context.Con
 	return _c
 }
 
+// UpdateResourceGroups provides a mock function with given fields: _a0, _a1
+func (_m *MockQueryCoord) UpdateResourceGroups(_a0 context.Context, _a1 *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockQueryCoord_UpdateResourceGroups_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'UpdateResourceGroups'
+type MockQueryCoord_UpdateResourceGroups_Call struct {
+	*mock.Call
+}
+
+// UpdateResourceGroups is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.UpdateResourceGroupsRequest
+func (_e *MockQueryCoord_Expecter) UpdateResourceGroups(_a0 interface{}, _a1 interface{}) *MockQueryCoord_UpdateResourceGroups_Call {
+	return &MockQueryCoord_UpdateResourceGroups_Call{Call: _e.mock.On("UpdateResourceGroups", _a0, _a1)}
+}
+
+func (_c *MockQueryCoord_UpdateResourceGroups_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateResourceGroupsRequest)) *MockQueryCoord_UpdateResourceGroups_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.UpdateResourceGroupsRequest))
+	})
+	return _c
+}
+
+func (_c *MockQueryCoord_UpdateResourceGroups_Call) Return(_a0 *commonpb.Status, _a1 error) *MockQueryCoord_UpdateResourceGroups_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockQueryCoord_UpdateResourceGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error)) *MockQueryCoord_UpdateResourceGroups_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // UpdateStateCode provides a mock function with given fields: stateCode
 func (_m *MockQueryCoord) UpdateStateCode(stateCode commonpb.StateCode) {
 	_m.Called(stateCode)

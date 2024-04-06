@@ -18,21 +18,15 @@ package meta
 import (
 	"testing"
 
-	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/mock"
-	"github.com/stretchr/testify/suite"
-
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
-	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/stretchr/testify/suite"
 )
 
 type ResourceManagerSuite struct {
@@ -47,7 +41,7 @@ func (suite *ResourceManagerSuite) SetupSuite() {
 }
 
 func (suite *ResourceManagerSuite) SetupTest() {
-	config := GenerateEtcdConfig()
+	config := params.GenerateEtcdConfig()
 	cli, err := etcd.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
@@ -63,15 +57,126 @@ func (suite *ResourceManagerSuite) SetupTest() {
 	suite.manager = NewResourceManager(store, session.NewNodeManager())
 }
 
+func (suite *ResourceManagerSuite) TearDownSuite() {
+	suite.kv.Close()
+}
+
+func TestResourceManager(t *testing.T) {
+	suite.Run(t, new(ResourceManagerSuite))
+}
+
+func (suite *ResourceManagerSuite) TestValidateConfiguration() {
+	err := suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(0, 0))
+	suite.NoError(err)
+
+	err = suite.manager.validateResourceGroupConfig("rg1", &rgpb.ResourceGroupConfig{})
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	err = suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(-1, 2))
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	err = suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(2, -1))
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	err = suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(3, 2))
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	cfg := createResourceGroupConfig(0, 0)
+	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: DefaultResourceGroupName}}
+	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
+	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
+	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: DefaultResourceGroupName}}
+	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
+	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
+	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	err = suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(0, 0))
+	suite.NoError(err)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
+	err = suite.manager.validateResourceGroupConfig(DefaultResourceGroupName, cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
+	err = suite.manager.validateResourceGroupConfig(DefaultResourceGroupName, cfg)
+	suite.ErrorIs(err, ErrIllegalRGConfig)
+
+	err = suite.manager.RemoveResourceGroup("rg2")
+	suite.NoError(err)
+}
+
+func (suite *ResourceManagerSuite) TestValidateDelete() {
+	// Non empty resource group can not be removed.
+	err := suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(1, 1))
+	suite.NoError(err)
+
+	err = suite.manager.validateResourceGroupIsDeletable(DefaultResourceGroupName)
+	suite.ErrorIs(err, ErrDeleteDefaultRG)
+
+	err = suite.manager.validateResourceGroupIsDeletable("rg1")
+	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
+
+	cfg := createResourceGroupConfig(0, 0)
+	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
+	suite.manager.AddResourceGroup("rg2", cfg)
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": createResourceGroupConfig(0, 0),
+	})
+	err = suite.manager.validateResourceGroupIsDeletable("rg1")
+	suite.ErrorIs(err, ErrDeleteInUsedRG)
+
+	cfg = createResourceGroupConfig(0, 0)
+	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg2": cfg,
+	})
+	err = suite.manager.validateResourceGroupIsDeletable("rg1")
+	suite.ErrorIs(err, ErrDeleteInUsedRG)
+
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg2": createResourceGroupConfig(0, 0),
+	})
+	err = suite.manager.validateResourceGroupIsDeletable("rg1")
+	suite.NoError(err)
+
+	err = suite.manager.RemoveResourceGroup("rg1")
+	suite.NoError(err)
+	err = suite.manager.RemoveResourceGroup("rg2")
+	suite.NoError(err)
+}
+
 func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	// test add rg
-	err := suite.manager.AddResourceGroup("rg1")
+	err := suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(0, 0))
 	suite.NoError(err)
 	suite.True(suite.manager.ContainResourceGroup("rg1"))
 	suite.Len(suite.manager.ListResourceGroups(), 2)
 
 	// test add duplicate rg
-	err = suite.manager.AddResourceGroup("rg1")
+	err = suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(0, 0))
 	suite.Error(err)
 	// test delete rg
 	err = suite.manager.RemoveResourceGroup("rg1")
@@ -82,461 +187,316 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	suite.NoError(err)
 	// test delete default rg
 	err = suite.manager.RemoveResourceGroup(DefaultResourceGroupName)
-	suite.ErrorIs(ErrDeleteDefaultRG, err)
-}
+	suite.ErrorIs(err, ErrDeleteDefaultRG)
 
-func (suite *ResourceManagerSuite) TestManipulateNode() {
+	// test delete a rg not empty.
+	err = suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(1, 1))
+	suite.NoError(err)
+	err = suite.manager.RemoveResourceGroup("rg2")
+	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
+
+	// test delete a rg after update
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg2": createResourceGroupConfig(0, 0),
+	})
+	err = suite.manager.RemoveResourceGroup("rg2")
+	suite.NoError(err)
+
+	// assign a node to rg.
+	err = suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(1, 1))
+	suite.NoError(err)
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
-		Address:  "127.0.0.1:0",
+		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	err := suite.manager.AddResourceGroup("rg1")
+	defer suite.manager.nodeMgr.Remove(1)
+	suite.manager.HandleNodeUp(1)
+	err = suite.manager.RemoveResourceGroup("rg2")
+	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg2": createResourceGroupConfig(0, 0),
+	})
+	// RemoveResourceGroup will remove all nodes from the resource group.
+	err = suite.manager.RemoveResourceGroup("rg2")
+	suite.NoError(err)
+}
+
+func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	err := suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	// test add node to rg
-	err = suite.manager.AssignNode("rg1", 1)
-	suite.NoError(err)
+	suite.manager.HandleNodeUp(1)
+	suite.Equal(1, suite.manager.GetResourceGroup("rg1").NodeNum())
 
 	// test add non-exist node to rg
-	err = suite.manager.AssignNode("rg1", 2)
-	suite.ErrorIs(err, merr.ErrNodeNotFound)
-
-	// test add node to non-exist rg
-	err = suite.manager.AssignNode("rg2", 1)
-	suite.ErrorIs(err, merr.ErrResourceGroupNotFound)
-
-	// test remove node from rg
-	err = suite.manager.UnassignNode("rg1", 1)
+	err = suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": createResourceGroupConfig(2, 3),
+	})
 	suite.NoError(err)
+	suite.manager.HandleNodeUp(2)
+	suite.Equal(1, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-	// test remove non-exist node from rg
-	err = suite.manager.UnassignNode("rg1", 2)
+	// teardown a non-exist node from rg.
+	suite.manager.HandleNodeDown(2)
+	suite.Equal(1, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	// test add exist node to rg
+	suite.manager.HandleNodeUp(1)
+	suite.Equal(1, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	// teardown a exist node from rg.
+	suite.manager.HandleNodeDown(1)
+	suite.Zero(suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	// teardown a exist node from rg.
+	suite.manager.HandleNodeDown(1)
+	suite.Zero(suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	suite.manager.HandleNodeUp(1)
+	suite.Equal(1, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	err = suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": createResourceGroupConfig(4, 4),
+	})
 	suite.NoError(err)
-
-	// test remove node from non-exist rg
-	err = suite.manager.UnassignNode("rg2", 1)
-	suite.ErrorIs(err, merr.ErrResourceGroupNotFound)
-
-	// add node which already assign to rg  to another rg
-	err = suite.manager.AddResourceGroup("rg2")
+	suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(1, 1))
 	suite.NoError(err)
-	err = suite.manager.AssignNode("rg1", 1)
-	suite.NoError(err)
-	err = suite.manager.AssignNode("rg2", 1)
-	suite.ErrorIs(err, ErrNodeAlreadyAssign)
-
-	// transfer node between rgs
-	_, err = suite.manager.TransferNode("rg1", "rg2", 1)
-	suite.NoError(err)
-
-	// transfer meet non exist rg
-	_, err = suite.manager.TransferNode("rgggg", "rg2", 1)
-	suite.ErrorIs(err, merr.ErrResourceGroupNotFound)
-
-	_, err = suite.manager.TransferNode("rg1", "rg2", 5)
-	suite.ErrorIs(err, ErrNodeNotEnough)
 
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   11,
-		Address:  "127.0.0.1:0",
+		Address:  "localhost",
 		Hostname: "localhost",
 	}))
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   12,
-		Address:  "127.0.0.1:0",
+		Address:  "localhost",
 		Hostname: "localhost",
 	}))
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   13,
-		Address:  "127.0.0.1:0",
+		Address:  "localhost",
 		Hostname: "localhost",
 	}))
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   14,
-		Address:  "127.0.0.1:0",
+		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.manager.AssignNode("rg1", 11)
-	suite.manager.AssignNode("rg1", 12)
-	suite.manager.AssignNode("rg1", 13)
-	suite.manager.AssignNode("rg1", 14)
+	suite.manager.HandleNodeUp(11)
+	suite.manager.HandleNodeUp(12)
+	suite.manager.HandleNodeUp(13)
+	suite.manager.HandleNodeUp(14)
 
-	rg1, err := suite.manager.GetResourceGroup("rg1")
-	suite.NoError(err)
-	rg2, err := suite.manager.GetResourceGroup("rg2")
-	suite.NoError(err)
-	suite.Equal(rg1.GetCapacity(), 4)
-	suite.Equal(rg2.GetCapacity(), 1)
-	suite.manager.TransferNode("rg1", "rg2", 3)
-	suite.Equal(rg1.GetCapacity(), 1)
-	suite.Equal(rg2.GetCapacity(), 4)
-}
+	suite.Equal(4, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(1, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-func (suite *ResourceManagerSuite) TestHandleNodeUp() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   3,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   100,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   101,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	err := suite.manager.AddResourceGroup("rg1")
-	suite.NoError(err)
-
-	suite.manager.AssignNode("rg1", 1)
-	suite.manager.AssignNode("rg1", 2)
-	suite.manager.AssignNode("rg1", 3)
-
-	// test query node id not change, expect assign back to origin rg
-	rg, err := suite.manager.GetResourceGroup("rg1")
-	suite.NoError(err)
-	suite.Equal(rg.GetCapacity(), 3)
-	suite.Equal(len(rg.GetNodes()), 3)
-	suite.manager.HandleNodeUp(1)
-	suite.Equal(rg.GetCapacity(), 3)
-	suite.Equal(len(rg.GetNodes()), 3)
-
-	suite.manager.HandleNodeDown(2)
-	rg, err = suite.manager.GetResourceGroup("rg1")
-	suite.NoError(err)
-	suite.Equal(rg.GetCapacity(), 3)
-	suite.Equal(len(rg.GetNodes()), 2)
-	suite.NoError(err)
-	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
-	suite.NoError(err)
-	suite.Equal(DefaultResourceGroupCapacity, defaultRG.GetCapacity())
-	suite.manager.HandleNodeUp(101)
-	rg, err = suite.manager.GetResourceGroup("rg1")
-	suite.NoError(err)
-	suite.Equal(rg.GetCapacity(), 3)
-	suite.Equal(len(rg.GetNodes()), 2)
-	suite.False(suite.manager.ContainsNode("rg1", 101))
-	suite.Equal(DefaultResourceGroupCapacity, defaultRG.GetCapacity())
-}
-
-func (suite *ResourceManagerSuite) TestRecover() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   3,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   4,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	err := suite.manager.AddResourceGroup("rg1")
-	suite.NoError(err)
-	err = suite.manager.AddResourceGroup("rg2")
-	suite.NoError(err)
-
-	suite.manager.AssignNode(DefaultResourceGroupName, 1)
-	suite.manager.TransferNode(DefaultResourceGroupName, "rg1", 1)
-	suite.manager.AssignNode(DefaultResourceGroupName, 2)
-	suite.manager.TransferNode(DefaultResourceGroupName, "rg2", 1)
-	suite.manager.AssignNode(DefaultResourceGroupName, 3)
-	suite.manager.AssignNode(DefaultResourceGroupName, 4)
-
-	suite.manager.HandleNodeDown(2)
-	suite.manager.HandleNodeDown(3)
-
-	// clear resource manager in hack way
-	delete(suite.manager.groups, "rg1")
-	delete(suite.manager.groups, "rg2")
-	delete(suite.manager.groups, DefaultResourceGroupName)
-	suite.manager.Recover()
-
-	rg, err := suite.manager.GetResourceGroup("rg1")
-	suite.NoError(err)
-	suite.Equal(1, rg.GetCapacity())
-	suite.True(suite.manager.ContainsNode("rg1", 1))
-
-	rg, err = suite.manager.GetResourceGroup("rg2")
-	suite.NoError(err)
-	suite.Equal(1, rg.GetCapacity())
-	suite.False(suite.manager.ContainsNode("rg2", 2))
-
-	rg, err = suite.manager.GetResourceGroup(DefaultResourceGroupName)
-	suite.NoError(err)
-	suite.Equal(DefaultResourceGroupCapacity, rg.GetCapacity())
-	suite.False(suite.manager.ContainsNode(DefaultResourceGroupName, 3))
-	suite.True(suite.manager.ContainsNode(DefaultResourceGroupName, 4))
-}
-
-func (suite *ResourceManagerSuite) TestCheckOutboundNodes() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   3,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	err := suite.manager.AddResourceGroup("rg")
-	suite.NoError(err)
-	suite.manager.AssignNode("rg", 1)
-	suite.manager.AssignNode("rg", 2)
-	suite.manager.AssignNode("rg", 3)
-}
-
-func (suite *ResourceManagerSuite) TestCheckResourceGroup() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   3,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	err := suite.manager.AddResourceGroup("rg")
-	suite.NoError(err)
-	suite.manager.AssignNode("rg", 1)
-	suite.manager.AssignNode("rg", 2)
-	suite.manager.AssignNode("rg", 3)
+	suite.manager.HandleNodeDown(11)
+	suite.manager.HandleNodeDown(12)
+	suite.manager.HandleNodeDown(13)
+	suite.manager.HandleNodeDown(14)
+	suite.Equal(1, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
 	suite.manager.HandleNodeDown(1)
-	lackNodes := suite.manager.CheckLackOfNode("rg")
-	suite.Equal(lackNodes, 1)
+	suite.Zero(suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-	suite.manager.nodeMgr.Remove(2)
-	suite.manager.checkRGNodeStatus("rg")
-	lackNodes = suite.manager.CheckLackOfNode("rg")
-	suite.Equal(lackNodes, 2)
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": createResourceGroupConfig(20, 30),
+		"rg2": createResourceGroupConfig(30, 40),
+	})
+	for i := 1; i <= 100; i++ {
+		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+			NodeID:   int64(i),
+			Address:  "localhost",
+			Hostname: "localhost",
+		}))
+		suite.manager.HandleNodeUp(int64(i))
+	}
 
-	rg, err := suite.manager.FindResourceGroupByNode(3)
-	suite.NoError(err)
-	suite.Equal(rg, "rg")
-}
+	suite.Equal(20, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(30, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(50, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-func (suite *ResourceManagerSuite) TestGetOutboundNode() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   3,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.AddResourceGroup("rg")
-	suite.manager.AddResourceGroup("rg1")
-	suite.manager.AssignNode("rg", 1)
-	suite.manager.AssignNode("rg", 2)
-	suite.manager.AssignNode("rg1", 3)
+	// down all nodes
+	for i := 1; i <= 100; i++ {
+		suite.manager.HandleNodeDown(int64(i))
+		suite.Equal(100-i, suite.manager.GetResourceGroup("rg1").NodeNum()+
+			suite.manager.GetResourceGroup("rg2").NodeNum()+
+			suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	}
 
-	replica := NewReplica(
-		&querypb.Replica{
-			ID:            1,
-			CollectionID:  100,
-			ResourceGroup: "rg",
-			Nodes:         []int64{1, 2},
-			RoNodes:       []int64{3},
-		},
-		typeutil.NewUniqueSet(1, 2),
-	)
+	// if there are all rgs reach limit, should be fall back to default rg.
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1":                    createResourceGroupConfig(0, 0),
+		"rg2":                    createResourceGroupConfig(0, 0),
+		DefaultResourceGroupName: createResourceGroupConfig(0, 0),
+	})
 
-	outgoingNodes := suite.manager.GetOutgoingNodeNumByReplica(replica)
-	suite.NotNil(outgoingNodes)
-	suite.Len(outgoingNodes, 1)
-	suite.NotNil(outgoingNodes["rg1"])
-	suite.Equal(outgoingNodes["rg1"], int32(1))
+	for i := 1; i <= 100; i++ {
+		suite.manager.HandleNodeUp(int64(i))
+		suite.Equal(i, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+		suite.Equal(0, suite.manager.GetResourceGroup("rg1").NodeNum())
+		suite.Equal(0, suite.manager.GetResourceGroup("rg2").NodeNum())
+	}
 }
 
 func (suite *ResourceManagerSuite) TestAutoRecover() {
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   3,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	err := suite.manager.AddResourceGroup("rg")
-	suite.NoError(err)
-	suite.manager.AssignNode(DefaultResourceGroupName, 1)
-	suite.manager.AssignNode(DefaultResourceGroupName, 2)
-	suite.manager.AssignNode("rg", 3)
-
-	suite.manager.HandleNodeDown(3)
-	lackNodes := suite.manager.CheckLackOfNode("rg")
-	suite.Equal(lackNodes, 1)
-	suite.manager.AutoRecoverResourceGroup("rg")
-	lackNodes = suite.manager.CheckLackOfNode("rg")
-	suite.Equal(lackNodes, 0)
-
-	// test auto recover behavior when all node down
-	suite.manager.nodeMgr.Remove(1)
-	suite.manager.nodeMgr.Remove(2)
-	suite.manager.AutoRecoverResourceGroup("rg")
-	nodes, _ := suite.manager.GetNodes("rg")
-	suite.Len(nodes, 0)
-	nodes, _ = suite.manager.GetNodes(DefaultResourceGroupName)
-	suite.Len(nodes, 0)
-
-	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	suite.manager.HandleNodeUp(1)
-	suite.manager.AutoRecoverResourceGroup("rg")
-	nodes, _ = suite.manager.GetNodes("rg")
-	suite.Len(nodes, 1)
-	nodes, _ = suite.manager.GetNodes(DefaultResourceGroupName)
-	suite.Len(nodes, 0)
-}
-
-func (suite *ResourceManagerSuite) TestDefaultResourceGroup() {
-	for i := 0; i < 10; i++ {
+	for i := 1; i <= 100; i++ {
 		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 			NodeID:   int64(i),
-			Address:  "127.0.0.1:0",
+			Address:  "localhost",
 			Hostname: "localhost",
 		}))
+		suite.manager.HandleNodeUp(int64(i))
 	}
-	defaultRG, err := suite.manager.GetResourceGroup(DefaultResourceGroupName)
-	suite.NoError(err)
-	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
-	suite.Len(defaultRG.GetNodes(), 0)
+	suite.Equal(100, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-	suite.manager.HandleNodeUp(1)
-	suite.manager.HandleNodeUp(2)
-	suite.manager.HandleNodeUp(3)
-	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
-	suite.Len(defaultRG.GetNodes(), 3)
+	// Recover 10 nodes from default resource group
+	suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(10, 30))
+	suite.Zero(suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").MissingNumOfNodes())
+	suite.Equal(100, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg1").MissingNumOfNodes())
+	suite.Equal(90, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-	// shutdown node 1 and 2
-	suite.manager.nodeMgr.Remove(1)
-	suite.manager.nodeMgr.Remove(2)
+	// Recover 20 nodes from default resource group
+	suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(20, 30))
+	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(20, suite.manager.GetResourceGroup("rg2").MissingNumOfNodes())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(90, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.Equal(20, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(70, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-	defaultRG, err = suite.manager.GetResourceGroup(DefaultResourceGroupName)
-	suite.NoError(err)
-	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
-	suite.Len(defaultRG.GetNodes(), 1)
+	// Recover 5 redundant nodes from resource group
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": createResourceGroupConfig(5, 5),
+	})
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.Equal(20, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(5, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(75, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-	suite.manager.HandleNodeUp(4)
-	suite.manager.HandleNodeUp(5)
-	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
-	suite.Len(defaultRG.GetNodes(), 3)
+	// Recover 10 redundant nodes from resource group 2 to resource group 1 and default resource group.
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1": createResourceGroupConfig(10, 20),
+		"rg2": createResourceGroupConfig(5, 10),
+	})
 
-	suite.manager.HandleNodeUp(7)
-	suite.manager.HandleNodeUp(8)
-	suite.manager.HandleNodeUp(9)
-	suite.Equal(defaultRG.GetCapacity(), DefaultResourceGroupCapacity)
-	suite.Len(defaultRG.GetNodes(), 6)
-}
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(80, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-func (suite *ResourceManagerSuite) TestStoreFailed() {
-	store := mocks.NewQueryCoordCatalog(suite.T())
-	nodeMgr := session.NewNodeManager()
-	manager := NewResourceManager(store, nodeMgr)
+	// recover redundant nodes from default resource group
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg1":                    createResourceGroupConfig(10, 20),
+		"rg2":                    createResourceGroupConfig(20, 30),
+		DefaultResourceGroupName: createResourceGroupConfig(10, 20),
+	})
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
 
-	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   1,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   3,
-		Address:  "127.0.0.1:0",
-		Hostname: "localhost",
-	}))
-	storeErr := errors.New("store error")
-	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(storeErr)
-	store.EXPECT().RemoveResourceGroup(mock.Anything).Return(storeErr)
+	// Even though the default resource group has 20 nodes limits,
+	// all redundant nodes will be assign to default resource group.
+	suite.Equal(20, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(30, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(50, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
-	err := manager.AddResourceGroup("rg")
-	suite.ErrorIs(err, storeErr)
+	// Test recover missing from high priority resource group by set `from`.
+	suite.manager.AddResourceGroup("rg3", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 15,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 15,
+		},
+		TransferFrom: []*rgpb.ResourceGroupTransfer{{
+			ResourceGroup: "rg1",
+		}},
+	})
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: createResourceGroupConfig(30, 40),
+	})
 
-	manager.groups["rg"] = &ResourceGroup{
-		nodes:    typeutil.NewConcurrentSet[int64](),
-		capacity: 0,
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.manager.AutoRecoverResourceGroup("rg3")
+
+	// Get 10 from default group for redundant nodes, get 5 from rg1 for rg3 at high priority.
+	suite.Equal(15, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(30, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(15, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(40, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	// Test recover redundant to high priority resource group by set `to`.
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		"rg3": {
+			Requests: &rgpb.ResourceGroupLimit{
+				NodeNum: 0,
+			},
+			Limits: &rgpb.ResourceGroupLimit{
+				NodeNum: 0,
+			},
+			TransferTo: []*rgpb.ResourceGroupTransfer{{
+				ResourceGroup: "rg2",
+			}},
+		},
+		"rg1": createResourceGroupConfig(15, 100),
+		"rg2": createResourceGroupConfig(15, 40),
+	})
+
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.manager.AutoRecoverResourceGroup("rg3")
+
+	// Recover rg3 by transfer 10 nodes to rg2 with high priority, 5 to rg1.
+	suite.Equal(20, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(40, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(40, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	// Test down all nodes.
+	for i := 1; i <= 100; i++ {
+		suite.manager.nodeMgr.Remove(int64(i))
 	}
-
-	err = manager.RemoveResourceGroup("rg")
-	suite.ErrorIs(err, storeErr)
-
-	err = manager.AssignNode("rg", 1)
-	suite.ErrorIs(err, storeErr)
-
-	manager.groups["rg"].assignNode(1, 1)
-	err = manager.UnassignNode("rg", 1)
-	suite.ErrorIs(err, storeErr)
-
-	_, err = manager.TransferNode("rg", DefaultResourceGroupName, 1)
-	suite.ErrorIs(err, storeErr)
-
-	_, err = manager.HandleNodeUp(2)
-	suite.ErrorIs(err, storeErr)
-
-	_, err = manager.HandleNodeDown(1)
-	suite.ErrorIs(err, storeErr)
+	suite.manager.RemoveAllDownNode()
+	suite.Zero(suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 }
 
-func (suite *ResourceManagerSuite) TearDownSuite() {
-	suite.kv.Close()
-}
-
-func TestResourceManager(t *testing.T) {
-	suite.Run(t, new(ResourceManagerSuite))
+func createResourceGroupConfig(requestNode int, limitNode int) *rgpb.ResourceGroupConfig {
+	return &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: int32(requestNode),
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: int32(limitNode),
+		},
+	}
 }

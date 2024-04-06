@@ -5264,6 +5264,67 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 	return t.result, nil
 }
 
+func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	method := "UpdateResourceGroups"
+	for name := range request.GetResourceGroups() {
+		if err := ValidateResourceGroupName(name); err != nil {
+			log.Warn("UpdateResourceGroups failed",
+				zap.Error(err),
+			)
+			return getErrResponse(err, method, "", ""), nil
+		}
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateResourceGroups")
+	defer sp.End()
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.TotalLabel).Inc()
+	t := &UpdateResourceGroupsTask{
+		ctx:                         ctx,
+		Condition:                   NewTaskCondition(ctx),
+		UpdateResourceGroupsRequest: request,
+		queryCoord:                  node.queryCoord,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
+
+	log.Info("UpdateResourceGroups received")
+
+	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+		log.Warn("UpdateResourceGroups failed to enqueue",
+			zap.Error(err))
+		return getErrResponse(err, method, "", ""), nil
+	}
+
+	log.Debug("UpdateResourceGroups enqueued",
+		zap.Uint64("BeginTS", t.BeginTs()),
+		zap.Uint64("EndTS", t.EndTs()))
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("UpdateResourceGroups failed to WaitToFinish",
+			zap.Error(err),
+			zap.Uint64("BeginTS", t.BeginTs()),
+			zap.Uint64("EndTS", t.EndTs()))
+		return getErrResponse(err, method, "", ""), nil
+	}
+
+	log.Info("UpdateResourceGroups done",
+		zap.Uint64("BeginTS", t.BeginTs()),
+		zap.Uint64("EndTS", t.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+		metrics.SuccessLabel).Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return t.result, nil
+}
+
 func getErrResponse(err error, method string, dbName string, collectionName string) *commonpb.Status {
 	metrics.ProxyFunctionCall.
 		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, dbName, collectionName).Inc()

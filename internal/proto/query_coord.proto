@@ -6,6 +6,7 @@ option go_package = "github.com/milvus-io/milvus/internal/proto/querypb";
 
 import "common.proto";
 import "milvus.proto";
+import "rg.proto";
 import "internal.proto";
 import "schema.proto";
 import "msg.proto";
@@ -70,6 +71,9 @@ service QueryCoord {
     }
 
     rpc CreateResourceGroup(milvus.CreateResourceGroupRequest)
+        returns (common.Status) {
+    }
+    rpc UpdateResourceGroups(milvus.UpdateResourceGroupsRequest) 
         returns (common.Status) {
     }
     rpc DropResourceGroup(milvus.DropResourceGroupRequest)
@@ -692,8 +696,9 @@ message SyncDistributionRequest {
 
 message ResourceGroup {
     string name = 1;
-    int32 capacity = 2;
+    int32 capacity = 2 [deprecated = true]; // capacity can be found in config.requests.nodeNum and config.limits.nodeNum.
     repeated int64 nodes = 3;
+    rg.ResourceGroupConfig config = 4;
 }
 
 // transfer `replicaNum` replicas in `collectionID` from `source_resource_group` to `target_resource_groups`
@@ -717,15 +722,19 @@ message DescribeResourceGroupResponse {
 
 message ResourceGroupInfo {
     string name = 1;
-    int32 capacity = 2;
+    int32 capacity = 2 [deprecated = true]; // capacity can be found in config.requests.nodeNum and config.limits.nodeNum.
     int32 num_available_node = 3;
     // collection id -> loaded replica num
     map<int64, int32> num_loaded_replica = 4;
-    // collection id -> accessed other rg's node num
+    // collection id -> accessed other rg's node num 
     map<int64, int32> num_outgoing_node = 5;
-    // collection id -> be accessed node num by other rg
+     // collection id -> be accessed node num by other rg
     map<int64, int32> num_incoming_node = 6;
+    // resource group configuration.
+    rg.ResourceGroupConfig config = 7;
+    repeated common.NodeInfo nodes = 8;
 }
+
 message DeleteRequest {
     common.MsgBase base = 1;
     int64 collection_id = 2;

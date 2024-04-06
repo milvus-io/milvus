@@ -126,7 +126,7 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
+	checker.meta.ResourceManager.HandleNodeUp(1)
 
 	channels := []*datapb.VchannelInfo{
 		{
