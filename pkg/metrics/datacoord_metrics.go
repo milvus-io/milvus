@@ -103,14 +103,6 @@ var (
 			collectionIDLabelName,
 		})
 
-	DataCoordNumStoredRowsCounter = prometheus.NewCounterVec(
-		prometheus.CounterOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.DataCoordRole,
-			Name:      "stored_rows_count",
-			Help:      "count of all stored rows ever",
-		}, []string{})
-
 	DataCoordConsumeDataNodeTimeTickLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -295,7 +287,6 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumCollections)
 	registry.MustRegister(DataCoordNumStoredRows)
 	registry.MustRegister(DataCoordBulkVectors)
-	registry.MustRegister(DataCoordNumStoredRowsCounter)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordCheckpointUnixSeconds)
 	registry.MustRegister(DataCoordStoredBinlogSize)
