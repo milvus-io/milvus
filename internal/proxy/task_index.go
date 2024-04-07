@@ -308,7 +308,7 @@ func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.Fiel
 }
 
 func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) error {
-	if !isVectorType(field.GetDataType()) {
+	if !typeutil.IsVectorType(field.GetDataType()) {
 		return nil
 	}
 	params := make([]*commonpb.KeyValuePair, 0, len(field.GetTypeParams())+len(field.GetIndexParams()))
@@ -338,7 +338,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
-	if !isSparseVectorType(field.DataType) {
+	if !typeutil.IsSparseFloatVectorType(field.DataType) {
 		if err := fillDimension(field, indexParams); err != nil {
 			return err
 		}

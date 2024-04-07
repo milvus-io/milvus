@@ -129,16 +129,20 @@ func CreateSearchPlan(schema *typeutil.SchemaHelper, exprStr string, vectorField
 	if !typeutil.IsVectorType(dataType) {
 		return nil, fmt.Errorf("field (%s) to search is not of vector data type", vectorFieldName)
 	}
-	if dataType == schemapb.DataType_FloatVector {
-		vectorType = planpb.VectorType_FloatVector
-	} else if dataType == schemapb.DataType_BinaryVector {
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
 		vectorType = planpb.VectorType_BinaryVector
-	} else if dataType == schemapb.DataType_Float16Vector {
+	case schemapb.DataType_FloatVector:
+		vectorType = planpb.VectorType_FloatVector
+	case schemapb.DataType_Float16Vector:
 		vectorType = planpb.VectorType_Float16Vector
-	} else if dataType == schemapb.DataType_BFloat16Vector {
+	case schemapb.DataType_BFloat16Vector:
 		vectorType = planpb.VectorType_BFloat16Vector
-	} else if dataType == schemapb.DataType_SparseFloatVector {
+	case schemapb.DataType_SparseFloatVector:
 		vectorType = planpb.VectorType_SparseFloatVector
+	default:
+		log.Error("Invalid dataType", zap.Any("dataType", dataType))
+		return nil, err
 	}
 	planNode := &planpb.PlanNode{
 		Node: &planpb.PlanNode_VectorAnns{
