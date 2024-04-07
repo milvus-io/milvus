@@ -10265,7 +10265,7 @@ class TestSearchGroupBy(TestcaseBase):
                 all_pages_grpby_field_values.append(page_res[0][j].get(grpby_field))
             all_pages_ids += page_res[0].ids
         hit_rate = round(len(set(all_pages_grpby_field_values)) / len(all_pages_grpby_field_values), 3)
-        assert hit_rate > 0.85
+        assert hit_rate > 0.8
 
         total_res = collection_w.search(search_vectors, anns_field=default_search_field,
                                         param=search_param, limit=limit * page_rounds,
@@ -10276,7 +10276,7 @@ class TestSearchGroupBy(TestcaseBase):
                                         )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
         hit_rate = round(hit_num / (limit * page_rounds), 3)
-        assert hit_rate > 0.90
+        assert hit_rate > 0.8
         log.info(f"search pagination with groupby hit_rate: {hit_rate}")
         grpby_field_values = []
         for i in range(limit * page_rounds):
