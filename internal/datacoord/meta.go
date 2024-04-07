@@ -207,13 +207,12 @@ func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 	return collection
 }
 
-// GetClonedCollections returns cloned collection infos from local cache
-func (m *meta) GetClonedCollections() []*collectionInfo {
+// GetCollections returns collections from local cache
+func (m *meta) GetCollections() []*collectionInfo {
 	m.RLock()
 	defer m.RUnlock()
 	collections := make([]*collectionInfo, 0)
-	for collID := range m.collections {
-		coll := m.GetClonedCollectionInfo(collID)
+	for _, coll := range m.collections {
 		collections = append(collections, coll)
 	}
 	return collections

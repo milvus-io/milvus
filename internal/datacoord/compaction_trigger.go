@@ -189,14 +189,7 @@ func (t *compactionTrigger) startMajorCompactionLoop() {
 	defer logutil.LogPanic()
 	defer t.wg.Done()
 
-	// If MajorCompaction disabled, global loop will not start
-	if !Params.DataCoordCfg.MajorCompactionEnable.GetAsBool() {
-		return
-	}
 	t.majorCompactionManager.start()
-	if !Params.DataCoordCfg.MajorCompactionAutoEnable.GetAsBool() {
-		return
-	}
 	for {
 		select {
 		case <-t.quit:
@@ -300,21 +293,27 @@ func (t *compactionTrigger) triggerCompaction() error {
 
 // triggerMajorCompaction trigger major compaction.
 func (t *compactionTrigger) triggerMajorCompaction() error {
-	for _, collection := range t.meta.GetClonedCollections() {
-		clusteringKeyField := clustering.GetClusteringKeyField(collection.Schema)
-		if clusteringKeyField != nil {
-			id, err := t.allocSignalID()
-			if err != nil {
-				return err
+	if Params.DataCoordCfg.MajorCompactionEnable.GetAsBool() &&
+		Params.DataCoordCfg.MajorCompactionAutoEnable.GetAsBool() {
+		collections := t.meta.GetCollections()
+		isStart, _, err := t.allocator.allocN(int64(len(collections)))
+		if err != nil {
+			return err
+		}
+		id := isStart
+		for _, collection := range collections {
+			clusteringKeyField := clustering.GetClusteringKeyField(collection.Schema)
+			if clusteringKeyField != nil {
+				signal := &compactionSignal{
+					id:           id,
+					isForce:      false,
+					isGlobal:     true,
+					isMajor:      true,
+					collectionID: collection.ID,
+				}
+				t.signals <- signal
+				id++
 			}
-			signal := &compactionSignal{
-				id:           id,
-				isForce:      false,
-				isGlobal:     true,
-				isMajor:      true,
-				collectionID: collection.ID,
-			}
-			t.signals <- signal
 		}
 	}
 	return nil
