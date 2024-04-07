@@ -115,6 +115,11 @@ DECLARE_PROMETHEUS_COUNTER(internal_storage_op_count_list_fail);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_op_count_remove_suc);
 DECLARE_PROMETHEUS_COUNTER(internal_storage_op_count_remove_fail);
 
+DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_storage_load_duration);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_download_duration);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_write_disk_duration);
+DECLARE_PROMETHEUS_HISTOGRAM(internal_storage_deserialize_duration);
+
 // mmap metrics
 DECLARE_PROMETHEUS_HISTOGRAM_FAMILY(internal_mmap_allocated_space_bytes);
 DECLARE_PROMETHEUS_HISTOGRAM(internal_mmap_allocated_space_bytes_anon);
@@ -122,4 +127,5 @@ DECLARE_PROMETHEUS_HISTOGRAM(internal_mmap_allocated_space_bytes_file);
 DECLARE_PROMETHEUS_GAUGE_FAMILY(internal_mmap_in_used_space_bytes);
 DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_anon);
 DECLARE_PROMETHEUS_GAUGE(internal_mmap_in_used_space_bytes_file);
+
 }  // namespace milvus::storage
