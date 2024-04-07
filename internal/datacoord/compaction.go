@@ -68,7 +68,6 @@ const (
 	completed
 	failed
 	timeout
-	analyzing
 )
 
 var (

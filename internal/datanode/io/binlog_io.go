@@ -36,7 +36,6 @@ type BinlogIO interface {
 	Upload(ctx context.Context, kvs map[string][]byte) error
 	// JoinFullPath returns the full path by join the paths with the chunkmanager's rootpath
 	JoinFullPath(paths ...string) string
-	Remove(ctx context.Context, key string) error
 }
 
 type BinlogIoImpl struct {
@@ -101,18 +100,4 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 
 func (b *BinlogIoImpl) JoinFullPath(paths ...string) string {
 	return path.Join(b.ChunkManager.RootPath(), path.Join(paths...))
-}
-
-func (b *BinlogIoImpl) Remove(ctx context.Context, key string) error {
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Delete")
-	defer span.End()
-	future := b.pool.Submit(func() (any, error) {
-		err := retry.Do(ctx, func() error {
-			return b.RemoveWithPrefix(ctx, key)
-		})
-
-		return nil, err
-	})
-	_, err := future.Await()
-	return err
 }
