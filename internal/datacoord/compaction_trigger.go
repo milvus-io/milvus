@@ -122,8 +122,7 @@ func newCompactionTrigger(
 func (t *compactionTrigger) start() {
 	t.quit = make(chan struct{})
 	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
-	// currently, use the same interval
-	t.majorCompactionTicker = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	t.majorCompactionTicker = time.NewTicker(Params.DataCoordCfg.MajorCompactionInterval.GetAsDuration(time.Second))
 	t.wg.Add(3)
 	go func() {
 		defer logutil.LogPanic()

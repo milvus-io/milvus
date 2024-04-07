@@ -2551,7 +2551,8 @@ type dataCoordConfig struct {
 	// Major Compaction
 	MajorCompactionEnable                ParamItem `refreshable:"true"`
 	MajorCompactionAutoEnable            ParamItem `refreshable:"true"`
-	MajorCompactionCheckInterval         ParamItem `refreshable:"true"`
+	MajorCompactionInterval              ParamItem `refreshable:"false"`
+	MajorCompactionStateCheckInterval    ParamItem `refreshable:"true"`
 	MajorCompactionMinInterval           ParamItem `refreshable:"true"`
 	MajorCompactionMaxInterval           ParamItem `refreshable:"true"`
 	MajorCompactionNewDataRatioThreshold ParamItem `refreshable:"true"`
@@ -2941,12 +2942,19 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.MajorCompactionAutoEnable.Init(base.mgr)
 
-	p.MajorCompactionCheckInterval = ParamItem{
-		Key:          "dataCoord.compaction.major.checkInterval",
+	p.MajorCompactionInterval = ParamItem{
+		Key:          "dataCoord.compaction.major.interval",
+		Version:      "2.4.0",
+		DefaultValue: "600",
+	}
+	p.MajorCompactionInterval.Init(base.mgr)
+
+	p.MajorCompactionStateCheckInterval = ParamItem{
+		Key:          "dataCoord.compaction.major.stateCheckInterval",
 		Version:      "2.4.0",
 		DefaultValue: "10",
 	}
-	p.MajorCompactionCheckInterval.Init(base.mgr)
+	p.MajorCompactionStateCheckInterval.Init(base.mgr)
 
 	p.MajorCompactionMinInterval = ParamItem{
 		Key:          "dataCoord.compaction.major.minInterval",

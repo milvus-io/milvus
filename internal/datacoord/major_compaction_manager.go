@@ -80,7 +80,7 @@ func newMajorCompactionManager(
 
 func (t *MajorCompactionManager) start() {
 	t.quit = make(chan struct{})
-	t.ticker = time.NewTicker(Params.DataCoordCfg.MajorCompactionCheckInterval.GetAsDuration(time.Second))
+	t.ticker = time.NewTicker(Params.DataCoordCfg.MajorCompactionStateCheckInterval.GetAsDuration(time.Second))
 	t.wg.Add(1)
 	go t.startMajorCompactionLoop()
 }
@@ -394,11 +394,11 @@ func triggerMajorCompactionPolicy(ctx context.Context, meta *meta, collectionID 
 
 	pTime, _ := tsoutil.ParseTS(uint64(version))
 	if time.Since(pTime) < Params.DataCoordCfg.MajorCompactionMinInterval.GetAsDuration(time.Second) {
-		log.Info("Too short time before last major compaction, skip compaction")
+		log.Debug("Too short time before last major compaction, skip compaction")
 		return false, nil
 	}
 	if time.Since(pTime) > Params.DataCoordCfg.MajorCompactionMaxInterval.GetAsDuration(time.Second) {
-		log.Info("It is a long time after last major compaction, do compaction")
+		log.Debug("It is a long time after last major compaction, do compaction")
 		return true, nil
 	}
 	partitionStatsBytes, err := meta.chunkManager.Read(ctx, partitionStatsPath)
