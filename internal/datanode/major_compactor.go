@@ -60,8 +60,8 @@ import (
 
 type majorCompactionTask struct {
 	compactor
-	io        io.BinlogIO
-	stageIO   io.BinlogIO
+	io io.BinlogIO
+	//stageIO   io.BinlogIO
 	allocator allocator.Allocator
 	metaCache metacache.MetaCache
 	syncMgr   syncmgr.SyncManager
@@ -126,7 +126,7 @@ type SpillSignal struct {
 func newMajorCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	stagingIO io.BinlogIO,
+	//stagingIO io.BinlogIO,
 	alloc allocator.Allocator,
 	metaCache metacache.MetaCache,
 	syncMgr syncmgr.SyncManager,
@@ -134,10 +134,10 @@ func newMajorCompactionTask(
 ) *majorCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	return &majorCompactionTask{
-		ctx:                ctx,
-		cancel:             cancel,
-		io:                 binlogIO,
-		stageIO:            stagingIO,
+		ctx:    ctx,
+		cancel: cancel,
+		io:     binlogIO,
+		//stageIO:            stagingIO,
 		allocator:          alloc,
 		metaCache:          metaCache,
 		syncMgr:            syncMgr,

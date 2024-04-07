@@ -284,7 +284,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		task = newMajorCompactionTask(
 			taskCtx,
 			binlogIO,
-			binlogIO,
+			//binlogIO,
 			node.allocator,
 			ds.metacache,
 			node.syncMgr,
