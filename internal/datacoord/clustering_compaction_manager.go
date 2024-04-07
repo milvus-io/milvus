@@ -141,7 +141,7 @@ func (t *ClusteringCompactionManager) checkJobState(job *ClusteringCompactionJob
 	completedPlans := make([]*datapb.CompactionPlan, 0)
 	failedPlans := make([]*datapb.CompactionPlan, 0)
 	timeoutPlans := make([]*datapb.CompactionPlan, 0)
-	checkFunc := func(plans []*datapb.CompactionPlan) {
+	checkFunc := func(plans []*datapb.CompactionPlan, lastState compactionTaskState) error {
 		for _, plan := range plans {
 			compactionTask := t.compactionHandler.getCompaction(plan.GetPlanID())
 			// todo: if datacoord crash during clustering compaction, compactTask will lost, we can resubmit these plan
@@ -163,13 +163,60 @@ func (t *ClusteringCompactionManager) checkJobState(job *ClusteringCompactionJob
 			case completed:
 				completedPlans = append(completedPlans, plan)
 			}
+
+			if lastState == executing && compactionTask.state == completed {
+				// new finish task, commit the partitionStats and do cleaning
+				collectionID := job.collectionID
+				partitionID := compactionTask.plan.SegmentBinlogs[0].PartitionID
+				vChannelName := compactionTask.plan.GetChannel()
+
+				// read the temp file and write it to formal path
+				tempPartitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsTempPath, metautil.JoinIDPath(collectionID, partitionID), compactionTask.plan.GetChannel(), strconv.FormatInt(compactionTask.plan.PlanID, 10))
+				partitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath, metautil.JoinIDPath(collectionID, partitionID), compactionTask.plan.GetChannel(), strconv.FormatInt(compactionTask.plan.PlanID, 10))
+				tempStats, err := t.meta.chunkManager.Read(t.ctx, tempPartitionStatsPath)
+				if err != nil {
+					return err
+				}
+				err = t.meta.chunkManager.Write(t.ctx, partitionStatsPath, tempStats)
+				if err != nil {
+					return err
+				}
+
+				// list the partition stats, normally the files should not be more than two
+				statsPathPrefix := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath, metautil.JoinIDPath(collectionID, partitionID), vChannelName)
+				filePaths, _, err := t.meta.chunkManager.ListWithPrefix(t.ctx, statsPathPrefix, true)
+				if err != nil {
+					return err
+				}
+				_, maxPartitionStatsPath := storage.FindPartitionStatsMaxVersion(filePaths)
+				toRemovePaths := make([]string, 0)
+				for _, filePath := range filePaths {
+					// keep the newest one, still need it for search before querynode handoff
+					if filePath != maxPartitionStatsPath {
+						toRemovePaths = append(toRemovePaths, filePath)
+					}
+				}
+				// remove old partition stats
+				if len(toRemovePaths) > 0 {
+					err = t.meta.chunkManager.MultiRemove(t.ctx, toRemovePaths)
+					if err != nil {
+						return err
+					}
+				}
+
+				err = t.meta.chunkManager.Remove(t.ctx, tempPartitionStatsPath)
+				if err != nil {
+					return err
+				}
+			}
 		}
+		return nil
 	}
-	checkFunc(job.pipeliningPlans)
-	checkFunc(job.executingPlans)
-	checkFunc(job.completedPlans)
-	checkFunc(job.failedPlans)
-	checkFunc(job.timeoutPlans)
+	checkFunc(job.pipeliningPlans, pipelining)
+	checkFunc(job.executingPlans, executing)
+	checkFunc(job.completedPlans, completed)
+	checkFunc(job.failedPlans, failed)
+	checkFunc(job.timeoutPlans, timeout)
 
 	pipeliningPlans = append(pipeliningPlans, t.generateNewPlans(job)...)
 	job.pipeliningPlans = pipeliningPlans
