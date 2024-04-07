@@ -327,7 +327,7 @@ func setRateGaugeByRateType(rateType internalpb.RateType, nodeID int64, sourceID
 }
 
 func getDefaultLimiterConfig(scope internalpb.RateScope) map[internalpb.RateType]*paramtable.ParamItem {
-	return quota.GetQuotaConfigMap(scope, Params)
+	return quota.GetQuotaConfigMap(scope)
 }
 
 func IsDDLRequest(rt internalpb.RateType) bool {

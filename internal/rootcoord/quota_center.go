@@ -168,6 +168,7 @@ func NewQuotaCenter(proxies proxyutil.ProxyClientManagerInterface, queryCoord ty
 	dataCoord types.DataCoordClient, tsoAllocator tso.Allocator, meta IMetaTable,
 ) *QuotaCenter {
 	ctx, cancel := context.WithCancel(context.TODO())
+
 	q := &QuotaCenter{
 		ctx:                  ctx,
 		cancel:               cancel,
@@ -387,10 +388,11 @@ func (q *QuotaCenter) collectMetrics() error {
 		}
 
 		q.readableCollections = make(map[int64]map[int64][]int64, 0)
+		var rangeErr error
 		collections.Range(func(collectionID int64) bool {
-			var coll *model.Collection
-			coll, err = q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
-			if err != nil {
+			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
+			if getErr != nil {
+				rangeErr = getErr
 				return false
 			}
 			collIDToPartIDs, ok := q.readableCollections[coll.DBID]
@@ -408,7 +410,7 @@ func (q *QuotaCenter) collectMetrics() error {
 			return true
 		})
 
-		return err
+		return rangeErr
 	})
 	// get Data cluster metrics
 	group.Go(func() error {
@@ -443,10 +445,12 @@ func (q *QuotaCenter) collectMetrics() error {
 		if cm != nil {
 			collectionMetrics = cm.Collections
 		}
+		var rangeErr error
 		collections.Range(func(collectionID int64) bool {
 			var coll *model.Collection
-			coll, err = q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
-			if err != nil {
+			coll, getErr := q.meta.GetCollectionByIDWithMaxTs(context.TODO(), collectionID)
+			if getErr != nil {
+				rangeErr = getErr
 				return false
 			}
 
@@ -482,7 +486,7 @@ func (q *QuotaCenter) collectMetrics() error {
 			}
 			return true
 		})
-		return err
+		return rangeErr
 	})
 	// get Proxies metrics
 	group.Go(func() error {
@@ -1256,11 +1260,14 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		return nil
 	}
 
-	denyCluster := false
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	total := q.dataCoordMetrics.TotalBinlogSize
 	if float64(total) >= totalDiskQuota {
-		denyCluster = true
+		err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, true, nil, nil, nil)
+		if err != nil {
+			log.Warn("fail to force deny writing", zap.Error(err))
+		}
+		return err
 	}
 
 	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
@@ -1311,7 +1318,7 @@ func (q *QuotaCenter) checkDiskQuota() error {
 		}
 	}
 
-	err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, denyCluster, dbs, collections, col2partitions)
+	err := q.forceDenyWriting(commonpb.ErrorCode_DiskQuotaExhausted, false, dbs, collections, col2partitions)
 	if err != nil {
 		log.Warn("fail to force deny writing", zap.Error(err))
 		return err

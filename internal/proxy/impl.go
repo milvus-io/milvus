@@ -1265,6 +1265,7 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		zap.Uint64("EndTS", dpt.EndTs()))
 
 	DeregisterSubLabel(ratelimitutil.GetPartitionSubLabel(request.GetDbName(), request.GetCollectionName(), request.GetPartitionName()))
+
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return dpt.result, nil

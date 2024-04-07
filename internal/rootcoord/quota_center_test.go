@@ -111,6 +111,12 @@ func TestQuotaCenter(t *testing.T) {
 		})
 
 		meta.EXPECT().GetCollectionByID(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil, merr.ErrCollectionNotFound).Maybe()
+		meta.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return([]*model.Database{
+			{
+				Name: "default",
+				ID:   1,
+			},
+		}, nil).Maybe()
 		quotaCenter := NewQuotaCenter(pcm, qc, dc, core.tsoAllocator, meta)
 		quotaCenter.Start()
 		time.Sleep(3 * time.Second)
@@ -845,7 +851,7 @@ func TestQuotaCenter(t *testing.T) {
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuota.Key, "99")
 		paramtable.Get().Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "90")
 		quotaCenter.dataCoordMetrics = &metricsinfo.DataCoordQuotaMetrics{
-			TotalBinlogSize: 300 * 1024 * 1024,
+			TotalBinlogSize: 10 * 1024 * 1024,
 			CollectionBinlogSize: map[int64]int64{
 				1: 100 * 1024 * 1024,
 				2: 100 * 1024 * 1024,
@@ -1778,9 +1784,6 @@ func TestCheckDiskQuota(t *testing.T) {
 		quotaCenter.collectionIDToDBID.Insert(20, 2)
 		quotaCenter.collectionIDToDBID.Insert(30, 2)
 
-		err := quotaCenter.checkDiskQuota()
-		assert.NoError(t, err)
-
 		checkRate := func(rateNode *interalratelimitutil.RateLimiterNode, expectValue float64) {
 			insertRate, ok := rateNode.GetLimiters().Get(internalpb.RateType_DMLInsert)
 			assert.True(t, ok)
@@ -1788,16 +1791,27 @@ func TestCheckDiskQuota(t *testing.T) {
 		}
 
 		configQuotaValue := float64(10 * 1024 * 1024)
-		checkRate(quotaCenter.rateLimiter.GetRootLimiters(), 0)
-		checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(1), 0)
-		checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(2), 0)
-		checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(1, 10), 0)
-		checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 20), configQuotaValue)
-		checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 30), configQuotaValue)
-		checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(1, 10, 100), 0)
-		checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(1, 10, 101), configQuotaValue)
-		checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(2, 20, 200), configQuotaValue)
-		checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(2, 30, 300), configQuotaValue)
+
+		{
+			err := quotaCenter.checkDiskQuota()
+			assert.NoError(t, err)
+			checkRate(quotaCenter.rateLimiter.GetRootLimiters(), 0)
+		}
+
+		{
+			Params.Save(Params.QuotaConfig.DiskQuota.Key, "999")
+			err := quotaCenter.checkDiskQuota()
+			assert.NoError(t, err)
+			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(1), 0)
+			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(2), 0)
+			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(1, 10), 0)
+			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 20), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 30), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(1, 10, 100), 0)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(1, 10, 101), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(2, 20, 200), configQuotaValue)
+			checkRate(quotaCenter.rateLimiter.GetPartitionLimiters(2, 30, 300), configQuotaValue)
+		}
 	})
 }
 

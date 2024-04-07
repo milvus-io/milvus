@@ -34,9 +34,9 @@ var (
 	limitConfigMap map[internalpb.RateScope]map[internalpb.RateType]*paramtable.ParamItem
 )
 
-func initLimitConfigMaps(params *paramtable.ComponentParam) {
+func initLimitConfigMaps() {
 	initOnce.Do(func() {
-		quotaConfig := &params.QuotaConfig
+		quotaConfig := &paramtable.Get().QuotaConfig
 		limitConfigMap = map[internalpb.RateScope]map[internalpb.RateType]*paramtable.ParamItem{
 			internalpb.RateScope_Cluster: {
 				internalpb.RateType_DDLCollection: &quotaConfig.DDLCollectionRate,
@@ -85,8 +85,8 @@ func initLimitConfigMaps(params *paramtable.ComponentParam) {
 	})
 }
 
-func GetQuotaConfigMap(scope internalpb.RateScope, params *paramtable.ComponentParam) map[internalpb.RateType]*paramtable.ParamItem {
-	initLimitConfigMaps(params)
+func GetQuotaConfigMap(scope internalpb.RateScope) map[internalpb.RateType]*paramtable.ParamItem {
+	initLimitConfigMaps()
 	configMap, ok := limitConfigMap[scope]
 	if !ok {
 		log.Warn("Unknown rate scope", zap.Any("scope", scope))
@@ -96,7 +96,7 @@ func GetQuotaConfigMap(scope internalpb.RateScope, params *paramtable.ComponentP
 }
 
 func GetQuotaValue(scope internalpb.RateScope, rateType internalpb.RateType, params *paramtable.ComponentParam) float64 {
-	configMap := GetQuotaConfigMap(scope, params)
+	configMap := GetQuotaConfigMap(scope)
 	config, ok := configMap[rateType]
 	if !ok {
 		log.Warn("Unknown rate type", zap.Any("rateType", rateType))
