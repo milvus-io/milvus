@@ -36,7 +36,7 @@ class MilvusConan(ConanFile):
         "xz_utils/5.4.0",
         "prometheus-cpp/1.1.0",
         "re2/20230301",
-        "folly/2023.10.30.07@milvus/dev",
+        "folly/2023.10.30.08@milvus/dev",
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
