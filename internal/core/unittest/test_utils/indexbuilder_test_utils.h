@@ -108,7 +108,8 @@ generate_build_conf(const milvus::IndexType& index_type,
     return knowhere::Json();
 }
 
-auto
+template <typename DataType = float>
+inline auto
 generate_load_conf(const milvus::IndexType& index_type,
                    const milvus::MetricType& metric_type,
                    int64_t nb) {
@@ -118,7 +119,8 @@ generate_load_conf(const milvus::IndexType& index_type,
             {knowhere::meta::DIM, std::to_string(DIM)},
             {milvus::index::DISK_ANN_LOAD_THREAD_NUM, std::to_string(2)},
             {milvus::index::DISK_ANN_SEARCH_CACHE_BUDGET,
-             std::to_string(0.0002)},
+             std::to_string(0.05 * sizeof(DataType) * nb /
+                            (1024.0 * 1024.0 * 1024.0))},
         };
     }
     return knowhere::Json{
