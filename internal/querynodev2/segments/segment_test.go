@@ -196,6 +196,9 @@ func (suite *SegmentSuite) TestCASVersion() {
 	suite.Equal(curVersion+1, segment.Version())
 }
 
+func (suite *SegmentSuite) TestSegmentRemoveUnusedFieldFiles() {
+}
+
 func (suite *SegmentSuite) TestSegmentReleased() {
 	suite.sealed.Release()
 

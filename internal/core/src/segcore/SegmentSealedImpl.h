@@ -88,6 +88,9 @@ class SegmentSealedImpl : public SegmentSealed {
     DataType
     GetFieldDataType(FieldId fieldId) const override;
 
+    void
+    RemoveFieldFile(const FieldId field_id);
+
  public:
     int64_t
     get_row_count() const override;
