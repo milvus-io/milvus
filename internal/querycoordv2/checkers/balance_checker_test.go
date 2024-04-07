@@ -238,6 +238,7 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
+	suite.nodeMgr.Stopping(int64(nodeID1))
 	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID1))
 	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID2))
 

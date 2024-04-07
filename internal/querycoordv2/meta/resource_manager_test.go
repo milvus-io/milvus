@@ -83,22 +83,12 @@ func (suite *ResourceManagerSuite) TestValidateConfiguration() {
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
 	cfg := createResourceGroupConfig(0, 0)
-	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: DefaultResourceGroupName}}
-	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
-
-	cfg = createResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
 	cfg = createResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
-	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
-
-	cfg = createResourceGroupConfig(0, 0)
-	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: DefaultResourceGroupName}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
@@ -114,16 +104,6 @@ func (suite *ResourceManagerSuite) TestValidateConfiguration() {
 
 	err = suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(0, 0))
 	suite.NoError(err)
-
-	cfg = createResourceGroupConfig(0, 0)
-	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
-	err = suite.manager.validateResourceGroupConfig(DefaultResourceGroupName, cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
-
-	cfg = createResourceGroupConfig(0, 0)
-	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
-	err = suite.manager.validateResourceGroupConfig(DefaultResourceGroupName, cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
 
 	err = suite.manager.RemoveResourceGroup("rg2")
 	suite.NoError(err)
@@ -176,9 +156,13 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	suite.True(suite.manager.ContainResourceGroup("rg1"))
 	suite.Len(suite.manager.ListResourceGroups(), 2)
 
-	// test add duplicate rg
+	// test add duplicate rg but same configuration is ok
 	err = suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(0, 0))
+	suite.NoError(err)
+
+	err = suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(1, 1))
 	suite.Error(err)
+
 	// test delete rg
 	err = suite.manager.RemoveResourceGroup("rg1")
 	suite.NoError(err)

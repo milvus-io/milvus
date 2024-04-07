@@ -209,8 +209,8 @@ func TestAddNodesToCollectionsInRG(t *testing.T) {
 	nodeMgr := session.NewNodeManager()
 	m := meta.NewMeta(RandomIncrementIDAllocator(), store, nodeMgr)
 	m.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
-		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
-		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
 	})
 	m.CollectionManager.PutCollection(CreateTestCollection(1, 2))
 	m.CollectionManager.PutCollection(CreateTestCollection(2, 2))

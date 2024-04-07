@@ -22,10 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -60,63 +58,14 @@ func (s *ReplicaTestSuit) initCollection(collectionName string, replica int, cha
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	schema := integration.ConstructSchema(collectionName, dim, true)
-	marshaledSchema, err := proto.Marshal(schema)
-	s.NoError(err)
-
-	createCollectionStatus, err := s.Cluster.Proxy.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Schema:         marshaledSchema,
-		ShardsNum:      int32(channelNum),
+	s.CreateCollectionWithConfiguration(ctx, &integration.CreateCollectionConfig{
+		DBName:           dbName,
+		Dim:              dim,
+		CollectionName:   collectionName,
+		ChannelNum:       channelNum,
+		SegmentNum:       segmentNum,
+		RowNumPerSegment: segmentRowNum,
 	})
-	s.NoError(err)
-	s.True(merr.Ok(createCollectionStatus))
-
-	log.Info("CreateCollection result", zap.Any("createCollectionStatus", createCollectionStatus))
-	showCollectionsResp, err := s.Cluster.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	s.NoError(err)
-	s.True(merr.Ok(showCollectionsResp.Status))
-	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
-
-	for i := 0; i < segmentNum; i++ {
-		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, segmentRowNum, dim)
-		hashKeys := integration.GenerateHashKeys(segmentRowNum)
-		insertResult, err := s.Cluster.Proxy.Insert(ctx, &milvuspb.InsertRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn},
-			HashKeys:       hashKeys,
-			NumRows:        uint32(segmentRowNum),
-		})
-		s.NoError(err)
-		s.True(merr.Ok(insertResult.Status))
-
-		// flush
-		flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
-			DbName:          dbName,
-			CollectionNames: []string{collectionName},
-		})
-		s.NoError(err)
-		segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
-		ids := segmentIDs.GetData()
-		s.Require().NotEmpty(segmentIDs)
-		s.Require().True(has)
-		flushTs, has := flushResp.GetCollFlushTs()[collectionName]
-		s.True(has)
-		s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-	}
-
-	// create index
-	createIndexStatus, err := s.Cluster.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: collectionName,
-		FieldName:      integration.FloatVecField,
-		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
-	})
-	s.NoError(err)
-	s.True(merr.Ok(createIndexStatus))
-	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	for i := 1; i < replica; i++ {
 		s.Cluster.AddQueryNode()

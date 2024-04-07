@@ -79,6 +79,7 @@ func (suite *ResourceObserverSuite) SetupTest() {
 	suite.observer.Start()
 
 	suite.store.EXPECT().SaveResourceGroup(mock.Anything).Return(nil)
+	suite.store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
 	for i := 0; i < 10; i++ {
 		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 			NodeID:   int64(i),
@@ -87,6 +88,11 @@ func (suite *ResourceObserverSuite) SetupTest() {
 		}))
 		suite.meta.ResourceManager.HandleNodeUp(int64(i))
 	}
+}
+
+func (suite *ResourceObserverSuite) TearDownTest() {
+	suite.observer.Stop()
+	suite.store.ExpectedCalls = nil
 }
 
 func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
@@ -149,8 +155,8 @@ func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 
 func (suite *ResourceObserverSuite) TestRecoverResourceGroupFailed() {
 	suite.meta.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
-		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
-		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 50},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 50},
 	})
 	for i := 100; i < 200; i++ {
 		suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -167,7 +173,7 @@ func (suite *ResourceObserverSuite) TestRecoverResourceGroupFailed() {
 
 func (suite *ResourceObserverSuite) TestRecoverReplicaFailed() {
 	suite.store.EXPECT().SaveCollection(mock.Anything).Return(nil)
-	suite.store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil).Times(2)
+	suite.store.EXPECT().SaveReplica(mock.Anything, mock.Anything).Return(nil)
 	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
 	suite.meta.ReplicaManager.Put(meta.NewReplica(
 		&querypb.Replica{
