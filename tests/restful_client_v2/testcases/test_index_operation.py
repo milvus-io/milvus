@@ -104,7 +104,7 @@ class TestCreateIndex(TestBase):
         rsp = self.index_client.index_list(collection_name=name)
         assert rsp['data'] == []
 
-    @pytest.mark.parametrize("index_type", ["INVERTED"])
+    @pytest.mark.parametrize("index_type", ["TREE"])
     @pytest.mark.parametrize("dim", [128])
     def test_index_for_scalar_field(self, dim, index_type):
         """
@@ -153,7 +153,7 @@ class TestCreateIndex(TestBase):
         payload = {
             "collectionName": name,
             "indexParams": [{"fieldName": "word_count", "indexName": "word_count_vector",
-                             "indexConfig": {"index_type": "INVERTED"}}]
+                             "indexConfig": {"index_type": f"{index_type}"}}]
         }
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 200
