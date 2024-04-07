@@ -18,6 +18,8 @@ package meta
 import (
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
@@ -26,7 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/suite"
 )
 
 type ResourceManagerSuite struct {

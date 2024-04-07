@@ -371,7 +371,18 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 
+	// duplicate create a same resource group with same config is ok.
 	resp, err = server.CreateResourceGroup(ctx, createRG)
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+
+	resp, err = server.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		ResourceGroup: "rg1",
+		Config: &rgpb.ResourceGroupConfig{
+			Requests: &rgpb.ResourceGroupLimit{NodeNum: 10000},
+			Limits:   &rgpb.ResourceGroupLimit{NodeNum: 10000},
+		},
+	})
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
 
@@ -510,6 +521,10 @@ func (suite *ServiceSuite) TestTransferNode() {
 	ctx := context.Background()
 	server := suite.server
 
+	server.resourceObserver = observers.NewResourceObserver(server.meta)
+	server.resourceObserver.Start()
+	defer server.resourceObserver.Stop()
+
 	err := server.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
 		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
@@ -538,6 +553,8 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	time.Sleep(100 * time.Millisecond)
+
 	nodes, err := server.meta.ResourceManager.GetNodes("rg1")
 	suite.NoError(err)
 	suite.Len(nodes, 1)
@@ -612,6 +629,8 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	time.Sleep(100 * time.Millisecond)
+
 	nodes, err = server.meta.ResourceManager.GetNodes("rg3")
 	suite.NoError(err)
 	suite.Len(nodes, 1)
@@ -1706,6 +1725,18 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 }
 
 func (suite *ServiceSuite) TestHandleNodeUp() {
+	suite.server.replicaObserver = observers.NewReplicaObserver(
+		suite.server.meta,
+		suite.server.dist,
+	)
+	suite.server.resourceObserver = observers.NewResourceObserver(
+		suite.server.meta,
+	)
+	suite.server.replicaObserver.Start()
+	defer suite.server.replicaObserver.Stop()
+	suite.server.resourceObserver.Start()
+	defer suite.server.resourceObserver.Stop()
+
 	server := suite.server
 	suite.server.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	suite.server.meta.ReplicaManager.Put(meta.NewReplica(
@@ -1727,6 +1758,8 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 		Hostname: "localhost",
 	}))
 	server.handleNodeUp(111)
+	// wait for async update by observer
+	time.Sleep(100 * time.Millisecond)
 	nodes := suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	nodesInRG, _ := suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
 	suite.ElementsMatch(nodes, nodesInRG)
@@ -1743,6 +1776,8 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 		Hostname: "localhost",
 	}))
 	server.handleNodeUp(222)
+	// wait for async update by observer
+	time.Sleep(100 * time.Millisecond)
 	nodes = suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	nodesInRG, _ = suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
 	suite.ElementsMatch(nodes, nodesInRG)

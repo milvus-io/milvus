@@ -3,9 +3,10 @@ package meta
 import (
 	"testing"
 
+	"github.com/stretchr/testify/assert"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/stretchr/testify/assert"
 )
 
 func TestResourceGroup(t *testing.T) {

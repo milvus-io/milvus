@@ -244,14 +244,21 @@ func (rm *ResourceManager) TransferNode(sourceRGName string, targetRGName string
 	targetRG := rm.groups[targetRGName]
 
 	// Check if source resource group has enough node to transfer.
-	if sourceRG.GetConfig().Requests.NodeNum < int32(nodeNum) {
+	if len(sourceRG.GetNodes()) < nodeNum {
 		return ErrNodeNotEnough
 	}
 
 	sourceCfg := sourceRG.GetConfigCloned()
 	targetCfg := targetRG.GetConfigCloned()
 	sourceCfg.Requests.NodeNum -= int32(nodeNum)
+	sourceCfg.Limits.NodeNum -= int32(nodeNum)
 	targetCfg.Requests.NodeNum += int32(nodeNum)
+	targetCfg.Limits.NodeNum += int32(nodeNum)
+
+	if sourceCfg.Requests.NodeNum < 0 {
+		sourceCfg.Requests.NodeNum = 0
+		sourceCfg.Limits.NodeNum = 0
+	}
 
 	return rm.updateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
 		sourceRGName: sourceCfg,

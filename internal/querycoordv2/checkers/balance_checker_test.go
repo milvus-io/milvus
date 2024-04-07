@@ -309,9 +309,9 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.nodeMgr.Stopping(int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID1))
-	suite.checker.meta.ResourceManager.HandleNodeUp(int64(nodeID2))
+	suite.nodeMgr.Stopping(nodeID1)
+	suite.checker.meta.ResourceManager.HandleNodeUp(nodeID1)
+	suite.checker.meta.ResourceManager.HandleNodeUp(nodeID2)
 
 	segments := []*datapb.SegmentInfo{
 		{
@@ -332,7 +332,7 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	cid1, replicaID1, partitionID1 := 1, 1, 1
 	collection1 := utils.CreateTestCollection(int64(cid1), int32(replicaID1))
 	collection1.Status = querypb.LoadStatus_Loaded
-	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{int64(nodeID1), int64(nodeID2)})
+	replica1 := utils.CreateTestReplica(int64(replicaID1), int64(cid1), []int64{nodeID1, nodeID2})
 	partition1 := utils.CreateTestPartition(int64(cid1), int64(partitionID1))
 	suite.checker.meta.CollectionManager.PutCollection(collection1, partition1)
 	suite.checker.meta.ReplicaManager.Put(replica1)
@@ -342,7 +342,7 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	cid2, replicaID2, partitionID2 := 2, 2, 2
 	collection2 := utils.CreateTestCollection(int64(cid2), int32(replicaID2))
 	collection2.Status = querypb.LoadStatus_Loaded
-	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{int64(nodeID1), int64(nodeID2)})
+	replica2 := utils.CreateTestReplica(int64(replicaID2), int64(cid2), []int64{nodeID1, nodeID2})
 	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
 	suite.checker.meta.CollectionManager.PutCollection(collection2, partition2)
 	suite.checker.meta.ReplicaManager.Put(replica2)
