@@ -466,9 +466,8 @@ class TestInsertOperation(TestcaseBase):
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
         data = cf.gen_default_list_data(10)
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
-        collection_w.insert(
-            data=data, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
+        collection_w.insert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_default_partition(self):
