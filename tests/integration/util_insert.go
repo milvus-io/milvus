@@ -18,9 +18,13 @@ package integration
 
 import (
 	"context"
+	"encoding/binary"
 	"fmt"
+	"math"
 	"math/rand"
 	"time"
+
+	"github.com/x448/float16"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -163,20 +167,20 @@ func NewFloat16VectorFieldData(fieldName string, numRows, dim int) *schemapb.Fie
 	}
 }
 
-// func NewBFloat16VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
-// 	return &schemapb.FieldData{
-// 		Type:      schemapb.DataType_BFloat16Vector,
-// 		FieldName: fieldName,
-// 		Field: &schemapb.FieldData_Vectors{
-// 			Vectors: &schemapb.VectorField{
-// 				Dim: int64(dim),
-// 				Data: &schemapb.VectorField_Bfloat16Vector{
-// 					Bfloat16Vector: GenerateBFloat16Vectors(numRows, dim),
-// 				},
-// 			},
-// 		},
-// 	}
-// }
+func NewBFloat16VectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_BFloat16Vector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(dim),
+				Data: &schemapb.VectorField_Bfloat16Vector{
+					Bfloat16Vector: GenerateBFloat16Vectors(numRows, dim),
+				},
+			},
+		},
+	}
+}
 
 func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.FieldData {
 	return &schemapb.FieldData{
@@ -261,11 +265,28 @@ func GenerateBinaryVectors(numRows, dim int) []byte {
 }
 
 func GenerateFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
+	total := numRows * dim
+	ret := make([]byte, total*2)
+	for i := 0; i < total; i++ {
+		v := float16.Fromfloat32(rand.Float32()).Bits()
+		binary.LittleEndian.PutUint16(ret[i*2:], v)
+	}
+	return ret
+}
+
+func GenerateBFloat16Vectors(numRows, dim int) []byte {
+	total := numRows * dim
+	ret16 := make([]uint16, 0, total)
+	for i := 0; i < total; i++ {
+		f := rand.Float32()
+		bits := math.Float32bits(f)
+		bits >>= 16
+		bits &= 0x7FFF
+		ret16 = append(ret16, uint16(bits))
+	}
+	ret := make([]byte, total*2)
+	for i, value := range ret16 {
+		binary.LittleEndian.PutUint16(ret[i*2:], value)
 	}
 	return ret
 }
@@ -273,16 +294,6 @@ func GenerateFloat16Vectors(numRows, dim int) []byte {
 func GenerateSparseFloatArray(numRows int) *schemapb.SparseFloatArray {
 	return testutils.GenerateSparseFloatVectors(numRows)
 }
-
-// func GenerateBFloat16Vectors(numRows, dim int) []byte {
-// 	total := numRows * dim * 2
-// 	ret := make([]byte, total)
-// 	_, err := rand.Read(ret)
-// 	if err != nil {
-// 		panic(err)
-// 	}
-// 	return ret
-// }
 
 func GenerateHashKeys(numRows int) []uint32 {
 	ret := make([]uint32, 0, numRows)
