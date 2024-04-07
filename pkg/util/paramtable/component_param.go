@@ -3469,7 +3469,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Key:          "datanode.import.readBufferSizeInMB",
 		Version:      "2.4.0",
 		Doc:          "The data block size (in MB) read from chunk manager by the datanode during import.",
-		DefaultValue: "64",
+		DefaultValue: "16",
 		PanicIfEmpty: false,
 		Export:       true,
 	}
