@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package checkers
+package utils
 
 import (
 	"testing"
@@ -119,6 +119,23 @@ func (suite *UtilTestSuite) TestCheckLeaderAvaliableFailed() {
 		})
 		suite.Error(err)
 		suite.nodeMgr = session.NewNodeManager()
+	})
+
+	suite.Run("l0 segment on non-delegator node", func() {
+		leadview := &meta.LeaderView{
+			ID:       1,
+			Channel:  "test",
+			Segments: map[int64]*querypb.SegmentDist{2: {NodeID: 2}},
+		}
+		suite.setNodeAvailable(1, 2)
+		err := CheckLeaderAvailable(suite.nodeMgr, leadview, map[int64]*datapb.SegmentInfo{
+			2: {
+				ID:            2,
+				InsertChannel: "test",
+				Level:         datapb.SegmentLevel_L0,
+			},
+		})
+		suite.Error(err)
 	})
 }
 

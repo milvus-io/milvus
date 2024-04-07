@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/checkers"
 	"github.com/milvus-io/milvus/internal/querycoordv2/job"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
@@ -932,7 +931,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		}
 
 		for _, leader := range leaders {
-			if err := checkers.CheckLeaderAvailable(s.nodeMgr, leader, currentTargets); err != nil {
+			if err := utils.CheckLeaderAvailable(s.nodeMgr, leader, currentTargets); err != nil {
 				multierr.AppendInto(&channelErr, err)
 				continue
 			}

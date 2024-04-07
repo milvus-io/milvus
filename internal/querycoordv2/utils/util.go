@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package checkers
+package utils
 
 import (
 	"context"
@@ -74,6 +74,12 @@ func CheckLeaderAvailable(nodeMgr *session.NodeManager, leader *meta.LeaderView,
 		_, exist := leader.Segments[segmentID]
 		if !exist {
 			log.RatedInfo(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID))
+			return merr.WrapErrSegmentLack(segmentID)
+		}
+
+		l0WithWrongLocation := info.GetLevel() == datapb.SegmentLevel_L0 && leader.Segments[segmentID].GetNodeID() != leader.ID
+		if l0WithWrongLocation {
+			log.RatedInfo(10, "leader is not available due to lack of segment", zap.Int64("segmentID", segmentID), zap.Bool("isL0Segment", true))
 			return merr.WrapErrSegmentLack(segmentID)
 		}
 	}
