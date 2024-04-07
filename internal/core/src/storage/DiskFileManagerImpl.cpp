@@ -377,6 +377,7 @@ DiskFileManagerImpl::CacheBatchIndexFilesToDiskV2(
     }
     return offset;
 }
+template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(
     std::shared_ptr<milvus_storage::Space> space) {
@@ -413,7 +414,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(
         field_data->FillFieldData(col_data);
         dim = field_data->get_dim();
         auto data_size =
-            field_data->get_num_rows() * index_meta_.dim * sizeof(float);
+            field_data->get_num_rows() * index_meta_.dim * sizeof(DataType);
         local_chunk_manager->Write(local_data_path,
                                    write_offset,
                                    const_cast<void*>(field_data->Data()),
@@ -441,7 +442,7 @@ SortByPath(std::vector<std::string>& paths) {
                          std::stol(b.substr(b.find_last_of("/") + 1));
               });
 }
-
+template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     SortByPath(remote_files);
@@ -476,7 +477,8 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
                        "inconsistent dim value in multi binlogs!");
             dim = field_data->get_dim();
 
-            auto data_size = field_data->get_num_rows() * dim * sizeof(float);
+            auto data_size =
+                field_data->get_num_rows() * dim * sizeof(DataType);
             local_chunk_manager->Write(local_data_path,
                                        write_offset,
                                        const_cast<void*>(field_data->Data()),
@@ -824,5 +826,24 @@ DiskFileManagerImpl::IsExisted(const std::string& file) noexcept {
     }
     return isExist;
 }
+
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<float>(
+    std::vector<std::string> remote_files);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<float16>(
+    std::vector<std::string> remote_files);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
+    std::vector<std::string> remote_files);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<float>(
+    std::shared_ptr<milvus_storage::Space> space);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<float16>(
+    std::shared_ptr<milvus_storage::Space> space);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
+    std::shared_ptr<milvus_storage::Space> space);
 
 }  // namespace milvus::storage

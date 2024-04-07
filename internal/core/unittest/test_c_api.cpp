@@ -1787,6 +1787,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     DeleteSegment(segment);
 }
 
+template <typename VecType = float>
 void
 testReduceSearchWithExpr(int N,
                          int topK,
@@ -1794,8 +1795,19 @@ testReduceSearchWithExpr(int N,
                          bool filter_all = false) {
     std::cerr << "testReduceSearchWithExpr(" << N << ", " << topK << ", "
               << num_queries << ")" << std::endl;
-
-    auto collection = NewCollection(get_default_schema_config());
+    std::function<const char*()> schema_fun;
+    std::function<std::string(int)> query_gen_fun;
+    if constexpr (std::is_same_v<VecType, float>) {
+        schema_fun = get_default_schema_config;
+        query_gen_fun = generate_query_data;
+    } else if constexpr (std::is_same_v<VecType, float16>) {
+        schema_fun = get_float16_schema_config;
+        query_gen_fun = generate_query_data_float16;
+    } else if constexpr (std::is_same_v<VecType, bfloat16>) {
+        schema_fun = get_bfloat16_schema_config;
+        query_gen_fun = generate_query_data_bfloat16;
+    }
+    auto collection = NewCollection(schema_fun());
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -1853,7 +1865,7 @@ testReduceSearchWithExpr(int N,
               topK % N;
     }
     auto serialized_expr_plan = fmt.str();
-    auto blob = generate_query_data(num_queries);
+    auto blob = query_gen_fun(num_queries);
 
     void* plan = nullptr;
     auto binary_plan =
@@ -1942,17 +1954,29 @@ testReduceSearchWithExpr(int N,
 }
 
 TEST(CApiTest, ReduceSearchWithExpr) {
+    //float32
     testReduceSearchWithExpr(2, 1, 1);
     testReduceSearchWithExpr(2, 10, 10);
     testReduceSearchWithExpr(100, 1, 1);
     testReduceSearchWithExpr(100, 10, 10);
     testReduceSearchWithExpr(10000, 1, 1);
     testReduceSearchWithExpr(10000, 10, 10);
+    //float16
+    testReduceSearchWithExpr(2, 10, 10, false);
+    testReduceSearchWithExpr(100, 10, 10, false);
+    //bfloat16
+    testReduceSearchWithExpr(2, 10, 10, false);
+    testReduceSearchWithExpr(100, 10, 10, false);
 }
 
 TEST(CApiTest, ReduceSearchWithExprFilterAll) {
+    //float32
     testReduceSearchWithExpr(2, 1, 1, true);
     testReduceSearchWithExpr(2, 10, 10, true);
+    //float16
+    testReduceSearchWithExpr(2, 1, 1, true);
+    //bfloat16
+    testReduceSearchWithExpr(2, 1, 1, true);
 }
 
 TEST(CApiTest, LoadIndexInfo) {
