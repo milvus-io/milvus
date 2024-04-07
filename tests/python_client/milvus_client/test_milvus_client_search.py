@@ -124,7 +124,7 @@ class TestMilvusClientSearchInvalid(TestcaseBase):
         client = self._connect(enable_milvus_client_api=True)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
-        error = {ct.err_code: 65535,
+        error = {ct.err_code: 1100,
                  ct.err_msg: "metric type not found or not supported, supported: [L2 IP COSINE HAMMING JACCARD]"}
         client_w.create_collection(client, collection_name, default_dim, metric_type="invalid",
                                    check_task=CheckTasks.err_res, check_items=error)

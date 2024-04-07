@@ -1020,7 +1020,7 @@ class TestNewIndexBase(TestcaseBase):
                                   index_name=ct.default_index_name)
         self.connection_wrap.remove_connection(ct.default_alias)
         collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 0, ct.err_msg: "should create connect first."})
+                                check_items={ct.err_code: 1, ct.err_msg: "should create connect first."})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_index_repeatedly_ip(self, get_simple_index):
@@ -1286,8 +1286,12 @@ class TestNewIndexBinary(TestcaseBase):
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name, schema=default_binary_schema)
         binary_index_params = {'index_type': 'HNSW', "M": '18', "efConstruction": '240', 'metric_type': metric_type}
-        collection_w.create_index(default_binary_vec_field_name, binary_index_params)
-        assert collection_w.index()[0].params == binary_index_params
+        collection_w.create_index(default_binary_vec_field_name, binary_index_params,
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "HNSW only support float vector data type: invalid "
+                                                           "parameter[expected=valid index params][actual=invalid "
+                                                           "index params]"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", ct.binary_metrics)
@@ -2299,9 +2303,12 @@ class TestAutoIndex(TestcaseBase):
         expected: raise exception
         """
         collection_w = self.init_collection_general(prefix, is_binary=True, is_index=False)[0]
-        collection_w.create_index(binary_field_name, {})
-        actual_index_params = collection_w.index()[0].params
-        assert default_autoindex_params == actual_index_params
+        collection_w.create_index(binary_field_name, {},
+                                  check_task=CheckTasks.err_res,
+                                  check_items={ct.err_code: 1100,
+                                               ct.err_msg: "HNSW only support float vector data type: invalid "
+                                                           "parameter[expected=valid index params][actual=invalid "
+                                                           "index params]"})
 
 
 @pytest.mark.tags(CaseLabel.GPU)

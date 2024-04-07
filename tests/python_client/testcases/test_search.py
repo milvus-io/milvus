@@ -2216,6 +2216,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -3165,6 +3166,7 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
     def test_search_with_expression_bool(self, dim, auto_id, _async, bool_type, enable_dynamic_field):
         """
@@ -3395,7 +3397,6 @@ class TestCollectionSearch(TestcaseBase):
                                                                       is_all_data_type=True,
                                                                       auto_id=auto_id,
                                                                       dim=dim,
-                                                                      enable_dynamic_field=enable_dynamic_field,
                                                                       multiple_dim_array=[dim, dim])[0:4]
         # 2. search
         log.info("test_search_expression_all_data_type: Searching collection %s" %
@@ -4630,7 +4631,7 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metrics", ct.binary_metrics[:2])
-    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT", "HNSW"])
+    @pytest.mark.parametrize("index", ["BIN_FLAT", "BIN_IVF_FLAT"])
     @pytest.mark.parametrize("dim", [32768, 65536, ct.max_binary_vector_dim-8, ct.max_binary_vector_dim])
     def test_binary_indexed_large_dim_vectors_search(self, metrics, index, dim):
         """
