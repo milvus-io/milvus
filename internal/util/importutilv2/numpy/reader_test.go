@@ -137,6 +137,14 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 			_, err = rand2.Read(float16VecData)
 			assert.NoError(t, err)
 			insertData.Data[field.GetFieldID()] = &storage.Float16VectorFieldData{Data: float16VecData, Dim: int(dim)}
+		case schemapb.DataType_BFloat16Vector:
+			dim, err := typeutil.GetDim(field)
+			assert.NoError(t, err)
+			total := int64(rowCount) * dim * 2
+			bfloat16VecData := make([]byte, total)
+			_, err = rand2.Read(bfloat16VecData)
+			assert.NoError(t, err)
+			insertData.Data[field.GetFieldID()] = &storage.BFloat16VectorFieldData{Data: bfloat16VecData, Dim: int(dim)}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			varcharData := make([]string, 0)
 			for i := 0; i < rowCount; i++ {
@@ -262,6 +270,17 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		} else if dataType == schemapb.DataType_FloatVector {
 			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]float32), dim)
 			chunkedRows := make([][dim]float32, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
+			}
+			reader, err := CreateReader(chunkedRows)
+			suite.NoError(err)
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
+		} else if dataType == schemapb.DataType_Float16Vector || dataType == schemapb.DataType_BFloat16Vector {
+			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim*2)
+			chunkedRows := make([][dim * 2]byte, len(chunked))
 			for i, innerSlice := range chunked {
 				copy(chunkedRows[i][:], innerSlice[:])
 			}
@@ -397,6 +416,17 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
 				Reader: reader,
 			}, nil)
+		} else if dataType == schemapb.DataType_Float16Vector || dataType == schemapb.DataType_BFloat16Vector {
+			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim*2)
+			chunkedRows := make([][dim * 2]byte, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
+			}
+			reader, err := CreateReader(chunkedRows)
+			suite.NoError(err)
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
 		} else if dataType == schemapb.DataType_BinaryVector {
 			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim/8)
 			chunkedRows := make([][dim / 8]byte, len(chunked))
@@ -442,8 +472,14 @@ func (suite *ReaderSuite) TestStringPK() {
 	suite.run(schemapb.DataType_Int32)
 }
 
-func (suite *ReaderSuite) TestBinaryVector() {
+func (suite *ReaderSuite) TestVector() {
 	suite.vecDataType = schemapb.DataType_BinaryVector
+	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_FloatVector
+	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_Float16Vector
+	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_BFloat16Vector
 	suite.run(schemapb.DataType_Int32)
 }
 

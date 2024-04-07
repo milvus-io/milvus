@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
@@ -50,6 +51,10 @@ type BulkInsertSuite struct {
 	pkType   schemapb.DataType
 	autoID   bool
 	fileType importutilv2.FileType
+
+	vecType    schemapb.DataType
+	indexType  indexparamcheck.IndexType
+	metricType metric.MetricType
 }
 
 func (s *BulkInsertSuite) SetupTest() {
@@ -59,6 +64,10 @@ func (s *BulkInsertSuite) SetupTest() {
 	s.fileType = importutilv2.Parquet
 	s.pkType = schemapb.DataType_Int64
 	s.autoID = false
+
+	s.vecType = schemapb.DataType_FloatVector
+	s.indexType = indexparamcheck.IndexHNSW
+	s.metricType = metric.L2
 }
 
 func (s *BulkInsertSuite) run() {
@@ -75,7 +84,7 @@ func (s *BulkInsertSuite) run() {
 	schema := integration.ConstructSchema(collectionName, dim, s.autoID,
 		&schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: s.autoID},
 		&schemapb.FieldSchema{FieldID: 101, Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}},
-		&schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+		&schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
 	)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
@@ -91,11 +100,13 @@ func (s *BulkInsertSuite) run() {
 	var files []*internalpb.ImportFile
 	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
 	s.NoError(err)
-	if s.fileType == importutilv2.Numpy {
+
+	switch s.fileType {
+	case importutilv2.Numpy:
 		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
 		s.NoError(err)
 		files = []*internalpb.ImportFile{importFile}
-	} else if s.fileType == importutilv2.JSON {
+	case importutilv2.JSON:
 		rowBasedFile := c.ChunkManager.RootPath() + "/" + "test.json"
 		GenerateJSONFile(s.T(), rowBasedFile, schema, rowCount)
 		defer os.Remove(rowBasedFile)
@@ -106,7 +117,7 @@ func (s *BulkInsertSuite) run() {
 				},
 			},
 		}
-	} else if s.fileType == importutilv2.Parquet {
+	case importutilv2.Parquet:
 		filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
 		err = GenerateParquetFile(filePath, schema, rowCount)
 		s.NoError(err)
@@ -147,7 +158,7 @@ func (s *BulkInsertSuite) run() {
 		CollectionName: collectionName,
 		FieldName:      "embeddings",
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexHNSW, metric.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
 	})
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
@@ -168,28 +179,41 @@ func (s *BulkInsertSuite) run() {
 	topk := 10
 	roundDecimal := -1
 
-	params := integration.GetSearchParams(integration.IndexHNSW, metric.L2)
+	params := integration.GetSearchParams(s.indexType, s.metricType)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		"embeddings", schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
+		"embeddings", s.vecType, nil, s.metricType, params, nq, dim, topk, roundDecimal)
 
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
 }
 
-func (s *BulkInsertSuite) TestNumpy() {
-	s.fileType = importutilv2.Numpy
-	s.run()
-}
+func (s *BulkInsertSuite) TestMultiFileTypes() {
+	fileTypeArr := []importutilv2.FileType{importutilv2.JSON, importutilv2.Numpy, importutilv2.Parquet}
 
-func (s *BulkInsertSuite) TestJSON() {
-	s.fileType = importutilv2.JSON
-	s.run()
-}
+	for _, fileType := range fileTypeArr {
+		s.fileType = fileType
 
-func (s *BulkInsertSuite) TestParquet() {
-	s.fileType = importutilv2.Parquet
-	s.run()
+		s.vecType = schemapb.DataType_BinaryVector
+		s.indexType = indexparamcheck.IndexFaissBinIvfFlat
+		s.metricType = metric.HAMMING
+		s.run()
+
+		s.vecType = schemapb.DataType_FloatVector
+		s.indexType = indexparamcheck.IndexHNSW
+		s.metricType = metric.L2
+		s.run()
+
+		s.vecType = schemapb.DataType_Float16Vector
+		s.indexType = indexparamcheck.IndexHNSW
+		s.metricType = metric.L2
+		s.run()
+
+		s.vecType = schemapb.DataType_BFloat16Vector
+		s.indexType = indexparamcheck.IndexHNSW
+		s.metricType = metric.L2
+		s.run()
+	}
 }
 
 func (s *BulkInsertSuite) TestAutoID() {
