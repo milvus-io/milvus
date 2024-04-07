@@ -143,6 +143,15 @@ func (suite *LeaderViewManagerSuite) TestGetDist() {
 	suite.Len(segments, 1)
 }
 
+func (suite *LeaderViewManagerSuite) TestGetLatestLeadersByReplicaShard() {
+	suite.Run("replica_nil", func() {
+		suite.NotPanics(func() {
+			lv := suite.mgr.GetLatestLeadersByReplicaShard(nil, "")
+			suite.Nil(lv)
+		})
+	})
+}
+
 func (suite *LeaderViewManagerSuite) TestGetLeader() {
 	mgr := suite.mgr
 

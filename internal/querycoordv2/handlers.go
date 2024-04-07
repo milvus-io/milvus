@@ -109,7 +109,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
 		log.Info("manually balance segment...",
-			zap.Int64("replica", plan.Replica.ID),
+			zap.Int64("replica", plan.Replica.GetID()),
 			zap.String("channel", plan.Segment.InsertChannel),
 			zap.Int64("from", plan.From),
 			zap.Int64("to", plan.To),
@@ -133,7 +133,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 		)
 		if err != nil {
 			log.Warn("create segment task for balance failed",
-				zap.Int64("replica", plan.Replica.ID),
+				zap.Int64("replica", plan.Replica.GetID()),
 				zap.String("channel", plan.Segment.InsertChannel),
 				zap.Int64("from", plan.From),
 				zap.Int64("to", plan.To),
@@ -186,7 +186,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 	tasks := make([]task.Task, 0, len(plans))
 	for _, plan := range plans {
 		log.Info("manually balance channel...",
-			zap.Int64("replica", plan.Replica.ID),
+			zap.Int64("replica", plan.Replica.GetID()),
 			zap.String("channel", plan.Channel.GetChannelName()),
 			zap.Int64("from", plan.From),
 			zap.Int64("to", plan.To),
@@ -209,7 +209,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 		)
 		if err != nil {
 			log.Warn("create channel task for balance failed",
-				zap.Int64("replica", plan.Replica.ID),
+				zap.Int64("replica", plan.Replica.GetID()),
 				zap.String("channel", plan.Channel.GetChannelName()),
 				zap.Int64("from", plan.From),
 				zap.Int64("to", plan.To),

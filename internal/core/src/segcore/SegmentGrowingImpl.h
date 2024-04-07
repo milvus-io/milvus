@@ -28,10 +28,10 @@
 #include "InsertRecord.h"
 #include "SealedIndexingRecord.h"
 #include "SegmentGrowing.h"
-#include "common/Types.h"
 #include "common/EasyAssert.h"
-#include "query/PlanNode.h"
 #include "common/IndexMeta.h"
+#include "common/Types.h"
+#include "query/PlanNode.h"
 
 namespace milvus::segcore {
 
@@ -239,7 +239,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
     bool
     HasIndex(FieldId field_id) const override {
         auto& field_meta = schema_->operator[](field_id);
-        if (datatype_is_vector(field_meta.get_data_type()) &&
+        if (IsVectorDataType(field_meta.get_data_type()) &&
             indexing_record_.SyncDataWithIndex(field_id)) {
             return true;
         }

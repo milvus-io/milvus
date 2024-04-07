@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -83,13 +82,11 @@ func GetFlushTsPolicy(flushTimestamp *atomic.Uint64, meta metacache.MetaCache) S
 		if flushTs != nonFlushTS && ts >= flushTs {
 			// flush segment start pos < flushTs && checkpoint > flushTs
 			ids := lo.FilterMap(buffers, func(buf *segmentBuffer, _ int) (int64, bool) {
-				seg, ok := meta.GetSegmentByID(buf.segmentID)
+				_, ok := meta.GetSegmentByID(buf.segmentID)
 				if !ok {
 					return buf.segmentID, false
 				}
-				inRange := seg.State() == commonpb.SegmentState_Flushed ||
-					seg.Level() == datapb.SegmentLevel_L0
-				return buf.segmentID, inRange && buf.MinTimestamp() < flushTs
+				return buf.segmentID, buf.MinTimestamp() < flushTs
 			})
 
 			// flush all buffer

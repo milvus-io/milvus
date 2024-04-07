@@ -246,6 +246,9 @@ func (mgr *LeaderViewManager) GetLeadersByShard(shard string) map[int64]*LeaderV
 }
 
 func (mgr *LeaderViewManager) GetLatestLeadersByReplicaShard(replica *Replica, shard string) *LeaderView {
+	if replica == nil {
+		return nil
+	}
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
 

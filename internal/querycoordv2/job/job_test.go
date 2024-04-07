@@ -1195,7 +1195,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 		)
 		suite.scheduler.Add(job)
 		err := job.Wait()
-		suite.ErrorIs(err, ErrFailedAllocateID)
+		suite.ErrorIs(err, meta.ErrNodeNotEnough)
 	}
 }
 

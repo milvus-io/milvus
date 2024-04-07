@@ -389,6 +389,7 @@ class TestCreateCollection(TestBase):
     @pytest.mark.parametrize("enable_partition_key", [True])
     @pytest.mark.parametrize("dim", [128])
     @pytest.mark.parametrize("metric_type", ["JACCARD", "HAMMING"])
+    @pytest.mark.skip(reason="https://github.com/milvus-io/milvus/issues/31494")
     def test_create_collections_binary_vector_datatype(self, dim, auto_id, enable_dynamic_field, enable_partition_key,
                                                        metric_type):
         """

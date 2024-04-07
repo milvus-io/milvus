@@ -187,34 +187,36 @@ func (b *ScoreBasedBalancer) calculateSegmentScore(s *meta.Segment) int {
 
 func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAssignPlan, []ChannelAssignPlan) {
 	log := log.With(
-		zap.Int64("collection", replica.CollectionID),
-		zap.Int64("replica id", replica.Replica.GetID()),
-		zap.String("replica group", replica.Replica.GetResourceGroup()),
+		zap.Int64("collection", replica.GetCollectionID()),
+		zap.Int64("replica id", replica.GetID()),
+		zap.String("replica group", replica.GetResourceGroup()),
 	)
-	nodes := replica.GetNodes()
-	if len(nodes) == 0 {
+	if replica.NodesCount() == 0 {
 		return nil, nil
 	}
 
-	outboundNodes := b.meta.ResourceManager.CheckOutboundNodes(replica)
 	onlineNodes := make([]int64, 0)
 	offlineNodes := make([]int64, 0)
-	for _, nid := range nodes {
+
+	// read only nodes is offline in current replica.
+	if replica.RONodesCount() > 0 {
+		// if node is stop or transfer to other rg
+		log.RatedInfo(10, "meet read only node, try to move out all segment/channel", zap.Int64s("node", replica.GetRONodes()))
+		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
+	}
+
+	for _, nid := range replica.GetNodes() {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue
 		} else if isStopping {
-			offlineNodes = append(offlineNodes, nid)
-		} else if outboundNodes.Contain(nid) {
-			// if node is stop or transfer to other rg
-			log.RatedInfo(10, "meet outbound node, try to move out all segment/channel", zap.Int64("node", nid))
 			offlineNodes = append(offlineNodes, nid)
 		} else {
 			onlineNodes = append(onlineNodes, nid)
 		}
 	}
 
-	if len(nodes) == len(offlineNodes) || len(onlineNodes) == 0 {
+	if len(onlineNodes) == 0 {
 		// no available nodes to balance
 		return nil, nil
 	}
@@ -258,7 +260,7 @@ func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlin
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
 				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
-		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes, false)
+		plans := b.AssignSegment(replica.GetCollectionID(), segments, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -283,7 +285,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 		})
 		segmentDist[node] = segments
 
-		rowCount := b.calculateScore(replica.CollectionID, node)
+		rowCount := b.calculateScore(replica.GetCollectionID(), node)
 		totalScore += rowCount
 		nodeScore[node] = rowCount
 	}
@@ -322,7 +324,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 		return nil
 	}
 
-	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, onlineNodes, false)
+	segmentPlans := b.AssignSegment(replica.GetCollectionID(), segmentsToMove, onlineNodes, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].Replica = replica

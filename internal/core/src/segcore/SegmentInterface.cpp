@@ -218,7 +218,7 @@ SegmentInternalInterface::get_field_avg_size(FieldId field_id) const {
     auto data_type = field_meta.get_data_type();
 
     std::shared_lock lck(mutex_);
-    if (datatype_is_variable(data_type)) {
+    if (IsVariableDataType(data_type)) {
         if (variable_fields_avg_size_.find(field_id) ==
             variable_fields_avg_size_.end()) {
             return 0;
@@ -241,7 +241,7 @@ SegmentInternalInterface::set_field_avg_size(FieldId field_id,
     auto data_type = field_meta.get_data_type();
 
     std::unique_lock lck(mutex_);
-    if (datatype_is_variable(data_type)) {
+    if (IsVariableDataType(data_type)) {
         AssertInfo(num_rows > 0,
                    "The num rows of field data should be greater than 0");
         if (variable_fields_avg_size_.find(field_id) ==
