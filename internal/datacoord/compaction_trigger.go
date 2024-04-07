@@ -662,9 +662,9 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 		log := log.With(zap.Int64("collectionID", group.collectionID),
 			zap.Int64("partitionID", group.partitionID),
 			zap.String("channel", group.channelName))
-		if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
-			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
-		}
+		//if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
+		//	group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
+		//}
 
 		ct, err := getCompactTime(ts, coll)
 		if err != nil {
