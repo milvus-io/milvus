@@ -1668,9 +1668,15 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 		CollectionID: collectionID,
 		Channel:      channel,
 		Segments: map[int64]*querypb.SegmentDist{
-			1: {},
-			2: {},
-			3: {},
+			1: {
+				NodeID: 2,
+			},
+			2: {
+				NodeID: 2,
+			},
+			3: {
+				NodeID: 2,
+			},
 		},
 	})
 	suite.dist.LeaderViewManager.Update(1, &meta.LeaderView{
@@ -1697,9 +1703,15 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 		CollectionID: collectionID,
 		Channel:      channel,
 		Segments: map[int64]*querypb.SegmentDist{
-			1: {},
-			2: {},
-			3: {},
+			1: {
+				NodeID: 1,
+			},
+			2: {
+				NodeID: 1,
+			},
+			3: {
+				NodeID: 1,
+			},
 		},
 	})
 
