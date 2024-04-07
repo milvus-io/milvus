@@ -14,7 +14,7 @@ FROM ubuntu:focal-20220426
 ARG TARGETARCH
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 && \
+    apt-get install -y --no-install-recommends curl ca-certificates libaio-dev libgomp1 libopenblas-dev && \
     apt-get remove --purge -y && \
     rm -rf /var/lib/apt/lists/*
 
