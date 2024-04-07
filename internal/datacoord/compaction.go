@@ -432,7 +432,8 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 			return err
 		}
 	case datapb.CompactionType_MajorCompaction:
-		if err := c.handleMajorCompactionResult(plan, result); err != nil {
+		// todo we may need to create a bew handleMajorCompactionResult method if the logic differs a lot
+		if err := c.handleMergeCompactionResult(plan, result); err != nil {
 			return err
 		}
 	default:
@@ -465,79 +466,46 @@ func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.Compaction
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
 	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.String("type", plan.GetType().String()))
-	if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
-		// should never happen
-		log.Warn("illegal compaction results")
-		return fmt.Errorf("Illegal compaction results: %v", result)
+	if plan.GetType() == datapb.CompactionType_MajorCompaction {
+		if len(result.GetSegments()) == 0 {
+			// should never happen
+			log.Warn("illegal compaction results")
+			return fmt.Errorf("Illegal compaction results: %v", result)
+		}
+	} else {
+		if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
+			// should never happen
+			log.Warn("illegal compaction results")
+			return fmt.Errorf("Illegal compaction results: %v", result)
+		}
 	}
 
-	// Merge compaction has one and only one segment
 	newSegmentInfo := c.meta.GetHealthySegment(result.GetSegments()[0].SegmentID)
+	var newSegmentInfos []*SegmentInfo
 	if newSegmentInfo != nil {
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
 		// Also prepare metric updates.
 		newSegments, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
+		newSegmentInfos = newSegments
 		if err != nil {
 			return err
 		}
 		// Apply metrics after successful meta update.
 		metricMutation.commit()
-		newSegmentInfo = newSegments[0]
 	}
 
-	nodeID := c.plans[plan.GetPlanID()].dataNodeID
-	req := &datapb.SyncSegmentsRequest{
-		PlanID:        plan.PlanID,
-		CompactedTo:   newSegmentInfo.GetID(),
-		CompactedFrom: newSegmentInfo.GetCompactionFrom(),
-		NumOfRows:     newSegmentInfo.GetNumOfRows(),
-		StatsLogs:     newSegmentInfo.GetStatslogs(),
-		ChannelName:   plan.GetChannel(),
-		PartitionId:   newSegmentInfo.GetPartitionID(),
-		CollectionId:  newSegmentInfo.GetCollectionID(),
-	}
-
-	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
-	if err := c.sessions.SyncSegments(nodeID, req); err != nil {
-		log.Warn("handleCompactionResult: fail to sync segments with node",
-			zap.Int64("nodeID", nodeID), zap.Error(err))
-		return err
-	}
-
-	log.Info("handleCompactionResult: success to handle merge compaction result")
-	return nil
-}
-
-func (c *compactionPlanHandler) handleMajorCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
-	log := log.With(zap.Int64("planID", plan.GetPlanID()))
-	if len(result.GetSegments()) == 0 {
-		// should never happen
-		log.Warn("illegal compaction results")
-		return fmt.Errorf("Illegal compaction results: %v", result)
-	}
-
-	// Also prepare metric updates.
-	newSegments, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
-	if err != nil {
-		return err
-	}
-
-	// Apply metrics after successful meta update.
-	metricMutation.commit()
-
-	for _, newSegment := range newSegments {
-		newSegmentInfo := c.meta.GetHealthySegment(newSegment.ID)
+	for _, newSegment := range newSegmentInfos {
 		nodeID := c.plans[plan.GetPlanID()].dataNodeID
 		req := &datapb.SyncSegmentsRequest{
 			PlanID:        plan.PlanID,
-			CompactedTo:   newSegmentInfo.GetID(),
-			CompactedFrom: newSegmentInfo.GetCompactionFrom(),
-			NumOfRows:     newSegmentInfo.GetNumOfRows(),
-			StatsLogs:     newSegmentInfo.GetStatslogs(),
+			CompactedTo:   newSegment.ID,
+			CompactedFrom: newSegment.GetCompactionFrom(),
+			NumOfRows:     newSegment.GetNumOfRows(),
+			StatsLogs:     newSegment.GetStatslogs(),
 			ChannelName:   plan.GetChannel(),
-			PartitionId:   newSegmentInfo.GetPartitionID(),
-			CollectionId:  newSegmentInfo.GetCollectionID(),
+			PartitionId:   newSegment.GetPartitionID(),
+			CollectionId:  newSegment.GetCollectionID(),
 		}
 
 		log.Info("handleCompactionResult: syncing segments with node",
@@ -549,7 +517,7 @@ func (c *compactionPlanHandler) handleMajorCompactionResult(plan *datapb.Compact
 		}
 	}
 
-	log.Info("handleCompactionResult: success to handle merge compaction result")
+	log.Info("handleCompactionResult: success to handle compaction result")
 	return nil
 }
 
