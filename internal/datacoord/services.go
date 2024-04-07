@@ -1410,7 +1410,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	return merr.Success(), nil
 }
 
-// ReportDataNodeTtMsgs send datenode timetick messages to dataCoord.
+// ReportDataNodeTtMsgs gets timetick messages from datanode.
 func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -1490,7 +1490,7 @@ func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeT
 	infos := lo.Map(flushableSegments, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
 		return info.SegmentInfo
 	})
-	err = s.cluster.Flush(ctx, sourceID, channel, infos)
+	err = s.cluster.Flush(s.ctx, sourceID, channel, infos)
 	if err != nil {
 		log.Warn("failed to call Flush", zap.Error(err))
 		return err

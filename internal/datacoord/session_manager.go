@@ -171,9 +171,10 @@ func (c *SessionManagerImpl) Flush(ctx context.Context, nodeID int64, req *datap
 }
 
 func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
+	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID))
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
-		log.Warn("failed to get dataNode client", zap.Int64("dataNode ID", nodeID), zap.Error(err))
+		log.Warn("failed to get dataNode client", zap.Error(err))
 		return
 	}
 	ctx, cancel := context.WithTimeout(ctx, flushTimeout)
@@ -181,9 +182,9 @@ func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *d
 
 	resp, err := cli.FlushSegments(ctx, req)
 	if err := VerifyResponse(resp, err); err != nil {
-		log.Error("flush call (perhaps partially) failed", zap.Int64("dataNode ID", nodeID), zap.Error(err))
+		log.Error("flush call (perhaps partially) failed", zap.Error(err))
 	} else {
-		log.Info("flush call succeeded", zap.Int64("dataNode ID", nodeID))
+		log.Info("flush call succeeded")
 	}
 }
 
