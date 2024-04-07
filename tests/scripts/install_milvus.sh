@@ -23,7 +23,7 @@
 set -x
 
 
-MILVUS_HELM_REPO="${MILVUS_HELM_REPO:-https://milvus-io.github.io/milvus-helm/}"
+MILVUS_HELM_REPO="${MILVUS_HELM_REPO:-https://zilliztech.github.io/milvus-helm/}"
 MILVUS_HELM_RELEASE_NAME="${MILVUS_HELM_RELEASE_NAME:-milvus-testing}"
 MILVUS_CLUSTER_ENABLED="${MILVUS_CLUSTER_ENABLED:-false}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
