@@ -58,7 +58,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type majorCompactionTask struct {
+type clusteringCompactionTask struct {
 	compactor
 	io io.BinlogIO
 	//stageIO   io.BinlogIO
@@ -123,7 +123,7 @@ type SpillSignal struct {
 	buffer *ClusterBuffer
 }
 
-func newMajorCompactionTask(
+func newClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	//stagingIO io.BinlogIO,
@@ -131,9 +131,9 @@ func newMajorCompactionTask(
 	metaCache metacache.MetaCache,
 	syncMgr syncmgr.SyncManager,
 	plan *datapb.CompactionPlan,
-) *majorCompactionTask {
+) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
-	return &majorCompactionTask{
+	return &clusteringCompactionTask{
 		ctx:    ctx,
 		cancel: cancel,
 		io:     binlogIO,
@@ -142,7 +142,7 @@ func newMajorCompactionTask(
 		metaCache:          metaCache,
 		syncMgr:            syncMgr,
 		plan:               plan,
-		tr:                 timerecord.NewTimeRecorder("major_compaction"),
+		tr:                 timerecord.NewTimeRecorder("clustering_compaction"),
 		done:               make(chan struct{}, 1),
 		totalBufferSize:    atomic.Int64{},
 		spillChan:          make(chan SpillSignal, 100),
@@ -152,35 +152,35 @@ func newMajorCompactionTask(
 	}
 }
 
-func (t *majorCompactionTask) complete() {
+func (t *clusteringCompactionTask) complete() {
 	t.done <- struct{}{}
 }
 
-func (t *majorCompactionTask) stop() {
+func (t *clusteringCompactionTask) stop() {
 	t.cancel()
 	<-t.done
 }
 
-func (t *majorCompactionTask) getPlanID() UniqueID {
+func (t *clusteringCompactionTask) getPlanID() UniqueID {
 	return t.plan.GetPlanID()
 }
 
-func (t *majorCompactionTask) getChannelName() string {
+func (t *clusteringCompactionTask) getChannelName() string {
 	return t.plan.GetChannel()
 }
 
-func (t *majorCompactionTask) getCollection() int64 {
+func (t *clusteringCompactionTask) getCollection() int64 {
 	return t.metaCache.Collection()
 }
 
 // injectDone unlock the segments
-func (t *majorCompactionTask) injectDone() {
+func (t *clusteringCompactionTask) injectDone() {
 	for _, binlog := range t.plan.SegmentBinlogs {
 		t.syncMgr.Unblock(binlog.SegmentID)
 	}
 }
 
-func (t *majorCompactionTask) init() error {
+func (t *clusteringCompactionTask) init() error {
 	segIDs := make([]UniqueID, 0, len(t.plan.GetSegmentBinlogs()))
 	for _, s := range t.plan.GetSegmentBinlogs() {
 		segIDs = append(segIDs, s.GetSegmentID())
@@ -209,16 +209,16 @@ func (t *majorCompactionTask) init() error {
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTs = tsoutil.GetCurrentTime()
 	t.memoryBufferSize = t.getMemoryBufferSize()
-	log.Info("major compaction memory buffer", zap.Int64("size", t.memoryBufferSize))
+	log.Info("clustering compaction memory buffer", zap.Int64("size", t.memoryBufferSize))
 
 	return nil
 }
 
-func (t *majorCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
+func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("L2Compact-%d", t.getPlanID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
-	if t.plan.GetType() != datapb.CompactionType_MajorCompaction {
+	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
 		// this shouldn't be reached
 		log.Warn("compact wrong, illegal compaction type")
 		return nil, errIllegalCompactionPlan
@@ -376,7 +376,7 @@ func (t *majorCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
 }
 
 // mapping read and split input segments into buffers
-func (t *majorCompactionTask) mapping(ctx context.Context,
+func (t *clusteringCompactionTask) mapping(ctx context.Context,
 	deltaPk2Ts map[interface{}]Timestamp,
 ) ([]*datapb.CompactionSegment, *storage.PartitionStatsSnapshot, error) {
 	inputSegments := t.plan.GetSegmentBinlogs()
@@ -443,7 +443,7 @@ func (t *majorCompactionTask) mapping(ctx context.Context,
 }
 
 // read insert log of one segment, mappingSegment it into buckets according to partitionKey. Spill data to file when necessary
-func (t *majorCompactionTask) mappingSegment(
+func (t *clusteringCompactionTask) mappingSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
 	delta map[interface{}]Timestamp,
@@ -609,7 +609,7 @@ func (t *majorCompactionTask) mappingSegment(
 	return nil
 }
 
-func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *ClusterBuffer, value *storage.Value, rowSize int) error {
+func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *ClusterBuffer, value *storage.Value, rowSize int) error {
 	pk := value.PK
 	timestamp := value.Timestamp
 	row, ok := value.Value.(map[UniqueID]interface{})
@@ -662,22 +662,22 @@ func (t *majorCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *
 }
 
 // getMemoryBufferSize return memoryBufferSize
-func (t *majorCompactionTask) getMemoryBufferSize() int64 {
-	return int64(float64(hardware.GetMemoryCount()) * Params.DataNodeCfg.MajorCompactionMemoryBufferRatio.GetAsFloat())
+func (t *clusteringCompactionTask) getMemoryBufferSize() int64 {
+	return int64(float64(hardware.GetMemoryCount()) * Params.DataNodeCfg.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
 }
 
-func (t *majorCompactionTask) getSpillMemorySizeThreshold() int64 {
+func (t *clusteringCompactionTask) getSpillMemorySizeThreshold() int64 {
 	return int64(float64(t.memoryBufferSize) * 0.8)
 }
 
-func (t *majorCompactionTask) backgroundSpill(ctx context.Context) {
+func (t *clusteringCompactionTask) backgroundSpill(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Info("major compaction task context exit")
+			log.Info("clustering compaction task context exit")
 			return
 		case <-t.done:
-			log.Info("major compaction task done")
+			log.Info("clustering compaction task done")
 			return
 		case signal := <-t.spillChan:
 			var err error
@@ -698,7 +698,7 @@ func (t *majorCompactionTask) backgroundSpill(ctx context.Context) {
 	}
 }
 
-func (t *majorCompactionTask) spillLargestBuffers(ctx context.Context) error {
+func (t *clusteringCompactionTask) spillLargestBuffers(ctx context.Context) error {
 	// only one spillLargestBuffers or spillAll should do at the same time
 	t.spillMutex.Lock()
 	defer t.spillMutex.Unlock()
@@ -727,7 +727,7 @@ func (t *majorCompactionTask) spillLargestBuffers(ctx context.Context) error {
 	return nil
 }
 
-func (t *majorCompactionTask) spillAll(ctx context.Context) error {
+func (t *clusteringCompactionTask) spillAll(ctx context.Context) error {
 	// only one spillLargestBuffers or spillAll should do at the same time
 	t.spillMutex.Lock()
 	defer t.spillMutex.Unlock()
@@ -757,7 +757,7 @@ func (t *majorCompactionTask) spillAll(ctx context.Context) error {
 	return nil
 }
 
-func (t *majorCompactionTask) packBuffersToSegments(ctx context.Context, buffer *ClusterBuffer) error {
+func (t *clusteringCompactionTask) packBuffersToSegments(ctx context.Context, buffer *ClusterBuffer) error {
 	if len(buffer.currentSpillBinlogs) == 0 {
 		return nil
 	}
@@ -811,7 +811,7 @@ func (t *majorCompactionTask) packBuffersToSegments(ctx context.Context, buffer 
 	return nil
 }
 
-func (t *majorCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) error {
+func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) error {
 	if buffer.buffer.IsEmpty() {
 		return nil
 	}
@@ -849,7 +849,7 @@ func (t *majorCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) 
 	return nil
 }
 
-func (t *majorCompactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
+func (t *clusteringCompactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID, *etcdpb.CollectionMeta, error) {
 	collID := t.metaCache.Collection()
 	seg, ok := t.metaCache.GetSegmentByID(segID)
 	if !ok {
@@ -865,19 +865,16 @@ func (t *majorCompactionTask) getSegmentMeta(segID UniqueID) (UniqueID, UniqueID
 	return collID, partID, meta, nil
 }
 
-func (t *majorCompactionTask) uploadPartitionStats(ctx context.Context, collectionID, partitionID UniqueID, partitionStats *storage.PartitionStatsSnapshot) error {
-	// use allocID as partitionStats file name
-	newVersion, err := t.allocator.AllocOne()
-	if err != nil {
-		return err
-	}
-	partitionStats.Version = newVersion
+func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, collectionID, partitionID UniqueID, partitionStats *storage.PartitionStatsSnapshot) error {
+	// use planID as partitionStats version
+	version := t.plan.PlanID
+	partitionStats.Version = version
 	partitionStatsBytes, err := storage.SerializePartitionStatsSnapshot(partitionStats)
 	if err != nil {
 		return err
 	}
 	newStatsPath := t.io.JoinFullPath(common.PartitionStatsPath,
-		path.Join(strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10), t.plan.GetChannel(), strconv.FormatInt(newVersion, 10)))
+		path.Join(strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10), t.plan.GetChannel(), strconv.FormatInt(version, 10)))
 	kv := map[string][]byte{
 		newStatsPath: partitionStatsBytes,
 	}
@@ -890,7 +887,7 @@ func (t *majorCompactionTask) uploadPartitionStats(ctx context.Context, collecti
 }
 
 // cleanUp try best to clean all temp datas
-func (t *majorCompactionTask) cleanUp(ctx context.Context) {
+func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 	//stagePath := t.stageIO.JoinFullPath(common.CompactionStagePath, metautil.JoinIDPath(t.plan.PlanID))
 	//err := t.stageIO.Remove(ctx, stagePath)
 	//if err != nil {
@@ -898,7 +895,7 @@ func (t *majorCompactionTask) cleanUp(ctx context.Context) {
 	//}
 }
 
-func (t *majorCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {
+func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {
 	inputSegments := t.plan.GetSegmentBinlogs()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
 	mapStart := time.Now()
@@ -941,7 +938,7 @@ func (t *majorCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{
 	return analyzeDict, nil
 }
 
-func (t *majorCompactionTask) scalarAnalyzeSegment(
+func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	ctx context.Context,
 	segment *datapb.CompactionSegmentBinlogs,
 ) (map[interface{}]int64, error) {
@@ -1049,7 +1046,7 @@ func (t *majorCompactionTask) scalarAnalyzeSegment(
 	return analyzeResult, nil
 }
 
-func (t *majorCompactionTask) scalarPlan(dict map[interface{}]int64) [][]interface{} {
+func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]interface{} {
 	keys := lo.MapToSlice(dict, func(k interface{}, _ int64) interface{} {
 		return k
 	})

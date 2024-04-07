@@ -388,22 +388,22 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datacoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
-		params.Save("dataCoord.compaction.major.enable", "true")
-		assert.Equal(t, true, Params.MajorCompactionEnable.GetAsBool())
-		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10")
-		assert.Equal(t, int64(10), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10k")
-		assert.Equal(t, int64(10*1024), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.major.newDataSizeThreshold", "10g")
-		assert.Equal(t, int64(10*1024*1024*1024), Params.MajorCompactionNewDataSizeThreshold.GetAsSize())
-		params.Save("dataCoord.compaction.major.dropTolerance", "86400")
-		assert.Equal(t, int64(86400), Params.MajorCompactionDropTolerance.GetAsInt64())
-		params.Save("dataCoord.l2Compaction.preferSegmentSizeMax", "100m")
-		assert.Equal(t, int64(100*1024*1024), Params.MajorCompactionMaxSegmentSize.GetAsSize())
-		params.Save("dataCoord.l2Compaction.preferSegmentSizeMin", "10m")
-		assert.Equal(t, int64(10*1024*1024), Params.MajorCompactionPreferSegmentSize.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.enable", "true")
+		assert.Equal(t, true, Params.ClusteringCompactionEnable.GetAsBool())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10")
+		assert.Equal(t, int64(10), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10k")
+		assert.Equal(t, int64(10*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10m")
+		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.newDataSizeThreshold", "10g")
+		assert.Equal(t, int64(10*1024*1024*1024), Params.ClusteringCompactionNewDataSizeThreshold.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.dropTolerance", "86400")
+		assert.Equal(t, int64(86400), Params.ClusteringCompactionDropTolerance.GetAsInt64())
+		params.Save("dataCoord.compaction.clustering.maxSegmentSize", "100m")
+		assert.Equal(t, int64(100*1024*1024), Params.ClusteringCompactionMaxSegmentSize.GetAsSize())
+		params.Save("dataCoord.compaction.clustering.preferSegmentSize", "10m")
+		assert.Equal(t, int64(10*1024*1024), Params.ClusteringCompactionPreferSegmentSize.GetAsSize())
 	})
 
 	t.Run("test dataNodeConfig", func(t *testing.T) {
@@ -456,9 +456,9 @@ func TestComponentParam(t *testing.T) {
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 
-		// l2 compaction
-		params.Save("datanode.majorCompaction.memoryBufferRatio", "0.1")
-		assert.Equal(t, 0.1, Params.MajorCompactionMemoryBufferRatio.GetAsFloat())
+		// clustering compaction
+		params.Save("datanode.clusteringCompaction.memoryBufferRatio", "0.1")
+		assert.Equal(t, 0.1, Params.ClusteringCompactionMemoryBufferRatio.GetAsFloat())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {
@@ -478,11 +478,11 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, "by-dev-dml1", Params.RootCoordDml.GetValue())
 	})
 
-	t.Run("majorcompaction config", func(t *testing.T) {
+	t.Run("clustering compaction config", func(t *testing.T) {
 		Params := &params.CommonCfg
-		params.Save("common.l2compaction.usePartitionKeyAsClusteringKey", "true")
+		params.Save("common.usePartitionKeyAsClusteringKey", "true")
 		assert.Equal(t, true, Params.UsePartitionKeyAsClusteringKey.GetAsBool())
-		params.Save("common.l2compaction.useVectorAsClusteringKey", "true")
+		params.Save("common.useVectorAsClusteringKey", "true")
 		assert.Equal(t, true, Params.UseVectorAsClusteringKey.GetAsBool())
 	})
 }

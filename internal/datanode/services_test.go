@@ -320,7 +320,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		s.False(merr.Ok(resp))
 	})
 
-	s.Run("compact_major", func() {
+	s.Run("compact_clustering", func() {
 		node := s.node
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -332,7 +332,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
 				{SegmentID: growingSegmentID, Level: datapb.SegmentLevel_L1},
 			},
-			Type: datapb.CompactionType_MajorCompaction,
+			Type: datapb.CompactionType_ClusteringCompaction,
 		}
 
 		resp, err := node.Compaction(ctx, req)

@@ -149,9 +149,9 @@ type DataCoordCatalog interface {
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
 
-	ListMajorCompactionInfos(ctx context.Context) ([]*datapb.MajorCompactionInfo, error)
-	SaveMajorCompactionInfo(ctx context.Context, info *datapb.MajorCompactionInfo) error
-	DropMajorCompactionInfo(ctx context.Context, info *datapb.MajorCompactionInfo) error
+	ListClusteringCompactionInfos(ctx context.Context) ([]*datapb.ClusteringCompactionInfo, error)
+	SaveClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
+	DropClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
 
 	ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error)
 	SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error

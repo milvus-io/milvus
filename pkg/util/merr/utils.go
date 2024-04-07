@@ -968,24 +968,24 @@ func WrapErrCompactionReadDeltaLogErr(msg ...string) error {
 	return err
 }
 
-func WrapErrMajorCompactionClusterNotSupport(msg ...string) error {
-	err := error(ErrMajorCompactionClusterNotSupport)
+func WrapErrClusteringCompactionClusterNotSupport(msg ...string) error {
+	err := error(ErrClusteringCompactionClusterNotSupport)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
 }
 
-func WrapErrMajorCompactionCollectionNotSupport(msg ...string) error {
-	err := error(ErrMajorCompactionCollectionNotSupport)
+func WrapErrClusteringCompactionCollectionNotSupport(msg ...string) error {
+	err := error(ErrClusteringCompactionCollectionNotSupport)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
 	return err
 }
 
-func WrapErrMajorCompactionCollectionIsCompacting(msg ...string) error {
-	err := error(ErrMajorCompactionCollectionIsCompacting)
+func WrapErrClusteringCompactionCollectionIsCompacting(msg ...string) error {
+	err := error(ErrClusteringCompactionCollectionIsCompacting)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

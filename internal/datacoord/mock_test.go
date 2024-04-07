@@ -611,7 +611,7 @@ func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionI
 }
 
 // triggerManualCompaction force to start a compaction
-func (t *mockCompactionTrigger) triggerManualCompaction(collectionID int64, majorCompaction bool) (UniqueID, error) {
+func (t *mockCompactionTrigger) triggerManualCompaction(collectionID int64, clusteringCompaction bool) (UniqueID, error) {
 	if f, ok := t.methods["triggerManualCompaction"]; ok {
 		if ff, ok := f.(func(collectionID int64) (UniqueID, error)); ok {
 			return ff(collectionID)

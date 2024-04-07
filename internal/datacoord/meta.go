@@ -53,8 +53,8 @@ type CompactionMeta interface {
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
 
-	DropMajorCompactionInfo(info *datapb.MajorCompactionInfo) error
-	SaveMajorCompactionInfo(info *datapb.MajorCompactionInfo) error
+	DropClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error
+	SaveClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error
 
 	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 }
@@ -63,13 +63,13 @@ var _ CompactionMeta = (*meta)(nil)
 
 type meta struct {
 	sync.RWMutex
-	ctx              context.Context
-	catalog          metastore.DataCoordCatalog
-	collections      map[UniqueID]*collectionInfo // collection id to collection info
-	segments         *SegmentsInfo                // segment id to segment info
-	channelCPs       *channelCPs                  // vChannel -> channel checkpoint/see position
-	chunkManager     storage.ChunkManager
-	majorCompactions map[string]*datapb.MajorCompactionInfo
+	ctx                   context.Context
+	catalog               metastore.DataCoordCatalog
+	collections           map[UniqueID]*collectionInfo // collection id to collection info
+	segments              *SegmentsInfo                // segment id to segment info
+	channelCPs            *channelCPs                  // vChannel -> channel checkpoint/see position
+	chunkManager          storage.ChunkManager
+	clusteringCompactions map[string]*datapb.ClusteringCompactionInfo
 
 	indexMeta *indexMeta
 }
@@ -109,14 +109,14 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	}
 
 	mt := &meta{
-		ctx:              ctx,
-		catalog:          catalog,
-		collections:      make(map[UniqueID]*collectionInfo),
-		segments:         NewSegmentsInfo(),
-		channelCPs:       newChannelCps(),
-		indexMeta:        indexMeta,
-		chunkManager:     chunkManager,
-		majorCompactions: make(map[string]*datapb.MajorCompactionInfo, 0),
+		ctx:                   ctx,
+		catalog:               catalog,
+		collections:           make(map[UniqueID]*collectionInfo),
+		segments:              NewSegmentsInfo(),
+		channelCPs:            newChannelCps(),
+		indexMeta:             indexMeta,
+		chunkManager:          chunkManager,
+		clusteringCompactions: make(map[string]*datapb.ClusteringCompactionInfo, 0),
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -173,12 +173,12 @@ func (m *meta) reloadFromKV() error {
 		m.channelCPs.checkpoints[vChannel] = pos
 	}
 
-	compactionInfos, err := m.catalog.ListMajorCompactionInfos(m.ctx)
+	compactionInfos, err := m.catalog.ListClusteringCompactionInfos(m.ctx)
 	if err != nil {
 		return err
 	}
 	for _, info := range compactionInfos {
-		m.majorCompactions[fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID)] = info
+		m.clusteringCompactions[fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID)] = info
 	}
 
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
@@ -1175,7 +1175,7 @@ func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *d
 		return minPos
 	}
 
-	if plan.GetType() == datapb.CompactionType_MajorCompaction {
+	if plan.GetType() == datapb.CompactionType_ClusteringCompaction {
 		newSegments := make([]*SegmentInfo, 0)
 		for _, seg := range result.GetSegments() {
 			segmentInfo := &datapb.SegmentInfo{
@@ -1569,13 +1569,13 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 	segToUpdate.State = targetState
 }
 
-// GetClonedMajorCompactionInfos returns cloned MajorCompactionInfos from local cache
-func (m *meta) GetClonedMajorCompactionInfos() []*datapb.MajorCompactionInfo {
+// GetClonedClusteringCompactionInfos returns cloned ClusteringCompactionInfos from local cache
+func (m *meta) GetClonedClusteringCompactionInfos() []*datapb.ClusteringCompactionInfo {
 	m.RLock()
 	defer m.RUnlock()
-	infos := make([]*datapb.MajorCompactionInfo, 0)
-	for _, info := range m.majorCompactions {
-		cloneInfo := &datapb.MajorCompactionInfo{
+	infos := make([]*datapb.ClusteringCompactionInfo, 0)
+	for _, info := range m.clusteringCompactions {
+		cloneInfo := &datapb.ClusteringCompactionInfo{
 			TriggerID:       info.GetTriggerID(),
 			CollectionID:    info.GetCollectionID(),
 			ClusteringKeyID: info.GetClusteringKeyID(),
@@ -1594,12 +1594,12 @@ func (m *meta) GetClonedMajorCompactionInfos() []*datapb.MajorCompactionInfo {
 	return infos
 }
 
-// GetMajorCompactionInfos get major compaction infos by collection id
-func (m *meta) GetMajorCompactionInfos(collectionID UniqueID) []*datapb.MajorCompactionInfo {
+// GetClusteringCompactionInfos get clustering compaction infos by collection id
+func (m *meta) GetClusteringCompactionInfos(collectionID UniqueID) []*datapb.ClusteringCompactionInfo {
 	m.RLock()
 	defer m.RUnlock()
-	res := make([]*datapb.MajorCompactionInfo, 0)
-	for _, info := range m.majorCompactions {
+	res := make([]*datapb.ClusteringCompactionInfo, 0)
+	for _, info := range m.clusteringCompactions {
 		if info.CollectionID == collectionID {
 			res = append(res, info)
 		}
@@ -1607,26 +1607,26 @@ func (m *meta) GetMajorCompactionInfos(collectionID UniqueID) []*datapb.MajorCom
 	return res
 }
 
-// DropMajorCompactionInfo drop major compaction info in meta
-func (m *meta) DropMajorCompactionInfo(info *datapb.MajorCompactionInfo) error {
+// DropClusteringCompactionInfo drop clustering compaction info in meta
+func (m *meta) DropClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error {
 	m.Lock()
 	defer m.Unlock()
-	if err := m.catalog.DropMajorCompactionInfo(m.ctx, info); err != nil {
-		log.Error("meta update: drop major compaction info fail", zap.Int64("collectionID", info.CollectionID), zap.Error(err))
+	if err := m.catalog.DropClusteringCompactionInfo(m.ctx, info); err != nil {
+		log.Error("meta update: drop clustering compaction info fail", zap.Int64("collectionID", info.CollectionID), zap.Error(err))
 		return err
 	}
-	delete(m.majorCompactions, fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID))
+	delete(m.clusteringCompactions, fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID))
 	return nil
 }
 
-// SaveMajorCompactionInfo update collection compaction plan
-func (m *meta) SaveMajorCompactionInfo(info *datapb.MajorCompactionInfo) error {
+// SaveClusteringCompactionInfo update collection compaction plan
+func (m *meta) SaveClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error {
 	m.Lock()
 	defer m.Unlock()
-	if err := m.catalog.SaveMajorCompactionInfo(m.ctx, info); err != nil {
-		log.Error("meta update: update major compaction info fail", zap.Error(err))
+	if err := m.catalog.SaveClusteringCompactionInfo(m.ctx, info); err != nil {
+		log.Error("meta update: update clustering compaction info fail", zap.Error(err))
 		return err
 	}
-	m.majorCompactions[fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID)] = info
+	m.clusteringCompactions[fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID)] = info
 	return nil
 }

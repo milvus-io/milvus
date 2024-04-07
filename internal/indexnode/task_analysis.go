@@ -119,13 +119,13 @@ func (at *analysisTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	err = analysisInfo.AppendSegmentSize(Params.DataCoordCfg.MajorCompactionPreferSegmentSize.GetAsSize())
+	err = analysisInfo.AppendSegmentSize(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())
 	if err != nil {
 		log.Warn("append segment size failed", zap.Error(err))
 		return err
 	}
 
-	err = analysisInfo.AppendTrainSize(Params.DataCoordCfg.MajorCompactionMaxTrainSize.GetAsSize())
+	err = analysisInfo.AppendTrainSize(Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize())
 	if err != nil {
 		log.Warn("append train size failed", zap.Error(err))
 		return err

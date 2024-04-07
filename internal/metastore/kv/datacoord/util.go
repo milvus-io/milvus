@@ -227,18 +227,18 @@ func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
 	return key, segBytes, nil
 }
 
-func buildCollectionCompactionInfoKv(info *datapb.MajorCompactionInfo) (string, string, error) {
+func buildCollectionCompactionInfoKv(info *datapb.ClusteringCompactionInfo) (string, string, error) {
 	valueBytes, err := proto.Marshal(info)
 	if err != nil {
-		return "", "", fmt.Errorf("failed to marshal collection major compaction info: %d, err: %w", info.CollectionID, err)
+		return "", "", fmt.Errorf("failed to marshal collection clustering compaction info: %d, err: %w", info.CollectionID, err)
 	}
-	key := buildMajorCompactionInfoPath(info.CollectionID, info.TriggerID)
+	key := buildClusteringCompactionInfoPath(info.CollectionID, info.TriggerID)
 	return key, string(valueBytes), nil
 }
 
-// buildMajorCompactionInfoPath common logic mapping collection id and trigger id to corresponding key in kv store
-func buildMajorCompactionInfoPath(collectionID typeutil.UniqueID, triggerID typeutil.UniqueID) string {
-	return fmt.Sprintf("%s/%d/%d", MajorCompactionInfoPrefix, collectionID, triggerID)
+// buildClusteringCompactionInfoPath common logic mapping collection id and trigger id to corresponding key in kv store
+func buildClusteringCompactionInfoPath(collectionID typeutil.UniqueID, triggerID typeutil.UniqueID) string {
+	return fmt.Sprintf("%s/%d/%d", ClusteringCompactionInfoPrefix, collectionID, triggerID)
 }
 
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store

@@ -431,7 +431,7 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 		if err := c.handleL0CompactionResult(plan, result); err != nil {
 			return err
 		}
-	case datapb.CompactionType_MajorCompaction:
+	case datapb.CompactionType_ClusteringCompaction:
 		// todo we may need to create a bew handleMajorCompactionResult method if the logic differs a lot
 		if err := c.handleMergeCompactionResult(plan, result); err != nil {
 			return err
@@ -466,7 +466,7 @@ func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.Compaction
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
 	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.String("type", plan.GetType().String()))
-	if plan.GetType() == datapb.CompactionType_MajorCompaction {
+	if plan.GetType() == datapb.CompactionType_ClusteringCompaction {
 		if len(result.GetSegments()) == 0 {
 			// should never happen
 			log.Warn("illegal compaction results")

@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package majorcompaction
+package clustering
 
 import (
 	"context"
@@ -35,11 +35,11 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type MajorCompactionSuite struct {
+type ClusteringCompactionSuite struct {
 	integration.MiniClusterSuite
 }
 
-func (s *MajorCompactionSuite) TestMajorCompaction() {
+func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -50,7 +50,7 @@ func (s *MajorCompactionSuite) TestMajorCompaction() {
 		rowNum = 3000
 	)
 
-	collectionName := "TestMajorCompaction" + funcutil.GenRandomStr()
+	collectionName := "TestClusteringCompaction" + funcutil.GenRandomStr()
 
 	schema := integration.ConstructSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
@@ -160,10 +160,10 @@ func (s *MajorCompactionSuite) TestMajorCompaction() {
 	s.NoError(err)
 	log.Info("comapct", zap.Any("compactResp", compactResp))
 
-	log.Info("TestMajorCompaction succeed")
+	log.Info("TestClusteringCompaction succeed")
 }
 
-func TestMajorCompaction(t *testing.T) {
+func TestClusteringCompaction(t *testing.T) {
 	// t.Skip("Skip integration test")
-	suite.Run(t, new(MajorCompactionSuite))
+	suite.Run(t, new(ClusteringCompactionSuite))
 }

@@ -55,14 +55,14 @@ type trigger interface {
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
 	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error
 	// triggerManualCompaction force to start a compaction
-	triggerManualCompaction(collectionID int64, majorCompaction bool) (UniqueID, error)
+	triggerManualCompaction(collectionID int64, clusteringCompaction bool) (UniqueID, error)
 }
 
 type compactionSignal struct {
 	id           UniqueID
 	isForce      bool
 	isGlobal     bool
-	isMajor      bool
+	isClustering bool
 	collectionID UniqueID
 	partitionID  UniqueID
 	channel      string
@@ -84,8 +84,8 @@ type compactionTrigger struct {
 	quit              chan struct{}
 	wg                sync.WaitGroup
 
-	majorCompactionTicker  *time.Ticker
-	majorCompactionManager *MajorCompactionManager
+	clusteringCompactionTicker  *time.Ticker
+	clusteringCompactionManager *ClusteringCompactionManager
 
 	indexEngineVersionManager IndexEngineVersionManager
 
@@ -103,7 +103,7 @@ func newCompactionTrigger(
 	allocator allocator,
 	handler Handler,
 	indexVersionManager IndexEngineVersionManager,
-	majorCompactionManager *MajorCompactionManager,
+	clusteringCompactionManager *ClusteringCompactionManager,
 ) *compactionTrigger {
 	return &compactionTrigger{
 		ctx:                          ctx,
@@ -115,14 +115,14 @@ func newCompactionTrigger(
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		handler:                      handler,
-		majorCompactionManager:       majorCompactionManager,
+		clusteringCompactionManager:  clusteringCompactionManager,
 	}
 }
 
 func (t *compactionTrigger) start() {
 	t.quit = make(chan struct{})
 	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
-	t.majorCompactionTicker = time.NewTicker(Params.DataCoordCfg.MajorCompactionInterval.GetAsDuration(time.Second))
+	t.clusteringCompactionTicker = time.NewTicker(Params.DataCoordCfg.ClusteringCompactionInterval.GetAsDuration(time.Second))
 	t.wg.Add(3)
 	go func() {
 		defer logutil.LogPanic()
@@ -135,10 +135,10 @@ func (t *compactionTrigger) start() {
 				return
 			case signal := <-t.signals:
 				switch {
-				case signal.isMajor:
-					err := t.handleMajorCompactionSignal(signal)
+				case signal.isClustering:
+					err := t.handleClusteringCompactionSignal(signal)
 					if err != nil {
-						log.Warn("unable to handleMajorCompactionSignal", zap.Error(err))
+						log.Warn("unable to handleClusteringCompactionSignal", zap.Error(err))
 					}
 				case signal.isGlobal:
 					// ManualCompaction also use use handleGlobalSignal
@@ -158,7 +158,7 @@ func (t *compactionTrigger) start() {
 	}()
 
 	go t.startGlobalCompactionLoop()
-	go t.startMajorCompactionLoop()
+	go t.startClusteringCompactionLoop()
 }
 
 func (t *compactionTrigger) startGlobalCompactionLoop() {
@@ -185,29 +185,29 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 	}
 }
 
-func (t *compactionTrigger) startMajorCompactionLoop() {
+func (t *compactionTrigger) startClusteringCompactionLoop() {
 	defer logutil.LogPanic()
 	defer t.wg.Done()
 
-	t.majorCompactionManager.start()
+	t.clusteringCompactionManager.start()
 	for {
 		select {
 		case <-t.quit:
-			t.majorCompactionTicker.Stop()
-			log.Info("major compaction loop exit")
+			t.clusteringCompactionTicker.Stop()
+			log.Info("clustering compaction loop exit")
 			return
-		case <-t.majorCompactionTicker.C:
-			err := t.triggerMajorCompaction()
+		case <-t.clusteringCompactionTicker.C:
+			err := t.triggerClusteringCompaction()
 			if err != nil {
-				log.Warn("unable to triggerMajorCompaction", zap.Error(err))
+				log.Warn("unable to triggerClusteringCompaction", zap.Error(err))
 			}
 		}
 	}
 }
 
 func (t *compactionTrigger) stop() {
-	if t.majorCompactionManager != nil {
-		t.majorCompactionManager.stop()
+	if t.clusteringCompactionManager != nil {
+		t.clusteringCompactionManager.stop()
 	}
 	close(t.quit)
 	t.wg.Wait()
@@ -291,10 +291,10 @@ func (t *compactionTrigger) triggerCompaction() error {
 	return nil
 }
 
-// triggerMajorCompaction trigger major compaction.
-func (t *compactionTrigger) triggerMajorCompaction() error {
-	if Params.DataCoordCfg.MajorCompactionEnable.GetAsBool() &&
-		Params.DataCoordCfg.MajorCompactionAutoEnable.GetAsBool() {
+// triggerClusteringCompaction trigger clustering compaction.
+func (t *compactionTrigger) triggerClusteringCompaction() error {
+	if Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool() &&
+		Params.DataCoordCfg.ClusteringCompactionAutoEnable.GetAsBool() {
 		collections := t.meta.GetCollections()
 		isStart, _, err := t.allocator.allocN(int64(len(collections)))
 		if err != nil {
@@ -308,7 +308,7 @@ func (t *compactionTrigger) triggerMajorCompaction() error {
 					id:           id,
 					isForce:      false,
 					isGlobal:     true,
-					isMajor:      true,
+					isClustering: true,
 					collectionID: collection.ID,
 				}
 				t.signals <- signal
@@ -354,7 +354,7 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 
 // triggerManualCompaction force to start a compaction
 // invoked by user `ManualCompaction` operation
-func (t *compactionTrigger) triggerManualCompaction(collectionID int64, majorCompaction bool) (UniqueID, error) {
+func (t *compactionTrigger) triggerManualCompaction(collectionID int64, clusteringCompaction bool) (UniqueID, error) {
 	id, err := t.allocSignalID()
 	if err != nil {
 		return -1, err
@@ -363,12 +363,12 @@ func (t *compactionTrigger) triggerManualCompaction(collectionID int64, majorCom
 		id:           id,
 		isForce:      true,
 		isGlobal:     true,
-		isMajor:      majorCompaction,
+		isClustering: clusteringCompaction,
 		collectionID: collectionID,
 	}
 
-	if majorCompaction {
-		err = t.handleMajorCompactionSignal(signal)
+	if clusteringCompaction {
+		err = t.handleClusteringCompactionSignal(signal)
 	} else {
 		err = t.handleGlobalSignal(signal)
 	}
@@ -593,12 +593,12 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 	return nil
 }
 
-func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal) error {
+func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionSignal) error {
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
 
-	if !Params.DataCoordCfg.MajorCompactionEnable.GetAsBool() {
-		err := merr.WrapErrMajorCompactionClusterNotSupport()
+	if !Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool() {
+		err := merr.WrapErrClusteringCompactionClusterNotSupport()
 		log.Warn(err.Error())
 		return err
 	}
@@ -612,13 +612,13 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 	}
 	clusteringKeyField := clustering.GetClusteringKeyField(coll.Schema)
 	if clusteringKeyField == nil {
-		err := merr.WrapErrMajorCompactionCollectionNotSupport(fmt.Sprint(signal.collectionID))
+		err := merr.WrapErrClusteringCompactionCollectionNotSupport(fmt.Sprint(signal.collectionID))
 		log.Debug(err.Error())
 		return err
 	}
-	compacting := t.majorCompactionManager.IsMajorCompacting(coll.ID)
+	compacting := t.clusteringCompactionManager.IsClusteringCompacting(coll.ID)
 	if compacting {
-		err := merr.WrapErrMajorCompactionCollectionIsCompacting(fmt.Sprint(signal.collectionID))
+		err := merr.WrapErrClusteringCompactionCollectionIsCompacting(fmt.Sprint(signal.collectionID))
 		log.Debug(err.Error())
 		// only return error if it is a manual compaction
 		if signal.isForce {
@@ -647,7 +647,7 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 		return err
 	}
 
-	majorCompactionJob := &MajorCompactionJob{
+	clusteringCompactionJob := &ClusteringCompactionJob{
 		triggerID:         signal.id,
 		collectionID:      signal.collectionID,
 		clusteringKeyID:   clusteringKeyField.FieldID,
@@ -678,9 +678,9 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 		}
 
 		if !signal.isForce {
-			execute, err := triggerMajorCompactionPolicy(t.ctx, t.meta, group.collectionID, group.partitionID, group.channelName, group.segments)
+			execute, err := triggerCompactionPolicy(t.ctx, t.meta, group.collectionID, group.partitionID, group.channelName, group.segments)
 			if err != nil {
-				log.Warn("failed to trigger major compaction", zap.Error(err))
+				log.Warn("failed to trigger clustering compaction", zap.Error(err))
 				continue
 			}
 			if !execute {
@@ -688,16 +688,16 @@ func (t *compactionTrigger) handleMajorCompactionSignal(signal *compactionSignal
 			}
 		}
 
-		plans := t.majorCompactionManager.fillMajorCompactionPlans(group.segments, clusteringKeyField.FieldID, ct)
-		// mark all segments prepare for major compaction
+		plans := t.clusteringCompactionManager.fillClusteringCompactionPlans(group.segments, clusteringKeyField.FieldID, ct)
+		// mark all segments prepare for clustering compaction
 		// todo： for now, no need to set compacting = false, as they will be set after compaction done or failed
-		// however, if we split major compaction into multi sub compaction task and support retry fail sub task,
+		// however, if we split clustering compaction into multi sub compaction task and support retry fail sub task,
 		// we need to manage compacting state correctly
 		t.setSegmentsCompacting(plans, true)
-		majorCompactionJob.pipeliningPlans = append(majorCompactionJob.pipeliningPlans, plans...)
+		clusteringCompactionJob.pipeliningPlans = append(clusteringCompactionJob.pipeliningPlans, plans...)
 	}
-	if len(majorCompactionJob.pipeliningPlans) > 0 {
-		t.majorCompactionManager.submit(majorCompactionJob)
+	if len(clusteringCompactionJob.pipeliningPlans) > 0 {
+		t.clusteringCompactionManager.submit(clusteringCompactionJob)
 	}
 	return nil
 }

@@ -483,6 +483,7 @@ enum CompactionType {
   MinorCompaction = 5;
   MajorCompaction = 6;
   Level0DeleteCompaction = 7;
+  ClusteringCompaction = 8;
 }
 
 message CompactionStateRequest {
@@ -841,7 +842,7 @@ enum CompactionTaskState {
   analyzing = 6;
 }
 
-message MajorCompactionInfo {
+message ClusteringCompactionInfo {
   int64 triggerID = 1;
   int64 collectionID = 2;
   int64 clusteringKeyID = 3;

@@ -2880,7 +2880,7 @@ func Test_compactionTrigger_updateSegmentMaxSize(t *testing.T) {
 	}
 }
 
-func Test_compactionTrigger_major(t *testing.T) {
+func Test_compactionTrigger_clustering(t *testing.T) {
 	paramtable.Init()
 	catalog := mocks.NewDataCoordCatalog(t)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
@@ -2908,7 +2908,7 @@ func Test_compactionTrigger_major(t *testing.T) {
 		},
 	}
 
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.MajorCompactionEnable.Key, "false")
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "false")
 	tr := &compactionTrigger{
 		handler:                      newMockHandlerWithMeta(meta),
 		allocator:                    &MockAllocator0{},
@@ -2918,11 +2918,11 @@ func Test_compactionTrigger_major(t *testing.T) {
 	}
 	_, err := tr.triggerManualCompaction(1, true)
 	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrMajorCompactionClusterNotSupport))
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.MajorCompactionEnable.Key, "true")
+	assert.True(t, errors.Is(err, merr.ErrClusteringCompactionClusterNotSupport))
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "true")
 	_, err2 := tr.triggerManualCompaction(1, true)
 	assert.Error(t, err2)
-	assert.True(t, errors.Is(err2, merr.ErrMajorCompactionCollectionNotSupport))
+	assert.True(t, errors.Is(err2, merr.ErrClusteringCompactionCollectionNotSupport))
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {

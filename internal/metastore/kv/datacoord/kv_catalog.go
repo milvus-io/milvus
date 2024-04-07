@@ -816,15 +816,15 @@ func (kc *Catalog) GcConfirm(ctx context.Context, collectionID, partitionID type
 	return len(keys) == 0 && len(values) == 0
 }
 
-func (kc *Catalog) ListMajorCompactionInfos(ctx context.Context) ([]*datapb.MajorCompactionInfo, error) {
-	infos := make([]*datapb.MajorCompactionInfo, 0)
+func (kc *Catalog) ListClusteringCompactionInfos(ctx context.Context) ([]*datapb.ClusteringCompactionInfo, error) {
+	infos := make([]*datapb.ClusteringCompactionInfo, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(MajorCompactionInfoPrefix)
+	_, values, err := kc.MetaKv.LoadWithPrefix(ClusteringCompactionInfoPrefix)
 	if err != nil {
 		return nil, err
 	}
 	for _, value := range values {
-		info := &datapb.MajorCompactionInfo{}
+		info := &datapb.ClusteringCompactionInfo{}
 		err = proto.Unmarshal([]byte(value), info)
 		if err != nil {
 			return nil, err
@@ -834,11 +834,11 @@ func (kc *Catalog) ListMajorCompactionInfos(ctx context.Context) ([]*datapb.Majo
 	return infos, nil
 }
 
-func (kc *Catalog) SaveMajorCompactionInfo(ctx context.Context, coll *datapb.MajorCompactionInfo) error {
+func (kc *Catalog) SaveClusteringCompactionInfo(ctx context.Context, coll *datapb.ClusteringCompactionInfo) error {
 	if coll == nil {
 		return nil
 	}
-	cloned := proto.Clone(coll).(*datapb.MajorCompactionInfo)
+	cloned := proto.Clone(coll).(*datapb.ClusteringCompactionInfo)
 	k, v, err := buildCollectionCompactionInfoKv(cloned)
 	if err != nil {
 		return err
@@ -848,8 +848,8 @@ func (kc *Catalog) SaveMajorCompactionInfo(ctx context.Context, coll *datapb.Maj
 	return kc.SaveByBatch(kvs)
 }
 
-func (kc *Catalog) DropMajorCompactionInfo(ctx context.Context, info *datapb.MajorCompactionInfo) error {
-	key := buildMajorCompactionInfoPath(info.CollectionID, info.TriggerID)
+func (kc *Catalog) DropClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error {
+	key := buildClusteringCompactionInfoPath(info.CollectionID, info.TriggerID)
 	return kc.MetaKv.Remove(key)
 }
 

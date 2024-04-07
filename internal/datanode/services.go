@@ -279,9 +279,9 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 			node.allocator,
 			req,
 		)
-	case datapb.CompactionType_MajorCompaction:
+	case datapb.CompactionType_ClusteringCompaction:
 		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
-		task = newMajorCompactionTask(
+		task = newClusteringCompactionTask(
 			taskCtx,
 			binlogIO,
 			//binlogIO,
