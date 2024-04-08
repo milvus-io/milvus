@@ -93,18 +93,6 @@ func isNumber(c uint8) bool {
 	return true
 }
 
-func isVectorType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_FloatVector ||
-		dataType == schemapb.DataType_BinaryVector ||
-		dataType == schemapb.DataType_Float16Vector ||
-		dataType == schemapb.DataType_BFloat16Vector ||
-		dataType == schemapb.DataType_SparseFloatVector
-}
-
-func isSparseVectorType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_SparseFloatVector
-}
-
 func validateMaxQueryResultWindow(offset int64, limit int64) error {
 	if offset < 0 {
 		return fmt.Errorf("%s [%d] is invalid, should be gte than 0", OffsetKey, offset)
@@ -301,7 +289,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 			break
 		}
 	}
-	if isSparseVectorType(field.DataType) {
+	if typeutil.IsSparseFloatVectorType(field.DataType) {
 		if exist {
 			return fmt.Errorf("dim should not be specified for sparse vector field %s(%d)", field.Name, field.FieldID)
 		}
@@ -315,7 +303,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		return fmt.Errorf("invalid dimension: %d. should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
 	}
 
-	if field.DataType != schemapb.DataType_BinaryVector {
+	if typeutil.IsFloatVectorType(field.DataType) {
 		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
 			return fmt.Errorf("invalid dimension: %d. float vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
 		}
@@ -379,7 +367,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 }
 
 func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
-	if !isVectorType(field.DataType) {
+	if !typeutil.IsVectorType(field.DataType) {
 		return nil
 	}
 	for _, params := range field.IndexParams {
@@ -520,7 +508,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
 	switch metricTypeStr {
 	case metric.L2, metric.IP, metric.COSINE:
-		if dataType == schemapb.DataType_FloatVector || dataType == schemapb.DataType_Float16Vector || dataType == schemapb.DataType_BFloat16Vector || dataType == schemapb.DataType_SparseFloatVector {
+		if typeutil.IsFloatVectorType(dataType) {
 			return nil
 		}
 	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE:
@@ -581,7 +569,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 			if err2 != nil {
 				return err2
 			}
-			if !isSparseVectorType(field.DataType) {
+			if !typeutil.IsSparseFloatVectorType(field.DataType) {
 				dimStr, ok := typeKv[common.DimKey]
 				if !ok {
 					return fmt.Errorf("dim not found in type_params for vector field %s(%d)", field.Name, field.FieldID)
@@ -626,7 +614,7 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	for i := range schema.Fields {
 		name := schema.Fields[i].Name
 		dType := schema.Fields[i].DataType
-		isVec := dType == schemapb.DataType_BinaryVector || dType == schemapb.DataType_FloatVector || dType == schemapb.DataType_Float16Vector || dType == schemapb.DataType_BFloat16Vector || dType == schemapb.DataType_SparseFloatVector
+		isVec := typeutil.IsVectorType(dType)
 		if isVec && vecExist && !enableMultipleVectorFields {
 			return fmt.Errorf(
 				"multiple vector fields is not supported, fields name: %s, %s",
