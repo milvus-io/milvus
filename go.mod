@@ -22,7 +22,7 @@ require (
 	github.com/golang/protobuf v1.5.3
 	github.com/google/btree v1.1.2
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
-	github.com/klauspost/compress v1.16.7
+	github.com/klauspost/compress v1.17.7
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
 	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.0-rc.1
 	github.com/minio/minio-go/v7 v7.0.61
@@ -47,7 +47,7 @@ require (
 	go.uber.org/atomic v1.11.0
 	go.uber.org/multierr v1.11.0
 	go.uber.org/zap v1.24.0
-	golang.org/x/crypto v0.16.0
+	golang.org/x/crypto v0.21.0
 	golang.org/x/exp v0.0.0-20230728194245-b0cb94b80691
 	golang.org/x/oauth2 v0.8.0
 	golang.org/x/sync v0.5.0
@@ -66,7 +66,8 @@ require (
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/quasilyte/go-ruleguard/dsl v0.3.22
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
-	golang.org/x/net v0.19.0
+	github.com/x448/float16 v0.8.4
+	golang.org/x/net v0.21.0
 )
 
 require (
@@ -158,10 +159,10 @@ require (
 	github.com/modern-go/concurrent v0.0.0-20180306012644-bacd9c7ef1dd // indirect
 	github.com/modern-go/reflect2 v1.0.2 // indirect
 	github.com/mtibben/percent v0.2.1 // indirect
-	github.com/nats-io/jwt/v2 v2.4.1 // indirect
-	github.com/nats-io/nats-server/v2 v2.9.17 // indirect
-	github.com/nats-io/nats.go v1.24.0 // indirect
-	github.com/nats-io/nkeys v0.4.4 // indirect
+	github.com/nats-io/jwt/v2 v2.5.5 // indirect
+	github.com/nats-io/nats-server/v2 v2.10.12 // indirect
+	github.com/nats-io/nats.go v1.34.1 // indirect
+	github.com/nats-io/nkeys v0.4.7 // indirect
 	github.com/nats-io/nuid v1.0.1 // indirect
 	github.com/opencontainers/runtime-spec v1.0.2 // indirect
 	github.com/opentracing/opentracing-go v1.2.0 // indirect
@@ -203,7 +204,6 @@ require (
 	github.com/twmb/murmur3 v1.1.3 // indirect
 	github.com/uber/jaeger-client-go v2.30.0+incompatible // indirect
 	github.com/ugorji/go/codec v1.2.11 // indirect
-	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
 	github.com/zeebo/xxh3 v1.0.2 // indirect
@@ -220,12 +220,12 @@ require (
 	go.opentelemetry.io/otel/metric v0.35.0 // indirect
 	go.opentelemetry.io/otel/sdk v1.13.0 // indirect
 	go.opentelemetry.io/proto/otlp v0.19.0 // indirect
-	go.uber.org/automaxprocs v1.5.2 // indirect
+	go.uber.org/automaxprocs v1.5.3 // indirect
 	golang.org/x/arch v0.3.0 // indirect
 	golang.org/x/mod v0.14.0 // indirect
-	golang.org/x/sys v0.15.0 // indirect
-	golang.org/x/term v0.15.0 // indirect
-	golang.org/x/time v0.3.0 // indirect
+	golang.org/x/sys v0.18.0 // indirect
+	golang.org/x/term v0.18.0 // indirect
+	golang.org/x/time v0.5.0 // indirect
 	golang.org/x/tools v0.16.1 // indirect
 	golang.org/x/xerrors v0.0.0-20220907171357-04be3eba64a2 // indirect
 	gonum.org/v1/gonum v0.11.0 // indirect
