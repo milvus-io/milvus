@@ -22,17 +22,15 @@ concurrency:
 
 jobs:
   publish-builder:
-    name: ${{ matrix.arch }} ${{ matrix.os }}
+    name: publish-builder-${{ matrix.os }}
     runs-on: ubuntu-latest
     timeout-minutes: 500
     strategy:
       fail-fast: false
       matrix:
         os: [ubuntu20.04, amazonlinux2023]
-        arch: [amd64&arm64]
     env:
       OS_NAME: ${{ matrix.os }}
-      IMAGE_ARCH: ${{ matrix.arch }}
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
