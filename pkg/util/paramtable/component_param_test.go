@@ -365,6 +365,10 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 2.5, Params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat())
 		params.Save("queryNode.memoryIndexLoadPredictMemoryUsageFactor", "2.0")
 		assert.Equal(t, 2.0, Params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat())
+
+		assert.NotZero(t, Params.DiskCacheCapacityLimit.GetAsInt64())
+		params.Save("queryNode.diskCacheCapacityLimit", "70")
+		assert.Equal(t, int64(70), Params.DiskCacheCapacityLimit.GetAsInt64())
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

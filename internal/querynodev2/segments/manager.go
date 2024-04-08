@@ -162,7 +162,7 @@ type Manager struct {
 }
 
 func NewManager() *Manager {
-	diskCap := paramtable.Get().QueryNodeCfg.DiskCapacityLimit.GetAsInt64()
+	diskCap := paramtable.Get().QueryNodeCfg.DiskCacheCapacityLimit.GetAsInt64()
 
 	segMgr := NewSegmentManager()
 	sf := singleflight.Group{}
