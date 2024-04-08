@@ -3209,6 +3209,7 @@ type dataNodeConfig struct {
 	// import
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
 	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
+	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio ParamItem `refreshable:"true"`
@@ -3476,6 +3477,16 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxImportFileSizeInGB.Init(base.mgr)
+
+	p.ReadBufferSizeInMB = ParamItem{
+		Key:          "datanode.import.readBufferSizeInMB",
+		Version:      "2.4.0",
+		Doc:          "The data block size (in MB) read from chunk manager by the datanode during import.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ReadBufferSizeInMB.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "datanode.compaction.levelZeroBatchMemoryRatio",

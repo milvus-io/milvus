@@ -150,7 +150,7 @@ func (s *scheduler) handleErr(task Task, err error, msg string) {
 }
 
 func (s *scheduler) PreImport(task Task) []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt()
+	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
 	log.Info("start to preimport", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
@@ -241,7 +241,7 @@ func (s *scheduler) readFileStat(reader importutilv2.Reader, task Task, fileIdx 
 }
 
 func (s *scheduler) Import(task Task) []*conc.Future[any] {
-	bufferSize := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt()
+	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
 	log.Info("start to import", WrapLogFields(task,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", task.GetSchema()))...)
