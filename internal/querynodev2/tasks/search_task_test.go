@@ -23,10 +23,11 @@ import (
 	"testing"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type SearchTaskSuite struct {
