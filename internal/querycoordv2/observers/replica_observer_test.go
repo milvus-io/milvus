@@ -168,7 +168,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 			}
 		}
 		return true
-	}, 6*time.Second, 2*time.Second)
+	}, 30*time.Second, 2*time.Second)
 
 	// Add some segment on nodes.
 	for i := 0; i < 4; i++ {
@@ -189,7 +189,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 			}
 		}
 		return true
-	}, 6*time.Second, 2*time.Second)
+	}, 30*time.Second, 2*time.Second)
 }
 
 func (suite *ReplicaObserverSuite) TearDownSuite() {

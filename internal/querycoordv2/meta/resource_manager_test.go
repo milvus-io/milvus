@@ -67,42 +67,42 @@ func TestResourceManager(t *testing.T) {
 }
 
 func (suite *ResourceManagerSuite) TestValidateConfiguration() {
-	err := suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(0, 0))
+	err := suite.manager.validateResourceGroupConfig("rg1", newResourceGroupConfig(0, 0))
 	suite.NoError(err)
 
 	err = suite.manager.validateResourceGroupConfig("rg1", &rgpb.ResourceGroupConfig{})
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	err = suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(-1, 2))
+	err = suite.manager.validateResourceGroupConfig("rg1", newResourceGroupConfig(-1, 2))
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	err = suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(2, -1))
+	err = suite.manager.validateResourceGroupConfig("rg1", newResourceGroupConfig(2, -1))
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	err = suite.manager.validateResourceGroupConfig("rg1", createResourceGroupConfig(3, 2))
+	err = suite.manager.validateResourceGroupConfig("rg1", newResourceGroupConfig(3, 2))
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	cfg := createResourceGroupConfig(0, 0)
+	cfg := newResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	cfg = createResourceGroupConfig(0, 0)
+	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	cfg = createResourceGroupConfig(0, 0)
+	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	cfg = createResourceGroupConfig(0, 0)
+	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
 	suite.ErrorIs(err, ErrIllegalRGConfig)
 
-	err = suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(0, 0))
+	err = suite.manager.AddResourceGroup("rg2", newResourceGroupConfig(0, 0))
 	suite.NoError(err)
 
 	err = suite.manager.RemoveResourceGroup("rg2")
@@ -111,7 +111,7 @@ func (suite *ResourceManagerSuite) TestValidateConfiguration() {
 
 func (suite *ResourceManagerSuite) TestValidateDelete() {
 	// Non empty resource group can not be removed.
-	err := suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(1, 1))
+	err := suite.manager.AddResourceGroup("rg1", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 
 	err = suite.manager.validateResourceGroupIsDeletable(DefaultResourceGroupName)
@@ -120,16 +120,16 @@ func (suite *ResourceManagerSuite) TestValidateDelete() {
 	err = suite.manager.validateResourceGroupIsDeletable("rg1")
 	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
 
-	cfg := createResourceGroupConfig(0, 0)
+	cfg := newResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
 	suite.manager.AddResourceGroup("rg2", cfg)
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1": createResourceGroupConfig(0, 0),
+		"rg1": newResourceGroupConfig(0, 0),
 	})
 	err = suite.manager.validateResourceGroupIsDeletable("rg1")
 	suite.ErrorIs(err, ErrDeleteInUsedRG)
 
-	cfg = createResourceGroupConfig(0, 0)
+	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
 		"rg2": cfg,
@@ -138,7 +138,7 @@ func (suite *ResourceManagerSuite) TestValidateDelete() {
 	suite.ErrorIs(err, ErrDeleteInUsedRG)
 
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg2": createResourceGroupConfig(0, 0),
+		"rg2": newResourceGroupConfig(0, 0),
 	})
 	err = suite.manager.validateResourceGroupIsDeletable("rg1")
 	suite.NoError(err)
@@ -151,16 +151,16 @@ func (suite *ResourceManagerSuite) TestValidateDelete() {
 
 func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	// test add rg
-	err := suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(0, 0))
+	err := suite.manager.AddResourceGroup("rg1", newResourceGroupConfig(0, 0))
 	suite.NoError(err)
 	suite.True(suite.manager.ContainResourceGroup("rg1"))
 	suite.Len(suite.manager.ListResourceGroups(), 2)
 
 	// test add duplicate rg but same configuration is ok
-	err = suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(0, 0))
+	err = suite.manager.AddResourceGroup("rg1", newResourceGroupConfig(0, 0))
 	suite.NoError(err)
 
-	err = suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(1, 1))
+	err = suite.manager.AddResourceGroup("rg1", newResourceGroupConfig(1, 1))
 	suite.Error(err)
 
 	// test delete rg
@@ -175,20 +175,20 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	suite.ErrorIs(err, ErrDeleteDefaultRG)
 
 	// test delete a rg not empty.
-	err = suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(1, 1))
+	err = suite.manager.AddResourceGroup("rg2", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	err = suite.manager.RemoveResourceGroup("rg2")
 	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
 
 	// test delete a rg after update
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg2": createResourceGroupConfig(0, 0),
+		"rg2": newResourceGroupConfig(0, 0),
 	})
 	err = suite.manager.RemoveResourceGroup("rg2")
 	suite.NoError(err)
 
 	// assign a node to rg.
-	err = suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(1, 1))
+	err = suite.manager.AddResourceGroup("rg2", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -200,7 +200,7 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	err = suite.manager.RemoveResourceGroup("rg2")
 	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg2": createResourceGroupConfig(0, 0),
+		"rg2": newResourceGroupConfig(0, 0),
 	})
 	// RemoveResourceGroup will remove all nodes from the resource group.
 	err = suite.manager.RemoveResourceGroup("rg2")
@@ -213,7 +213,7 @@ func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	err := suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(1, 1))
+	err := suite.manager.AddResourceGroup("rg1", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	// test add node to rg
 	suite.manager.HandleNodeUp(1)
@@ -221,7 +221,7 @@ func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
 
 	// test add non-exist node to rg
 	err = suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1": createResourceGroupConfig(2, 3),
+		"rg1": newResourceGroupConfig(2, 3),
 	})
 	suite.NoError(err)
 	suite.manager.HandleNodeUp(2)
@@ -253,10 +253,10 @@ func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
 	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
 	err = suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1": createResourceGroupConfig(4, 4),
+		"rg1": newResourceGroupConfig(4, 4),
 	})
 	suite.NoError(err)
-	suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(1, 1))
+	suite.manager.AddResourceGroup("rg2", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 
 	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -302,8 +302,8 @@ func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
 	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1": createResourceGroupConfig(20, 30),
-		"rg2": createResourceGroupConfig(30, 40),
+		"rg1": newResourceGroupConfig(20, 30),
+		"rg2": newResourceGroupConfig(30, 40),
 	})
 	for i := 1; i <= 100; i++ {
 		suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
@@ -328,9 +328,9 @@ func (suite *ResourceManagerSuite) TestNodeUpAndDown() {
 
 	// if there are all rgs reach limit, should be fall back to default rg.
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1":                    createResourceGroupConfig(0, 0),
-		"rg2":                    createResourceGroupConfig(0, 0),
-		DefaultResourceGroupName: createResourceGroupConfig(0, 0),
+		"rg1":                    newResourceGroupConfig(0, 0),
+		"rg2":                    newResourceGroupConfig(0, 0),
+		DefaultResourceGroupName: newResourceGroupConfig(0, 0),
 	})
 
 	for i := 1; i <= 100; i++ {
@@ -353,7 +353,7 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.Equal(100, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
 	// Recover 10 nodes from default resource group
-	suite.manager.AddResourceGroup("rg1", createResourceGroupConfig(10, 30))
+	suite.manager.AddResourceGroup("rg1", newResourceGroupConfig(10, 30))
 	suite.Zero(suite.manager.GetResourceGroup("rg1").NodeNum())
 	suite.Equal(10, suite.manager.GetResourceGroup("rg1").MissingNumOfNodes())
 	suite.Equal(100, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
@@ -363,7 +363,7 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.Equal(90, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
 	// Recover 20 nodes from default resource group
-	suite.manager.AddResourceGroup("rg2", createResourceGroupConfig(20, 30))
+	suite.manager.AddResourceGroup("rg2", newResourceGroupConfig(20, 30))
 	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
 	suite.Equal(20, suite.manager.GetResourceGroup("rg2").MissingNumOfNodes())
 	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
@@ -375,7 +375,7 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 
 	// Recover 5 redundant nodes from resource group
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1": createResourceGroupConfig(5, 5),
+		"rg1": newResourceGroupConfig(5, 5),
 	})
 	suite.manager.AutoRecoverResourceGroup("rg1")
 	suite.Equal(20, suite.manager.GetResourceGroup("rg2").NodeNum())
@@ -384,8 +384,8 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 
 	// Recover 10 redundant nodes from resource group 2 to resource group 1 and default resource group.
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1": createResourceGroupConfig(10, 20),
-		"rg2": createResourceGroupConfig(5, 10),
+		"rg1": newResourceGroupConfig(10, 20),
+		"rg2": newResourceGroupConfig(5, 10),
 	})
 
 	suite.manager.AutoRecoverResourceGroup("rg2")
@@ -395,9 +395,9 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 
 	// recover redundant nodes from default resource group
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		"rg1":                    createResourceGroupConfig(10, 20),
-		"rg2":                    createResourceGroupConfig(20, 30),
-		DefaultResourceGroupName: createResourceGroupConfig(10, 20),
+		"rg1":                    newResourceGroupConfig(10, 20),
+		"rg2":                    newResourceGroupConfig(20, 30),
+		DefaultResourceGroupName: newResourceGroupConfig(10, 20),
 	})
 	suite.manager.AutoRecoverResourceGroup("rg1")
 	suite.manager.AutoRecoverResourceGroup("rg2")
@@ -422,7 +422,7 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 		}},
 	})
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
-		DefaultResourceGroupName: createResourceGroupConfig(30, 40),
+		DefaultResourceGroupName: newResourceGroupConfig(30, 40),
 	})
 
 	suite.manager.AutoRecoverResourceGroup("rg1")
@@ -449,8 +449,8 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 				ResourceGroup: "rg2",
 			}},
 		},
-		"rg1": createResourceGroupConfig(15, 100),
-		"rg2": createResourceGroupConfig(15, 40),
+		"rg1": newResourceGroupConfig(15, 100),
+		"rg2": newResourceGroupConfig(15, 40),
 	})
 
 	suite.manager.AutoRecoverResourceGroup("rg1")
@@ -473,15 +473,4 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
 	suite.Zero(suite.manager.GetResourceGroup("rg3").NodeNum())
 	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
-}
-
-func createResourceGroupConfig(requestNode int, limitNode int) *rgpb.ResourceGroupConfig {
-	return &rgpb.ResourceGroupConfig{
-		Requests: &rgpb.ResourceGroupLimit{
-			NodeNum: int32(requestNode),
-		},
-		Limits: &rgpb.ResourceGroupLimit{
-			NodeNum: int32(limitNode),
-		},
-	}
 }

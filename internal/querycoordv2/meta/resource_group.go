@@ -10,19 +10,24 @@ import (
 )
 
 var (
-	DefaultResourceGroupName   = "__default_resource_group"
-	DefaultResourceGroupConfig = &rgpb.ResourceGroupConfig{
+	DefaultResourceGroupName           = "__default_resource_group"
+	defaultResourceGroupCapacity int32 = 1000000
+	resourceGroupTransferBoost         = 10000
+)
+
+// newResourceGroupConfig create a new resource group config.
+func newResourceGroupConfig(request int32, limit int32) *rgpb.ResourceGroupConfig {
+	return &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{
-			NodeNum: 0,
+			NodeNum: request,
 		},
 		Limits: &rgpb.ResourceGroupLimit{
-			NodeNum: 0,
+			NodeNum: limit,
 		},
 		TransferFrom: make([]*rgpb.ResourceGroupTransfer, 0),
 		TransferTo:   make([]*rgpb.ResourceGroupTransfer, 0),
 	}
-	DefaultResourceGroupCapacity int32 = 1000000
-)
+}
 
 type ResourceGroup struct {
 	name  string
@@ -45,24 +50,11 @@ func NewResourceGroupFromMeta(meta *querypb.ResourceGroup) *ResourceGroup {
 	// Backward compatibility, recover the config from capacity.
 	if meta.Config == nil {
 		// If meta.Config is nil, which means the meta is from old version.
+		// DefaultResourceGroup has special configuration.
 		if meta.Name == DefaultResourceGroupName {
-			meta.Config = &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: 0,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: meta.Capacity,
-				},
-			}
+			meta.Config = newResourceGroupConfig(0, meta.Capacity)
 		} else {
-			meta.Config = &rgpb.ResourceGroupConfig{
-				Requests: &rgpb.ResourceGroupLimit{
-					NodeNum: meta.Capacity,
-				},
-				Limits: &rgpb.ResourceGroupLimit{
-					NodeNum: meta.Capacity,
-				},
-			}
+			meta.Config = newResourceGroupConfig(meta.Capacity, meta.Capacity)
 		}
 	}
 	rg := NewResourceGroup(meta.Name, meta.Config)
@@ -83,7 +75,7 @@ func (rg *ResourceGroup) GetCapacity() int {
 	capacity := rg.cfg.Requests.NodeNum
 	if rg.GetName() == DefaultResourceGroupName {
 		// Default resource group's capacity is always DefaultResourceGroupCapacity.
-		capacity = DefaultResourceGroupCapacity
+		capacity = defaultResourceGroupCapacity
 	}
 	return int(capacity)
 }
@@ -186,7 +178,7 @@ func (rg *ResourceGroup) Snapshot() *ResourceGroup {
 	return &ResourceGroup{
 		name:  rg.name,
 		nodes: rg.nodes.Clone(),
-		cfg:   proto.Clone(rg.cfg).(*rgpb.ResourceGroupConfig),
+		cfg:   rg.GetConfigCloned(),
 	}
 }
 
@@ -214,13 +206,7 @@ func (rg *ResourceGroup) MeetRequirement() error {
 
 // CopyForWrite return a mutable resource group.
 func (rg *ResourceGroup) CopyForWrite() *mutableResourceGroup {
-	return &mutableResourceGroup{
-		ResourceGroup: &ResourceGroup{
-			name:  rg.name,
-			nodes: rg.nodes.Clone(),
-			cfg:   rg.GetConfigCloned(),
-		},
-	}
+	return &mutableResourceGroup{ResourceGroup: rg.Snapshot()}
 }
 
 // mutableResourceGroup is a mutable type (COW) for manipulating resource group meta info for replica manager.

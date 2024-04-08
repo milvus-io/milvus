@@ -268,7 +268,7 @@ func TestResourceGroupMeta(t *testing.T) {
 	// Recover Default Resource Group.
 	rgMeta = &querypb.ResourceGroup{
 		Name:     DefaultResourceGroupName,
-		Capacity: DefaultResourceGroupCapacity,
+		Capacity: defaultResourceGroupCapacity,
 		Nodes:    []int64{1, 2},
 	}
 	rg = NewResourceGroupFromMeta(rgMeta)
@@ -278,7 +278,7 @@ func TestResourceGroupMeta(t *testing.T) {
 	assert.Equal(t, 2, rg.OversizedNumOfNodes())
 	assert.Equal(t, 0, rg.RedundantNumOfNodes())
 	assert.Equal(t, 0, rg.MissingNumOfNodes())
-	assert.Equal(t, int(DefaultResourceGroupCapacity-2), rg.ReachLimitNumOfNodes())
+	assert.Equal(t, int(defaultResourceGroupCapacity-2), rg.ReachLimitNumOfNodes())
 	assert.False(t, rg.HasFrom("rg3"))
 	assert.False(t, rg.HasFrom("rg2"))
 	assert.False(t, rg.HasTo("rg2"))
@@ -290,7 +290,7 @@ func TestResourceGroupMeta(t *testing.T) {
 	assert.NoError(t, rg.MeetRequirement())
 
 	newMeta = rg.GetMeta()
-	assert.Equal(t, DefaultResourceGroupCapacity, newMeta.Capacity)
+	assert.Equal(t, defaultResourceGroupCapacity, newMeta.Capacity)
 
 	// Recover Default Resource Group.
 	rgMeta = &querypb.ResourceGroup{
