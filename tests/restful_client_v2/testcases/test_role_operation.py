@@ -2,6 +2,8 @@ from utils.utils import gen_unique_str
 from base.testbase import TestBase
 import pytest
 
+
+@pytest.mark.L1
 class TestRoleE2E(TestBase):
 
     def teardown_method(self):
@@ -26,7 +28,6 @@ class TestRoleE2E(TestBase):
                     self.role_client.role_revoke(payload)
                 self.role_client.role_drop(payload)
 
-    @pytest.mark.L1
     def test_role_e2e(self):
 
         # list role before create
