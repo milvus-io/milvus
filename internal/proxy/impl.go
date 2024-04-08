@@ -1740,30 +1740,26 @@ func (node *Proxy) GetLoadState(ctx context.Context, request *milvuspb.GetLoadSt
 	var progress int64
 	if len(request.GetPartitionNames()) == 0 {
 		if progress, _, err = getCollectionProgress(ctx, node.queryCoord, request.GetBase(), collectionID); err != nil {
-			if err != nil {
-				if errors.Is(err, merr.ErrCollectionNotLoaded) {
-					successResponse.State = commonpb.LoadState_LoadStateNotLoad
-					return successResponse, nil
-				}
-				return &milvuspb.GetLoadStateResponse{
-					Status: merr.Status(err),
-				}, nil
+			if errors.Is(err, merr.ErrCollectionNotLoaded) {
+				successResponse.State = commonpb.LoadState_LoadStateNotLoad
+				return successResponse, nil
 			}
+			return &milvuspb.GetLoadStateResponse{
+				Status: merr.Status(err),
+			}, nil
 		}
 	} else {
 		if progress, _, err = getPartitionProgress(ctx, node.queryCoord, request.GetBase(),
 			request.GetPartitionNames(), request.GetCollectionName(), collectionID, request.GetDbName()); err != nil {
-			if err != nil {
-				if errors.IsAny(err,
-					merr.ErrCollectionNotLoaded,
-					merr.ErrPartitionNotLoaded) {
-					successResponse.State = commonpb.LoadState_LoadStateNotLoad
-					return successResponse, nil
-				}
-				return &milvuspb.GetLoadStateResponse{
-					Status: merr.Status(err),
-				}, nil
+			if errors.IsAny(err,
+				merr.ErrCollectionNotLoaded,
+				merr.ErrPartitionNotLoaded) {
+				successResponse.State = commonpb.LoadState_LoadStateNotLoad
+				return successResponse, nil
 			}
+			return &milvuspb.GetLoadStateResponse{
+				Status: merr.Status(err),
+			}, nil
 		}
 	}
 	if progress >= 100 {
