@@ -17,9 +17,34 @@
 package typeutil
 
 import (
+	"encoding/binary"
 	"fmt"
 	"math"
 )
+
+func bfloat16IsNaN(f uint16) bool {
+	// the nan value of bfloat16 is x111 1111 1xxx xxxx
+	return (f&0x7F80 == 0x7F80) && (f&0x007f != 0)
+}
+
+func bfloat16IsInf(f uint16, sign int) bool {
+	// +inf: 0111 1111 1000 0000
+	// -inf: 1111 1111 1000 0000
+	return ((f == 0x7F80) && sign >= 0) ||
+		(f == 0xFF80 && sign <= 0)
+}
+
+func float16IsNaN(f uint16) bool {
+	// the nan value of float16 is x111 1100 0000 0000
+	return (f&0x7c00 == 0x7c00) && (f&0x03ff != 0)
+}
+
+func float16IsInf(f uint16, sign int) bool {
+	// +inf: 0111 1100 0000 0000
+	// -inf: 1111 1100 0000 0000
+	return ((f == 0x7c00) && sign >= 0) ||
+		(f == 0xfc00 && sign <= 0)
+}
 
 func VerifyFloat(value float64) error {
 	// not allow not-a-number and infinity
@@ -49,5 +74,33 @@ func VerifyFloats64(values []float64) error {
 		}
 	}
 
+	return nil
+}
+
+func VerifyFloats16(value []byte) error {
+	if len(value)%2 != 0 {
+		return fmt.Errorf("The length of float16 is not aligned to 2.")
+	}
+	dataSize := len(value) / 2
+	for i := 0; i < dataSize; i++ {
+		v := binary.LittleEndian.Uint16(value[i*2:])
+		if float16IsNaN(v) || float16IsInf(v, -1) || float16IsInf(v, 1) {
+			return fmt.Errorf("float16 vector contain nan or infinity value.")
+		}
+	}
+	return nil
+}
+
+func VerifyBFloats16(value []byte) error {
+	if len(value)%2 != 0 {
+		return fmt.Errorf("The length of bfloat16 in not aligned to 2")
+	}
+	dataSize := len(value) / 2
+	for i := 0; i < dataSize; i++ {
+		v := binary.LittleEndian.Uint16(value[i*2:])
+		if bfloat16IsNaN(v) || bfloat16IsInf(v, -1) || bfloat16IsInf(v, 1) {
+			return fmt.Errorf("bfloat16 vector contain nan or infinity value.")
+		}
+	}
 	return nil
 }
