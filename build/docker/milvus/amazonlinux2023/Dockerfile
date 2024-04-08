@@ -13,7 +13,7 @@ FROM amazonlinux:2023
 
 ARG TARGETARCH
 
-RUN yum install -y wget libgomp libaio libatomic && \
+RUN yum install -y wget libgomp libaio libatomic openblas-devel && \
     rm -rf /var/cache/yum/*
 
 COPY --chown=root:root --chmod=774 ./bin/ /milvus/bin/
