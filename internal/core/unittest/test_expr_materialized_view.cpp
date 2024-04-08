@@ -76,6 +76,7 @@ const std::string kVecFieldIdPlaceholder = "VEC_FID";
 const std::string kDataTypePlaceholder = "DT";
 const std::string kValPlaceholder = "VAL";
 const std::string kPredicatePlaceholder = "PREDICATE_PLACEHOLDER";
+const std::string kMvInvolvedPlaceholder = "MV_INVOLVED_PLACEHOLDER";
 }  // namespace
 
 class ExprMaterializedViewTest : public testing::Test {
@@ -121,6 +122,7 @@ class ExprMaterializedViewTest : public testing::Test {
                                       round_decimal: 3
                                       metric_type: "L2"
                                       search_params: "{\"nprobe\": 1}"
+                                      materialized_view_involved: MV_INVOLVED_PLACEHOLDER
                                     >
                                     placeholder_tag: "$0">)";
         const int64_t vec_field_id =
@@ -147,8 +149,9 @@ class ExprMaterializedViewTest : public testing::Test {
     // this function takes an predicate string in schemapb format
     // and return a vector search plan
     std::unique_ptr<milvus::query::Plan>
-    CreatePlan(const std::string& predicate_str) {
+    CreatePlan(const std::string& predicate_str, const bool is_mv_enable) {
         auto plan_str = InterpolateTemplate(predicate_str);
+        plan_str = InterpolateMvInvolved(plan_str, is_mv_enable);
         auto binary_plan = milvus::segcore::translate_text_plan_to_binary_plan(
             plan_str.c_str());
         return milvus::query::CreateSearchPlanByExpr(
@@ -217,15 +220,13 @@ class ExprMaterializedViewTest : public testing::Test {
 
     knowhere::MaterializedViewSearchInfo
     TranslateThenExecuteWhenMvInolved(const std::string& predicate_str) {
-        auto plan = CreatePlan(predicate_str);
-        plan->plan_node_->search_info_.materialized_view_involved = true;
+        auto plan = CreatePlan(predicate_str, true);
         return ExecutePlan(plan);
     }
 
     knowhere::MaterializedViewSearchInfo
     TranslateThenExecuteWhenMvNotInolved(const std::string& predicate_str) {
-        auto plan = CreatePlan(predicate_str);
-        plan->plan_node_->search_info_.materialized_view_involved = false;
+        auto plan = CreatePlan(predicate_str, false);
         return ExecutePlan(plan);
     }
 
@@ -257,6 +258,14 @@ class ExprMaterializedViewTest : public testing::Test {
                          const std::string& occ,
                          const std::string& replace) {
         str = std::regex_replace(str, std::regex(occ), replace);
+    }
+
+    std::string
+    InterpolateMvInvolved(const std::string& plan, const bool is_mv_involved) {
+        std::string p = plan;
+        ReplaceAllOccurrence(
+            p, kMvInvolvedPlaceholder, is_mv_involved ? "true" : "false");
+        return p;
     }
 
  private:
@@ -320,13 +329,12 @@ TEST_F(ExprMaterializedViewTest, TestMvNoExpr) {
                 data_field_info[DataType::VECTOR_FLOAT].field_id;
             ReplaceAllOccurrence(
                 plan_str, kVecFieldIdPlaceholder, std::to_string(vec_field_id));
+            plan_str = InterpolateMvInvolved(plan_str, mv_involved);
             auto binary_plan =
                 milvus::segcore::translate_text_plan_to_binary_plan(
                     plan_str.c_str());
             auto plan = milvus::query::CreateSearchPlanByExpr(
                 *schema, binary_plan.data(), binary_plan.size());
-            plan->plan_node_->search_info_.materialized_view_involved =
-                mv_involved;
             auto mv = ExecutePlan(plan);
             TestMvExpectDefault(mv);
         }
@@ -345,8 +353,7 @@ TEST_F(ExprMaterializedViewTest, TestMvNotInvolvedExpr) {
             >
         )";
         predicate = InterpolateSingleExpr(predicate, data_type);
-        auto plan = CreatePlan(predicate);
-        plan->plan_node_->search_info_.materialized_view_involved = false;
+        auto plan = CreatePlan(predicate, false);
         auto mv = ExecutePlan(plan);
         TestMvExpectDefault(mv);
     }
@@ -360,8 +367,7 @@ TEST_F(ExprMaterializedViewTest, TestMvNotInvolvedJsonExpr) {
         InterpolateSingleExpr(
             R"( elements:<VAL1> op:Contains elements_same_type:true>)",
             DataType::INT64);
-    auto plan = CreatePlan(predicate);
-    plan->plan_node_->search_info_.materialized_view_involved = false;
+    auto plan = CreatePlan(predicate, false);
     auto mv = ExecutePlan(plan);
     TestMvExpectDefault(mv);
 }

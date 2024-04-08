@@ -293,6 +293,20 @@ func (t *searchTask) checkNq(ctx context.Context) (int64, error) {
 	return nq, nil
 }
 
+func setQueryInfoIfMvEnable(queryInfo *planpb.QueryInfo, t *searchTask) error {
+	if t.enableMaterializedView {
+		partitionKeyFieldSchema, err := typeutil.GetPartitionKeyFieldSchema(t.schema.CollectionSchema)
+		if err != nil {
+			log.Warn("failed to get partition key field schema", zap.Error(err))
+			return err
+		}
+		if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyFieldSchema) {
+			queryInfo.MaterializedViewInvolved = true
+		}
+	}
+	return nil
+}
+
 func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "init advanced search request")
 	defer sp.End()
@@ -331,11 +345,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			if len(partitionIDs) > 0 {
 				internalSubReq.PartitionIDs = partitionIDs
 				t.partitionIDsSet.Upsert(partitionIDs...)
-				if t.enableMaterializedView {
-					if planPtr := plan.GetVectorAnns(); planPtr != nil {
-						planPtr.QueryInfo.MaterializedViewInvolved = true
-					}
-				}
+				setQueryInfoIfMvEnable(queryInfo, t)
 			}
 		} else {
 			internalSubReq.PartitionIDs = t.SearchRequest.GetPartitionIDs()
@@ -391,11 +401,7 @@ func (t *searchTask) initSearchRequest(ctx context.Context) error {
 		}
 		if len(partitionIDs) > 0 {
 			t.SearchRequest.PartitionIDs = partitionIDs
-			if t.enableMaterializedView {
-				if planPtr := plan.GetVectorAnns(); planPtr != nil {
-					planPtr.QueryInfo.MaterializedViewInvolved = true
-				}
-			}
+			setQueryInfoIfMvEnable(queryInfo, t)
 		}
 	}
 
