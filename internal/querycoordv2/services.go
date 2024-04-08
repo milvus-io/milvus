@@ -899,7 +899,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 		return resp, nil
 	}
 	collection := s.meta.CollectionManager.GetCollection(req.GetCollectionID())
-	if collection.GetStatus() == querypb.LoadStatus_Loaded {
+	if collection != nil && collection.GetStatus() == querypb.LoadStatus_Loaded {
 		// when collection is loaded, regard collection as readable, set percentage == 100
 		percentage = 100
 	}
