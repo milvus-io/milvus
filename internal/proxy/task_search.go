@@ -819,12 +819,12 @@ func checkRangeSearchParams(str string, metricType string) error {
 
 	if metric.PositivelyRelated(metricType) {
 		if params.radius >= params.rangeFilter {
-			msg := fmt.Sprintf("range_filter must be greater than radius for IP/COSINE, range_filter:%f, radius:%f", params.rangeFilter, params.radius)
+			msg := fmt.Sprintf("metric type '%s', range_filter(%f) must be greater than radius(%f)", metricType, params.rangeFilter, params.radius)
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
 	} else {
 		if params.radius <= params.rangeFilter {
-			msg := fmt.Sprintf("range_filter must be less than radius for L2/HAMMING/JACCARD, range_filter:%f, radius:%f", params.rangeFilter, params.radius)
+			msg := fmt.Sprintf("metric type '%s', range_filter(%f) must be less than radius(%f)", metricType, params.rangeFilter, params.radius)
 			return merr.WrapErrParameterInvalidMsg(msg)
 		}
 	}
