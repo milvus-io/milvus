@@ -98,6 +98,7 @@ func (t *SearchTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(t.GetNodeID(), 10)
 	inQueueDuration := t.tr.ElapseSpan()
+	inQueueDurationMS := inQueueDuration.Seconds() * 1000
 
 	// Update in queue metric for prometheus.
 	metrics.QueryNodeSQLatencyInQueue.WithLabelValues(
@@ -107,14 +108,14 @@ func (t *SearchTask) PreExecute() error {
 		t.collection.GetResourceGroup(),
 		// TODO: resource group and db name may be removed at runtime,
 		// should be refactor into metricsutil.observer in the future.
-	).Observe(float64(inQueueDuration.Milliseconds()))
+	).Observe(inQueueDurationMS)
 
 	username := t.Username()
 	metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
 		nodeID,
 		metrics.SearchLabel,
 		username).
-		Observe(float64(inQueueDuration.Milliseconds()))
+		Observe(inQueueDurationMS)
 
 	// Update collector for query node quota.
 	collector.Average.Add(metricsinfo.SearchQueueMetric, float64(inQueueDuration.Microseconds()))

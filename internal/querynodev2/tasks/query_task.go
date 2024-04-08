@@ -67,6 +67,7 @@ func (t *QueryTask) PreExecute() error {
 	// Update task wait time metric before execute
 	nodeID := strconv.FormatInt(paramtable.GetNodeID(), 10)
 	inQueueDuration := t.tr.ElapseSpan()
+	inQueueDurationMS := inQueueDuration.Seconds() * 1000
 
 	// Update in queue metric for prometheus.
 	metrics.QueryNodeSQLatencyInQueue.WithLabelValues(
@@ -75,14 +76,14 @@ func (t *QueryTask) PreExecute() error {
 		t.collection.GetDBName(),
 		t.collection.GetResourceGroup(), // TODO: resource group and db name may be removed at runtime.
 		// should be refactor into metricsutil.observer in the future.
-	).Observe(float64(inQueueDuration.Milliseconds()))
+	).Observe(inQueueDurationMS)
 
 	username := t.Username()
 	metrics.QueryNodeSQPerUserLatencyInQueue.WithLabelValues(
 		nodeID,
 		metrics.QueryLabel,
 		username).
-		Observe(float64(inQueueDuration.Milliseconds()))
+		Observe(inQueueDurationMS)
 
 	// Update collector for query node quota.
 	collector.Average.Add(metricsinfo.QueryQueueMetric, float64(inQueueDuration.Microseconds()))
