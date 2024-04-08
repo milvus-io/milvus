@@ -143,6 +143,7 @@ var (
 			Name:      "stored_binlog_size",
 			Help:      "binlog size of healthy segments",
 		}, []string{
+			databaseLabelName,
 			collectionIDLabelName,
 			segmentIDLabelName,
 		})
