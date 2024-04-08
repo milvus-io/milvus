@@ -261,7 +261,7 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-20.04-unittests
-          fail_ci_if_error: true
+          fail_ci_if_error: false # when false, will not cause ci fail if upload cov fail
       - name: Retry Upload coverage to Codecov
         if: "${{ failure() }} && github.repository == 'milvus-io/milvus'"
         uses: codecov/codecov-action@v3.1.1
@@ -270,4 +270,4 @@ jobs:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-20.04-unittests
-          fail_ci_if_error: true
+          fail_ci_if_error: false # when false, will not cause ci fail if upload cov fail
