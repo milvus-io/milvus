@@ -137,7 +137,10 @@ func (t *SearchTask) Execute() error {
 	tr := timerecord.NewTimeRecorderWithTrace(t.ctx, "SearchTask")
 
 	req := t.req
-	t.combinePlaceHolderGroups()
+	err := t.combinePlaceHolderGroups()
+	if err != nil {
+		return err
+	}
 	searchReq, err := segments.NewSearchRequest(t.ctx, t.collection, req, t.placeholderGroup)
 	if err != nil {
 		return err
@@ -343,15 +346,28 @@ func (t *SearchTask) MergeWith(other Task) bool {
 }
 
 // combinePlaceHolderGroups combine all the placeholder groups.
-func (t *SearchTask) combinePlaceHolderGroups() {
-	if len(t.others) > 0 {
-		ret := &commonpb.PlaceholderGroup{}
-		_ = proto.Unmarshal(t.placeholderGroup, ret)
-		for _, t := range t.others {
-			x := &commonpb.PlaceholderGroup{}
-			_ = proto.Unmarshal(t.placeholderGroup, x)
-			ret.Placeholders[0].Values = append(ret.Placeholders[0].Values, x.Placeholders[0].Values...)
-		}
-		t.placeholderGroup, _ = proto.Marshal(ret)
+func (t *SearchTask) combinePlaceHolderGroups() error {
+	if len(t.others) == 0 {
+		return nil
 	}
+
+	ret := &commonpb.PlaceholderGroup{}
+	if err := proto.Unmarshal(t.placeholderGroup, ret); err != nil {
+		return merr.WrapErrParameterInvalidMsg("invalid search vector placeholder: %v", err)
+	}
+	if len(ret.GetPlaceholders()) == 0 {
+		return merr.WrapErrParameterInvalidMsg("empty search vector is not allowed")
+	}
+	for _, t := range t.others {
+		x := &commonpb.PlaceholderGroup{}
+		if err := proto.Unmarshal(t.placeholderGroup, x); err != nil {
+			return merr.WrapErrParameterInvalidMsg("invalid search vector placeholder: %v", err)
+		}
+		if len(x.GetPlaceholders()) == 0 {
+			return merr.WrapErrParameterInvalidMsg("empty search vector is not allowed")
+		}
+		ret.Placeholders[0].Values = append(ret.Placeholders[0].Values, x.Placeholders[0].Values...)
+	}
+	t.placeholderGroup, _ = proto.Marshal(ret)
+	return nil
 }
