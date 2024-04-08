@@ -126,9 +126,10 @@ type Server struct {
 	importScheduler  ImportScheduler
 	importChecker    ImportChecker
 
-	compactionTrigger     trigger
-	compactionHandler     compactionPlanContext
-	compactionViewManager *CompactionViewManager
+	compactionTrigger           trigger
+	clusteringCompactionManager *ClusteringCompactionManager
+	compactionHandler           compactionPlanContext
+	compactionViewManager       *CompactionViewManager
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -154,8 +155,11 @@ type Server struct {
 
 	// segReferManager  *SegmentReferenceManager
 	indexBuilder              *indexBuilder
-	indexNodeManager          *IndexNodeManager
+	indexNodeManager          WorkerManager
 	indexEngineVersionManager IndexEngineVersionManager
+
+	analysisMeta      *analysisMeta
+	analysisScheduler *analysisTaskScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -366,6 +370,7 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
+	s.initAnalysisScheduler()
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
@@ -412,6 +417,7 @@ func (s *Server) Start() error {
 func (s *Server) startDataCoord() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
+		s.analysisScheduler.Start()
 		s.compactionTrigger.start()
 		s.compactionViewManager.Start()
 	}
@@ -514,7 +520,8 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
+	s.clusteringCompactionManager = newClusteringCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler, s.analysisScheduler)
+	s.compactionTrigger = newCompactionTrigger(s.ctx, s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager, s.clusteringCompactionManager)
 }
 
 func (s *Server) stopCompactionTrigger() {
@@ -644,6 +651,10 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
+		s.analysisMeta, err = newAnalysisMeta(s.ctx, catalog)
+		if err != nil {
+			return err
+		}
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
@@ -652,6 +663,12 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
 	if s.indexBuilder == nil {
 		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
+	}
+}
+
+func (s *Server) initAnalysisScheduler() {
+	if s.analysisScheduler == nil {
+		s.analysisScheduler = newAnalysisTaskScheduler(s.ctx, s.meta, s.analysisMeta, s.indexNodeManager)
 	}
 }
 

@@ -185,6 +185,47 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
+	/* just for test analysis task
+	taskID, err := s.allocator.allocID(ctx)
+	if err != nil {
+		log.Error("analysis failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	segments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
+		return isFlush(info) && info.GetCollectionID() == req.GetCollectionID()
+	})
+	segmentIDs := lo.Map(segments, func(t *SegmentInfo, i int) int64 {
+		return t.ID
+	})
+
+	task := &model.AnalysisTask{
+		TenantID:                  "",
+		CollectionID:              req.GetCollectionID(),
+		PartitionID:               segments[0].GetPartitionID(),
+		FieldID:                   req.GetFieldID(),
+		FieldName:                 "",
+		FieldType:                 schemapb.DataType_FloatVector,
+		SegmentIDs:                segmentIDs,
+		TaskID:                    taskID,
+		Version:                   0,
+		NodeID:                    0,
+		State:                     commonpb.IndexState_Unissued,
+		FailReason:                "",
+		CentroidsFile:             "",
+		SegmentOffsetMappingFiles: nil,
+		Dim:                       128,
+	}
+
+	err = s.analysisMeta.AddAnalysisTask(task)
+	if err != nil {
+		log.Error("analysis task add failed", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	s.analysisScheduler.enqueue(taskID)
+	return merr.Success(), nil
+	*/
+
 	if req.GetIndexName() == "" {
 		indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
 		if len(indexes) == 0 {

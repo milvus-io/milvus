@@ -15,12 +15,12 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
-	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const defaultFilterRatio float64 = 0.5
@@ -40,11 +40,21 @@ func PruneSegments(ctx context.Context,
 	log := log.Ctx(ctx)
 	// 1. calculate filtered segments
 	filteredSegments := make(map[UniqueID]struct{}, 0)
-	clusteringKeyField := typeutil.GetClusteringKeyField(schema.Fields)
+	clusteringKeyField := clustering.GetClusteringKeyField(schema)
 	if clusteringKeyField == nil {
+		// no need to prune
 		return
 	}
+
+	var expr []byte
 	if searchReq != nil {
+		expr = searchReq.GetSerializedExprPlan()
+	} else {
+		expr = queryReq.GetSerializedExprPlan()
+	}
+
+	// currently we only prune based on one column
+	if typeutil.IsVectorType(clusteringKeyField.GetDataType()) {
 		// parse searched vectors
 		var vectorsHolder commonpb.PlaceholderGroup
 		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
@@ -61,14 +71,13 @@ func PruneSegments(ctx context.Context,
 		if err != nil {
 			return
 		}
-		for _, partID := range searchReq.GetPartitionIDs() {
-			partStats := partitionStats[partID]
+		for _, partStats := range partitionStats {
 			FilterSegmentsByVector(partStats, searchReq, vectorsBytes, dimValue, clusteringKeyField, filteredSegments, info.filterRatio)
 		}
-	} else if queryReq != nil {
+	} else {
 		// 0. parse expr from plan
 		plan := planpb.PlanNode{}
-		err := proto.Unmarshal(queryReq.GetSerializedExprPlan(), &plan)
+		err := proto.Unmarshal(expr, &plan)
 		if err != nil {
 			log.Error("failed to unmarshall serialized expr from bytes, failed the operation")
 			return
@@ -82,20 +91,23 @@ func PruneSegments(ctx context.Context,
 		if matchALL || targetRanges == nil {
 			return
 		}
-		for _, partID := range queryReq.GetPartitionIDs() {
-			partStats := partitionStats[partID]
+		for _, partStats := range partitionStats {
 			FilterSegmentsOnScalarField(partStats, targetRanges, clusteringKeyField, filteredSegments)
 		}
 	}
 
 	// 2. remove filtered segments from sealed segment list
 	if len(filteredSegments) > 0 {
+		var realFilteredSegments = 0
 		totalSegNum := 0
 		for idx, item := range sealedSegments {
 			newSegments := make([]SegmentEntry, 0)
 			totalSegNum += len(item.Segments)
 			for _, segment := range item.Segments {
-				if _, ok := filteredSegments[segment.SegmentID]; !ok {
+				_, exist := filteredSegments[segment.SegmentID]
+				if exist {
+					realFilteredSegments++
+				} else {
 					newSegments = append(newSegments, segment)
 				}
 			}
@@ -103,7 +115,7 @@ func PruneSegments(ctx context.Context,
 			sealedSegments[idx] = item
 		}
 		log.RatedInfo(30, "Pruned segment for search/query",
-			zap.Int("filtered_segment_num[excluded]", len(filteredSegments)),
+			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
 			zap.Float32("filtered_rate", float32(len(filteredSegments)/totalSegNum)),
 		)
@@ -152,6 +164,7 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 					}
 					// currently, we only support float vector and only one center one segment
 					if disErr != nil {
+						log.Error("calculate distance error", zap.Error(disErr))
 						neededSegments[segId] = struct{}{}
 						break
 					}
@@ -207,10 +220,23 @@ func FilterSegmentsOnScalarField(partitionStats *storage.PartitionStatsSnapshot,
 	overlap := func(min storage.ScalarFieldValue, max storage.ScalarFieldValue) bool {
 		for _, tRange := range targetRanges {
 			switch keyField.DataType {
-			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32, schemapb.DataType_Int64:
+			case schemapb.DataType_Int8:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int8)), int64(max.GetValue().(int8)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int16:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int16)), int64(max.GetValue().(int16)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int32:
+				targetRange := tRange.ToIntRange()
+				statRange := exprutil.NewIntRange(int64(min.GetValue().(int32)), int64(max.GetValue().(int32)), true, true)
+				return exprutil.IntRangeOverlap(targetRange, statRange)
+			case schemapb.DataType_Int64:
 				targetRange := tRange.ToIntRange()
 				statRange := exprutil.NewIntRange(min.GetValue().(int64), max.GetValue().(int64), true, true)
 				return exprutil.IntRangeOverlap(targetRange, statRange)
+			// todo: add float/double pruner
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
 				targetRange := tRange.ToStrRange()
 				statRange := exprutil.NewStrRange(min.GetValue().(string), max.GetValue().(string), true, true)

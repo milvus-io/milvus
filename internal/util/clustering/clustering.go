@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func CalcVectorDistance(dim int64, dataType schemapb.DataType, left []byte, right []float32, metric string) ([]float32, error) {
@@ -47,4 +48,33 @@ func SerializeFloatVector(fv []float32) []byte {
 		data = append(data, buf...)
 	}
 	return data
+}
+
+func GetClusteringKeyField(collectionSchema *schemapb.CollectionSchema) *schemapb.FieldSchema {
+	var clusteringKeyField *schemapb.FieldSchema
+	var partitionKeyField *schemapb.FieldSchema
+	vectorFields := make([]*schemapb.FieldSchema, 0)
+	for _, field := range collectionSchema.GetFields() {
+		if field.IsClusteringKey {
+			clusteringKeyField = field
+		}
+		if field.IsPartitionKey {
+			partitionKeyField = field
+		}
+		// todo support other vector type
+		// if typeutil.IsVectorType(field.GetDataType()) {
+		if field.DataType == schemapb.DataType_FloatVector {
+			vectorFields = append(vectorFields, field)
+		}
+	}
+	// in some server mode, we regard partition key field or vector field as clustering key by default.
+	// here is the priority: clusteringKey > partitionKey > vector field(only single vector)
+	if clusteringKeyField != nil {
+		return clusteringKeyField
+	} else if paramtable.Get().CommonCfg.UsePartitionKeyAsClusteringKey.GetAsBool() && partitionKeyField != nil {
+		return partitionKeyField
+	} else if paramtable.Get().CommonCfg.UseVectorAsClusteringKey.GetAsBool() && len(vectorFields) == 1 {
+		return vectorFields[0]
+	}
+	return nil
 }
