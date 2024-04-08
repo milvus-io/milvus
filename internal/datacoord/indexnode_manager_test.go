@@ -25,7 +25,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -34,9 +33,6 @@ import (
 
 func TestIndexNodeManager_AddNode(t *testing.T) {
 	nm := NewNodeManager(context.Background(), defaultIndexNodeCreatorFunc)
-	nodeID, client := nm.PeekClient(&model.SegmentIndex{})
-	assert.Equal(t, int64(-1), nodeID)
-	assert.Nil(t, client)
 
 	t.Run("success", func(t *testing.T) {
 		err := nm.AddNode(1, "indexnode-1")
@@ -49,7 +45,7 @@ func TestIndexNodeManager_AddNode(t *testing.T) {
 	})
 }
 
-func TestIndexNodeManager_PeekClient(t *testing.T) {
+func TestIndexNodeManager_SelectNodeAndAssignTask(t *testing.T) {
 	getMockedGetJobStatsClient := func(resp *indexpb.GetJobStatsResponse, err error) types.IndexNodeClient {
 		ic := mocks.NewMockIndexNodeClient(t)
 		ic.EXPECT().GetJobStats(mock.Anything, mock.Anything, mock.Anything).Return(resp, err)
@@ -94,9 +90,19 @@ func TestIndexNodeManager_PeekClient(t *testing.T) {
 			},
 		}
 
-		nodeID, client := nm.PeekClient(&model.SegmentIndex{})
-		assert.NotNil(t, client)
-		assert.Contains(t, []UniqueID{8, 9}, nodeID)
+		err := nm.SelectNodeAndAssignTask(func(selectNodeID int64, client types.IndexNodeClient) error {
+			assert.NotNil(t, client)
+			assert.Contains(t, []UniqueID{8, 9}, selectNodeID)
+			return nil
+		})
+		assert.NoError(t, err)
+
+		err = nm.SelectNodeAndAssignTask(func(selectNodeID int64, client types.IndexNodeClient) error {
+			assert.NotNil(t, client)
+			assert.Contains(t, []UniqueID{8, 9}, selectNodeID)
+			return errors.New("error")
+		})
+		assert.Error(t, err)
 	})
 }
 

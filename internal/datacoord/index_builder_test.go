@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
-	mclient "github.com/milvus-io/milvus/internal/util/mock"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -678,13 +677,13 @@ func TestIndexBuilder(t *testing.T) {
 	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), nil)
 
 	assert.Equal(t, 6, len(ib.tasks))
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
-	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+1])
+	assert.Equal(t, taskInit, ib.tasks[buildID])
+	assert.Equal(t, taskInProgress, ib.tasks[buildID+1])
 	// buildID+2 will be filter by isDeleted
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+3])
-	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+8])
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+9])
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+10])
+	assert.Equal(t, taskInit, ib.tasks[buildID+3])
+	assert.Equal(t, taskInProgress, ib.tasks[buildID+8])
+	assert.Equal(t, taskInit, ib.tasks[buildID+9])
+	assert.Equal(t, taskInit, ib.tasks[buildID+10])
 
 	ib.scheduleDuration = time.Millisecond * 500
 	ib.Start()
@@ -721,6 +720,7 @@ func TestIndexBuilder(t *testing.T) {
 			break
 		}
 		ib.taskMutex.RUnlock()
+		time.Sleep(time.Second)
 	}
 	ib.Stop()
 }
@@ -743,8 +743,8 @@ func TestIndexBuilder_Error(t *testing.T) {
 	chunkManager.EXPECT().RootPath().Return("root")
 	ib := &indexBuilder{
 		ctx: context.Background(),
-		tasks: map[int64]indexTaskState{
-			buildID: indexTaskInit,
+		tasks: map[int64]taskState{
+			buildID: taskInit,
 		},
 		meta:                      createMetaTable(ec),
 		chunkManager:              chunkManager,
@@ -752,7 +752,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 	}
 
 	t.Run("meta not exist", func(t *testing.T) {
-		ib.tasks[buildID+100] = indexTaskInit
+		ib.tasks[buildID+100] = taskInit
 		ib.process(buildID + 100)
 
 		_, ok := ib.tasks[buildID+100]
@@ -760,40 +760,36 @@ func TestIndexBuilder_Error(t *testing.T) {
 	})
 
 	t.Run("finish few rows task fail", func(t *testing.T) {
-		ib.tasks[buildID+9] = indexTaskInit
+		ib.tasks[buildID+9] = taskInit
 		ib.process(buildID + 9)
 
 		state, ok := ib.tasks[buildID+9]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskInit, state)
+		assert.Equal(t, taskInit, state)
 	})
 
 	t.Run("peek client fail", func(t *testing.T) {
-		ib.tasks[buildID] = indexTaskInit
+		ib.tasks[buildID] = taskInit
 		ib.nodeManager = &IndexNodeManager{nodeClients: map[UniqueID]types.IndexNodeClient{}}
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskInit, state)
+		assert.Equal(t, taskInit, state)
 	})
 
 	t.Run("update version fail", func(t *testing.T) {
-		ib.nodeManager = &IndexNodeManager{
-			ctx:         context.Background(),
-			nodeClients: map[UniqueID]types.IndexNodeClient{1: &mclient.GrpcIndexNodeClient{Err: nil}},
-		}
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskInit, state)
+		assert.Equal(t, taskInit, state)
 	})
 
 	t.Run("no need to build index but update catalog failed", func(t *testing.T) {
 		ib.meta.catalog = ec
 		ib.meta.indexMeta.indexes[collID][indexID].IsDeleted = true
-		ib.tasks[buildID] = indexTaskInit
+		ib.tasks[buildID] = taskInit
 		ok := ib.process(buildID)
 		assert.False(t, ok)
 
@@ -806,7 +802,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		ib.meta.catalog = sc
 
 		ib.meta.indexMeta.indexes[collID][indexID].IsDeleted = true
-		ib.tasks[buildID] = indexTaskInit
+		ib.tasks[buildID] = taskInit
 		ib.process(buildID)
 
 		_, ok := ib.tasks[buildID]
@@ -816,7 +812,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	t.Run("assign task error", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
-		ib.tasks[buildID] = indexTaskInit
+		ib.tasks[buildID] = taskInit
 		ib.meta.indexMeta.catalog = sc
 		ib.meta.catalog = sc
 
@@ -837,7 +833,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 	t.Run("assign task fail", func(t *testing.T) {
 		paramtable.Get().Save(Params.CommonCfg.StorageType.Key, "local")
@@ -860,12 +856,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 				1: ic,
 			},
 		}
-		ib.tasks[buildID] = indexTaskInit
+		ib.tasks[buildID] = taskInit
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 
 	t.Run("drop job error", func(t *testing.T) {
@@ -882,19 +878,19 @@ func TestIndexBuilder_Error(t *testing.T) {
 				nodeID: ic,
 			},
 		}
-		ib.tasks[buildID] = indexTaskDone
+		ib.tasks[buildID] = taskDone
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskDone, state)
+		assert.Equal(t, taskDone, state)
 
-		ib.tasks[buildID] = indexTaskRetry
+		ib.tasks[buildID] = taskRetry
 		ib.process(buildID)
 
 		state, ok = ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 
 	t.Run("drop job fail", func(t *testing.T) {
@@ -912,19 +908,19 @@ func TestIndexBuilder_Error(t *testing.T) {
 				nodeID: ic,
 			},
 		}
-		ib.tasks[buildID] = indexTaskDone
+		ib.tasks[buildID] = taskDone
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskDone, state)
+		assert.Equal(t, taskDone, state)
 
-		ib.tasks[buildID] = indexTaskRetry
+		ib.tasks[buildID] = taskRetry
 		ib.process(buildID)
 
 		state, ok = ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 
 	t.Run("get state error", func(t *testing.T) {
@@ -941,12 +937,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
+		ib.tasks[buildID] = taskInProgress
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 
 	t.Run("get state fail", func(t *testing.T) {
@@ -968,12 +964,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
+		ib.tasks[buildID] = taskInProgress
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 
 	t.Run("finish task fail", func(t *testing.T) {
@@ -1002,12 +998,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
+		ib.tasks[buildID] = taskInProgress
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		assert.Equal(t, taskInProgress, state)
 	})
 
 	t.Run("task still in progress", func(t *testing.T) {
@@ -1034,12 +1030,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
+		ib.tasks[buildID] = taskInProgress
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskInProgress, state)
+		assert.Equal(t, taskInProgress, state)
 	})
 
 	t.Run("indexNode has no task", func(t *testing.T) {
@@ -1057,12 +1053,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 			},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
+		ib.tasks[buildID] = taskInProgress
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 
 	t.Run("node not exist", func(t *testing.T) {
@@ -1073,12 +1069,12 @@ func TestIndexBuilder_Error(t *testing.T) {
 			nodeClients: map[UniqueID]types.IndexNodeClient{},
 		}
 
-		ib.tasks[buildID] = indexTaskInProgress
+		ib.tasks[buildID] = taskInProgress
 		ib.process(buildID)
 
 		state, ok := ib.tasks[buildID]
 		assert.True(t, ok)
-		assert.Equal(t, indexTaskRetry, state)
+		assert.Equal(t, taskRetry, state)
 	})
 }
 
@@ -1169,13 +1165,13 @@ func TestIndexBuilderV2(t *testing.T) {
 	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), handler)
 
 	assert.Equal(t, 6, len(ib.tasks))
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
-	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+1])
+	assert.Equal(t, taskInit, ib.tasks[buildID])
+	assert.Equal(t, taskInProgress, ib.tasks[buildID+1])
 	// buildID+2 will be filter by isDeleted
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+3])
-	assert.Equal(t, indexTaskInProgress, ib.tasks[buildID+8])
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+9])
-	assert.Equal(t, indexTaskInit, ib.tasks[buildID+10])
+	assert.Equal(t, taskInit, ib.tasks[buildID+3])
+	assert.Equal(t, taskInProgress, ib.tasks[buildID+8])
+	assert.Equal(t, taskInit, ib.tasks[buildID+9])
+	assert.Equal(t, taskInit, ib.tasks[buildID+10])
 
 	ib.scheduleDuration = time.Millisecond * 500
 	ib.Start()
@@ -1424,7 +1420,7 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 				return merr.Success(), nil
 			}).Once()
 		assert.Equal(t, 1, len(ib.tasks))
-		assert.Equal(t, indexTaskInit, ib.tasks[buildID])
+		assert.Equal(t, taskInit, ib.tasks[buildID])
 
 		ib.scheduleDuration = time.Millisecond * 500
 		ib.Start()

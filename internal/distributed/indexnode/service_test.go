@@ -111,6 +111,27 @@ func TestIndexNodeServer(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 	})
 
+	t.Run("Analysis", func(t *testing.T) {
+		req := &indexpb.AnalysisRequest{}
+		resp, err := server.Analysis(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("QueryAnalysisResult", func(t *testing.T) {
+		req := &indexpb.QueryAnalysisResultRequest{}
+		resp, err := server.QueryAnalysisResult(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("DropAnalysisTasks", func(t *testing.T) {
+		req := &indexpb.DropAnalysisTasksRequest{}
+		resp, err := server.DropAnalysisTasks(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
 	err = server.Stop()
 	assert.NoError(t, err)
 }

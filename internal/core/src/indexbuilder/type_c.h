@@ -16,3 +16,5 @@
 typedef void* CIndex;
 typedef void* CIndexQueryResult;
 typedef void* CBuildIndexInfo;
+typedef void* CAnalysis;
+typedef void* CAnalysisInfo;

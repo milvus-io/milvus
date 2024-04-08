@@ -84,6 +84,48 @@ func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run f
 	return _c
 }
 
+// DropClusteringCompactionInfo provides a mock function with given fields: info
+func (_m *MockCompactionMeta) DropClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error {
+	ret := _m.Called(info)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*datapb.ClusteringCompactionInfo) error); ok {
+		r0 = rf(info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_DropClusteringCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropClusteringCompactionInfo'
+type MockCompactionMeta_DropClusteringCompactionInfo_Call struct {
+	*mock.Call
+}
+
+// DropClusteringCompactionInfo is a helper method to define mock.On call
+//   - info *datapb.ClusteringCompactionInfo
+func (_e *MockCompactionMeta_Expecter) DropClusteringCompactionInfo(info interface{}) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
+	return &MockCompactionMeta_DropClusteringCompactionInfo_Call{Call: _e.mock.On("DropClusteringCompactionInfo", info)}
+}
+
+func (_c *MockCompactionMeta_DropClusteringCompactionInfo_Call) Run(run func(info *datapb.ClusteringCompactionInfo)) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*datapb.ClusteringCompactionInfo))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_DropClusteringCompactionInfo_Call) Return(_a0 error) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_DropClusteringCompactionInfo_Call) RunAndReturn(run func(*datapb.ClusteringCompactionInfo) error) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetHealthySegment provides a mock function with given fields: segID
 func (_m *MockCompactionMeta) GetHealthySegment(segID int64) *SegmentInfo {
 	ret := _m.Called(segID)
@@ -124,6 +166,48 @@ func (_c *MockCompactionMeta_GetHealthySegment_Call) Return(_a0 *SegmentInfo) *M
 }
 
 func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(int64) *SegmentInfo) *MockCompactionMeta_GetHealthySegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveClusteringCompactionInfo provides a mock function with given fields: info
+func (_m *MockCompactionMeta) SaveClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error {
+	ret := _m.Called(info)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(*datapb.ClusteringCompactionInfo) error); ok {
+		r0 = rf(info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_SaveClusteringCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveClusteringCompactionInfo'
+type MockCompactionMeta_SaveClusteringCompactionInfo_Call struct {
+	*mock.Call
+}
+
+// SaveClusteringCompactionInfo is a helper method to define mock.On call
+//   - info *datapb.ClusteringCompactionInfo
+func (_e *MockCompactionMeta_Expecter) SaveClusteringCompactionInfo(info interface{}) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
+	return &MockCompactionMeta_SaveClusteringCompactionInfo_Call{Call: _e.mock.On("SaveClusteringCompactionInfo", info)}
+}
+
+func (_c *MockCompactionMeta_SaveClusteringCompactionInfo_Call) Run(run func(info *datapb.ClusteringCompactionInfo)) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*datapb.ClusteringCompactionInfo))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_SaveClusteringCompactionInfo_Call) Return(_a0 error) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_SaveClusteringCompactionInfo_Call) RunAndReturn(run func(*datapb.ClusteringCompactionInfo) error) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -148,6 +148,14 @@ type DataCoordCatalog interface {
 	DropImportTask(taskID int64) error
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
+
+	ListClusteringCompactionInfos(ctx context.Context) ([]*datapb.ClusteringCompactionInfo, error)
+	SaveClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
+	DropClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
+
+	ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error)
+	SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error
+	DropAnalysisTask(ctx context.Context, taskID typeutil.UniqueID) error
 }
 
 type QueryCoordCatalog interface {

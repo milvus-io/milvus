@@ -707,3 +707,15 @@ func TestVectorFieldStatsMarshal(t *testing.T) {
 	assert.Equal(t, 2, len(stats4.Centroids))
 	assert.ElementsMatch(t, []VectorFieldValue{centroid, centroid2}, stats4.Centroids)
 }
+
+func TestFindMaxVersion(t *testing.T) {
+	files := []string{"path/1", "path/2", "path/3"}
+	version, path := FindPartitionStatsMaxVersion(files)
+	assert.Equal(t, int64(3), version)
+	assert.Equal(t, "path/3", path)
+
+	files2 := []string{}
+	version2, path2 := FindPartitionStatsMaxVersion(files2)
+	assert.Equal(t, int64(-1), version2)
+	assert.Equal(t, "", path2)
+}

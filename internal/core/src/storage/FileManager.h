@@ -148,6 +148,26 @@ class FileManagerImpl : public knowhere::FileManager {
                std::to_string(field_meta_.segment_id);
     }
 
+    virtual std::string
+    GetRemoteCentroidsObjectPrefix() const {
+        return rcm_->GetRootPath() + "/files" + std::string(ANALYZE_ROOT_PATH) +
+               "/" + std::to_string(index_meta_.build_id) + "/" +
+               std::to_string(index_meta_.index_version) + "/" +
+               std::to_string(field_meta_.collection_id) + "/" +
+               std::to_string(field_meta_.partition_id) + "/" +
+               std::to_string(field_meta_.field_id);
+    }
+
+    virtual std::string
+    GetRemoteCentroidIdMappingObjectPrefix(std::string segment_id) const {
+        return rcm_->GetRootPath() + "/files" + std::string(ANALYZE_ROOT_PATH) +
+               "/" + std::to_string(index_meta_.build_id) + "/" +
+               std::to_string(index_meta_.index_version) + "/" +
+               std::to_string(field_meta_.collection_id) + "/" +
+               std::to_string(field_meta_.partition_id) + "/" +
+               std::to_string(field_meta_.field_id) + "/" + segment_id;
+    }
+
  protected:
     // collection meta
     FieldDataMeta field_meta_;
