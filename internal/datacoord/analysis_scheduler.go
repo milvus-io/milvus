@@ -231,7 +231,7 @@ func (ats *analysisTaskScheduler) process(taskID int64) bool {
 			}
 
 			// get binlogIDs
-			binlogIDs := getBinLogIds(info, t.FieldID)
+			binlogIDs := getBinLogIDs(info, t.FieldID)
 
 			req.SegmentStats[segID] = &indexpb.SegmentStats{
 				ID:      segID,
