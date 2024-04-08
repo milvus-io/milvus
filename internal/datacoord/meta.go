@@ -269,8 +269,15 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
-			metrics.DataCoordStoredBinlogSize.WithLabelValues(
-				fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+
+			coll, ok := m.collections[segment.GetCollectionID()]
+			if ok {
+				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
+					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+			} else {
+				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
+			}
+
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
 			}
