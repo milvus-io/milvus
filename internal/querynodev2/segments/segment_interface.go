@@ -62,8 +62,10 @@ type Segment interface {
 	Level() datapb.SegmentLevel
 	LoadStatus() LoadStatus
 	LoadInfo() *querypb.SegmentLoadInfo
-	RLock() error
-	RUnlock()
+	// PinIfNotReleased the segment to prevent it from being released
+	PinIfNotReleased() error
+	// Unpin the segment to allow it to be released
+	Unpin()
 
 	// Stats related
 	// InsertCount returns the number of inserted rows, not effected by deletion

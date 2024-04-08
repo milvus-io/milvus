@@ -370,7 +370,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 	defer func() {
 		if err != nil {
 			for _, segment := range ret {
-				segment.RUnlock()
+				segment.Unpin()
 			}
 		}
 	}()
@@ -379,7 +379,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 		if segment.Level() == datapb.SegmentLevel_L0 {
 			return true
 		}
-		err = segment.RLock()
+		err = segment.PinIfNotReleased()
 		if err != nil {
 			return false
 		}
@@ -399,7 +399,7 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 	defer func() {
 		if err != nil {
 			for _, segment := range lockedSegments {
-				segment.RUnlock()
+				segment.Unpin()
 			}
 		}
 	}()
@@ -417,14 +417,14 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 		sealedExist = sealedExist && filter(sealed, filters...)
 
 		if growingExist {
-			err = growing.RLock()
+			err = growing.PinIfNotReleased()
 			if err != nil {
 				return nil, err
 			}
 			lockedSegments = append(lockedSegments, growing)
 		}
 		if sealedExist {
-			err = sealed.RLock()
+			err = sealed.PinIfNotReleased()
 			if err != nil {
 				return nil, err
 			}
@@ -442,7 +442,7 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 
 func (mgr *segmentManager) Unpin(segments []Segment) {
 	for _, segment := range segments {
-		segment.RUnlock()
+		segment.Unpin()
 	}
 }
 
