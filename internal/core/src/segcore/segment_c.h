@@ -60,7 +60,16 @@ Retrieve(CTraceContext c_trace,
          CRetrievePlan c_plan,
          uint64_t timestamp,
          CRetrieveResult* result,
-         int64_t limit_size);
+         int64_t limit_size,
+         bool ignore_non_pk);
+
+CStatus
+RetrieveByOffsets(CTraceContext c_trace,
+                  CSegmentInterface c_segment,
+                  CRetrievePlan c_plan,
+                  CRetrieveResult* result,
+                  int64_t* offsets,
+                  int64_t len);
 
 int64_t
 GetMemoryUsageInBytes(CSegmentInterface c_segment);

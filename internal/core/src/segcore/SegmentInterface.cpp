@@ -83,6 +83,14 @@ std::unique_ptr<proto::segcore::RetrieveResults>
 SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
                                    Timestamp timestamp,
                                    int64_t limit_size) const {
+    return Retrieve(plan, timestamp, limit_size, false);
+}
+
+std::unique_ptr<proto::segcore::RetrieveResults>
+SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
+                                   Timestamp timestamp,
+                                   int64_t limit_size,
+                                   bool ignore_non_pk) const {
     std::shared_lock lck(mutex_);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
@@ -110,10 +118,21 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
 
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
-
+#if 1
+    FillTargetEntry(plan,
+                    results,
+                    retrieve_results.result_offsets_.data(),
+                    retrieve_results.result_offsets_.size(),
+                    ignore_non_pk);
+#else
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
     auto pk_field_id = plan->schema_.get_primary_field_id();
+
+    auto is_pk_field = [&, pk_field_id](const FieldId& field_id) -> bool {
+        return pk_field_id.has_value() && pk_field_id.value() == field_id;
+    };
+
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
@@ -138,6 +157,10 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
             continue;
         }
 
+        if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
         auto& field_meta = plan->schema_[field_id];
 
         auto col = bulk_subscript(field_id,
@@ -148,8 +171,10 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
                 proto::schema::DataType(field_meta.get_element_type()));
         }
         auto col_data = col.release();
-        fields_data->AddAllocated(col_data);
-        if (pk_field_id.has_value() && pk_field_id.value() == field_id) {
+        if (!ignore_non_pk) {
+            fields_data->AddAllocated(col_data);
+        }
+        if (is_pk_field(field_id)) {
             switch (field_meta.get_data_type()) {
                 case DataType::INT64: {
                     auto int_ids = ids->mutable_int_id();
@@ -174,6 +199,94 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
             }
         }
     }
+#endif
+    return results;
+}
+
+void
+SegmentInternalInterface::FillTargetEntry(
+    const query::RetrievePlan* plan,
+    const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+    const int64_t* offsets,
+    int64_t size,
+    bool ignore_non_pk) const {
+    auto fields_data = results->mutable_fields_data();
+    auto ids = results->mutable_ids();
+    auto pk_field_id = plan->schema_.get_primary_field_id();
+
+    auto is_pk_field = [&, pk_field_id](const FieldId& field_id) -> bool {
+        return pk_field_id.has_value() && pk_field_id.value() == field_id;
+    };
+
+    for (auto field_id : plan->field_ids_) {
+        if (SystemProperty::Instance().IsSystem(field_id)) {
+            auto system_type =
+                SystemProperty::Instance().GetSystemFieldType(field_id);
+
+            FixedVector<int64_t> output(size);
+            bulk_subscript(system_type, offsets, size, output.data());
+
+            auto data_array = std::make_unique<DataArray>();
+            data_array->set_field_id(field_id.get());
+            data_array->set_type(milvus::proto::schema::DataType::Int64);
+
+            auto scalar_array = data_array->mutable_scalars();
+            auto data = reinterpret_cast<const int64_t*>(output.data());
+            auto obj = scalar_array->mutable_long_data();
+            obj->mutable_data()->Add(data, data + size);
+            fields_data->AddAllocated(data_array.release());
+            continue;
+        }
+
+        if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
+        auto& field_meta = plan->schema_[field_id];
+
+        auto col = bulk_subscript(field_id, offsets, size);
+        if (field_meta.get_data_type() == DataType::ARRAY) {
+            col->mutable_scalars()->mutable_array_data()->set_element_type(
+                proto::schema::DataType(field_meta.get_element_type()));
+        }
+        auto col_data = col.release();
+        if (!ignore_non_pk) {
+            fields_data->AddAllocated(col_data);
+        }
+        if (is_pk_field(field_id)) {
+            switch (field_meta.get_data_type()) {
+                case DataType::INT64: {
+                    auto int_ids = ids->mutable_int_id();
+                    auto& src_data = col_data->scalars().long_data();
+                    int_ids->mutable_data()->Add(src_data.data().begin(),
+                                                 src_data.data().end());
+                    break;
+                }
+                case DataType::VARCHAR: {
+                    auto str_ids = ids->mutable_str_id();
+                    auto& src_data = col_data->scalars().string_data();
+                    for (auto i = 0; i < src_data.data_size(); ++i) {
+                        *(str_ids->mutable_data()->Add()) = src_data.data(i);
+                    }
+                    break;
+                }
+                default: {
+                    PanicInfo(DataTypeInvalid,
+                              fmt::format("unsupported datatype {}",
+                                          field_meta.get_data_type()));
+                }
+            }
+        }
+    }
+}
+
+std::unique_ptr<proto::segcore::RetrieveResults>
+SegmentInternalInterface::Retrieve(const query::RetrievePlan* Plan,
+                                   const int64_t* offsets,
+                                   int64_t size) const {
+    std::shared_lock lck(mutex_);
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    FillTargetEntry(Plan, results, offsets, size, false);
     return results;
 }
 

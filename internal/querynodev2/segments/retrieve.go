@@ -45,6 +45,8 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		wg       sync.WaitGroup
 	)
 
+	plan.ignoreNonPk = len(segments) > 1
+
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
 		label = metrics.GrowingSegmentLabel

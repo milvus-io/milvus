@@ -67,4 +67,22 @@ GetTraceIDAsVector(const TraceContext* ctx);
 std::vector<uint8_t>
 GetSpanIDAsVector(const TraceContext* ctx);
 
+struct AutoSpan {
+    explicit AutoSpan(const std::string& name,
+                      TraceContext* ctx = nullptr,
+                      bool is_root_span = false) {
+        span_ = StartSpan(name, ctx);
+        if (is_root_span) {
+            SetRootSpan(span_);
+        }
+    }
+
+    ~AutoSpan() {
+        span_->End();
+    }
+
+ private:
+    std::shared_ptr<trace::Span> span_;
+};
+
 }  // namespace milvus::tracer
