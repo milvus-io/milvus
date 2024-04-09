@@ -1859,9 +1859,10 @@ TEST(CApiTest, LoadIndexInfo) {
 
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = knowhere::IndexFactory::Instance().Create<float>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<float>(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
         knowhere::Version::GetCurrentVersion().VersionNumber());
+    auto indexing = get_index_obj.value();
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -1909,9 +1910,10 @@ TEST(CApiTest, LoadIndexSearch) {
     auto N = 1024 * 10;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = knowhere::IndexFactory::Instance().Create<float>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<float>(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
         knowhere::Version::GetCurrentVersion().VersionNumber());
+    auto indexing = get_index_obj.value();
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
