@@ -2,7 +2,7 @@ FROM rockylinux/rockylinux:8
 
 RUN dnf install -y make automake gcc gcc-c++ curl zip unzip tar git which \
         libaio libuuid-devel wget python3 python3-pip \
-        pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool 
+        pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool openblas
 
 RUN dnf -y update && \
     dnf -y install dnf-plugins-core && \
