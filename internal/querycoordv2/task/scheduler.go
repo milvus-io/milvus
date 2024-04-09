@@ -966,7 +966,7 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
-			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.(*LeaderAction).GetLeaderID()); ok {
 				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
 				return merr.WrapErrNodeOffline(action.Node())
 			}
