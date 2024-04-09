@@ -130,6 +130,11 @@ class SegmentGrowingImpl : public SegmentGrowing {
     try_remove_chunks(FieldId fieldId);
 
  public:
+    size_t
+    GetMemoryUsageInBytes() const override {
+        return stats_.mem_size.load() + deleted_record_.mem_size();
+    }
+
     int64_t
     get_row_count() const override {
         return insert_record_.ack_responder_.GetAck();
@@ -305,6 +310,8 @@ class SegmentGrowingImpl : public SegmentGrowing {
     mutable DeletedRecord deleted_record_;
 
     int64_t id_;
+
+    SegmentStats stats_{};
 };
 
 const static IndexMetaPtr empty_index_meta =

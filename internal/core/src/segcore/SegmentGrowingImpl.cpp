@@ -395,7 +395,6 @@ SegmentGrowingImpl::Delete(int64_t reserved_begin,
 
     // step 2: fill delete record
     deleted_record_.push(sort_pks, sort_timestamps.data());
-    stats_.mem_size += size * sizeof(Timestamp) + CalcPksSize(sort_pks);
     return SegcoreError::success();
 }
 
@@ -417,8 +416,6 @@ SegmentGrowingImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 
     // step 2: fill pks and timestamps
     deleted_record_.push(pks, timestamps);
-
-    stats_.mem_size += info.row_count * sizeof(Timestamp) + CalcPksSize(pks);
 }
 
 SpanBase
