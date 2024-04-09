@@ -133,6 +133,8 @@ func TestRowParser_Parse_Invalid(t *testing.T) {
 	cases := []testCase{
 		{name: `{"id": 1, "vector": [], "x": 6, "$meta": {"x": 8}}`, expectErr: "duplicated key is not allowed"},
 		{name: `{"id": 1, "vector": [], "x": 6, "$meta": "{\"x\": 8}"}`, expectErr: "duplicated key is not allowed"},
+		{name: `{"id": 1, "vector": [], "x": 6, "$meta": "{*&%%&$*(&"}`, expectErr: "not a JSON format string"},
+		{name: `{"id": 1, "vector": [], "x": 6, "$meta": []}`, expectErr: "not a JSON object"},
 	}
 
 	for _, c := range cases {
