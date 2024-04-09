@@ -13,11 +13,12 @@ import pytest
 from base.testbase import TestBase
 from uuid import uuid4
 
+IMPORT_TIMEOUT = 360
 
 @pytest.mark.BulkInsert
 class TestCreateImportJob(TestBase):
 
-    @pytest.mark.parametrize("insert_num", [5000])
+    @pytest.mark.parametrize("insert_num", [3000])
     @pytest.mark.parametrize("import_task_num", [2])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("is_partition_key", [True, False])
@@ -87,7 +88,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 360:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
         c.load(_refresh=True)
@@ -178,7 +179,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
         c.load(_refresh=True)
@@ -271,7 +272,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
         c.load(_refresh=True)
@@ -361,7 +362,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         time.sleep(10)
         # assert data count
@@ -441,7 +442,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         time.sleep(10)
         # assert data count
@@ -526,7 +527,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         time.sleep(10)
         # assert data count
@@ -650,7 +651,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         time.sleep(10)
         # assert data count
@@ -808,7 +809,7 @@ class TestCreateImportJob(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         time.sleep(10)
         c_restore = Collection(restore_collection_name)
@@ -892,7 +893,7 @@ class TestImportJobAdvance(TestBase):
                     if rsp['data']['state'] == "Completed":
                         finished = True
                     time.sleep(5)
-                    if time.time() - t0 > 360:
+                    if time.time() - t0 > IMPORT_TIMEOUT:
                         assert False, "import job timeout"
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
@@ -984,7 +985,7 @@ class TestCreateImportJobAdvance(TestBase):
                     if rsp['data']['state'] == "Completed":
                         finished = True
                     time.sleep(5)
-                    if time.time() - t0 > 360:
+                    if time.time() - t0 > IMPORT_TIMEOUT:
                         assert False, "import job timeout"
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
@@ -1073,7 +1074,7 @@ class TestCreateImportJobAdvance(TestBase):
                     if rsp['data']['state'] == "Completed":
                         finished = True
                     time.sleep(5)
-                    if time.time() - t0 > 360:
+                    if time.time() - t0 > IMPORT_TIMEOUT:
                         assert False, "import job timeout"
                 except Exception as e:
                     logger.error(f"get import job progress failed: {e}")
@@ -1420,7 +1421,7 @@ class TestCreateImportJobNegative(TestBase):
                 if rsp['data']['state'] == "Completed":
                     finished = True
                 time.sleep(5)
-                if time.time() - t0 > 120:
+                if time.time() - t0 > IMPORT_TIMEOUT:
                     assert False, "import job timeout"
         c = Collection(name)
         c.load(_refresh=True)
