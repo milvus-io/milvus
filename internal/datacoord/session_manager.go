@@ -171,7 +171,7 @@ func (c *SessionManagerImpl) Flush(ctx context.Context, nodeID int64, req *datap
 }
 
 func (c *SessionManagerImpl) execFlush(ctx context.Context, nodeID int64, req *datapb.FlushSegmentsRequest) {
-	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID))
+	log := log.Ctx(ctx).With(zap.Int64("nodeID", nodeID), zap.String("channel", req.GetChannelName()))
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
 		log.Warn("failed to get dataNode client", zap.Error(err))
