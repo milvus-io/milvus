@@ -2876,7 +2876,6 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 			hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
 			hookutil.DataSizeKey:   sentSize,
 			hookutil.RelatedCntKey: qt.result.GetResults().GetAllSearchCount(),
-			hookutil.DimensionKey:  qt.dimension,
 		})
 		SetReportValue(qt.result.GetStatus(), v)
 		metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
@@ -2929,18 +2928,18 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
-
-	qt := &hybridSearchTask{
+	newSearchReq := convertHybridSearchToSearch(request)
+	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		HybridSearchRequest: &internalpb.HybridSearchRequest{
+		SearchRequest: &internalpb.SearchRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Search),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: request,
+		request: newSearchReq,
 		tr:      timerecord.NewTimeRecorder(method),
 		qc:      node.queryCoord,
 		node:    node,
@@ -3034,7 +3033,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), request.GetDbName(), request.GetCollectionName()).
-		Add(float64(len(qt.request.GetRequests())))
+		Add(float64(len(request.GetRequests())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -3058,7 +3057,6 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.UsernameKey:   GetCurUserFromContextOrDefault(ctx),
 			hookutil.DataSizeKey:   sentSize,
 			hookutil.RelatedCntKey: qt.result.GetResults().GetAllSearchCount(),
-			hookutil.DimensionKey:  qt.dimension,
 		})
 		SetReportValue(qt.result.GetStatus(), v)
 		metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
