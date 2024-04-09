@@ -128,6 +128,9 @@ type shardDelegator struct {
 	chunkManager   storage.ChunkManager
 
 	excludedSegments *ExcludedSegments
+	// cause growing segment meta has been stored in segmentManager/distribution/pkOracle/excludeSegments
+	// in order to make add/remove growing be atomic, need lock before modify these meta info
+	growingSegmentLock sync.RWMutex
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.

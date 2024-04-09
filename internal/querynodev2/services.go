@@ -545,13 +545,6 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 			return merr.Status(err), nil
 		}
 
-		// when we try to release a segment, add it to pipeline's exclude list first
-		// in case of consumed it's growing segment again
-		droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
-			return id, typeutil.MaxTimestamp
-		})
-		delegator.AddExcludedSegments(droppedInfos)
-
 		req.NeedTransfer = false
 		err := delegator.ReleaseSegments(ctx, req, false)
 		if err != nil {
