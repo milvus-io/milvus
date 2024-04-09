@@ -88,8 +88,9 @@ func (r *compositeRecord) Schema() map[FieldID]schemapb.DataType {
 	return r.schema
 }
 
+var _ RecordReader = (*compositeRecordReader)(nil)
+
 type compositeRecordReader struct {
-	RecordReader
 	blobs [][]*Blob
 
 	blobPos int
@@ -665,10 +666,10 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 	}), nil
 }
 
+var _ Record = (*selectiveRecord)(nil)
+
 // selectiveRecord is a Record that only contains a single field, reusing existing Record.
 type selectiveRecord struct {
-	Record
-
 	r               Record
 	selectedFieldId FieldID
 
@@ -708,8 +709,9 @@ func newSelectiveRecord(r Record, selectedFieldId FieldID) *selectiveRecord {
 	}
 }
 
+var _ RecordWriter = (*compositeRecordWriter)(nil)
+
 type compositeRecordWriter struct {
-	RecordWriter
 	writers map[FieldID]RecordWriter
 }
 
@@ -742,8 +744,9 @@ func newCompositeRecordWriter(writers map[FieldID]RecordWriter) *compositeRecord
 	}
 }
 
+var _ RecordWriter = (*singleFieldRecordWriter)(nil)
+
 type singleFieldRecordWriter struct {
-	RecordWriter
 	fw      *pqarrow.FileWriter
 	fieldId FieldID
 
