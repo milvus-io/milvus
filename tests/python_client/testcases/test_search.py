@@ -15,6 +15,7 @@ import decimal
 import multiprocessing
 import numbers
 import random
+import math
 import numpy
 import threading
 import pytest
@@ -10495,6 +10496,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 3. prepare search params
         req_list = []
         weights = [0.2, 0.3, 0.5]
+        metrics = []
         search_res_dict_array = []
         for i in range(len(vector_name_list)):
             # 4. generate search data
@@ -10508,22 +10510,22 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
+            metrics.append("COSINE")
             # 5. search to get the base line of hybrid_search
             search_res = collection_w.search(vectors[:1], vector_name_list[i],
                                              default_search_params, default_limit,
                                              default_search_exp,
-                                             offset = offset,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
                                                           "limit": default_limit})[0]
             ids = search_res[0].ids
-            distance_array = [distance_single * weights[i] for distance_single in search_res[0].distances]
+            distance_array = search_res[0].distances
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = distance_array[j]
             search_res_dict_array.append(search_res_dict)
         # 6. calculate hybrid search base line
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array, weights, metrics)
         # 7. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit,
                                                 offset = offset,
@@ -11236,7 +11238,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 search_res_dict[ids[j]] = 1/(j + 60 +1)
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line for RRFRanker
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results_rrf(search_res_dict_array)
         # 5. hybrid search
         hybrid_search_0 = collection_w.hybrid_search(req_list, RRFRanker(), default_limit,
                                                 check_task=CheckTasks.check_search_results,
@@ -11296,7 +11298,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             # search for get the base line of hybrid_search
             search_res = collection_w.search(vectors[:1], vector_name_list[i],
                                              default_search_params, default_limit,
-                                             default_search_exp, offset=offset,
+                                             default_search_exp, offset=0,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
@@ -11306,7 +11308,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 search_res_dict[ids[j]] = 1/(j + k +1)
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line for RRFRanker
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results_rrf(search_res_dict_array)
         # 5. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, RRFRanker(k), default_limit,
                                                 offset=offset,
@@ -11444,7 +11446,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 search_res_dict[ids[j]] = 1/(j + k +1)
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line for RRFRanker
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results_rrf(search_res_dict_array)
         # 5. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, RRFRanker(k), default_limit,
                                                 check_task=CheckTasks.check_search_results,
@@ -11453,7 +11455,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                              "limit": default_limit})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
-            assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
+            delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("limit", [1, 100, 16384])
@@ -11477,6 +11480,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         search_res_dict_array = []
         if limit > default_nb:
             limit = default_limit
+        metrics = []
         for i in range(len(vector_name_list)):
             vectors = [[random.random() for _ in range(default_dim)] for _ in range(1)]
             search_res_dict = {}
@@ -11488,6 +11492,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
+            metrics.append("COSINE")
             # search to get the base line of hybrid_search
             search_res = collection_w.search(vectors[:1], vector_name_list[i],
                                              default_search_params, limit,
@@ -11497,12 +11502,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                           "ids": insert_ids,
                                                           "limit": limit})[0]
             ids = search_res[0].ids
-            distance_array = [distance_single * weights[i] for distance_single in search_res[0].distances]
+            distance_array = search_res[0].distances
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = distance_array[j]
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array, weights, metrics, 5)
         # 5. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), limit,
                                                 round_decimal=5,
@@ -11512,7 +11517,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                              "limit": limit})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:limit])):
-            assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
+            delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_limit_out_of_range_max(self):
@@ -11598,6 +11604,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req_list = []
         weights = [0.2, 0.3, 0.5]
         search_res_dict_array = []
+        metrics = []
         for i in range(len(vector_name_list)):
             vectors = [[random.random() for _ in range(default_dim)] for _ in range(1)]
             search_res_dict = {}
@@ -11609,6 +11616,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
+            metrics.append("COSINE")
             # search to get the base line of hybrid_search
             search_res = collection_w.search(vectors[:1], vector_name_list[i],
                                              default_search_params, default_limit,
@@ -11618,12 +11626,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                           "ids": insert_ids,
                                                           "limit": default_limit})[0]
             ids = search_res[0].ids
-            distance_array = [distance_single * weights[i] for distance_single in search_res[0].distances]
+            distance_array = search_res[0].distances
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = distance_array[j]
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array, weights, metrics)
         # 5. hybrid search
         output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name,
                          default_json_field_name]
@@ -11637,7 +11645,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                              "output_fields": output_fields})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
-            assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
+            delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_with_output_fields_all_fields_wildcard(self):
@@ -11656,6 +11665,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req_list = []
         weights = [0.2, 0.3, 0.5]
         search_res_dict_array = []
+        metrics = []
         for i in range(len(vector_name_list)):
             vectors = [[random.random() for _ in range(default_dim)] for _ in range(1)]
             search_res_dict = {}
@@ -11667,6 +11677,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
+            metrics.append("COSINE")
             # search to get the base line of hybrid_search
             search_res = collection_w.search(vectors[:1], vector_name_list[i],
                                              default_search_params, default_limit,
@@ -11676,12 +11687,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                           "ids": insert_ids,
                                                           "limit": default_limit})[0]
             ids = search_res[0].ids
-            distance_array = [distance_single * weights[i] for distance_single in search_res[0].distances]
+            distance_array = search_res[0].distances
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = distance_array[j]
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array, weights, metrics)
         # 5. hybrid search
         output_fields = [default_int64_field_name, default_float_field_name, default_string_field_name,
                          default_json_field_name]
@@ -11695,7 +11706,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                              "output_fields": output_fields})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
-            assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
+            delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("output_fields", [[default_search_field], [default_search_field, default_int64_field_name]])
@@ -11717,6 +11729,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req_list = []
         weights = [0.2, 0.3, 0.5]
         search_res_dict_array = []
+        metrics = []
         for i in range(len(vector_name_list)):
             vectors = [[random.random() for _ in range(default_dim)] for _ in range(1)]
             search_res_dict = {}
@@ -11728,6 +11741,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
+            metrics.append("COSINE")
             # search to get the base line of hybrid_search
             search_res = collection_w.search(vectors[:1], vector_name_list[i],
                                              default_search_params, default_limit,
@@ -11742,12 +11756,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 search_res.done()
                 search_res = search_res.result()
             ids = search_res[0].ids
-            distance_array = [distance_single * weights[i] for distance_single in search_res[0].distances]
+            distance_array = search_res[0].distances
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = distance_array[j]
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array, weights, metrics)
         # 5. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit, _async = _async,
                                                 output_fields = output_fields,
@@ -11762,7 +11776,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             hybrid_res = hybrid_res.result()
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:default_limit])):
-            assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
+            delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("rerank", [RRFRanker(), WeightedRanker(0.1, 0.9, 1)])
@@ -11825,6 +11840,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         search_res_dict_array = []
         if limit > default_nb:
             limit = default_limit
+        metrics = []
         for i in range(len(vector_name_list)):
             vectors = [[random.random() for _ in range(default_dim)] for _ in range(1)]
             search_res_dict = {}
@@ -11836,6 +11852,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
+            metrics.append("COSINE")
             # search to get the base line of hybrid_search
             search_res = collection_w.search(vectors[:1], vector_name_list[i],
                                              default_search_params, limit,
@@ -11845,12 +11862,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                           "ids": insert_ids,
                                                           "limit": limit})[0]
             ids = search_res[0].ids
-            distance_array = [distance_single * weights[i] for distance_single in search_res[0].distances]
+            distance_array = search_res[0].distances
             for j in range(len(ids)):
                 search_res_dict[ids[j]] = distance_array[j]
             search_res_dict_array.append(search_res_dict)
         # 4. calculate hybrid search base line
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array)
+        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array, weights, metrics, 5)
         # 5. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), limit,
                                                 round_decimal=5,
@@ -11860,7 +11877,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                              "limit": limit})[0]
         # 6. compare results through the re-calculated distances
         for i in range(len(score_answer[:limit])):
-            assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
+            delta = math.fabs(score_answer[i] - hybrid_res[0].distances[i])
+            assert delta < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_result_L2_order(self):
@@ -11896,8 +11914,8 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             req_list.append(req)
         # 4. hybrid search 
         res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)[0]
-        is_sorted_ascend = lambda lst: all(lst[i] <= lst[i+1] for i in range(len(lst)-1))
-        assert is_sorted_ascend(res[0].distances)
+        is_sorted_descend = lambda lst: all(lst[i] >= lst[i+1] for i in range(len(lst)-1))
+        assert is_sorted_descend(res[0].distances)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_hybrid_search_result_order(self):

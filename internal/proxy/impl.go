@@ -2825,18 +2825,19 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-HybridSearch")
 	defer sp.End()
 
-	qt := &hybridSearchTask{
+	newSearchReq := convertHybridSearchToSearch(request)
+	qt := &searchTask{
 		ctx:       ctx,
 		Condition: NewTaskCondition(ctx),
-		HybridSearchRequest: &internalpb.HybridSearchRequest{
+		SearchRequest: &internalpb.SearchRequest{
 			Base: commonpbutil.NewMsgBase(
 				commonpbutil.WithMsgType(commonpb.MsgType_Search),
 				commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: request,
-		tr:      timerecord.NewTimeRecorder(method),
+		request: newSearchReq,
+		tr:      timerecord.NewTimeRecorder("search"),
 		qc:      node.queryCoord,
 		node:    node,
 		lb:      node.lbPolicy,
@@ -2921,7 +2922,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		metrics.SuccessLabel,
 	).Inc()
 
-	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(len(qt.request.GetRequests())))
+	metrics.ProxySearchVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(len(request.GetRequests())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
