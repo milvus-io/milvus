@@ -32,7 +32,7 @@ func PrometheusCacheMonitor[K comparable, V any](c Cache[K, V], namespace, subsy
 		func() float64 {
 			hit := float64(c.Stats().HitCount.Load())
 			miss := float64(c.Stats().MissCount.Load())
-			return float64(hit) / (hit + miss)
+			return hit / (hit + miss)
 		})
 	// TODO: adding more metrics.
 	prometheus.MustRegister(hitRate)
