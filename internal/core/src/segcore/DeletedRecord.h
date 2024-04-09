@@ -105,6 +105,8 @@ struct DeletedRecord {
         pks_.set_data_raw(n, pks.data() + divide_point, size);
         timestamps_.set_data_raw(n, timestamps + divide_point, size);
         n_ += size;
+        mem_size_ += sizeof(Timestamp) * size +
+                     CalcPksSize(pks.data() + divide_point, size);
     }
 
     const ConcurrentVector<Timestamp>&
@@ -122,12 +124,18 @@ struct DeletedRecord {
         return n_.load();
     }
 
+    size_t
+    mem_size() const {
+        return mem_size_.load();
+    }
+
  private:
     std::shared_ptr<TmpBitmap> lru_;
     std::shared_mutex shared_mutex_;
 
     std::shared_mutex buffer_mutex_;
     std::atomic<int64_t> n_ = 0;
+    std::atomic<int64_t> mem_size_ = 0;
     ConcurrentVector<Timestamp> timestamps_;
     ConcurrentVector<PkType> pks_;
 };

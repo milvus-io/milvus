@@ -182,12 +182,12 @@ GetDataTypeName(DataType data_type) {
 }
 
 inline size_t
-CalcPksSize(const std::vector<PkType>& pks) {
+CalcPksSize(const PkType* data, size_t n) {
     size_t size = 0;
-    for (auto& pk : pks) {
-        size += sizeof(pk);
-        if (std::holds_alternative<std::string>(pk)) {
-            size += std::get<std::string>(pk).size();
+    for (size_t i = 0; i < n; ++i) {
+        size += sizeof(data[i]);
+        if (std::holds_alternative<std::string>(data[i])) {
+            size += std::get<std::string>(data[i]).size();
         }
     }
     return size;
