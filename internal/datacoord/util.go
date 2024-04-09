@@ -22,6 +22,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // Response response interface for verification
@@ -68,17 +70,12 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 		return nil
 	}
 
-	segmentMap := make(map[int64]*SegmentInfo)
-	collectionSegments := make(map[int64][]int64)
-	// TODO(yah01): This can't handle the case of multiple vector fields exist,
-	// modify it if we support multiple vector fields.
-	vecFieldID := make(map[int64]int64)
-	for _, segment := range segments {
-		collectionID := segment.GetCollectionID()
-		segmentMap[segment.GetID()] = segment
-		collectionSegments[collectionID] = append(collectionSegments[collectionID], segment.GetID())
-	}
-	for collection := range collectionSegments {
+	collectionSegments := lo.GroupBy(segments, func(segment *SegmentInfo) int64 {
+		return segment.GetCollectionID()
+	})
+
+	ret := make([]*SegmentInfo, 0)
+	for collection, segmentList := range collectionSegments {
 		ctx, cancel := context.WithTimeout(context.Background(), time.Second*2)
 		coll, err := handler.GetCollection(ctx, collection)
 		cancel()
@@ -86,27 +83,34 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 			log.Warn("failed to get collection schema", zap.Error(err))
 			continue
 		}
+		// TODO(yah01): This can't handle the case of multiple vector fields exist,
+		// modify it if we support multiple vector fields.
+		vecFieldID := int64(-1)
 		for _, field := range coll.Schema.GetFields() {
 			if field.GetDataType() == schemapb.DataType_BinaryVector ||
 				field.GetDataType() == schemapb.DataType_FloatVector {
-				vecFieldID[collection] = field.GetFieldID()
+				vecFieldID = field.GetFieldID()
 				break
+			}
+		}
+
+		// get indexed segments which finish build index on all vector field
+		indexed := mt.indexMeta.GetIndexedSegments(collection, []int64{vecFieldID})
+		if len(indexed) > 0 {
+			indexedSet := typeutil.NewUniqueSet(indexed...)
+			for _, segment := range segmentList {
+				if !isFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
+					continue
+				}
+
+				if indexedSet.Contain(segment.GetID()) {
+					ret = append(ret, segment)
+				}
 			}
 		}
 	}
 
-	indexedSegments := make([]*SegmentInfo, 0)
-	for _, segment := range segments {
-		if !isFlushState(segment.GetState()) && segment.GetState() != commonpb.SegmentState_Dropped {
-			continue
-		}
-		segmentState := mt.indexMeta.GetSegmentIndexStateOnField(segment.GetCollectionID(), segment.GetID(), vecFieldID[segment.GetCollectionID()])
-		if segmentState.state == commonpb.IndexState_Finished {
-			indexedSegments = append(indexedSegments, segment)
-		}
-	}
-
-	return indexedSegments
+	return ret
 }
 
 func getZeroTime() time.Time {
