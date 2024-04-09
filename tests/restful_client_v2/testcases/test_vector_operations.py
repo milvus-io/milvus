@@ -2036,8 +2036,7 @@ class TestDeleteVector(TestBase):
         rsp = self.vector_client.vector_delete(payload)
 
         # query data after delete
-        time.sleep(1)
-        res = c.query(expr="", output_fields=["count(*)"])
+        res = c.query(expr="", output_fields=["count(*)"], consistency_level="Strong")
         logger.info(f"res: {res}")
         assert res[0]["count(*)"] == 0
 
@@ -2097,8 +2096,7 @@ class TestDeleteVector(TestBase):
         rsp = self.vector_client.vector_delete(payload)
 
         # query data after delete
-        time.sleep(1)
-        res = c.query(expr="", output_fields=["count(*)"])
+        res = c.query(expr="", output_fields=["count(*)"], consistency_level="Strong")
         logger.info(f"res: {res}")
         assert res[0]["count(*)"] == 0
 
