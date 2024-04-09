@@ -27,3 +27,9 @@ const EventLogRouterPath = "/eventlog"
 
 // ExprPath is path for expression.
 const ExprPath = "/expr"
+
+// TriggerStopPath is path for trigger component stop
+const TriggerStopPath = "/stop"
+
+// TriggerStopPath is path for trigger component stop
+const CheckComponentReady = "/check/ready"
