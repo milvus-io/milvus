@@ -65,14 +65,14 @@ fi
 echo "prepare e2e test"
 install_pytest_requirements
 
-# Run concurrent test with 5 processes
+# Run concurrent test
 cd ${ROOT}/tests/python_client
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout  "${TEST_TIMEOUT}" pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 5 -n 5 \
+  timeout  "${TEST_TIMEOUT}" pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
                                      --html=${CI_LOG_PATH}/report_concurrent.html  --self-contained-html
 else
-  pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} --count 5 -n 5 \
+  pytest testcases/test_concurrent.py --host ${MILVUS_SERVICE_NAME} --port ${MILVUS_SERVICE_PORT} \
                                      --html=${CI_LOG_PATH}/report_concurrent.html --self-contained-html
 fi
 
