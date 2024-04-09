@@ -20,7 +20,6 @@ import (
 	"context"
 	"time"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -122,12 +121,7 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 	)
 	ret := make([]task.Task, 0)
 
-	// skip set segment on stopping node to leader view
-	aliveNodeDist := lo.Filter(dist, func(s *meta.Segment, _ int) bool {
-		nodeInfo := c.nodeMgr.Get(s.Node)
-		return nodeInfo != nil && nodeInfo.GetState() != session.NodeStateStopping
-	})
-	latestNodeDist := utils.FindMaxVersionSegments(aliveNodeDist)
+	latestNodeDist := utils.FindMaxVersionSegments(dist)
 	for _, s := range latestNodeDist {
 		segment := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
 		existInTarget := segment != nil
