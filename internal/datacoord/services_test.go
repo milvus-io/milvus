@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
@@ -85,6 +86,71 @@ func genMsg(msgType commonpb.MsgType, ch string, t Timestamp, sourceID int64) *m
 			SegmentsStats: []*commonpb.SegmentStats{{SegmentID: 2, NumRows: 100}},
 		},
 	}
+}
+
+func (s *ServerSuite) TestHandleDataNodeTtMsg() {
+	var (
+		chanName       = "ch-1"
+		collID   int64 = 100
+		sourceID int64 = 1
+	)
+	s.testServer.meta.AddCollection(&collectionInfo{
+		ID:         collID,
+		Schema:     newTestSchema(),
+		Partitions: []int64{10},
+	})
+	resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
+		NodeID: sourceID,
+		SegmentIDRequests: []*datapb.SegmentIDRequest{
+			{
+				CollectionID: collID,
+				PartitionID:  10,
+				ChannelName:  chanName,
+				Count:        100,
+			},
+		},
+	})
+	s.Require().NoError(err)
+	s.Require().True(merr.Ok(resp.GetStatus()))
+	s.Equal(1, len(resp.GetSegIDAssignments()))
+	assign := resp.GetSegIDAssignments()[0]
+
+	assignedSegmentID := resp.SegIDAssignments[0].SegID
+	segment := s.testServer.meta.GetHealthySegment(assignedSegmentID)
+	s.Require().NotNil(segment)
+	s.Equal(1, len(segment.allocations))
+
+	ts := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, -3*time.Minute)
+	msg := genMsg(commonpb.MsgType_DataNodeTt, chanName, ts, sourceID)
+	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
+		SegmentID: assign.GetSegID(),
+		NumRows:   1,
+	})
+	mockCluster := NewMockCluster(s.T())
+	mockCluster.EXPECT().Close().Once()
+	mockCluster.EXPECT().Flush(mock.Anything, sourceID, chanName, mock.Anything).RunAndReturn(
+		func(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
+			s.EqualValues(chanName, channel)
+			s.EqualValues(sourceID, nodeID)
+			s.Equal(1, len(segments))
+			s.EqualValues(2, segments[0].GetID())
+
+			return fmt.Errorf("mock error")
+		}).Once()
+	s.testServer.cluster = mockCluster
+	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Twice()
+
+	err = s.testServer.handleDataNodeTtMsg(context.TODO(), &msg.DataNodeTtMsg)
+
+	tt := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, 48*time.Hour)
+	msg = genMsg(commonpb.MsgType_DataNodeTt, chanName, tt, sourceID)
+	msg.SegmentsStats = append(msg.SegmentsStats, &commonpb.SegmentStats{
+		SegmentID: assign.GetSegID(),
+		NumRows:   1,
+	})
+
+	err = s.testServer.handleDataNodeTtMsg(context.TODO(), &msg.DataNodeTtMsg)
+	s.Error(err)
 }
 
 // restart the server for config DataNodeTimeTickByRPC=false
