@@ -214,6 +214,13 @@ func (q *orderFlushQueue) inject(inject *taskInjection) {
 	}
 }
 
+func (q *orderFlushQueue) getTailChan() chan struct{} {
+	q.taskMut.Lock()
+	defer q.taskMut.Unlock()
+
+	return q.tailCh
+}
+
 // injectTask handles injection for empty flush queue
 type injectTask struct {
 	startSignal, finishSignal chan struct{}
@@ -601,8 +608,8 @@ func (m *rendezvousFlushManager) waitForAllFlushQueue() {
 	m.dispatcher.Range(func(segmentID int64, queue *orderFlushQueue) bool {
 		wg.Add(1)
 		go func() {
-			<-queue.tailCh
-			wg.Done()
+			defer wg.Done()
+			<-queue.getTailChan()
 		}()
 		return true
 	})
