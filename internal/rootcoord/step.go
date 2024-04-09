@@ -87,6 +87,21 @@ func (s *deleteCollectionMetaStep) Weight() stepPriority {
 	return stepPriorityNormal
 }
 
+type deleteDatabaseMetaStep struct {
+	baseStep
+	databaseName string
+	ts           Timestamp
+}
+
+func (s *deleteDatabaseMetaStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	err := s.core.meta.DropDatabase(ctx, s.databaseName, s.ts)
+	return nil, err
+}
+
+func (s *deleteDatabaseMetaStep) Desc() string {
+	return fmt.Sprintf("delete database from meta table, name: %s, ts: %d", s.databaseName, s.ts)
+}
+
 type removeDmlChannelsStep struct {
 	baseStep
 	pChannels []string
