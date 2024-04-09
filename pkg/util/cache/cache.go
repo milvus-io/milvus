@@ -41,11 +41,6 @@ type Scavenger[K comparable] interface {
 	Collect(key K) (bool, func(K) bool)
 	// Throw records entry removals.
 	Throw(key K)
-	// Spare returns a collector function based on given key.
-	//	The collector is a function which can be invoked repetedly, each invocation will test if there is enough
-	//	room for all the pending entries if the thrown entry is evicted. Typically, the collector will get multiple true
-	//	before it gets a false.
-	Spare(key K) func(K) bool
 }
 
 type LazyScavenger[K comparable] struct {
@@ -78,17 +73,16 @@ func (s *LazyScavenger[K]) Throw(key K) {
 	s.size -= s.weight(key)
 }
 
-func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
-	w := s.weight(key)
-	available := s.capacity - s.size + w
-	return func(k K) bool {
-		available -= s.weight(k)
-		return available >= 0
-	}
-}
-
 type Cache[K comparable, V any] interface {
+	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
+	// completes.
+	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
+	// Throws `ErrNotEnoughSpace` if there is no room for the operation.
 	Do(key K, doer func(V) error) error
+	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
+	// completes. The function waits for `timeout` if there is not enough space for the given key.
+	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
+	// Throws `ErrTimeOut` if timed out.
 	DoWait(key K, timeout time.Duration, doer func(V) error) error
 }
 
@@ -249,16 +243,14 @@ func (c *lruCache[K, V]) Unpin(key K) {
 	}
 	item := e.Value.(*cacheItem[K, V])
 	item.pinCount.Dec()
+	c.notifyWaiters()
+}
+
+func (c *lruCache[K, V]) notifyWaiters() {
 	if c.waitQueue.Len() > 0 {
-		// Notify waiters
-		collector := c.scavenger.Spare(key)
 		for e := c.waitQueue.Front(); e != nil; e = e.Next() {
 			w := e.Value.(*Waiter[K])
-			if ok := collector(w.key); ok {
-				w.c.Broadcast()
-			} else {
-				break
-			}
+			w.c.Broadcast()
 		}
 	}
 }

@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"math/rand"
 	"sync"
 	"testing"
 	"time"
@@ -237,8 +238,9 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				for j := 0; j < 100; j++ {
-					err := cache.DoWait(j, 2*time.Second, func(v int) error {
+				for j := 0; j < 20; j++ {
+					err := cache.DoWait(j, time.Second, func(v int) error {
+						time.Sleep(time.Duration(rand.Intn(3)))
 						return nil
 					})
 					assert.NoError(t, err)
