@@ -853,6 +853,43 @@ func (kc *Catalog) DropClusteringCompactionInfo(ctx context.Context, info *datap
 	return kc.MetaKv.Remove(key)
 }
 
+func (kc *Catalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error) {
+	infos := make([]*datapb.PartitionStatsInfo, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(PartitionStatsInfoPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		info := &datapb.PartitionStatsInfo{}
+		err = proto.Unmarshal([]byte(value), info)
+		if err != nil {
+			return nil, err
+		}
+		infos = append(infos, info)
+	}
+	return infos, nil
+}
+
+func (kc *Catalog) SavePartitionStatsInfo(ctx context.Context, coll *datapb.PartitionStatsInfo) error {
+	if coll == nil {
+		return nil
+	}
+	cloned := proto.Clone(coll).(*datapb.PartitionStatsInfo)
+	k, v, err := buildPartitionStatsInfoKv(cloned)
+	if err != nil {
+		return err
+	}
+	kvs := make(map[string]string)
+	kvs[k] = v
+	return kc.SaveByBatch(kvs)
+}
+
+func (kc *Catalog) DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
+	key := buildPartitionStatsInfoPath(info)
+	return kc.MetaKv.Remove(key)
+}
+
 func (kc *Catalog) ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error) {
 	tasks := make([]*model.AnalysisTask, 0)
 

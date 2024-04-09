@@ -153,6 +153,10 @@ type DataCoordCatalog interface {
 	SaveClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
 	DropClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error
 
+	ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error)
+	SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+	DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+	
 	ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error)
 	SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error
 	DropAnalysisTask(ctx context.Context, taskID typeutil.UniqueID) error

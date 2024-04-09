@@ -18,7 +18,9 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
+	"sort"
 	"strconv"
 	"sync"
 	"time"
@@ -29,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -47,11 +48,12 @@ type ClusteringCompactionManager struct {
 	scheduler         Scheduler
 	analysisScheduler *analysisTaskScheduler
 
-	forceMu sync.Mutex
-	quit    chan struct{}
-	wg      sync.WaitGroup
-	signals chan *compactionSignal
-	ticker  *time.Ticker
+	forceMu  sync.Mutex
+	quit     chan struct{}
+	wg       sync.WaitGroup
+	signals  chan *compactionSignal
+	ticker   *time.Ticker
+	gcTicker *time.Ticker
 
 	jobs map[UniqueID]*ClusteringCompactionJob
 }
@@ -75,8 +77,10 @@ func newClusteringCompactionManager(
 func (t *ClusteringCompactionManager) start() {
 	t.quit = make(chan struct{})
 	t.ticker = time.NewTicker(Params.DataCoordCfg.ClusteringCompactionStateCheckInterval.GetAsDuration(time.Second))
-	t.wg.Add(1)
+	t.gcTicker = time.NewTicker(Params.DataCoordCfg.ClusteringCompactionStateCheckInterval.GetAsDuration(time.Second))
+	t.wg.Add(2)
 	go t.startJobCheckLoop()
+	go t.startGCLoop()
 }
 
 func (t *ClusteringCompactionManager) stop() {
@@ -114,6 +118,79 @@ func (t *ClusteringCompactionManager) startJobCheckLoop() {
 	}
 }
 
+func (t *ClusteringCompactionManager) startGCLoop() {
+	defer logutil.LogPanic()
+	defer t.wg.Done()
+	for {
+		select {
+		case <-t.quit:
+			t.gcTicker.Stop()
+			log.Info("clustering compaction gc loop exit")
+			return
+		case <-t.gcTicker.C:
+			err := t.gc()
+			if err != nil {
+				log.Warn("fail to gc", zap.Error(err))
+			}
+		}
+	}
+}
+
+func (t *ClusteringCompactionManager) gc() error {
+	log.Debug("start gc clustering compaction related meta and files")
+	// gc clustering compaction jobs
+	jobs := t.GetAllJobs()
+	log.Debug("clustering compaction job meta", zap.Int("len", len(jobs)))
+	for _, job := range jobs {
+		if job.state == completed || job.state == failed || job.state == timeout {
+			if time.Since(tsoutil.PhysicalTime(job.startTime)) > Params.DataCoordCfg.ClusteringCompactionDropTolerance.GetAsDuration(time.Second) {
+				// skip handle this error, try best to delete meta
+				err := t.dropJob(job)
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	// gc partition stats
+	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo, 0)
+	for _, partitionStatsInfo := range t.meta.partitionStatsInfos {
+		channel := fmt.Sprintf("%d/%d/%s", partitionStatsInfo.CollectionID, partitionStatsInfo.PartitionID, partitionStatsInfo.VChannel)
+		infos, exist := channelPartitionStatsInfos[channel]
+		if exist {
+			infos = append(infos, partitionStatsInfo)
+			channelPartitionStatsInfos[channel] = infos
+		} else {
+			channelPartitionStatsInfos[channel] = []*datapb.PartitionStatsInfo{partitionStatsInfo}
+		}
+	}
+	log.Debug("channels with PartitionStats meta", zap.Int("len", len(channelPartitionStatsInfos)))
+
+	for channel, infos := range channelPartitionStatsInfos {
+		sort.Slice(infos, func(i, j int) bool {
+			return infos[i].Version > infos[j].Version
+		})
+		log.Debug("PartitionStats in channel", zap.String("channel", channel), zap.Int("len", len(infos)))
+		if len(infos) > 2 {
+			for i := 2; i < len(infos); i++ {
+				info := infos[i]
+				partitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath, metautil.JoinIDPath(info.CollectionID, info.PartitionID), info.GetVChannel(), strconv.FormatInt(info.GetVersion(), 10))
+				err := t.meta.chunkManager.Remove(t.ctx, partitionStatsPath)
+				log.Debug("remove partition stats file", zap.String("path", partitionStatsPath))
+				if err != nil {
+					return err
+				}
+				err = t.meta.DropPartitionStatsInfo(info)
+				log.Debug("drop partition stats meta", zap.Any("info", info))
+				if err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (t *ClusteringCompactionManager) checkAllJobState() error {
 	jobs := t.GetAllJobs()
 	for _, job := range jobs {
@@ -130,10 +207,6 @@ func (t *ClusteringCompactionManager) checkAllJobState() error {
 
 func (t *ClusteringCompactionManager) checkJobState(job *ClusteringCompactionJob) error {
 	if job.state == completed || job.state == failed || job.state == timeout {
-		if time.Since(tsoutil.PhysicalTime(job.startTime)) > Params.DataCoordCfg.ClusteringCompactionDropTolerance.GetAsDuration(time.Second) {
-			// skip handle this error, try best to delete meta
-			t.dropJob(job)
-		}
 		return nil
 	}
 	pipeliningPlans := make([]*datapb.CompactionPlan, 0)
@@ -165,46 +238,17 @@ func (t *ClusteringCompactionManager) checkJobState(job *ClusteringCompactionJob
 			}
 
 			if lastState == executing && compactionTask.state == completed {
-				// new finish task, commit the partitionStats and do cleaning
-				collectionID := job.collectionID
-				partitionID := compactionTask.plan.SegmentBinlogs[0].PartitionID
-				vChannelName := compactionTask.plan.GetChannel()
-
-				// read the temp file and write it to formal path
-				tempPartitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsTempPath, metautil.JoinIDPath(collectionID, partitionID), compactionTask.plan.GetChannel(), strconv.FormatInt(compactionTask.plan.PlanID, 10))
-				partitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath, metautil.JoinIDPath(collectionID, partitionID), compactionTask.plan.GetChannel(), strconv.FormatInt(compactionTask.plan.PlanID, 10))
-				tempStats, err := t.meta.chunkManager.Read(t.ctx, tempPartitionStatsPath)
-				if err != nil {
-					return err
+				segmentIDs := make([]int64, 0)
+				for _, seg := range compactionTask.result.Segments {
+					segmentIDs = append(segmentIDs, seg.GetSegmentID())
 				}
-				err = t.meta.chunkManager.Write(t.ctx, partitionStatsPath, tempStats)
-				if err != nil {
-					return err
-				}
-
-				// list the partition stats, normally the files should not be more than two
-				statsPathPrefix := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath, metautil.JoinIDPath(collectionID, partitionID), vChannelName)
-				filePaths, _, err := t.meta.chunkManager.ListWithPrefix(t.ctx, statsPathPrefix, true)
-				if err != nil {
-					return err
-				}
-				_, maxPartitionStatsPath := storage.FindPartitionStatsMaxVersion(filePaths)
-				toRemovePaths := make([]string, 0)
-				for _, filePath := range filePaths {
-					// keep the newest one, still need it for search before querynode handoff
-					if filePath != maxPartitionStatsPath {
-						toRemovePaths = append(toRemovePaths, filePath)
-					}
-				}
-				// remove old partition stats
-				if len(toRemovePaths) > 0 {
-					err = t.meta.chunkManager.MultiRemove(t.ctx, toRemovePaths)
-					if err != nil {
-						return err
-					}
-				}
-
-				err = t.meta.chunkManager.Remove(t.ctx, tempPartitionStatsPath)
+				err := t.meta.SavePartitionStatsInfo(&datapb.PartitionStatsInfo{
+					CollectionID: job.collectionID,
+					PartitionID:  compactionTask.plan.SegmentBinlogs[0].PartitionID,
+					VChannel:     compactionTask.plan.GetChannel(),
+					Version:      compactionTask.plan.PlanID,
+					SegmentIDs:   segmentIDs,
+				})
 				if err != nil {
 					return err
 				}
@@ -361,7 +405,7 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 
 // IsClusteringCompacting get clustering compaction info by collection id
 func (t *ClusteringCompactionManager) IsClusteringCompacting(collectionID UniqueID) bool {
-	infos := t.meta.GetClusteringCompactionInfos(collectionID)
+	infos := t.meta.GetClusteringCompactionInfosByID(collectionID)
 	executingInfos := lo.Filter(infos, func(info *datapb.ClusteringCompactionInfo, _ int) bool {
 		return info.State == datapb.CompactionTaskState_analyzing ||
 			info.State == datapb.CompactionTaskState_executing ||
@@ -392,7 +436,7 @@ func (t *ClusteringCompactionManager) fillClusteringCompactionPlans(segments []*
 // GetAllJobs returns cloned ClusteringCompactionJob from local meta cache
 func (t *ClusteringCompactionManager) GetAllJobs() []*ClusteringCompactionJob {
 	jobs := make([]*ClusteringCompactionJob, 0)
-	infos := t.meta.GetClonedClusteringCompactionInfos()
+	infos := t.meta.GetClusteringCompactionInfos()
 	for _, info := range infos {
 		job := convertClusteringCompactionJob(info)
 		jobs = append(jobs, job)
@@ -413,14 +457,12 @@ func (t *ClusteringCompactionManager) saveJob(job *ClusteringCompactionJob) erro
 
 func triggerCompactionPolicy(ctx context.Context, meta *meta, collectionID int64, partitionID int64, channel string, segments []*SegmentInfo) (bool, error) {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID))
-	partitionStatsPrefix := path.Join(meta.chunkManager.RootPath(), common.PartitionStatsPath, strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10), channel)
-	files, _, err := meta.chunkManager.ListWithPrefix(ctx, partitionStatsPrefix, true)
-	if err != nil {
-		log.Error("Fail to list partition stats", zap.String("prefix", partitionStatsPrefix), zap.Error(err))
-		return false, err
-	}
-	version, partitionStatsPath := storage.FindPartitionStatsMaxVersion(files)
-	if version <= 0 {
+	partitionStatsInfos := meta.ListPartitionStatsInfos(collectionID, partitionID, channel)
+	sort.Slice(partitionStatsInfos, func(i, j int) bool {
+		return partitionStatsInfos[i].Version > partitionStatsInfos[j].Version
+	})
+
+	if len(partitionStatsInfos) == 0 {
 		var newDataSize int64 = 0
 		for _, seg := range segments {
 			newDataSize += seg.getSegmentSize()
@@ -433,6 +475,8 @@ func triggerCompactionPolicy(ctx context.Context, meta *meta, collectionID int64
 		return false, nil
 	}
 
+	partitionStats := partitionStatsInfos[0]
+	version := partitionStats.Version
 	pTime, _ := tsoutil.ParseTS(uint64(version))
 	if time.Since(pTime) < Params.DataCoordCfg.ClusteringCompactionMinInterval.GetAsDuration(time.Second) {
 		log.Debug("Too short time before last clustering compaction, skip compaction")
@@ -442,22 +486,11 @@ func triggerCompactionPolicy(ctx context.Context, meta *meta, collectionID int64
 		log.Debug("It is a long time after last clustering compaction, do compaction")
 		return true, nil
 	}
-	partitionStatsBytes, err := meta.chunkManager.Read(ctx, partitionStatsPath)
-	if err != nil {
-		log.Error("Fail to read partition stats", zap.String("path", partitionStatsPath), zap.Error(err))
-		return false, err
-	}
-	partitionStats, err := storage.DeserializePartitionsStatsSnapshot(partitionStatsBytes)
-	if err != nil {
-		log.Error("Fail to deserialize partition stats", zap.String("path", partitionStatsPath), zap.Error(err))
-		return false, err
-	}
-	log.Info("Read partition stats", zap.Int64("version", version))
 
 	var compactedSegmentSize int64 = 0
 	var uncompactedSegmentSize int64 = 0
 	for _, seg := range segments {
-		if _, ok := partitionStats.SegmentStats[seg.ID]; ok {
+		if lo.Contains(partitionStats.SegmentIDs, seg.ID) {
 			compactedSegmentSize += seg.getSegmentSize()
 		} else {
 			uncompactedSegmentSize += seg.getSegmentSize()

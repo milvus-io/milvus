@@ -594,6 +594,12 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 }
 
 func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionSignal) error {
+	ts, err := t.allocTs()
+	if err != nil {
+		log.Warn("allocate ts failed, skip to handle compaction")
+		return err
+	}
+
 	t.forceMu.Lock()
 	defer t.forceMu.Unlock()
 
@@ -639,12 +645,6 @@ func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionS
 	if len(partSegments) == 0 {
 		log.Info("the length of SegmentsChanPart is 0, skip to handle compaction")
 		return nil
-	}
-
-	ts, err := t.allocTs()
-	if err != nil {
-		log.Warn("allocate ts failed, skip to handle compaction")
-		return err
 	}
 
 	clusteringCompactionJob := &ClusteringCompactionJob{

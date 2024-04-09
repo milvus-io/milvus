@@ -644,6 +644,49 @@ func (_c *DataCoordCatalog_DropIndex_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
+// DropPartitionStatsInfo provides a mock function with given fields: ctx, info
+func (_m *DataCoordCatalog) DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
+	ret := _m.Called(ctx, info)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PartitionStatsInfo) error); ok {
+		r0 = rf(ctx, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropPartitionStatsInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPartitionStatsInfo'
+type DataCoordCatalog_DropPartitionStatsInfo_Call struct {
+	*mock.Call
+}
+
+// DropPartitionStatsInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *datapb.PartitionStatsInfo
+func (_e *DataCoordCatalog_Expecter) DropPartitionStatsInfo(ctx interface{}, info interface{}) *DataCoordCatalog_DropPartitionStatsInfo_Call {
+	return &DataCoordCatalog_DropPartitionStatsInfo_Call{Call: _e.mock.On("DropPartitionStatsInfo", ctx, info)}
+}
+
+func (_c *DataCoordCatalog_DropPartitionStatsInfo_Call) Run(run func(ctx context.Context, info *datapb.PartitionStatsInfo)) *DataCoordCatalog_DropPartitionStatsInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.PartitionStatsInfo))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropPartitionStatsInfo_Call) Return(_a0 error) *DataCoordCatalog_DropPartitionStatsInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropPartitionStatsInfo_Call) RunAndReturn(run func(context.Context, *datapb.PartitionStatsInfo) error) *DataCoordCatalog_DropPartitionStatsInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropPreImportTask provides a mock function with given fields: taskID
 func (_m *DataCoordCatalog) DropPreImportTask(taskID int64) error {
 	ret := _m.Called(taskID)
@@ -1137,6 +1180,60 @@ func (_c *DataCoordCatalog_ListIndexes_Call) Return(_a0 []*model.Index, _a1 erro
 }
 
 func (_c *DataCoordCatalog_ListIndexes_Call) RunAndReturn(run func(context.Context) ([]*model.Index, error)) *DataCoordCatalog_ListIndexes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListPartitionStatsInfos provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error) {
+	ret := _m.Called(ctx)
+
+	var r0 []*datapb.PartitionStatsInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.PartitionStatsInfo, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.PartitionStatsInfo); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.PartitionStatsInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListPartitionStatsInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListPartitionStatsInfos'
+type DataCoordCatalog_ListPartitionStatsInfos_Call struct {
+	*mock.Call
+}
+
+// ListPartitionStatsInfos is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListPartitionStatsInfos(ctx interface{}) *DataCoordCatalog_ListPartitionStatsInfos_Call {
+	return &DataCoordCatalog_ListPartitionStatsInfos_Call{Call: _e.mock.On("ListPartitionStatsInfos", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListPartitionStatsInfos_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListPartitionStatsInfos_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListPartitionStatsInfos_Call) Return(_a0 []*datapb.PartitionStatsInfo, _a1 error) *DataCoordCatalog_ListPartitionStatsInfos_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListPartitionStatsInfos_Call) RunAndReturn(run func(context.Context) ([]*datapb.PartitionStatsInfo, error)) *DataCoordCatalog_ListPartitionStatsInfos_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1684,6 +1781,49 @@ func (_c *DataCoordCatalog_SaveImportTask_Call) Return(_a0 error) *DataCoordCata
 }
 
 func (_c *DataCoordCatalog_SaveImportTask_Call) RunAndReturn(run func(*datapb.ImportTaskV2) error) *DataCoordCatalog_SaveImportTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SavePartitionStatsInfo provides a mock function with given fields: ctx, info
+func (_m *DataCoordCatalog) SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error {
+	ret := _m.Called(ctx, info)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.PartitionStatsInfo) error); ok {
+		r0 = rf(ctx, info)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SavePartitionStatsInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SavePartitionStatsInfo'
+type DataCoordCatalog_SavePartitionStatsInfo_Call struct {
+	*mock.Call
+}
+
+// SavePartitionStatsInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - info *datapb.PartitionStatsInfo
+func (_e *DataCoordCatalog_Expecter) SavePartitionStatsInfo(ctx interface{}, info interface{}) *DataCoordCatalog_SavePartitionStatsInfo_Call {
+	return &DataCoordCatalog_SavePartitionStatsInfo_Call{Call: _e.mock.On("SavePartitionStatsInfo", ctx, info)}
+}
+
+func (_c *DataCoordCatalog_SavePartitionStatsInfo_Call) Run(run func(ctx context.Context, info *datapb.PartitionStatsInfo)) *DataCoordCatalog_SavePartitionStatsInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.PartitionStatsInfo))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SavePartitionStatsInfo_Call) Return(_a0 error) *DataCoordCatalog_SavePartitionStatsInfo_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SavePartitionStatsInfo_Call) RunAndReturn(run func(context.Context, *datapb.PartitionStatsInfo) error) *DataCoordCatalog_SavePartitionStatsInfo_Call {
 	_c.Call.Return(run)
 	return _c
 }

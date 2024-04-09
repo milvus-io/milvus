@@ -873,7 +873,7 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 	if err != nil {
 		return err
 	}
-	newStatsPath := t.io.JoinFullPath(common.PartitionStatsTempPath,
+	newStatsPath := t.io.JoinFullPath(common.PartitionStatsPath,
 		path.Join(strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10), t.plan.GetChannel(), strconv.FormatInt(version, 10)))
 	kv := map[string][]byte{
 		newStatsPath: partitionStatsBytes,

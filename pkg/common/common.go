@@ -92,9 +92,6 @@ const (
 	// PartitionStatsPath storage path const for partition stats files
 	PartitionStatsPath = `part_stats`
 
-	// PartitionStatsTempPath storage path const for temporary partition stats files
-	PartitionStatsTempPath = `part_stats_temp`
-
 	// AnalyzeStatsPath storage path const for analyze.
 	AnalyzeStatsPath = `filesanalyze_stats`
 )
