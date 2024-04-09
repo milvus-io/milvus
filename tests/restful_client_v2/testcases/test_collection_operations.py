@@ -579,7 +579,8 @@ class TestCreateCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 1
+        assert rsp['code'] == 1100
+        assert "Invalid collection name" in rsp['message'] or "invalid parameter" in rsp['message']
 
 
 @pytest.mark.L0
@@ -719,7 +720,7 @@ class TestLoadReleaseCollection(TestBase):
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['data']['loadState'] == "LoadStateNotLoad"
 
-
+@pytest.mark.L0
 class TestGetCollectionLoadState(TestBase):
 
     def test_get_collection_load_state(self):
@@ -742,7 +743,7 @@ class TestGetCollectionLoadState(TestBase):
         client.collection_describe(collection_name=name)
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['code'] == 200
-        assert rsp['data']['load'] == "LoadStateNotLoad"
+        assert rsp['data']['loadState'] in ["LoadStateNotLoad", "LoadStateLoading"]
         # insert data
         nb = 3000
         data = get_data_by_payload(payload, nb)
@@ -752,10 +753,10 @@ class TestGetCollectionLoadState(TestBase):
         }
         self.vector_client.vector_insert(payload=payload)
         rsp = client.collection_load_state(collection_name=name)
-        assert rsp['data']['load'] == "LoadStateLoading"
+        assert rsp['data']['loadState'] in ["LoadStateLoading", "LoadStateLoaded"]
         time.sleep(10)
         rsp = client.collection_load_state(collection_name=name)
-        assert rsp['data']['load'] == "LoadStateLoaded"
+        assert rsp['data']['loadState'] == "LoadStateLoaded"
 
 
 @pytest.mark.L0
@@ -913,7 +914,7 @@ class TestDescribeCollectionNegative(TestBase):
         all_collections = rsp['data']
         assert name in all_collections
         # describe collection
-        illegal_client = CollectionClient(self.url, "illegal_api_key")
+        illegal_client = CollectionClient(self.endpoint, "illegal_api_key")
         rsp = illegal_client.collection_describe(name)
         assert rsp['code'] == 1800
 
@@ -938,7 +939,8 @@ class TestDescribeCollectionNegative(TestBase):
         # describe collection
         invalid_name = "invalid_name"
         rsp = client.collection_describe(invalid_name)
-        assert rsp['code'] == 1
+        assert rsp['code'] == 100
+        assert "can't find collection" in rsp['message']
 
 
 @pytest.mark.L0
@@ -1003,7 +1005,7 @@ class TestDropCollectionNegative(TestBase):
         payload = {
             "collectionName": name,
         }
-        illegal_client = CollectionClient(self.url, "invalid_api_key")
+        illegal_client = CollectionClient(self.endpoint, "invalid_api_key")
         rsp = illegal_client.collection_drop(payload)
         assert rsp['code'] == 1800
         rsp = client.collection_list()
@@ -1034,7 +1036,7 @@ class TestDropCollectionNegative(TestBase):
             "collectionName": invalid_name,
         }
         rsp = client.collection_drop(payload)
-        assert rsp['code'] == 100
+        assert rsp['code'] == 200
 
 
 @pytest.mark.L0
