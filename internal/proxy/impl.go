@@ -115,10 +115,11 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 
 	collectionName := request.CollectionName
 	collectionID := request.CollectionID
+	msgType := request.GetBase().GetMsgType()
 	var aliasName []string
 
 	if globalMetaCache != nil {
-		switch request.GetBase().GetMsgType() {
+		switch msgType {
 		case commonpb.MsgType_DropCollection, commonpb.MsgType_RenameCollection, commonpb.MsgType_DropAlias, commonpb.MsgType_AlterAlias:
 			if collectionName != "" {
 				globalMetaCache.RemoveCollection(ctx, request.GetDbName(), collectionName) // no need to return error, though collection may be not cached
@@ -129,16 +130,16 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 			}
 			log.Info("complete to invalidate collection meta cache with collection name", zap.String("collectionName", collectionName))
 		case commonpb.MsgType_DropPartition:
-			if globalMetaCache != nil {
-				if collectionName != "" && request.GetPartitionName() != "" {
-					globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
-				} else {
-					log.Warn("invalidate collection meta cache failed. collectionName or partitionName is empty",
-						zap.String("collectionName", collectionName),
-						zap.String("partitionName", request.GetPartitionName()))
-					return merr.Status(merr.WrapErrPartitionNotFound(request.GetPartitionName(), "partition name not specified")), nil
-				}
+			if collectionName != "" && request.GetPartitionName() != "" {
+				globalMetaCache.RemovePartition(ctx, request.GetDbName(), request.GetCollectionName(), request.GetPartitionName())
+			} else {
+				log.Warn("invalidate collection meta cache failed. collectionName or partitionName is empty",
+					zap.String("collectionName", collectionName),
+					zap.String("partitionName", request.GetPartitionName()))
+				return merr.Status(merr.WrapErrPartitionNotFound(request.GetPartitionName(), "partition name not specified")), nil
 			}
+		case commonpb.MsgType_DropDatabase:
+			globalMetaCache.RemoveDatabase(ctx, request.GetDbName())
 		default:
 			log.Warn("receive unexpected msgType of invalidate collection meta cache", zap.String("msgType", request.GetBase().GetMsgType().String()))
 
@@ -151,7 +152,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		}
 	}
 
-	if request.GetBase().GetMsgType() == commonpb.MsgType_DropCollection {
+	if msgType == commonpb.MsgType_DropCollection {
 		// no need to handle error, since this Proxy may not create dml stream for the collection.
 		node.chMgr.removeDMLStream(request.GetCollectionID())
 		// clean up collection level metrics
@@ -159,6 +160,8 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		for _, alias := range aliasName {
 			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), alias)
 		}
+	} else if msgType == commonpb.MsgType_DropDatabase {
+		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 	}
 	log.Info("complete to invalidate collection meta cache")
 
@@ -298,8 +301,6 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		method,
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-	metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 	return dct.result, nil
 }
 

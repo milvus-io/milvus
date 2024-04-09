@@ -2427,6 +2427,18 @@ func TestProxy(t *testing.T) {
 
 		_, err = globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 		assert.Error(t, err)
+
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DropDatabase,
+			},
+			DbName: dbName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		hasDatabase := globalMetaCache.HasDatabase(ctx, dbName)
+		assert.False(t, hasDatabase)
 	})
 
 	wg.Add(1)
