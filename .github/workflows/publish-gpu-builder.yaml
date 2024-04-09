@@ -51,8 +51,8 @@ jobs:
           images: |
             milvusdb/milvus-env
           tags: |
-            type=raw,enable=true,value=${{ env.OS }}-{{date 'YYYYMMDD'}}-{{sha}}
-            type=raw,enable=true,value=${{ env.OS }}-latest
+            type=raw,enable=true,value=gpu-${{ env.OS }}-{{date 'YYYYMMDD'}}-{{sha}}
+            type=raw,enable=true,value=gpu-${{ env.OS }}-latest
       # - name: Setup upterm session
       #   uses: lhotari/action-upterm@v1
       - name: Set up QEMU
