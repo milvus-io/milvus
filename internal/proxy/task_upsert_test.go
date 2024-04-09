@@ -58,7 +58,7 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 	err = case1.upsertMsg.InsertMsg.CheckAligned()
 	assert.NoError(t, err)
 
-	// fillFieldsDataBySchema was already checked by TestUpsertTask_fillFieldsDataBySchema
+	// checkFieldsDataBySchema was already checked by TestUpsertTask_checkFieldsDataBySchema
 
 	boolFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Bool}
 	int8FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int8}
