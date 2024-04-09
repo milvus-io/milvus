@@ -73,6 +73,7 @@ type searchTask struct {
 	lb              LBPolicy
 	queryChannelsTs map[string]Timestamp
 	queryInfos      []*planpb.QueryInfo
+	relatedDataSize int64
 
 	reScorers  []reScorer
 	rankParams *rankParams
@@ -561,7 +562,9 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 
 	t.queryChannelsTs = make(map[string]uint64)
+	t.relatedDataSize = 0
 	for _, r := range toReduceResults {
+		t.relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range r.GetChannelsMvcc() {
 			t.queryChannelsTs[ch] = ts
 		}
