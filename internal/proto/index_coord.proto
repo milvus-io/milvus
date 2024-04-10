@@ -408,6 +408,11 @@ message JobDescriptor {
 message CreateJobV2Request {
     string clusterID = 1;
     int64 taskID = 2;
+//    JobType job_type = 3;
+//    oneof request {
+//        AnalyzeRequest analyze_request = 4;
+//        CreateJobRequest index_request = 5;
+//    }
     JobDescriptor job = 3;
 }
 
