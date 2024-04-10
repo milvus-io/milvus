@@ -217,3 +217,12 @@ func LogStats(manager TaskManager) {
 	tasks = manager.GetBy(WithType(ImportTaskType))
 	logFunc(tasks, ImportTaskType)
 }
+
+func UnsetAutoID(schema *schemapb.CollectionSchema) {
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() && field.GetAutoID() {
+			field.AutoID = false
+			return
+		}
+	}
+}

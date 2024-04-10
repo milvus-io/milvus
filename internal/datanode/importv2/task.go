@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -161,6 +162,11 @@ func NewPreImportTask(req *datapb.PreImportRequest) Task {
 		}
 	})
 	ctx, cancel := context.WithCancel(context.Background())
+	// During binlog import, even if the primary key's autoID is set to true,
+	// the primary key from the binlog should be used instead of being reassigned.
+	if importutilv2.IsBackup(req.GetOptions()) {
+		UnsetAutoID(req.GetSchema())
+	}
 	return &PreImportTask{
 		PreImportTask: &datapb.PreImportTask{
 			JobID:        req.GetJobID(),
@@ -230,6 +236,11 @@ type ImportTask struct {
 
 func NewImportTask(req *datapb.ImportRequest) Task {
 	ctx, cancel := context.WithCancel(context.Background())
+	// During binlog import, even if the primary key's autoID is set to true,
+	// the primary key from the binlog should be used instead of being reassigned.
+	if importutilv2.IsBackup(req.GetOptions()) {
+		UnsetAutoID(req.GetSchema())
+	}
 	task := &ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			JobID:        req.GetJobID(),

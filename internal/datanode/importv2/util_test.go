@@ -89,3 +89,27 @@ func Test_AppendSystemFieldsData(t *testing.T) {
 	assert.Equal(t, count, insertData.Data[common.RowIDField].RowNum())
 	assert.Equal(t, count, insertData.Data[common.TimeStampField].RowNum())
 }
+
+func Test_UnsetAutoID(t *testing.T) {
+	pkField := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         "pk",
+		DataType:     schemapb.DataType_Int64,
+		IsPrimaryKey: true,
+		AutoID:       true,
+	}
+	vecField := &schemapb.FieldSchema{
+		FieldID:  101,
+		Name:     "vec",
+		DataType: schemapb.DataType_FloatVector,
+	}
+
+	schema := &schemapb.CollectionSchema{}
+	schema.Fields = []*schemapb.FieldSchema{pkField, vecField}
+	UnsetAutoID(schema)
+	for _, field := range schema.GetFields() {
+		if field.GetIsPrimaryKey() {
+			assert.False(t, schema.GetFields()[0].GetAutoID())
+		}
+	}
+}
