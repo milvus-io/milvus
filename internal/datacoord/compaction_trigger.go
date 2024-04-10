@@ -648,14 +648,15 @@ func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionS
 	}
 
 	clusteringCompactionJob := &ClusteringCompactionJob{
-		triggerID:         signal.id,
-		collectionID:      signal.collectionID,
-		clusteringKeyID:   clusteringKeyField.FieldID,
-		clusteringKeyName: clusteringKeyField.Name,
-		clusteringKeyType: clusteringKeyField.DataType,
-		startTime:         ts,
-		state:             pipelining,
-		pipeliningPlans:   make([]*datapb.CompactionPlan, 0),
+		triggerID:            signal.id,
+		collectionID:         signal.collectionID,
+		clusteringKeyID:      clusteringKeyField.FieldID,
+		clusteringKeyName:    clusteringKeyField.Name,
+		clusteringKeyType:    clusteringKeyField.DataType,
+		startTime:            ts,
+		state:                pipelining,
+		compactionPlans:      make([]*datapb.CompactionPlan, 0),
+		compactionPlanStates: make([]compactionTaskState, 0),
 	}
 
 	for _, group := range partSegments {
@@ -690,13 +691,12 @@ func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionS
 
 		plans := t.clusteringCompactionManager.fillClusteringCompactionPlans(group.segments, clusteringKeyField.FieldID, ct)
 		// mark all segments prepare for clustering compaction
-		// todo： for now, no need to set compacting = false, as they will be set after compaction done or failed
-		// however, if we split clustering compaction into multi sub compaction task and support retry fail sub task,
-		// we need to manage compacting state correctly
 		t.setSegmentsCompacting(plans, true)
-		clusteringCompactionJob.pipeliningPlans = append(clusteringCompactionJob.pipeliningPlans, plans...)
+		for _, plan := range plans {
+			clusteringCompactionJob.addCompactionPlan(plan, pipelining)
+		}
 	}
-	if len(clusteringCompactionJob.pipeliningPlans) > 0 {
+	if len(clusteringCompactionJob.compactionPlans) > 0 {
 		t.clusteringCompactionManager.submit(clusteringCompactionJob)
 	}
 	return nil
