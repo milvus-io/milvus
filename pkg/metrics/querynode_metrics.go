@@ -512,6 +512,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_access_total",
+			Help:      "number of segments accessed",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
@@ -526,10 +527,25 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_access_duration",
+			Help:      "total time cost of accessing segments",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
 			resourceGroupLabelName,
+			queryTypeLabelName,
+		},
+	)
+
+	// QueryNodeSegmentAccessGlobalDuration records the global time cost of accessing segments.
+	QueryNodeSegmentAccessGlobalDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_access_global_duration",
+			Help:      "global time cost of accessing segments",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			nodeIDLabelName,
 			queryTypeLabelName,
 		},
 	)
@@ -540,6 +556,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_access_wait_cache_total",
+			Help:      "number of segments waiting for loading access",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
@@ -553,10 +570,24 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_access_wait_cache_duration",
+			Help:      "total time cost of waiting for loading access",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
 			resourceGroupLabelName,
+			queryTypeLabelName,
+		})
+
+	// QueryNodeSegmentAccessWaitCacheGlobalDuration records the global time cost of waiting for loading access.
+	QueryNodeSegmentAccessWaitCacheGlobalDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_access_wait_cache_global_duration",
+			Help:      "global time cost of waiting for loading access",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			nodeIDLabelName,
 			queryTypeLabelName,
 		})
 
@@ -565,6 +596,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
+			Help:      "number of segments loaded from disk cache",
 			Name:      "disk_cache_load_total",
 		}, []string{
 			nodeIDLabelName,
@@ -577,6 +609,7 @@ var (
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
+			Help:      "number of bytes loaded from disk cache",
 			Name:      "disk_cache_load_bytes",
 		}, []string{
 			nodeIDLabelName,
@@ -585,15 +618,29 @@ var (
 		})
 
 	// QueryNodeDiskCacheLoadDuration records the total time cost of loading segments from disk cache.
+	// With db and resource group labels.
 	QueryNodeDiskCacheLoadDuration = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
+			Help:      "total time cost of loading segments from disk cache",
 			Name:      "disk_cache_load_duration",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
 			resourceGroupLabelName,
+		})
+
+	// QueryNodeDiskCacheLoadGlobalDuration records the global time cost of loading segments from disk cache.
+	QueryNodeDiskCacheLoadGlobalDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_load_global_duration",
+			Help:      "global duration of loading segments from disk cache",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			nodeIDLabelName,
 		})
 
 	// QueryNodeDiskCacheEvictTotal records the number of real segments evicted from disk cache.
@@ -602,6 +649,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "disk_cache_evict_total",
+			Help:      "number of segments evicted from disk cache",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
@@ -614,6 +662,7 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "disk_cache_evict_bytes",
+			Help:      "number of bytes evicted from disk cache",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
@@ -626,10 +675,23 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "disk_cache_evict_duration",
+			Help:      "total time cost of evicting segments from disk cache",
 		}, []string{
 			nodeIDLabelName,
 			databaseLabelName,
 			resourceGroupLabelName,
+		})
+
+	// QueryNodeDiskCacheEvictGlobalDuration records the global time cost of evicting segments from disk cache.
+	QueryNodeDiskCacheEvictGlobalDuration = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "disk_cache_evict_global_duration",
+			Help:      "global duration of evicting segments from disk cache",
+			Buckets:   longTaskBuckets,
+		}, []string{
+			nodeIDLabelName,
 		})
 )
 
@@ -680,14 +742,18 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeLoadIndexLatency)
 	registry.MustRegister(QueryNodeSegmentAccessTotal)
 	registry.MustRegister(QueryNodeSegmentAccessDuration)
+	registry.MustRegister(QueryNodeSegmentAccessGlobalDuration)
 	registry.MustRegister(QueryNodeSegmentAccessWaitCacheTotal)
 	registry.MustRegister(QueryNodeSegmentAccessWaitCacheDuration)
+	registry.MustRegister(QueryNodeSegmentAccessWaitCacheGlobalDuration)
 	registry.MustRegister(QueryNodeDiskCacheLoadTotal)
 	registry.MustRegister(QueryNodeDiskCacheLoadBytes)
 	registry.MustRegister(QueryNodeDiskCacheLoadDuration)
+	registry.MustRegister(QueryNodeDiskCacheLoadGlobalDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictTotal)
 	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
+	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

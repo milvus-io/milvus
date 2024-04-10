@@ -27,7 +27,7 @@ func TestBaseRecord(t *testing.T) {
 	r.finish(err)
 	assert.Equal(t, err, r.getError())
 	assert.NotZero(t, r.getDuration())
-	assert.NotZero(t, r.getSeconds())
+	assert.NotZero(t, r.getMilliseconds())
 }
 
 func TestSegmentAccessRecorder(t *testing.T) {

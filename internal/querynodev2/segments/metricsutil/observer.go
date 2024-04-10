@@ -164,6 +164,13 @@ func newPromObserver(nodeID string, label SegmentLabel) promMetricsObserver {
 		SearchSegmentAccessDuration:          metrics.QueryNodeSegmentAccessDuration.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.SearchLabel),
 		SearchSegmentAccessWaitCacheTotal:    metrics.QueryNodeSegmentAccessWaitCacheTotal.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.SearchLabel),
 		SearchSegmentAccessWaitCacheDuration: metrics.QueryNodeSegmentAccessWaitCacheDuration.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.SearchLabel),
+
+		DiskCacheLoadGlobalDuration:                metrics.QueryNodeDiskCacheLoadGlobalDuration.WithLabelValues(nodeID),
+		DiskCacheEvictGlobalDuration:               metrics.QueryNodeDiskCacheEvictGlobalDuration.WithLabelValues(nodeID),
+		QuerySegmentAccessGlobalDuration:           metrics.QueryNodeSegmentAccessGlobalDuration.WithLabelValues(nodeID, metrics.QueryLabel),
+		SearchSegmentAccessGlobalDuration:          metrics.QueryNodeSegmentAccessGlobalDuration.WithLabelValues(nodeID, metrics.SearchLabel),
+		QuerySegmentAccessWaitCacheGlobalDuration:  metrics.QueryNodeSegmentAccessWaitCacheGlobalDuration.WithLabelValues(nodeID, metrics.QueryLabel),
+		SearchSegmentAccessWaitCacheGlobalDuration: metrics.QueryNodeSegmentAccessWaitCacheGlobalDuration.WithLabelValues(nodeID, metrics.SearchLabel),
 	}
 }
 
@@ -186,39 +193,58 @@ type promMetricsObserver struct {
 	SearchSegmentAccessDuration          prometheus.Counter
 	SearchSegmentAccessWaitCacheTotal    prometheus.Counter
 	SearchSegmentAccessWaitCacheDuration prometheus.Counter
+
+	DiskCacheLoadGlobalDuration                prometheus.Observer
+	DiskCacheEvictGlobalDuration               prometheus.Observer
+	QuerySegmentAccessGlobalDuration           prometheus.Observer
+	SearchSegmentAccessGlobalDuration          prometheus.Observer
+	QuerySegmentAccessWaitCacheGlobalDuration  prometheus.Observer
+	SearchSegmentAccessWaitCacheGlobalDuration prometheus.Observer
 }
 
 // ObserveLoad records a new cache load
 func (o *promMetricsObserver) ObserveCacheLoad(r *CacheLoadRecord) {
 	o.DiskCacheLoadTotal.Inc()
-	o.DiskCacheLoadDuration.Add(r.getSeconds())
 	o.DiskCacheLoadBytes.Add(r.getBytes())
+	d := r.getMilliseconds()
+	o.DiskCacheLoadDuration.Add(d)
+	o.DiskCacheLoadGlobalDuration.Observe(d)
 }
 
 // ObserveCacheEvict records a new cache evict.
 func (o *promMetricsObserver) ObserveCacheEvict(r *CacheEvictRecord) {
 	o.DiskCacheEvictTotal.Inc()
-	o.DiskCacheEvictDuration.Add(r.getSeconds())
 	o.DiskCacheEvictBytes.Add(r.getBytes())
+	d := r.getMilliseconds()
+	o.DiskCacheEvictDuration.Add(d)
+	o.DiskCacheEvictGlobalDuration.Observe(d)
 }
 
 // ObserveQueryAccess records a new query access.
 func (o *promMetricsObserver) ObserveQueryAccess(r QuerySegmentAccessRecord) {
 	o.QuerySegmentAccessTotal.Inc()
-	o.QuerySegmentAccessDuration.Add(r.getSeconds())
+	d := r.getMilliseconds()
+	o.QuerySegmentAccessDuration.Add(d)
+	o.QuerySegmentAccessGlobalDuration.Observe(d)
 	if r.isCacheMiss {
 		o.QuerySegmentAccessWaitCacheTotal.Inc()
-		o.QuerySegmentAccessWaitCacheDuration.Add(r.getWaitLoadSeconds())
+		d := r.getWaitLoadMilliseconds()
+		o.QuerySegmentAccessWaitCacheDuration.Add(d)
+		o.QuerySegmentAccessWaitCacheGlobalDuration.Observe(d)
 	}
 }
 
 // ObserveSearchAccess records a new search access.
 func (o *promMetricsObserver) ObserveSearchAccess(r SearchSegmentAccessRecord) {
 	o.SearchSegmentAccessTotal.Inc()
-	o.SearchSegmentAccessDuration.Add(r.getSeconds())
+	d := r.getMilliseconds()
+	o.SearchSegmentAccessDuration.Add(d)
+	o.SearchSegmentAccessGlobalDuration.Observe(d)
 	if r.isCacheMiss {
 		o.SearchSegmentAccessWaitCacheTotal.Inc()
-		o.SearchSegmentAccessWaitCacheDuration.Add(r.getWaitLoadSeconds())
+		d := r.getWaitLoadMilliseconds()
+		o.SearchSegmentAccessWaitCacheDuration.Add(d)
+		o.SearchSegmentAccessWaitCacheGlobalDuration.Observe(d)
 	}
 }
 

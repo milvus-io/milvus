@@ -260,7 +260,7 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 			defer c.Unpin(key)
 			return missing, doer(item.value)
 		} else if err != ErrNotEnoughSpace {
-			return missing, err
+			return true, err
 		}
 		if ele == nil {
 			// If no enough space, enqueue the key
@@ -274,7 +274,7 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 		timeLeft := time.Until(start.Add(timeout))
 		if timeLeft <= 0 || timedWait(ele.Value.(*Waiter[K]).c, timeLeft) {
 			log.Warn("failed to get item for key", zap.Any("key", key), zap.Int("wait_len", c.waitQueue.Len()))
-			return missing, ErrTimeOut
+			return true, ErrTimeOut
 		}
 	}
 }
@@ -293,12 +293,12 @@ func (c *lruCache[K, V]) Unpin(key K) {
 	if item.pinCount.Load() == 0 && c.waitQueue.Len() > 0 {
 		log.Info("Unpin item to zero ref, trigger activating waiters")
 		// Notify waiters
-		//collector := c.scavenger.Spare(key)
+		// collector := c.scavenger.Spare(key)
 		for e := c.waitQueue.Front(); e != nil; e = e.Next() {
 			w := e.Value.(*Waiter[K])
 			log.Info("try to activate waiter", zap.Any("activated_waiter_key", w.key))
 			w.c.Broadcast()
-			//we try best to activate as many waiters as possible every time
+			// we try best to activate as many waiters as possible every time
 		}
 	} else {
 		log.Info("Miss to trigger activating waiters",
