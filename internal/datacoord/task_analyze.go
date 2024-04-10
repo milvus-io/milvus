@@ -187,6 +187,8 @@ func (at *analyzeTask) setResult(result *indexpb.AnalyzeResult) {
 	at.taskInfo.TaskID = at.GetTaskID()
 	at.taskInfo.State = result.GetState()
 	at.taskInfo.FailReason = result.GetFailReason()
+	at.taskInfo.CentroidsFile = result.GetCentroidsFile()
+	at.taskInfo.OffsetMapping = result.GetOffsetMapping()
 }
 
 func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {

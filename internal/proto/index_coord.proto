@@ -366,6 +366,9 @@ message AnalyzeTask {
     JobState state = 10;
     string fail_reason = 11;
     int64 dim = 12;
+    string centroids_file = 13;
+    map<int64, string> offset_mapping = 14;
+    bool deleted = 15;
 }
 
 message SegmentStats {
@@ -392,6 +395,8 @@ message AnalyzeResult {
     int64 taskID = 1;
     JobState state = 2;
     string fail_reason = 3;
+    string centroids_file = 4;
+    map<int64, string> offset_mapping = 5;
 }
 
 enum JobType {

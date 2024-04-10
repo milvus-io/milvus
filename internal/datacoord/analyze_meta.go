@@ -177,6 +177,8 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *indexpb.AnalyzeResult) er
 	cloneT := model.CloneAnalyzeTask(t)
 	cloneT.State = result.GetState()
 	cloneT.FailReason = result.GetFailReason()
+	cloneT.CentroidsFile = result.GetCentroidsFile()
+	cloneT.OffsetMapping = result.GetOffsetMapping()
 	return m.saveTask(cloneT)
 }
 

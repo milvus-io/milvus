@@ -23,15 +23,8 @@ extern "C" {
 CStatus
 Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info);
 
-//CStatus
-//CreateMajorCompaction(CAnalyze* res_analyze,
-//                      CBuildIndexInfo c_build_index_info);
-
 CStatus
 DeleteAnalyze(CAnalyze analyze);
-
-CStatus
-CleanAnalyzeLocalData(CAnalyze analyze);
 
 CStatus
 NewAnalyzeInfo(CAnalyzeInfo* c_analyze_info, CStorageConfig c_storage_config);
@@ -40,22 +33,17 @@ void
 DeleteAnalyzeInfo(CAnalyzeInfo c_analyze_info);
 
 CStatus
-AppendAnalyzeFieldMetaInfo(CAnalyzeInfo c_analyze_info,
-                           int64_t collection_id,
-                            int64_t partition_id,
-                            int64_t field_id,
-                            const char* field_name,
-                            enum CDataType field_type,
-                            int64_t dim);
-
-CStatus
 AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
+                  int64_t collection_id,
+                  int64_t partition_id,
+                  int64_t field_id,
                   int64_t task_id,
-                   int64_t version);
-
-// no use
-CStatus
-AppendSegmentID(CAnalyzeInfo c_analyze_info, int64_t segment_id);
+                  int64_t version,
+                  const char* field_name,
+                  enum CDataType field_type,
+                  int64_t dim,
+                  int64_t segment_size,
+                  int64_t train_size);
 
 CStatus
 AppendSegmentInsertFile(CAnalyzeInfo c_analyze_info,
@@ -63,19 +51,12 @@ AppendSegmentInsertFile(CAnalyzeInfo c_analyze_info,
                         const char* file_path);
 
 CStatus
-AppendSegmentSize(CAnalyzeInfo c_analyze_info, int64_t size);
+AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
+                     int64_t segID,
+                     int64_t num_rows);
 
 CStatus
-AppendTrainSize(CAnalyzeInfo c_analyze_info, int64_t size);
-
-CStatus
-SerializeAnalyzeAndUpLoad(CAnalyze analyze);
-
-CStatus
-GetCentroidsFile(const char* file);
-
-CStatus
-GetSegmentOffsetMapping(int64_t segment_id, const char* file);
+SerializeAnalyzeAndUpLoad(CAnalyze analyze, CBinarySet* c_binary_set);
 
 #ifdef __cplusplus
 };

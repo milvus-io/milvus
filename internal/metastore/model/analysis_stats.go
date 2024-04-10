@@ -22,20 +22,22 @@ import (
 )
 
 type AnalyzeTask struct {
-	TenantID     string
-	CollectionID int64
-	PartitionID  int64
-	FieldID      int64
-	FieldName    string
-	FieldType    schemapb.DataType
-	SegmentIDs   []int64
-	TaskID       int64
-	Version      int64
-	NodeID       int64
-	State        indexpb.JobState
-	FailReason   string
-	Dim          int64
-	Deleted      bool
+	TenantID      string
+	CollectionID  int64
+	PartitionID   int64
+	FieldID       int64
+	FieldName     string
+	FieldType     schemapb.DataType
+	SegmentIDs    []int64
+	TaskID        int64
+	Version       int64
+	NodeID        int64
+	State         indexpb.JobState
+	FailReason    string
+	Dim           int64
+	Deleted       bool
+	CentroidsFile string
+	OffsetMapping map[int64]string
 }
 
 func UnmarshalAnalyzeTask(info *indexpb.AnalyzeTask) *AnalyzeTask {
@@ -43,19 +45,22 @@ func UnmarshalAnalyzeTask(info *indexpb.AnalyzeTask) *AnalyzeTask {
 		return nil
 	}
 	return &AnalyzeTask{
-		TenantID:     "",
-		CollectionID: info.GetCollectionID(),
-		PartitionID:  info.GetPartitionID(),
-		FieldID:      info.GetFieldID(),
-		FieldName:    info.GetFieldName(),
-		FieldType:    info.GetFieldType(),
-		SegmentIDs:   info.GetSegmentIDs(),
-		TaskID:       info.GetTaskID(),
-		Version:      info.GetVersion(),
-		NodeID:       info.GetNodeID(),
-		State:        info.GetState(),
-		FailReason:   info.GetFailReason(),
-		Dim:          info.GetDim(),
+		TenantID:      "",
+		CollectionID:  info.GetCollectionID(),
+		PartitionID:   info.GetPartitionID(),
+		FieldID:       info.GetFieldID(),
+		FieldName:     info.GetFieldName(),
+		FieldType:     info.GetFieldType(),
+		SegmentIDs:    info.GetSegmentIDs(),
+		TaskID:        info.GetTaskID(),
+		Version:       info.GetVersion(),
+		NodeID:        info.GetNodeID(),
+		State:         info.GetState(),
+		FailReason:    info.GetFailReason(),
+		Dim:           info.GetDim(),
+		Deleted:       info.GetDeleted(),
+		CentroidsFile: info.GetCentroidsFile(),
+		OffsetMapping: info.GetOffsetMapping(),
 	}
 }
 
@@ -65,18 +70,21 @@ func MarshalAnalyzeTask(t *AnalyzeTask) *indexpb.AnalyzeTask {
 	}
 
 	return &indexpb.AnalyzeTask{
-		CollectionID: t.CollectionID,
-		PartitionID:  t.PartitionID,
-		FieldID:      t.FieldID,
-		FieldName:    t.FieldName,
-		FieldType:    t.FieldType,
-		TaskID:       t.TaskID,
-		Version:      t.Version,
-		SegmentIDs:   t.SegmentIDs,
-		NodeID:       t.NodeID,
-		State:        t.State,
-		FailReason:   t.FailReason,
-		Dim:          t.Dim,
+		CollectionID:  t.CollectionID,
+		PartitionID:   t.PartitionID,
+		FieldID:       t.FieldID,
+		FieldName:     t.FieldName,
+		FieldType:     t.FieldType,
+		TaskID:        t.TaskID,
+		Version:       t.Version,
+		SegmentIDs:    t.SegmentIDs,
+		NodeID:        t.NodeID,
+		State:         t.State,
+		FailReason:    t.FailReason,
+		Dim:           t.Dim,
+		CentroidsFile: t.CentroidsFile,
+		OffsetMapping: t.OffsetMapping,
+		Deleted:       t.Deleted,
 	}
 }
 
@@ -85,18 +93,21 @@ func CloneAnalyzeTask(t *AnalyzeTask) *AnalyzeTask {
 		return t
 	}
 	return &AnalyzeTask{
-		TenantID:     t.TenantID,
-		CollectionID: t.CollectionID,
-		PartitionID:  t.PartitionID,
-		FieldID:      t.FieldID,
-		FieldName:    t.FieldName,
-		FieldType:    t.FieldType,
-		SegmentIDs:   t.SegmentIDs,
-		TaskID:       t.TaskID,
-		Version:      t.Version,
-		NodeID:       t.NodeID,
-		State:        t.State,
-		FailReason:   t.FailReason,
-		Dim:          t.Dim,
+		TenantID:      t.TenantID,
+		CollectionID:  t.CollectionID,
+		PartitionID:   t.PartitionID,
+		FieldID:       t.FieldID,
+		FieldName:     t.FieldName,
+		FieldType:     t.FieldType,
+		SegmentIDs:    t.SegmentIDs,
+		TaskID:        t.TaskID,
+		Version:       t.Version,
+		NodeID:        t.NodeID,
+		State:         t.State,
+		FailReason:    t.FailReason,
+		Dim:           t.Dim,
+		Deleted:       t.Deleted,
+		CentroidsFile: t.CentroidsFile,
+		OffsetMapping: t.OffsetMapping,
 	}
 }

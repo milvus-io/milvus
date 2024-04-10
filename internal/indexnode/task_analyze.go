@@ -18,6 +18,8 @@ package indexnode
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -40,10 +42,8 @@ type analyzeTask struct {
 	node     *IndexNode
 	analyze  analyzecgowrapper.CodecAnalyze
 
-	segmentIDs []int64
-	dataPaths  map[int64][]string
-	startTime  int64
-	endTime    int64
+	startTime int64
+	endTime   int64
 }
 
 func (at *analyzeTask) Ctx() context.Context {
@@ -60,19 +60,7 @@ func (at *analyzeTask) Prepare(ctx context.Context) error {
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 	log.Info("Begin to prepare analyze task")
 
-	at.segmentIDs = make([]int64, 0)
-	at.dataPaths = make(map[int64][]string)
-	for segID, stats := range at.req.GetSegmentStats() {
-		at.segmentIDs = append(at.segmentIDs, segID)
-		at.dataPaths[segID] = make([]string, 0)
-		for _, id := range stats.GetLogIDs() {
-			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
-				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
-			at.dataPaths[segID] = append(at.dataPaths[segID], path)
-		}
-	}
-
-	log.Info("Successfully prepare analyze task", zap.Any("dataPaths", at.dataPaths))
+	log.Info("Successfully prepare analyze task, nothing to do...")
 	return nil
 }
 
@@ -94,21 +82,33 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		log.Warn("create analyze info failed", zap.Error(err))
 		return err
 	}
-	err = analyzeInfo.AppendAnalyzeFieldMetaInfo(at.req.GetCollectionID(), at.req.GetPartitionID(),
-		at.req.GetFieldID(), at.req.GetFieldType(), at.req.GetFieldName(), at.req.GetDim())
+
+	err = analyzeInfo.AppendAnalyzeInfo(
+		at.req.GetCollectionID(),
+		at.req.GetPartitionID(),
+		at.req.GetFieldID(),
+		at.req.GetTaskID(),
+		at.req.GetVersion(),
+		at.req.GetFieldName(),
+		at.req.GetFieldType(),
+		at.req.GetDim(),
+		Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize(),
+		Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize(),
+	)
 	if err != nil {
-		log.Warn("append field meta failed", zap.Error(err))
+		log.Warn("append analyze info failed", zap.Error(err))
 		return err
 	}
 
-	err = analyzeInfo.AppendAnalyzeInfo(at.req.GetTaskID(), at.req.GetVersion())
-	if err != nil {
-		log.Warn("append index meta failed", zap.Error(err))
-		return err
-	}
-
-	for segID, paths := range at.dataPaths {
-		for _, path := range paths {
+	for segID, stats := range at.req.GetSegmentStats() {
+		err = analyzeInfo.AppendNumRows(segID, stats.GetNumRows())
+		if err != nil {
+			log.Warn("append segment num rows failed", zap.Error(err))
+			return err
+		}
+		for _, id := range stats.GetLogIDs() {
+			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
+				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
 			err = analyzeInfo.AppendSegmentInsertFile(segID, path)
 			if err != nil {
 				log.Warn("append insert binlog path failed", zap.Error(err))
@@ -117,25 +117,8 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	err = analyzeInfo.AppendSegmentSize(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())
-	if err != nil {
-		log.Warn("append segment size failed", zap.Error(err))
-		return err
-	}
-
-	err = analyzeInfo.AppendTrainSize(Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize())
-	if err != nil {
-		log.Warn("append train size failed", zap.Error(err))
-		return err
-	}
-
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
 	if err != nil {
-		if at.analyze != nil && at.analyze.CleanLocalData() != nil {
-			log.Error("failed to clean cached data on disk after analyze failed",
-				zap.Int64("buildID", at.req.GetTaskID()),
-				zap.Int64("index version", at.req.GetVersion()))
-		}
 		log.Error("failed to analyze data", zap.Error(err))
 		return err
 	}
@@ -154,11 +137,25 @@ func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
 			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-	err := at.analyze.UpLoad()
+	files, err := at.analyze.UpLoad()
 	if err != nil {
 		log.Error("failed to upload index", zap.Error(err))
 		gc()
 		return err
+	}
+	centroidsFile := ""
+	segmentOffsetMapping := make(map[int64]string)
+	for file := range files {
+		if strings.Contains(file, "centroid") {
+			centroidsFile = file
+			continue
+		}
+		for segID := range at.req.GetSegmentStats() {
+			if strings.Contains(file, fmt.Sprintf("%d", segID)) {
+				segmentOffsetMapping[segID] = file
+				break
+			}
+		}
 	}
 	//encodeIndexFileDur := at.tr.Record("index serialize and upload done")
 	//metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
@@ -169,6 +166,7 @@ func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
 	at.endTime = time.Now().UnixMicro()
 	//saveIndexFileDur := at.tr.RecordSpan()
 	//metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
+	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(), at.req.GetTaskID(), centroidsFile, segmentOffsetMapping)
 	at.tr.Elapse("index building all done")
 	log.Info("Successfully save analyze files")
 	return nil
