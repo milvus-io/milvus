@@ -32,7 +32,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -164,19 +163,6 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 	s.initCollection(name, 1, 2, 2, 2000, 500)
 
 	ctx := context.Background()
-	// disable compact
-	s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "3600"},
-		},
-	})
-	defer s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Resume,
-	})
-
 	// add a querynode, expected balance happens
 	qn := s.Cluster.AddQueryNode()
 
@@ -204,19 +190,6 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 
 func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 	ctx := context.Background()
-
-	// disable compact
-	s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "3600"},
-		},
-	})
-	defer s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Resume,
-	})
 
 	// init collection with 2 channel, each channel has 4 segment, each segment has 2000 row
 	// and load it with 2 replicas on 2 nodes.
@@ -261,19 +234,6 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 
 func (s *BalanceTestSuit) TestNodeDown() {
 	ctx := context.Background()
-
-	// disable compact
-	s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "3600"},
-		},
-	})
-	defer s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Resume,
-	})
 
 	// disable balance channel
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key, "false")
