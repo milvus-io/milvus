@@ -221,7 +221,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		l0WithWrongLocation := false
 		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
 			// the L0 segments have to been in the same node as the channel watched
-			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
+			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
 			l0WithWrongLocation = leader != nil && node != leader.ID
 		}
 		if !existInDist || l0WithWrongLocation {
@@ -240,7 +240,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		l0WithWrongLocation := false
 		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
 			// the L0 segments have to been in the same node as the channel watched
-			leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, segment.GetInsertChannel())
+			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
 			l0WithWrongLocation = leader != nil && node != leader.ID
 		}
 		if !existInDist || l0WithWrongLocation {
@@ -383,7 +383,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 	plans := make([]balance.SegmentAssignPlan, 0)
 	for shard, segments := range shardSegments {
 		// if channel is not subscribed yet, skip load segments
-		leader := c.dist.LeaderViewManager.GetLatestLeadersByReplicaShard(replica, shard)
+		leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(shard))
 		if leader == nil {
 			continue
 		}
