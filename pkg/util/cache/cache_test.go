@@ -227,10 +227,11 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			return nil
 		})
 		wg1.Wait()
-		err := cache.DoWait(1001, time.Nanosecond, func(v int) error {
+		missing, err := cache.DoWait(1001, time.Nanosecond, func(v int) error {
 			return nil
 		})
 		wg.Done()
+		assert.True(t, missing)
 		assert.Equal(t, ErrTimeOut, err)
 	})
 
@@ -250,9 +251,10 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			return nil
 		})
 		wg1.Wait()
-		err := cache.DoWait(1001, time.Second*2, func(v int) error {
+		missing, err := cache.DoWait(1001, time.Second*2, func(v int) error {
 			return nil
 		})
+		assert.True(t, missing)
 		assert.NoError(t, err)
 	})
 
@@ -271,7 +273,7 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				for j := 0; j < 100; j++ {
-					err := cache.DoWait(j, 2*time.Second, func(v int) error {
+					_, err := cache.DoWait(j, 2*time.Second, func(v int) error {
 						return nil
 					})
 					assert.NoError(t, err)

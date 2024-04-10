@@ -21,7 +21,7 @@ type SegmentLabel struct {
 
 // CacheLoadRecord records the metrics of a cache load.
 type CacheLoadRecord struct {
-	bytes uint64
+	numBytes uint64
 	baseRecord
 }
 
@@ -34,13 +34,13 @@ func NewCacheLoadRecord(label SegmentLabel) *CacheLoadRecord {
 
 // WithBytes sets the bytes of the record.
 func (r *CacheLoadRecord) WithBytes(bytes uint64) *CacheLoadRecord {
-	r.bytes = bytes
+	r.numBytes = bytes
 	return r
 }
 
 // getBytes returns the bytes of the record.
 func (r *CacheLoadRecord) getBytes() float64 {
-	return float64(r.bytes)
+	return float64(r.numBytes)
 }
 
 // Finish finishes the record.
@@ -132,9 +132,9 @@ func (r *segmentAccessRecord) CacheMissing() {
 	r.waitLoadCost = r.timeRecorder.RecordSpan()
 }
 
-// getWaitLoadSeconds returns the wait load seconds of the recorder.
-func (r *segmentAccessRecord) getWaitLoadSeconds() float64 {
-	return r.waitLoadCost.Seconds()
+// getWaitLoadMilliseconds returns the wait load seconds of the recorder.
+func (r *segmentAccessRecord) getWaitLoadMilliseconds() float64 {
+	return r.waitLoadCost.Seconds() * 1000
 }
 
 // getWaitLoadDuration returns the wait load duration of the recorder.
@@ -173,9 +173,9 @@ func (r *baseRecord) getDuration() time.Duration {
 	return r.duration
 }
 
-// getSeconds returns the duration of the recorder in seconds.
-func (r *baseRecord) getSeconds() float64 {
-	return r.duration.Seconds()
+// getMilliseconds returns the duration of the recorder in seconds.
+func (r *baseRecord) getMilliseconds() float64 {
+	return r.duration.Seconds() * 1000
 }
 
 // finish finishes the record.

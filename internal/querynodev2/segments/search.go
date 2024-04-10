@@ -19,10 +19,10 @@ package segments
 import (
 	"context"
 	"fmt"
-	"go.uber.org/atomic"
 	"sync"
 	"time"
 
+	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
