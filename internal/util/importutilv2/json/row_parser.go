@@ -116,10 +116,6 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 			}
 			row[fieldID] = data
 		} else if r.dynamicField != nil {
-			if key == r.dynamicField.GetName() {
-				return nil, merr.WrapErrImportFailed(
-					fmt.Sprintf("dynamic field is enabled, explicit specification of '%s' is not allowed", key))
-			}
 			// has dynamic field, put redundant pair to dynamicValues
 			dynamicValues[key] = value
 		} else {
@@ -144,23 +140,55 @@ func (r *rowParser) Parse(raw any) (Row, error) {
 
 func (r *rowParser) combineDynamicRow(dynamicValues map[string]any, row Row) error {
 	// Combine the dynamic field value
-	// invalid inputs:
-	// case 1: {"id": 1, "vector": [], "$meta": {"x": 8}} ==>> "$meta" is not allowed
 	// valid inputs:
-	// case 2: {"id": 1, "vector": [], "x": 8} ==>> {"id": 1, "vector": [], "$meta": "{\"x\": 8}"}
-	// case 3: {"id": 1, "vector": []}
+	// case 1: {"id": 1, "vector": [], "x": 8, "$meta": "{\"y\": 8}"} ==>> {"id": 1, "vector": [], "$meta": "{\"y\": 8, \"x\": 8}"}
+	// case 2: {"id": 1, "vector": [], "x": 8, "$meta": {}} ==>> {"id": 1, "vector": [], "$meta": {\"x\": 8}}
+	// case 3: {"id": 1, "vector": [], "$meta": "{\"x\": 8}"}
+	// case 4: {"id": 1, "vector": [], "$meta": {"x": 8}}
+	// case 5: {"id": 1, "vector": [], "$meta": {}}
+	// case 6: {"id": 1, "vector": [], "x": 8} ==>> {"id": 1, "vector": [], "$meta": "{\"x\": 8}"}
+	// case 7: {"id": 1, "vector": []}
+	// invalid inputs:
+	// case 8: {"id": 1, "vector": [], "x": 6, "$meta": {"x": 8}} ==>> duplicated key is not allowed
+	// case 9: {"id": 1, "vector": [], "x": 6, "$meta": "{\"x\": 8}"} ==>> duplicated key is not allowed
 	dynamicFieldID := r.dynamicField.GetFieldID()
-	if len(dynamicValues) > 0 {
-		// case 2
-		data, err := r.parseEntity(dynamicFieldID, dynamicValues)
-		if err != nil {
-			return err
-		}
-		row[dynamicFieldID] = data
-	} else {
-		// case 3
+	if len(dynamicValues) == 0 {
+		// case 7
 		row[dynamicFieldID] = []byte("{}")
+		return nil
 	}
+
+	if obj, ok := dynamicValues[r.dynamicField.GetName()]; ok {
+		var mp map[string]interface{}
+		switch value := obj.(type) {
+		case string:
+			// case 1, 3
+			err := json.Unmarshal([]byte(value), &mp)
+			if err != nil {
+				return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON format string")
+			}
+		case map[string]interface{}:
+			// case 2, 4, 5
+			mp = value
+		default:
+			// invalid input
+			return merr.WrapErrImportFailed("illegal value for dynamic field, not a JSON object")
+		}
+		delete(dynamicValues, r.dynamicField.GetName())
+		for k, v := range mp {
+			if _, ok = dynamicValues[k]; ok {
+				// case 8, 9
+				return merr.WrapErrImportFailed(fmt.Sprintf("duplicated key is not allowed, key=%s", k))
+			}
+			dynamicValues[k] = v
+		}
+	}
+	data, err := r.parseEntity(dynamicFieldID, dynamicValues)
+	if err != nil {
+		return err
+	}
+	row[dynamicFieldID] = data
+
 	return nil
 }
 
