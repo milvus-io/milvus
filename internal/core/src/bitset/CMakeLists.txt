@@ -38,7 +38,7 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
     # comment it out for now
     # set_source_files_properties(detail/platform/dynamic.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
     
-    set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
+    #set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
 endif()
 
 add_library(milvus_bitset ${BITSET_SRCS})
