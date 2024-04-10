@@ -19,6 +19,7 @@ package delegator
 import (
 	"context"
 	"testing"
+	"time"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
@@ -64,6 +65,11 @@ type DelegatorDataSuite struct {
 func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
+}
+
+func (s *DelegatorDataSuite) TearDownSuite() {
+	paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key)
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
@@ -998,6 +1004,20 @@ func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
 	result, err := s.delegator.readDeleteFromMsgstream(ctx, &msgpb.MsgPosition{Timestamp: 0}, 10, oracle)
 	s.NoError(err)
 	s.Equal(2, len(result.Pks))
+}
+
+func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
+	s.delegator.AddExcludedSegments(map[int64]uint64{
+		1: 3,
+	})
+
+	s.False(s.delegator.VerifyExcludedSegments(1, 1))
+	s.True(s.delegator.VerifyExcludedSegments(1, 5))
+
+	time.Sleep(time.Second * 1)
+	s.delegator.TryCleanExcludedSegments(4)
+	s.True(s.delegator.VerifyExcludedSegments(1, 1))
+	s.True(s.delegator.VerifyExcludedSegments(1, 5))
 }
 
 func TestDelegatorDataSuite(t *testing.T) {
