@@ -519,17 +519,30 @@ std::vector<char>
 StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
     auto nq_begin = slice_nqs_prefix_sum_[slice_index];
     auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
-
-    int64_t result_count =
-        merged_search_result->topk_per_nq_prefix_sum_[nq_end] -
-        merged_search_result->topk_per_nq_prefix_sum_[nq_begin];
-
+    
     auto search_result_data =
         std::make_unique<milvus::proto::schema::SearchResultData>();
     // set unify_topK and total_nq
     search_result_data->set_top_k(slice_topKs_[slice_index]);
     search_result_data->set_num_queries(nq_end - nq_begin);
     search_result_data->mutable_topks()->Resize(nq_end - nq_begin, 0);
+
+    int64_t result_count = 0;
+    if (merged_search_result->has_result_) {
+        AssertInfo(
+            nq_begin < merged_search_result->topk_per_nq_prefix_sum_.size(),
+            "nq_begin is incorrect for reduce, nq_begin:{}, topk_size:{}",
+            nq_begin,
+            merged_search_result->topk_per_nq_prefix_sum_.size());
+        AssertInfo(
+            nq_end < merged_search_result->topk_per_nq_prefix_sum_.size(),
+            "nq_end is incorrect for reduce, nq_end:{}, topk_size:{}",
+            nq_end,
+            merged_search_result->topk_per_nq_prefix_sum_.size());
+
+        result_count = merged_search_result->topk_per_nq_prefix_sum_[nq_end] -
+                       merged_search_result->topk_per_nq_prefix_sum_[nq_begin];
+    }
 
     // `result_pairs` contains the SearchResult and result_offset info, used for filling output fields
     std::vector<MergeBase> result_pairs(result_count);
@@ -576,7 +589,8 @@ StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
         int64_t topk_count = 0;
         AssertInfo(merged_search_result != nullptr,
                    "null merged search result when reorganize");
-        if (merged_search_result->result_offsets_.size() == 0) {
+        if (!merged_search_result->has_result_ ||
+            merged_search_result->result_offsets_.size() == 0) {
             continue;
         }
 
