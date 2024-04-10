@@ -50,7 +50,15 @@ func NewScoreBasedBalancer(scheduler task.Scheduler,
 }
 
 // AssignSegment got a segment list, and try to assign each segment to node's with lowest score
-func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64) []SegmentAssignPlan {
+func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan {
+	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
+	if !manualBalance {
+		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
+			info := b.nodeManager.Get(node)
+			return info != nil && info.GetState() == session.NodeStateNormal
+		})
+	}
+
 	// calculate each node's score
 	nodeItems := b.convertToNodeItems(collectionID, nodes)
 	if len(nodeItems) == 0 {
@@ -87,7 +95,8 @@ func (b *ScoreBasedBalancer) AssignSegment(collectionID int64, segments []*meta.
 			sourceNode := nodeItemsMap[s.Node]
 			// if segment's node exist, which means this segment comes from balancer. we should consider the benefit
 			// if the segment reassignment doesn't got enough benefit, we should skip this reassignment
-			if sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, priorityChange) {
+			// notice: we should skip benefit check for manual balance
+			if !manualBalance && sourceNode != nil && !b.hasEnoughBenefit(sourceNode, targetNode, priorityChange) {
 				return
 			}
 
@@ -240,7 +249,7 @@ func (b *ScoreBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlin
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil
 		})
-		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes)
+		plans := b.AssignSegment(replica.CollectionID, segments, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].ReplicaID = replica.ID
@@ -304,7 +313,7 @@ func (b *ScoreBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes [
 		return nil
 	}
 
-	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, onlineNodes)
+	segmentPlans := b.AssignSegment(replica.CollectionID, segmentsToMove, onlineNodes, false)
 	for i := range segmentPlans {
 		segmentPlans[i].From = segmentPlans[i].Segment.Node
 		segmentPlans[i].ReplicaID = replica.ID

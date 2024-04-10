@@ -87,7 +87,7 @@ func (suite *SegmentCheckerTestSuite) TearDownTest() {
 
 func (suite *SegmentCheckerTestSuite) createMockBalancer() balance.Balance {
 	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(collectionID int64, segments []*meta.Segment, nodes []int64) []balance.SegmentAssignPlan {
+	balancer.EXPECT().AssignSegment(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(collectionID int64, segments []*meta.Segment, nodes []int64, _ bool) []balance.SegmentAssignPlan {
 		plans := make([]balance.SegmentAssignPlan, 0, len(segments))
 		for i, s := range segments {
 			plan := balance.SegmentAssignPlan{
@@ -147,6 +147,17 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 	suite.Equal(task.ActionTypeGrow, action.Type())
 	suite.EqualValues(1, action.SegmentID())
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityNormal)
+
+	// test activation
+	checker.Deactivate()
+	suite.False(checker.IsActive())
+	tasks = checker.Check(context.TODO())
+	suite.Len(tasks, 0)
+
+	checker.Activate()
+	suite.True(checker.IsActive())
+	tasks = checker.Check(context.TODO())
+	suite.Len(tasks, 1)
 }
 
 func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {

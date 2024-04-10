@@ -30,12 +30,14 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // BalanceChecker checks the cluster distribution and generates balance tasks.
 type BalanceChecker struct {
+	*checkerActivation
 	balance.Balance
 	meta                                 *meta.Meta
 	nodeManager                          *session.NodeManager
@@ -51,6 +53,7 @@ func NewBalanceChecker(meta *meta.Meta,
 	scheduler task.Scheduler,
 ) *BalanceChecker {
 	return &BalanceChecker{
+		checkerActivation:                    newCheckerActivation(),
 		Balance:                              balancer,
 		meta:                                 meta,
 		targetMgr:                            targetMgr,
@@ -61,7 +64,7 @@ func NewBalanceChecker(meta *meta.Meta,
 }
 
 func (b *BalanceChecker) ID() task.Source {
-	return balanceChecker
+	return utils.BalanceChecker
 }
 
 func (b *BalanceChecker) Description() string {
@@ -162,6 +165,9 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 }
 
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
+	if !b.IsActive() {
+		return nil
+	}
 	ret := make([]task.Task, 0)
 
 	replicasToBalance := b.replicasToBalance()

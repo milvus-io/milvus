@@ -35,6 +35,7 @@ import (
 
 // TODO(sunby): have too much similar codes with SegmentChecker
 type ChannelChecker struct {
+	*checkerActivation
 	meta      *meta.Meta
 	dist      *meta.DistributionManager
 	targetMgr *meta.TargetManager
@@ -48,15 +49,16 @@ func NewChannelChecker(
 	balancer balance.Balance,
 ) *ChannelChecker {
 	return &ChannelChecker{
-		meta:      meta,
-		dist:      dist,
-		targetMgr: targetMgr,
-		balancer:  balancer,
+		checkerActivation: newCheckerActivation(),
+		meta:              meta,
+		dist:              dist,
+		targetMgr:         targetMgr,
+		balancer:          balancer,
 	}
 }
 
 func (c *ChannelChecker) ID() task.Source {
-	return channelChecker
+	return utils.ChannelChecker
 }
 
 func (c *ChannelChecker) Description() string {
@@ -71,6 +73,9 @@ func (c *ChannelChecker) readyToCheck(collectionID int64) bool {
 }
 
 func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
+	if !c.IsActive() {
+		return nil
+	}
 	collectionIDs := c.meta.CollectionManager.GetAll()
 	tasks := make([]task.Task, 0)
 	for _, cid := range collectionIDs {
@@ -191,7 +196,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
 		return !outboundNodes.Contain(node)
 	})
-	plans := c.balancer.AssignChannel(channels, availableNodes)
+	plans := c.balancer.AssignChannel(channels, availableNodes, false)
 	for i := range plans {
 		plans[i].ReplicaID = replica.GetID()
 	}

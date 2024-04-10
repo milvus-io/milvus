@@ -87,7 +87,7 @@ func (suite *ChannelCheckerTestSuite) TearDownTest() {
 
 func (suite *ChannelCheckerTestSuite) createMockBalancer() balance.Balance {
 	balancer := balance.NewMockBalancer(suite.T())
-	balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything).Maybe().Return(func(channels []*meta.DmChannel, nodes []int64) []balance.ChannelAssignPlan {
+	balancer.EXPECT().AssignChannel(mock.Anything, mock.Anything, mock.Anything).Maybe().Return(func(channels []*meta.DmChannel, nodes []int64, _ bool) []balance.ChannelAssignPlan {
 		plans := make([]balance.ChannelAssignPlan, 0, len(channels))
 		for i, c := range channels {
 			plan := balance.ChannelAssignPlan{
