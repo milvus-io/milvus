@@ -584,7 +584,10 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 }
 
 func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
-	s.ptrLock.RLock()
+	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
 	defer s.ptrLock.RUnlock()
 
 	if s.ptr == nil {
@@ -633,7 +636,7 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 		return nil, err
 	}
 
-	log.Debug("retrieve segment done")
+	log.Debug("retrieve by segment offsets done")
 
 	return result, nil
 }

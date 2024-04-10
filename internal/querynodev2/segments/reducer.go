@@ -21,7 +21,7 @@ func CreateInternalReducer(req *querypb.QueryRequest, schema *schemapb.Collectio
 }
 
 type segCoreReducer interface {
-	Reduce(context.Context, []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error)
+	Reduce(context.Context, []*segcorepb.RetrieveResults, []Segment, *RetrievePlan) (*segcorepb.RetrieveResults, error)
 }
 
 func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) segCoreReducer {

@@ -33,7 +33,7 @@ func (r *cntReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveR
 
 type cntReducerSegCore struct{}
 
-func (r *cntReducerSegCore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults) (*segcorepb.RetrieveResults, error) {
+func (r *cntReducerSegCore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults, _ []Segment, _ *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	cnt := int64(0)
 	allRetrieveCount := int64(0)
 	for _, res := range results {
