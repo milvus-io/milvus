@@ -19,11 +19,9 @@ package importv2
 import (
 	"context"
 	"fmt"
-	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -39,14 +37,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type BinlogImportSuite struct {
-	integration.MiniClusterSuite
-
-	insertCount int
-	deleteCount int
-}
-
-func (s *BinlogImportSuite) PrepareCollectionA() (int64, int64) {
+func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -160,7 +151,7 @@ func (s *BinlogImportSuite) PrepareCollectionA() (int64, int64) {
 	return collectionID, partitionID
 }
 
-func (s *BinlogImportSuite) TestBinlogImport() {
+func (s *BulkInsertSuite) TestBinlogImport() {
 	const (
 		startTs = "0"
 		endTs   = "548373346338803234"
@@ -261,8 +252,4 @@ func (s *BinlogImportSuite) TestBinlogImport() {
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
-}
-
-func TestBinlogImport(t *testing.T) {
-	suite.Run(t, new(BinlogImportSuite))
 }
