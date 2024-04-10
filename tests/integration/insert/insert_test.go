@@ -38,6 +38,7 @@ type InsertSuite struct {
 	integration.MiniClusterSuite
 }
 
+// insert request with duplicate field data should fail
 func (s *InsertSuite) TestInsert() {
 	c := s.Cluster
 	ctx, cancel := context.WithCancel(c.GetContext())
