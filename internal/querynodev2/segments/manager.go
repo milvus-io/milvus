@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -185,12 +186,18 @@ func NewManager() *Manager {
 		}
 
 		info := segment.LoadInfo()
-		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (interface{}, error) {
+		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (nop interface{}, err error) {
+			cacheLoadRecord := metricsutil.NewCacheLoadRecord(getSegmentMetricLabel(segment))
+			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
+			defer func() {
+				cacheLoadRecord.Finish(err)
+			}()
+
 			collection := manager.Collection.Get(segment.Collection())
 			if collection == nil {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
-			err := manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info, LoadStatusMapped)
+			err = manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info, LoadStatusMapped)
 			return nil, err
 		})
 		if err != nil {
@@ -200,6 +207,10 @@ func NewManager() *Manager {
 		return segment, true
 	}).WithFinalizer(func(key int64, segment Segment) error {
 		log.Debug("evict segment from cache", zap.Int64("segmentID", key))
+		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
+		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
+		defer cacheEvictRecord.Finish(nil)
+
 		segment.Release(WithReleaseScope(ReleaseScopeData))
 		return nil
 	}).Build()

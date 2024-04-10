@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -77,8 +78,16 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				mu.Unlock()
 			}
 			var err error
+			accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
+			defer func() {
+				accessRecord.Finish(err)
+			}()
 			if seg.IsLazyLoad() {
-				err = mgr.DiskCache.Do(seg.ID(), searcher)
+				var missing bool
+				missing, err = mgr.DiskCache.Do(seg.ID(), searcher)
+				if missing {
+					accessRecord.CacheMissing()
+				}
 			} else {
 				err = searcher(seg)
 			}
