@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -37,7 +38,7 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64) {
+func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64, *schemapb.IDs) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -86,6 +87,7 @@ func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64) {
 	})
 	s.NoError(err)
 	s.Equal(int32(0), insertResult.GetStatus().GetCode())
+	insertedIDs := insertResult.GetIDs()
 
 	// flush
 	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
@@ -148,7 +150,7 @@ func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64) {
 	// get collectionID and partitionID
 	collectionID := showCollectionsResp.GetCollectionIds()[0]
 	partitionID := showPartitionsResp.GetPartitionIDs()[0]
-	return collectionID, partitionID
+	return collectionID, partitionID, insertedIDs
 }
 
 func (s *BulkInsertSuite) TestBinlogImport() {
@@ -157,7 +159,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 		endTs   = "548373346338803234"
 	)
 
-	collectionID, partitionID := s.PrepareCollectionA()
+	collectionID, partitionID, insertedIDs := s.PrepareCollectionA()
 
 	c := s.Cluster
 	ctx, cancel := context.WithTimeout(c.GetContext(), 60*time.Second)
@@ -252,4 +254,13 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+	// check ids from collectionA, because during binlog import, even if the primary key's autoID is set to true,
+	// the primary key from the binlog should be used instead of being reassigned.
+	insertedIDsMap := lo.SliceToMap(insertedIDs.GetIntId().GetData(), func(id int64) (int64, struct{}) {
+		return id, struct{}{}
+	})
+	for _, id := range searchResult.GetResults().GetIds().GetIntId().GetData() {
+		_, ok := insertedIDsMap[id]
+		s.True(ok)
+	}
 }
