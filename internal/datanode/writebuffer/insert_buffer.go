@@ -67,10 +67,7 @@ func (b *BufferBase) MinTimestamp() typeutil.Timestamp {
 }
 
 func (b *BufferBase) GetTimeRange() *TimeRange {
-	return &TimeRange{
-		timestampMin: b.TimestampFrom,
-		timestampMax: b.TimestampTo,
-	}
+	return NewTimeRange(b.TimestampFrom, b.TimestampTo)
 }
 
 type InsertBuffer struct {
@@ -117,16 +114,16 @@ func (ib *InsertBuffer) Yield() *storage.InsertData {
 }
 
 func (ib *InsertBuffer) Buffer(inData *inData, startPos, endPos *msgpb.MsgPosition) int64 {
-	totalMemSize := int64(0)
+	bufferedSize := int64(0)
 	for idx, data := range inData.data {
 		storage.MergeInsertData(ib.buffer, data)
 		tsData := inData.tsField[idx]
 
 		// update buffer size
 		ib.UpdateStatistics(int64(data.GetRowNum()), int64(data.GetMemorySize()), ib.getTimestampRange(tsData), startPos, endPos)
-		totalMemSize += int64(data.GetMemorySize())
+		bufferedSize += int64(data.GetMemorySize())
 	}
-	return totalMemSize
+	return bufferedSize
 }
 
 func (ib *InsertBuffer) getTimestampRange(tsData *storage.Int64FieldData) TimeRange {

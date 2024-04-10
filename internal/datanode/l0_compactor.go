@@ -23,12 +23,14 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -50,7 +52,7 @@ import (
 )
 
 type levelZeroCompactionTask struct {
-	compactor
+	compaction.Compactor
 	io.BinlogIO
 
 	allocator allocator.Allocator
@@ -66,6 +68,9 @@ type levelZeroCompactionTask struct {
 	done chan struct{}
 	tr   *timerecord.TimeRecorder
 }
+
+// make sure compactionTask implements compactor interface
+var _ compaction.Compactor = (*levelZeroCompactionTask)(nil)
 
 func newLevelZeroCompactionTask(
 	ctx context.Context,
@@ -92,31 +97,31 @@ func newLevelZeroCompactionTask(
 	}
 }
 
-func (t *levelZeroCompactionTask) complete() {
+func (t *levelZeroCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *levelZeroCompactionTask) stop() {
+func (t *levelZeroCompactionTask) Stop() {
 	t.cancel()
 	<-t.done
 }
 
-func (t *levelZeroCompactionTask) getPlanID() UniqueID {
+func (t *levelZeroCompactionTask) GetPlanID() UniqueID {
 	return t.plan.GetPlanID()
 }
 
-func (t *levelZeroCompactionTask) getChannelName() string {
+func (t *levelZeroCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
-func (t *levelZeroCompactionTask) getCollection() int64 {
+func (t *levelZeroCompactionTask) GetCollection() int64 {
 	return t.metacache.Collection()
 }
 
 // Do nothing for levelzero compaction
-func (t *levelZeroCompactionTask) injectDone() {}
+func (t *levelZeroCompactionTask) InjectDone() {}
 
-func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
+func (t *levelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
 	defer span.End()
 	log := log.Ctx(t.ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
@@ -124,7 +129,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
-		return nil, errContext
+		return nil, ctx.Err()
 	}
 
 	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
@@ -139,7 +144,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 	})
 	if len(targetSegments) == 0 {
 		log.Warn("compact wrong, not target sealed segments")
-		return nil, errIllegalCompactionPlan
+		return nil, errors.New("illegal compaction plan with empty target segments")
 	}
 	err := binlog.DecompressCompactionBinlogs(l0Segments)
 	if err != nil {
