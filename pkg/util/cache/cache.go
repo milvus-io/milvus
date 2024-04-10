@@ -101,8 +101,10 @@ func (s *LazyScavenger[K]) Replace(key K) (bool, func(K) bool, func()) {
 }
 
 func (s *LazyScavenger[K]) Throw(key K) {
-	s.size -= s.weight(key)
-	delete(s.weights, key)
+	if w, ok := s.weights[key]; ok {
+		s.size -= w
+		delete(s.weights, key)
+	}
 }
 
 func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
