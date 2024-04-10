@@ -1184,8 +1184,8 @@ func (suite *ServiceSuite) TestSearch_Normal() {
 
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
 	req := &querypb.SearchRequest{
-		Req:             creq,
-		FromShardLeader: false,
+		Req: creq,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1208,8 +1208,8 @@ func (suite *ServiceSuite) TestSearch_Concurrent() {
 		future := conc.Go(func() (*internalpb.SearchResults, error) {
 			creq, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
 			req := &querypb.SearchRequest{
-				Req:             creq,
-				FromShardLeader: false,
+				Req: creq,
+
 				DmlChannels:     []string{suite.vchannel},
 				TotalChannelNum: 2,
 			}
@@ -1234,8 +1234,8 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, "invalidMetricType")
 	req := &querypb.SearchRequest{
-		Req:             creq,
-		FromShardLeader: false,
+		Req: creq,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1305,7 +1305,6 @@ func (suite *ServiceSuite) TestSearchSegments_Unhealthy() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	req := &querypb.SearchRequest{
-		FromShardLeader: true,
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1324,7 +1323,7 @@ func (suite *ServiceSuite) TestSearchSegments_Failed() {
 		Req: &internalpb.SearchRequest{
 			CollectionID: -1, // not exist collection id
 		},
-		FromShardLeader: true,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1353,8 +1352,8 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
 	req := &querypb.SearchRequest{
-		Req:             creq,
-		FromShardLeader: true,
+		Req: creq,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1397,9 +1396,9 @@ func (suite *ServiceSuite) TestQuery_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	rsp, err := suite.node.Query(ctx, req)
@@ -1416,9 +1415,9 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	// Delegator not found
@@ -1443,8 +1442,8 @@ func (suite *ServiceSuite) TestQuerySegments_Failed() {
 		Req: &internalpb.RetrieveRequest{
 			CollectionID: -1,
 		},
-		FromShardLeader: true,
-		DmlChannels:     []string{suite.vchannel},
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	rsp, err := suite.node.QuerySegments(ctx, req)
@@ -1478,9 +1477,9 @@ func (suite *ServiceSuite) TestQueryStream_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	client := streamrpc.NewLocalQueryClient(ctx)
@@ -1513,9 +1512,9 @@ func (suite *ServiceSuite) TestQueryStream_Failed() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	queryFunc := func(wg *sync.WaitGroup, req *querypb.QueryRequest, client *streamrpc.LocalQueryClient) {
@@ -1591,9 +1590,9 @@ func (suite *ServiceSuite) TestQuerySegments_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: true,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	rsp, err := suite.node.QuerySegments(ctx, req)
@@ -1613,9 +1612,9 @@ func (suite *ServiceSuite) TestQueryStreamSegments_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: true,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	client := streamrpc.NewLocalQueryClient(ctx)
