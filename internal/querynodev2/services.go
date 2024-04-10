@@ -701,15 +701,9 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	if req.FromShardLeader {
-		// for compatible with rolling upgrade from version before v2.2.9
-		return node.SearchSegments(ctx, req)
-	}
-
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("channels", req.GetDmlChannels()),
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64("nq", req.GetReq().GetNq()),
 	)
 
@@ -745,7 +739,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 			Req:             req.Req,
 			DmlChannels:     []string{ch},
 			SegmentIDs:      req.SegmentIDs,
-			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
 			TotalChannelNum: req.TotalChannelNum,
 		}
@@ -826,10 +819,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		}
 	}()
 
-	log.Debug("start do query segments",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-	)
+	log.Debug("start do query segments", zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 	// add cancel when error occurs
 	queryCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -855,9 +845,8 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		return resp, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s,  vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))
@@ -874,11 +863,6 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	if req.FromShardLeader {
-		// for compatible with rolling upgrade from version before v2.2.9
-		return node.QuerySegments(ctx, req)
-	}
-
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("shards", req.GetDmlChannels()),
@@ -906,11 +890,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	for i, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.QueryRequest{
-			Req:             req.Req,
-			DmlChannels:     []string{ch},
-			SegmentIDs:      req.SegmentIDs,
-			FromShardLeader: req.FromShardLeader,
-			Scope:           req.Scope,
+			Req:         req.Req,
+			DmlChannels: []string{ch},
+			SegmentIDs:  req.SegmentIDs,
+			Scope:       req.Scope,
 		}
 
 		idx := i
@@ -944,10 +927,8 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
 		Observe(float64(reduceLatency.Milliseconds()))
 
-	if !req.FromShardLeader {
-		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
-		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
-	}
+	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 
 	if ret.GetCostAggregation() != nil {
 		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
@@ -982,11 +963,10 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 	for _, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.QueryRequest{
-			Req:             req.Req,
-			DmlChannels:     []string{ch},
-			SegmentIDs:      req.SegmentIDs,
-			FromShardLeader: req.FromShardLeader,
-			Scope:           req.Scope,
+			Req:         req.Req,
+			DmlChannels: []string{ch},
+			SegmentIDs:  req.SegmentIDs,
+			Scope:       req.Scope,
 		}
 
 		runningGp.Go(func() error {
@@ -1039,10 +1019,7 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 	}
 	defer node.lifetime.Done()
 
-	log.Debug("start do query with channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-	)
+	log.Debug("start do query with channel", zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 
 	tr := timerecord.NewTimeRecorder("queryChannel")
 
@@ -1053,9 +1030,8 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 		return nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s,  vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))

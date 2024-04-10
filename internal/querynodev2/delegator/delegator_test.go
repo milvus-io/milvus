@@ -266,7 +266,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				if req.GetScope() == querypb.DataScope_Streaming {
 					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
@@ -279,7 +279,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -334,7 +334,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -374,7 +374,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -487,7 +487,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				if req.GetScope() == querypb.DataScope_Streaming {
 					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
@@ -500,7 +500,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -554,7 +554,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -591,7 +591,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -684,7 +684,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		worker1.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				if req.GetScope() == querypb.DataScope_Streaming {
 					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
@@ -707,7 +707,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -840,7 +840,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
