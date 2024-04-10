@@ -46,23 +46,18 @@ struct BuildIndexInfo {
 struct AnalyzeInfo {
     int64_t collection_id;
     int64_t partition_id;
-    // int64_t segment_id;  // no use
     int64_t field_id;
-    milvus::DataType field_type;
     int64_t task_id;
     int64_t version;
+    std::string field_name;
+    milvus::DataType field_type;
+    int64_t dim;
+    int64_t segment_size;
+    int64_t train_size;
     std::map<int64_t, std::vector<std::string>> insert_files; // segment_id->files
-    //    std::vector<std::string> insert_files;
     std::map<int64_t, int64_t> num_rows;
     milvus::storage::StorageConfig storage_config;
     milvus::Config config;
-    std::string field_name;
     std::string centroids_store_path;
     std::vector<std::string> segments_offset_mapping;
-    int64_t data_store_version;
-    std::string index_store_path;
-    int64_t dim;
-    int32_t index_engine_version;
-    int64_t segment_size;
-    int64_t train_size;
 };

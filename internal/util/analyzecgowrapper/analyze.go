@@ -31,12 +31,14 @@ import "C"
 
 import (
 	"context"
+	"runtime"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type CodecAnalyze interface {
 	Delete() error
-	CleanLocalData() error
-	UpLoad() error
+	UpLoad() (map[string]int64, error)
 }
 
 func Analyze(ctx context.Context, analyzeInfo *AnalyzeInfo) (CodecAnalyze, error) {
@@ -69,15 +71,36 @@ func (ca *CgoAnalyze) Delete() error {
 	//return nil
 }
 
-func (ca *CgoAnalyze) CleanLocalData() error {
-	status := C.CleanAnalyzeLocalData(ca.analyzePtr)
-	return HandleCStatus(&status, "failed to clean cached data on disk")
-}
+func (ca *CgoAnalyze) UpLoad() (map[string]int64, error) {
+	var cBinarySet C.CBinarySet
 
-func (ca *CgoAnalyze) UpLoad() error {
-	status := C.SerializeAnalyzeAndUpLoad(ca.analyzePtr)
+	status := C.SerializeAnalyzeAndUpLoad(ca.analyzePtr, &cBinarySet)
+	defer func() {
+		if cBinarySet != nil {
+			C.DeleteBinarySet(cBinarySet)
+		}
+	}()
 	if err := HandleCStatus(&status, "failed to upload analyze result"); err != nil {
-		return err
+		return nil, err
 	}
-	return nil
+	files, err := GetBinarySetKeys(cBinarySet)
+	if err != nil {
+		return nil, err
+	}
+
+	res := make(map[string]int64)
+	for _, path := range files {
+		size, err := GetBinarySetSize(cBinarySet, path)
+		if err != nil {
+			return nil, err
+		}
+		res[path] = size
+	}
+
+	runtime.SetFinalizer(ca, func(ca *CgoAnalyze) {
+		if ca != nil && !ca.close {
+			log.Error("there is leakage in analyze object, please check.")
+		}
+	})
+	return res, nil
 }

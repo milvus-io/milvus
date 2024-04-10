@@ -20,6 +20,7 @@ package analyzecgowrapper
 #cgo pkg-config: milvus_indexbuilder
 
 #include <stdlib.h>	// free
+#include "common/binary_set_c.h"
 #include "indexbuilder/analyze_c.h"
 */
 import "C"
@@ -31,6 +32,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
+
+func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
+	size := int(C.GetBinarySetSize(cBinarySet))
+	if size == 0 {
+		return nil, fmt.Errorf("BinarySet size is zero")
+	}
+	datas := make([]unsafe.Pointer, size)
+
+	C.GetBinarySetKeys(cBinarySet, unsafe.Pointer(&datas[0]))
+	ret := make([]string, size)
+	for i := 0; i < size; i++ {
+		ret[i] = C.GoString((*C.char)(datas[i]))
+	}
+
+	return ret, nil
+}
+
+func GetBinarySetSize(cBinarySet C.CBinarySet, key string) (int64, error) {
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+	ret := C.GetBinarySetValueSize(cBinarySet, cKey)
+	return int64(ret), nil
+}
 
 // HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {

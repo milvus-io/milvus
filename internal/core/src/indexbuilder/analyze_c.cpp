@@ -40,25 +40,11 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
         config["segment_size"] = analyze_info->segment_size;
         config["train_size"] = analyze_info->train_size;
 
-        // get index type
-        //        auto index_type = milvus::index::GetValueFromConfig<std::string>(
-        //            config, "index_type");
-        //        AssertInfo(index_type.has_value(), "index type is empty");
-        //        index_info.index_type = index_type.value();
-
-        auto engine_version = analyze_info->index_engine_version;
-
-        //        index_info.index_engine_version = engine_version;
-        config[milvus::index::INDEX_ENGINE_VERSION] =
-            std::to_string(engine_version);
-
-        // get metric type
-        //        if (milvus::datatype_is_vector(field_type)) {
-        //            auto metric_type = milvus::index::GetValueFromConfig<std::string>(
-        //                config, "metric_type");
-        //            AssertInfo(metric_type.has_value(), "metric type is empty");
-        //            index_info.metric_type = metric_type.value();
-        //        }
+        //        auto engine_version = analyze_info->index_engine_version;
+        //
+        //        //        index_info.index_engine_version = engine_version;
+        //        config[milvus::index::INDEX_ENGINE_VERSION] =
+        //            std::to_string(engine_version);
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{analyze_info->collection_id,
@@ -102,25 +88,6 @@ DeleteAnalyze(CAnalyze analyze) {
         auto real_analyze =
             reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analyze);
         delete real_analyze;
-        status.error_code = Success;
-        status.error_msg = "";
-    } catch (std::exception& e) {
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-    }
-    return status;
-}
-
-CStatus
-CleanAnalyzeLocalData(CAnalyze analyze) {
-    auto status = CStatus();
-    try {
-        AssertInfo(analyze, "failed to build analyze, passed index was null");
-        auto real_analyze =
-            reinterpret_cast<milvus::indexbuilder::IndexCreatorBase*>(analyze);
-        auto cAnalyze =
-            dynamic_cast<milvus::indexbuilder::VecIndexCreator*>(real_analyze);
-        cAnalyze->CleanLocalData();
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
@@ -176,59 +143,30 @@ DeleteAnalyzeInfo(CAnalyzeInfo c_analyze_info) {
 }
 
 CStatus
-AppendAnalyzeFieldMetaInfo(CAnalyzeInfo c_analyze_info,
-                           int64_t collection_id,
-                            int64_t partition_id,
-                    int64_t field_id,
-                    const char* field_name,
-                    enum CDataType field_type,
-                    int64_t dim) {
+AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
+                  int64_t collection_id,
+                  int64_t partition_id,
+                  int64_t field_id,
+                  int64_t task_id,
+                  int64_t version,
+                  const char* field_name,
+                  enum CDataType field_type,
+                  int64_t dim,
+                  int64_t segment_size,
+                  int64_t train_size) {
     try {
         auto analyze_info = (AnalyzeInfo*)c_analyze_info;
         analyze_info->collection_id = collection_id;
         analyze_info->partition_id = partition_id;
         analyze_info->field_id = field_id;
+        analyze_info->task_id = task_id;
+        analyze_info->version = version;
         analyze_info->field_type = milvus::DataType(field_type);
         analyze_info->field_name = field_name;
         analyze_info->dim = dim;
-
+        analyze_info->segment_size = segment_size;
+        analyze_info->train_size = train_size;
         return milvus::SuccessCStatus();
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
-                  int64_t task_id,
-                   int64_t version) {
-    try {
-        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
-        analyze_info->task_id = task_id;
-        analyze_info->version = version;
-
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        auto status = CStatus();
-        status.error_code = UnexpectedError;
-        status.error_msg = strdup(e.what());
-        return status;
-    }
-}
-
-CStatus
-AppendSegmentID(CAnalyzeInfo c_analyze_info, int64_t segment_id) {
-    try {
-        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
-        //        analyze_info->segment_ids.emplace_back(segment_id);
-
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        return status;
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
@@ -242,7 +180,6 @@ AppendSegmentInsertFile(CAnalyzeInfo c_analyze_info,
         auto analyze_info = (AnalyzeInfo*)c_analyze_info;
         std::string insert_file_path(c_file_path);
         analyze_info->insert_files[segID].emplace_back(insert_file_path);
-        //        analyze_info->insert_files.emplace_back(insert_file_path);
 
         auto status = CStatus();
         status.error_code = Success;
@@ -254,10 +191,12 @@ AppendSegmentInsertFile(CAnalyzeInfo c_analyze_info,
 }
 
 CStatus
-AppendSegmentSize(CAnalyzeInfo c_analyze_info, int64_t size) {
+AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
+                     int64_t segID,
+                     int64_t num_rows) {
     try {
         auto analyze_info = (AnalyzeInfo*)c_analyze_info;
-        analyze_info->segment_size = size;
+        analyze_info->num_rows[segID] = num_rows;
 
         auto status = CStatus();
         status.error_code = Success;
@@ -269,22 +208,7 @@ AppendSegmentSize(CAnalyzeInfo c_analyze_info, int64_t size) {
 }
 
 CStatus
-AppendTrainSize(CAnalyzeInfo c_analyze_info, int64_t size) {
-    try {
-        auto analyze_info = (AnalyzeInfo*)c_analyze_info;
-        analyze_info->train_size = size;
-
-        auto status = CStatus();
-        status.error_code = Success;
-        status.error_msg = "";
-        return status;
-    } catch (std::exception& e) {
-        return milvus::FailureCStatus(&e);
-    }
-}
-
-CStatus
-SerializeAnalyzeAndUpLoad(CAnalyze analyze) {
+SerializeAnalyzeAndUpLoad(CAnalyze analyze, CBinarySet* c_binary_set) {
     auto status = CStatus();
     try {
         AssertInfo(analyze,
@@ -294,7 +218,7 @@ SerializeAnalyzeAndUpLoad(CAnalyze analyze) {
             reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analyze);
         auto binary =
             std::make_unique<knowhere::BinarySet>(real_analyze->Upload());
-        //        *c_binary_set = binary.release();
+        *c_binary_set = binary.release();
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {
