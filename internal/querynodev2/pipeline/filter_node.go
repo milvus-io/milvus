@@ -23,6 +23,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -37,10 +38,11 @@ type filterNode struct {
 	*BaseNode
 	collectionID     UniqueID
 	manager          *DataManager
-	excludedSegments *ExcludedSegments
 	channel          string
 	InsertMsgPolicys []InsertMsgFilter
 	DeleteMsgPolicys []DeleteMsgFilter
+
+	delegator delegator.ShardDelegator
 }
 
 func (fNode *filterNode) Operate(in Msg) Msg {
@@ -95,9 +97,7 @@ func (fNode *filterNode) Operate(in Msg) Msg {
 			out.append(msg)
 		}
 	}
-	if fNode.excludedSegments.ShouldClean() {
-		fNode.excludedSegments.CleanInvalid(streamMsgPack.EndTs)
-	}
+	fNode.delegator.TryCleanExcludedSegments(streamMsgPack.EndTs)
 	metrics.QueryNodeWaitProcessingMsgCount.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).Inc()
 	return out
 }
@@ -114,6 +114,14 @@ func (fNode *filterNode) filtrate(c *Collection, msg msgstream.TsMsg) error {
 				return err
 			}
 		}
+
+		// check segment whether excluded
+		ok := fNode.delegator.VerifyExcludedSegments(insertMsg.SegmentID, insertMsg.EndTimestamp)
+		if !ok {
+			m := fmt.Sprintf("Segment excluded, id: %d", insertMsg.GetSegmentID())
+			return merr.WrapErrSegmentLack(insertMsg.GetSegmentID(), m)
+		}
+		return nil
 
 	case commonpb.MsgType_Delete:
 		deleteMsg := msg.(*msgstream.DeleteMsg)
@@ -134,20 +142,19 @@ func newFilterNode(
 	collectionID int64,
 	channel string,
 	manager *DataManager,
-	excludedSegments *ExcludedSegments,
+	delegator delegator.ShardDelegator,
 	maxQueueLength int32,
 ) *filterNode {
 	return &filterNode{
-		BaseNode:         base.NewBaseNode(fmt.Sprintf("FilterNode-%s", channel), maxQueueLength),
-		collectionID:     collectionID,
-		manager:          manager,
-		channel:          channel,
-		excludedSegments: excludedSegments,
+		BaseNode:     base.NewBaseNode(fmt.Sprintf("FilterNode-%s", channel), maxQueueLength),
+		collectionID: collectionID,
+		manager:      manager,
+		channel:      channel,
+		delegator:    delegator,
 		InsertMsgPolicys: []InsertMsgFilter{
 			InsertNotAligned,
 			InsertEmpty,
 			InsertOutOfTarget,
-			InsertExcluded,
 		},
 		DeleteMsgPolicys: []DeleteMsgFilter{
 			DeleteNotAligned,

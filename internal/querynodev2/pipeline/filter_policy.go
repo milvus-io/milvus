@@ -17,14 +17,6 @@
 package pipeline
 
 import (
-	"fmt"
-	"sync"
-	"time"
-
-	"go.uber.org/atomic"
-	"go.uber.org/zap"
-
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -59,15 +51,6 @@ func InsertOutOfTarget(n *filterNode, c *Collection, msg *InsertMsg) error {
 	return nil
 }
 
-func InsertExcluded(n *filterNode, c *Collection, msg *InsertMsg) error {
-	ok := n.excludedSegments.Verify(msg.SegmentID, msg.EndTimestamp)
-	if !ok {
-		m := fmt.Sprintf("Segment excluded, id: %d", msg.GetSegmentID())
-		return merr.WrapErrSegmentLack(msg.GetSegmentID(), m)
-	}
-	return nil
-}
-
 func DeleteNotAligned(n *filterNode, c *Collection, msg *DeleteMsg) error {
 	err := msg.CheckAligned()
 	if err != nil {
@@ -90,61 +73,4 @@ func DeleteOutOfTarget(n *filterNode, c *Collection, msg *DeleteMsg) error {
 
 	// all growing will be be in-memory to support dynamic partition load/release
 	return nil
-}
-
-type ExcludedSegments struct {
-	mu            sync.RWMutex
-	segments      map[int64]uint64 // segmentID -> Excluded TS
-	lastClean     atomic.Time
-	cleanInterval time.Duration
-}
-
-func NewExcludedSegments(cleanInterval time.Duration) *ExcludedSegments {
-	return &ExcludedSegments{
-		segments:      make(map[int64]uint64),
-		cleanInterval: cleanInterval,
-	}
-}
-
-func (s *ExcludedSegments) Insert(excludeInfo map[int64]uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	for segmentID, ts := range excludeInfo {
-		log.Debug("add exclude info",
-			zap.Int64("segmentID", segmentID),
-			zap.Uint64("ts", ts),
-		)
-		s.segments[segmentID] = ts
-	}
-}
-
-func (s *ExcludedSegments) Verify(segmentID int64, ts uint64) bool {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if excludeTs, ok := s.segments[segmentID]; ok && ts <= excludeTs {
-		return false
-	}
-	return true
-}
-
-func (s *ExcludedSegments) CleanInvalid(ts uint64) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	invalidExcludedInfos := []int64{}
-	for segmentsID, excludeTs := range s.segments {
-		if excludeTs < ts {
-			invalidExcludedInfos = append(invalidExcludedInfos, segmentsID)
-		}
-	}
-
-	for _, segmentID := range invalidExcludedInfos {
-		delete(s.segments, segmentID)
-	}
-	s.lastClean.Store(time.Now())
-}
-
-func (s *ExcludedSegments) ShouldClean() bool {
-	return time.Since(s.lastClean.Load()) > s.cleanInterval
 }
