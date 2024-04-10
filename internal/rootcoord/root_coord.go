@@ -1130,6 +1130,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.CollectionName = resp.Schema.Name
 	resp.Properties = collInfo.Properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
+	resp.DbId = collInfo.DBID
 	return resp
 }
 
