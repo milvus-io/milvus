@@ -84,6 +84,7 @@ type collectionInfo struct {
 	StartPositions []*commonpb.KeyDataPair
 	Properties     map[string]string
 	CreatedAt      Timestamp
+	DatabaseName   string
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -198,6 +199,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		Partitions:     coll.Partitions,
 		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
 		Properties:     clonedProperties,
+		DatabaseName:   coll.DatabaseName,
 	}
 
 	return cloneColl
@@ -267,17 +269,29 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
-			metrics.DataCoordStoredBinlogSize.WithLabelValues(
-				fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+
+			coll, ok := m.collections[segment.GetCollectionID()]
+			if ok {
+				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
+					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+			} else {
+				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
+			}
+
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
 			}
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
 		}
 	}
-	for collection, statesRows := range collectionRowsNum {
+	for collectionID, statesRows := range collectionRowsNum {
 		for state, rows := range statesRows {
-			metrics.DataCoordNumStoredRows.WithLabelValues(fmt.Sprint(collection), state.String()).Set(float64(rows))
+			coll, ok := m.collections[collectionID]
+			if ok {
+				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), state.String()).Set(float64(rows))
+			} else {
+				log.Warn("not found database name", zap.Int64("collectionID", collectionID))
+			}
 		}
 	}
 	return total, collectionBinlogSize

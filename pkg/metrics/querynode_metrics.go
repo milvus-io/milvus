@@ -362,6 +362,7 @@ var (
 			Name:      "entity_num",
 			Help:      "number of entities which can be searched/queried, clustered by collection, partition and state",
 		}, []string{
+			databaseLabelName,
 			nodeIDLabelName,
 			collectionIDLabelName,
 			partitionIDLabelName,
@@ -565,6 +566,12 @@ func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
 				prometheus.Labels{
 					nodeIDLabelName:       fmt.Sprint(nodeID),
 					msgTypeLabelName:      label,
+					collectionIDLabelName: fmt.Sprint(collectionID),
+				})
+		QueryNodeNumEntities.
+			DeletePartialMatch(
+				prometheus.Labels{
+					nodeIDLabelName:       fmt.Sprint(nodeID),
 					collectionIDLabelName: fmt.Sprint(collectionID),
 				})
 	}
