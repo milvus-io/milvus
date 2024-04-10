@@ -155,7 +155,7 @@ func TestStats(t *testing.T) {
 		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
 
 		for i := 0; i < size; i++ {
-			err := cache.Do(i, func(v int) error {
+			_, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -170,7 +170,7 @@ func TestStats(t *testing.T) {
 		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
 
 		for i := 0; i < size; i++ {
-			err := cache.Do(i, func(v int) error {
+			_, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -184,7 +184,7 @@ func TestStats(t *testing.T) {
 		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
 
 		for i := size; i < size*2; i++ {
-			err := cache.Do(i, func(v int) error {
+			_, err := cache.Do(i, func(v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
