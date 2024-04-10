@@ -18,6 +18,7 @@ pipeline {
         TARGET_REPO = "milvusdb"
         CI_DOCKER_CREDENTIAL_ID = "harbor-milvus-io-registry"
         HARBOR_REPO = "harbor.milvus.io"
+        ENABLE_AZURE = true
     }
 
     stages {
