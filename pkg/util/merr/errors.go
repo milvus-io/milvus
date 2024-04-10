@@ -158,6 +158,12 @@ var (
 
 	// Search/Query related
 	ErrInconsistentRequery = newMilvusError("inconsistent requery result", 2200, true)
+
+	// Compaction
+	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)
+	ErrClusteringCompactionClusterNotSupport      = newMilvusError("milvus cluster not support clustering compaction", 2301, false)
+	ErrClusteringCompactionCollectionNotSupport   = newMilvusError("collection not support clustering compaction", 2302, false)
+	ErrClusteringCompactionCollectionIsCompacting = newMilvusError("collection is compacting", 2303, false)
 )
 
 type milvusError struct {

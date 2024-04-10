@@ -20,6 +20,8 @@ import (
 	"context"
 	"testing"
 
+	"github.com/stretchr/testify/suite"
+
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -99,4 +101,124 @@ func TestMockFieldData(t *testing.T) {
 	chunkMgr := NewMockChunkManager()
 
 	chunkMgr.mockFieldData(100000, 8, 0, 0, 1)
+}
+
+type IndexNodeServiceSuite struct {
+	suite.Suite
+	cluster      string
+	collectionID int64
+	partitionID  int64
+	taskID       int64
+	fieldID      int64
+	segmentID    int64
+}
+
+func (suite *IndexNodeServiceSuite) SetupTest() {
+	suite.cluster = "test_cluster"
+	suite.collectionID = 100
+	suite.partitionID = 102
+	suite.taskID = 11111
+	suite.fieldID = 103
+	suite.segmentID = 104
+}
+
+func (suite *IndexNodeServiceSuite) Test_AbnormalIndexNode() {
+	in, err := NewMockIndexNodeComponent(context.TODO())
+	suite.NoError(err)
+	suite.Nil(in.Stop())
+
+	ctx := context.TODO()
+	status, err := in.CreateJob(ctx, &indexpb.CreateJobRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+
+	qresp, err := in.QueryJobs(ctx, &indexpb.QueryJobsRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(qresp.GetStatus()), merr.ErrServiceNotReady)
+
+	status, err = in.DropJobs(ctx, &indexpb.DropJobsRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+
+	jobNumRsp, err := in.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+	suite.NoError(err)
+	suite.ErrorIs(merr.Error(jobNumRsp.GetStatus()), merr.ErrServiceNotReady)
+
+	metricsResp, err := in.GetMetrics(ctx, &milvuspb.GetMetricsRequest{})
+	err = merr.CheckRPCCall(metricsResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	configurationResp, err := in.ShowConfigurations(ctx, &internalpb.ShowConfigurationsRequest{})
+	err = merr.CheckRPCCall(configurationResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	status, err = in.Analysis(ctx, &indexpb.AnalysisRequest{})
+	err = merr.CheckRPCCall(status, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	queryAnalysisResultResp, err := in.QueryAnalysisResult(ctx, &indexpb.QueryAnalysisResultRequest{})
+	err = merr.CheckRPCCall(queryAnalysisResultResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+
+	dropAnalysisTasksResp, err := in.DropAnalysisTasks(ctx, &indexpb.DropAnalysisTasksRequest{})
+	err = merr.CheckRPCCall(dropAnalysisTasksResp, err)
+	suite.ErrorIs(err, merr.ErrServiceNotReady)
+}
+
+func (suite *IndexNodeServiceSuite) Test_Method() {
+	ctx := context.TODO()
+	in, err := NewMockIndexNodeComponent(context.TODO())
+	suite.NoError(err)
+	suite.NoError(in.Stop())
+
+	in.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	suite.Run("Analysis", func() {
+		req := &indexpb.AnalysisRequest{
+			ClusterID:    suite.cluster,
+			TaskID:       suite.taskID,
+			CollectionID: suite.collectionID,
+			PartitionID:  suite.partitionID,
+			FieldID:      suite.fieldID,
+			SegmentStats: map[int64]*indexpb.SegmentStats{
+				suite.segmentID: {
+					ID:      suite.segmentID,
+					NumRows: 1024,
+					LogIDs:  []int64{1, 2, 3},
+				}},
+			Version:       1,
+			StorageConfig: nil,
+		}
+
+		resp, err := in.Analysis(ctx, req)
+		err = merr.CheckRPCCall(resp, err)
+		suite.NoError(err)
+	})
+
+	suite.Run("QueryAnalysisTask", func() {
+		req := &indexpb.QueryAnalysisResultRequest{
+			ClusterID: suite.cluster,
+			TaskIDs:   []int64{suite.taskID},
+		}
+
+		resp, err := in.QueryAnalysisResult(ctx, req)
+		err = merr.CheckRPCCall(resp, err)
+		suite.NoError(err)
+	})
+
+	suite.Run("DropAnalysisTask", func() {
+		req := &indexpb.DropAnalysisTasksRequest{
+			ClusterID: suite.cluster,
+			TaskIDs:   []int64{suite.taskID},
+		}
+
+		resp, err := in.DropAnalysisTasks(ctx, req)
+		err = merr.CheckRPCCall(resp, err)
+		suite.NoError(err)
+	})
+
+}
+
+func Test_IndexNodeServiceSuite(t *testing.T) {
+	suite.Run(t, new(IndexNodeServiceSuite))
 }

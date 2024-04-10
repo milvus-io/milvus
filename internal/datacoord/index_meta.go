@@ -651,18 +651,17 @@ func (m *indexMeta) IsIndexExist(collID, indexID UniqueID) bool {
 }
 
 // UpdateVersion updates the version and nodeID of the index meta, whenever the task is built once, the version will be updated once.
-func (m *indexMeta) UpdateVersion(buildID UniqueID, nodeID UniqueID) error {
+func (m *indexMeta) UpdateVersion(buildID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
-	log.Debug("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID), zap.Int64("nodeID", nodeID))
+	log.Debug("IndexCoord metaTable UpdateVersion receive", zap.Int64("buildID", buildID))
 	segIdx, ok := m.buildID2SegmentIndex[buildID]
 	if !ok {
 		return fmt.Errorf("there is no index with buildID: %d", buildID)
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
-		segIdx.NodeID = nodeID
 		segIdx.IndexVersion++
 		return m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})
 	}
@@ -726,7 +725,7 @@ func (m *indexMeta) DeleteTask(buildID int64) error {
 }
 
 // BuildIndex set the index state to be InProgress. It means IndexNode is building the index.
-func (m *indexMeta) BuildIndex(buildID UniqueID) error {
+func (m *indexMeta) BuildIndex(buildID, nodeID UniqueID) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -736,6 +735,7 @@ func (m *indexMeta) BuildIndex(buildID UniqueID) error {
 	}
 
 	updateFunc := func(segIdx *model.SegmentIndex) error {
+		segIdx.NodeID = nodeID
 		segIdx.IndexState = commonpb.IndexState_InProgress
 
 		err := m.alterSegmentIndexes([]*model.SegmentIndex{segIdx})

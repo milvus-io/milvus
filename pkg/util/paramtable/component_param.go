@@ -244,6 +244,9 @@ type commonConfig struct {
 	TraceLogMode          ParamItem `refreshable:"true"`
 	BloomFilterSize       ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive ParamItem `refreshable:"true"`
+
+	UsePartitionKeyAsClusteringKey ParamItem `refreshable:"true"`
+	UseVectorAsClusteringKey       ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -717,6 +720,22 @@ like the old password verification when updating the credential`,
 		Doc:          "max false positive rate for bloom filter",
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
+
+	p.UsePartitionKeyAsClusteringKey = ParamItem{
+		Key:          "common.usePartitionKeyAsClusteringKey",
+		Version:      "2.4.0",
+		Doc:          "if true, do clustering compaction and segment prune on partition key field",
+		DefaultValue: "false",
+	}
+	p.UsePartitionKeyAsClusteringKey.Init(base.mgr)
+
+	p.UseVectorAsClusteringKey = ParamItem{
+		Key:          "common.useVectorAsClusteringKey",
+		Version:      "2.4.0",
+		Doc:          "if true, do clustering compaction and segment prune on vector field",
+		DefaultValue: "false",
+	}
+	p.UseVectorAsClusteringKey.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -2569,6 +2588,21 @@ type dataCoordConfig struct {
 	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 	ChannelCheckpointMaxLag           ParamItem `refreshable:"true"`
 
+	// Clustering Compaction
+	ClusteringCompactionEnable                ParamItem `refreshable:"true"`
+	ClusteringCompactionAutoEnable            ParamItem `refreshable:"true"`
+	ClusteringCompactionInterval              ParamItem `refreshable:"false"`
+	ClusteringCompactionStateCheckInterval    ParamItem `refreshable:"true"`
+	ClusteringCompactionMinInterval           ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxInterval           ParamItem `refreshable:"true"`
+	ClusteringCompactionNewDataRatioThreshold ParamItem `refreshable:"true"`
+	ClusteringCompactionNewDataSizeThreshold  ParamItem `refreshable:"true"`
+	ClusteringCompactionDropTolerance         ParamItem `refreshable:"true"`
+	ClusteringCompactionPreferSegmentSize     ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxSegmentSize        ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainSize          ParamItem `refreshable:"true"`
+	ClusteringCompactionTimeoutInSeconds      ParamItem `refreshable:"true"`
+
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
 	LevelZeroCompactionTriggerMinSize        ParamItem `refreshable:"true"`
@@ -2931,6 +2965,112 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
 
+	p.ClusteringCompactionEnable = ParamItem{
+		Key:          "dataCoord.compaction.clustering.enable",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "Enable clustering compaction",
+		Export:       true,
+	}
+	p.ClusteringCompactionEnable.Init(base.mgr)
+
+	p.ClusteringCompactionAutoEnable = ParamItem{
+		Key:          "dataCoord.compaction.clustering.autoEnable",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "Enable auto clustering compaction",
+		Export:       true,
+	}
+	p.ClusteringCompactionAutoEnable.Init(base.mgr)
+
+	p.ClusteringCompactionInterval = ParamItem{
+		Key:          "dataCoord.compaction.clustering.interval",
+		Version:      "2.4.0",
+		DefaultValue: "600",
+	}
+	p.ClusteringCompactionInterval.Init(base.mgr)
+
+	p.ClusteringCompactionStateCheckInterval = ParamItem{
+		Key:          "dataCoord.compaction.clustering.stateCheckInterval",
+		Version:      "2.4.0",
+		DefaultValue: "10",
+	}
+	p.ClusteringCompactionStateCheckInterval.Init(base.mgr)
+
+	p.ClusteringCompactionMinInterval = ParamItem{
+		Key:          "dataCoord.compaction.clustering.minInterval",
+		Version:      "2.4.0",
+		Doc:          "The minimum interval between clustering compaction executions of one collection, to avoid redundant compaction",
+		DefaultValue: "3600",
+	}
+	p.ClusteringCompactionMinInterval.Init(base.mgr)
+
+	p.ClusteringCompactionMaxInterval = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxInterval",
+		Version:      "2.4.0",
+		Doc:          "If a collection haven't been clustering compacted for longer than maxInterval, force compact",
+		DefaultValue: "86400",
+	}
+	p.ClusteringCompactionMaxInterval.Init(base.mgr)
+
+	p.ClusteringCompactionNewDataRatioThreshold = ParamItem{
+		Key:          "dataCoord.compaction.clustering.newDataRatioThreshold",
+		Version:      "2.4.0",
+		Doc:          "If new data ratio is large than newDataRatioThreshold, execute clustering compaction",
+		DefaultValue: "0.2",
+	}
+	p.ClusteringCompactionNewDataRatioThreshold.Init(base.mgr)
+
+	p.ClusteringCompactionNewDataSizeThreshold = ParamItem{
+		Key:          "dataCoord.compaction.clustering.newDataSizeThreshold",
+		Version:      "2.4.0",
+		Doc:          "If new data size is large than newDataSizeThreshold, execute clustering compaction",
+		DefaultValue: "512m",
+	}
+	p.ClusteringCompactionNewDataSizeThreshold.Init(base.mgr)
+
+	p.ClusteringCompactionTimeoutInSeconds = ParamItem{
+		Key:          "dataCoord.compaction.clustering.timeout",
+		Version:      "2.4.0",
+		DefaultValue: "3600",
+	}
+	p.ClusteringCompactionTimeoutInSeconds.Init(base.mgr)
+
+	p.ClusteringCompactionDropTolerance = ParamItem{
+		Key:          "dataCoord.compaction.clustering.dropTolerance",
+		Version:      "2.4.0",
+		Doc:          "If clustering compaction job is finished for a long time, gc it",
+		DefaultValue: "86400",
+	}
+	p.ClusteringCompactionDropTolerance.Init(base.mgr)
+
+	p.ClusteringCompactionPreferSegmentSize = ParamItem{
+		Key:          "dataCoord.compaction.clustering.preferSegmentSize",
+		Version:      "2.4.0",
+		DefaultValue: "64m",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionPreferSegmentSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxSegmentSize = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxSegmentSize",
+		Version:      "2.4.0",
+		DefaultValue: "128m",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxSegmentSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxTrainSize = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxTrainSize",
+		Version:      "2.4.0",
+		DefaultValue: "26g",
+		Doc:          "max data size in Kmeans train, if larger than it, will down sampling to meet this limit",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxTrainSize.Init(base.mgr)
+
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",
 		Version:      "2.0.0",
@@ -3230,6 +3370,9 @@ type dataNodeConfig struct {
 	L0BatchMemoryRatio ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	// clustering compaction
+	ClusteringCompactionMemoryBufferRatio ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3510,6 +3653,16 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.ClusteringCompactionMemoryBufferRatio = ParamItem{
+		Key:          "datanode.clusteringCompaction.memoryBufferRatio",
+		Version:      "2.4.0",
+		Doc:          "The ratio of memory buffer of clustering compaction. Data larger than threshold will be spilled to storage.",
+		DefaultValue: "0.1",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ClusteringCompactionMemoryBufferRatio.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

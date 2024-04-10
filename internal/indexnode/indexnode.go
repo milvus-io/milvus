@@ -105,9 +105,10 @@ type IndexNode struct {
 	etcdCli *clientv3.Client
 	address string
 
-	initOnce  sync.Once
-	stateLock sync.Mutex
-	tasks     map[taskKey]*taskInfo
+	initOnce      sync.Once
+	stateLock     sync.Mutex
+	indexTasks    map[taskKey]*indexTaskInfo
+	analysisTasks map[taskKey]*analysisTaskInfo
 }
 
 // NewIndexNode creates a new IndexNode component.
@@ -120,7 +121,8 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 		loopCancel:     cancel,
 		factory:        factory,
 		storageFactory: NewChunkMgrFactory(),
-		tasks:          map[taskKey]*taskInfo{},
+		indexTasks:     make(map[taskKey]*indexTaskInfo),
+		analysisTasks:  make(map[taskKey]*analysisTaskInfo),
 		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
 	sc := NewTaskScheduler(b.loopCtx)
@@ -251,10 +253,16 @@ func (i *IndexNode) Stop() error {
 		i.lifetime.Wait()
 		log.Info("Index node abnormal")
 		// cleanup all running tasks
-		deletedTasks := i.deleteAllTasks()
-		for _, task := range deletedTasks {
-			if task.cancel != nil {
-				task.cancel()
+		deletedIndexTasks := i.deleteAllIndexTasks()
+		for _, t := range deletedIndexTasks {
+			if t.cancel != nil {
+				t.cancel()
+			}
+		}
+		deletedAnalysisTasks := i.deleteAllAnalysisTasks()
+		for _, t := range deletedAnalysisTasks {
+			if t.cancel != nil {
+				t.cancel()
 			}
 		}
 		if i.sched != nil {
