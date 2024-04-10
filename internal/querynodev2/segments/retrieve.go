@@ -38,9 +38,13 @@ import (
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, error) {
+func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []Segment, error) {
+	type segmentResult struct {
+		result  *segcorepb.RetrieveResults
+		segment Segment
+	}
 	var (
-		resultCh = make(chan *segcorepb.RetrieveResults, len(segments))
+		resultCh = make(chan segmentResult, len(segments))
 		errs     = make([]error, len(segments))
 		wg       sync.WaitGroup
 	)
@@ -55,7 +59,10 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	retriever := func(s Segment) error {
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 		result, err := s.Retrieve(ctx, plan)
-		resultCh <- result
+		resultCh <- segmentResult{
+			result,
+			s,
+		}
 		if err != nil {
 			return err
 		}
@@ -94,16 +101,18 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 
 	for _, err := range errs {
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 	}
 
+	var retrieveSegments []Segment
 	var retrieveResults []*segcorepb.RetrieveResults
 	for result := range resultCh {
-		retrieveResults = append(retrieveResults, result)
+		retrieveSegments = append(retrieveSegments, result.segment)
+		retrieveResults = append(retrieveResults, result.result)
 	}
 
-	return retrieveResults, nil
+	return retrieveResults, retrieveSegments, nil
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
@@ -174,8 +183,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 		return retrieveResults, retrieveSegments, err
 	}
 
-	retrieveResults, err = retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan)
-	return retrieveResults, retrieveSegments, err
+	return retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan)
 }
 
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream

@@ -534,6 +534,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		zap.Int64("msgID", plan.msgID),
 		zap.String("segmentType", s.segmentType.String()),
 	)
+	log.Debug("begin to retrieve")
 
 	traceCtx := ParseCTraceContext(ctx)
 
@@ -604,6 +605,7 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 	}
 
 	log := log.Ctx(ctx).With(fields...)
+	log.Debug("begin to retrieve by offsets")
 
 	traceCtx := ParseCTraceContext(ctx)
 
