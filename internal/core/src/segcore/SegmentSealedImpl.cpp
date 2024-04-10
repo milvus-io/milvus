@@ -1129,7 +1129,7 @@ SegmentSealedImpl::ClearData() {
     index_ready_bitset_.reset();
     binlog_index_bitset_.reset();
     system_ready_count_ = 0;
-    num_rows_ = 0;
+    num_rows_ = std::nullopt;
     scalar_indexings_.clear();
     vector_indexings_.clear();
     insert_record_.clear();

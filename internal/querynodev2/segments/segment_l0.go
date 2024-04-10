@@ -117,6 +117,9 @@ func (s *L0Segment) Indexes() []*IndexedFieldInfo {
 	return nil
 }
 
+func (s *L0Segment) ResetIndexesLazyLoad(lazyState bool) {
+}
+
 func (s *L0Segment) Type() SegmentType {
 	return s.segmentType
 }
