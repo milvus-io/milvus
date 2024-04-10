@@ -79,6 +79,11 @@ type ShardDelegator interface {
 	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
 
+	// manage exclude segments
+	AddExcludedSegments(excludeInfo map[int64]uint64)
+	VerifyExcludedSegments(segmentID int64, ts uint64) bool
+	TryCleanExcludedSegments(ts uint64)
+
 	// control
 	Serviceable() bool
 	Start()
@@ -121,6 +126,11 @@ type shardDelegator struct {
 	queryHook      optimizers.QueryHook
 	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot
 	chunkManager   storage.ChunkManager
+
+	excludedSegments *ExcludedSegments
+	// cause growing segment meta has been stored in segmentManager/distribution/pkOracle/excludeSegments
+	// in order to make add/remove growing be atomic, need lock before modify these meta info
+	growingSegmentLock sync.RWMutex
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -836,26 +846,29 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 	sizePerBlock := paramtable.Get().QueryNodeCfg.DeleteBufferBlockSize.GetAsInt64()
 	log.Info("Init delete cache with list delete buffer", zap.Int64("sizePerBlock", sizePerBlock), zap.Time("startTime", tsoutil.PhysicalTime(startTs)))
 
+	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
+
 	sd := &shardDelegator{
-		collectionID:    collectionID,
-		replicaID:       replicaID,
-		vchannelName:    channel,
-		version:         version,
-		collection:      collection,
-		segmentManager:  manager.Segment,
-		workerManager:   workerManager,
-		lifetime:        lifetime.NewLifetime(lifetime.Initializing),
-		distribution:    NewDistribution(),
-		level0Deletions: make(map[int64]*storage.DeleteData),
-		deleteBuffer:    deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock),
-		pkOracle:        pkoracle.NewPkOracle(),
-		tsafeManager:    tsafeManager,
-		latestTsafe:     atomic.NewUint64(startTs),
-		loader:          loader,
-		factory:         factory,
-		queryHook:       queryHook,
-		chunkManager:    chunkManager,
-		partitionStats:  make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		collectionID:     collectionID,
+		replicaID:        replicaID,
+		vchannelName:     channel,
+		version:          version,
+		collection:       collection,
+		segmentManager:   manager.Segment,
+		workerManager:    workerManager,
+		lifetime:         lifetime.NewLifetime(lifetime.Initializing),
+		distribution:     NewDistribution(),
+		level0Deletions:  make(map[int64]*storage.DeleteData),
+		deleteBuffer:     deletebuffer.NewListDeleteBuffer[*deletebuffer.Item](startTs, sizePerBlock),
+		pkOracle:         pkoracle.NewPkOracle(),
+		tsafeManager:     tsafeManager,
+		latestTsafe:      atomic.NewUint64(startTs),
+		loader:           loader,
+		factory:          factory,
+		queryHook:        queryHook,
+		chunkManager:     chunkManager,
+		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
+		excludedSegments: excludedSegments,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)

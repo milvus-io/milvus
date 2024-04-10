@@ -291,17 +291,17 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		info := req.GetSegmentInfos()[id]
 		return id, info.GetDmlPosition().GetTimestamp()
 	})
-	pipeline.ExcludedSegments(growingInfo)
+	delegator.AddExcludedSegments(growingInfo)
 
 	flushedInfo := lo.SliceToMap(channel.GetFlushedSegmentIds(), func(id int64) (int64, uint64) {
 		return id, typeutil.MaxTimestamp
 	})
-	pipeline.ExcludedSegments(flushedInfo)
+	delegator.AddExcludedSegments(flushedInfo)
 	for _, channelInfo := range req.GetInfos() {
 		droppedInfos := lo.SliceToMap(channelInfo.GetDroppedSegmentIds(), func(id int64) (int64, uint64) {
 			return id, typeutil.MaxTimestamp
 		})
-		pipeline.ExcludedSegments(droppedInfos)
+		delegator.AddExcludedSegments(droppedInfos)
 	}
 
 	err = loadL0Segments(ctx, delegator, req)
@@ -543,16 +543,6 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 			log.Warn(msg)
 			err := merr.WrapErrChannelNotFound(req.GetShard())
 			return merr.Status(err), nil
-		}
-
-		// when we try to release a segment, add it to pipeline's exclude list first
-		// in case of consumed it's growing segment again
-		pipeline := node.pipelineManager.Get(req.GetShard())
-		if pipeline != nil {
-			droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
-				return id, typeutil.MaxTimestamp
-			})
-			pipeline.ExcludedSegments(droppedInfos)
 		}
 
 		req.NeedTransfer = false
@@ -1320,14 +1310,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			})
 		case querypb.SyncType_UpdateVersion:
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
-			pipeline := node.pipelineManager.Get(req.GetChannel())
-			if pipeline != nil {
-				droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
-					return id, typeutil.MaxTimestamp
-				})
-
-				pipeline.ExcludedSegments(droppedInfos)
-			}
+			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
+				return id, typeutil.MaxTimestamp
+			})
+			shardDelegator.AddExcludedSegments(droppedInfos)
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		default:
