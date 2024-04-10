@@ -1324,7 +1324,7 @@ type ResultWithID interface {
 }
 
 // SelectMinPK select the index of the minPK in results T of the cursors.
-func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
+func SelectMinPK[T ResultWithID](limit int64, results []T, cursors []int64) (int, bool) {
 	var (
 		sel               = -1
 		drainResult       = false
@@ -1334,7 +1334,8 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 		minStrPK string
 	)
 	for i, cursor := range cursors {
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) {
+		// if result size < limit, this means we should ignore the result from this segment
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (GetSizeOfIDs(results[i].GetIds()) == int(limit)) {
 			drainResult = true
 			continue
 		}
