@@ -216,6 +216,7 @@ class TestCompactionParams(TestcaseBase):
         assert len(res[0]) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31258")
     def test_compact_delete_ratio(self):
         """
         target: test delete entities reaches ratio and auto-compact

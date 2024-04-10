@@ -951,7 +951,7 @@ class TestNewIndexBase(TestcaseBase):
                                   index_name=ct.default_index_name)
         self.connection_wrap.remove_connection(ct.default_alias)
         collection_w.drop_index(index_name=ct.default_index_name, check_task=CheckTasks.err_res,
-                                check_items={ct.err_code: 0, ct.err_msg: "should create connect first."})
+                                check_items={ct.err_code: 1, ct.err_msg: "should create connect first."})
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_create_drop_index_repeatedly(self, get_simple_index):
