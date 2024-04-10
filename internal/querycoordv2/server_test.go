@@ -306,6 +306,7 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 
 func (suite *ServerSuite) TestEnableActiveStandby() {
 	paramtable.Get().Save(Params.QueryCoordCfg.EnableActiveStandby.Key, "true")
+	defer paramtable.Get().Reset(Params.QueryCoordCfg.EnableActiveStandby.Key)
 
 	err := suite.server.Stop()
 	suite.NoError(err)
@@ -342,14 +343,11 @@ func (suite *ServerSuite) TestEnableActiveStandby() {
 	suite.Equal(commonpb.StateCode_StandBy, states1.GetState().GetStateCode())
 	err = suite.server.Register()
 	suite.NoError(err)
-	err = suite.server.Start()
-	suite.NoError(err)
 
-	states2, err := suite.server.GetComponentStates(context.Background(), nil)
-	suite.NoError(err)
-	suite.Equal(commonpb.StateCode_Healthy, states2.GetState().GetStateCode())
-
-	paramtable.Get().Save(Params.QueryCoordCfg.EnableActiveStandby.Key, "false")
+	suite.Eventually(func() bool {
+		state, err := suite.server.GetComponentStates(context.Background(), nil)
+		return err == nil && state.GetState().GetStateCode() == commonpb.StateCode_Healthy
+	}, time.Second*5, time.Millisecond*200)
 }
 
 func (suite *ServerSuite) TestStop() {

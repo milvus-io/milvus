@@ -4296,13 +4296,28 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.NoError(t, err)
+
+	signal := make(chan struct{})
 	if Params.DataCoordCfg.EnableActiveStandby.GetAsBool() {
 		assert.Equal(t, commonpb.StateCode_StandBy, svr.stateCode.Load().(commonpb.StateCode))
+		activateFunc := svr.activateFunc
+		svr.activateFunc = func() error {
+			defer func() {
+				close(signal)
+			}()
+			var err error
+			if activateFunc != nil {
+				err = activateFunc()
+			}
+			return err
+		}
 	} else {
 		assert.Equal(t, commonpb.StateCode_Initializing, svr.stateCode.Load().(commonpb.StateCode))
+		close(signal)
 	}
 	err = svr.Register()
 	assert.NoError(t, err)
+	<-signal
 	err = svr.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, svr.stateCode.Load().(commonpb.StateCode))
@@ -4600,14 +4615,35 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.NoError(t, err)
-	err = svr.Start()
-	assert.NoError(t, err)
+
+	signal := make(chan struct{})
+	if Params.DataCoordCfg.EnableActiveStandby.GetAsBool() {
+		assert.Equal(t, commonpb.StateCode_StandBy, svr.stateCode.Load().(commonpb.StateCode))
+		activateFunc := svr.activateFunc
+		svr.activateFunc = func() error {
+			defer func() {
+				close(signal)
+			}()
+			var err error
+			if activateFunc != nil {
+				err = activateFunc()
+			}
+			return err
+		}
+	} else {
+		assert.Equal(t, commonpb.StateCode_Initializing, svr.stateCode.Load().(commonpb.StateCode))
+		close(signal)
+	}
 	err = svr.Register()
+	assert.NoError(t, err)
+	<-signal
+
+	err = svr.Start()
 	assert.NoError(t, err)
 
 	resp, err := svr.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.True(t, merr.Ok(resp.GetStatus()))
 	assert.Equal(t, commonpb.StateCode_Healthy, resp.GetState().GetStateCode())
 
 	// stop channal watch state watcher in tests
@@ -4620,6 +4656,7 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 func TestDataCoord_DisableActiveStandby(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "false")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableActiveStandby.Key)
 	svr := testDataCoordBase(t)
 	defer closeTestServer(t, svr)
 }
