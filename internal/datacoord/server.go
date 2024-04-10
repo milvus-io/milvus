@@ -1203,11 +1203,6 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		return err
 	}
 
-	dbID, err := s.broker.GetDatabaseID(ctx, resp.DbName)
-	if err != nil {
-		return err
-	}
-
 	properties := make(map[string]string)
 	for _, pair := range resp.Properties {
 		properties[pair.GetKey()] = pair.GetValue()
@@ -1221,7 +1216,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		Properties:     properties,
 		CreatedAt:      resp.GetCreatedTimestamp(),
 		DatabaseName:   resp.GetDbName(),
-		DatabaseID:     dbID,
+		DatabaseID:     resp.GetDbId(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

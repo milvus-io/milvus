@@ -188,9 +188,8 @@ func TestRateSubLabel(t *testing.T) {
 		assert.Equal(t, float64(50), avgs[FormatSubLabel(label, collectionSubLabel)])
 	}
 
-	rateCollector.Add(label, 10, GetPartitionSubLabel(db, collection, "p1"))
-	rateCollector.Add(label, 10, GetCollectionSubLabel(db, "col2"),
-		GetPartitionSubLabel(db, "col2", "p1"))
+	rateCollector.Add(label, 10, GetCollectionSubLabel(db, collection))
+	rateCollector.Add(label, 10, GetCollectionSubLabel(db, "col2"))
 
 	rateCollector.DeregisterSubLabel(label, GetCollectionSubLabel(db, "col2"))
 	rateCollector.DeregisterSubLabel(label, dbSubLabel)
@@ -225,7 +224,6 @@ func TestRateSubLabel(t *testing.T) {
 func TestLabelUtil(t *testing.T) {
 	assert.Equal(t, GetDBSubLabel("db"), "db.db")
 	assert.Equal(t, GetCollectionSubLabel("db", "collection"), "collection.db.collection")
-	assert.Equal(t, GetPartitionSubLabel("db", "collection", "partition"), "partition.db.collection.partition")
 	{
 		db, ok := GetDBFromSubLabel("foo", FormatSubLabel("foo", GetDBSubLabel("db1")))
 		assert.True(t, ok)

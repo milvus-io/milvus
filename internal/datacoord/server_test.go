@@ -3674,22 +3674,3 @@ func TestUpdateAutoBalanceConfigLoop(t *testing.T) {
 		wg.Wait()
 	})
 }
-
-func TestLoadCollectionFromRootCoord(t *testing.T) {
-	t.Run("fail to get database id", func(t *testing.T) {
-		brokerInt := broker.NewMockBroker(t)
-		server := &Server{
-			broker: brokerInt,
-		}
-		brokerInt.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
-			Status:         merr.Success(),
-			CollectionID:   100,
-			CollectionName: "foo",
-			DbName:         "default",
-		}, nil).Once()
-		brokerInt.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{1, 2, 3}, nil).Once()
-		brokerInt.EXPECT().GetDatabaseID(mock.Anything, mock.Anything).Return(0, errors.New("mock error: get database id")).Once()
-		err := server.loadCollectionFromRootCoord(context.Background(), 100)
-		assert.Error(t, err)
-	})
-}

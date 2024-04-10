@@ -162,8 +162,10 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		for _, alias := range aliasName {
 			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), alias)
 		}
+		DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
 	} else if msgType == commonpb.MsgType_DropDatabase {
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
+		DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 	}
 	log.Info("complete to invalidate collection meta cache")
 
@@ -1263,8 +1265,6 @@ func (node *Proxy) DropPartition(ctx context.Context, request *milvuspb.DropPart
 		rpcDone(method),
 		zap.Uint64("BeginTS", dpt.BeginTs()),
 		zap.Uint64("EndTS", dpt.EndTs()))
-
-	DeregisterSubLabel(ratelimitutil.GetPartitionSubLabel(request.GetDbName(), request.GetCollectionName(), request.GetPartitionName()))
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))

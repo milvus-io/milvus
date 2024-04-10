@@ -29,7 +29,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -266,49 +265,6 @@ func (s *BrokerSuite) TestHasCollection() {
 		s.Error(err)
 
 		s.TearDownTest()
-	})
-}
-
-func (s *BrokerSuite) TestGetDatabaseID() {
-	s.Run("return success", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		call := s.rootCoordClient.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{
-			Status: merr.Success(),
-			DbName: "foo",
-			DbID:   1,
-		}, nil)
-		defer call.Unset()
-
-		dbID, err := s.broker.GetDatabaseID(context.Background(), "foo")
-		s.NoError(err)
-		s.Equal(int64(1), dbID)
-	})
-
-	s.Run("return error", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		call := s.rootCoordClient.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, errors.New("mocked"))
-		defer call.Unset()
-
-		_, err := s.broker.GetDatabaseID(context.Background(), "foo")
-		s.Error(err)
-	})
-
-	s.Run("return not found error", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		call := s.rootCoordClient.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{
-			Status: merr.Status(merr.WrapErrDatabaseNotFound("foo")),
-		}, nil)
-		defer call.Unset()
-
-		dbID, err := s.broker.GetDatabaseID(context.Background(), "foo")
-		s.NoError(err)
-		s.Equal(int64(0), dbID)
 	})
 }
 

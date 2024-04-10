@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -40,7 +39,6 @@ type Broker interface {
 	ShowCollections(ctx context.Context, dbName string) (*milvuspb.ShowCollectionsResponse, error)
 	ListDatabases(ctx context.Context) (*milvuspb.ListDatabasesResponse, error)
 	HasCollection(ctx context.Context, collectionID int64) (bool, error)
-	GetDatabaseID(ctx context.Context, dbName string) (int64, error)
 }
 
 type coordinatorBroker struct {
@@ -152,22 +150,4 @@ func (b *coordinatorBroker) HasCollection(ctx context.Context, collectionID int6
 		return false, nil
 	}
 	return err == nil, err
-}
-
-func (b *coordinatorBroker) GetDatabaseID(ctx context.Context, dbName string) (int64, error) {
-	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
-	defer cancel()
-	resp, err := b.rootCoord.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithSourceID(paramtable.GetNodeID()),
-		),
-		DbName: dbName,
-	})
-	if err = merr.CheckRPCCall(resp, err); err != nil && !errors.Is(err, merr.ErrDatabaseNotFound) {
-		return 0, err
-	} else if errors.Is(err, merr.ErrDatabaseNotFound) {
-		return 0, nil
-	}
-
-	return resp.GetDbID(), nil
 }

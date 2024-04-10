@@ -102,28 +102,10 @@ func (r *RateCollector) removeSubLabel(labelInfo lo.Tuple2[string, string]) {
 		}
 	}
 
-	deletePartitionSubLabelWithPrefix := func(dbName, collectionName string) {
-		for key := range r.values {
-			partitionSubLabel := GetPartitionSubLabel(dbName, collectionName, "")
-			if collectionName == "" {
-				// remove the last dot
-				partitionSubLabel = partitionSubLabel[:len(partitionSubLabel)-1]
-			}
-			if strings.HasPrefix(key, FormatSubLabel(label, partitionSubLabel)) {
-				removeKeys = append(removeKeys, key)
-			}
-		}
-	}
-
 	parts := strings.Split(subLabel, ".")
 	if strings.HasPrefix(subLabel, GetDBSubLabel("")) {
 		dbName := parts[1]
 		deleteCollectionSubLabelWithPrefix(dbName)
-		deletePartitionSubLabelWithPrefix(dbName, "")
-	} else if strings.HasPrefix(subLabel, "collection.") {
-		dbName := parts[1]
-		collectionName := parts[2]
-		deletePartitionSubLabelWithPrefix(dbName, collectionName)
 	}
 	for _, key := range removeKeys {
 		delete(r.values, key)
@@ -152,10 +134,6 @@ func GetDBSubLabel(dbName string) string {
 
 func GetCollectionSubLabel(dbName, collectionName string) string {
 	return fmt.Sprintf("collection.%s.%s", dbName, collectionName)
-}
-
-func GetPartitionSubLabel(dbName, collectionName, partitionName string) string {
-	return fmt.Sprintf("partition.%s.%s.%s", dbName, collectionName, partitionName)
 }
 
 func FormatSubLabel(label, subLabel string) string {

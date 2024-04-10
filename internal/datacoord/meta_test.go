@@ -609,7 +609,7 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, int64(size0+size1), total)
 
 		meta.collections[collID] = collInfo
-		total, collectionBinlogSize = meta.GetCollectionBinlogSize()
+		total, collectionBinlogSize, _ = meta.GetCollectionBinlogSize()
 		assert.Len(t, collectionBinlogSize, 1)
 		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), total)

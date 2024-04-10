@@ -63,6 +63,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	chMgr.EXPECT().removeDMLStream(mock.Anything).Return()
 
 	node := &Proxy{chMgr: chMgr}
+	_ = node.initRateCollector()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	ctx := context.Background()
