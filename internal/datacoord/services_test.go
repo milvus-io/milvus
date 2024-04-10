@@ -141,6 +141,7 @@ func (s *ServerSuite) TestHandleDataNodeTtMsg() {
 	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Twice()
 
 	err = s.testServer.handleDataNodeTtMsg(context.TODO(), &msg.DataNodeTtMsg)
+	s.NoError(err)
 
 	tt := tsoutil.AddPhysicalDurationOnTs(assign.ExpireTime, 48*time.Hour)
 	msg = genMsg(commonpb.MsgType_DataNodeTt, chanName, tt, sourceID)
