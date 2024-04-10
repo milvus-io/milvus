@@ -114,7 +114,7 @@ func (m *bufferManager) memoryCheck() {
 	}
 
 	totalMemory := hardware.GetMemoryCount()
-	memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryWatermark.GetAsFloat()
+	memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryForceSyncWatermark.GetAsFloat()
 	if float64(total) < memoryWatermark {
 		log.RatedDebug(20, "skip force sync because memory level is not high enough",
 			zap.Float64("current_total_memory_usage", toMB(float64(total))),

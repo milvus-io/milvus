@@ -3188,7 +3188,7 @@ type dataNodeConfig struct {
 	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
 	MemoryCheckInterval       ParamItem `refreshable:"true"`
-	MemoryWatermark           ParamItem `refreshable:"true"`
+	MemoryForceSyncWatermark  ParamItem `refreshable:"true"`
 
 	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
@@ -3319,26 +3319,20 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MemoryCheckInterval.Init(base.mgr)
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
-		p.MemoryWatermark = ParamItem{
-			Key:          "datanode.memory.watermarkStandalone",
-			Version:      "2.2.4",
+		p.MemoryForceSyncWatermark = ParamItem{
+			Key:          "datanode.memory.forceSyncWatermark",
+			Version:      "2.4.0",
 			DefaultValue: "0.2",
-		}
-	} else if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.ClusterDeployMode {
-		p.MemoryWatermark = ParamItem{
-			Key:          "datanode.memory.watermarkCluster",
-			Version:      "2.2.4",
-			DefaultValue: "0.5",
 		}
 	} else {
 		log.Info("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
-		p.MemoryWatermark = ParamItem{
-			Key:          "datanode.memory.watermarkCluster",
-			Version:      "2.2.4",
+		p.MemoryForceSyncWatermark = ParamItem{
+			Key:          "datanode.memory.forceSyncWatermark",
+			Version:      "2.4.0",
 			DefaultValue: "0.5",
 		}
 	}
-	p.MemoryWatermark.Init(base.mgr)
+	p.MemoryForceSyncWatermark.Init(base.mgr)
 
 	p.FlushDeleteBufferBytes = ParamItem{
 		Key:          "dataNode.segment.deleteBufBytes",
