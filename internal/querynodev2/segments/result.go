@@ -98,6 +98,13 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return nil, false
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
+	if searchResults.CostAggregation == nil {
+		searchResults.CostAggregation = &internalpb.CostAggregation{}
+	}
+	relatedDataSize := lo.Reduce(results, func(acc int64, result *internalpb.SearchResults, _ int) int64 {
+		return acc + result.GetCostAggregation().GetTotalRelatedDataSize()
+	}, 0)
+	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	searchResults.ChannelsMvcc = channelsMvcc
 	return searchResults, nil
 }
@@ -108,17 +115,16 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 	}
 
 	channelsMvcc := make(map[string]uint64)
-	for _, r := range results {
-		for ch, ts := range r.GetChannelsMvcc() {
-			channelsMvcc[ch] = ts
-		}
-	}
+	relatedDataSize := int64(0)
 	searchResults := &internalpb.SearchResults{
-		IsAdvanced:   true,
-		ChannelsMvcc: channelsMvcc,
+		IsAdvanced: true,
 	}
 
 	for _, result := range results {
+		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
+		for ch, ts := range result.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
 		if !result.GetIsAdvanced() {
 			continue
 		}
@@ -127,6 +133,7 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 		searchResults.SubResults = append(searchResults.SubResults, result.GetSubResults()...)
 		searchResults.NumQueries = result.GetNumQueries()
 	}
+	searchResults.ChannelsMvcc = channelsMvcc
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
 		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
 			return result.GetCostAggregation(), true
@@ -139,6 +146,10 @@ func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.Sear
 		return nil, false
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
+	if searchResults.CostAggregation == nil {
+		searchResults.CostAggregation = &internalpb.CostAggregation{}
+	}
+	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	return searchResults, nil
 }
 
@@ -148,13 +159,12 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 	}
 
 	channelsMvcc := make(map[string]uint64)
-	for _, r := range results {
-		for ch, ts := range r.GetChannelsMvcc() {
+	relatedDataSize := int64(0)
+	for index, result := range results {
+		relatedDataSize += result.GetCostAggregation().GetTotalRelatedDataSize()
+		for ch, ts := range result.GetChannelsMvcc() {
 			channelsMvcc[ch] = ts
 		}
-	}
-	searchResults.ChannelsMvcc = channelsMvcc
-	for index, result := range results {
 		// we just append here, no need to split subResult and reduce
 		// defer this reduce to proxy
 		subResult := &internalpb.SubSearchResults{
@@ -169,6 +179,7 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 		searchResults.NumQueries = result.GetNumQueries()
 		searchResults.SubResults = append(searchResults.SubResults, subResult)
 	}
+	searchResults.ChannelsMvcc = channelsMvcc
 	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
 		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
 			return result.GetCostAggregation(), true
@@ -181,6 +192,10 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 		return nil, false
 	})
 	searchResults.CostAggregation = mergeRequestCost(requestCosts)
+	if searchResults.CostAggregation == nil {
+		searchResults.CostAggregation = &internalpb.CostAggregation{}
+	}
+	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	return searchResults, nil
 }
 
@@ -366,8 +381,10 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	)
 
 	validRetrieveResults := []*internalpb.RetrieveResults{}
+	relatedDataSize := int64(0)
 	for _, r := range retrieveResults {
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
+		relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		if r == nil || len(r.GetFieldsData()) == 0 || size == 0 {
 			continue
@@ -437,7 +454,10 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		return nil, false
 	})
 	ret.CostAggregation = mergeRequestCost(requestCosts)
-
+	if ret.CostAggregation == nil {
+		ret.CostAggregation = &internalpb.CostAggregation{}
+	}
+	ret.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	return ret, nil
 }
 
