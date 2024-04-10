@@ -342,12 +342,26 @@ func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fiel
 }
 
 func (v *validateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	// TODO
+	float16VecArray := field.GetVectors().GetFloat16Vector()
+	if float16VecArray == nil {
+		msg := fmt.Sprintf("float16 float field '%v' is illegal, nil Vector_Float16 type", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need vector_float16 array", "got nil", msg)
+	}
+	if v.checkNAN {
+		return typeutil.VerifyFloats16(float16VecArray)
+	}
 	return nil
 }
 
 func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	// TODO
+	bfloat16VecArray := field.GetVectors().GetBfloat16Vector()
+	if bfloat16VecArray == nil {
+		msg := fmt.Sprintf("bfloat16 float field '%v' is illegal, nil Vector_BFloat16 type", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need vector_bfloat16 array", "got nil", msg)
+	}
+	if v.checkNAN {
+		return typeutil.VerifyBFloats16(bfloat16VecArray)
+	}
 	return nil
 }
 
