@@ -1388,11 +1388,10 @@ func checkSearchResult(ctx context.Context, nq int64, plan *SearchPlan, searchRe
 func genSearchPlanAndRequests(collection *Collection, segments []int64, indexType string, nq int64) (*SearchRequest, error) {
 	iReq, _ := genSearchRequest(nq, indexType, collection)
 	queryReq := &querypb.SearchRequest{
-		Req:             iReq,
-		DmlChannels:     []string{"dml"},
-		SegmentIDs:      segments,
-		FromShardLeader: true,
-		Scope:           querypb.DataScope_Historical,
+		Req:         iReq,
+		DmlChannels: []string{"dml"},
+		SegmentIDs:  segments,
+		Scope:       querypb.DataScope_Historical,
 	}
 	return NewSearchRequest(context.Background(), collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 }
