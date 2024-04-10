@@ -924,7 +924,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 	for _, channel := range channels {
 		log := log.With(zap.String("channel", channel.GetChannelName()))
 
-		leaders := s.dist.LeaderViewManager.GetLeadersByShard(channel.GetChannelName())
+		leaders := s.dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
 
 		readableLeaders := make(map[int64]*meta.LeaderView)
 

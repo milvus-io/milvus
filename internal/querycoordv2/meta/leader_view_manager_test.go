@@ -32,7 +32,7 @@ type LeaderViewManagerSuite struct {
 	collections     []int64
 	channels        map[int64][]string
 	growingSegments map[int64]map[string]int64
-	segments        map[int64][]int64
+	segments        map[int64]map[string][]int64
 	nodes           []int64
 	leaders         map[int64]map[string]*LeaderView
 
@@ -56,32 +56,44 @@ func (suite *LeaderViewManagerSuite) SetupSuite() {
 			"101-dmc1": 13,
 		},
 	}
-	suite.segments = map[int64][]int64{
-		100: {1, 2, 3, 4},
-		101: {5, 6, 7, 8},
+	suite.segments = map[int64]map[string][]int64{
+		100: {
+			"100-dmc0": []int64{1, 2},
+			"100-dmc1": {3, 4},
+		},
+		101: {
+			"101-dmc0": {5, 6},
+			"101-dmc1": {7, 8},
+		},
 	}
-	suite.nodes = []int64{1, 2, 3, 4}
+	suite.nodes = []int64{1, 2}
 
 	// Leaders: 1, 2
 	suite.leaders = make(map[int64]map[string]*LeaderView)
 	for _, collection := range suite.collections {
-		for j := 1; j <= 2; j++ {
-			channel := suite.channels[collection][j-1]
+		for j := 0; j < 2; j++ {
+			channel := suite.channels[collection][j]
+			node := suite.nodes[j]
 			view := &LeaderView{
-				ID:              int64(j),
+				ID:              node,
 				CollectionID:    collection,
 				Channel:         channel,
 				GrowingSegments: map[int64]*Segment{suite.growingSegments[collection][channel]: nil},
 				Segments:        make(map[int64]*querypb.SegmentDist),
 			}
-			for k, segment := range suite.segments[collection] {
+
+			for _, segment := range suite.segments[collection][channel] {
 				view.Segments[segment] = &querypb.SegmentDist{
-					NodeID:  suite.nodes[k],
+					NodeID:  node,
 					Version: 0,
 				}
 			}
-			suite.leaders[int64(j)] = map[string]*LeaderView{
-				suite.channels[collection][j-1]: view,
+			if suite.leaders[node] == nil {
+				suite.leaders[node] = map[string]*LeaderView{
+					channel: view,
+				}
+			} else {
+				suite.leaders[node][channel] = view
 			}
 		}
 	}
@@ -94,105 +106,110 @@ func (suite *LeaderViewManagerSuite) SetupTest() {
 	}
 }
 
-func (suite *LeaderViewManagerSuite) TestGetDist() {
-	mgr := suite.mgr
-
-	// Test GetSegmentDist
-	for segmentID := int64(1); segmentID <= 13; segmentID++ {
-		nodes := mgr.GetSegmentDist(segmentID)
-		suite.AssertSegmentDist(segmentID, nodes)
-
-		for _, node := range nodes {
-			segments := mgr.GetSegmentByNode(node)
-			suite.Contains(segments, segmentID)
-		}
-	}
-
-	// Test GetSealedSegmentDist
-	for segmentID := int64(1); segmentID <= 13; segmentID++ {
-		nodes := mgr.GetSealedSegmentDist(segmentID)
-		suite.AssertSegmentDist(segmentID, nodes)
-
-		for _, node := range nodes {
-			segments := mgr.GetSegmentByNode(node)
-			suite.Contains(segments, segmentID)
-		}
-	}
-
-	// Test GetGrowingSegmentDist
-	for segmentID := int64(1); segmentID <= 13; segmentID++ {
-		nodes := mgr.GetGrowingSegmentDist(segmentID)
-
-		for _, node := range nodes {
-			segments := mgr.GetSegmentByNode(node)
-			suite.Contains(segments, segmentID)
-			suite.Contains(suite.leaders, node)
-		}
-	}
-
-	// Test GetChannelDist
-	for _, shards := range suite.channels {
-		for _, shard := range shards {
-			nodes := mgr.GetChannelDist(shard)
-			suite.AssertChannelDist(shard, nodes)
-		}
-	}
-
-	// test get growing segments
-	segments := mgr.GetGrowingSegments(101, 1)
-	suite.Len(segments, 1)
-}
-
-func (suite *LeaderViewManagerSuite) TestGetLeader() {
-	mgr := suite.mgr
-
-	// Test GetLeaderView
-	for leader, view := range suite.leaders {
-		leaderView := mgr.GetLeaderView(leader)
-		suite.Equal(view, leaderView)
-	}
-
-	// Test GetLeadersByShard
-	for leader, leaderViews := range suite.leaders {
-		for shard, view := range leaderViews {
-			views := mgr.GetLeadersByShard(shard)
+func (suite *LeaderViewManagerSuite) TestGetByFilter() {
+	// Test WithChannelName
+	for collectionID, channels := range suite.channels {
+		for _, channel := range channels {
+			views := suite.mgr.GetByFilter(WithChannelName2LeaderView(channel))
 			suite.Len(views, 1)
-			suite.Equal(view, views[leader])
+			suite.Equal(collectionID, views[0].CollectionID)
 		}
 	}
 
-	// Test GetByCollectionAndNode
-	leaders := mgr.GetByCollectionAndNode(101, 1)
-	suite.Len(leaders, 1)
-}
+	// Test WithCollection
+	for _, collectionID := range suite.collections {
+		views := suite.mgr.GetByFilter(WithCollectionID2LeaderView(collectionID))
+		suite.Len(views, 2)
+		suite.Equal(collectionID, views[0].CollectionID)
+	}
 
-func (suite *LeaderViewManagerSuite) AssertSegmentDist(segment int64, nodes []int64) bool {
-	nodeSet := typeutil.NewUniqueSet(nodes...)
-	for leader, views := range suite.leaders {
+	// Test WithNodeID
+	for _, nodeID := range suite.nodes {
+		views := suite.mgr.GetByFilter(WithNodeID2LeaderView(nodeID))
+		suite.Len(views, 2)
 		for _, view := range views {
-			version, ok := view.Segments[segment]
-			if ok {
-				_, ok = view.GrowingSegments[version.NodeID]
-				if !suite.True(nodeSet.Contain(version.NodeID) || version.NodeID == leader && ok) {
-					return false
-				}
-			}
+			suite.Equal(nodeID, view.ID)
 		}
 	}
-	return true
+
+	// Test WithReplica
+	for i, collectionID := range suite.collections {
+		replica := &Replica{
+			Replica: &querypb.Replica{
+				ID:           int64(i),
+				CollectionID: collectionID,
+				Nodes:        suite.nodes,
+			},
+			nodes: typeutil.NewUniqueSet(suite.nodes...),
+		}
+		views := suite.mgr.GetByFilter(WithReplica2LeaderView(replica))
+		suite.Len(views, 2)
+	}
+
+	// Test WithSegment
+	for _, leaders := range suite.leaders {
+		for _, leader := range leaders {
+			for sid := range leader.Segments {
+				views := suite.mgr.GetByFilter(WithSegment2LeaderView(sid, false))
+				suite.Len(views, 1)
+				suite.Equal(views[0].ID, leader.ID)
+				suite.Equal(views[0].Channel, leader.Channel)
+			}
+
+			for sid := range leader.GrowingSegments {
+				views := suite.mgr.GetByFilter(WithSegment2LeaderView(sid, true))
+				suite.Len(views, 1)
+				suite.Equal(views[0].ID, leader.ID)
+				suite.Equal(views[0].Channel, leader.Channel)
+			}
+
+			view := suite.mgr.GetLeaderShardView(leader.ID, leader.Channel)
+			suite.Equal(view.ID, leader.ID)
+			suite.Equal(view.Channel, leader.Channel)
+		}
+	}
 }
 
-func (suite *LeaderViewManagerSuite) AssertChannelDist(channel string, nodes []int64) bool {
-	nodeSet := typeutil.NewUniqueSet(nodes...)
-	for leader, views := range suite.leaders {
-		_, ok := views[channel]
-		if ok {
-			if !suite.True(nodeSet.Contain(leader)) {
-				return false
-			}
+func (suite *LeaderViewManagerSuite) TestGetLatestShardLeader() {
+	nodeID := int64(1001)
+	collectionID := suite.collections[0]
+	channel := suite.channels[collectionID][0]
+	// add duplicate shard leader
+	view := &LeaderView{
+		ID:              nodeID,
+		CollectionID:    collectionID,
+		Channel:         channel,
+		GrowingSegments: map[int64]*Segment{suite.growingSegments[collectionID][channel]: nil},
+		Segments:        make(map[int64]*querypb.SegmentDist),
+	}
+
+	for _, segment := range suite.segments[collectionID][channel] {
+		view.Segments[segment] = &querypb.SegmentDist{
+			NodeID:  nodeID,
+			Version: 1000,
 		}
 	}
-	return true
+	view.Version = 1000
+
+	suite.mgr.Update(nodeID, view)
+
+	leader := suite.mgr.GetLatestShardLeaderByFilter(WithChannelName2LeaderView(channel))
+	suite.Equal(nodeID, leader.ID)
+
+	// test replica is nil
+	leader = suite.mgr.GetLatestShardLeaderByFilter(WithReplica2LeaderView(nil))
+	suite.Nil(leader)
+}
+
+func (suite *LeaderViewManagerSuite) TestClone() {
+	for _, leaders := range suite.leaders {
+		for _, leader := range leaders {
+			clone := leader.Clone()
+			suite.Equal(leader.ID, clone.ID)
+			suite.Equal(leader.Channel, clone.Channel)
+			suite.Equal(leader.CollectionID, clone.CollectionID)
+		}
+	}
 }
 
 func TestLeaderViewManager(t *testing.T) {
