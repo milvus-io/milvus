@@ -1160,7 +1160,7 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	}
 
 	if len(insertMsg.FieldsData) != requiredFieldsNum {
-		log.Warn("the number of fields is less than needed",
+		log.Warn("the number of fields is not the same as needed",
 			zap.Int("fieldNum", len(insertMsg.FieldsData)),
 			zap.Int("requiredFieldNum", requiredFieldsNum),
 			zap.String("collection", schema.GetName()))
