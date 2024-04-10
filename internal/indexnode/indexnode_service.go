@@ -321,8 +321,8 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 
 	switch req.GetJob().GetJobType() {
 	case indexpb.JobType_JobTypeIndexJob:
-		var indexRequest *indexpb.CreateJobRequest
-		if err := req.GetJob().GetParameters().UnmarshalTo(indexRequest); err != nil {
+		var indexRequest indexpb.CreateJobRequest
+		if err := req.GetJob().GetParameters().UnmarshalTo(&indexRequest); err != nil {
 			log.Warn("cannot unmarshal params to index request", zap.Error(err))
 			return merr.Status(err), nil
 		}
@@ -356,7 +356,7 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 					BuildID:        indexRequest.GetBuildID(),
 					ClusterID:      indexRequest.GetClusterID(),
 					node:           i,
-					req:            indexRequest,
+					req:            &indexRequest,
 					cm:             cm,
 					nodeID:         i.GetNodeID(),
 					tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", indexRequest.GetBuildID(), indexRequest.GetClusterID())),
@@ -371,7 +371,7 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 				BuildID:        indexRequest.GetBuildID(),
 				ClusterID:      indexRequest.GetClusterID(),
 				node:           i,
-				req:            indexRequest,
+				req:            &indexRequest,
 				cm:             cm,
 				nodeID:         i.GetNodeID(),
 				tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", indexRequest.GetBuildID(), indexRequest.GetClusterID())),

@@ -157,7 +157,6 @@ type Server struct {
 	indexNodeManager          WorkerManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	analyzeMeta   *analyzeMeta
 	taskScheduler *taskScheduler
 
 	// manage ways that data coord access other coord
@@ -646,10 +645,6 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		var err error
 		catalog := datacoord.NewCatalog(s.kv, chunkManager.RootPath(), metaRootPath)
 		s.meta, err = newMeta(s.ctx, catalog, chunkManager)
-		if err != nil {
-			return err
-		}
-		s.analyzeMeta, err = newAnalyzeMeta(s.ctx, catalog)
 		if err != nil {
 			return err
 		}

@@ -265,6 +265,8 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
+		ClusterID: req.GetClusterID(),
+		TaskID:    req.GetBuildID(),
 		Job: &indexpb.JobDescriptor{
 			JobType:    indexpb.JobType_JobTypeIndexJob,
 			Parameters: anyParams,

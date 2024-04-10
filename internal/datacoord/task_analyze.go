@@ -162,6 +162,8 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
+		ClusterID: req.GetClusterID(),
+		TaskID:    req.GetTaskID(),
 		Job: &indexpb.JobDescriptor{
 			JobType:    indexpb.JobType_JobTypeAnalyzeJob,
 			Parameters: anyParams,
