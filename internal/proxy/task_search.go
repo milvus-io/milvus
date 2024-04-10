@@ -348,6 +348,10 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			zap.Int64s("plan.OutputFieldIds", plan.GetOutputFieldIds()),
 			zap.Stringer("plan", plan)) // may be very large if large term passed.
 	}
+	// used for requery
+	if t.partitionKeyMode {
+		t.SearchRequest.PartitionIDs = t.partitionIDsSet.Collect()
+	}
 	var err error
 	t.reScorers, err = NewReScorers(len(t.request.GetSubReqs()), t.request.GetSearchParams())
 	if err != nil {
