@@ -34,7 +34,6 @@ endif()
 
 set(STORAGE_FILES
     ${STORAGE_FILES}
-    parquet_c.cpp
     PayloadStream.cpp
     DataCodec.cpp
     Util.cpp
