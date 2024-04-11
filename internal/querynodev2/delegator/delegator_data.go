@@ -833,7 +833,11 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	// when we try to release a segment, add it to pipeline's exclude list first
 	// in case of consumed it's growing segment again
 	droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
-		return id, typeutil.MaxTimestamp
+		if req.GetCheckpoint() == nil {
+			return id, typeutil.MaxTimestamp
+		}
+
+		return id, req.GetCheckpoint().GetTimestamp()
 	})
 	sd.AddExcludedSegments(droppedInfos)
 
