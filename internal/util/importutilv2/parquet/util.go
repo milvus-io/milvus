@@ -76,6 +76,9 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			}
 		}
 		if !isConvertible(arrowType, dataType, isList) {
+			if isList {
+				return nil, WrapTypeErr(dataType.String(), pqField.Type.(*arrow.ListType).ElemField().Type.Name(), field)
+			}
 			return nil, WrapTypeErr(dataType.String(), pqField.Type.Name(), field)
 		}
 
