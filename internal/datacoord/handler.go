@@ -41,7 +41,7 @@ type Handler interface {
 	// GetDataVChanPositions gets the information recovery needed of a channel for DataNode
 	GetDataVChanPositions(ch RWChannel, partitionID UniqueID) *datapb.VchannelInfo
 	CheckShouldDropChannel(ch string) bool
-	FinishDropChannel(ch string) error
+	FinishDropChannel(ch string, collectionID int64) error
 	GetCollection(ctx context.Context, collectionID UniqueID) (*collectionInfo, error)
 }
 
@@ -410,8 +410,21 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 
 // FinishDropChannel cleans up the remove flag for channels
 // this function is a wrapper of server.meta.FinishDropChannel
-func (h *ServerHandler) FinishDropChannel(channel string) error {
-	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
+func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) error {
+	// clean channel cp
+	err := h.s.meta.DropChannelCheckpoint(channel)
+	if err != nil {
+		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
+		return err
+	}
+
+	// clean collection info cache
+	channels := h.s.channelManager.GetChannelsByCollectionID(collectionID)
+	if len(channels) == 0 {
+		h.s.meta.DropCollection(collectionID)
+	}
+
+	err = h.s.meta.catalog.DropChannel(h.s.ctx, channel)
 	if err != nil {
 		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
 		return err

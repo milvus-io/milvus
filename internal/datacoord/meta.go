@@ -172,6 +172,16 @@ func (m *meta) AddCollection(collection *collectionInfo) {
 	log.Info("meta update: add collection - complete", zap.Int64("collectionID", collection.ID))
 }
 
+// DropCollection drop a collection from meta
+func (m *meta) DropCollection(collectionID int64) {
+	log.Debug("meta update: drop collection", zap.Int64("collectionID", collectionID))
+	m.Lock()
+	defer m.Unlock()
+	delete(m.collections, collectionID)
+	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
+	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
+}
+
 // GetCollection returns collection info with provided collection id from local cache
 func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 	m.RLock()

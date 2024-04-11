@@ -64,13 +64,13 @@ func (_c *NMockHandler_CheckShouldDropChannel_Call) RunAndReturn(run func(string
 	return _c
 }
 
-// FinishDropChannel provides a mock function with given fields: ch
-func (_m *NMockHandler) FinishDropChannel(ch string) error {
-	ret := _m.Called(ch)
+// FinishDropChannel provides a mock function with given fields: ch, collectionID
+func (_m *NMockHandler) FinishDropChannel(ch string, collectionID int64) error {
+	ret := _m.Called(ch, collectionID)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(string) error); ok {
-		r0 = rf(ch)
+	if rf, ok := ret.Get(0).(func(string, int64) error); ok {
+		r0 = rf(ch, collectionID)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -85,13 +85,14 @@ type NMockHandler_FinishDropChannel_Call struct {
 
 // FinishDropChannel is a helper method to define mock.On call
 //   - ch string
-func (_e *NMockHandler_Expecter) FinishDropChannel(ch interface{}) *NMockHandler_FinishDropChannel_Call {
-	return &NMockHandler_FinishDropChannel_Call{Call: _e.mock.On("FinishDropChannel", ch)}
+//   - collectionID int64
+func (_e *NMockHandler_Expecter) FinishDropChannel(ch interface{}, collectionID interface{}) *NMockHandler_FinishDropChannel_Call {
+	return &NMockHandler_FinishDropChannel_Call{Call: _e.mock.On("FinishDropChannel", ch, collectionID)}
 }
 
-func (_c *NMockHandler_FinishDropChannel_Call) Run(run func(ch string)) *NMockHandler_FinishDropChannel_Call {
+func (_c *NMockHandler_FinishDropChannel_Call) Run(run func(ch string, collectionID int64)) *NMockHandler_FinishDropChannel_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(string))
+		run(args[0].(string), args[1].(int64))
 	})
 	return _c
 }
@@ -101,7 +102,7 @@ func (_c *NMockHandler_FinishDropChannel_Call) Return(_a0 error) *NMockHandler_F
 	return _c
 }
 
-func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string) error) *NMockHandler_FinishDropChannel_Call {
+func (_c *NMockHandler_FinishDropChannel_Call) RunAndReturn(run func(string, int64) error) *NMockHandler_FinishDropChannel_Call {
 	_c.Call.Return(run)
 	return _c
 }

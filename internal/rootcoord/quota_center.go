@@ -277,7 +277,7 @@ func (q *QuotaCenter) Start() {
 func (q *QuotaCenter) run() {
 	defer q.wg.Done()
 
-	interval := time.Duration(Params.QuotaConfig.QuotaCenterCollectInterval.GetAsFloat() * float64(time.Second))
+	interval := Params.QuotaConfig.QuotaCenterCollectInterval.GetAsDuration(time.Second)
 	log.Info("Start QuotaCenter", zap.Duration("collectInterval", interval))
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
