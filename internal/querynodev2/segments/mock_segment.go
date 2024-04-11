@@ -709,47 +709,6 @@ func (_c *MockSegment_LoadInfo_Call) RunAndReturn(run func() *querypb.SegmentLoa
 	return _c
 }
 
-// LoadStatus provides a mock function with given fields:
-func (_m *MockSegment) LoadStatus() LoadStatus {
-	ret := _m.Called()
-
-	var r0 LoadStatus
-	if rf, ok := ret.Get(0).(func() LoadStatus); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(LoadStatus)
-	}
-
-	return r0
-}
-
-// MockSegment_LoadStatus_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadStatus'
-type MockSegment_LoadStatus_Call struct {
-	*mock.Call
-}
-
-// LoadStatus is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) LoadStatus() *MockSegment_LoadStatus_Call {
-	return &MockSegment_LoadStatus_Call{Call: _e.mock.On("LoadStatus")}
-}
-
-func (_c *MockSegment_LoadStatus_Call) Run(run func()) *MockSegment_LoadStatus_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSegment_LoadStatus_Call) Return(_a0 LoadStatus) *MockSegment_LoadStatus_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_LoadStatus_Call) RunAndReturn(run func() LoadStatus) *MockSegment_LoadStatus_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // MayPkExist provides a mock function with given fields: pk
 func (_m *MockSegment) MayPkExist(pk storage.PrimaryKey) bool {
 	ret := _m.Called(pk)

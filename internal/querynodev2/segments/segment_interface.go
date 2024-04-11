@@ -27,14 +27,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type LoadStatus string
-
-const (
-	LoadStatusMeta     LoadStatus = "meta"
-	LoadStatusMapped   LoadStatus = "mapped"
-	LoadStatusInMemory LoadStatus = "in_memory"
-)
-
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
 type ResourceUsage struct {
 	MemorySize     uint64
@@ -60,7 +52,6 @@ type Segment interface {
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
 	Level() datapb.SegmentLevel
-	LoadStatus() LoadStatus
 	LoadInfo() *querypb.SegmentLoadInfo
 	// PinIfNotReleased the segment to prevent it from being released
 	PinIfNotReleased() error

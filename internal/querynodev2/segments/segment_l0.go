@@ -63,8 +63,6 @@ func NewL0Segment(collection *Collection,
 	}
 
 	// level 0 segments are always in memory
-	segment.loadStatus.Store(string(LoadStatusInMemory))
-
 	return segment, nil
 }
 

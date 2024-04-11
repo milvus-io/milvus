@@ -200,7 +200,7 @@ func NewManager() *Manager {
 			if collection == nil {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
-			err = manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info, LoadStatusMapped)
+			err = manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info)
 			return nil, err
 		})
 		if err != nil {
