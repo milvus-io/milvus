@@ -594,15 +594,44 @@ func TestTaskQuery_functions(t *testing.T) {
 				assert.InDeltaSlice(t, resultFloat[0:(len)*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
 			})
 
+			t.Run("test stop reduce for best for limit and offset", func(t *testing.T) {
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 1, offset: 1, reduceStopForBest: true})
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()))
+				assert.Equal(t, []int64{11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+			})
+
+			t.Run("test stop reduce for best for limit and offset", func(t *testing.T) {
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: 2, offset: 1, reduceStopForBest: true})
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()))
+
+				// we should get 6 result back in total, but only get 4, which means all the result should actually be part of result
+				assert.Equal(t, []int64{11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+			})
+
 			t.Run("test stop reduce for best for unlimited set", func(t *testing.T) {
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: typeutil.Unlimited, reduceStopForBest: true})
 				assert.NoError(t, err)
 				assert.Equal(t, 2, len(result.GetFieldsData()))
-				assert.Equal(t, []int64{11, 11, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+				assert.Equal(t, []int64{11, 11, 22, 22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 				len := len(result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 				assert.InDeltaSlice(t, resultFloat[0:(len)*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+			})
+
+			t.Run("test stop reduce for best for unlimited set amd pffset", func(t *testing.T) {
+				result, err := reduceRetrieveResults(context.Background(),
+					[]*internalpb.RetrieveResults{r1, r2},
+					&queryParams{limit: typeutil.Unlimited, offset: 3, reduceStopForBest: true})
+				assert.NoError(t, err)
+				assert.Equal(t, 2, len(result.GetFieldsData()))
+				assert.Equal(t, []int64{22}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 			})
 		})
 	})
