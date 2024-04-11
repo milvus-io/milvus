@@ -40,9 +40,13 @@ import (
 
 type HelloMilvusSuite struct {
 	integration.MiniClusterSuite
+
+	indexType  string
+	metricType string
+	vecType    schemapb.DataType
 }
 
-func (s *HelloMilvusSuite) TestHelloMilvus() {
+func (s *HelloMilvusSuite) run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	c := s.Cluster
@@ -55,7 +59,7 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 
 	collectionName := "TestHelloMilvus" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchema(collectionName, dim, true)
+	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, s.vecType)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -77,7 +81,12 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.Equal(showCollectionsResp.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	var fVecColumn *schemapb.FieldData
+	if s.vecType == schemapb.DataType_SparseFloatVector {
+		fVecColumn = integration.NewSparseFloatVectorFieldData(integration.SparseFloatVecField, rowNum)
+	} else {
+		fVecColumn = integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	}
 	hashKeys := integration.GenerateHashKeys(rowNum)
 	insertCheckReport := func() {
 		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
@@ -131,9 +140,9 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
 		CollectionName: collectionName,
-		FieldName:      integration.FloatVecField,
+		FieldName:      fVecColumn.FieldName,
 		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
+		ExtraParams:    integration.ConstructIndexParam(dim, s.indexType, s.metricType),
 	})
 	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
 		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
@@ -141,7 +150,7 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
 
-	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
+	s.WaitForIndexBuilt(ctx, collectionName, fVecColumn.FieldName)
 
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -161,9 +170,9 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	topk := 10
 	roundDecimal := -1
 
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
+	params := integration.GetSearchParams(s.indexType, s.metricType)
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
+		fVecColumn.FieldName, s.vecType, nil, s.metricType, params, nq, dim, topk, roundDecimal)
 
 	searchCheckReport := func() {
 		timeoutCtx, cancelFunc := context.WithTimeout(ctx, 5*time.Second)
@@ -264,6 +273,27 @@ func (s *HelloMilvusSuite) TestHelloMilvus() {
 	s.NoError(err)
 
 	log.Info("TestHelloMilvus succeed")
+}
+
+func (s *HelloMilvusSuite) TestHelloMilvus_basic() {
+	s.indexType = integration.IndexFaissIvfFlat
+	s.metricType = metric.L2
+	s.vecType = schemapb.DataType_FloatVector
+	s.run()
+}
+
+func (s *HelloMilvusSuite) TestHelloMilvus_sparse_basic() {
+	s.indexType = integration.IndexSparseInvertedIndex
+	s.metricType = metric.IP
+	s.vecType = schemapb.DataType_SparseFloatVector
+	s.run()
+}
+
+func (s *HelloMilvusSuite) TestHelloMilvus_sparse_wand_basic() {
+	s.indexType = integration.IndexSparseWand
+	s.metricType = metric.IP
+	s.vecType = schemapb.DataType_SparseFloatVector
+	s.run()
 }
 
 func TestHelloMilvus(t *testing.T) {

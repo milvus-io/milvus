@@ -363,6 +363,10 @@ class CollectionClient(Requests):
             payload["dbName"] = self.db_name
         if db_name != "default":
             payload["dbName"] = db_name
+        if not ("params" in payload and "consistencyLevel" in payload["params"]):
+            if "params" not in payload:
+                payload["params"] = {}
+            payload["params"]["consistencyLevel"] = "Strong"
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 

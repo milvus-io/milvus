@@ -75,6 +75,29 @@ func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, coll
 	}
 }
 
+func (s *MiniClusterSuite) WaitForLoadRefresh(ctx context.Context, dbName, collection string) {
+	cluster := s.Cluster
+	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {
+		loadProgress, err := cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+			DbName:         dbName,
+			CollectionName: collection,
+		})
+		if err != nil {
+			panic("GetLoadingProgress fail")
+		}
+		return loadProgress
+	}
+	for getLoadingProgress().GetRefreshProgress() != 100 {
+		select {
+		case <-ctx.Done():
+			s.FailNow("failed to wait for load (refresh)")
+			return
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}
+
 func ConstructSearchRequest(
 	dbName, collectionName string,
 	expr string,
@@ -128,6 +151,7 @@ func ConstructSearchRequest(
 		},
 		TravelTimestamp:    0,
 		GuaranteeTimestamp: 0,
+		Nq:                 int64(nq),
 	}
 }
 
@@ -243,6 +267,13 @@ func constructPlaceholderGroup(nq, dim int, vectorType schemapb.DataType) *commo
 	// 		}
 	// 		values = append(values, ret)
 	// 	}
+	case schemapb.DataType_SparseFloatVector:
+		// for sparse, all query rows are encoded in a single byte array
+		values = make([][]byte, 0, 1)
+		placeholderType = commonpb.PlaceholderType_SparseFloatVector
+		sparseVecs := GenerateSparseFloatArray(nq)
+		values = append(values, sparseVecs.Contents...)
+
 	default:
 		panic("invalid vector data type")
 	}

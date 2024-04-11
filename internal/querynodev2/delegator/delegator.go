@@ -185,7 +185,6 @@ func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope 
 	nodeReq.Scope = scope
 	nodeReq.Req.Base.TargetID = targetID
 	nodeReq.SegmentIDs = segmentIDs
-	nodeReq.FromShardLeader = true
 	nodeReq.DmlChannels = []string{sd.vchannelName}
 	return nodeReq
 }
@@ -195,7 +194,6 @@ func (sd *shardDelegator) modifyQueryRequest(req *querypb.QueryRequest, scope qu
 	nodeReq.Scope = scope
 	nodeReq.Req.Base.TargetID = targetID
 	nodeReq.SegmentIDs = segmentIDs
-	nodeReq.FromShardLeader = true
 	nodeReq.DmlChannels = []string{sd.vchannelName}
 	return nodeReq
 }
@@ -315,7 +313,6 @@ func (sd *shardDelegator) Search(ctx context.Context, req *querypb.SearchRequest
 					Req:             newRequest,
 					DmlChannels:     req.GetDmlChannels(),
 					TotalChannelNum: req.GetTotalChannelNum(),
-					FromShardLeader: true,
 				}
 				searchReq.Req.GuaranteeTimestamp = req.GetReq().GetGuaranteeTimestamp()
 				searchReq.Req.TimeoutTimestamp = req.GetReq().GetTimeoutTimestamp()

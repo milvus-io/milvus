@@ -26,7 +26,6 @@
 #include "exec/Task.h"
 #include "segcore/SegmentInterface.h"
 #include "query/GroupByOperator.h"
-#include "knowhere/comp/materialized_view.h"
 namespace milvus::query {
 
 namespace impl {
@@ -141,11 +140,6 @@ ExecPlanNodeVisitor::ExecuteExprNodeInternal(
     //    std::cout << bitset_holder->size() << " .  " << s << std::endl;
 }
 
-expr::ExprInfo
-GatherInfoBasedOnExpr(const std::shared_ptr<milvus::plan::PlanNode>& node) {
-    return node->GatherInfo();
-}
-
 template <typename VectorType>
 void
 ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
@@ -172,22 +166,6 @@ ExecPlanNodeVisitor::VectorVisitorImpl(VectorPlanNode& node) {
 
     std::unique_ptr<BitsetType> bitset_holder;
     if (node.filter_plannode_.has_value()) {
-        if (node.search_info_.materialized_view_involved) {
-            knowhere::MaterializedViewSearchInfo materialized_view_search_info;
-            const auto expr_info =
-                GatherInfoBasedOnExpr(node.filter_plannode_.value());
-            for (const auto& [field_id, vals] : expr_info.field_id_to_values) {
-                materialized_view_search_info
-                    .field_id_to_touched_categories_cnt[field_id] = vals.size();
-            }
-            materialized_view_search_info.is_pure_and = expr_info.is_pure_and;
-            materialized_view_search_info.has_not = expr_info.has_not;
-
-            node.search_info_
-                .search_params_[knowhere::meta::MATERIALIZED_VIEW_SEARCH_INFO] =
-                materialized_view_search_info;
-        }
-
         BitsetType expr_res;
         ExecuteExprNode(
             node.filter_plannode_.value(), segment, active_count, expr_res);

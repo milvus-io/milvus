@@ -134,10 +134,10 @@ func (suite *LeaderViewManagerSuite) TestGetByFilter() {
 	// Test WithReplica
 	for i, collectionID := range suite.collections {
 		replica := newReplica(&querypb.Replica{
-				ID:           int64(i),
-				CollectionID: collectionID,
-				Nodes:        suite.nodes,
-			})
+			ID:           int64(i),
+			CollectionID: collectionID,
+			Nodes:        suite.nodes,
+		})
 		views := suite.mgr.GetByFilter(WithReplica2LeaderView(replica))
 		suite.Len(views, 2)
 	}
