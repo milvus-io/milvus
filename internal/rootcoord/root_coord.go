@@ -268,17 +268,25 @@ func (c *Core) SetQueryCoordClient(s types.QueryCoordClient) error {
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session.Register()
-	if c.enableActiveStandBy {
-		if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
-			return err
-		}
+	afterRegister := func() {
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Inc()
+		log.Info("RootCoord Register Finished")
+		c.session.LivenessCheck(c.ctx, func() {
+			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
+			os.Exit(1)
+		})
 	}
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Inc()
-	log.Info("RootCoord Register Finished")
-	c.session.LivenessCheck(c.ctx, func() {
-		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
-		os.Exit(1)
-	})
+	if c.enableActiveStandBy {
+		go func() {
+			if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
+				log.Warn("failed to activate standby rootcoord server", zap.Error(err))
+				return
+			}
+			afterRegister()
+		}()
+	} else {
+		afterRegister()
+	}
 
 	return nil
 }

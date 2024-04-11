@@ -141,17 +141,24 @@ func NewQueryCoord(ctx context.Context) (*Server, error) {
 
 func (s *Server) Register() error {
 	s.session.Register()
-	if s.enableActiveStandBy {
-		if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
-			log.Error("failed to activate standby server", zap.Error(err))
-			return err
-		}
+	afterRegister := func() {
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
+		s.session.LivenessCheck(s.ctx, func() {
+			log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
+			os.Exit(1)
+		})
 	}
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.QueryCoordRole).Inc()
-	s.session.LivenessCheck(s.ctx, func() {
-		log.Error("QueryCoord disconnected from etcd, process will exit", zap.Int64("serverID", s.session.GetServerID()))
-		os.Exit(1)
-	})
+	if s.enableActiveStandBy {
+		go func() {
+			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
+				log.Error("failed to activate standby server", zap.Error(err))
+				return
+			}
+			afterRegister()
+		}()
+	} else {
+		afterRegister()
+	}
 	return nil
 }
 
