@@ -35,27 +35,34 @@ class FieldMeta {
     FieldMeta&
     operator=(FieldMeta&&) = default;
 
-    FieldMeta(const FieldName& name, FieldId id, DataType type)
-        : name_(name), id_(id), type_(type) {
+    FieldMeta(const FieldName& name, FieldId id, DataType type, bool nullable)
+        : name_(name), id_(id), type_(type), nullable_(nullable) {
         Assert(!IsVectorDataType(type_));
     }
 
     FieldMeta(const FieldName& name,
               FieldId id,
               DataType type,
-              int64_t max_length)
+              int64_t max_length,
+              bool nullable)
         : name_(name),
           id_(id),
           type_(type),
-          string_info_(StringInfo{max_length}) {
+          string_info_(StringInfo{max_length}),
+          nullable_(nullable) {
         Assert(IsStringDataType(type_));
     }
 
     FieldMeta(const FieldName& name,
               FieldId id,
               DataType type,
-              DataType element_type)
-        : name_(name), id_(id), type_(type), element_type_(element_type) {
+              DataType element_type,
+              bool nullable)
+        : name_(name),
+          id_(id),
+          type_(type),
+          element_type_(element_type),
+          nullable_(nullable) {
         Assert(IsArrayDataType(type_));
     }
 
@@ -71,6 +78,7 @@ class FieldMeta {
           type_(type),
           vector_info_(VectorInfo{dim, std::move(metric_type)}) {
         Assert(IsVectorDataType(type_));
+        nullable_ = false;
     }
 
     int64_t
@@ -126,6 +134,11 @@ class FieldMeta {
         return IsStringDataType(type_);
     }
 
+    bool
+    is_nullable() const {
+        return nullable_;
+    }
+
     size_t
     get_sizeof() const {
         AssertInfo(!IsSparseFloatVectorDataType(type_),
@@ -157,6 +170,7 @@ class FieldMeta {
     FieldId id_;
     DataType type_ = DataType::NONE;
     DataType element_type_ = DataType::NONE;
+    bool nullable_;
     std::optional<VectorInfo> vector_info_;
     std::optional<StringInfo> string_info_;
 };

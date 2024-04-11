@@ -123,7 +123,7 @@ ChunkCache::Mmap(const FieldDataPtr& field_data,
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {
         column = std::make_shared<Column>(
-            data_size, dim, data_type, mcm_, descriptor);
+            file, data_size, dim, data_type, field_data->IsNullable());
     }
     column->AppendBatch(field_data);
     return column;

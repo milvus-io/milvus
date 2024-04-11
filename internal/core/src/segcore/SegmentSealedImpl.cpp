@@ -412,6 +412,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
+                        var_column->AppendValidData(
+                            field_data->ValidData(),
+                            field_data->ValidDataSize());
                     }
                     var_column->Seal();
                     field_data_size = var_column->ByteSize();
@@ -427,6 +430,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
                         var_column->Append(std::move(field_data));
+                        var_column->AppendValidData(
+                            field_data->ValidData(),
+                            field_data->ValidDataSize());
                     }
                     var_column->Seal();
                     stats_.mem_size += var_column->ByteSize();
@@ -451,6 +457,9 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             stats_.mem_size +=
                                 array->byte_size() + sizeof(uint64_t);
                         }
+                        var_column->AppendValidData(
+                            field_data->ValidData(),
+                            field_data->ValidDataSize());
                     }
                     var_column->Seal();
                     column = std::move(var_column);
@@ -1236,6 +1245,16 @@ SegmentSealedImpl::get_raw_data(FieldId field_id,
     // to make sure it won't get released if segment released
     auto column = fields_.at(field_id);
     auto ret = fill_with_empty(field_id, count);
+    if (column->IsNullable()) {
+        auto dst = ret->mutable_valid_data()->mutable_data();
+        // auto valid_data = std::make_unique<bool[]>(count);
+        for (size_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            auto bit =
+                (column->ValidData()[offset >> 3] >> ((offset & 0x07))) & 1;
+            dst[i] = bit;
+        }
+    }
     switch (field_meta.get_data_type()) {
         case DataType::VARCHAR:
         case DataType::STRING: {

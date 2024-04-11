@@ -34,20 +34,24 @@ static int64_t debug_id = START_USER_FIELDID;
 class Schema {
  public:
     FieldId
-    AddDebugField(const std::string& name, DataType data_type) {
+    AddDebugField(const std::string& name,
+                  DataType data_type,
+                  bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(FieldName(name), field_id, data_type);
+        this->AddField(FieldName(name), field_id, data_type, nullable);
         return field_id;
     }
 
     FieldId
     AddDebugField(const std::string& name,
                   DataType data_type,
-                  DataType element_type) {
+                  DataType element_type,
+                  bool nullable = false) {
         auto field_id = FieldId(debug_id);
         debug_id++;
-        this->AddField(FieldName(name), field_id, data_type, element_type);
+        this->AddField(
+            FieldName(name), field_id, data_type, element_type, nullable);
         return field_id;
     }
 
@@ -76,8 +80,11 @@ class Schema {
 
     // scalar type
     void
-    AddField(const FieldName& name, const FieldId id, DataType data_type) {
-        auto field_meta = FieldMeta(name, id, data_type);
+    AddField(const FieldName& name,
+             const FieldId id,
+             DataType data_type,
+             bool nullable) {
+        auto field_meta = FieldMeta(name, id, data_type, nullable);
         this->AddField(std::move(field_meta));
     }
 
@@ -86,8 +93,10 @@ class Schema {
     AddField(const FieldName& name,
              const FieldId id,
              DataType data_type,
-             DataType element_type) {
-        auto field_meta = FieldMeta(name, id, data_type, element_type);
+             DataType element_type,
+             bool nullable) {
+        auto field_meta =
+            FieldMeta(name, id, data_type, element_type, nullable);
         this->AddField(std::move(field_meta));
     }
 
@@ -96,8 +105,9 @@ class Schema {
     AddField(const FieldName& name,
              const FieldId id,
              DataType data_type,
-             int64_t max_length) {
-        auto field_meta = FieldMeta(name, id, data_type, max_length);
+             int64_t max_length,
+             bool nullable) {
+        auto field_meta = FieldMeta(name, id, data_type, max_length, nullable);
         this->AddField(std::move(field_meta));
     }
 

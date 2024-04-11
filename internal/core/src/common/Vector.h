@@ -65,7 +65,8 @@ class ColumnVector final : public BaseVector {
                  size_t length,
                  std::optional<size_t> null_count = std::nullopt)
         : BaseVector(data_type, length, null_count) {
-        values_ = InitScalarFieldData(data_type, length);
+        //todo(smellthemoon): use false temporarily
+        values_ = InitScalarFieldData(data_type, false, length);
     }
 
     //    ColumnVector(FixedVector<bool>&& data)
@@ -78,7 +79,7 @@ class ColumnVector final : public BaseVector {
     ColumnVector(TargetBitmap&& bitmap)
         : BaseVector(DataType::INT8, bitmap.size()) {
         values_ = std::make_shared<FieldDataImpl<uint8_t, false>>(
-            bitmap.size(), DataType::INT8, std::move(bitmap).into());
+            bitmap.size(), DataType::INT8, false, std::move(bitmap).into());
     }
 
     virtual ~ColumnVector() override {

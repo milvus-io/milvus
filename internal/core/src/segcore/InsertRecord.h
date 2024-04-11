@@ -419,6 +419,9 @@ struct InsertRecord {
         for (auto& field : schema) {
             auto field_id = field.first;
             auto& field_meta = field.second;
+            if (field_meta.is_nullable()) {
+                this->append_valid_data(field_id, size_per_chunk);
+            }
             if (pk2offset_ == nullptr && pk_field_id.has_value() &&
                 pk_field_id.value() == field_id) {
                 switch (field_meta.get_data_type()) {
@@ -698,6 +701,21 @@ struct InsertRecord {
         return ptr;
     }
 
+    ConcurrentValidDataVector*
+    get_valid_data(FieldId field_id) const {
+        AssertInfo(valid_data_.find(field_id) != valid_data_.end(),
+                   "Cannot find valid_data with field_id: " +
+                       std::to_string(field_id.get()));
+        auto ptr = valid_data_.at(field_id).get();
+        Assert(ptr);
+        return ptr;
+    }
+
+    bool
+    is_valid_data_exist(FieldId field_id) {
+        return valid_data_.find(field_id) != valid_data_.end();
+    }
+
     // append a column of scalar or sparse float vector type
     template <typename Type>
     void
@@ -706,6 +724,14 @@ struct InsertRecord {
         fields_data_.emplace(field_id,
                              std::make_unique<ConcurrentVector<Type>>(
                                  size_per_chunk, mmap_descriptor_));
+    }
+
+    // append a column of scalar type
+    void
+    append_valid_data(FieldId field_id, int64_t size_per_chunk) {
+        valid_data_.emplace(
+            field_id,
+            std::make_unique<ConcurrentValidDataVector>(size_per_chunk));
     }
 
     // append a column of vector type
@@ -719,8 +745,9 @@ struct InsertRecord {
     }
 
     void
-    drop_field_data(FieldId field_id) {
+    drop_data(FieldId field_id) {
         fields_data_.erase(field_id);
+        valid_data_.erase(field_id);
     }
 
     const ConcurrentVector<Timestamp>&
@@ -763,6 +790,8 @@ struct InsertRecord {
 
  private:
     std::unordered_map<FieldId, std::unique_ptr<VectorBase>> fields_data_{};
+    std::unordered_map<FieldId, std::unique_ptr<ConcurrentValidDataVector>>
+        valid_data_{};
     mutable std::shared_mutex shared_mutex_{};
     storage::MmapChunkDescriptorPtr mmap_descriptor_;
 };

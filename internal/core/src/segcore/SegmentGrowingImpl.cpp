@@ -110,6 +110,13 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
                 num_rows,
                 &insert_record_proto->fields_data(data_offset),
                 field_meta);
+            if (insert_record_.is_valid_data_exist(field_id)) {
+                insert_record_.get_valid_data(field_id)->set_data_raw(
+                    reserved_offset,
+                    num_rows,
+                    &insert_record_proto->fields_data(data_offset),
+                    field_meta);
+            }
         }
         //insert vector data into index
         if (segcore_config_.get_enable_interim_segment_index()) {
@@ -232,6 +239,10 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
         if (!indexing_record_.SyncDataWithIndex(field_id)) {
             insert_record_.get_field_data_base(field_id)->set_data_raw(
                 reserved_offset, field_data);
+            if (insert_record_.is_valid_data_exist(field_id)) {
+                insert_record_.get_valid_data(field_id)->set_data_raw(
+                    reserved_offset, field_data);
+            }
         }
         if (segcore_config_.get_enable_interim_segment_index()) {
             auto offset = reserved_offset;
@@ -514,6 +525,15 @@ SegmentGrowingImpl::bulk_subscript(FieldId field_id,
     AssertInfo(!field_meta.is_vector(),
                "Scalar field meta type is vector type");
     auto result = CreateScalarDataArray(count, field_meta);
+    if (field_meta.is_nullable()) {
+        auto valid_data_ptr = insert_record_.get_valid_data(field_id);
+        auto res = result->mutable_valid_data()->mutable_data();
+        auto& valid_data = *valid_data_ptr;
+        for (int64_t i = 0; i < count; ++i) {
+            auto offset = seg_offsets[i];
+            res[i] = valid_data[offset];
+        }
+    }
     switch (field_meta.get_data_type()) {
         case DataType::BOOL: {
             bulk_subscript_impl<bool>(vec_ptr,
