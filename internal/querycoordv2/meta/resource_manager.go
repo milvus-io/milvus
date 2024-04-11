@@ -84,7 +84,11 @@ func (rm *ResourceManager) Recover() error {
 		return errors.Wrap(err, "failed to recover resource group from store")
 	}
 
+	// Resource group meta upgrade to latest version.
+	upgrades := make([]*querypb.ResourceGroup, 0)
 	for _, meta := range rgs {
+		needUpgrade := meta.Config == nil
+
 		rg := NewResourceGroupFromMeta(meta)
 		rm.groups[rg.GetName()] = rg
 		for _, node := range rg.GetNodes() {
@@ -99,6 +103,13 @@ func (rm *ResourceManager) Recover() error {
 			zap.Int64s("nodes", rm.groups[rg.GetName()].GetNodes()),
 			zap.Any("config", rg.GetConfig()),
 		)
+		if needUpgrade {
+			upgrades = append(upgrades, rg.GetMeta())
+		}
+	}
+	if len(upgrades) > 0 {
+		log.Info("upgrade resource group meta into latest", zap.Int("num", len(upgrades)))
+		return rm.catalog.SaveResourceGroup(upgrades...)
 	}
 	return nil
 }
