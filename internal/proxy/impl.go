@@ -2998,7 +2998,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), request.GetDbName(), request.GetCollectionName()).
-		Add(float64(len(request.GetRequests())))
+		Add(float64(len(request.GetRequests()) * int(qt.SearchRequest.GetNq())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
