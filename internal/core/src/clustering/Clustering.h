@@ -18,22 +18,30 @@
 
 #include <memory>
 #include <vector>
+#include <unordered_map>
+#include <string>
+#include "common/Types.h"
 
-#include "storage/DiskFileManagerImpl.h"
-#include "storage/space.h"
+namespace milvus::clustering {
 
-namespace milvus::indexbuilder {
-
-class MajorCompaction {
- public:
-    virtual ~MajorCompaction() = default;
-
-    virtual void
-    Train() = 0;
-
-    virtual BinarySet
-    Upload() = 0;
+// after clustering result uploaded, return result meta for golang usage
+struct ClusteringResultMeta {
+    std::string centroid_path;   // centroid result path
+    int64_t centroid_file_size;  // centroid result size
+    std::unordered_map<std::string, int64_t>
+        id_mappings;  // id mapping result path/size for each segment
 };
 
-using MajorCompactionBasePtr = std::unique_ptr<MajorCompaction>;
-}  // namespace milvus::indexbuilder
+class Clustering {
+ public:
+    virtual ~Clustering() = default;
+
+    virtual void
+    Run(const Config& config) = 0;
+
+    virtual ClusteringResultMeta
+    GetClusteringResultMeta() = 0;
+};
+
+using ClusteringBasePtr = std::unique_ptr<Clustering>;
+}  // namespace milvus::clustering

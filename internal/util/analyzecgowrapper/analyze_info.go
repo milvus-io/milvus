@@ -17,9 +17,9 @@
 package analyzecgowrapper
 
 /*
-#cgo pkg-config: milvus_indexbuilder
+#cgo pkg-config: milvus_clustering
 #include <stdlib.h>	// free
-#include "indexbuilder/analyze_c.h"
+#include "clustering/analyze_c.h"
 */
 import "C"
 
@@ -91,7 +91,8 @@ func (ai *AnalyzeInfo) AppendAnalyzeInfo(collectionID int64,
 	fieldType schemapb.DataType,
 	dim int64,
 	segmentSize int64,
-	trainSize int64) error {
+	trainSize int64,
+) error {
 	cColID := C.int64_t(collectionID)
 	cParID := C.int64_t(partitionID)
 	cFieldID := C.int64_t(fieldID)

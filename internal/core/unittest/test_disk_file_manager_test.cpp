@@ -214,8 +214,6 @@ const DataType kOptFieldDataType = DataType::INT64;
 const FieldDataMeta kOptVecFieldDataMeta = {1, 2, 3, 100};
 using OffsetT = uint32_t;
 
-const std::string compactionRawDataPath = "/tmp/diskann/compaction_raw_data/";
-
 auto
 CreateFileManager(const ChunkManagerPtr& cm)
     -> std::shared_ptr<DiskFileManagerImpl> {
@@ -352,21 +350,6 @@ PrepareOptionalField(const std::shared_ptr<DiskFileManagerImpl>& file_manager,
 }
 
 void
-CheckCacheCompactionRawData(const std::string& local_file_path,
-                            int64_t offset,
-                            float expected) {
-    std::ifstream ifs(local_file_path);
-    if (!ifs.is_open()) {
-        FAIL() << "open file failed: " << local_file_path << std::endl;
-        return;
-    }
-    float value;
-    ifs.seekg(offset, std::ios::beg);
-    ifs.read(reinterpret_cast<char*>(&value), sizeof(float));
-    EXPECT_EQ(value, expected);
-}
-
-void
 CheckOptFieldCorrectness(const std::string& local_file_path) {
     std::ifstream ifs(local_file_path);
     if (!ifs.is_open()) {
@@ -409,32 +392,6 @@ CheckOptFieldCorrectness(const std::string& local_file_path) {
                       first_offset % kOptFieldDataRange);
         }
     }
-}
-
-TEST_F(DiskAnnFileManagerTest, CacheCompactionRawDataToDisk) {
-    auto file_manager = CreateFileManager(cm_);
-    std::map<int64_t, std::vector<std::string>> remote_files;
-    int64_t segment_id = 1;
-    int64_t segment_id2 = 2;
-    remote_files[segment_id] = {PrepareVectorInsertData(segment_id),
-                                PrepareVectorInsertData(segment_id)};
-    remote_files[segment_id2] = {PrepareVectorInsertData(segment_id2)};
-    std::vector<std::string> output_files;
-    std::vector<uint64_t> offsets;
-    uint32_t dim = 0;
-    auto whole_size = file_manager->CacheCompactionRawDataToDisk(
-        remote_files, output_files, offsets, dim);
-    EXPECT_EQ(whole_size, 96);
-    EXPECT_EQ(output_files.size(), 2);
-    EXPECT_EQ(offsets.size(), 2);
-    EXPECT_EQ(offsets[0], 64);
-    EXPECT_EQ(offsets[1], 32);
-    EXPECT_EQ(dim, 2);
-
-    CheckCacheCompactionRawData(output_files[0], 0, 1);
-    CheckCacheCompactionRawData(output_files[0], 40, 3);
-    CheckCacheCompactionRawData(output_files[0], 48, 5);
-    CheckCacheCompactionRawData(output_files[1], 4, 2);
 }
 
 TEST_F(DiskAnnFileManagerTest, CacheOptFieldToDiskFieldEmpty) {

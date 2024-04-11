@@ -10,17 +10,15 @@
 # or implied. See the License for the specific language governing permissions and limitations under the License
 
 
-set(INDEXBUILDER_FILES
-        VecIndexCreator.cpp
-        index_c.cpp
-        init_c.cpp
-        ScalarIndexCreator.cpp
+set(CLUSTERING_FILES
+        analyze_c.cpp
+        KmeansClustering.cpp
         )
 
-milvus_add_pkg_config("milvus_indexbuilder")
-add_library(milvus_indexbuilder SHARED ${INDEXBUILDER_FILES})
+milvus_add_pkg_config("milvus_clustering")
+add_library(milvus_clustering SHARED ${CLUSTERING_FILES})
 
 # link order matters
-target_link_libraries(milvus_indexbuilder milvus_index)
+target_link_libraries(milvus_clustering milvus_index)
 
-install(TARGETS milvus_indexbuilder DESTINATION "${CMAKE_INSTALL_LIBDIR}")
+install(TARGETS milvus_clustering DESTINATION "${CMAKE_INSTALL_LIBDIR}")

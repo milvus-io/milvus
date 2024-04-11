@@ -163,89 +163,6 @@ DiskFileManagerImpl::AddFile(const std::string& file) noexcept {
 }  // namespace knowhere
 
 void
-DiskFileManagerImpl::AddCompactionResultFiles(
-    const std::vector<std::string>& files,
-    std::unordered_map<std::string, int64_t>& map) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    std::vector<std::string> local_files;
-    std::vector<std::string> batch_remote_files;
-    std::vector<int64_t> remote_file_sizes;
-    for (auto i = 0; i < files.size(); ++i) {
-        auto file = files[i];
-        if (!local_chunk_manager->Exist(file)) {
-            LOG_ERROR("local file {} not exists", file);
-            std::stringstream err_msg;
-            err_msg << "Error: open local file '" << file << " failed, "
-                    << strerror(errno);
-            throw SegcoreError(FileOpenFailed, err_msg.str());
-        }
-        auto fileName = GetFileName(file);
-        auto fileSize = local_chunk_manager->Size(file);
-
-        auto parallel_degree = 16;
-
-        if (batch_remote_files.size() >= parallel_degree) {
-            AddBatchCompactionResultFiles(
-                local_files, batch_remote_files, remote_file_sizes, map);
-            batch_remote_files.clear();
-            remote_file_sizes.clear();
-            local_files.clear();
-        }
-        if (i == 0) {  // centroids file
-            batch_remote_files.emplace_back(GetRemoteCentroidsObjectPrefix() +
-                                            "/centroids");
-        } else {
-            batch_remote_files.emplace_back(
-                GetRemoteCentroidIdMappingObjectPrefix(fileName) +
-                "/offsets_mapping");
-        }
-        remote_file_sizes.emplace_back(fileSize);
-        local_files.emplace_back(file);
-    }
-    if (batch_remote_files.size() > 0) {
-        AddBatchCompactionResultFiles(
-            local_files, batch_remote_files, remote_file_sizes, map);
-    }
-}
-
-void
-DiskFileManagerImpl::AddBatchCompactionResultFiles(
-    const std::vector<std::string>& local_files,
-    const std::vector<std::string>& remote_files,
-    const std::vector<int64_t>& remote_file_sizes,
-    std::unordered_map<std::string, int64_t>& map) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::HIGH);
-
-    std::vector<std::future<std::shared_ptr<uint8_t[]>>> futures;
-    futures.reserve(remote_file_sizes.size());
-
-    for (int64_t i = 0; i < remote_files.size(); ++i) {
-        futures.push_back(pool.Submit(
-            [&](const std::string& file,
-                const int64_t data_size) -> std::shared_ptr<uint8_t[]> {
-                auto buf = std::shared_ptr<uint8_t[]>(new uint8_t[data_size]);
-                local_chunk_manager->Read(file, 0, buf.get(), data_size);
-                return buf;
-            },
-            local_files[i],
-            remote_file_sizes[i]));
-    }
-
-    std::vector<std::shared_ptr<uint8_t[]>> index_datas;
-    std::vector<const uint8_t*> data_slices;
-    for (auto& future : futures) {
-        auto res = future.get();
-        index_datas.emplace_back(res);
-        data_slices.emplace_back(res.get());
-    }
-    PutCompactionResultData(
-        rcm_.get(), data_slices, remote_file_sizes, remote_files, map);
-}
-
-void
 DiskFileManagerImpl::AddBatchIndexFiles(
     const std::string& local_file_name,
     const std::vector<int64_t>& local_file_offsets,
@@ -525,101 +442,6 @@ SortByPath(std::vector<std::string>& paths) {
               });
 }
 
-uint64_t
-FetchRawDataAndWriteFile(ChunkManagerPtr rcm,
-                         std::string& local_data_path,
-                         std::vector<std::string>& batch_files,
-                         int64_t& write_offset,
-                         uint32_t& num_rows,
-                         uint32_t& dim) {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto field_datas = GetObjectData(rcm.get(), batch_files);
-    int batch_size = batch_files.size();
-    uint64_t batch_data_size = 0;
-    for (int i = 0; i < batch_size; ++i) {
-        auto field_data = field_datas[i].get()->GetFieldData();
-        num_rows += uint32_t(field_data->get_num_rows());
-        AssertInfo(dim == 0 || dim == field_data->get_dim(),
-                   "inconsistent dim value in multi binlogs!");
-        dim = field_data->get_dim();
-
-        auto data_size = field_data->get_num_rows() * dim * sizeof(float);
-        local_chunk_manager->Write(local_data_path,
-                                   write_offset,
-                                   const_cast<void*>(field_data->Data()),
-                                   data_size);
-        write_offset += data_size;
-        batch_data_size += data_size;
-    }
-    return batch_data_size;
-}
-
-// cache raw data for major compaction
-uint64_t
-DiskFileManagerImpl::CacheCompactionRawDataToDisk(
-    const std::map<int64_t, std::vector<std::string>>& remote_files,
-    std::vector<std::string>& output_files,
-    std::vector<uint64_t>& offsets,
-    uint32_t& dim) {
-    auto partition_id = GetFieldDataMeta().partition_id;
-    auto field_id = GetFieldDataMeta().field_id;
-
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    auto local_data_path_prefix =
-        storage::GenCompactionRawDataPathPrefix(
-            local_chunk_manager, partition_id, field_id) +
-        "raw_data";
-    auto next_file_id = 0;
-
-    std::vector<std::string> batch_files;
-
-    int64_t write_offset = 0;
-    uint32_t num_rows = 0;
-    uint64_t whole_size = 0;
-
-    auto parallel_degree =
-        uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
-
-    for (auto& [segment_id, filess] : remote_files) {
-        std::vector<std::string> files = filess;
-        SortByPath(files);
-
-        auto local_data_path =
-            local_data_path_prefix + std::to_string(next_file_id);
-        next_file_id++;
-        local_chunk_manager->CreateFile(local_data_path);
-        output_files.emplace_back(local_data_path);
-        batch_files.clear();
-
-        write_offset = 0;
-        for (auto& file : files) {
-            if (batch_files.size() >= parallel_degree) {
-                whole_size += FetchRawDataAndWriteFile(rcm_,
-                                                       local_data_path,
-                                                       batch_files,
-                                                       write_offset,
-                                                       num_rows,
-                                                       dim);
-                batch_files.clear();
-            }
-            batch_files.emplace_back(file);
-        }
-        if (batch_files.size() > 0) {
-            whole_size += FetchRawDataAndWriteFile(rcm_,
-                                                   local_data_path,
-                                                   batch_files,
-                                                   write_offset,
-                                                   num_rows,
-                                                   dim);
-        }
-        offsets.emplace_back(write_offset);
-    }
-
-    return whole_size;
-}
-
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     SortByPath(remote_files);
@@ -644,16 +466,30 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     uint32_t dim = 0;
     int64_t write_offset = sizeof(num_rows) + sizeof(dim);
 
+    auto FetchRawData = [&]() {
+        auto field_datas = GetObjectData(rcm_.get(), batch_files);
+        int batch_size = batch_files.size();
+        for (int i = 0; i < batch_size; ++i) {
+            auto field_data = field_datas[i].get()->GetFieldData();
+            num_rows += uint32_t(field_data->get_num_rows());
+            AssertInfo(dim == 0 || dim == field_data->get_dim(),
+                       "inconsistent dim value in multi binlogs!");
+            dim = field_data->get_dim();
+
+            auto data_size = field_data->get_num_rows() * dim * sizeof(float);
+            local_chunk_manager->Write(local_data_path,
+                                       write_offset,
+                                       const_cast<void*>(field_data->Data()),
+                                       data_size);
+            write_offset += data_size;
+        }
+    };
+
     auto parallel_degree =
         uint64_t(DEFAULT_FIELD_MAX_MEMORY_LIMIT / FILE_SLICE_SIZE);
     for (auto& file : remote_files) {
         if (batch_files.size() >= parallel_degree) {
-            FetchRawDataAndWriteFile(rcm_,
-                                     local_data_path,
-                                     batch_files,
-                                     write_offset,
-                                     num_rows,
-                                     dim);
+            FetchRawData();
             batch_files.clear();
         }
 
@@ -661,8 +497,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
     }
 
     if (batch_files.size() > 0) {
-        FetchRawDataAndWriteFile(
-            rcm_, local_data_path, batch_files, write_offset, num_rows, dim);
+        FetchRawData();
     }
 
     // write num_rows and dim value to file header
@@ -968,24 +803,6 @@ DiskFileManagerImpl::GetLocalRawDataObjectPrefix() {
         LocalChunkManagerSingleton::GetInstance().GetChunkManager();
     return GenFieldRawDataPathPrefix(
         local_chunk_manager, field_meta_.segment_id, field_meta_.field_id);
-}
-
-// need to confirm the raw data path, used for train
-std::string
-DiskFileManagerImpl::GetCompactionRawDataObjectPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return GenCompactionRawDataPathPrefix(
-        local_chunk_manager, field_meta_.partition_id, field_meta_.field_id);
-}
-
-// need to confirm the result path, used for data partition and search
-std::string
-DiskFileManagerImpl::GetCompactionResultObjectPrefix() {
-    auto local_chunk_manager =
-        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
-    return GenCompactionResultPathPrefix(
-        local_chunk_manager, index_meta_.build_id, index_meta_.index_version);
 }
 
 bool

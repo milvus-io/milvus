@@ -443,24 +443,6 @@ GenFieldRawDataPathPrefix(ChunkManagerPtr cm,
 }
 
 std::string
-GenCompactionRawDataPathPrefix(ChunkManagerPtr cm,
-                               int64_t partition_id,
-                               int64_t field_id) {
-    return cm->GetRootPath() + "/" + std::string(COMPACTION_RAWDATA_ROOT_PATH) +
-           "/" + std::to_string(partition_id) + "/" + std::to_string(field_id) +
-           "/";
-}
-
-std::string
-GenCompactionResultPathPrefix(ChunkManagerPtr cm,
-                              int64_t build_id,
-                              int64_t index_version) {
-    return cm->GetRootPath() + "/" + std::string(COMPACTION_RESULT_ROOT_PATH) +
-           "/" + std::to_string(build_id) + "/" +
-           std::to_string(index_version) + "/";
-}
-
-std::string
 GetSegmentRawDataPathPrefix(ChunkManagerPtr cm, int64_t segment_id) {
     return cm->GetRootPath() + "/" + std::string(RAWDATA_ROOT_PATH) + "/" +
            std::to_string(segment_id);
@@ -583,43 +565,6 @@ GetObjectData(std::shared_ptr<milvus_storage::Space> space,
     return datas;
 }
 
-void
-PutCompactionResultData(ChunkManager* remote_chunk_manager,
-                        const std::vector<const uint8_t*>& data_slices,
-                        const std::vector<int64_t>& slice_sizes,
-                        const std::vector<std::string>& slice_names,
-                        std::unordered_map<std::string, int64_t>& map) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<std::pair<std::string, int64_t>>> futures;
-    AssertInfo(data_slices.size() == slice_sizes.size(),
-               "inconsistent data slices size {} with slice sizes {}",
-               data_slices.size(),
-               slice_sizes.size());
-    AssertInfo(data_slices.size() == slice_names.size(),
-               "inconsistent data slices size {} with slice names size {}",
-               data_slices.size(),
-               slice_names.size());
-
-    for (int64_t i = 0; i < data_slices.size(); ++i) {
-        futures.push_back(pool.Submit(
-            [&](ChunkManager* chunk_manager,
-                uint8_t* buf,
-                int64_t batch_size,
-                std::string object_key) -> std::pair<std::string, int64_t> {
-                chunk_manager->Write(object_key, buf, batch_size);
-                return std::make_pair(object_key, batch_size);
-            },
-            remote_chunk_manager,
-            const_cast<uint8_t*>(data_slices[i]),
-            slice_sizes[i],
-            slice_names[i]));
-    }
-
-    for (auto& future : futures) {
-        auto res = future.get();
-        map[res.first] = res.second;
-    }
-}
 std::map<std::string, int64_t>
 PutIndexData(ChunkManager* remote_chunk_manager,
              const std::vector<const uint8_t*>& data_slices,

@@ -20,25 +20,21 @@ package analyzecgowrapper
 //libdir=/home/zc/work/milvus/internal/core/output/lib
 //includedir=/home/zc/work/milvus/internal/core/output/include
 //
-//Libs: -L${libdir} -lmilvus_indexbuilder
+//Libs: -L${libdir} -lmilvus_clustering
 //Cflags: -I${includedir
-#cgo pkg-config: milvus_indexbuilder
+#cgo pkg-config: milvus_clustering
 
 #include <stdlib.h>	// free
-#include "indexbuilder/analyze_c.h"
+#include "clustering/analyze_c.h"
 */
 import "C"
 
 import (
 	"context"
-	"runtime"
-
-	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type CodecAnalyze interface {
 	Delete() error
-	UpLoad() (map[string]int64, error)
 }
 
 func Analyze(ctx context.Context, analyzeInfo *AnalyzeInfo) (CodecAnalyze, error) {
@@ -68,39 +64,5 @@ func (ca *CgoAnalyze) Delete() error {
 	status := C.DeleteAnalyze(ca.analyzePtr)
 	ca.close = true
 	return HandleCStatus(&status, "failed to delete analyze")
-	//return nil
-}
-
-func (ca *CgoAnalyze) UpLoad() (map[string]int64, error) {
-	var cBinarySet C.CBinarySet
-
-	status := C.SerializeAnalyzeAndUpLoad(ca.analyzePtr, &cBinarySet)
-	defer func() {
-		if cBinarySet != nil {
-			C.DeleteBinarySet(cBinarySet)
-		}
-	}()
-	if err := HandleCStatus(&status, "failed to upload analyze result"); err != nil {
-		return nil, err
-	}
-	files, err := GetBinarySetKeys(cBinarySet)
-	if err != nil {
-		return nil, err
-	}
-
-	res := make(map[string]int64)
-	for _, path := range files {
-		size, err := GetBinarySetSize(cBinarySet, path)
-		if err != nil {
-			return nil, err
-		}
-		res[path] = size
-	}
-
-	runtime.SetFinalizer(ca, func(ca *CgoAnalyze) {
-		if ca != nil && !ca.close {
-			log.Error("there is leakage in analyze object, please check.")
-		}
-	})
-	return res, nil
+	// return nil
 }

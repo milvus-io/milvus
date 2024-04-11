@@ -64,12 +64,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetLocalRawDataObjectPrefix();
 
-    std::string
-    GetCompactionRawDataObjectPrefix();
-
-    std::string
-    GetCompactionResultObjectPrefix();
-
     std::map<std::string, int64_t>
     GetRemotePathsToFileSize() const {
         return remote_paths_to_size_;
@@ -97,17 +91,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
                                  uint64_t local_file_init_offfset);
 
     void
-    AddCompactionResultFiles(const std::vector<std::string>& files,
-                             std::unordered_map<std::string, int64_t>& map);
-
-    void
-    AddBatchCompactionResultFiles(
-        const std::vector<std::string>& local_files,
-        const std::vector<std::string>& remote_files,
-        const std::vector<int64_t>& remote_file_sizes,
-        std::unordered_map<std::string, int64_t>& map);
-
-    void
     AddBatchIndexFiles(const std::string& local_file_name,
                        const std::vector<int64_t>& local_file_offsets,
                        const std::vector<std::string>& remote_files,
@@ -118,13 +101,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
 
     std::string
     CacheRawDataToDisk(std::shared_ptr<milvus_storage::Space> space);
-
-    uint64_t
-    CacheCompactionRawDataToDisk(
-        const std::map<int64_t, std::vector<std::string>>& insert_files,
-        std::vector<std::string>& output_files,
-        std::vector<uint64_t>& offsets,
-        uint32_t& dim);
 
     std::string
     CacheOptFieldToDisk(OptFieldT& fields_map);

@@ -22,10 +22,9 @@
 #include "index/Utils.h"
 #include "index/Meta.h"
 #include "storage/Util.h"
-#include "indexbuilder/IndexFactory.h"
+#include "clustering/KmeansClustering.h"
 
 using namespace milvus;
-
 CStatus
 Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
     try {
@@ -39,12 +38,8 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
         config["insert_files"] = analyze_info->insert_files;
         config["segment_size"] = analyze_info->segment_size;
         config["train_size"] = analyze_info->train_size;
-
-        //        auto engine_version = analyze_info->index_engine_version;
-        //
-        //        //        index_info.index_engine_version = engine_version;
-        //        config[milvus::index::INDEX_ENGINE_VERSION] =
-        //            std::to_string(engine_version);
+        config["num_rows"] = analyze_info->num_rows;
+        config["dim"] = analyze_info->dim;
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{analyze_info->collection_id,
@@ -62,12 +57,18 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
 
-        auto compactionJob =
-            milvus::indexbuilder::IndexFactory::GetInstance()
-                .CreateCompactionJob(
-                    analyze_info->field_type, config, fileManagerContext);
-        compactionJob->Train();
-        *res_analyze = compactionJob.release();
+        if (analyze_info->field_type != DataType::VECTOR_FLOAT) {
+            throw SegcoreError(
+                DataTypeInvalid,
+                fmt::format("invalid type is {}",
+                            std::to_string(int(analyze_info->field_type))));
+        }
+        auto clusteringJob =
+            std::make_unique<milvus::clustering::KmeansClustering<float>>(
+                fileManagerContext);
+
+        clusteringJob->Run(config);
+        *res_analyze = clusteringJob.release();
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
@@ -86,7 +87,7 @@ DeleteAnalyze(CAnalyze analyze) {
     try {
         AssertInfo(analyze, "failed to delete analyze, passed index was null");
         auto real_analyze =
-            reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analyze);
+            reinterpret_cast<milvus::clustering::Clustering*>(analyze);
         delete real_analyze;
         status.error_code = Success;
         status.error_msg = "";
@@ -208,17 +209,29 @@ AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
 }
 
 CStatus
-SerializeAnalyzeAndUpLoad(CAnalyze analyze, CBinarySet* c_binary_set) {
+GetAnalyzeResultMeta(CAnalyze analyze,
+                     char* centroid_path,
+                     int64_t* centroid_file_size,
+                     void* id_mapping_paths,
+                     int64_t* id_mapping_sizes) {
     auto status = CStatus();
     try {
         AssertInfo(analyze,
                    "failed to serialize analyze to binary set, passed index "
                    "was null");
         auto real_analyze =
-            reinterpret_cast<milvus::indexbuilder::MajorCompaction*>(analyze);
-        auto binary =
-            std::make_unique<knowhere::BinarySet>(real_analyze->Upload());
-        *c_binary_set = binary.release();
+            reinterpret_cast<milvus::clustering::Clustering*>(analyze);
+        auto res = real_analyze->GetClusteringResultMeta();
+        centroid_path = res.centroid_path.data();
+        *centroid_file_size = res.centroid_file_size;
+
+        auto& map_ = res.id_mappings;
+        const char** id_mapping_paths_ = (const char**)id_mapping_paths;
+        size_t i = 0;
+        for (auto it = map_.begin(); it != map_.end(); ++it, i++) {
+            id_mapping_paths_[i] = it->first.data();
+            id_mapping_sizes[i] = it->second;
+        }
         status.error_code = Success;
         status.error_msg = "";
     } catch (std::exception& e) {

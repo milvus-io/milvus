@@ -3073,7 +3073,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.ClusteringCompactionMaxTrainSize = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxTrainSize",
 		Version:      "2.4.0",
-		DefaultValue: "26g",
+		DefaultValue: "25g",
 		Doc:          "max data size in Kmeans train, if larger than it, will down sampling to meet this limit",
 		Export:       true,
 	}

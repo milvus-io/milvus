@@ -17,7 +17,7 @@
 package indexnode
 
 /*
-#cgo pkg-config: milvus_common milvus_indexbuilder milvus_segcore
+#cgo pkg-config: milvus_common milvus_indexbuilder milvus_clustering milvus_segcore
 
 #include <stdlib.h>
 #include <stdint.h>
