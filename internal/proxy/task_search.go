@@ -714,17 +714,6 @@ func (t *searchTask) Requery() error {
 		UseDefaultConsistency: false,
 		GuaranteeTimestamp:    t.SearchRequest.GuaranteeTimestamp,
 	}
-
-	if t.SearchRequest.GetIsAdvanced() {
-		queryReq.QueryParams = []*commonpb.KeyValuePair{
-			{
-				Key:   LimitKey,
-				Value: strconv.FormatInt(t.rankParams.limit, 10),
-			},
-		}
-	} else {
-		queryReq.QueryParams = t.request.GetSearchParams()
-	}
 	return doRequery(t.ctx, t.GetCollectionID(), t.node, t.schema.CollectionSchema, queryReq, t.result, t.queryChannelsTs, t.GetPartitionIDs())
 }
 
