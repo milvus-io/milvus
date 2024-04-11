@@ -75,6 +75,29 @@ func (s *MiniClusterSuite) waitForLoadInternal(ctx context.Context, dbName, coll
 	}
 }
 
+func (s *MiniClusterSuite) WaitForLoadRefresh(ctx context.Context, dbName, collection string) {
+	cluster := s.Cluster
+	getLoadingProgress := func() *milvuspb.GetLoadingProgressResponse {
+		loadProgress, err := cluster.Proxy.GetLoadingProgress(ctx, &milvuspb.GetLoadingProgressRequest{
+			DbName:         dbName,
+			CollectionName: collection,
+		})
+		if err != nil {
+			panic("GetLoadingProgress fail")
+		}
+		return loadProgress
+	}
+	for getLoadingProgress().GetRefreshProgress() != 100 {
+		select {
+		case <-ctx.Done():
+			s.FailNow("failed to wait for load (refresh)")
+			return
+		default:
+			time.Sleep(500 * time.Millisecond)
+		}
+	}
+}
+
 func ConstructSearchRequest(
 	dbName, collectionName string,
 	expr string,
