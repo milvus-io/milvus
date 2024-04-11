@@ -22,6 +22,7 @@ extern "C" {
 #include <stdlib.h>
 
 #include "common/type_c.h"
+#include "segcore/collection_c.h"
 
 typedef void* CLoadFieldDataInfo;
 
@@ -57,6 +58,13 @@ void
 EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            int64_t field_id,
            bool enabled);
+
+float
+MemOfLoadFieldDataWithBinlogIndex(CCollection c_collection,
+                                  int64_t field_id,
+                                  uint64_t field_data_size,
+                                  uint64_t field_data_size_num,
+                                  float build_expand_rate);
 
 #ifdef __cplusplus
 }

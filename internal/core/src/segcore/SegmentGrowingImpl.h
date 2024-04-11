@@ -208,7 +208,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
           schema_(std::move(schema)),
           index_meta_(indexMeta),
           insert_record_(*schema_, segcore_config.get_chunk_rows()),
-          indexing_record_(*schema_, index_meta_, segcore_config_),
+          indexing_record_(*schema_, index_meta_, segcore_config_, segment_id),
           id_(segment_id) {
     }
 

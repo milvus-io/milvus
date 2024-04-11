@@ -804,6 +804,8 @@ TEST(GroupBY, GrowingIndex) {
                              0);  //no repetition on groupBy field
                 i32_set.insert(g_val);
                 auto distance = search_result->distances_.at(idx);
+                std::cout << "lastDistance and distance" << lastDistance << " "
+                          << distance << std::endl;
                 ASSERT_TRUE(
                     lastDistance <=
                     distance);  //distance should be decreased as metrics_type is L2

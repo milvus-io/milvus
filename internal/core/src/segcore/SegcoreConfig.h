@@ -48,9 +48,9 @@ class SegcoreConfig {
         return nlist_;
     }
 
-    int64_t
-    get_nprobe() const {
-        return nprobe_;
+    float
+    get_vec_compress_ratio() const {
+        return vec_compress_ratio_;
     }
 
     void
@@ -59,8 +59,18 @@ class SegcoreConfig {
     }
 
     void
-    set_nprobe(int64_t nprobe) {
-        nprobe_ = nprobe;
+    set_vec_compress_ratio(float value) {
+        vec_compress_ratio_ = value;
+    }
+
+    void
+    set_search_granularity(int64_t search_granularity) {
+        search_granularity_ = search_granularity;
+    }
+
+    int64_t
+    get_search_granularity() const {
+        return search_granularity_;
     }
 
     void
@@ -77,7 +87,8 @@ class SegcoreConfig {
     inline static bool enable_interim_segment_index_ = false;
     inline static int64_t chunk_rows_ = 32 * 1024;
     inline static int64_t nlist_ = 100;
-    inline static int64_t nprobe_ = 4;
+    inline static float vec_compress_ratio_ = 0.25;
+    inline static int64_t search_granularity_ = 5;
 };
 
 }  // namespace milvus::segcore

@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"io"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -32,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type RetrieveSuite struct {
@@ -64,6 +66,8 @@ func (suite *RetrieveSuite) SetupTest() {
 	chunkManagerFactory := storage.NewTestChunkManagerFactory(paramtable.Get(), suite.rootPath)
 	suite.chunkManager, _ = chunkManagerFactory.NewPersistentStorageChunkManager(ctx)
 	initcore.InitRemoteChunkManager(paramtable.Get())
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
 
 	suite.collectionID = 100
 	suite.partitionID = 10

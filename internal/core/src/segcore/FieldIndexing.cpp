@@ -11,7 +11,6 @@
 
 #include <string>
 #include <thread>
-
 #include "common/EasyAssert.h"
 #include "fmt/format.h"
 #include "index/ScalarIndexSort.h"
@@ -25,10 +24,12 @@
 namespace milvus::segcore {
 using std::unique_ptr;
 
-VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
-                                         const FieldIndexMeta& field_index_meta,
-                                         int64_t segment_max_row_count,
-                                         const SegcoreConfig& segcore_config)
+VectorFieldIndexing::VectorFieldIndexing(
+    const FieldMeta& field_meta,
+    const FieldIndexMeta& field_index_meta,
+    int64_t segment_max_row_count,
+    const SegcoreConfig& segcore_config,
+    milvus::storage::IndexingRecordFileManagerPtr index_record_local_manager)
     : FieldIndexing(field_meta, segcore_config),
       built_(false),
       sync_with_index_(false),
@@ -36,6 +37,11 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
                                                field_index_meta,
                                                segcore_config,
                                                SegmentType::Growing)) {
+    if (index_record_local_manager != nullptr) {
+        index_raw_data_prefix_ =
+            index_record_local_manager->GetAndCreateFieldDir(
+                field_meta.get_id().get());
+    }
     recreate_index();
 }
 
@@ -263,6 +269,12 @@ VectorFieldIndexing::get_build_params() const {
         config[knowhere::meta::DIM] = std::to_string(field_meta_.get_dim());
     }
     config[knowhere::meta::NUM_BUILD_THREAD] = std::to_string(1);
+
+    // in order to get vector, ivf_sq_cc index will store raw data in file
+    if (index_raw_data_prefix_.has_value()) {
+        config[knowhere::indexparam::RAW_DATA_STORE_PREFIX] =
+            index_raw_data_prefix_.value();
+    }
     // for sparse float vector: drop_ratio_build config is not allowed to be set
     // on growing segment index.
     return config;
@@ -311,19 +323,23 @@ ScalarFieldIndexing<T>::BuildIndexRange(int64_t ack_beg,
 }
 
 std::unique_ptr<FieldIndexing>
-CreateIndex(const FieldMeta& field_meta,
-            const FieldIndexMeta& field_index_meta,
-            int64_t segment_max_row_count,
-            const SegcoreConfig& segcore_config) {
+CreateIndex(
+    const FieldMeta& field_meta,
+    const FieldIndexMeta& field_index_meta,
+    int64_t segment_max_row_count,
+    const SegcoreConfig& segcore_config,
+    milvus::storage::IndexingRecordFileManagerPtr index_record_local_manager) {
     if (field_meta.is_vector()) {
         if (field_meta.get_data_type() == DataType::VECTOR_FLOAT ||
             field_meta.get_data_type() == DataType::VECTOR_FLOAT16 ||
             field_meta.get_data_type() == DataType::VECTOR_BFLOAT16 ||
             field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
-            return std::make_unique<VectorFieldIndexing>(field_meta,
-                                                         field_index_meta,
-                                                         segment_max_row_count,
-                                                         segcore_config);
+            return std::make_unique<VectorFieldIndexing>(
+                field_meta,
+                field_index_meta,
+                segment_max_row_count,
+                segcore_config,
+                index_record_local_manager);
         } else {
             PanicInfo(DataTypeInvalid,
                       fmt::format("unsupported vector type in index: {}",

@@ -22,13 +22,16 @@ void
 SegcoreSetChunkRows(const int64_t);
 
 void
-SegcoreSetEnableTempSegmentIndex(const bool);
+SegcoreSetEnableInterimSegmentIndex(const bool);
 
 void
 SegcoreSetNlist(const int64_t);
 
 void
-SegcoreSetNprobe(const int64_t);
+SegcoreSetSearchGranularity(const int64_t);
+
+void
+SegcoreSetVecCompressRatio(const float value);
 
 // return value must be freed by the caller
 char*

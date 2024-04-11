@@ -20,6 +20,7 @@ package segments
 #cgo pkg-config: milvus_segcore
 
 #include "segcore/load_index_c.h"
+#include "segcore/load_field_data_c.h"
 */
 import "C"
 
@@ -1456,7 +1457,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	mmapFieldCount := 0
 	for _, loadInfo := range segmentLoadInfos {
 		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
-		usage, err := getResourceUsageEstimateOfSegment(collection.Schema(), loadInfo, factor)
+		usage, err := getResourceUsageEstimateOfSegment(collection, loadInfo, factor)
 		if err != nil {
 			log.Warn(
 				"failed to estimate resource usage of segment",
@@ -1513,7 +1514,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 }
 
 // getResourceUsageEstimateOfSegment estimates the resource usage of the segment
-func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor) (usage *ResourceUsage, err error) {
+func getResourceUsageEstimateOfSegment(collection *Collection, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor) (usage *ResourceUsage, err error) {
 	var segmentMemorySize, segmentDiskSize uint64
 	var mmapFieldCount int
 
@@ -1544,15 +1545,17 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 				segmentDiskSize += neededDiskSize
 			}
 		} else {
-			mmapEnabled = common.IsFieldMmapEnabled(schema, fieldID) ||
-				(!common.FieldHasMmapKey(schema, fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
+			mmapEnabled = common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
+				(!common.FieldHasMmapKey(collection.Schema(), fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
 			binlogSize := uint64(getBinlogDataSize(fieldBinlog))
 			if mmapEnabled {
 				segmentDiskSize += binlogSize
 			} else {
-				segmentMemorySize += binlogSize
 				if multiplyFactor.enableTempSegmentIndex {
-					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
+					buildBinlogIndexMem := C.MemOfLoadFieldDataWithBinlogIndex(collection.collectionPtr, C.int64_t(fieldID), C.uint64_t(binlogSize), C.uint64_t(loadInfo.GetNumOfRows()), C.float(float32(multiplyFactor.tempSegmentIndexFactor)))
+					segmentMemorySize += uint64(buildBinlogIndexMem)
+				} else {
+					segmentMemorySize += binlogSize
 				}
 			}
 		}

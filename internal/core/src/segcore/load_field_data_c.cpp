@@ -17,6 +17,9 @@
 #include "common/EasyAssert.h"
 #include "common/LoadInfo.h"
 #include "segcore/load_field_data_c.h"
+#include "segcore/Collection.h"
+#include "segcore/SegcoreConfig.h"
+#include "segcore/IndexConfigGenerator.h"
 
 CStatus
 NewLoadFieldDataInfo(CLoadFieldDataInfo* c_load_field_data_info) {
@@ -108,4 +111,35 @@ EnableMmap(CLoadFieldDataInfo c_load_field_data_info,
            bool enabled) {
     auto info = static_cast<LoadFieldDataInfo*>(c_load_field_data_info);
     info->field_infos[field_id].enable_mmap = enabled;
+}
+
+float
+MemOfLoadFieldDataWithBinlogIndex(CCollection c_collection,
+                                  int64_t field_id,
+                                  uint64_t field_data_size,
+                                  uint64_t field_data_size_num,
+                                  float build_expand_rate) {
+    auto col = static_cast<milvus::segcore::Collection*>(c_collection);
+    auto index_meta = col->get_index_meta();
+    if (index_meta == nullptr) {
+        // index meta is null
+        return field_data_size;
+    }
+    milvus::FieldId f_id = milvus::FieldId(field_id);
+    if (!index_meta->HasFiled(f_id))
+        return field_data_size;
+    auto& field_index_meta = index_meta->GetFieldIndexMeta(f_id);
+    auto vec_index_config = milvus::segcore::VecIndexConfig(
+        field_data_size_num,
+        field_index_meta,
+        milvus::segcore::SegcoreConfig::default_config(),
+        SegmentType::Sealed);
+    auto field_meta = col->get_schema()->operator[](f_id);
+    if (!vec_index_config.IsSupportedDataType(field_meta.get_data_type())) {
+        // not a float_vector type
+        return field_data_size;
+    } else {
+        return vec_index_config.EstimateBuildBinlogIndexMemoryInBytes(
+            field_data_size, build_expand_rate);
+    }
 }

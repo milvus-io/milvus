@@ -1928,9 +1928,10 @@ type queryNodeConfig struct {
 	ChunkRows                     ParamItem `refreshable:"false"`
 	EnableTempSegmentIndex        ParamItem `refreshable:"false"`
 	InterimIndexNlist             ParamItem `refreshable:"false"`
-	InterimIndexNProbe            ParamItem `refreshable:"false"`
+	InterimIndexVecCompressRatio  ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
+	InterimIndexSearchGranularity ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -2106,24 +2107,33 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.InterimIndexBuildParallelRate.Init(base.mgr)
 
-	p.InterimIndexNProbe = ParamItem{
-		Key:     "queryNode.segcore.interimIndex.nprobe",
-		Version: "2.0.0",
+	p.InterimIndexVecCompressRatio = ParamItem{
+		Key:          "queryNode.segcore.interimIndex.vecCompressRatio",
+		Version:      "2.3.0",
+		DefaultValue: "0.25",
+		Doc:          "interim index compress each vector conponent into vecCompressRatio * origin vector size",
+		Export:       true,
+	}
+	p.InterimIndexVecCompressRatio.Init(base.mgr)
+
+	p.InterimIndexSearchGranularity = ParamItem{
+		Key:     "queryNode.segcore.interimIndex.searchGranularity",
+		Version: "2.4.0",
 		Formatter: func(v string) string {
-			defaultNprobe := p.InterimIndexNlist.GetAsInt64() / 8
-			nprobe := getAsInt64(v)
-			if nprobe == 0 {
-				nprobe = defaultNprobe
+			defaultSearchGranularity := int64(5)
+			searchGranularity := getAsInt64(v)
+			if searchGranularity <= 0 {
+				searchGranularity = defaultSearchGranularity
 			}
-			if nprobe > p.InterimIndexNlist.GetAsInt64() {
+			if searchGranularity > p.InterimIndexNlist.GetAsInt64() {
 				return p.InterimIndexNlist.GetValue()
 			}
-			return strconv.FormatInt(nprobe, 10)
+			return strconv.FormatInt(searchGranularity, 10)
 		},
-		Doc:    "nprobe to search small index, based on your accuracy requirement, must smaller than nlist",
+		Doc:    "The search parmeters will auto turn with topk, searchGranularity control the turing granularity of search parameters.",
 		Export: true,
 	}
-	p.InterimIndexNProbe.Init(base.mgr)
+	p.InterimIndexSearchGranularity.Init(base.mgr)
 
 	p.LoadMemoryUsageFactor = ParamItem{
 		Key:          "queryNode.loadMemoryUsageFactor",

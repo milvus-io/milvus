@@ -314,9 +314,6 @@ func TestComponentParam(t *testing.T) {
 		nlist := Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 
-		nprobe := Params.InterimIndexNProbe.GetAsInt64()
-		assert.Equal(t, int64(16), nprobe)
-
 		assert.Equal(t, true, Params.GroupEnabled.GetAsBool())
 		assert.Equal(t, int32(10240), Params.MaxReceiveChanSize.GetAsInt32())
 		assert.Equal(t, int32(10240), Params.MaxUnsolvedQueueSize.GetAsInt32())
@@ -343,9 +340,6 @@ func TestComponentParam(t *testing.T) {
 
 		nlist = Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
-
-		nprobe = Params.InterimIndexNProbe.GetAsInt64()
-		assert.Equal(t, int64(16), nprobe)
 
 		params.Remove("queryNode.segcore.growing.nlist")
 		params.Remove("queryNode.segcore.growing.nprobe")

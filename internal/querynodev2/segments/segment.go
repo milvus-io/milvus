@@ -186,7 +186,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		return *cache
 	}
 
-	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.loadInfo, resourceEstimateFactor{
+	usage, err := getResourceUsageEstimateOfSegment(s.collection, s.loadInfo, resourceEstimateFactor{
 		memoryUsageFactor:        1.0,
 		memoryIndexUsageFactor:   1.0,
 		enableTempSegmentIndex:   false,

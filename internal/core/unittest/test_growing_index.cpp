@@ -50,6 +50,7 @@ class GrowingIndexTest : public ::testing::TestWithParam<Param> {
     knowhere::MetricType metric_type;
     DataType data_type;
     bool is_sparse = false;
+    const uint64_t segment_id = 120;
 };
 
 INSTANTIATE_TEST_SUITE_P(
@@ -242,7 +243,7 @@ TEST_P(GrowingIndexTest, GetVector) {
     std::map<FieldId, FieldIndexMeta> filedMap = {{vec, fieldIndexMeta}};
     IndexMetaPtr metaPtr =
         std::make_shared<CollectionIndexMeta>(100000, std::move(filedMap));
-    auto segment_growing = CreateGrowingSegment(schema, metaPtr);
+    auto segment_growing = CreateGrowingSegment(schema, metaPtr, segment_id);
     auto segment = dynamic_cast<SegmentGrowingImpl*>(segment_growing.get());
 
     if (data_type == DataType::VECTOR_FLOAT) {

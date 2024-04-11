@@ -19,6 +19,7 @@ package delegator
 import (
 	"context"
 	"path"
+	"path/filepath"
 	"strconv"
 	"testing"
 	"time"
@@ -40,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/querynodev2/tsafe"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -47,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type DelegatorDataSuite struct {
@@ -71,6 +74,8 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
+	localDataRootPath := filepath.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), typeutil.QueryNodeRole)
+	initcore.InitLocalChunkManager(localDataRootPath)
 }
 
 func (s *DelegatorDataSuite) TearDownSuite() {
