@@ -415,7 +415,7 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 	return s.queryCoord.CreateResourceGroup(ctx, req)
 }
 
-func (s *Server) UpdateResourceGroups(ctx context.Context, req *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+func (s *Server) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
 	return s.queryCoord.UpdateResourceGroups(ctx, req)
 }
 

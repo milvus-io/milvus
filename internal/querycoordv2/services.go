@@ -1030,7 +1030,7 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 	return merr.Success(), nil
 }
 
-func (s *Server) UpdateResourceGroups(ctx context.Context, req *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+func (s *Server) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.Any("rgName", req.GetResourceGroups()),
 	)

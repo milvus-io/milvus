@@ -2593,7 +2593,7 @@ func (_c *MockQueryCoordClient_TransferSegment_Call) RunAndReturn(run func(conte
 }
 
 // UpdateResourceGroups provides a mock function with given fields: ctx, in, opts
-func (_m *MockQueryCoordClient) UpdateResourceGroups(ctx context.Context, in *milvuspb.UpdateResourceGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (_m *MockQueryCoordClient) UpdateResourceGroups(ctx context.Context, in *querypb.UpdateResourceGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
@@ -2605,10 +2605,10 @@ func (_m *MockQueryCoordClient) UpdateResourceGroups(ctx context.Context, in *mi
 
 	var r0 *commonpb.Status
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateResourceGroupsRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
 		return rf(ctx, in, opts...)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest, ...grpc.CallOption) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateResourceGroupsRequest, ...grpc.CallOption) *commonpb.Status); ok {
 		r0 = rf(ctx, in, opts...)
 	} else {
 		if ret.Get(0) != nil {
@@ -2616,7 +2616,7 @@ func (_m *MockQueryCoordClient) UpdateResourceGroups(ctx context.Context, in *mi
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest, ...grpc.CallOption) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.UpdateResourceGroupsRequest, ...grpc.CallOption) error); ok {
 		r1 = rf(ctx, in, opts...)
 	} else {
 		r1 = ret.Error(1)
@@ -2632,14 +2632,14 @@ type MockQueryCoordClient_UpdateResourceGroups_Call struct {
 
 // UpdateResourceGroups is a helper method to define mock.On call
 //   - ctx context.Context
-//   - in *milvuspb.UpdateResourceGroupsRequest
+//   - in *querypb.UpdateResourceGroupsRequest
 //   - opts ...grpc.CallOption
 func (_e *MockQueryCoordClient_Expecter) UpdateResourceGroups(ctx interface{}, in interface{}, opts ...interface{}) *MockQueryCoordClient_UpdateResourceGroups_Call {
 	return &MockQueryCoordClient_UpdateResourceGroups_Call{Call: _e.mock.On("UpdateResourceGroups",
 		append([]interface{}{ctx, in}, opts...)...)}
 }
 
-func (_c *MockQueryCoordClient_UpdateResourceGroups_Call) Run(run func(ctx context.Context, in *milvuspb.UpdateResourceGroupsRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_UpdateResourceGroups_Call {
+func (_c *MockQueryCoordClient_UpdateResourceGroups_Call) Run(run func(ctx context.Context, in *querypb.UpdateResourceGroupsRequest, opts ...grpc.CallOption)) *MockQueryCoordClient_UpdateResourceGroups_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		variadicArgs := make([]grpc.CallOption, len(args)-2)
 		for i, a := range args[2:] {
@@ -2647,7 +2647,7 @@ func (_c *MockQueryCoordClient_UpdateResourceGroups_Call) Run(run func(ctx conte
 				variadicArgs[i] = a.(grpc.CallOption)
 			}
 		}
-		run(args[0].(context.Context), args[1].(*milvuspb.UpdateResourceGroupsRequest), variadicArgs...)
+		run(args[0].(context.Context), args[1].(*querypb.UpdateResourceGroupsRequest), variadicArgs...)
 	})
 	return _c
 }
@@ -2657,7 +2657,7 @@ func (_c *MockQueryCoordClient_UpdateResourceGroups_Call) Return(_a0 *commonpb.S
 	return _c
 }
 
-func (_c *MockQueryCoordClient_UpdateResourceGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateResourceGroupsRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_UpdateResourceGroups_Call {
+func (_c *MockQueryCoordClient_UpdateResourceGroups_Call) RunAndReturn(run func(context.Context, *querypb.UpdateResourceGroupsRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockQueryCoordClient_UpdateResourceGroups_Call {
 	_c.Call.Return(run)
 	return _c
 }

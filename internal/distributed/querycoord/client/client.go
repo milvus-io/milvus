@@ -315,7 +315,7 @@ func (c *Client) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 	})
 }
 
-func (c *Client) UpdateResourceGroups(ctx context.Context, req *milvuspb.UpdateResourceGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
 		req.GetBase(),

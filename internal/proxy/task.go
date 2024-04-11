@@ -2088,7 +2088,10 @@ func (t *UpdateResourceGroupsTask) PreExecute(ctx context.Context) error {
 
 func (t *UpdateResourceGroupsTask) Execute(ctx context.Context) error {
 	var err error
-	t.result, err = t.queryCoord.UpdateResourceGroups(ctx, t.UpdateResourceGroupsRequest)
+	t.result, err = t.queryCoord.UpdateResourceGroups(ctx, &querypb.UpdateResourceGroupsRequest{
+		Base:           t.UpdateResourceGroupsRequest.GetBase(),
+		ResourceGroups: t.UpdateResourceGroupsRequest.GetResourceGroups(),
+	})
 	return err
 }
 

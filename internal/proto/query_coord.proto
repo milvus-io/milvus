@@ -73,7 +73,7 @@ service QueryCoord {
     rpc CreateResourceGroup(milvus.CreateResourceGroupRequest)
         returns (common.Status) {
     }
-    rpc UpdateResourceGroups(milvus.UpdateResourceGroupsRequest) 
+    rpc UpdateResourceGroups(UpdateResourceGroupsRequest) 
         returns (common.Status) {
     }
     rpc DropResourceGroup(milvus.DropResourceGroupRequest)
@@ -285,6 +285,11 @@ message GetShardLeadersRequest {
 message GetShardLeadersResponse {
     common.Status status = 1;
     repeated ShardLeadersList shards = 2;
+}
+
+message UpdateResourceGroupsRequest {
+    common.MsgBase base = 1;
+    map<string, rg.ResourceGroupConfig> resource_groups = 2;
 }
 
 message ShardLeadersList {  // All leaders of all replicas of one shard

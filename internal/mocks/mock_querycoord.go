@@ -2395,15 +2395,15 @@ func (_c *MockQueryCoord_TransferSegment_Call) RunAndReturn(run func(context.Con
 }
 
 // UpdateResourceGroups provides a mock function with given fields: _a0, _a1
-func (_m *MockQueryCoord) UpdateResourceGroups(_a0 context.Context, _a1 *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+func (_m *MockQueryCoord) UpdateResourceGroups(_a0 context.Context, _a1 *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *querypb.UpdateResourceGroupsRequest) *commonpb.Status); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
@@ -2411,7 +2411,7 @@ func (_m *MockQueryCoord) UpdateResourceGroups(_a0 context.Context, _a1 *milvusp
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.UpdateResourceGroupsRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *querypb.UpdateResourceGroupsRequest) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -2427,14 +2427,14 @@ type MockQueryCoord_UpdateResourceGroups_Call struct {
 
 // UpdateResourceGroups is a helper method to define mock.On call
 //   - _a0 context.Context
-//   - _a1 *milvuspb.UpdateResourceGroupsRequest
+//   - _a1 *querypb.UpdateResourceGroupsRequest
 func (_e *MockQueryCoord_Expecter) UpdateResourceGroups(_a0 interface{}, _a1 interface{}) *MockQueryCoord_UpdateResourceGroups_Call {
 	return &MockQueryCoord_UpdateResourceGroups_Call{Call: _e.mock.On("UpdateResourceGroups", _a0, _a1)}
 }
 
-func (_c *MockQueryCoord_UpdateResourceGroups_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.UpdateResourceGroupsRequest)) *MockQueryCoord_UpdateResourceGroups_Call {
+func (_c *MockQueryCoord_UpdateResourceGroups_Call) Run(run func(_a0 context.Context, _a1 *querypb.UpdateResourceGroupsRequest)) *MockQueryCoord_UpdateResourceGroups_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*milvuspb.UpdateResourceGroupsRequest))
+		run(args[0].(context.Context), args[1].(*querypb.UpdateResourceGroupsRequest))
 	})
 	return _c
 }
@@ -2444,7 +2444,7 @@ func (_c *MockQueryCoord_UpdateResourceGroups_Call) Return(_a0 *commonpb.Status,
 	return _c
 }
 
-func (_c *MockQueryCoord_UpdateResourceGroups_Call) RunAndReturn(run func(context.Context, *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error)) *MockQueryCoord_UpdateResourceGroups_Call {
+func (_c *MockQueryCoord_UpdateResourceGroups_Call) RunAndReturn(run func(context.Context, *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error)) *MockQueryCoord_UpdateResourceGroups_Call {
 	_c.Call.Return(run)
 	return _c
 }
