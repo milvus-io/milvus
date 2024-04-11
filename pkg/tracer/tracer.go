@@ -29,6 +29,7 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
+	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -38,8 +39,52 @@ import (
 func Init() {
 	params := paramtable.Get()
 
+	exp, err := CreateTracerExporter(params)
+	if err != nil {
+		log.Warn("Init tracer faield", zap.Error(err))
+		return
+	}
+
+	SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
+	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
+	log.Info("Init tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+}
+
+func CloseTracerProvider() error {
+	provider, ok := otel.GetTracerProvider().(*sdk.TracerProvider)
+	if ok {
+		err := provider.Shutdown(context.Background())
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func SetTracerProvider(exp sdk.SpanExporter, traceIDRatio float64) {
+	if exp == nil {
+		otel.SetTracerProvider(trace.NewNoopTracerProvider())
+		return
+	}
+
+	tp := sdk.NewTracerProvider(
+		sdk.WithBatcher(exp),
+		sdk.WithResource(resource.NewWithAttributes(
+			semconv.SchemaURL,
+			semconv.ServiceNameKey.String(paramtable.GetRole()),
+			attribute.Int64("NodeID", paramtable.GetNodeID()),
+		)),
+		sdk.WithSampler(sdk.ParentBased(
+			sdk.TraceIDRatioBased(traceIDRatio),
+		)),
+	)
+	otel.SetTracerProvider(tp)
+}
+
+func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, error) {
 	var exp sdk.SpanExporter
 	var err error
+
 	switch params.TraceCfg.Exporter.GetValue() {
 	case "jaeger":
 		exp, err = jaeger.New(jaeger.WithCollectorEndpoint(
@@ -58,22 +103,6 @@ func Init() {
 	default:
 		err = errors.New("Empty Trace")
 	}
-	if err != nil {
-		log.Warn("Init tracer faield", zap.Error(err))
-		return
-	}
-	tp := sdk.NewTracerProvider(
-		sdk.WithBatcher(exp),
-		sdk.WithResource(resource.NewWithAttributes(
-			semconv.SchemaURL,
-			semconv.ServiceNameKey.String(paramtable.GetRole()),
-			attribute.Int64("NodeID", paramtable.GetNodeID()),
-		)),
-		sdk.WithSampler(sdk.ParentBased(
-			sdk.TraceIDRatioBased(params.TraceCfg.SampleFraction.GetAsFloat()),
-		)),
-	)
-	otel.SetTracerProvider(tp)
-	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
-	log.Info("Init tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+
+	return exp, err
 }
