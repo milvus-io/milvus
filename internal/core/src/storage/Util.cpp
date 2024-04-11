@@ -75,6 +75,17 @@ std::map<std::string, int> ReadAheadPolicy_Map = {
     {"willneed", MADV_WILLNEED},
     {"dontneed", MADV_DONTNEED}};
 
+// in arrow, null_bitmap read from the least significant bit
+std::vector<uint8_t>
+genValidIter(const uint8_t* valid_data, int length) {
+    std::vector<uint8_t> valid_data_;
+    for (size_t i = 0; i < length; ++i) {
+        auto bit = (valid_data[i >> 3] >> ((i & 0x07))) & 1;
+        valid_data_.push_back(bit);
+    }
+    return valid_data_;
+}
+
 StorageType
 ReadMediumType(BinlogReaderPtr reader) {
     AssertInfo(reader->Tell() == 0,
@@ -106,12 +117,22 @@ template <typename DT, typename BT>
 void
 add_numeric_payload(std::shared_ptr<arrow::ArrayBuilder> builder,
                     DT* start,
+                    const uint8_t* valid_data,
+                    bool nullable,
                     int length) {
     AssertInfo(builder != nullptr, "empty arrow builder");
     auto numeric_builder = std::dynamic_pointer_cast<BT>(builder);
-    auto ast = numeric_builder->AppendValues(start, start + length);
-    AssertInfo(
-        ast.ok(), "append value to arrow builder failed: {}", ast.ToString());
+    arrow::Status ast;
+    if (nullable) {
+        // need iter to read valid_data when write
+        auto iter = genValidIter(valid_data, length);
+        ast =
+            numeric_builder->AppendValues(start, start + length, iter.begin());
+        AssertInfo(ast.ok(), "append value to arrow builder failed");
+    } else {
+        ast = numeric_builder->AppendValues(start, start + length);
+        AssertInfo(ast.ok(), "append value to arrow builder failed");
+    }
 }
 
 void
@@ -121,48 +142,49 @@ AddPayloadToArrowBuilder(std::shared_ptr<arrow::ArrayBuilder> builder,
     auto raw_data = const_cast<uint8_t*>(payload.raw_data);
     auto length = payload.rows;
     auto data_type = payload.data_type;
+    auto nullable = payload.nullable;
 
     switch (data_type) {
         case DataType::BOOL: {
             auto bool_data = reinterpret_cast<bool*>(raw_data);
             add_numeric_payload<bool, arrow::BooleanBuilder>(
-                builder, bool_data, length);
+                builder, bool_data, payload.valid_data, nullable, length);
             break;
         }
         case DataType::INT8: {
             auto int8_data = reinterpret_cast<int8_t*>(raw_data);
             add_numeric_payload<int8_t, arrow::Int8Builder>(
-                builder, int8_data, length);
+                builder, int8_data, payload.valid_data, nullable, length);
             break;
         }
         case DataType::INT16: {
             auto int16_data = reinterpret_cast<int16_t*>(raw_data);
             add_numeric_payload<int16_t, arrow::Int16Builder>(
-                builder, int16_data, length);
+                builder, int16_data, payload.valid_data, nullable, length);
             break;
         }
         case DataType::INT32: {
             auto int32_data = reinterpret_cast<int32_t*>(raw_data);
             add_numeric_payload<int32_t, arrow::Int32Builder>(
-                builder, int32_data, length);
+                builder, int32_data, payload.valid_data, nullable, length);
             break;
         }
         case DataType::INT64: {
             auto int64_data = reinterpret_cast<int64_t*>(raw_data);
             add_numeric_payload<int64_t, arrow::Int64Builder>(
-                builder, int64_data, length);
+                builder, int64_data, payload.valid_data, nullable, length);
             break;
         }
         case DataType::FLOAT: {
             auto float_data = reinterpret_cast<float*>(raw_data);
             add_numeric_payload<float, arrow::FloatBuilder>(
-                builder, float_data, length);
+                builder, float_data, payload.valid_data, nullable, length);
             break;
         }
         case DataType::DOUBLE: {
             auto double_data = reinterpret_cast<double_t*>(raw_data);
             add_numeric_payload<double, arrow::DoubleBuilder>(
-                builder, double_data, length);
+                builder, double_data, payload.valid_data, nullable, length);
             break;
         }
         case DataType::VECTOR_FLOAT16:
@@ -292,40 +314,50 @@ CreateArrowBuilder(DataType data_type, int dim) {
 }
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(DataType data_type) {
+CreateArrowSchema(DataType data_type, bool nullable) {
     switch (static_cast<DataType>(data_type)) {
         case DataType::BOOL: {
-            return arrow::schema({arrow::field("val", arrow::boolean())});
+            return arrow::schema(
+                {arrow::field("val", arrow::boolean(), nullable)});
         }
         case DataType::INT8: {
-            return arrow::schema({arrow::field("val", arrow::int8())});
+            return arrow::schema(
+                {arrow::field("val", arrow::int8(), nullable)});
         }
         case DataType::INT16: {
-            return arrow::schema({arrow::field("val", arrow::int16())});
+            return arrow::schema(
+                {arrow::field("val", arrow::int16(), nullable)});
         }
         case DataType::INT32: {
-            return arrow::schema({arrow::field("val", arrow::int32())});
+            return arrow::schema(
+                {arrow::field("val", arrow::int32(), nullable)});
         }
         case DataType::INT64: {
-            return arrow::schema({arrow::field("val", arrow::int64())});
+            return arrow::schema(
+                {arrow::field("val", arrow::int64(), nullable)});
         }
         case DataType::FLOAT: {
-            return arrow::schema({arrow::field("val", arrow::float32())});
+            return arrow::schema(
+                {arrow::field("val", arrow::float32(), nullable)});
         }
         case DataType::DOUBLE: {
-            return arrow::schema({arrow::field("val", arrow::float64())});
+            return arrow::schema(
+                {arrow::field("val", arrow::float64(), nullable)});
         }
         case DataType::VARCHAR:
         case DataType::STRING: {
-            return arrow::schema({arrow::field("val", arrow::utf8())});
+            return arrow::schema(
+                {arrow::field("val", arrow::utf8(), nullable)});
         }
         case DataType::ARRAY:
         case DataType::JSON: {
-            return arrow::schema({arrow::field("val", arrow::binary())});
+            return arrow::schema(
+                {arrow::field("val", arrow::binary(), nullable)});
         }
         // sparse float vector doesn't require a dim
         case DataType::VECTOR_SPARSE_FLOAT: {
-            return arrow::schema({arrow::field("val", arrow::binary())});
+            return arrow::schema(
+                {arrow::field("val", arrow::binary(), nullable)});
         }
         default: {
             PanicInfo(
@@ -335,30 +367,37 @@ CreateArrowSchema(DataType data_type) {
 }
 
 std::shared_ptr<arrow::Schema>
-CreateArrowSchema(DataType data_type, int dim) {
+CreateArrowSchema(DataType data_type, int dim, bool nullable) {
     switch (static_cast<DataType>(data_type)) {
         case DataType::VECTOR_FLOAT: {
             AssertInfo(dim > 0, "invalid dim value: {}", dim);
-            return arrow::schema({arrow::field(
-                "val", arrow::fixed_size_binary(dim * sizeof(float)))});
+            return arrow::schema(
+                {arrow::field("val",
+                              arrow::fixed_size_binary(dim * sizeof(float)),
+                              nullable)});
         }
         case DataType::VECTOR_BINARY: {
             AssertInfo(dim % 8 == 0 && dim > 0, "invalid dim value: {}", dim);
-            return arrow::schema(
-                {arrow::field("val", arrow::fixed_size_binary(dim / 8))});
+            return arrow::schema({arrow::field(
+                "val", arrow::fixed_size_binary(dim / 8), nullable)});
         }
         case DataType::VECTOR_FLOAT16: {
             AssertInfo(dim > 0, "invalid dim value: {}", dim);
-            return arrow::schema({arrow::field(
-                "val", arrow::fixed_size_binary(dim * sizeof(float16)))});
+            return arrow::schema(
+                {arrow::field("val",
+                              arrow::fixed_size_binary(dim * sizeof(float16)),
+                              nullable)});
         }
         case DataType::VECTOR_BFLOAT16: {
             AssertInfo(dim > 0, "invalid dim value");
-            return arrow::schema({arrow::field(
-                "val", arrow::fixed_size_binary(dim * sizeof(bfloat16)))});
+            return arrow::schema(
+                {arrow::field("val",
+                              arrow::fixed_size_binary(dim * sizeof(bfloat16)),
+                              nullable)});
         }
         case DataType::VECTOR_SPARSE_FLOAT: {
-            return arrow::schema({arrow::field("val", arrow::binary())});
+            return arrow::schema(
+                {arrow::field("val", arrow::binary(), nullable)});
         }
         default: {
             PanicInfo(
@@ -499,7 +538,7 @@ EncodeAndUploadIndexSlice(ChunkManager* chunk_manager,
                           IndexMeta index_meta,
                           FieldDataMeta field_meta,
                           std::string object_key) {
-    auto field_data = CreateFieldData(DataType::INT8);
+    auto field_data = CreateFieldData(DataType::INT8, false);
     field_data->FillFieldData(buf, batch_size);
     auto indexData = std::make_shared<IndexData>(field_data);
     indexData->set_index_meta(index_meta);
@@ -518,7 +557,7 @@ EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
                            IndexMeta index_meta,
                            FieldDataMeta field_meta,
                            std::string object_key) {
-    auto field_data = CreateFieldData(DataType::INT8);
+    auto field_data = CreateFieldData(DataType::INT8, false);
     field_data->FillFieldData(buf, batch_size);
     auto indexData = std::make_shared<IndexData>(field_data);
     indexData->set_index_meta(index_meta);
@@ -542,7 +581,7 @@ EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
     auto dim = IsSparseFloatVectorDataType(field_meta.get_data_type())
                    ? -1
                    : field_meta.get_dim();
-    auto field_data = CreateFieldData(field_meta.get_data_type(), dim, 0);
+    auto field_data = CreateFieldData(field_meta.get_data_type(),field_meta.is_nullable(), dim, 0);
     field_data->FillFieldData(buf, element_count);
     auto insertData = std::make_shared<InsertData>(field_data);
     insertData->SetFieldDataMeta(field_data_meta);
@@ -779,30 +818,42 @@ CreateChunkManager(const StorageConfig& storage_config) {
 }
 
 FieldDataPtr
-CreateFieldData(const DataType& type, int64_t dim, int64_t total_num_rows) {
+CreateFieldData(const DataType& type,
+                bool nullable,
+                int64_t dim,
+                int64_t total_num_rows) {
     switch (type) {
         case DataType::BOOL:
-            return std::make_shared<FieldData<bool>>(type, total_num_rows);
+            return std::make_shared<FieldData<bool>>(
+                type, nullable, total_num_rows);
         case DataType::INT8:
-            return std::make_shared<FieldData<int8_t>>(type, total_num_rows);
+            return std::make_shared<FieldData<int8_t>>(
+                type, nullable, total_num_rows);
         case DataType::INT16:
-            return std::make_shared<FieldData<int16_t>>(type, total_num_rows);
+            return std::make_shared<FieldData<int16_t>>(
+                type, nullable, total_num_rows);
         case DataType::INT32:
-            return std::make_shared<FieldData<int32_t>>(type, total_num_rows);
+            return std::make_shared<FieldData<int32_t>>(
+                type, nullable, total_num_rows);
         case DataType::INT64:
-            return std::make_shared<FieldData<int64_t>>(type, total_num_rows);
+            return std::make_shared<FieldData<int64_t>>(
+                type, nullable, total_num_rows);
         case DataType::FLOAT:
-            return std::make_shared<FieldData<float>>(type, total_num_rows);
+            return std::make_shared<FieldData<float>>(
+                type, nullable, total_num_rows);
         case DataType::DOUBLE:
-            return std::make_shared<FieldData<double>>(type, total_num_rows);
+            return std::make_shared<FieldData<double>>(
+                type, nullable, total_num_rows);
         case DataType::STRING:
         case DataType::VARCHAR:
-            return std::make_shared<FieldData<std::string>>(type,
-                                                            total_num_rows);
+            return std::make_shared<FieldData<std::string>>(
+                type, nullable, total_num_rows);
         case DataType::JSON:
-            return std::make_shared<FieldData<Json>>(type, total_num_rows);
+            return std::make_shared<FieldData<Json>>(
+                type, nullable, total_num_rows);
         case DataType::ARRAY:
-            return std::make_shared<FieldData<Array>>(type, total_num_rows);
+            return std::make_shared<FieldData<Array>>(
+                type, nullable, total_num_rows);
         case DataType::VECTOR_FLOAT:
             return std::make_shared<FieldData<FloatVector>>(
                 dim, type, total_num_rows);
@@ -859,11 +910,16 @@ MergeFieldData(std::vector<FieldDataPtr>& data_array) {
     for (const auto& data : data_array) {
         total_length += data->Length();
     }
-
-    auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type());
+    auto merged_data = storage::CreateFieldData(data_array[0]->get_data_type(),
+                                                data_array[0]->IsNullable());
     merged_data->Reserve(total_length);
     for (const auto& data : data_array) {
-        merged_data->FillFieldData(data->Data(), data->Length());
+        if (merged_data->IsNullable()) {
+            merged_data->FillFieldData(
+                data->Data(), data->ValidData(), data->Length());
+        } else {
+            merged_data->FillFieldData(data->Data(), data->Length());
+        }
     }
     return merged_data;
 }

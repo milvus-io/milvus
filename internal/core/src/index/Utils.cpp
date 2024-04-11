@@ -249,9 +249,9 @@ AssembleIndexDatas(std::map<std::string, FieldDataPtr>& index_datas) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
+            // todo:smellthemoon: use false here temporarily
             auto new_field_data =
-                storage::CreateFieldData(DataType::INT8, 1, total_len);
+                storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);
@@ -288,9 +288,9 @@ AssembleIndexDatas(std::map<std::string, FieldDataChannelPtr>& index_datas,
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
+            // todo:smellthemoon: use false here temporarily
             auto new_field_data =
-                storage::CreateFieldData(DataType::INT8, 1, total_len);
+                storage::CreateFieldData(DataType::INT8, false, 1, total_len);
 
             for (auto i = 0; i < slice_num; ++i) {
                 std::string file_name = GenSlicedFileName(prefix, i);

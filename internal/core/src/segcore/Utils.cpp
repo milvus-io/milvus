@@ -232,6 +232,10 @@ CreateScalarDataArray(int64_t count, const FieldMeta& field_meta) {
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
 
+    if (field_meta.is_nullable()) {
+        data_array->mutable_valid_data()->Resize(count, false);
+    }
+
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
         case DataType::BOOL: {
@@ -360,6 +364,7 @@ CreateVectorDataArray(int64_t count, const FieldMeta& field_meta) {
 
 std::unique_ptr<DataArray>
 CreateScalarDataArrayFrom(const void* data_raw,
+                          const void* valid_data,
                           int64_t count,
                           const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
@@ -367,6 +372,11 @@ CreateScalarDataArrayFrom(const void* data_raw,
     data_array->set_field_id(field_meta.get_id().get());
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
+    if (field_meta.is_nullable()) {
+        auto valid_data_ = reinterpret_cast<const bool*>(valid_data);
+        auto obj = data_array->mutable_valid_data();
+        obj->Add(valid_data_, valid_data_ + count);
+    }
 
     auto scalar_array = data_array->mutable_scalars();
     switch (data_type) {
@@ -517,12 +527,14 @@ CreateVectorDataArrayFrom(const void* data_raw,
 
 std::unique_ptr<DataArray>
 CreateDataArrayFrom(const void* data_raw,
+                    const void* valid_data,
                     int64_t count,
                     const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
 
     if (!IsVectorDataType(data_type)) {
-        return CreateScalarDataArrayFrom(data_raw, count, field_meta);
+        return CreateScalarDataArrayFrom(
+            data_raw, valid_data, count, field_meta);
     }
 
     return CreateVectorDataArrayFrom(data_raw, count, field_meta);
@@ -535,6 +547,7 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
     auto data_type = field_meta.get_data_type();
     auto data_array = std::make_unique<DataArray>();
     data_array->set_field_id(field_meta.get_id().get());
+    auto nullable = field_meta.is_nullable();
     data_array->set_type(static_cast<milvus::proto::schema::DataType>(
         field_meta.get_data_type()));
 
@@ -586,6 +599,12 @@ MergeDataArray(std::vector<MergeBase>& merge_bases,
                           fmt::format("unsupported datatype {}", data_type));
             }
             continue;
+        }
+
+        if (nullable) {
+            auto data = src_field_data->valid_data().data();
+            auto obj = data_array->mutable_valid_data();
+            *(obj->Add()) = data[src_offset];
         }
 
         auto scalar_array = data_array->mutable_scalars();
@@ -781,6 +800,7 @@ LoadFieldDatasFromRemote2(std::shared_ptr<milvus_storage::Space> space,
                 data->GetColumnByName(field.second.get_name().get());
             auto field_data = storage::CreateFieldData(
                 field.second.get_data_type(),
+                field.second.is_nullable(),
                 field.second.is_vector() ? field.second.get_dim() : 0,
                 total_num_rows);
             field_data->FillFieldData(col_data);

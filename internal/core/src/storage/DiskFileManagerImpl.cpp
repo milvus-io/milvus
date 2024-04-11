@@ -411,7 +411,7 @@ DiskFileManagerImpl::CacheRawDataToDisk(
         num_rows += total_num_rows;
         auto col_data = data->GetColumnByName(index_meta_.field_name);
         auto field_data = storage::CreateFieldData(
-            index_meta_.field_type, index_meta_.dim, total_num_rows);
+            index_meta_.field_type, false, index_meta_.dim, total_num_rows);
         field_data->FillFieldData(col_data);
         dim = field_data->get_dim();
         auto data_size =
