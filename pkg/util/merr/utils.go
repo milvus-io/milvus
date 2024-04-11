@@ -870,14 +870,6 @@ func WrapErrSegcore(code int32, msg ...string) error {
 	return err
 }
 
-func WrapErrSegcoreUnsupported(code int32, msg ...string) error {
-	err := wrapFields(ErrSegcoreUnsupported, value("segcoreCode", code))
-	if len(msg) > 0 {
-		err = errors.Wrap(err, strings.Join(msg, "->"))
-	}
-	return err
-}
-
 // field related
 func WrapErrFieldNotFound[T any](field T, msg ...string) error {
 	err := wrapFields(ErrFieldNotFound, value("field", field))

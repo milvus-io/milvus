@@ -72,11 +72,6 @@ CreateIndexV0(enum CDataType dtype,
         *res_index = index.release();
         status.error_code = Success;
         status.error_msg = "";
-    } catch (SegcoreError& e) {
-        auto status = CStatus();
-        status.error_code = e.get_error_code();
-        status.error_msg = strdup(e.what());
-        return status;
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
@@ -144,11 +139,6 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         auto status = CStatus();
         status.error_code = Success;
         status.error_msg = "";
-        return status;
-    } catch (SegcoreError& e) {
-        auto status = CStatus();
-        status.error_code = e.get_error_code();
-        status.error_msg = strdup(e.what());
         return status;
     } catch (std::exception& e) {
         auto status = CStatus();
@@ -238,11 +228,6 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         index->BuildV2();
         *res_index = index.release();
         return milvus::SuccessCStatus();
-    } catch (SegcoreError& e) {
-        auto status = CStatus();
-        status.error_code = e.get_error_code();
-        status.error_msg = strdup(e.what());
-        return status;
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
