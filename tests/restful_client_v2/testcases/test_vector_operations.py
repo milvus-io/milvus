@@ -183,7 +183,7 @@ class TestInsertVector(TestBase):
                 {"fieldName": "float16_vector", "indexName": "float16_vector", "metricType": "L2"},
                 {"fieldName": "bfloat16_vector", "indexName": "bfloat16_vector", "metricType": "L2"},
                 {"fieldName": "binary_vector", "indexName": "binary_vector", "metricType": "HAMMING",
-                 "indexConfig": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
+                 "params": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
             ]
         }
         rsp = self.collection_client.collection_create(payload)
@@ -572,7 +572,7 @@ class TestSearchVector(TestBase):
                 {"fieldName": "float16_vector", "indexName": "float16_vector", "metricType": "COSINE"},
                 {"fieldName": "bfloat16_vector", "indexName": "bfloat16_vector", "metricType": "COSINE"},
                 {"fieldName": "binary_vector", "indexName": "binary_vector", "metricType": "HAMMING",
-                 "indexConfig": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
+                 "params": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
             ]
         }
         rsp = self.collection_client.collection_create(payload)
@@ -751,7 +751,7 @@ class TestSearchVector(TestBase):
             },
             "indexParams": [
                 {"fieldName": "binary_vector", "indexName": "binary_vector", "metricType": "HAMMING",
-                 "indexConfig": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
+                 "params": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
             ]
         }
         rsp = self.collection_client.collection_create(payload)
@@ -1511,7 +1511,7 @@ class TestQueryVector(TestBase):
                 {"fieldName": "float16_vector", "indexName": "float16_vector", "metricType": "L2"},
                 {"fieldName": "bfloat16_vector", "indexName": "bfloat16_vector", "metricType": "L2"},
                 {"fieldName": "binary_vector", "indexName": "binary_vector", "metricType": "HAMMING",
-                 "indexConfig": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
+                 "params": {"index_type": "BIN_IVF_FLAT", "nlist": "512"}}
             ]
         }
         rsp = self.collection_client.collection_create(payload)

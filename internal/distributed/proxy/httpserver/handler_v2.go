@@ -3,6 +3,7 @@ package httpserver
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"strconv"
@@ -10,7 +11,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/gin-gonic/gin"
 	"github.com/gin-gonic/gin/binding"
-	"github.com/go-playground/validator/v10"
+	validator "github.com/go-playground/validator/v10"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/tidwall/gjson"
@@ -222,13 +223,32 @@ func wrapperTraceLog(v2 handlerFuncV2) handlerFuncV2 {
 	}
 }
 
+func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, req interface{}) error {
+	username, ok := c.Get(ContextUsername)
+	if !ok || username.(string) == "" {
+		if !ignoreErr {
+			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+		}
+		return merr.ErrNeedAuthenticate
+	}
+	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
+	if authErr != nil {
+		if !ignoreErr {
+			c.JSON(http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
+		}
+		return authErr
+	}
+
+	return nil
+}
+
 func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, ignoreErr bool, handler func(reqCtx context.Context, req any) (any, error)) (interface{}, error) {
 	if baseGetter, ok := req.(BaseGetter); ok {
 		span := trace.SpanFromContext(ctx)
 		span.AddEvent(baseGetter.GetBase().GetMsgType().String())
 	}
 	if checkAuth {
-		err := checkAuthorization(ctx, c, req)
+		err := checkAuthorizationV2(ctx, c, ignoreErr, req)
 		if err != nil {
 			return nil, err
 		}
@@ -331,6 +351,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	} else {
 		autoID = primaryField.AutoID
 	}
+	errMessage := ""
 	loadStateReq := &milvuspb.GetLoadStateRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -341,6 +362,8 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	collLoadState := ""
 	if err == nil {
 		collLoadState = stateResp.(*milvuspb.GetLoadStateResponse).State.String()
+	} else {
+		errMessage += err.Error() + ";"
 	}
 	vectorField := ""
 	for _, field := range coll.Schema.Fields {
@@ -355,22 +378,26 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		CollectionName: collectionName,
 		FieldName:      vectorField,
 	}
-	indexResp, err := wrapperProxy(ctx, c, descIndexReq, false, true, func(reqCtx context.Context, req any) (any, error) {
+	indexResp, err := wrapperProxy(ctx, c, descIndexReq, h.checkAuth, true, func(reqCtx context.Context, req any) (any, error) {
 		return h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
 	})
 	if err == nil {
 		indexDesc = printIndexes(indexResp.(*milvuspb.DescribeIndexResponse).IndexDescriptions)
+	} else {
+		errMessage += err.Error() + ";"
 	}
 	var aliases []string
 	aliasReq := &milvuspb.ListAliasesRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
-	aliasResp, err := wrapperProxy(ctx, c, aliasReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	aliasResp, err := wrapperProxy(ctx, c, aliasReq, h.checkAuth, true, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListAliases(reqCtx, req.(*milvuspb.ListAliasesRequest))
 	})
 	if err == nil {
 		aliases = aliasResp.(*milvuspb.ListAliasesResponse).GetAliases()
+	} else {
+		errMessage += err.Error() + "."
 	}
 	if aliases == nil {
 		aliases = []string{}
@@ -392,7 +419,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		"consistencyLevel":    commonpb.ConsistencyLevel_name[int32(coll.ConsistencyLevel)],
 		"enableDynamicField":  coll.Schema.EnableDynamicField,
 		"properties":          coll.Properties,
-	}})
+	}, HTTPReturnMessage: errMessage})
 	return resp, nil
 }
 
@@ -443,8 +470,11 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 		return h.proxy.GetLoadingProgress(reqCtx, req.(*milvuspb.GetLoadingProgressRequest))
 	})
 	progress := int64(-1)
+	errMessage := ""
 	if err == nil {
 		progress = progressResp.(*milvuspb.GetLoadingProgressResponse).Progress
+	} else {
+		errMessage += err.Error() + "."
 	}
 	state := commonpb.LoadState_LoadStateLoading.String()
 	if progress >= 100 {
@@ -453,7 +483,7 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
 		HTTPReturnLoadState:    state,
 		HTTPReturnLoadProgress: progress,
-	}})
+	}, HTTPReturnMessage: errMessage})
 	return resp, err
 }
 
@@ -1081,7 +1111,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				}
 			}
 			for key, fieldParam := range field.ElementTypeParams {
-				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: fieldParam})
+				fieldSchema.TypeParams = append(fieldSchema.TypeParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", fieldParam)})
 			}
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
 			fieldNames[field.FieldName] = true
@@ -1175,8 +1205,8 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				IndexName:      indexParam.IndexName,
 				ExtraParams:    []*commonpb.KeyValuePair{{Key: common.MetricTypeKey, Value: indexParam.MetricType}},
 			}
-			for key, value := range indexParam.IndexConfig {
-				createIndexReq.ExtraParams = append(createIndexReq.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: value})
+			for key, value := range indexParam.Params {
+				createIndexReq.ExtraParams = append(createIndexReq.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
 			}
 			statusResponse, err := wrapperProxy(ctx, c, createIndexReq, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 				return h.proxy.CreateIndex(ctx, req.(*milvuspb.CreateIndexRequest))
@@ -1603,8 +1633,8 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 				{Key: common.MetricTypeKey, Value: indexParam.MetricType},
 			},
 		}
-		for key, value := range indexParam.IndexConfig {
-			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: value})
+		for key, value := range indexParam.Params {
+			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
 		}
 		resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.CreateIndex(reqCtx, req.(*milvuspb.CreateIndexRequest))
@@ -1728,7 +1758,7 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		CollectionName: collectionName,
 	}
 	if h.checkAuth {
-		err := checkAuthorization(ctx, c, &milvuspb.ListImportsAuthPlaceholder{
+		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ListImportsAuthPlaceholder{
 			DbName:         dbName,
 			CollectionName: collectionName,
 		})
@@ -1778,7 +1808,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
 	if h.checkAuth {
-		err := checkAuthorization(ctx, c, &milvuspb.ImportAuthPlaceholder{
+		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ImportAuthPlaceholder{
 			DbName:         dbName,
 			CollectionName: collectionGetter.GetCollectionName(),
 			PartitionName:  partitionGetter.GetPartitionName(),
@@ -1805,7 +1835,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		JobID:  jobIDGetter.GetJobID(),
 	}
 	if h.checkAuth {
-		err := checkAuthorization(ctx, c, &milvuspb.GetImportProgressAuthPlaceholder{
+		err := checkAuthorizationV2(ctx, c, false, &milvuspb.GetImportProgressAuthPlaceholder{
 			DbName: dbName,
 		})
 		if err != nil {

@@ -288,6 +288,39 @@ func TestGrpcWrapper(t *testing.T) {
 			fmt.Println(w.Body.String())
 		})
 	}
+
+	path = "/wrapper/grpc/auth"
+	app.GET(path, func(c *gin.Context) {
+		wrapperProxy(context.Background(), c, &milvuspb.DescribeCollectionRequest{}, true, false, handle)
+	})
+	appNeedAuth.GET(path, func(c *gin.Context) {
+		ctx := proxy.NewContextWithMetadata(c, "test", DefaultDbName)
+		wrapperProxy(ctx, c, &milvuspb.LoadCollectionRequest{}, true, false, handle)
+	})
+	t.Run("check authorization", func(t *testing.T) {
+		req := httptest.NewRequest(http.MethodGet, path, nil)
+		w := httptest.NewRecorder()
+		ginHandler.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusUnauthorized, w.Code)
+		returnBody := &ReturnErrMsg{}
+		err := json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err)
+		assert.Equal(t, int32(1800), returnBody.Code)
+		assert.Equal(t, "user hasn't authenticated", returnBody.Message)
+		fmt.Println(w.Body.String())
+
+		paramtable.Get().Save(proxy.Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		req = httptest.NewRequest(http.MethodGet, needAuthPrefix+path, nil)
+		req.SetBasicAuth("test", util.DefaultRootPassword)
+		w = httptest.NewRecorder()
+		ginHandler.ServeHTTP(w, req)
+		assert.Equal(t, http.StatusForbidden, w.Code)
+		err = json.Unmarshal(w.Body.Bytes(), returnBody)
+		assert.Nil(t, err)
+		assert.Equal(t, int32(2), returnBody.Code)
+		assert.Equal(t, "service unavailable: internal: Milvus Proxy is not ready yet. please wait", returnBody.Message)
+		fmt.Println(w.Body.String())
+	})
 }
 
 type headerTestCase struct {
@@ -446,8 +479,8 @@ func TestCreateCollection(t *testing.T) {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
                 {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": false, "elementTypeParams": {}},
-                {"fieldName": "partition_field", "dataType": "VarChar", "isPartitionKey": true, "elementTypeParams": {"max_length": "256"}},
-                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+                {"fieldName": "partition_field", "dataType": "VarChar", "isPartitionKey": true, "elementTypeParams": {"max_length": 256}},
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }, "params": {"partitionsNum": "32"}}`),
 	})
@@ -457,7 +490,7 @@ func TestCreateCollection(t *testing.T) {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
                 {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 	})
@@ -467,7 +500,7 @@ func TestCreateCollection(t *testing.T) {
             "fields": [
                 {"fieldName": "book_id", "dataType": "int64", "isPrimary": true, "elementTypeParams": {}},
                 {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }}`),
 		errMsg:  "invalid parameter, data type int64 is invalid(case sensitive).",
@@ -478,8 +511,8 @@ func TestCreateCollection(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
-                {"fieldName": "word_count", "dataType": "Array", "elementDataType": "Int64", "elementTypeParams": {"max_capacity": "2"}},
-                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+                {"fieldName": "word_count", "dataType": "Array", "elementDataType": "Int64", "elementTypeParams": {"max_capacity": 2}},
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }}`),
 	})
@@ -489,7 +522,7 @@ func TestCreateCollection(t *testing.T) {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
                 {"fieldName": "word_count", "dataType": "Array", "elementDataType": "int64", "elementTypeParams": {}},
-                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }}`),
 		errMsg:  "invalid parameter, element data type int64 is invalid(case sensitive).",
@@ -501,7 +534,7 @@ func TestCreateCollection(t *testing.T) {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
                 {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }, "indexParams": [{"fieldName": "book_xxx", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "missing required parameters, error: `book_xxx` hasn't defined in schema",
@@ -519,7 +552,7 @@ func TestCreateCollection(t *testing.T) {
             "fields": [
                 {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
                 {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}
+                {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}
             ]
         }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
 		errMsg:  "",
@@ -634,9 +667,11 @@ func TestMethodGet(t *testing.T) {
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Once()
+	}, nil).Twice()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Twice()
+	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadStateResponse{Status: commonErrorStatus}, nil).Once()
+	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Times(3)
+	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&DefaultDescIndexesReqp, nil).Times(3)
 	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName)).Once()
 	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{
@@ -658,6 +693,7 @@ func TestMethodGet(t *testing.T) {
 		Status:   commonSuccessStatus,
 		Progress: int64(77),
 	}, nil).Once()
+	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
 		Status:         &StatusSuccess,
 		PartitionNames: []string{DefaultPartitionName},
@@ -705,6 +741,7 @@ func TestMethodGet(t *testing.T) {
 			},
 		},
 	}, nil).Once()
+	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().ListAliases(mock.Anything, mock.Anything).Return(&milvuspb.ListAliasesResponse{
 		Status: &StatusSuccess,
 	}, nil).Once()
@@ -737,6 +774,9 @@ func TestMethodGet(t *testing.T) {
 		path: versionalV2(CollectionCategory, DescribeAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(CollectionCategory, DescribeAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
 		path:    versionalV2(CollectionCategory, DescribeAction),
 		errMsg:  "",
 		errCode: 65535,
@@ -746,6 +786,9 @@ func TestMethodGet(t *testing.T) {
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, StatsAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(CollectionCategory, LoadStateAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(CollectionCategory, LoadStateAction),
@@ -993,8 +1036,8 @@ func TestMethodPost(t *testing.T) {
 			bodyReader := bytes.NewReader([]byte(`{` +
 				`"collectionName": "` + DefaultCollectionName + `", "newCollectionName": "test", "newDbName": "",` +
 				`"partitionName": "` + DefaultPartitionName + `", "partitionNames": ["` + DefaultPartitionName + `"],` +
-				`"schema": {"fields": [{"fieldName": "book_id", "dataType": "Int64", "elementTypeParams": {}}, {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": "2"}}]},` +
-				`"indexParams": [{"indexName": "` + DefaultIndexName + `", "fieldName": "book_intro", "metricType": "L2", "indexConfig": {"nlist": "30", "index_type": "IVF_FLAT"}}],` +
+				`"schema": {"fields": [{"fieldName": "book_id", "dataType": "Int64", "elementTypeParams": {}}, {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": 2}}]},` +
+				`"indexParams": [{"indexName": "` + DefaultIndexName + `", "fieldName": "book_intro", "metricType": "L2", "params": {"nlist": 30, "index_type": "IVF_FLAT"}}],` +
 				`"userName": "` + util.UserRoot + `", "password": "Milvus", "newPassword": "milvus", "roleName": "` + util.RoleAdmin + `",` +
 				`"roleName": "` + util.RoleAdmin + `", "objectType": "Global", "objectName": "*", "privilege": "*",` +
 				`"aliasName": "` + DefaultAliasName + `",` +
