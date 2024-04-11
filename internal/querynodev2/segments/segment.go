@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/pkoracle"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/state"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -80,14 +81,9 @@ type baseSegment struct {
 	collection *Collection
 	version    *atomic.Int64
 
-	// the load status of the segment,
-	// only transitions below are allowed:
-	// 1. LoadStatusMeta <-> LoadStatusMapped
-	// 2. LoadStatusMeta <-> LoadStatusInMemory
-	loadStatus     *atomic.String
 	segmentType    SegmentType
 	bloomFilterSet *pkoracle.BloomFilterSet
-	loadInfo       *querypb.SegmentLoadInfo
+	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
 	isLazyLoad     bool
 
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
@@ -95,28 +91,39 @@ type baseSegment struct {
 
 func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) baseSegment {
 	return baseSegment{
-		collection:     collection,
-		loadInfo:       loadInfo,
-		version:        atomic.NewInt64(version),
-		loadStatus:     atomic.NewString(string(LoadStatusMeta)),
-		segmentType:    segmentType,
-		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
-
+		collection:         collection,
+		loadInfo:           atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+		version:            atomic.NewInt64(version),
+		isLazyLoad:         isLazyLoad(collection, segmentType),
+		segmentType:        segmentType,
+		bloomFilterSet:     pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 	}
 }
 
+// isLazyLoad checks if the segment is lazy load
+func isLazyLoad(collection *Collection, segmentType SegmentType) bool {
+	return segmentType == SegmentTypeSealed && // only sealed segment enable lazy load
+		(common.IsCollectionLazyLoadEnabled(collection.Schema().Properties...) || // collection level lazy load
+			(!common.HasLazyload(collection.Schema().Properties) &&
+				params.Params.QueryNodeCfg.LazyLoadEnabled.GetAsBool())) // global level lazy load
+}
+
 // ID returns the identity number.
 func (s *baseSegment) ID() int64 {
-	return s.loadInfo.GetSegmentID()
+	return s.loadInfo.Load().GetSegmentID()
 }
 
 func (s *baseSegment) Collection() int64 {
-	return s.loadInfo.GetCollectionID()
+	return s.loadInfo.Load().GetCollectionID()
+}
+
+func (s *baseSegment) GetCollection() *Collection {
+	return s.collection
 }
 
 func (s *baseSegment) Partition() int64 {
-	return s.loadInfo.GetPartitionID()
+	return s.loadInfo.Load().GetPartitionID()
 }
 
 func (s *baseSegment) DatabaseName() string {
@@ -128,7 +135,7 @@ func (s *baseSegment) ResourceGroup() string {
 }
 
 func (s *baseSegment) Shard() string {
-	return s.loadInfo.GetInsertChannel()
+	return s.loadInfo.Load().GetInsertChannel()
 }
 
 func (s *baseSegment) Type() SegmentType {
@@ -136,11 +143,11 @@ func (s *baseSegment) Type() SegmentType {
 }
 
 func (s *baseSegment) Level() datapb.SegmentLevel {
-	return s.loadInfo.GetLevel()
+	return s.loadInfo.Load().GetLevel()
 }
 
 func (s *baseSegment) StartPosition() *msgpb.MsgPosition {
-	return s.loadInfo.GetStartPosition()
+	return s.loadInfo.Load().GetStartPosition()
 }
 
 func (s *baseSegment) Version() int64 {
@@ -151,16 +158,8 @@ func (s *baseSegment) CASVersion(old, newVersion int64) bool {
 	return s.version.CompareAndSwap(old, newVersion)
 }
 
-func (s *baseSegment) LoadStatus() LoadStatus {
-	return LoadStatus(s.loadStatus.Load())
-}
-
 func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
-	if s.segmentType == SegmentTypeGrowing {
-		// Growing segment do not have load info.
-		return nil
-	}
-	return s.loadInfo
+	return s.loadInfo.Load()
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
@@ -185,7 +184,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		return *cache
 	}
 
-	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.loadInfo, resourceEstimateFactor{
+	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
 		memoryUsageFactor:        1.0,
 		memoryIndexUsageFactor:   1.0,
 		enableTempSegmentIndex:   false,
@@ -200,7 +199,9 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	return *usage
 }
 
-func (s *baseSegment) IsLazyLoad() bool { return s.isLazyLoad }
+func (s *baseSegment) IsLazyLoad() bool {
+	return s.isLazyLoad
+}
 
 type FieldInfo struct {
 	datapb.FieldBinlog
@@ -288,10 +289,9 @@ func NewSegment(ctx context.Context,
 		insertCount: atomic.NewInt64(0),
 	}
 
-	if segmentType != SegmentTypeSealed {
-		segment.loadStatus.Store(string(LoadStatusInMemory))
+	if err := segment.initializeSegment(); err != nil {
+		return nil, err
 	}
-
 	return segment, nil
 }
 
@@ -355,11 +355,57 @@ func NewSegmentV2(
 		insertCount:        atomic.NewInt64(0),
 	}
 
-	if segmentType != SegmentTypeSealed {
-		segment.loadStatus.Store(string(LoadStatusInMemory))
+	if err := segment.initializeSegment(); err != nil {
+		return nil, err
+	}
+	return segment, nil
+}
+
+func (s *LocalSegment) initializeSegment() error {
+	loadInfo := s.loadInfo.Load()
+	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
+	schemaHelper, _ := typeutil.CreateSchemaHelper(s.collection.Schema())
+
+	for fieldID, info := range indexedFieldInfos {
+		field, err := schemaHelper.GetFieldFromID(fieldID)
+		if err != nil {
+			return err
+		}
+		indexInfo := info.IndexInfo
+		s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
+			FieldBinlog: &datapb.FieldBinlog{
+				FieldID: indexInfo.GetFieldID(),
+			},
+			IndexInfo: indexInfo,
+			LazyLoad:  s.isLazyLoad,
+		})
+		if !typeutil.IsVectorType(field.GetDataType()) && !s.HasRawData(fieldID) {
+			s.fields.Insert(fieldID, &FieldInfo{
+				FieldBinlog: *info.FieldBinlog,
+				RowCount:    loadInfo.GetNumOfRows(),
+			})
+		}
 	}
 
-	return segment, nil
+	for _, binlogs := range fieldBinlogs {
+		s.fields.Insert(binlogs.FieldID, &FieldInfo{
+			FieldBinlog: *binlogs,
+			RowCount:    loadInfo.GetNumOfRows(),
+		})
+	}
+
+	// Update the insert count when initialize the segment and update the metrics.
+	s.insertCount.Store(loadInfo.GetNumOfRows())
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		s.DatabaseName(),
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(s.Collection()),
+		fmt.Sprint(s.Partition()),
+		s.Type().String(),
+		strconv.FormatInt(int64(len(s.Indexes())), 10),
+	).Add(float64(loadInfo.GetNumOfRows()))
+
+	return nil
 }
 
 // PinIfNotReleased acquires the `ptrLock` and returns true if the pointer is valid
@@ -383,7 +429,6 @@ func (s *LocalSegment) InsertCount() int64 {
 func (s *LocalSegment) RowNum() int64 {
 	// if segment is not loaded, return 0 (maybe not loaded or release by lru)
 	if !s.ptrLock.RLockIf(state.IsDataLoaded) {
-		log.Warn("segment is not valid", zap.Int64("segmentID", s.ID()))
 		return 0
 	}
 	defer s.ptrLock.RUnlock()
@@ -424,10 +469,6 @@ func (s *LocalSegment) MemSize() int64 {
 
 func (s *LocalSegment) LastDeltaTimestamp() uint64 {
 	return s.lastDeltaTimestamp.Load()
-}
-
-func (s *LocalSegment) addIndex(fieldID int64, info *IndexedFieldInfo) {
-	s.fieldIndexes.Insert(fieldID, info)
 }
 
 func (s *LocalSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
@@ -654,6 +695,15 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	}
 
 	s.insertCount.Add(int64(numOfRow))
+	metrics.QueryNodeNumEntities.WithLabelValues(
+		s.DatabaseName(),
+		fmt.Sprint(paramtable.GetNodeID()),
+		fmt.Sprint(s.Collection()),
+		fmt.Sprint(s.Partition()),
+		s.Type().String(),
+		strconv.FormatInt(int64(len(s.Indexes())), 10),
+	).Add(float64(numOfRow))
+
 	s.rowNum.Store(-1)
 	s.memSize.Store(-1)
 	return nil
@@ -735,7 +785,11 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 }
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
-func (s *LocalSegment) LoadMultiFieldData(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
+func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
+	loadInfo := s.loadInfo.Load()
+	rowCount := loadInfo.GetNumOfRows()
+	fields := loadInfo.GetBinlogPaths()
+
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -793,7 +847,6 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context, rowCount int64, f
 		return err
 	}
 
-	s.insertCount.Store(rowCount)
 	log.Info("load mutil field done",
 		zap.Int64("row count", rowCount),
 		zap.Int64("segmentID", s.ID()))
@@ -801,43 +854,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context, rowCount int64, f
 	return nil
 }
 
-type loadOptions struct {
-	LoadStatus LoadStatus
-}
-
-func newLoadOptions() *loadOptions {
-	return &loadOptions{
-		LoadStatus: LoadStatusInMemory,
-	}
-}
-
-type loadOption func(*loadOptions)
-
-func WithLoadStatus(loadStatus LoadStatus) loadOption {
-	return func(options *loadOptions) {
-		options.LoadStatus = loadStatus
-	}
-}
-
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, opts ...loadOption) error {
-	options := newLoadOptions()
-	for _, opt := range opts {
-		opt(options)
-	}
-
-	if field != nil {
-		s.fields.Insert(fieldID, &FieldInfo{
-			FieldBinlog: *field,
-			RowCount:    rowCount,
-		})
-	}
-
-	if options.LoadStatus == LoadStatusMeta {
-		return nil
-	}
-
-	s.loadStatus.Store(string(options.LoadStatus))
-
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -875,7 +892,9 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		}
 	}
 
-	mmapEnabled := options.LoadStatus == LoadStatusMapped
+	collection := s.collection
+	mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
+		(!common.FieldHasMmapKey(collection.Schema(), fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
 
@@ -904,7 +923,6 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 		return err
 	}
 
-	s.insertCount.Store(rowCount)
 	log.Info("load field done")
 
 	return nil
@@ -1128,12 +1146,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	return nil
 }
 
-func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType, opts ...loadOption) error {
-	options := newLoadOptions()
-	for _, opt := range opts {
-		opt(options)
-	}
-
+func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIndexInfo, fieldType schemapb.DataType) error {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
@@ -1142,16 +1155,6 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Int64("indexID", indexInfo.GetIndexID()),
 	)
 
-	if options.LoadStatus == LoadStatusMeta {
-		s.addIndex(indexInfo.GetFieldID(), &IndexedFieldInfo{
-			FieldBinlog: &datapb.FieldBinlog{
-				FieldID: indexInfo.GetFieldID(),
-			},
-			IndexInfo: indexInfo,
-			LazyLoad:  true,
-		})
-		return nil
-	}
 	old := s.GetIndex(indexInfo.GetFieldID())
 	// the index loaded
 	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && !old.LazyLoad {
@@ -1228,7 +1231,7 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		return err
 	}
 
-	s.addIndex(indexInfo.GetFieldID(), &IndexedFieldInfo{
+	s.fieldIndexes.Insert(indexInfo.GetFieldID(), &IndexedFieldInfo{
 		FieldBinlog: &datapb.FieldBinlog{
 			FieldID: indexInfo.GetFieldID(),
 		},
@@ -1353,16 +1356,14 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	)
 
 	// wait all read ops finished
-	ptr := s.ptr
 	if options.Scope == ReleaseScopeData {
-		s.loadStatus.Store(string(LoadStatusMeta))
-		C.ClearSegmentData(ptr)
-		s.ResetIndexesLazyLoad(true)
+		s.ReleaseSegmentData()
 		log.Debug("release segment data done and the field indexes info has been set lazy load=true")
 		return
 	}
 
-	C.DeleteSegment(ptr)
+	C.DeleteSegment(s.ptr)
+	s.ptr = nil
 
 	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
 	// ignore error here, shall not block releasing
@@ -1371,6 +1372,12 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	}
 
 	log.Info("delete segment from memory")
+}
+
+// ReleaseSegmentData releases the segment data.
+func (s *LocalSegment) ReleaseSegmentData() {
+	C.ClearSegmentData(s.ptr)
+	s.ResetIndexesLazyLoad(true)
 }
 
 // StartLoadData starts the loading process of the segment.

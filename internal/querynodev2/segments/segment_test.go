@@ -71,6 +71,7 @@ func (suite *SegmentSuite) SetupTest() {
 			PartitionID:   suite.partitionID,
 			InsertChannel: "dml",
 			Level:         datapb.SegmentLevel_Legacy,
+			NumOfRows:     int64(msgLength),
 			BinlogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 101,

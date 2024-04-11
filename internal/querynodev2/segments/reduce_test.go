@@ -83,6 +83,7 @@ func (suite *ReduceSuite) SetupTest() {
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
 			InsertChannel: "dml",
+			NumOfRows:     int64(msgLength),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)

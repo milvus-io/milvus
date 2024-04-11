@@ -173,15 +173,17 @@ func NewManager() *Manager {
 	}
 
 	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithLazyScavenger(func(key int64) int64 {
-		return int64(segMgr.sealedSegments[key].ResourceUsageEstimate().DiskSize)
+		segment := segMgr.GetWithType(key, SegmentTypeSealed)
+		if segment == nil {
+			return 0
+		}
+		return int64(segment.ResourceUsageEstimate().DiskSize)
 	}, diskCap).WithLoader(func(key int64) (Segment, bool) {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
-		segMgr.mu.RLock()
-		defer segMgr.mu.RUnlock()
-
-		segment, ok := segMgr.sealedSegments[key]
-		if !ok {
+		segment := segMgr.GetWithType(key, SegmentTypeSealed)
+		if segment == nil {
 			// the segment has been released, just ignore it
+			log.Debug("segment is not found when loading", zap.Int64("segmentID", key))
 			return nil, false
 		}
 
@@ -197,7 +199,7 @@ func NewManager() *Manager {
 			if collection == nil {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
-			err = manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info, LoadStatusMapped)
+			err = manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info)
 			return nil, err
 		})
 		if err != nil {
