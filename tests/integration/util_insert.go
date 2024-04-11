@@ -99,6 +99,22 @@ func NewInt64SameFieldData(fieldName string, numRows int, value int64) *schemapb
 	}
 }
 
+func NewVarCharSameFieldData(fieldName string, numRows int, value string) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_String,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: GenerateSameStringArray(numRows, value),
+					},
+				},
+			},
+		},
+	}
+}
+
 func NewStringFieldData(fieldName string, numRows int) *schemapb.FieldData {
 	return &schemapb.FieldData{
 		Type:      schemapb.DataType_Int64,
@@ -203,6 +219,14 @@ func GenerateInt64Array(numRows int, start int64) []int64 {
 
 func GenerateSameInt64Array(numRows int, value int64) []int64 {
 	ret := make([]int64, numRows)
+	for i := 0; i < numRows; i++ {
+		ret[i] = value
+	}
+	return ret
+}
+
+func GenerateSameStringArray(numRows int, value string) []string {
+	ret := make([]string, numRows)
 	for i := 0; i < numRows; i++ {
 		ret[i] = value
 	}

@@ -287,20 +287,24 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 
 		// vector index build needs information of optional scalar fields data
 		optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
-		if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
+		if Params.CommonCfg.EnableMaterializedView.GetAsBool() {
 			colSchema := ib.meta.GetCollection(meta.CollectionID).Schema
-			hasPartitionKey := typeutil.HasPartitionKey(colSchema)
-			if hasPartitionKey {
-				partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(colSchema)
-				if partitionKeyField == nil || err != nil {
-					log.Ctx(ib.ctx).Warn("index builder get partition key field failed", zap.Int64("build", buildID), zap.Error(err))
-				} else {
-					optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-						FieldID:   partitionKeyField.FieldID,
-						FieldName: partitionKeyField.Name,
-						FieldType: int32(partitionKeyField.DataType),
-						DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
-					})
+			if colSchema != nil {
+				hasPartitionKey := typeutil.HasPartitionKey(colSchema)
+				if hasPartitionKey {
+					partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(colSchema)
+					if partitionKeyField == nil || err != nil {
+						log.Ctx(ib.ctx).Warn("index builder get partition key field failed", zap.Int64("build", buildID), zap.Error(err))
+					} else {
+						if typeutil.IsFieldDataTypeSupportMaterializedView(partitionKeyField) {
+							optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+								FieldID:   partitionKeyField.FieldID,
+								FieldName: partitionKeyField.Name,
+								FieldType: int32(partitionKeyField.DataType),
+								DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+							})
+						}
+					}
 				}
 			}
 		}
