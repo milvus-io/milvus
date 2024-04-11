@@ -113,7 +113,7 @@ func NewMqMsgStream(ctx context.Context,
 		ctxLog.Info("Msg Stream state updated", zap.Bool("can_produce", stream.isEnabledProduce()))
 	})
 	paramtable.Get().Watch(paramtable.Get().CommonCfg.TTMsgEnabled.Key, stream.configEvent)
-	ctxLog.Info("Msg Stream state", zap.Bool("can_produce", stream.isEnabledProduce()))
+	ctxLog.Info("Msg Stream create done", zap.Bool("can_produce", stream.isEnabledProduce()))
 
 	return stream, nil
 }
@@ -143,8 +143,7 @@ func (ms *mqMsgStream) AsProducer(channels []string) {
 		}
 		err := retry.Do(context.TODO(), fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
-			errMsg := "Failed to create producer " + channel + ", error = " + err.Error()
-			panic(errMsg)
+			log.Panic("Failed to create producer", zap.Any("channel", channel), zap.Error(err))
 		}
 	}
 }
