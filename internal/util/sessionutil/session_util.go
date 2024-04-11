@@ -1149,7 +1149,7 @@ func (s *Session) ForceActiveStandby(activateFunc func() error) error {
 				0)).
 			Then(clientv3.OpPut(s.activeKey, string(sessionJSON), clientv3.WithLease(*s.LeaseID))).Commit()
 
-		if !resp.Succeeded {
+		if err != nil || !resp.Succeeded {
 			msg := fmt.Sprintf("failed to force register ACTIVE %s", s.ServerName)
 			log.Error(msg, zap.Error(err), zap.Any("resp", resp))
 			return errors.New(msg)
