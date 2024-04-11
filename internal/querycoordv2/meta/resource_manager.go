@@ -31,23 +31,12 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var (
-	ErrRGAlreadyExist                = errors.New("resource group already exist, but create with different config")
-	ErrRecoverResourceGroupFromStore = errors.New("failed to recover resource group from store")
-	ErrRGNameIsEmpty                 = errors.New("resource group name couldn't be empty")
-	ErrDeleteDefaultRG               = errors.New("delete default rg is not permitted")
-	ErrDeleteNonEmptyRG              = errors.New("delete non-empty rg is not permitted")
-	ErrDeleteInUsedRG                = errors.New("delete in used rg is not permitted")
-	ErrNodeStopped                   = errors.New("node has been stopped")
-	ErrRGLimit                       = errors.New("resource group num reach limit 1024")
-	ErrNodeNotEnough                 = errors.New("nodes not enough")
-	ErrAllRGReachLimits              = errors.New("all resource group reach limits")
-	ErrIllegalRGConfig               = errors.New("illegal resource group config")
-)
+var ErrNodeNotEnough = errors.New("nodes not enough")
 
 type ResourceManager struct {
 	incomingNode typeutil.UniqueSet // incomingNode is a temporary set for incoming hangup node,
@@ -92,7 +81,7 @@ func (rm *ResourceManager) Recover() error {
 
 	rgs, err := rm.catalog.GetResourceGroups()
 	if err != nil {
-		return ErrRecoverResourceGroupFromStore
+		return errors.Wrap(err, "failed to recover resource group from store")
 	}
 
 	for _, meta := range rgs {
@@ -118,7 +107,7 @@ func (rm *ResourceManager) Recover() error {
 // Do no changed with node, all node will be reassign to new resource group by auto recover.
 func (rm *ResourceManager) AddResourceGroup(rgName string, cfg *rgpb.ResourceGroupConfig) error {
 	if len(rgName) == 0 {
-		return ErrRGNameIsEmpty
+		return merr.WrapErrParameterMissing("resource group name couldn't be empty")
 	}
 	if cfg == nil {
 		// Use default config if not set, compatible with old client.
@@ -133,11 +122,12 @@ func (rm *ResourceManager) AddResourceGroup(rgName string, cfg *rgpb.ResourceGro
 		if proto.Equal(rm.groups[rgName].GetConfig(), cfg) {
 			return nil
 		}
-		return ErrRGAlreadyExist
+		return merr.WrapErrResourceGroupAlreadyExist(rgName)
 	}
 
-	if len(rm.groups) >= 1024 {
-		return ErrRGLimit
+	maxResourceGroup := paramtable.Get().QuotaConfig.MaxResourceGroupNumOfQueryNode.GetAsInt()
+	if len(rm.groups) >= maxResourceGroup {
+		return merr.WrapErrResourceGroupReachLimit(rgName, maxResourceGroup)
 	}
 
 	if err := rm.validateResourceGroupConfig(rgName, cfg); err != nil {
@@ -151,7 +141,7 @@ func (rm *ResourceManager) AddResourceGroup(rgName string, cfg *rgpb.ResourceGro
 			zap.Any("config", cfg),
 			zap.Error(err),
 		)
-		return err
+		return merr.WrapErrResourceGroupServiceAvailable()
 	}
 
 	rm.groups[rgName] = rg
@@ -205,7 +195,7 @@ func (rm *ResourceManager) updateResourceGroups(rgs map[string]*rgpb.ResourceGro
 				zap.Error(err),
 			)
 		}
-		return err
+		return merr.WrapErrResourceGroupServiceAvailable()
 	}
 
 	// Commit updates to memory.
@@ -240,7 +230,7 @@ func (rm *ResourceManager) TransferNode(sourceRGName string, targetRGName string
 
 	// Check if source resource group has enough node to transfer.
 	if len(sourceRG.GetNodes()) < nodeNum {
-		return ErrNodeNotEnough
+		return merr.WrapErrResourceGroupNodeNotEnough(sourceRGName, len(sourceRG.GetNodes()), nodeNum)
 	}
 
 	// Compatible with old version.
@@ -298,7 +288,7 @@ func (rm *ResourceManager) RemoveResourceGroup(rgName string) error {
 			zap.String("rgName", rgName),
 			zap.Error(err),
 		)
-		return err
+		return merr.WrapErrResourceGroupServiceAvailable()
 	}
 
 	// After recovering, all node assigned to these rg has been removed.
@@ -581,7 +571,7 @@ func (rm *ResourceManager) recoverRedundantNodeRG(rgName string) error {
 		if targetRG == nil {
 			log.Info("failed to select redundant recover target resource group, please check resource group configuration if as expected.",
 				zap.String("rgName", rg.GetName()))
-			return ErrAllRGReachLimits
+			return errors.New("all resource group reach limits")
 		}
 
 		nodeID, err := rm.transferOneNodeFromRGToRG(rg, targetRG)
@@ -657,11 +647,11 @@ func (rm *ResourceManager) assignIncomingNodeWithNodeCheck(node int64) (string, 
 	// node is on stopping or stopped, remove it from incoming node set.
 	if rm.nodeMgr.Get(node) == nil {
 		rm.incomingNode.Remove(node)
-		return "", merr.WrapErrNodeNotFound(node)
+		return "", errors.New("node is not online")
 	}
 	if ok, _ := rm.nodeMgr.IsStoppingNode(node); ok {
 		rm.incomingNode.Remove(node)
-		return "", ErrNodeStopped
+		return "", errors.New("node has been stopped")
 	}
 
 	rgName, err := rm.assignIncomingNode(node)
@@ -783,7 +773,7 @@ func (rm *ResourceManager) transferNode(rgName string, node int64) error {
 			zap.Int64("node", node),
 			zap.Error(err),
 		)
-		return err
+		return merr.WrapErrResourceGroupServiceAvailable()
 	}
 
 	// Commit updates to memory.
@@ -814,7 +804,7 @@ func (rm *ResourceManager) unassignNode(node int64) (string, error) {
 				zap.Int64("node", node),
 				zap.Error(err),
 			)
-			return "", err
+			return "", merr.WrapErrResourceGroupServiceAvailable()
 		}
 
 		// Commit updates to memory.
@@ -836,29 +826,29 @@ func (rm *ResourceManager) unassignNode(node int64) (string, error) {
 // validateResourceGroupConfig must be called after lock, because it will check with other resource group.
 func (rm *ResourceManager) validateResourceGroupConfig(rgName string, cfg *rgpb.ResourceGroupConfig) error {
 	if cfg.GetLimits() == nil || cfg.GetRequests() == nil {
-		return errors.Wrap(ErrIllegalRGConfig, "requests or limits is required")
+		return merr.WrapErrResourceGroupIllegalConfig(rgName, cfg, "requests or limits is required")
 	}
 	if cfg.GetRequests().GetNodeNum() < 0 || cfg.GetLimits().GetNodeNum() < 0 {
-		return errors.Wrap(ErrIllegalRGConfig, "node num in `requests` or `limits` should not less than 0")
+		return merr.WrapErrResourceGroupIllegalConfig(rgName, cfg, "node num in `requests` or `limits` should not less than 0")
 	}
 	if cfg.GetLimits().GetNodeNum() < cfg.GetRequests().GetNodeNum() {
-		return errors.Wrap(ErrIllegalRGConfig, "limits node num should not less than requests node num")
+		return merr.WrapErrResourceGroupIllegalConfig(rgName, cfg, "limits node num should not less than requests node num")
 	}
 
 	for _, transferCfg := range cfg.GetTransferFrom() {
 		if transferCfg.GetResourceGroup() == rgName {
-			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `from` %s should not be itself", rgName)
+			return merr.WrapErrResourceGroupIllegalConfig(rgName, cfg, fmt.Sprintf("resource group in `TransferFrom` %s should not be itself", rgName))
 		}
 		if rm.groups[transferCfg.GetResourceGroup()] == nil {
-			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `from` %s not exist", transferCfg.GetResourceGroup())
+			return merr.WrapErrResourceGroupIllegalConfig(rgName, cfg, fmt.Sprintf("resource group in `TransferFrom` %s not exist", transferCfg.GetResourceGroup()))
 		}
 	}
 	for _, transferCfg := range cfg.GetTransferTo() {
 		if transferCfg.GetResourceGroup() == rgName {
-			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `to` %s should not be itself", rgName)
+			return merr.WrapErrResourceGroupIllegalConfig(rgName, cfg, fmt.Sprintf("resource group in `TransferTo` %s should not be itself", rgName))
 		}
 		if rm.groups[transferCfg.GetResourceGroup()] == nil {
-			return errors.Wrapf(ErrIllegalRGConfig, "resource group in `to` %s not exist", transferCfg.GetResourceGroup())
+			return merr.WrapErrResourceGroupIllegalConfig(rgName, cfg, fmt.Sprintf("resource group in `TransferTo` %s not exist", transferCfg.GetResourceGroup()))
 		}
 	}
 	return nil
@@ -868,24 +858,24 @@ func (rm *ResourceManager) validateResourceGroupConfig(rgName string, cfg *rgpb.
 func (rm *ResourceManager) validateResourceGroupIsDeletable(rgName string) error {
 	// default rg is not deletable.
 	if rgName == DefaultResourceGroupName {
-		return ErrDeleteDefaultRG
+		return merr.WrapErrParameterInvalid("not default resource group", rgName, "default resource group is not deletable")
 	}
 
 	// If rg is not empty, it's not deletable.
 	if rm.groups[rgName].GetConfig().GetLimits().GetNodeNum() != 0 {
-		return ErrDeleteNonEmptyRG
+		return merr.WrapErrParameterInvalid("not empty resource group", rgName, "resource group's limits node num is not 0")
 	}
 
 	// If rg is used by other rg, it's not deletable.
 	for _, rg := range rm.groups {
 		for _, transferCfg := range rg.GetConfig().GetTransferFrom() {
 			if transferCfg.GetResourceGroup() == rgName {
-				return errors.Wrapf(ErrDeleteInUsedRG, "resource group %s is used by %s's `from`, remove that configuration first", rgName, rg.name)
+				return merr.WrapErrParameterInvalid("not `TransferFrom` of resource group", rgName, fmt.Sprintf("resource group %s is used by %s's `TransferFrom`, remove that configuration first", rgName, rg.name))
 			}
 		}
 		for _, transferCfg := range rg.GetConfig().GetTransferTo() {
 			if transferCfg.GetResourceGroup() == rgName {
-				return errors.Wrapf(ErrDeleteInUsedRG, "resource group %s is used by %s's `in`, remove that configuration first", rgName, rg.name)
+				return merr.WrapErrParameterInvalid("not `TransferTo` of resource group", rgName, fmt.Sprintf("resource group %s is used by %s's `TransferTo`, remove that configuration first", rgName, rg.name))
 			}
 		}
 	}

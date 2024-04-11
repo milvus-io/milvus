@@ -61,7 +61,13 @@ var (
 	ErrGeneralCapacityExceeded = newMilvusError("general capacity exceeded", 250, false)
 
 	// ResourceGroup related
-	ErrResourceGroupNotFound = newMilvusError("resource group not found", 300, false)
+	ErrResourceGroupNotFound      = newMilvusError("resource group not found", 300, false)
+	ErrResourceGroupAlreadyExist  = newMilvusError("resource group already exist, but create with different config", 301, false)
+	ErrResourceGroupReachLimit    = newMilvusError("resource group num reach limit", 302, false)
+	ErrResourceGroupIllegalConfig = newMilvusError("resource group illegal config", 303, false)
+	// go:deprecated
+	ErrResourceGroupNodeNotEnough    = newMilvusError("resource group node not enough", 304, false)
+	ErrResourceGroupServiceAvailable = newMilvusError("resource group service available", 305, true)
 
 	// Replica related
 	ErrReplicaNotFound     = newMilvusError("replica not found", 400, false)

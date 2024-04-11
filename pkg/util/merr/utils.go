@@ -555,6 +555,52 @@ func WrapErrResourceGroupNotFound(rg any, msg ...string) error {
 	return err
 }
 
+// WrapErrResourceGroupAlreadyExist wraps ErrResourceGroupNotFound with resource group
+func WrapErrResourceGroupAlreadyExist(rg any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupAlreadyExist, value("rg", rg))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrResourceGroupReachLimit wraps ErrResourceGroupReachLimit with resource group and limit
+func WrapErrResourceGroupReachLimit(rg any, limit any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupReachLimit, value("rg", rg), value("limit", limit))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrResourceGroupIllegalConfig wraps ErrResourceGroupIllegalConfig with resource group
+func WrapErrResourceGroupIllegalConfig(rg any, cfg any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupIllegalConfig, value("rg", rg), value("config", cfg))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// go:deprecated
+// WrapErrResourceGroupNodeNotEnough wraps ErrResourceGroupNodeNotEnough with resource group
+func WrapErrResourceGroupNodeNotEnough(rg any, current any, expected any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupNodeNotEnough, value("rg", rg), value("currentNodeNum", current), value("expectedNodeNum", expected))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrResourceGroupServiceAvailable wraps ErrResourceGroupServiceAvailable with resource group
+func WrapErrResourceGroupServiceAvailable(msg ...string) error {
+	err := wrapFields(ErrResourceGroupServiceAvailable)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 // Replica related
 func WrapErrReplicaNotFound(id int64, msg ...string) error {
 	err := wrapFields(ErrReplicaNotFound, value("replica", id))

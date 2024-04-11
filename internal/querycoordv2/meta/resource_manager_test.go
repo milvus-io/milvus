@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -71,36 +72,36 @@ func (suite *ResourceManagerSuite) TestValidateConfiguration() {
 	suite.NoError(err)
 
 	err = suite.manager.validateResourceGroupConfig("rg1", &rgpb.ResourceGroupConfig{})
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	err = suite.manager.validateResourceGroupConfig("rg1", newResourceGroupConfig(-1, 2))
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	err = suite.manager.validateResourceGroupConfig("rg1", newResourceGroupConfig(2, -1))
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	err = suite.manager.validateResourceGroupConfig("rg1", newResourceGroupConfig(3, 2))
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	cfg := newResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg2"}}
 	err = suite.manager.validateResourceGroupConfig("rg1", cfg)
-	suite.ErrorIs(err, ErrIllegalRGConfig)
+	suite.ErrorIs(err, merr.ErrResourceGroupIllegalConfig)
 
 	err = suite.manager.AddResourceGroup("rg2", newResourceGroupConfig(0, 0))
 	suite.NoError(err)
@@ -115,10 +116,10 @@ func (suite *ResourceManagerSuite) TestValidateDelete() {
 	suite.NoError(err)
 
 	err = suite.manager.validateResourceGroupIsDeletable(DefaultResourceGroupName)
-	suite.ErrorIs(err, ErrDeleteDefaultRG)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 
 	err = suite.manager.validateResourceGroupIsDeletable("rg1")
-	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 
 	cfg := newResourceGroupConfig(0, 0)
 	cfg.TransferFrom = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
@@ -127,7 +128,7 @@ func (suite *ResourceManagerSuite) TestValidateDelete() {
 		"rg1": newResourceGroupConfig(0, 0),
 	})
 	err = suite.manager.validateResourceGroupIsDeletable("rg1")
-	suite.ErrorIs(err, ErrDeleteInUsedRG)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 
 	cfg = newResourceGroupConfig(0, 0)
 	cfg.TransferTo = []*rgpb.ResourceGroupTransfer{{ResourceGroup: "rg1"}}
@@ -135,7 +136,7 @@ func (suite *ResourceManagerSuite) TestValidateDelete() {
 		"rg2": cfg,
 	})
 	err = suite.manager.validateResourceGroupIsDeletable("rg1")
-	suite.ErrorIs(err, ErrDeleteInUsedRG)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
 		"rg2": newResourceGroupConfig(0, 0),
@@ -172,13 +173,13 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	suite.NoError(err)
 	// test delete default rg
 	err = suite.manager.RemoveResourceGroup(DefaultResourceGroupName)
-	suite.ErrorIs(err, ErrDeleteDefaultRG)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 
 	// test delete a rg not empty.
 	err = suite.manager.AddResourceGroup("rg2", newResourceGroupConfig(1, 1))
 	suite.NoError(err)
 	err = suite.manager.RemoveResourceGroup("rg2")
-	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 
 	// test delete a rg after update
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
@@ -198,7 +199,7 @@ func (suite *ResourceManagerSuite) TestManipulateResourceGroup() {
 	defer suite.manager.nodeMgr.Remove(1)
 	suite.manager.HandleNodeUp(1)
 	err = suite.manager.RemoveResourceGroup("rg2")
-	suite.ErrorIs(err, ErrDeleteNonEmptyRG)
+	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
 		"rg2": newResourceGroupConfig(0, 0),
 	})
