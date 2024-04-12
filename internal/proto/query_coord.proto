@@ -403,6 +403,7 @@ message ReleaseSegmentsRequest {
     DataScope scope = 7;  // All, Streaming, Historical
     string shard = 8;
     bool need_transfer = 11;
+    msg.MsgPosition checkpoint = 12; // channel's check point
 }
 
 message SearchRequest {

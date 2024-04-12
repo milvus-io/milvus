@@ -14,15 +14,30 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package accesslog
+#pragma once
 
-import (
-	"testing"
+namespace milvus {
+namespace bitset {
+namespace detail {
+namespace arm {
 
-	"github.com/stretchr/testify/assert"
-)
+class InstructionSet {
+ public:
+    static InstructionSet&
+    GetInstance() {
+        static InstructionSet inst;
+        return inst;
+    }
 
-func TestJoin(t *testing.T) {
-	assert.Equal(t, "a/b", join("a", "b"))
-	assert.Equal(t, "a/b", join("a/", "b"))
-}
+ private:
+    InstructionSet();
+
+ public:
+    bool
+    supports_sve();
+};
+
+}  // namespace arm
+}  // namespace detail
+}  // namespace bitset
+}  // namespace milvus

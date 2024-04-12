@@ -92,7 +92,7 @@ func (c *ClusterImpl) Watch(ctx context.Context, ch string, collectionID UniqueI
 	return c.channelManager.Watch(ctx, &channelMeta{Name: ch, CollectionID: collectionID})
 }
 
-// Flush sends flush requests to dataNodes specified
+// Flush sends async FlushSegments requests to dataNodes
 // which also according to channels where segments are assigned to.
 func (c *ClusterImpl) Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
 	if !c.channelManager.Match(nodeID, channel) {

@@ -196,7 +196,7 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 	segmentIDs := wb.getSegmentsToSync(ts, policies...)
 	if len(segmentIDs) > 0 {
 		log.Info("evict buffer find segments to sync", zap.Int64s("segmentIDs", segmentIDs))
-		wb.syncSegments(context.Background(), segmentIDs)
+		conc.AwaitAll(wb.syncSegments(context.Background(), segmentIDs)...)
 	}
 }
 
@@ -266,6 +266,7 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 	segmentsToSync := wb.getSegmentsToSync(wb.checkpoint.GetTimestamp(), wb.syncPolicies...)
 	if len(segmentsToSync) > 0 {
 		log.Info("write buffer get segments to sync", zap.Int64s("segmentIDs", segmentsToSync))
+		// ignore future here, use callback to handle error
 		wb.syncSegments(context.Background(), segmentsToSync)
 	}
 
@@ -296,8 +297,9 @@ func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64)
 	return nil
 }
 
-func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) {
+func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[error] {
 	log := log.Ctx(ctx)
+	result := make([]*conc.Future[error], 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		syncTask, err := wb.getSyncTask(ctx, segmentID)
 		if err != nil {
@@ -309,9 +311,9 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			}
 		}
 
-		// discard Future here, handle error in callback
-		_ = wb.syncMgr.SyncData(ctx, syncTask)
+		result = append(result, wb.syncMgr.SyncData(ctx, syncTask))
 	}
+	return result
 }
 
 // getSegmentsToSync applies all policies to get segments list to sync.

@@ -14,15 +14,26 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package accesslog
+package cache
 
 import (
-	"testing"
-
-	"github.com/stretchr/testify/assert"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
-func TestJoin(t *testing.T) {
-	assert.Equal(t, "a/b", join("a", "b"))
-	assert.Equal(t, "a/b", join("a/", "b"))
+// WIP: this function is a showcase of how to use prometheus, do not use it in production.
+func PrometheusCacheMonitor[K comparable, V any](c Cache[K, V], namespace, subsystem string) {
+	hitRate := prometheus.NewGaugeFunc(
+		prometheus.GaugeOpts{
+			Namespace: namespace,
+			Subsystem: subsystem,
+			Name:      "cache_hitrate",
+			Help:      "hit rate equals hitcount / (hitcount + misscount)",
+		},
+		func() float64 {
+			hit := float64(c.Stats().HitCount.Load())
+			miss := float64(c.Stats().MissCount.Load())
+			return hit / (hit + miss)
+		})
+	// TODO: adding more metrics.
+	prometheus.MustRegister(hitRate)
 }

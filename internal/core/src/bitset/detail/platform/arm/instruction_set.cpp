@@ -14,15 +14,43 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package accesslog
+#include "instruction_set.h"
 
-import (
-	"testing"
+#ifdef __linux__
+#include <sys/auxv.h>
+#endif
 
-	"github.com/stretchr/testify/assert"
-)
+namespace milvus {
+namespace bitset {
+namespace detail {
+namespace arm {
 
-func TestJoin(t *testing.T) {
-	assert.Equal(t, "a/b", join("a", "b"))
-	assert.Equal(t, "a/b", join("a/", "b"))
+InstructionSet::InstructionSet() {
 }
+
+#ifdef __linux__
+
+#if defined(HWCAP_SVE)
+bool
+InstructionSet::supports_sve() {
+    const unsigned long cap = getauxval(AT_HWCAP);
+    return ((cap & HWCAP_SVE) == HWCAP_SVE);
+}
+#else
+bool
+InstructionSet::supports_sve() {
+    return false;
+}
+#endif
+
+#else
+bool
+InstructionSet::supports_sve() {
+    return false;
+}
+#endif
+
+}  // namespace arm
+}  // namespace detail
+}  // namespace bitset
+}  // namespace milvus
