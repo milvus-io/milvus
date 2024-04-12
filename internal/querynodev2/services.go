@@ -292,17 +292,6 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	})
 	delegator.AddExcludedSegments(growingInfo)
 
-	flushedInfo := lo.SliceToMap(channel.GetFlushedSegmentIds(), func(id int64) (int64, uint64) {
-		return id, typeutil.MaxTimestamp
-	})
-	delegator.AddExcludedSegments(flushedInfo)
-	for _, channelInfo := range req.GetInfos() {
-		droppedInfos := lo.SliceToMap(channelInfo.GetDroppedSegmentIds(), func(id int64) (int64, uint64) {
-			return id, typeutil.MaxTimestamp
-		})
-		delegator.AddExcludedSegments(droppedInfos)
-	}
-
 	err = loadL0Segments(ctx, delegator, req)
 	if err != nil {
 		log.Warn("failed to load l0 segments", zap.Error(err))
@@ -1281,7 +1270,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		case querypb.SyncType_UpdateVersion:
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
 			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
-				return id, typeutil.MaxTimestamp
+				if action.GetCheckpoint() == nil {
+					return id, typeutil.MaxTimestamp
+				}
+				return id, action.GetCheckpoint().Timestamp
 			})
 			shardDelegator.AddExcludedSegments(droppedInfos)
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
