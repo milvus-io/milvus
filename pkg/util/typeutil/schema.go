@@ -1184,7 +1184,7 @@ func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 
 func GetSizeOfIDs(data *schemapb.IDs) int {
 	result := 0
-	if data.IdField == nil {
+	if data.GetIdField() == nil {
 		return result
 	}
 
