@@ -411,25 +411,16 @@ func (h *ServerHandler) CheckShouldDropChannel(channel string) bool {
 // FinishDropChannel cleans up the remove flag for channels
 // this function is a wrapper of server.meta.FinishDropChannel
 func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) error {
-	// clean channel cp
-	err := h.s.meta.DropChannelCheckpoint(channel)
-	if err != nil {
-		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
-		return err
-	}
-
-	// clean collection info cache
-	channels := h.s.channelManager.GetChannelsByCollectionID(collectionID)
-	if len(channels) == 0 {
-		h.s.meta.DropCollection(collectionID)
-	}
-
-	err = h.s.meta.catalog.DropChannel(h.s.ctx, channel)
+	err := h.s.meta.catalog.DropChannel(h.s.ctx, channel)
 	if err != nil {
 		log.Warn("DropChannel failed", zap.String("vChannel", channel), zap.Error(err))
 		return err
 	}
 	log.Info("DropChannel succeeded", zap.String("vChannel", channel))
 	// Channel checkpoints are cleaned up during garbage collection.
+
+	// clean collection info cache when meet drop collection info
+	h.s.meta.DropCollection(collectionID)
+
 	return nil
 }
