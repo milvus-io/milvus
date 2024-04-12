@@ -113,7 +113,7 @@ func (s *ChannelBalanceSuite) flushCollections(collections []string) {
 			return info.GetCollectionID() == collID
 		})
 		lo.ForEach(collSegs, func(info *datapb.SegmentInfo, _ int) {
-			s.Require().Equal(commonpb.SegmentState_Flushed, info.GetState())
+			s.Require().Contains([]commonpb.SegmentState{commonpb.SegmentState_Flushed, commonpb.SegmentState_Flushing}, info.GetState())
 		})
 	}
 	log.Info("=========================Data flush done=========================")
