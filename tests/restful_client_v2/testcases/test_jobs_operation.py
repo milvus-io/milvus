@@ -15,6 +15,7 @@ from uuid import uuid4
 
 IMPORT_TIMEOUT = 360
 
+
 @pytest.mark.BulkInsert
 class TestCreateImportJob(TestBase):
 
@@ -1104,8 +1105,8 @@ class TestCreateImportJobNegative(TestBase):
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
-    @pytest.mark.L0
-    def test_create_import_job_with_json_dup_key(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
+    @pytest.mark.BulkInsert
+    def test_create_import_job_with_json_dup_dynamic_key(self, insert_num, import_task_num, auto_id, is_partition_key, enable_dynamic_field):
         # create collection
         name = gen_collection_name()
         dim = 16
@@ -1131,12 +1132,13 @@ class TestCreateImportJobNegative(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
+                "dynamic_ksy": i,
                 "book_intro": [random.random() for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
             if enable_dynamic_field:
-                tmp.update({f"$meta": {"word_count": i+1}})
+                tmp.update({f"$meta": {"dynamic_key": i+1}})
             data.append(tmp)
         # dump data to file
         file_name = f"bulk_insert_data_{uuid4()}.json"
@@ -1170,6 +1172,7 @@ class TestCreateImportJobNegative(TestBase):
                 rsp = self.import_job_client.get_import_job_progress(task_id)
                 if rsp['data']['state'] == "Failed":
                     assert True
+                    finished = True
                 if rsp['data']['state'] == "Completed":
                     assert False
                 time.sleep(5)
