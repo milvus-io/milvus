@@ -105,10 +105,6 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
                        ") than other column's row count (" +
                        std::to_string(num_rows_.value()) + ")");
     }
-    LOG_INFO(
-        "Before setting field_bit for field index, fieldID:{}. segmentID:{}, ",
-        info.field_id,
-        id_);
     if (get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
@@ -122,9 +118,6 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         metric_type,
         std::move(const_cast<LoadIndexInfo&>(info).index));
     set_bit(index_ready_bitset_, field_id, true);
-    LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
-             info.field_id,
-             id_);
 }
 
 void
