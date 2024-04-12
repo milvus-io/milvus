@@ -53,7 +53,7 @@ services:
   azurite:
     image: mcr.microsoft.com/azure-storage/azurite
     volumes:
-      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/azurite:/opt/azurite
+      - ${DOCKER_VOLUME_DIRECTORY:-.}/volumes/azurite:/data
     command: azurite-blob --blobHost 0.0.0.0
     ports:
       - "10000:10000"
