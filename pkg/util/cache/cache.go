@@ -428,7 +428,7 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 
 	for _, ek := range toEvict {
 		c.evict(ek)
-		log.Info("setAndPin trigger releasing memory back", zap.Any("ek", ek))
+		log.Info("cache evicting", zap.Any("key", ek), zap.Any("by", key))
 	}
 
 	c.scavenger.Collect(key)
