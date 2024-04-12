@@ -15,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -356,7 +357,9 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(syncmgr.NewSyncTask(), nil)
-		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil)
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(conc.Go[error](func() (error, error) {
+			return nil, nil
+		}))
 		defer func() {
 			s.wb.mut.Lock()
 			defer s.wb.mut.Unlock()

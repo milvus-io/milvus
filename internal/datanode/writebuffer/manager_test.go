@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -209,14 +210,22 @@ func (s *ManagerSuite) TestMemoryCheck() {
 
 	wb := NewMockWriteBuffer(s.T())
 
+	flag := atomic.NewBool(false)
 	memoryLimit := hardware.GetMemoryCount()
 	signal := make(chan struct{}, 1)
-	wb.EXPECT().MemorySize().Return(int64(float64(memoryLimit) * 0.6))
+	wb.EXPECT().MemorySize().RunAndReturn(func() int64 {
+		if flag.Load() {
+			return int64(float64(memoryLimit) * 0.4)
+		}
+		return int64(float64(memoryLimit) * 0.6)
+	})
+	//.Return(int64(float64(memoryLimit) * 0.6))
 	wb.EXPECT().EvictBuffer(mock.Anything).Run(func(polices ...SyncPolicy) {
 		select {
 		case signal <- struct{}{}:
 		default:
 		}
+		flag.Store(true)
 	}).Return()
 	manager.mut.Lock()
 	manager.buffers[s.channelName] = wb
