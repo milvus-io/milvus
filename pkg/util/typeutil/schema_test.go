@@ -18,6 +18,7 @@ package typeutil
 
 import (
 	"encoding/binary"
+	"math"
 	"reflect"
 	"testing"
 
@@ -2055,6 +2056,14 @@ func TestValidateSparseFloatRows(t *testing.T) {
 	t.Run("unordered index", func(t *testing.T) {
 		rows := [][]byte{
 			testutils.CreateSparseFloatRow([]uint32{100, 2000, 500}, []float32{1.0, 2.0, 3.0}),
+		}
+		err := ValidateSparseFloatRows(rows...)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid index", func(t *testing.T) {
+		rows := [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{3, 5, math.MaxUint32}, []float32{1.0, 2.0, 3.0}),
 		}
 		err := ValidateSparseFloatRows(rows...)
 		assert.Error(t, err)
