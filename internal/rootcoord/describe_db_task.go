@@ -19,37 +19,38 @@ package rootcoord
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// describeCollectionTask describe collection request task
-type describeCollectionTask struct {
+// describeDBTask describe database request task
+type describeDBTask struct {
 	baseTask
-	Req              *milvuspb.DescribeCollectionRequest
-	Rsp              *milvuspb.DescribeCollectionResponse
+	Req              *rootcoordpb.DescribeDatabaseRequest
+	Rsp              *rootcoordpb.DescribeDatabaseResponse
 	allowUnavailable bool
 }
 
-func (t *describeCollectionTask) Prepare(ctx context.Context) error {
-	if err := CheckMsgType(t.Req.Base.MsgType, commonpb.MsgType_DescribeCollection); err != nil {
-		return err
-	}
+func (t *describeDBTask) Prepare(ctx context.Context) error {
 	return nil
 }
 
 // Execute task execution
-func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
-	coll, err := t.core.describeCollection(ctx, t.Req, t.allowUnavailable)
+func (t *describeDBTask) Execute(ctx context.Context) (err error) {
+	db, err := t.core.meta.GetDatabaseByName(ctx, t.Req.GetDbName(), typeutil.MaxTimestamp)
 	if err != nil {
+		t.Rsp = &rootcoordpb.DescribeDatabaseResponse{
+			Status: merr.Status(err),
+		}
 		return err
 	}
 
-	aliases := t.core.meta.ListAliasesByID(coll.CollectionID)
-	db, err := t.core.meta.GetDatabaseByID(ctx, coll.DBID, t.GetTs())
-	if err != nil {
-		return err
+	t.Rsp = &rootcoordpb.DescribeDatabaseResponse{
+		Status:           merr.Success(),
+		DbID:             db.ID,
+		DbName:           db.Name,
+		CreatedTimestamp: db.CreatedTime,
 	}
-	t.Rsp = convertModelToDesc(coll, aliases, db.Name)
 	return nil
 }

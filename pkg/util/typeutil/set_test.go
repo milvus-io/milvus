@@ -30,6 +30,16 @@ func TestUniqueSet(t *testing.T) {
 	assert.True(t, set.Contain(9))
 	assert.True(t, set.Contain(5, 7, 9))
 
+	containFive := false
+	set.Range(func(i UniqueID) bool {
+		if i == 5 {
+			containFive = true
+			return false
+		}
+		return true
+	})
+	assert.True(t, containFive)
+
 	set.Remove(7)
 	assert.True(t, set.Contain(5))
 	assert.False(t, set.Contain(7))

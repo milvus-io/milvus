@@ -50,12 +50,29 @@ func getQuotaMetrics() (*metricsinfo.ProxyQuotaMetrics, error) {
 			Rate:  rate,
 		})
 	}
+
+	getSubLabelRateMetric := func(label string) {
+		rates, err2 := rateCol.RateSubLabel(label, ratelimitutil.DefaultAvgDuration)
+		if err2 != nil {
+			err = err2
+			return
+		}
+		for s, f := range rates {
+			rms = append(rms, metricsinfo.RateMetric{
+				Label: s,
+				Rate:  f,
+			})
+		}
+	}
 	getRateMetric(internalpb.RateType_DMLInsert.String())
 	getRateMetric(internalpb.RateType_DMLUpsert.String())
 	getRateMetric(internalpb.RateType_DMLDelete.String())
 	getRateMetric(internalpb.RateType_DQLSearch.String())
+	getSubLabelRateMetric(internalpb.RateType_DQLSearch.String())
 	getRateMetric(internalpb.RateType_DQLQuery.String())
+	getSubLabelRateMetric(internalpb.RateType_DQLQuery.String())
 	getRateMetric(metricsinfo.ReadResultThroughput)
+	getSubLabelRateMetric(metricsinfo.ReadResultThroughput)
 	if err != nil {
 		return nil, err
 	}

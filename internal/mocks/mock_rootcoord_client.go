@@ -1124,6 +1124,76 @@ func (_c *MockRootCoordClient_DescribeCollectionInternal_Call) RunAndReturn(run 
 	return _c
 }
 
+// DescribeDatabase provides a mock function with given fields: ctx, in, opts
+func (_m *MockRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *rootcoordpb.DescribeDatabaseResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.DescribeDatabaseRequest, ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.DescribeDatabaseRequest, ...grpc.CallOption) *rootcoordpb.DescribeDatabaseResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*rootcoordpb.DescribeDatabaseResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.DescribeDatabaseRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockRootCoordClient_DescribeDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeDatabase'
+type MockRootCoordClient_DescribeDatabase_Call struct {
+	*mock.Call
+}
+
+// DescribeDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *rootcoordpb.DescribeDatabaseRequest
+//   - opts ...grpc.CallOption
+func (_e *MockRootCoordClient_Expecter) DescribeDatabase(ctx interface{}, in interface{}, opts ...interface{}) *MockRootCoordClient_DescribeDatabase_Call {
+	return &MockRootCoordClient_DescribeDatabase_Call{Call: _e.mock.On("DescribeDatabase",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockRootCoordClient_DescribeDatabase_Call) Run(run func(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption)) *MockRootCoordClient_DescribeDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*rootcoordpb.DescribeDatabaseRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockRootCoordClient_DescribeDatabase_Call) Return(_a0 *rootcoordpb.DescribeDatabaseResponse, _a1 error) *MockRootCoordClient_DescribeDatabase_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockRootCoordClient_DescribeDatabase_Call) RunAndReturn(run func(context.Context, *rootcoordpb.DescribeDatabaseRequest, ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error)) *MockRootCoordClient_DescribeDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropAlias provides a mock function with given fields: ctx, in, opts
 func (_m *MockRootCoordClient) DropAlias(ctx context.Context, in *milvuspb.DropAliasRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	_va := make([]interface{}, len(opts))

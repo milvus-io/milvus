@@ -85,6 +85,7 @@ type collectionInfo struct {
 	Properties     map[string]string
 	CreatedAt      Timestamp
 	DatabaseName   string
+	DatabaseID     int64
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -200,6 +201,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
 		Properties:     clonedProperties,
 		DatabaseName:   coll.DatabaseName,
+		DatabaseID:     coll.DatabaseID,
 	}
 
 	return cloneColl
@@ -257,10 +259,11 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 }
 
 // GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
-func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
+func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
+	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
 	segments := m.segments.GetSegments()
 	var total int64
@@ -269,6 +272,13 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
+
+			partBinlogSize, ok := partitionBinlogSize[segment.GetCollectionID()]
+			if !ok {
+				partBinlogSize = make(map[int64]int64)
+				partitionBinlogSize[segment.GetCollectionID()] = partBinlogSize
+			}
+			partBinlogSize[segment.GetPartitionID()] += segmentSize
 
 			coll, ok := m.collections[segment.GetCollectionID()]
 			if ok {
@@ -294,7 +304,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 			}
 		}
 	}
-	return total, collectionBinlogSize
+	return total, collectionBinlogSize, partitionBinlogSize
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {

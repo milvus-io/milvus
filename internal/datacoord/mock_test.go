@@ -329,6 +329,15 @@ type mockRootCoordClient struct {
 	cnt   int64
 }
 
+func (m *mockRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	return &rootcoordpb.DescribeDatabaseResponse{
+		Status:           merr.Success(),
+		DbID:             1,
+		DbName:           "default",
+		CreatedTimestamp: 1,
+	}, nil
+}
+
 func (m *mockRootCoordClient) Close() error {
 	// TODO implement me
 	panic("implement me")

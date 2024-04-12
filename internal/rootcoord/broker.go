@@ -234,6 +234,11 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		return err
 	}
 
+	db, err := b.s.meta.GetDatabaseByName(ctx, req.GetDbName(), typeutil.MaxTimestamp)
+	if err != nil {
+		return err
+	}
+
 	partitionIDs := make([]int64, len(colMeta.Partitions))
 	for _, p := range colMeta.Partitions {
 		partitionIDs = append(partitionIDs, p.PartitionID)
@@ -249,6 +254,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		PartitionIDs:   partitionIDs,
 		StartPositions: colMeta.StartPositions,
 		Properties:     req.GetProperties(),
+		DbID:           db.ID,
 	}
 
 	resp, err := b.s.dataCoord.BroadcastAlteredCollection(ctx, dcReq)
