@@ -94,38 +94,40 @@ func (m *bufferManager) memoryCheck() {
 
 	m.mut.Lock()
 	defer m.mut.Unlock()
+	for {
+		var total int64
+		var candidate WriteBuffer
+		var candiSize int64
+		var candiChan string
 
-	var total int64
-	var candidate WriteBuffer
-	var candiSize int64
-	var candiChan string
-	for chanName, buf := range m.buffers {
-		size := buf.MemorySize()
-		total += size
-		if size > candiSize {
-			candiSize = size
-			candidate = buf
-			candiChan = chanName
+		toMB := func(mem float64) float64 {
+			return mem / 1024 / 1024
 		}
-	}
 
-	toMB := func(mem float64) float64 {
-		return mem / 1024 / 1024
-	}
+		for chanName, buf := range m.buffers {
+			size := buf.MemorySize()
+			total += size
+			if size > candiSize {
+				candiSize = size
+				candidate = buf
+				candiChan = chanName
+			}
+		}
 
-	totalMemory := hardware.GetMemoryCount()
-	memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryWatermark.GetAsFloat()
-	if float64(total) < memoryWatermark {
-		log.RatedDebug(20, "skip force sync because memory level is not high enough",
-			zap.Float64("current_total_memory_usage", toMB(float64(total))),
-			zap.Float64("current_memory_watermark", toMB(memoryWatermark)))
-		return
-	}
+		totalMemory := hardware.GetMemoryCount()
+		memoryWatermark := float64(totalMemory) * paramtable.Get().DataNodeCfg.MemoryForceSyncWatermark.GetAsFloat()
+		if float64(total) < memoryWatermark {
+			log.RatedDebug(20, "skip force sync because memory level is not high enough",
+				zap.Float64("current_total_memory_usage", toMB(float64(total))),
+				zap.Float64("current_memory_watermark", toMB(memoryWatermark)))
+			return
+		}
 
-	if candidate != nil {
-		candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
-		log.Info("notify writebuffer to sync",
-			zap.String("channel", candiChan), zap.Float64("bufferSize(MB)", toMB(float64(candiSize))))
+		if candidate != nil {
+			candidate.EvictBuffer(GetOldestBufferPolicy(paramtable.Get().DataNodeCfg.MemoryForceSyncSegmentNum.GetAsInt()))
+			log.Info("notify writebuffer to sync",
+				zap.String("channel", candiChan), zap.Float64("bufferSize(MB)", toMB(float64(candiSize))))
+		}
 	}
 }
 

@@ -10,6 +10,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -64,7 +65,7 @@ func BenchmarkAccesslog(b *testing.B) {
 	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
 	Params.Save(Params.ProxyCfg.AccessLog.Filename.Key, "")
 	Params.Save(Params.CommonCfg.ClusterPrefix.Key, "in-test")
-	initAccessLogger(&Params.ProxyCfg.AccessLog, &Params.MinioCfg)
+	InitAccessLogger(Params)
 	paramtable.Get().CommonCfg.ClusterPrefix.GetValue()
 
 	clientInfo := &commonpb.ClientInfo{
@@ -81,9 +82,9 @@ func BenchmarkAccesslog(b *testing.B) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		data := datas[i%len(datas)]
-		accessInfo := NewGrpcAccessInfo(ctx, rpcInfo, data.req)
+		accessInfo := info.NewGrpcAccessInfo(ctx, rpcInfo, data.req)
 		accessInfo.UpdateCtx(ctx)
 		accessInfo.SetResult(data.resp, data.err)
-		accessInfo.Write()
+		_globalL.Write(accessInfo)
 	}
 }
