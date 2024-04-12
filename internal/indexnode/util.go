@@ -28,13 +28,11 @@ func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType)
 		return uint64(dim) / 8 * uint64(numRows), nil
 	case schemapb.DataType_FloatVector:
 		return uint64(dim) * uint64(numRows) * 4, nil
-	case schemapb.DataType_Float16Vector:
-	case schemapb.DataType_BFloat16Vector:
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return uint64(dim) * uint64(numRows) * 2, nil
 	case schemapb.DataType_SparseFloatVector:
 		return 0, errors.New("could not estimate field data size of SparseFloatVector")
 	default:
 		return 0, nil
 	}
-	return 0, nil
 }
