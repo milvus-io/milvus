@@ -27,7 +27,7 @@ type rankParams struct {
 }
 
 // parseSearchInfo returns QueryInfo and offset
-func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, ignoreOffset bool) (*planpb.QueryInfo, int64, error) {
+func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb.CollectionSchema, ignoreOffset bool, metricTypeFromResp string) (*planpb.QueryInfo, int64, error) {
 	// 1. parse offset and real topk
 	topKStr, err := funcutil.GetAttrByKeyFromRepeatedKV(TopKKey, searchParamsPair)
 	if err != nil {
@@ -66,7 +66,11 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 	// 2. parse metrics type
 	metricType, err := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, searchParamsPair)
 	if err != nil {
-		metricType = ""
+		metricType = metricTypeFromResp
+	} else {
+		if metricTypeFromResp != metricType {
+			return nil, 0, merr.WrapErrParameterInvalid(metricTypeFromResp, metricType, "metric type not match")
+		}
 	}
 
 	// 3. parse round decimal

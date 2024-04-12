@@ -17,11 +17,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/parser/planparserv2"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -443,11 +445,39 @@ func (t *searchTask) tryGeneratePlan(params []*commonpb.KeyValuePair, dsl string
 		}
 		annsFieldName = vecFields[0].Name
 	}
-	queryInfo, offset, parseErr := parseSearchInfo(params, t.schema.CollectionSchema, ignoreOffset)
+
+	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
+	listIndexResp, respErr := t.node.(*Proxy).dataCoord.ListIndexes(t.ctx, &indexpb.ListIndexesRequest{
+		CollectionID: t.CollectionID,
+	})
+	err = merr.CheckRPCCall(listIndexResp, respErr)
+	if err != nil {
+		log.Warn("failed to list index", zap.Error(err))
+		return nil, nil, 0, err
+	}
+
+	var annFieldIndexInfo *indexpb.IndexInfo
+	for _, info := range listIndexResp.IndexInfos {
+		if info.GetFieldID() == annField.FieldID {
+			annFieldIndexInfo = info
+			break
+		}
+	}
+
+	if annFieldIndexInfo == nil {
+		return nil, nil, 0, merr.WrapErrParameterInvalidMsg("failed to get annFieldIndexInfo")
+	}
+
+	metricTypeFromResp, getErr := funcutil.GetAttrByKeyFromRepeatedKV(common.MetricTypeKey, annFieldIndexInfo.IndexParams)
+	if err != nil {
+		return nil, nil, 0, getErr
+	}
+
+	queryInfo, offset, parseErr := parseSearchInfo(params, t.schema.CollectionSchema, ignoreOffset, metricTypeFromResp)
 	if parseErr != nil {
 		return nil, nil, 0, parseErr
 	}
-	annField := typeutil.GetFieldByName(t.schema.CollectionSchema, annsFieldName)
+
 	if queryInfo.GetGroupByFieldId() != -1 && annField.GetDataType() == schemapb.DataType_BinaryVector {
 		return nil, nil, 0, errors.New("not support search_group_by operation based on binary vector column")
 	}

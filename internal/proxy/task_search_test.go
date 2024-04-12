@@ -2007,7 +2007,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.validParams, nil, false)
+				info, offset, err := parseSearchInfo(test.validParams, nil, false, metric.L2)
 				assert.NoError(t, err)
 				assert.NotNil(t, info)
 				if test.description == "offsetParam" {
@@ -2048,6 +2048,12 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			Value: metric.L2,
 		})
 
+		wrongMetricTypeParams := getBaseSearchParams()
+		wrongMetricTypeParams = append(wrongMetricTypeParams, &commonpb.KeyValuePair{
+			Key:   common.MetricTypeKey,
+			Value: metric.IP,
+		})
+
 		// no roundDecimal is valid
 		noRoundDecimal := append(spNoSearchParams, &commonpb.KeyValuePair{
 			Key:   SearchParamsKey,
@@ -2086,6 +2092,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			{"No_topk", spNoTopk},
 			{"Invalid_topk", spInvalidTopk},
 			{"Invalid_topk_65536", spInvalidTopk65536},
+			{"wrongMetricTypeParams", wrongMetricTypeParams},
 			{"Invalid_topk_plus_offset", spInvalidTopkPlusOffset},
 			{"Invalid_round_decimal", spInvalidRoundDecimal},
 			{"Invalid_round_decimal_1000", spInvalidRoundDecimal2},
@@ -2096,7 +2103,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.invalidParams, nil, false)
+				info, offset, err := parseSearchInfo(test.invalidParams, nil, false, metric.L2)
 				assert.Error(t, err)
 				assert.Nil(t, info)
 				assert.Zero(t, offset)
@@ -2163,52 +2170,55 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		})
 
 		tests := []struct {
-			description string
-			validParams []*commonpb.KeyValuePair
+			description        string
+			validParams        []*commonpb.KeyValuePair
+			metricTypeFromResp string
 		}{
-			{"normalParam", normalParam},
-			{"normalParamWithNoFilter", normalParamWithNoFilter},
-			{"normalParamForIP", normalParamForIP},
-			{"normalParamForL2", normalParamForL2},
+			{"normalParam", normalParam, metric.L2},
+			{"normalParamWithNoFilter", normalParamWithNoFilter, metric.L2},
+			{"normalParamForIP", normalParamForIP, metric.IP},
+			{"normalParamForL2", normalParamForL2, metric.L2},
 		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil, false)
+				info, _, err := parseSearchInfo(test.validParams, nil, false, test.metricTypeFromResp)
 				assert.NoError(t, err)
 				assert.NotNil(t, info)
 			})
 		}
 
 		tests = []struct {
-			description string
-			validParams []*commonpb.KeyValuePair
+			description        string
+			validParams        []*commonpb.KeyValuePair
+			metricTypeFromResp string
 		}{
-			{"abnormalParamForIP", abnormalParamForIP},
-			{"abnormalParamForL2", abnormalParamForL2},
+			{"abnormalParamForIP", abnormalParamForIP, metric.IP},
+			{"abnormalParamForL2", abnormalParamForL2, metric.L2},
 		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil, false)
+				info, _, err := parseSearchInfo(test.validParams, nil, false, test.metricTypeFromResp)
 				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 				assert.Nil(t, info)
 			})
 		}
 
 		tests = []struct {
-			description string
-			validParams []*commonpb.KeyValuePair
+			description        string
+			validParams        []*commonpb.KeyValuePair
+			metricTypeFromResp string
 		}{
-			{"invalidTypeRadius", invalidTypeRadius},
-			{"invalidTypeFilter", invalidTypeFilter},
-			{"wrongTypeRadius", wrongTypeRadius},
-			{"wrongTypeFilter", wrongTypeFilter},
+			{"invalidTypeRadius", invalidTypeRadius, metric.L2},
+			{"invalidTypeFilter", invalidTypeFilter, metric.L2},
+			{"wrongTypeRadius", wrongTypeRadius, metric.IP},
+			{"wrongTypeFilter", wrongTypeFilter, metric.IP},
 		}
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil, false)
+				info, _, err := parseSearchInfo(test.validParams, nil, false, test.metricTypeFromResp)
 				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 				assert.Nil(t, info)
 			})
@@ -2232,7 +2242,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, false, metric.L2)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2251,7 +2261,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema, false)
+		info, _, err := parseSearchInfo(normalParam, schema, false, metric.L2)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})

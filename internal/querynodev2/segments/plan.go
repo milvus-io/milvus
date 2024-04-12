@@ -88,7 +88,6 @@ type SearchRequest struct {
 }
 
 func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.SearchRequest, placeholderGrp []byte) (*SearchRequest, error) {
-	metricType := req.GetReq().GetMetricType()
 	expr := req.Req.SerializedExprPlan
 	plan, err := createSearchPlanByExpr(ctx, collection, expr)
 	if err != nil {
@@ -108,12 +107,6 @@ func NewSearchRequest(ctx context.Context, collection *Collection, req *querypb.
 	if err := HandleCStatus(ctx, &status, "parser searchRequest failed"); err != nil {
 		plan.delete()
 		return nil, err
-	}
-
-	metricTypeInPlan := plan.GetMetricType()
-	if len(metricType) != 0 && metricType != metricTypeInPlan {
-		plan.delete()
-		return nil, merr.WrapErrParameterInvalid(metricTypeInPlan, metricType, "metric type not match")
 	}
 
 	var fieldID C.int64_t
