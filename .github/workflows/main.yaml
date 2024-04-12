@@ -263,6 +263,8 @@ jobs:
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
           disable_safe_directory: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
       - name: Retry Upload coverage to Codecov
         if: ${{ failure()  && github.repository == 'milvus-io/milvus' }}
         uses: codecov/codecov-action@v4
@@ -273,3 +275,6 @@ jobs:
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
           disable_safe_directory: true
+        env:
+          CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
+
