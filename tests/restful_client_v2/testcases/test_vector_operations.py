@@ -730,6 +730,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.xfail(reason="issue https://github.com/milvus-io/milvus/issues/32214")
     def test_search_vector_with_sparse_float_vector_datatype(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema):
         """
