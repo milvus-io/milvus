@@ -120,6 +120,11 @@ type Cache[K comparable, V any] interface {
 	Do(key K, doer func(V) error) (bool, error)
 	DoWait(key K, timeout time.Duration, doer func(V) error) (bool, error)
 	MarkItemNeedReload(key K) bool
+
+	// Expire removes the item from the cache.
+	// Return true if the item is not in used and removed immediately or the item is not in cache now.
+	// Return false if the item is in used, it will be marked as need to be reloaded, a lazy expire is applied.
+	Expire(key K) (evicted bool)
 }
 
 type Waiter[K comparable] struct {
@@ -436,6 +441,25 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 	c.items[item.key] = e
 	log.Info("setAndPin set up item", zap.Any("item.key", item.key))
 	return item, nil
+}
+
+func (c *lruCache[K, V]) Expire(key K) (evicted bool) {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+
+	e, ok := c.items[key]
+	if !ok {
+		return true
+	}
+
+	item := e.Value.(*cacheItem[K, V])
+	if item.pinCount.Load() == 0 {
+		c.evict(key)
+		return true
+	}
+
+	item.needReload = true
+	return false
 }
 
 func (c *lruCache[K, V]) evict(key K) {
