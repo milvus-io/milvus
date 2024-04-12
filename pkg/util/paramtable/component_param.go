@@ -2330,7 +2330,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				// use local storage path to check correct device
 				localStoragePath := base.Get("localStorage.path")
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
-					os.MkdirAll(localStoragePath, os.ModePerm)
+					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
+						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+					}
 				}
 				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
@@ -2409,7 +2411,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.gracefulStopTimeout",
 		Version:      "2.2.1",
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
-		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
@@ -3624,7 +3625,6 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Version:      "2.2.1",
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
 		Doc:          "seconds. force stop node without graceful stop",
-		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 }

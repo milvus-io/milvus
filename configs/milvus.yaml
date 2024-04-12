@@ -196,6 +196,7 @@ rootCoord:
 proxy:
   timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
+  healthCheckTimetout: 3000 # ms, the interval that to do component healthy check
   msgStream:
     timeTick:
       bufSize: 512
@@ -331,6 +332,7 @@ queryNode:
     warmup: async
   mmap:
     mmapEnabled: false # Enable mmap for loading data
+  mmapEnabled: false # Enable mmap for loading data
   lazyloadEnabled: false # Enable lazyload for loading data
   grouping:
     enabled: true
@@ -359,7 +361,6 @@ queryNode:
       taskQueueExpire: 60 # Control how long (many seconds) that queue retains since queue is empty
       enableCrossUserGrouping: false # Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)
       maxPendingTaskPerUser: 1024 # Max pending task per user in scheduler
-  gracefulStopTimeout: 
   dataSync:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
@@ -387,7 +388,6 @@ indexNode:
     buildParallel: 1
   enableDisk: true # enable index node build disk vector index
   maxDiskUsagePercentage: 95
-  gracefulStopTimeout:  # seconds. force stop node without graceful stop
   ip:  # if not specified, use the first unicastable address
   port: 21121
   grpc:
@@ -532,6 +532,8 @@ log:
 grpc:
   log:
     level: WARNING
+  serverMaxSendSize: 536870912
+  serverMaxRecvSize: 268435456
   gracefulStopTimeout: 10 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
@@ -544,6 +546,8 @@ grpc:
     minResetInterval: 1000
     maxCancelError: 32
     minSessionCheckInterval: 200
+  clientMaxSendSize: 268435456
+  clientMaxRecvSize: 536870912
 
 # Configure the proxy tls enable.
 tls:
@@ -552,6 +556,18 @@ tls:
   caPemPath: configs/cert/ca.pem
 
 common:
+  chanNamePrefix:
+    cluster: by-dev
+    rootCoordTimeTick: rootcoord-timetick
+    rootCoordStatistics: rootcoord-statistics
+    rootCoordDml: rootcoord-dml
+    replicateMsg: replicate-msg
+    queryTimeTick: queryTimeTick
+    dataCoordTimeTick: datacoord-timetick-channel
+    dataCoordSegmentInfo: segment-info-channel
+  subNamePrefix:
+    dataCoordSubNamePrefix: dataCoord
+    dataNodeSubNamePrefix: dataNode
   defaultPartitionName: _default # default partition name for a collection
   defaultIndexName: _default_idx # default index name
   entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
