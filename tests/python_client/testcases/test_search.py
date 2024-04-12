@@ -11902,6 +11902,94 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
         # 4. hybrid search 
-        res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)
-        is_sorted_ascend = lambda lst: all(lst[i]['distance'] <= lst[i+1]['distance'] for i in range(len(lst)-1))
-        assert is_sorted_ascend(res[0])
+        res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)[0]
+        is_sorted_descend = lambda lst: all(lst[i] >= lst[i+1] for i in range(len(lst)-1))
+        assert is_sorted_descend(res[0].distances)
+
+
+class TestSparseSearch(TestcaseBase):
+    """ Add some test cases for the sparse vector """
+
+    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.parametrize("index, index_params", zip(ct.all_index_types[9:11], ct.default_index_params[9:11]))
+    def test_sparse_index_search(self, index, index_params):
+        """
+        target: verify that sparse index for sparse vectors can be searched properly
+        method: create connection, collection, insert and search
+        expected: search successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema(auto_id=False)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data)
+        params = {"index_type": index, "metric_type": "IP", "params": index_params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
+
+        collection_w.load()
+        collection_w.search(data[-1][-1:], ct.default_sparse_vec_field_name,
+                            ct.default_sparse_search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("index, index_params", zip(ct.all_index_types[9:11], ct.default_index_params[9:11]))
+    @pytest.mark.parametrize("dim", [ct.min_sparse_vector_dim, 32768, ct.max_sparse_vector_dim])
+    def test_sparse_index_dim(self, index, index_params, dim):
+        """
+        target: validating the sparse index in different dimensions
+        method: create connection, collection, insert and hybrid search
+        expected: search successfully
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema(auto_id=False)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+        data = cf.gen_default_list_sparse_data(dim=dim)
+        collection_w.insert(data)
+        params = {"index_type": index, "metric_type": "IP", "params": index_params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
+
+        collection_w.load()
+        collection_w.search(data[-1][-1:], ct.default_sparse_vec_field_name,
+                            ct.default_sparse_search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.xfail(reason="issue #31485")
+    @pytest.mark.parametrize("index, index_params", zip(ct.all_index_types[9:11], ct.default_index_params[9:11]))
+    def test_sparse_index_enable_mmap_search(self, index, index_params):
+        """
+        target: verify that the sparse indexes of sparse vectors can be searched properly after turning on mmap
+        method: create connection, collection, enable mmap,  insert and search
+        expected: search successfully , query result is correct
+        """
+        self._connect()
+        c_name = cf.gen_unique_str(prefix)
+        schema = cf.gen_default_sparse_schema(auto_id=False)
+        collection_w, _ = self.collection_wrap.init_collection(c_name, schema=schema)
+
+        data = cf.gen_default_list_sparse_data()
+        collection_w.insert(data)
+
+        params = {"index_type": index, "metric_type": "IP", "params": index_params}
+        collection_w.create_index(ct.default_sparse_vec_field_name, params, index_name=index)
+
+        collection_w.set_properties({'mmap.enabled': True})
+        pro = collection_w.describe().get("properties")
+        assert pro["mmap.enabled"] == 'True'
+        collection_w.alter_index(index, {'mmap.enabled': True})
+        assert collection_w.index().params["mmap.enabled"] == 'True'
+        collection_w.load()
+        collection_w.search(data[-1][-1:], ct.default_sparse_vec_field_name,
+                            ct.default_sparse_search_params, default_limit,
+                            check_task=CheckTasks.check_search_results,
+                            check_items={"nq": default_nq,
+                                         "limit": default_limit})
+        term_expr = f'{ct.default_int64_field_name} in [0, 1, 10, 100]'
+        res = collection_w.query(term_expr)
+        assert len(res) == 4
