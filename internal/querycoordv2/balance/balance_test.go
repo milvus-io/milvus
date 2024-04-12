@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
+	"github.com/milvus-io/milvus/pkg/common"
 )
 
 type BalanceTestSuite struct {
@@ -153,6 +154,7 @@ func (suite *BalanceTestSuite) TestAssignChannel() {
 					NodeID:   c.nodeIDs[i],
 					Address:  "127.0.0.1:0",
 					Hostname: "localhost",
+					Version:  common.Version,
 				})
 				nodeInfo.UpdateStats(session.WithChannelCnt(c.channelCnts[i]))
 				nodeInfo.SetState(c.states[i])
