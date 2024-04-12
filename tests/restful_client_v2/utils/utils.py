@@ -12,7 +12,7 @@ from loguru import logger
 import datetime
 
 fake = Faker()
-
+rng = np.random.default_rng()
 
 def random_string(length=8):
     letters = string.ascii_letters
@@ -201,6 +201,8 @@ def gen_vector(datatype="float_vector", dim=128, binary_data=False):
     value = None
     if datatype == "FloatVector":
         return preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist()
+    if datatype == "SparseFloatVector":
+        return {d: rng.random() for d in random.sample(range(dim), random.randint(20, 30))}
     if datatype == "BinaryVector":
         value = gen_binary_vectors(1, dim)[1][0]
     if datatype == "Float16Vector":
