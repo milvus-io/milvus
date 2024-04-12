@@ -223,11 +223,11 @@ proxy:
     remotePath: access_log/ # File path in minIO
     remoteMaxTime: 0 # Max time for log file in minIO, in hours
     formatters:
-      query:
-        methods: "Query,Search,Delete"
-        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
       base:
         format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost]"
+      query:
+        format: "[$time_now] [ACCESS] <$user_name: $user_addr> $method_name [status: $method_status] [code: $error_code] [sdk: $sdk_version] [msg: $error_msg] [traceID: $trace_id] [timeCost: $time_cost] [database: $database_name] [collection: $collection_name] [partitions: $partition_name] [expr: $method_expr]"
+        methods: "Query,Search,Delete"
   connectionCheckIntervalSeconds: 120 # the interval time(in seconds) for connection manager to scan inactive client info
   connectionClientInfoTTLSeconds: 86400 # inactive client info TTL duration, in seconds
   maxConnectionNum: 10000 # the max client info numbers that proxy should manage, avoid too many client infos
@@ -474,7 +474,6 @@ dataNode:
     flowGraph:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
-    maxParallelSyncTaskNum: 6 # deprecated, legacy flush manager max conurrency number
     maxParallelSyncMgrTasks: 256 # The max concurrent sync task number of datanode sync mgr globally
     skipMode:
       enable: true # Support skip some timetick message to reduce CPU usage

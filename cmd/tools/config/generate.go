@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"os"
+	"io"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/samber/lo"
@@ -77,7 +78,16 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			item := subVal.Interface().(paramtable.ParamGroup)
 			log.Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
 			refreshable := tag.Get("refreshable")
-			for key, value := range item.GetValue() {
+
+			// Sort group items to stablize the output order
+			m := item.GetValue()
+			keys := make([]string, 0, len(m))
+			for k := range m {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				value := m[key]
 				log.Debug("got group entry", zap.String("key", key), zap.String("value", value))
 				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, ""})
 			}
@@ -87,13 +97,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 	}
 }
 
-func WriteCsv() {
-	f, err := os.Create("configs.csv")
-	defer f.Close()
-	if err != nil {
-		log.Error("create file failed", zap.Error(err))
-		os.Exit(-2)
-	}
+func WriteCsv(f io.Writer) {
 	w := csv.NewWriter(f)
 	w.Write([]string{"key", "defaultValue", "sinceVersion", "refreshable", "exportToUser", "comment"})
 
@@ -111,7 +115,7 @@ type YamlGroup struct {
 }
 
 type YamlMarshaller struct {
-	writer *os.File
+	writer io.Writer
 	groups []YamlGroup
 	data   []DocContent
 }
@@ -152,19 +156,19 @@ func (m *YamlMarshaller) writeYamlRecursive(data []DocContent, level int) {
 		isDisabled := slices.Contains(disabledGroups, strings.Split(content.key, ".")[0])
 		if strings.Count(content.key, ".") == level {
 			if isDisabled {
-				m.writer.WriteString("# ")
+				io.WriteString(m.writer, "# ")
 			}
 			m.writeContent(key, content.defaultValue, content.comment, level)
 			continue
 		}
 		extra, ok := extraHeaders[key]
 		if ok {
-			m.writer.WriteString(extra + "\n")
+			io.WriteString(m.writer, extra+"\n")
 		}
 		if isDisabled {
-			m.writer.WriteString("# ")
+			io.WriteString(m.writer, "# ")
 		}
-		m.writer.WriteString(fmt.Sprintf("%s%s:\n", strings.Repeat(" ", level*2), key))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s:\n", strings.Repeat(" ", level*2), key))
 		m.writeYamlRecursive(contents, level+1)
 	}
 }
@@ -173,27 +177,20 @@ func (m *YamlMarshaller) writeContent(key, value, comment string, level int) {
 	if strings.Contains(comment, "\n") {
 		multilines := strings.Split(comment, "\n")
 		for _, line := range multilines {
-			m.writer.WriteString(fmt.Sprintf("%s# %s\n", strings.Repeat(" ", level*2), line))
+			io.WriteString(m.writer, fmt.Sprintf("%s# %s\n", strings.Repeat(" ", level*2), line))
 		}
-		m.writer.WriteString(fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
 	} else if comment != "" {
-		m.writer.WriteString(fmt.Sprintf("%s%s: %s # %s\n", strings.Repeat(" ", level*2), key, value, comment))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s: %s # %s\n", strings.Repeat(" ", level*2), key, value, comment))
 	} else {
-		m.writer.WriteString(fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
 	}
 }
 
-func WriteYaml() {
-	f, err := os.Create("milvus.yaml")
-	defer f.Close()
-	if err != nil {
-		log.Error("create file failed", zap.Error(err))
-		os.Exit(-2)
-	}
-
+func WriteYaml(w io.Writer) {
 	result := collect()
 
-	f.WriteString(`# Licensed to the LF AI & Data foundation under one
+	io.WriteString(w, `# Licensed to the LF AI & Data foundation under one
 # or more contributor license agreements. See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership. The ASF licenses this file
@@ -322,7 +319,7 @@ func WriteYaml() {
 			name: "trace",
 		},
 	}
-	marshller := YamlMarshaller{f, groups, result}
+	marshller := YamlMarshaller{w, groups, result}
 	marshller.writeYamlRecursive(lo.Filter(result, func(d DocContent, _ int) bool {
 		return d.exportToUser
 	}), 0)

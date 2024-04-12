@@ -3299,7 +3299,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Version:      "2.3.0",
 		DefaultValue: "6",
 		Doc:          "deprecated, legacy flush manager max conurrency number",
-		Export:       true,
+		Export:       false,
 	}
 	p.MaxParallelSyncTaskNum.Init(base.mgr)
 
