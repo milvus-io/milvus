@@ -23,7 +23,6 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	"github.com/cockroachdb/errors"
@@ -203,14 +202,14 @@ func (sched *TaskScheduler) scheduleIndexBuildTask() []task {
 	return ret
 }
 
-func getStateFromError(err error) commonpb.IndexState {
+func getStateFromError(err error) indexpb.JobState {
 	if errors.Is(err, errCancel) {
-		return commonpb.IndexState_Retry
+		return indexpb.JobState_JobStateRetry
 	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) {
 		// NoSuchKey or unsupported error
-		return commonpb.IndexState_Failed
+		return indexpb.JobState_JobStateFailed
 	}
-	return commonpb.IndexState_Retry
+	return indexpb.JobState_JobStateRetry
 }
 
 func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
@@ -234,7 +233,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
 			log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))
-			t.SetState(indexpb.JobState(getStateFromError(err)), err.Error())
+			t.SetState(getStateFromError(err), err.Error())
 			return
 		}
 	}
