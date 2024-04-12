@@ -20,39 +20,14 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 const (
-	unknownString = "Unknown"
-	fomaterkey    = "format"
-	methodKey     = "methods"
+	fomaterkey = "format"
+	methodKey  = "methods"
 )
-
-type getMetricFunc func(i *GrpcAccessInfo) string
-
-// supported metrics
-var metricFuncMap = map[string]getMetricFunc{
-	"$method_name":     getMethodName,
-	"$method_status":   getMethodStatus,
-	"$trace_id":        getTraceID,
-	"$user_addr":       getAddr,
-	"$user_name":       getUserName,
-	"$response_size":   getResponseSize,
-	"$error_code":      getErrorCode,
-	"$error_msg":       getErrorMsg,
-	"$database_name":   getDbName,
-	"$collection_name": getCollectionName,
-	"$partition_name":  getPartitionName,
-	"$time_cost":       getTimeCost,
-	"$time_now":        getTimeNow,
-	"$time_start":      getTimeStart,
-	"$time_end":        getTimeEnd,
-	"$method_expr":     getExpr,
-	"$output_fields":   getOutputFields,
-	"$sdk_version":     getSdkVersion,
-	"$cluster_prefix":  getClusterPrefix,
-}
 
 var BaseFormatterKey = "base"
 
@@ -128,7 +103,7 @@ func (f *Formatter) buildMetric(metric string, prefixs []string) ([]string, []st
 func (f *Formatter) build() {
 	prefixs := []string{f.base}
 	f.fields = []string{}
-	for metric := range metricFuncMap {
+	for metric := range info.MetricFuncMap {
 		if strings.Contains(f.base, metric) {
 			f.fields, prefixs = f.buildMetric(metric, prefixs)
 		}
@@ -144,8 +119,8 @@ func (f *Formatter) build() {
 	f.fmt += "\n"
 }
 
-func (f *Formatter) Format(i AccessInfo) string {
-	fieldValues := i.Get(f.fields...)
+func (f *Formatter) Format(i info.AccessInfo) string {
+	fieldValues := info.Get(i, f.fields...)
 	return fmt.Sprintf(f.fmt, fieldValues...)
 }
 
