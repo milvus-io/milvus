@@ -316,6 +316,7 @@ func (t *searchTask) initAdvancedSearchRequest(ctx context.Context) error {
 			PartitionIDs:       nil,
 			Topk:               queryInfo.GetTopk(),
 			Offset:             offset,
+			MetricType:         queryInfo.GetMetricType(),
 		}
 
 		// set PartitionIDs for sub search
