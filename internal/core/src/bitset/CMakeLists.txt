@@ -29,15 +29,12 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
     list(APPEND BITSET_SRCS
         detail/platform/arm/neon-inst.cpp
         detail/platform/arm/sve-inst.cpp
+        detail/platform/arm/instruction_set.cpp
     )
 
     # targeting AWS graviton, 
     #  https://github.com/aws/aws-graviton-getting-started/blob/main/c-c%2B%2B.md
 
-    # let dynamic.cpp know that SVE is available
-    # comment it out for now
-    # set_source_files_properties(detail/platform/dynamic.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
-    
     set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
 endif()
 
