@@ -47,6 +47,13 @@ func collect() []DocContent {
 	return result
 }
 
+func quoteIfNeeded(s string) string {
+	if strings.ContainsAny(s, "[],{}") {
+		return fmt.Sprintf("\"%s\"", s)
+	}
+	return s
+}
+
 func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val *reflect.Value) {
 	if val.Kind() != reflect.Struct {
 		return
@@ -62,15 +69,18 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			defaultValue := params.GetWithDefault(item.Key, item.DefaultValue)
 			log.Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
 			*data = append(*data, DocContent{item.Key, defaultValue, item.Version, refreshable, item.Export, item.Doc})
-			for _, fk := range item.FallbackKeys {
-				log.Debug("got fallback key", zap.String("key", fk), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
-				*data = append(*data, DocContent{fk, defaultValue, item.Version, refreshable, item.Export, item.Doc})
-			}
+			// for _, fk := range item.FallbackKeys {
+			// 	log.Debug("got fallback key", zap.String("key", fk), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
+			// 	*data = append(*data, DocContent{fk, defaultValue, item.Version, refreshable, item.Export, item.Doc})
+			// }
 		} else if t == "paramtable.ParamGroup" {
 			item := subVal.Interface().(paramtable.ParamGroup)
 			log.Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
 			refreshable := tag.Get("refreshable")
-			*data = append(*data, DocContent{item.KeyPrefix, "", item.Version, refreshable, item.Export, item.Doc})
+			for key, value := range item.GetValue() {
+				log.Debug("got group entry", zap.String("key", key), zap.String("value", value))
+				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, ""})
+			}
 		} else {
 			collectRecursive(params, data, &subVal)
 		}
@@ -208,6 +218,13 @@ func WriteYaml() {
 			name: "metastore",
 		},
 		{
+			name: "tikv",
+			header: `
+# Related configuration of tikv, used to store Milvus metadata.
+# Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
+# TiKV is a good option when the metadata size requires better horizontal scalability.`,
+		},
+		{
 			name: "localStorage",
 		},
 		{
@@ -217,13 +234,17 @@ func WriteYaml() {
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.`,
 		},
 		{
+			name: "mq",
+			header: `
+# Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
+# You can change your mq by setting mq.type field.
+# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
+# 1. standalone(local) mode: rocksmq(default) > natsmq > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)`,
+		},
+		{
 			name: "pulsar",
 			header: `
-# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
-# There is a note about enabling priority if we config multiple mq in this file
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
-
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.`,
 		},
 		{
@@ -233,6 +254,12 @@ func WriteYaml() {
 		},
 		{
 			name: "rocksmq",
+		},
+		{
+			name: "natsmq",
+			header: `
+# natsmq configuration.
+# more detail: https://docs.nats.io/running-a-nats-service/configuration`,
 		},
 		{
 			name:   "rootCoord",
