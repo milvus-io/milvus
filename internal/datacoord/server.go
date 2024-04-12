@@ -53,14 +53,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/expr"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -671,11 +669,12 @@ func (s *Server) initIndexNodeManager() {
 }
 
 func (s *Server) startServerLoop() {
-	s.serverLoopWg.Add(2)
 	if !Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
 		s.serverLoopWg.Add(1)
 		s.startDataNodeTtLoop(s.serverLoopCtx)
 	}
+
+	s.serverLoopWg.Add(2)
 	s.startWatchService(s.serverLoopCtx)
 	s.startFlushLoop(s.serverLoopCtx)
 	s.startIndexService(s.serverLoopCtx)
@@ -748,7 +747,7 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 					checker.Check()
 				}
 
-				if err := s.handleTimetickMessage(ctx, ttMsg); err != nil {
+				if err := s.handleDataNodeTtMsg(ctx, &ttMsg.DataNodeTtMsg); err != nil {
 					log.Warn("failed to handle timetick message", zap.Error(err))
 					continue
 				}
@@ -756,62 +755,6 @@ func (s *Server) handleDataNodeTimetickMsgstream(ctx context.Context, ttMsgStrea
 			s.helper.eventAfterHandleDataNodeTt()
 		}
 	}
-}
-
-func (s *Server) handleTimetickMessage(ctx context.Context, ttMsg *msgstream.DataNodeTtMsg) error {
-	log := log.Ctx(ctx).WithRateGroup("dc.handleTimetick", 1, 60)
-	ch := ttMsg.GetChannelName()
-	ts := ttMsg.GetTimestamp()
-	physical, _ := tsoutil.ParseTS(ts)
-	if time.Since(physical).Minutes() > 1 {
-		// if lag behind, log every 1 mins about
-		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes", zap.String("channel", ch), zap.Time("timetick", physical))
-	}
-	// ignore report from a different node
-	if !s.channelManager.Match(ttMsg.GetBase().GetSourceID(), ch) {
-		log.Warn("node is not matched with channel", zap.String("channel", ch), zap.Int64("nodeID", ttMsg.GetBase().GetSourceID()))
-		return nil
-	}
-
-	sub := tsoutil.SubByNow(ts)
-	pChannelName := funcutil.ToPhysicalChannel(ch)
-	metrics.DataCoordConsumeDataNodeTimeTickLag.
-		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChannelName).
-		Set(float64(sub))
-
-	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
-
-	if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
-		return fmt.Errorf("expire allocations: %w", err)
-	}
-
-	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
-	if err != nil {
-		return fmt.Errorf("get flushable segments: %w", err)
-	}
-	flushableSegments := s.getFlushableSegmentsInfo(flushableIDs)
-
-	if len(flushableSegments) == 0 {
-		return nil
-	}
-
-	log.Info("start flushing segments",
-		zap.Int64s("segment IDs", flushableIDs))
-	// update segment last update triggered time
-	// it's ok to fail flushing, since next timetick after duration will re-trigger
-	s.setLastFlushTime(flushableSegments)
-
-	finfo := make([]*datapb.SegmentInfo, 0, len(flushableSegments))
-	for _, info := range flushableSegments {
-		finfo = append(finfo, info.SegmentInfo)
-	}
-	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo)
-	if err != nil {
-		log.Warn("failed to handle flush", zap.Int64("source", ttMsg.GetBase().GetSourceID()), zap.Error(err))
-		return err
-	}
-
-	return nil
 }
 
 func (s *Server) updateSegmentStatistics(stats []*commonpb.SegmentStats) {
@@ -1216,6 +1159,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		Properties:     properties,
 		CreatedAt:      resp.GetCreatedTimestamp(),
 		DatabaseName:   resp.GetDbName(),
+		DatabaseID:     resp.GetDbId(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

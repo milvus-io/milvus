@@ -189,9 +189,6 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			log.Warn("cannot get collection schema", zap.Error(err))
 		}
 
-		// Add the channel to cluster for watching.
-		s.cluster.Watch(ctx, r.ChannelName, r.CollectionID)
-
 		// Have segment manager allocate and return the segment allocation info.
 		segmentAllocations, err := s.segmentManager.AllocSegment(ctx,
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
@@ -1413,7 +1410,7 @@ func (s *Server) UpdateChannelCheckpoint(ctx context.Context, req *datapb.Update
 	return merr.Success(), nil
 }
 
-// ReportDataNodeTtMsgs send datenode timetick messages to dataCoord.
+// ReportDataNodeTtMsgs gets timetick messages from datanode.
 func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDataNodeTtMsgsRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx)
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
@@ -1425,7 +1422,7 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 		metrics.DataCoordConsumeDataNodeTimeTickLag.
 			WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), ttMsg.GetChannelName()).
 			Set(float64(sub))
-		err := s.handleRPCTimetickMessage(ctx, ttMsg)
+		err := s.handleDataNodeTtMsg(ctx, ttMsg)
 		if err != nil {
 			log.Error("fail to handle Datanode Timetick Msg",
 				zap.Int64("sourceID", ttMsg.GetBase().GetSourceID()),
@@ -1438,49 +1435,64 @@ func (s *Server) ReportDataNodeTtMsgs(ctx context.Context, req *datapb.ReportDat
 	return merr.Success(), nil
 }
 
-func (s *Server) handleRPCTimetickMessage(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
-	log := log.Ctx(ctx)
-	ch := ttMsg.GetChannelName()
-	ts := ttMsg.GetTimestamp()
+func (s *Server) handleDataNodeTtMsg(ctx context.Context, ttMsg *msgpb.DataNodeTtMsg) error {
+	var (
+		channel      = ttMsg.GetChannelName()
+		ts           = ttMsg.GetTimestamp()
+		sourceID     = ttMsg.GetBase().GetSourceID()
+		segmentStats = ttMsg.GetSegmentsStats()
+	)
 
-	// ignore to handle RPC Timetick message since it's no longer the leader
-	if !s.channelManager.Match(ttMsg.GetBase().GetSourceID(), ch) {
-		log.Warn("node is not matched with channel",
-			zap.String("channelName", ch),
-			zap.Int64("nodeID", ttMsg.GetBase().GetSourceID()),
-		)
+	physical, _ := tsoutil.ParseTS(ts)
+	log := log.Ctx(ctx).WithRateGroup("dc.handleTimetick", 1, 60).With(
+		zap.String("channel", channel),
+		zap.Int64("sourceID", sourceID),
+		zap.Any("ts", ts),
+	)
+	if time.Since(physical).Minutes() > 1 {
+		// if lag behind, log every 1 mins about
+		log.RatedWarn(60.0, "time tick lag behind for more than 1 minutes")
+	}
+	// ignore report from a different node
+	if !s.channelManager.Match(sourceID, channel) {
+		log.Warn("node is not matched with channel")
 		return nil
 	}
 
-	s.updateSegmentStatistics(ttMsg.GetSegmentsStats())
+	sub := tsoutil.SubByNow(ts)
+	pChannelName := funcutil.ToPhysicalChannel(channel)
+	metrics.DataCoordConsumeDataNodeTimeTickLag.
+		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), pChannelName).
+		Set(float64(sub))
 
-	if err := s.segmentManager.ExpireAllocations(ch, ts); err != nil {
-		return fmt.Errorf("expire allocations: %w", err)
+	s.updateSegmentStatistics(segmentStats)
+
+	if err := s.segmentManager.ExpireAllocations(channel, ts); err != nil {
+		log.Warn("failed to expire allocations", zap.Error(err))
+		return err
 	}
 
-	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, ch, ts)
+	flushableIDs, err := s.segmentManager.GetFlushableSegments(ctx, channel, ts)
 	if err != nil {
-		return fmt.Errorf("get flushable segments: %w", err)
+		log.Warn("failed to get flushable segments", zap.Error(err))
+		return err
 	}
 	flushableSegments := s.getFlushableSegmentsInfo(flushableIDs)
-
 	if len(flushableSegments) == 0 {
 		return nil
 	}
 
-	log.Info("start flushing segments",
-		zap.Int64s("segment IDs", flushableIDs))
+	log.Info("start flushing segments", zap.Int64s("segmentIDs", flushableIDs))
 	// update segment last update triggered time
 	// it's ok to fail flushing, since next timetick after duration will re-trigger
 	s.setLastFlushTime(flushableSegments)
 
-	finfo := make([]*datapb.SegmentInfo, 0, len(flushableSegments))
-	for _, info := range flushableSegments {
-		finfo = append(finfo, info.SegmentInfo)
-	}
-	err = s.cluster.Flush(s.ctx, ttMsg.GetBase().GetSourceID(), ch, finfo)
+	infos := lo.Map(flushableSegments, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
+		return info.SegmentInfo
+	})
+	err = s.cluster.Flush(s.ctx, sourceID, channel, infos)
 	if err != nil {
-		log.Warn("failed to handle flush", zap.Any("source", ttMsg.GetBase().GetSourceID()), zap.Error(err))
+		log.Warn("failed to call Flush", zap.Error(err))
 		return err
 	}
 
@@ -1539,6 +1551,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			Partitions:     req.GetPartitionIDs(),
 			StartPositions: req.GetStartPositions(),
 			Properties:     properties,
+			DatabaseID:     req.GetDbID(),
 		}
 		s.meta.AddCollection(collInfo)
 		return merr.Success(), nil

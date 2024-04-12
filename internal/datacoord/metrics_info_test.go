@@ -56,7 +56,7 @@ func (m *mockMetricIndexNodeClient) GetMetrics(ctx context.Context, req *milvusp
 }
 
 func TestGetDataNodeMetrics(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 
 	ctx := context.Background()
@@ -123,7 +123,7 @@ func TestGetDataNodeMetrics(t *testing.T) {
 }
 
 func TestGetIndexNodeMetrics(t *testing.T) {
-	svr := newTestServer(t, nil)
+	svr := newTestServer(t)
 	defer closeTestServer(t, svr)
 
 	ctx := context.Background()

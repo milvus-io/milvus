@@ -2669,6 +2669,40 @@ func (c *Core) RenameCollection(ctx context.Context, req *milvuspb.RenameCollect
 	return merr.Success(), nil
 }
 
+func (c *Core) DescribeDatabase(ctx context.Context, req *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return &rootcoordpb.DescribeDatabaseResponse{Status: merr.Status(err)}, nil
+	}
+
+	log := log.Ctx(ctx).With(zap.String("dbName", req.GetDbName()))
+	log.Info("received request to describe database ")
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeDatabase", metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder("DescribeDatabase")
+	t := &describeDBTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      req,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Warn("failed to enqueue request to describe database", zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeDatabase", metrics.FailLabel).Inc()
+		return &rootcoordpb.DescribeDatabaseResponse{Status: merr.Status(err)}, nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("failed to describe database", zap.Uint64("ts", t.GetTs()), zap.Error(err))
+		metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeDatabase", metrics.FailLabel).Inc()
+		return &rootcoordpb.DescribeDatabaseResponse{Status: merr.Status(err)}, nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues("DescribeDatabase", metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues("DescribeDatabase").Observe(float64(tr.ElapseSpan().Milliseconds()))
+
+	log.Info("done to describe database", zap.Uint64("ts", t.GetTs()))
+	return t.Rsp, nil
+}
+
 func (c *Core) CheckHealth(ctx context.Context, in *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
 		return &milvuspb.CheckHealthResponse{

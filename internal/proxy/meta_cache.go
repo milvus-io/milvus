@@ -89,10 +89,10 @@ type Cache interface {
 
 	RemoveDatabase(ctx context.Context, database string)
 	HasDatabase(ctx context.Context, database string) bool
+	GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error)
 	// AllocID is only using on requests that need to skip timestamp allocation, don't overuse it.
 	AllocID(ctx context.Context) (int64, error)
 }
-
 type collectionBasicInfo struct {
 	collID              typeutil.UniqueID
 	createdTimestamp    uint64
@@ -107,6 +107,11 @@ type collectionInfo struct {
 	createdTimestamp    uint64
 	createdUtcTimestamp uint64
 	consistencyLevel    commonpb.ConsistencyLevel
+}
+
+type databaseInfo struct {
+	dbID             typeutil.UniqueID
+	createdTimestamp uint64
 }
 
 // schemaInfo is a helper function wraps *schemapb.CollectionSchema
@@ -244,17 +249,19 @@ type MetaCache struct {
 	rootCoord  types.RootCoordClient
 	queryCoord types.QueryCoordClient
 
-	collInfo       map[string]map[string]*collectionInfo   // database -> collectionName -> collection_info
-	collLeader     map[string]map[string]*shardLeaders     // database -> collectionName -> collection_leaders
-	dbInfo         map[string]map[typeutil.UniqueID]string // database -> collectionID -> collectionName
-	credMap        map[string]*internalpb.CredentialInfo   // cache for credential, lazy load
-	privilegeInfos map[string]struct{}                     // privileges cache
-	userToRoles    map[string]map[string]struct{}          // user to role cache
-	mu             sync.RWMutex
-	credMut        sync.RWMutex
-	leaderMut      sync.RWMutex
-	shardMgr       shardClientMgr
-	sfGlobal       conc.Singleflight[*collectionInfo]
+	dbInfo           map[string]*databaseInfo                // database -> db_info
+	collInfo         map[string]map[string]*collectionInfo   // database -> collectionName -> collection_info
+	collLeader       map[string]map[string]*shardLeaders     // database -> collectionName -> collection_leaders
+	dbCollectionInfo map[string]map[typeutil.UniqueID]string // database -> collectionID -> collectionName
+	credMap          map[string]*internalpb.CredentialInfo   // cache for credential, lazy load
+	privilegeInfos   map[string]struct{}                     // privileges cache
+	userToRoles      map[string]map[string]struct{}          // user to role cache
+	mu               sync.RWMutex
+	credMut          sync.RWMutex
+	leaderMut        sync.RWMutex
+	shardMgr         shardClientMgr
+	sfGlobal         conc.Singleflight[*collectionInfo]
+	sfDB             conc.Singleflight[*databaseInfo]
 
 	IDStart int64
 	IDCount int64
@@ -287,15 +294,16 @@ func InitMetaCache(ctx context.Context, rootCoord types.RootCoordClient, queryCo
 // NewMetaCache creates a MetaCache with provided RootCoord and QueryNode
 func NewMetaCache(rootCoord types.RootCoordClient, queryCoord types.QueryCoordClient, shardMgr shardClientMgr) (*MetaCache, error) {
 	return &MetaCache{
-		rootCoord:      rootCoord,
-		queryCoord:     queryCoord,
-		collInfo:       map[string]map[string]*collectionInfo{},
-		collLeader:     map[string]map[string]*shardLeaders{},
-		dbInfo:         map[string]map[typeutil.UniqueID]string{},
-		credMap:        map[string]*internalpb.CredentialInfo{},
-		shardMgr:       shardMgr,
-		privilegeInfos: map[string]struct{}{},
-		userToRoles:    map[string]map[string]struct{}{},
+		rootCoord:        rootCoord,
+		queryCoord:       queryCoord,
+		dbInfo:           map[string]*databaseInfo{},
+		collInfo:         map[string]map[string]*collectionInfo{},
+		collLeader:       map[string]map[string]*shardLeaders{},
+		dbCollectionInfo: map[string]map[typeutil.UniqueID]string{},
+		credMap:          map[string]*internalpb.CredentialInfo{},
+		shardMgr:         shardMgr,
+		privilegeInfos:   map[string]struct{}{},
+		userToRoles:      map[string]map[string]struct{}{},
 	}, nil
 }
 
@@ -510,7 +518,7 @@ func (m *MetaCache) innerGetCollectionByID(collectionID int64) (string, string) 
 	m.mu.RLock()
 	defer m.mu.RUnlock()
 
-	for database, db := range m.dbInfo {
+	for database, db := range m.dbCollectionInfo {
 		name, ok := db[collectionID]
 		if ok {
 			return database, name
@@ -554,7 +562,7 @@ func (m *MetaCache) updateDBInfo(ctx context.Context) error {
 
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	m.dbInfo = dbInfo
+	m.dbCollectionInfo = dbInfo
 
 	return nil
 }
@@ -737,6 +745,19 @@ func (m *MetaCache) showPartitions(ctx context.Context, dbName string, collectio
 	}
 
 	return partitions, nil
+}
+
+func (m *MetaCache) describeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	req := &rootcoordpb.DescribeDatabaseRequest{
+		DbName: dbName,
+	}
+
+	resp, err := m.rootCoord.DescribeDatabase(ctx, req)
+	if err = merr.CheckRPCCall(resp, err); err != nil {
+		return nil, err
+	}
+
+	return resp, nil
 }
 
 // parsePartitionsInfo parse partitionInfo list to partitionInfos struct.
@@ -1084,6 +1105,7 @@ func (m *MetaCache) RemoveDatabase(ctx context.Context, database string) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	delete(m.collInfo, database)
+	delete(m.dbInfo, database)
 }
 
 func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
@@ -1091,6 +1113,41 @@ func (m *MetaCache) HasDatabase(ctx context.Context, database string) bool {
 	defer m.mu.RUnlock()
 	_, ok := m.collInfo[database]
 	return ok
+}
+
+func (m *MetaCache) GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error) {
+	dbInfo := m.safeGetDBInfo(database)
+	if dbInfo != nil {
+		return dbInfo, nil
+	}
+
+	dbInfo, err, _ := m.sfDB.Do(database, func() (*databaseInfo, error) {
+		resp, err := m.describeDatabase(ctx, database)
+		if err != nil {
+			return nil, err
+		}
+
+		m.mu.Lock()
+		defer m.mu.Unlock()
+		dbInfo := &databaseInfo{
+			dbID:             resp.GetDbID(),
+			createdTimestamp: resp.GetCreatedTimestamp(),
+		}
+		m.dbInfo[database] = dbInfo
+		return dbInfo, nil
+	})
+
+	return dbInfo, err
+}
+
+func (m *MetaCache) safeGetDBInfo(database string) *databaseInfo {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	db, ok := m.dbInfo[database]
+	if !ok {
+		return nil
+	}
+	return db
 }
 
 func (m *MetaCache) AllocID(ctx context.Context) (int64, error) {

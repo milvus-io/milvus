@@ -298,8 +298,7 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	multiLimiter := NewMultiRateLimiter()
-	s.multiRateLimiter = multiLimiter
+	s.simpleLimiter = NewSimpleLimiter()
 
 	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
@@ -309,7 +308,7 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 		grpc.MaxSendMsgSize(p.ServerMaxSendSize.GetAsInt()),
 		grpc.UnaryInterceptor(grpc_middleware.ChainUnaryServer(
 			otelgrpc.UnaryServerInterceptor(opts...),
-			RateLimitInterceptor(multiLimiter),
+			RateLimitInterceptor(s.simpleLimiter),
 		)),
 		grpc.StreamInterceptor(otelgrpc.StreamServerInterceptor(opts...)))
 	proxypb.RegisterProxyServer(s.grpcServer, s)

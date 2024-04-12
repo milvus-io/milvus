@@ -14,25 +14,17 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package indexnode
+package ratelimitutil
 
-import (
-	"github.com/cockroachdb/errors"
+import "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-)
+var QuotaErrorString = map[commonpb.ErrorCode]string{
+	commonpb.ErrorCode_ForceDeny:            "the writing has been deactivated by the administrator",
+	commonpb.ErrorCode_MemoryQuotaExhausted: "memory quota exceeded, please allocate more resources",
+	commonpb.ErrorCode_DiskQuotaExhausted:   "disk quota exceeded, please allocate more resources",
+	commonpb.ErrorCode_TimeTickLongDelay:    "time tick long delay",
+}
 
-func estimateFieldDataSize(dim int64, numRows int64, dataType schemapb.DataType) (uint64, error) {
-	switch dataType {
-	case schemapb.DataType_BinaryVector:
-		return uint64(dim) / 8 * uint64(numRows), nil
-	case schemapb.DataType_FloatVector:
-		return uint64(dim) * uint64(numRows) * 4, nil
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		return uint64(dim) * uint64(numRows) * 2, nil
-	case schemapb.DataType_SparseFloatVector:
-		return 0, errors.New("could not estimate field data size of SparseFloatVector")
-	default:
-		return 0, nil
-	}
+func GetQuotaErrorString(errCode commonpb.ErrorCode) string {
+	return QuotaErrorString[errCode]
 }
