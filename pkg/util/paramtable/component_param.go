@@ -669,6 +669,7 @@ like the old password verification when updating the credential`,
 		Key:          "common.storage.enablev2",
 		Version:      "2.3.1",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
 
@@ -676,6 +677,7 @@ like the old password verification when updating the credential`,
 		Key:          "common.storage.scheme",
 		Version:      "2.3.4",
 		DefaultValue: "s3",
+		Export:       true,
 	}
 	p.StorageScheme.Init(base.mgr)
 
@@ -691,6 +693,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.2",
 		DefaultValue: "true",
 		Doc:          "Whether the instance disable sending ts messages",
+		Export:       true,
 	}
 	p.TTMsgEnabled.Init(base.mgr)
 
@@ -699,6 +702,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.4",
 		DefaultValue: "0",
 		Doc:          "trace request info",
+		Export:       true,
 	}
 	p.TraceLogMode.Init(base.mgr)
 
@@ -707,6 +711,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.2",
 		DefaultValue: "100000",
 		Doc:          "bloom filter initial size",
+		Export:       true,
 	}
 	p.BloomFilterSize.Init(base.mgr)
 
@@ -715,6 +720,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.2",
 		DefaultValue: "0.05",
 		Doc:          "max false positive rate for bloom filter",
+		Export:       true,
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
 }
@@ -755,8 +761,9 @@ func (t *traceConfig) init(base *BaseTable) {
 		Key:     "trace.exporter",
 		Version: "2.3.0",
 		Doc: `trace exporter type, default is stdout,
-optional values: ['stdout', 'jaeger']`,
-		Export: true,
+optional values: ['stdout', 'jaeger', 'otlp']`,
+		DefaultValue: "stdout",
+		Export:       true,
 	}
 	t.Exporter.Init(base.mgr)
 
@@ -783,6 +790,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Key:     "trace.otlp.endpoint",
 		Version: "2.3.0",
 		Doc:     "example: \"127.0.0.1:4318\"",
+		Export:  true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
@@ -790,6 +798,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Key:          "trace.otlp.secure",
 		Version:      "2.4.0",
 		DefaultValue: "true",
+		Export:       true,
 	}
 	t.OtlpSecure.Init(base.mgr)
 }

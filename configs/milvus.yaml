@@ -591,6 +591,13 @@ common:
     threshold:
       info: 500 # minimum milliseconds for printing durations in info level
       warn: 1000 # minimum milliseconds for printing durations in warn level
+  storage:
+    scheme: s3
+    enablev2: false
+  ttMsgEnabled: true # Whether the instance disable sending ts messages
+  traceLogMode: 0 # trace request info
+  bloomFilterSize: 100000 # bloom filter initial size
+  maxBloomFalsePositive: 0.05 # max false positive rate for bloom filter
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -656,6 +663,9 @@ quotaAndLimits:
       max: -1 # qps, default no limit
       collection:
         max: -1 # qps, default no limit
+  limits:
+    maxCollectionNum: 65536
+    maxCollectionNumPerDB: 65536
   limitWriting:
     # forceDeny false means dml requests are allowed (except for some
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
@@ -718,7 +728,7 @@ quotaAndLimits:
 
 trace:
   # trace exporter type, default is stdout,
-  # optional values: ['stdout', 'jaeger']
+  # optional values: ['stdout', 'jaeger', 'otlp']
   exporter: stdout
   # fraction of traceID based sampler,
   # optional values: [0, 1]
@@ -726,3 +736,16 @@ trace:
   sampleFraction: 0
   jaeger:
     url:  # when exporter is jaeger should set the jaeger's URL
+  otlp:
+    endpoint:  # example: "127.0.0.1:4318"
+    secure: true
+
+#when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
+#here, you can set the size of the memory occupied by the memory pool, with the unit being MB.
+#note that there is a possibility of Milvus crashing when the actual memory demand exceeds the value set by maxMemSize.
+#if initMemSize and MaxMemSize both set zero,
+#milvus will automatically initialize half of the available GPU memory,
+#maxMemSize will the whole available GPU memory.
+gpu:
+  initMemSize:  # Gpu Memory Pool init size
+  maxMemSize:  # Gpu Memory Pool Max size

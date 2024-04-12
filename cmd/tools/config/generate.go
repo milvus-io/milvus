@@ -318,6 +318,16 @@ func WriteYaml(w io.Writer) {
 		{
 			name: "trace",
 		},
+		{
+			name: "gpu",
+			header: `
+#when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
+#here, you can set the size of the memory occupied by the memory pool, with the unit being MB.
+#note that there is a possibility of Milvus crashing when the actual memory demand exceeds the value set by maxMemSize.
+#if initMemSize and MaxMemSize both set zero,
+#milvus will automatically initialize half of the available GPU memory,
+#maxMemSize will the whole available GPU memory.`,
+		},
 	}
 	marshller := YamlMarshaller{w, groups, result}
 	marshller.writeYamlRecursive(lo.Filter(result, func(d DocContent, _ int) bool {
