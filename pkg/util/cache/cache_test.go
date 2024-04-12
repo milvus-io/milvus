@@ -139,7 +139,7 @@ func TestLRUCache(t *testing.T) {
 		cache := cacheBuilder.WithReloader(func(key int) (int, bool) {
 			return -key, true
 		}).Build()
-		err := cache.Do(1, func(i int) error { return nil })
+		_, err := cache.Do(1, func(i int) error { return nil })
 		assert.NoError(t, err)
 		exist := cache.MarkItemNeedReload(1)
 		assert.True(t, exist)
@@ -153,7 +153,7 @@ func TestLRUCache(t *testing.T) {
 		cache := cacheBuilder.WithCapacity(1).Build()
 		exist := cache.MarkItemNeedReload(1)
 		assert.False(t, exist)
-		err := cache.Do(1, func(i int) error { return nil })
+		_, err := cache.Do(1, func(i int) error { return nil })
 		assert.NoError(t, err)
 		exist = cache.MarkItemNeedReload(1)
 		assert.True(t, exist)
@@ -315,5 +315,60 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			}
 		}()
 		wg.Wait()
+	})
+
+	t.Run("test expire", func(t *testing.T) {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+			return key, true
+		}).WithCapacity(5).WithFinalizer(func(key, value int) error {
+			return nil
+		}).WithReloader(func(key int) (int, bool) {
+			return key, true
+		}).Build()
+
+		for i := 0; i < 100; i++ {
+			cache.DoWait(i, 2*time.Second, func(v int) error { return nil })
+		}
+
+		evicted := 0
+		for i := 0; i < 100; i++ {
+			if cache.Expire(i) {
+				evicted++
+			}
+		}
+		assert.Equal(t, 100, evicted)
+
+		// all item shouldn't be evicted if they are in used.
+		for i := 0; i < 5; i++ {
+			cache.DoWait(i, 2*time.Second, func(v int) error { return nil })
+		}
+		wg := sync.WaitGroup{}
+		wg.Add(5)
+		for i := 0; i < 5; i++ {
+			go func(i int) {
+				defer wg.Done()
+				cache.DoWait(i, 2*time.Second, func(v int) error {
+					time.Sleep(2 * time.Second)
+					return nil
+				})
+			}(i)
+		}
+		time.Sleep(1 * time.Second)
+		evicted = 0
+		for i := 0; i < 5; i++ {
+			if cache.Expire(i) {
+				evicted++
+			}
+		}
+		assert.Zero(t, evicted)
+		wg.Wait()
+
+		evicted = 0
+		for i := 0; i < 5; i++ {
+			if cache.Expire(i) {
+				evicted++
+			}
+		}
+		assert.Equal(t, 5, evicted)
 	})
 }

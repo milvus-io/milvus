@@ -237,6 +237,13 @@ func NewManager() *Manager {
 
 		return segment, true
 	}).Build()
+
+	segMgr.registerReleaseCallback(func(s Segment) {
+		if s.Type() == SegmentTypeSealed {
+			manager.DiskCache.Expire(s.ID())
+		}
+	})
+
 	return manager
 }
 
@@ -278,6 +285,9 @@ type segmentManager struct {
 
 	growingSegments map[typeutil.UniqueID]Segment
 	sealedSegments  map[typeutil.UniqueID]Segment
+
+	// releaseCallback is the callback function when a segment is released.
+	releaseCallback func(s Segment)
 }
 
 func NewSegmentManager() *segmentManager {
@@ -336,7 +346,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	if len(replacedSegment) > 0 {
 		go func() {
 			for _, segment := range replacedSegment {
-				remove(segment)
+				mgr.remove(segment)
 			}
 		}()
 	}
@@ -619,11 +629,11 @@ func (mgr *segmentManager) Remove(segmentID typeutil.UniqueID, scope querypb.Dat
 	mgr.mu.Unlock()
 
 	if growing != nil {
-		remove(growing)
+		mgr.remove(growing)
 	}
 
 	if sealed != nil {
-		remove(sealed)
+		mgr.remove(sealed)
 	}
 
 	return removeGrowing, removeSealed
@@ -674,7 +684,7 @@ func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	mgr.mu.Unlock()
 
 	for _, s := range removeSegments {
-		remove(s)
+		mgr.remove(s)
 	}
 
 	return removeGrowing, removeSealed
@@ -686,14 +696,20 @@ func (mgr *segmentManager) Clear() {
 
 	for id, segment := range mgr.growingSegments {
 		delete(mgr.growingSegments, id)
-		remove(segment)
+		mgr.remove(segment)
 	}
 
 	for id, segment := range mgr.sealedSegments {
 		delete(mgr.sealedSegments, id)
-		remove(segment)
+		mgr.remove(segment)
 	}
 	mgr.updateMetric()
+}
+
+// registerReleaseCallback registers the callback function when a segment is released.
+// TODO: bad implementation for keep consistency with DiskCache, need to be refactor.
+func (mgr *segmentManager) registerReleaseCallback(callback func(s Segment)) {
+	mgr.releaseCallback = callback
 }
 
 func (mgr *segmentManager) updateMetric() {
@@ -711,8 +727,11 @@ func (mgr *segmentManager) updateMetric() {
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
 }
 
-func remove(segment Segment) bool {
+func (mgr *segmentManager) remove(segment Segment) bool {
 	segment.Release()
+	if mgr.releaseCallback != nil {
+		mgr.releaseCallback(segment)
+	}
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
