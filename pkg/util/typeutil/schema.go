@@ -1462,7 +1462,11 @@ func ValidateSparseFloatRows(rows ...[]byte) error {
 			return fmt.Errorf("invalid data length in sparse float vector: %d", len(row))
 		}
 		for i := 0; i < SparseFloatRowElementCount(row); i++ {
-			if i > 0 && SparseFloatRowIndexAt(row, i) < SparseFloatRowIndexAt(row, i-1) {
+			idx := SparseFloatRowIndexAt(row, i)
+			if idx == math.MaxUint32 {
+				return errors.New("invalid index in sparse float vector: must be less than 2^32-1")
+			}
+			if i > 0 && idx < SparseFloatRowIndexAt(row, i-1) {
 				return errors.New("unsorted indices in sparse float vector")
 			}
 			VerifyFloat(float64(SparseFloatRowValueAt(row, i)))
