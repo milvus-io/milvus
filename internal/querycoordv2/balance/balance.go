@@ -20,6 +20,7 @@ import (
 	"fmt"
 	"sort"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -103,9 +104,12 @@ func (b *RoundRobinBalancer) AssignSegment(collectionID int64, segments []*meta.
 func (b *RoundRobinBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
+		versionRangeFilter := semver.MustParseRange(">2.3.x")
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)
-			return info != nil && info.GetState() == session.NodeStateNormal
+			// balance channel to qn with version < 2.4 is not allowed since l0 segment supported
+			// if watch channel on qn with version < 2.4, it may cause delete data loss
+			return info != nil && info.GetState() == session.NodeStateNormal && versionRangeFilter(info.Version())
 		})
 	}
 	nodesInfo := b.getNodes(nodes)

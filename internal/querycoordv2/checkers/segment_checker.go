@@ -213,12 +213,12 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		distMap[s.GetID()] = s.Node
 	}
 
-	versionRangeFilter := semver.MustParseRange("<2.4.0")
+	versionRangeFilter := semver.MustParseRange(">2.3.x")
 	checkLeaderVersion := func(leader *meta.LeaderView, segmentID int64) bool {
 		// if current shard leader's node version < 2.4, skip load L0 segment
 		info := c.nodeMgr.Get(leader.ID)
-		if info != nil && versionRangeFilter(info.Version()) {
-			log.Warn("skip load L0 segment, because current shard leader's node version < 2.4",
+		if info != nil && !versionRangeFilter(info.Version()) {
+			log.Warn("l0 segment is not supported in current node version, skip it",
 				zap.Int64("collection", replica.GetCollectionID()),
 				zap.Int64("segmentID", segmentID),
 				zap.String("channel", leader.Channel),
