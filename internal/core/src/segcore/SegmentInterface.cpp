@@ -249,11 +249,12 @@ SegmentInternalInterface::FillTargetEntry(
             col->mutable_scalars()->mutable_array_data()->set_element_type(
                 proto::schema::DataType(field_meta.get_element_type()));
         }
-        auto col_data = col.release();
         if (!ignore_non_pk) {
-            fields_data->AddAllocated(col_data);
-        }
-        if (is_pk_field(field_id)) {
+            fields_data->AddAllocated(col.release());
+            // no need to fill the pk again.
+        } else if (is_pk_field(field_id)) {
+            // only fill the schema.IDs, no need to fill the target entry.
+            auto col_data = col.get();
             switch (field_meta.get_data_type()) {
                 case DataType::INT64: {
                     auto int_ids = ids->mutable_int_id();
