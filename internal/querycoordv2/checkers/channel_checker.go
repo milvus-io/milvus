@@ -91,9 +91,9 @@ func (c *ChannelChecker) Check(ctx context.Context) []task.Task {
 		}
 	}
 
-	channels := c.dist.ChannelDistManager.GetAll()
+	channels := c.dist.ChannelDistManager.GetByFilter()
 	released := utils.FilterReleased(channels, collectionIDs)
-	releaseTasks := c.createChannelReduceTasks(ctx, released, -1)
+	releaseTasks := c.createChannelReduceTasks(ctx, released, meta.NilReplica)
 	task.SetReason("collection released", releaseTasks...)
 	tasks = append(tasks, releaseTasks...)
 	return tasks
@@ -107,12 +107,12 @@ func (c *ChannelChecker) checkReplica(ctx context.Context, replica *meta.Replica
 	task.SetReason("lacks of channel", tasks...)
 	ret = append(ret, tasks...)
 
-	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), redundancies, replica.GetID())
+	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), redundancies, replica)
 	task.SetReason("collection released", tasks...)
 	ret = append(ret, tasks...)
 
 	repeated := c.findRepeatedChannels(ctx, replica.GetID())
-	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), repeated, replica.GetID())
+	tasks = c.createChannelReduceTasks(c.getTraceCtx(ctx, replica.CollectionID), repeated, replica)
 	task.SetReason("redundancies of channel", tasks...)
 	ret = append(ret, tasks...)
 
@@ -163,7 +163,7 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel {
 	dist := make([]*meta.DmChannel, 0)
 	for _, nodeID := range replica.GetNodes() {
-		dist = append(dist, c.dist.ChannelDistManager.GetByCollectionAndNode(replica.GetCollectionID(), nodeID)...)
+		dist = append(dist, c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(nodeID))...)
 	}
 	return dist
 }
@@ -222,23 +222,23 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	availableNodes := lo.Filter(replica.Replica.GetNodes(), func(node int64, _ int) bool {
 		return !outboundNodes.Contain(node)
 	})
-	plans := c.balancer.AssignChannel(channels, availableNodes)
+	plans := c.balancer.AssignChannel(channels, availableNodes, false)
 	for i := range plans {
-		plans[i].ReplicaID = replica.GetID()
+		plans[i].Replica = replica
 	}
 
 	return balance.CreateChannelTasksFromPlans(ctx, c.ID(), Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), plans)
 }
 
-func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replicaID int64) []task.Task {
+func (c *ChannelChecker) createChannelReduceTasks(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
 	ret := make([]task.Task, 0, len(channels))
 	for _, ch := range channels {
 		action := task.NewChannelAction(ch.Node, task.ActionTypeReduce, ch.GetChannelName())
-		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replicaID, action)
+		task, err := task.NewChannelTask(ctx, Params.QueryCoordCfg.ChannelTaskTimeout.GetAsDuration(time.Millisecond), c.ID(), ch.GetCollectionID(), replica, action)
 		if err != nil {
 			log.Warn("create channel reduce task failed",
 				zap.Int64("collection", ch.GetCollectionID()),
-				zap.Int64("replica", replicaID),
+				zap.Int64("replica", replica.GetID()),
 				zap.String("channel", ch.GetChannelName()),
 				zap.Int64("from", ch.Node),
 				zap.Error(err),

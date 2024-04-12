@@ -55,6 +55,10 @@ INSTALL_GCI := $(findstring $(GCI_VERSION),$(GCI_OUTPUT))
 GOFUMPT_VERSION := 0.5.0
 GOFUMPT_OUTPUT := $(shell $(INSTALL_PATH)/gofumpt --version 2>/dev/null)
 INSTALL_GOFUMPT := $(findstring $(GOFUMPT_VERSION),$(GOFUMPT_OUTPUT))
+# gotestsum
+GOTESTSUM_VERSION := 1.11.0
+GOTESTSUM_OUTPUT := $(shell $(INSTALL_PATH)/gotestsum --version 2>/dev/null)
+INSTALL_GOTESTSUM := $(findstring $(GOTESTSUM_VERSION),$(GOTESTSUM_OUTPUT))
 
 index_engine = knowhere
 
@@ -93,6 +97,11 @@ getdeps:
 		echo "Installing mockery v$(MOCKERY_VERSION) to ./bin/" && GOBIN=$(INSTALL_PATH) go install github.com/vektra/mockery/v2@v$(MOCKERY_VERSION); \
 	else \
 		echo "Mockery v$(MOCKERY_VERSION) already installed"; \
+	fi
+	@if [ -z "$(INSTALL_GOTESTSUM)" ]; then \
+		echo "Install gotestsum v$(GOTESTSUM_VERSION) to ./bin/" && curl -sSL "https://github.com/gotestyourself/gotestsum/releases/download/v$(GOTESTSUM_VERSION)/gotestsum_$(GOTESTSUM_VERSION)_linux_amd64.tar.gz" | tar -xz -C ./bin/ gotestsum ; \
+	else \
+		echo "gotestsum v$(GOTESTSUM_VERSION) already installed";\
 	fi
 
 tools/bin/revive: tools/check/go.mod
@@ -166,12 +175,9 @@ meta-migration:
     		-tags dynamic -o $(INSTALL_PATH)/meta-migration $(MIGRATION_PATH)/main.go 1>/dev/null
 
 INTERATION_PATH = $(PWD)/tests/integration
-integration-test:
+integration-test: getdeps
 	@echo "Building integration tests ..."
-	@source $(PWD)/scripts/setenv.sh && \
-    		mkdir -p $(INSTALL_PATH) && go env -w CGO_ENABLED="1" && \
-    		GO111MODULE=on $(GO) build -ldflags="-r $${RPATH} -X '$(OBJPREFIX).BuildTags=$(BUILD_TAGS)' -X '$(OBJPREFIX).BuildTime=$(BUILD_TIME)' -X '$(OBJPREFIX).GitCommit=$(GIT_COMMIT)' -X '$(OBJPREFIX).GoVersion=$(GO_VERSION)'" \
-    		-tags dynamic -o $(INSTALL_PATH)/integration-test $(INTERATION_PATH)/ 1>/dev/null
+	@(env bash $(PWD)/scripts/run_intergration_test.sh "$(INSTALL_PATH)/gotestsum --")
 
 BUILD_TAGS = $(shell git describe --tags --always --dirty="-dev")
 BUILD_TAGS_GPU = ${BUILD_TAGS}-gpu
@@ -319,6 +325,11 @@ codecov: codecov-go codecov-cpp
 codecov-go: build-cpp-with-coverage
 	@echo "Running go coverage..."
 	@(env bash $(PWD)/scripts/run_go_codecov.sh)
+
+# Run codecov-go without build core again, used in github action
+codecov-go-without-build: getdeps
+	@echo "Running go coverage..."
+	@(env bash $(PWD)/scripts/run_go_codecov.sh "$(INSTALL_PATH)/gotestsum --")
 
 # Run codecov-cpp
 codecov-cpp: build-cpp-with-coverage

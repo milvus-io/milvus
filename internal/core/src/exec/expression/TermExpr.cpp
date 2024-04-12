@@ -198,8 +198,8 @@ PhyTermFilterExpr::ExecPkTermImpl() {
     }
 
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     for (size_t i = 0; i < real_batch_size; ++i) {
         res[i] = cached_bits_[current_data_chunk_pos_++];
@@ -243,9 +243,10 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
     if (real_batch_size == 0) {
         return nullptr;
     }
+
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
@@ -253,7 +254,7 @@ PhyTermFilterExpr::ExecTermArrayVariableInField() {
 
     auto execute_sub_batch = [](const ArrayView* data,
                                 const int size,
-                                bool* res,
+                                TargetBitmapView res,
                                 const ValueType& target_val) {
         auto executor = [&](size_t i) {
             for (int i = 0; i < data[i].length(); i++) {
@@ -290,9 +291,10 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     if (real_batch_size == 0) {
         return nullptr;
     }
+
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     int index = -1;
     if (expr_->column_.nested_path_.size() > 0) {
@@ -304,15 +306,13 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     }
 
     if (term_set.empty()) {
-        for (size_t i = 0; i < real_batch_size; ++i) {
-            res[i] = false;
-        }
+        res.reset();
         return res_vec;
     }
 
     auto execute_sub_batch = [](const ArrayView* data,
                                 const int size,
-                                bool* res,
+                                TargetBitmapView res,
                                 int index,
                                 const std::unordered_set<ValueType>& term_set) {
         if (term_set.empty()) {
@@ -350,9 +350,11 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
     if (real_batch_size == 0) {
         return nullptr;
     }
+
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+
     AssertInfo(expr_->vals_.size() == 1,
                "element length in json array must be one");
     ValueType val = GetValueFromProto<ValueType>(expr_->vals_[0]);
@@ -360,7 +362,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
 
     auto execute_sub_batch = [](const Json* data,
                                 const int size,
-                                bool* res,
+                                TargetBitmapView res,
                                 const std::string pointer,
                                 const ValueType& target_val) {
         auto executor = [&](size_t i) {
@@ -403,9 +405,11 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     if (real_batch_size == 0) {
         return nullptr;
     }
+
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
     std::unordered_set<ValueType> term_set;
     for (const auto& element : expr_->vals_) {
@@ -421,7 +425,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
 
     auto execute_sub_batch = [](const Json* data,
                                 const int size,
-                                bool* res,
+                                TargetBitmapView res,
                                 const std::string pointer,
                                 const std::unordered_set<ValueType>& terms) {
         auto executor = [&](size_t i) {
@@ -532,9 +536,11 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
     if (real_batch_size == 0) {
         return nullptr;
     }
+
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+
     std::vector<T> vals;
     for (auto& val : expr_->vals_) {
         // Integral overflow process
@@ -547,7 +553,7 @@ PhyTermFilterExpr::ExecVisitorImplForData() {
     std::unordered_set<T> vals_set(vals.begin(), vals.end());
     auto execute_sub_batch = [](const T* data,
                                 const int size,
-                                bool* res,
+                                TargetBitmapView res,
                                 const std::unordered_set<T>& vals) {
         TermElementFuncSet<T> func;
         for (size_t i = 0; i < size; ++i) {

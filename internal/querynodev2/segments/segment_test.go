@@ -63,15 +63,25 @@ func (suite *SegmentSuite) SetupTest() {
 
 	suite.sealed, err = NewSegment(ctx,
 		suite.collection,
-		suite.segmentID,
-		suite.partitionID,
-		suite.collectionID,
-		"dml",
 		SegmentTypeSealed,
 		0,
-		nil,
-		nil,
-		datapb.SegmentLevel_Legacy,
+		&querypb.SegmentLoadInfo{
+			CollectionID:  suite.collectionID,
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			InsertChannel: "dml",
+			Level:         datapb.SegmentLevel_Legacy,
+			BinlogPaths: []*datapb.FieldBinlog{
+				{
+					FieldID: 101,
+					Binlogs: []*datapb.Binlog{
+						{
+							LogSize: 10086,
+						},
+					},
+				},
+			},
+		},
 	)
 	suite.Require().NoError(err)
 
@@ -91,15 +101,15 @@ func (suite *SegmentSuite) SetupTest() {
 
 	suite.growing, err = NewSegment(ctx,
 		suite.collection,
-		suite.segmentID+1,
-		suite.partitionID,
-		suite.collectionID,
-		"dml",
 		SegmentTypeGrowing,
 		0,
-		nil,
-		nil,
-		datapb.SegmentLevel_Legacy,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID + 1,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			InsertChannel: "dml",
+			Level:         datapb.SegmentLevel_Legacy,
+		},
 	)
 	suite.Require().NoError(err)
 
@@ -120,6 +130,26 @@ func (suite *SegmentSuite) TearDownTest() {
 	suite.growing.Release()
 	DeleteCollection(suite.collection)
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
+}
+
+func (suite *SegmentSuite) TestLoadInfo() {
+	// sealed segment has load info
+	suite.NotNil(suite.sealed.LoadInfo())
+	// growing segment has no load info
+	suite.Nil(suite.growing.LoadInfo())
+}
+
+func (suite *SegmentSuite) TestResourceUsageEstimate() {
+	// growing segment has resource usage
+	// growing segment can not estimate resource usage
+	usage := suite.growing.ResourceUsageEstimate()
+	suite.Zero(usage.MemorySize)
+	suite.Zero(usage.DiskSize)
+	// growing segment has no resource usage
+	usage = suite.sealed.ResourceUsageEstimate()
+	suite.NotZero(usage.MemorySize)
+	suite.Zero(usage.DiskSize)
+	suite.Zero(usage.MmapFieldCount)
 }
 
 func (suite *SegmentSuite) TestDelete() {

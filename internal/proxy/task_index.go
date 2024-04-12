@@ -144,36 +144,29 @@ func (cit *createIndexTask) parseIndexParams() error {
 			indexParamsMap[kv.Key] = kv.Value
 		}
 	}
+
+	specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
+	if exist && specifyIndexType != "" {
+		_, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(specifyIndexType)
+		if err != nil {
+			log.Ctx(cit.ctx).Warn("Failed to get index checker", zap.String(common.IndexTypeKey, specifyIndexType))
+			return merr.WrapErrParameterInvalid("valid index", fmt.Sprintf("invalid index type: %s", specifyIndexType))
+		}
+	}
+
 	if !isVecIndex {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
-		if cit.fieldSchema.DataType == schemapb.DataType_VarChar {
-			if !exist {
-				indexParamsMap[common.IndexTypeKey] = DefaultStringIndexType
+		if Params.AutoIndexConfig.ScalarAutoIndexEnable.GetAsBool() || specifyIndexType == AutoIndexName || !exist {
+			if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
+				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarNumericIndexType.GetValue()
+			} else if typeutil.IsStringType(cit.fieldSchema.DataType) {
+				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarVarcharIndexType.GetValue()
+			} else if typeutil.IsBoolType(cit.fieldSchema.DataType) {
+				indexParamsMap[common.IndexTypeKey] = Params.AutoIndexConfig.ScalarBoolIndexType.GetValue()
+			} else {
+				return merr.WrapErrParameterInvalid("supported field",
+					fmt.Sprintf("create auto index on %s field is not supported", cit.fieldSchema.DataType.String()))
 			}
-
-			if exist && !validateStringIndexType(specifyIndexType) {
-				return merr.WrapErrParameterInvalid(DefaultStringIndexType, specifyIndexType, "index type not match")
-			}
-		} else if typeutil.IsArithmetic(cit.fieldSchema.DataType) {
-			if !exist {
-				indexParamsMap[common.IndexTypeKey] = DefaultArithmeticIndexType
-			}
-
-			if exist && !validateArithmeticIndexType(specifyIndexType) {
-				return merr.WrapErrParameterInvalid(DefaultArithmeticIndexType, specifyIndexType, "index type not match")
-			}
-		} else if typeutil.IsBoolType(cit.fieldSchema.DataType) {
-			if !exist {
-				return merr.WrapErrParameterInvalidMsg("no index type specified")
-			}
-			if specifyIndexType != InvertedIndexType {
-				return merr.WrapErrParameterInvalidMsg("index type (%s) not supported for boolean, supported: %s",
-					specifyIndexType, InvertedIndexType)
-			}
-		} else {
-			return merr.WrapErrParameterInvalid("supported field",
-				fmt.Sprintf("create index on %s field", cit.fieldSchema.DataType.String()),
-				fmt.Sprintf("create index on %s field is not supported", cit.fieldSchema.DataType.String()))
 		}
 	} else {
 		specifyIndexType, exist := indexParamsMap[common.IndexTypeKey]
@@ -263,12 +256,13 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return fmt.Errorf("only IP is the supported metric type for sparse index")
 			}
 		}
-
-		err := checkTrain(cit.fieldSchema, indexParamsMap)
-		if err != nil {
-			return err
-		}
 	}
+
+	err := checkTrain(cit.fieldSchema, indexParamsMap)
+	if err != nil {
+		return merr.WrapErrParameterInvalid("valid index params", "invalid index params", err.Error())
+	}
+
 	typeParams := cit.fieldSchema.GetTypeParams()
 	typeParamsMap := make(map[string]string)
 	for _, pair := range typeParams {
@@ -314,7 +308,7 @@ func (cit *createIndexTask) getIndexedField(ctx context.Context) (*schemapb.Fiel
 }
 
 func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) error {
-	if !isVectorType(field.GetDataType()) {
+	if !typeutil.IsVectorType(field.GetDataType()) {
 		return nil
 	}
 	params := make([]*commonpb.KeyValuePair, 0, len(field.GetTypeParams())+len(field.GetIndexParams()))
@@ -337,9 +331,6 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 
 func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) error {
 	indexType := indexParams[common.IndexTypeKey]
-	if !isVectorType(field.GetDataType()) {
-		return indexparamcheck.CheckIndexValid(field.GetDataType(), indexType, indexParams)
-	}
 
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
@@ -347,7 +338,7 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
-	if !isSparseVectorType(field.DataType) {
+	if !typeutil.IsSparseFloatVectorType(field.DataType) {
 		if err := fillDimension(field, indexParams); err != nil {
 			return err
 		}

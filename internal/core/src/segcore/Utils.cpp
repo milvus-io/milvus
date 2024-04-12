@@ -18,12 +18,11 @@
 
 #include "common/Common.h"
 #include "common/FieldData.h"
+#include "common/Types.h"
 #include "index/ScalarIndex.h"
-#include "log/Log.h"
 #include "mmap/Utils.h"
-#include "common/FieldData.h"
+#include "log/Log.h"
 #include "storage/RemoteChunkManagerSingleton.h"
-#include "common/Common.h"
 #include "storage/ThreadPools.h"
 #include "storage/Util.h"
 
@@ -126,7 +125,7 @@ GetRawDataSizeOfDataArray(const DataArray* data,
                           int64_t num_rows) {
     int64_t result = 0;
     auto data_type = field_meta.get_data_type();
-    if (!datatype_is_variable(data_type)) {
+    if (!IsVariableDataType(data_type)) {
         result = field_meta.get_sizeof() * num_rows;
     } else {
         switch (data_type) {
@@ -460,7 +459,7 @@ CreateVectorDataArrayFrom(const void* data_raw,
 
     auto vector_array = data_array->mutable_vectors();
     auto dim = 0;
-    if (!datatype_is_sparse_vector(data_type)) {
+    if (!IsSparseFloatVectorDataType(data_type)) {
         dim = field_meta.get_dim();
         vector_array->set_dim(dim);
     }
@@ -522,7 +521,7 @@ CreateDataArrayFrom(const void* data_raw,
                     const FieldMeta& field_meta) {
     auto data_type = field_meta.get_data_type();
 
-    if (!datatype_is_vector(data_type)) {
+    if (!IsVectorDataType(data_type)) {
         return CreateScalarDataArrayFrom(data_raw, count, field_meta);
     }
 
@@ -549,7 +548,7 @@ MergeDataArray(
         if (field_meta.is_vector()) {
             auto vector_array = data_array->mutable_vectors();
             auto dim = 0;
-            if (!datatype_is_sparse_vector(data_type)) {
+            if (!IsSparseFloatVectorDataType(data_type)) {
                 dim = field_meta.get_dim();
                 vector_array->set_dim(dim);
             }
@@ -558,6 +557,15 @@ MergeDataArray(
                 auto obj = vector_array->mutable_float_vector();
                 obj->mutable_data()->Add(data + src_offset * dim,
                                          data + (src_offset + 1) * dim);
+            } else if (field_meta.get_data_type() == DataType::VECTOR_FLOAT16) {
+                auto data = VEC_FIELD_DATA(src_field_data, float16);
+                auto obj = vector_array->mutable_float16_vector();
+                obj->assign(data, dim * sizeof(float16));
+            } else if (field_meta.get_data_type() ==
+                       DataType::VECTOR_BFLOAT16) {
+                auto data = VEC_FIELD_DATA(src_field_data, bfloat16);
+                auto obj = vector_array->mutable_bfloat16_vector();
+                obj->assign(data, dim * sizeof(bfloat16));
             } else if (field_meta.get_data_type() == DataType::VECTOR_BINARY) {
                 AssertInfo(
                     dim % 8 == 0,

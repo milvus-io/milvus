@@ -25,7 +25,7 @@
 namespace milvus::query {
 
 void
-AppendOneChunk(BitsetType& result, const FixedVector<bool>& chunk_res);
+AppendOneChunk(BitsetType& result, const TargetBitmapView chunk_res);
 
 class ExecExprVisitor : public ExprVisitor {
  public:

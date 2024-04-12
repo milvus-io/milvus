@@ -17,8 +17,6 @@
 package pipeline
 
 import (
-	"time"
-
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -29,18 +27,12 @@ import (
 // pipeline used for querynode
 type Pipeline interface {
 	base.StreamPipeline
-	ExcludedSegments(info map[int64]uint64)
 }
 
 type pipeline struct {
 	base.StreamPipeline
 
-	excludedSegments *ExcludedSegments
-	collectionID     UniqueID
-}
-
-func (p *pipeline) ExcludedSegments(excludeInfo map[int64]uint64) { //(segInfos ...*datapb.SegmentInfo) {
-	p.excludedSegments.Insert(excludeInfo)
+	collectionID UniqueID
 }
 
 func (p *pipeline) Close() {
@@ -57,15 +49,13 @@ func NewPipeLine(
 	delegator delegator.ShardDelegator,
 ) (Pipeline, error) {
 	pipelineQueueLength := paramtable.Get().QueryNodeCfg.FlowGraphMaxQueueLength.GetAsInt32()
-	excludedSegments := NewExcludedSegments(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.GetAsDuration(time.Second))
 
 	p := &pipeline{
-		collectionID:     collectionID,
-		excludedSegments: excludedSegments,
-		StreamPipeline:   base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel),
+		collectionID:   collectionID,
+		StreamPipeline: base.NewPipelineWithStream(dispatcher, nodeCtxTtInterval, enableTtChecker, channel),
 	}
 
-	filterNode := newFilterNode(collectionID, channel, manager, excludedSegments, pipelineQueueLength)
+	filterNode := newFilterNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	insertNode := newInsertNode(collectionID, channel, manager, delegator, pipelineQueueLength)
 	deleteNode := newDeleteNode(collectionID, channel, manager, tSafeManager, delegator, pipelineQueueLength)
 	p.Add(filterNode, insertNode, deleteNode)

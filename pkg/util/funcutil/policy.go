@@ -34,17 +34,17 @@ func GetVersion(m proto.GeneratedMessage) (string, error) {
 func GetPrivilegeExtObj(m proto.GeneratedMessage) (commonpb.PrivilegeExt, error) {
 	_, md := descriptor.MessageDescriptorProto(m)
 	if md == nil {
-		log.Info("MessageDescriptorProto result is nil")
+		log.RatedInfo(60, "MessageDescriptorProto result is nil")
 		return commonpb.PrivilegeExt{}, fmt.Errorf("MessageDescriptorProto result is nil")
 	}
 
 	extObj, err := proto.GetExtension(md.Options, commonpb.E_PrivilegeExtObj)
 	if err != nil {
-		log.Info("GetExtension fail", zap.Error(err))
+		log.RatedInfo(60, "GetExtension fail", zap.Error(err))
 		return commonpb.PrivilegeExt{}, err
 	}
 	privilegeExt := extObj.(*commonpb.PrivilegeExt)
-	log.Debug("GetPrivilegeExtObj success", zap.String("resource_type", privilegeExt.ObjectType.String()), zap.String("resource_privilege", privilegeExt.ObjectPrivilege.String()))
+	log.RatedDebug(60, "GetPrivilegeExtObj success", zap.String("resource_type", privilegeExt.ObjectType.String()), zap.String("resource_privilege", privilegeExt.ObjectPrivilege.String()))
 	return commonpb.PrivilegeExt{
 		ObjectType:       privilegeExt.ObjectType,
 		ObjectPrivilege:  privilegeExt.ObjectPrivilege,

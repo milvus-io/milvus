@@ -96,9 +96,11 @@ class DiskFileManagerImpl : public FileManagerImpl {
                        const std::vector<std::string>& remote_files,
                        const std::vector<int64_t>& remote_file_sizes);
 
+    template <typename DataType>
     std::string
     CacheRawDataToDisk(std::vector<std::string> remote_files);
 
+    template <typename DataType>
     std::string
     CacheRawDataToDisk(std::shared_ptr<milvus_storage::Space> space);
 

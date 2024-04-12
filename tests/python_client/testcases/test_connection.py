@@ -791,7 +791,7 @@ class TestConnectionOperation(TestcaseBase):
 
         # drop collection failed
         self.collection_wrap.drop(check_task=ct.CheckTasks.err_res,
-                                  check_items={ct.err_code: 0, ct.err_msg: "should create connect first"})
+                                  check_items={ct.err_code: 1, ct.err_msg: "should create connect first"})
 
         # successfully created default connection
         self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING, host=host, port=port,

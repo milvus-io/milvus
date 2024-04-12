@@ -35,6 +35,7 @@ import (
 var maxTxnNum = 128
 
 // GetEtcdClient returns etcd client
+// should only used for test
 func GetEtcdClient(
 	useEmbedEtcd bool,
 	useSSL bool,

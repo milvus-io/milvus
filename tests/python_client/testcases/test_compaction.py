@@ -31,7 +31,7 @@ class TestCompactionParams(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: "should create connect first"}
+        error = {ct.err_code: 1, ct.err_msg: "should create connect first"}
         collection_w.compact(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -216,6 +216,7 @@ class TestCompactionParams(TestcaseBase):
         assert len(res[0]) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31258")
     def test_compact_delete_ratio(self):
         """
         target: test delete entities reaches ratio and auto-compact

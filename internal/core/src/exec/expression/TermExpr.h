@@ -41,7 +41,7 @@ struct TermIndexFunc {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    FixedVector<bool>
+    TargetBitmap
     operator()(Index* index, size_t n, const IndexInnerType* val) {
         return index->In(n, val);
     }
@@ -129,7 +129,7 @@ class PhyTermFilterExpr : public SegmentExpr {
     bool use_cache_offsets_{false};
     bool cached_offsets_inited_{false};
     ColumnVectorPtr cached_offsets_;
-    FixedVector<bool> cached_bits_;
+    TargetBitmap cached_bits_;
 };
 }  //namespace exec
 }  // namespace milvus

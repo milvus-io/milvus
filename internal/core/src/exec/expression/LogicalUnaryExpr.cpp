@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include "LogicalUnaryExpr.h"
-#include "simd/hook.h"
 
 namespace milvus {
 namespace exec {
@@ -29,14 +28,8 @@ PhyLogicalUnaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     inputs_[0]->Eval(context, result);
     if (expr_->op_type_ == milvus::expr::LogicalUnaryExpr::OpType::LogicalNot) {
         auto flat_vec = GetColumnVector(result);
-        bool* data = static_cast<bool*>(flat_vec->GetRawData());
-#if defined(USE_DYNAMIC_SIMD)
-        milvus::simd::invert_bool(data, flat_vec->size());
-#else
-        for (int i = 0; i < flat_vec->size(); ++i) {
-            data[i] = !data[i];
-        }
-#endif
+        TargetBitmapView data(flat_vec->GetRawData(), flat_vec->size());
+        data.flip();
     }
 }
 

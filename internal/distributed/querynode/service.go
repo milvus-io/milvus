@@ -74,6 +74,10 @@ func (s *Server) GetStatistics(ctx context.Context, request *querypb.GetStatisti
 	return s.querynode.GetStatistics(ctx, request)
 }
 
+func (s *Server) GetQueryNode() types.QueryNodeComponent {
+	return s.querynode
+}
+
 // NewServer create a new QueryNode grpc server.
 func NewServer(ctx context.Context, factory dependency.Factory) (*Server, error) {
 	ctx1, cancel := context.WithCancel(ctx)
@@ -382,9 +386,4 @@ func (s *Server) SyncDistribution(ctx context.Context, req *querypb.SyncDistribu
 // Delete is used to forward delete message between delegator and workers.
 func (s *Server) Delete(ctx context.Context, req *querypb.DeleteRequest) (*commonpb.Status, error) {
 	return s.querynode.Delete(ctx, req)
-}
-
-// HybridSearch performs hybrid search of streaming/historical replica on QueryNode.
-func (s *Server) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error) {
-	return s.querynode.HybridSearch(ctx, req)
 }

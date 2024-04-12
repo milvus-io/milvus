@@ -46,6 +46,8 @@
 #include "pb/segcore.pb.h"
 #include "Json.h"
 
+#include "CustomBitset.h"
+
 namespace milvus {
 
 using idx_t = int64_t;
@@ -97,6 +99,89 @@ using InsertRecordProto = proto::segcore::InsertRecord;
 using PkType = std::variant<std::monostate, int64_t, std::string>;
 
 inline size_t
+GetDataTypeSize(DataType data_type, int dim = 1) {
+    switch (data_type) {
+        case DataType::BOOL:
+            return sizeof(bool);
+        case DataType::INT8:
+            return sizeof(int8_t);
+        case DataType::INT16:
+            return sizeof(int16_t);
+        case DataType::INT32:
+            return sizeof(int32_t);
+        case DataType::INT64:
+            return sizeof(int64_t);
+        case DataType::FLOAT:
+            return sizeof(float);
+        case DataType::DOUBLE:
+            return sizeof(double);
+        case DataType::VECTOR_FLOAT:
+            return sizeof(float) * dim;
+        case DataType::VECTOR_BINARY: {
+            AssertInfo(dim % 8 == 0, "dim={}", dim);
+            return dim / 8;
+        }
+        case DataType::VECTOR_FLOAT16: {
+            return sizeof(float16) * dim;
+        }
+        case DataType::VECTOR_BFLOAT16: {
+            return sizeof(bfloat16) * dim;
+        }
+        // Not supporting VECTOR_SPARSE_FLOAT here intentionally. We can't
+        // easily estimately the size of a sparse float vector. Caller of this
+        // method must handle this case themselves and must not pass
+        // VECTOR_SPARSE_FLOAT data_type.
+        default: {
+            throw SegcoreError(DataTypeInvalid,
+                               fmt::format("invalid type is {}", data_type));
+        }
+    }
+}
+
+// TODO: use magic_enum when available
+inline std::string
+GetDataTypeName(DataType data_type) {
+    switch (data_type) {
+        case DataType::NONE:
+            return "none";
+        case DataType::BOOL:
+            return "bool";
+        case DataType::INT8:
+            return "int8_t";
+        case DataType::INT16:
+            return "int16_t";
+        case DataType::INT32:
+            return "int32_t";
+        case DataType::INT64:
+            return "int64_t";
+        case DataType::FLOAT:
+            return "float";
+        case DataType::DOUBLE:
+            return "double";
+        case DataType::STRING:
+            return "string";
+        case DataType::VARCHAR:
+            return "varChar";
+        case DataType::ARRAY:
+            return "array";
+        case DataType::JSON:
+            return "json";
+        case DataType::VECTOR_FLOAT:
+            return "vector_float";
+        case DataType::VECTOR_BINARY:
+            return "vector_binary";
+        case DataType::VECTOR_FLOAT16:
+            return "vector_float16";
+        case DataType::VECTOR_BFLOAT16:
+            return "vector_bfloat16";
+        case DataType::VECTOR_SPARSE_FLOAT:
+            return "vector_sparse_float";
+        default:
+            PanicInfo(DataTypeInvalid, "Unsupported DataType({})", data_type);
+    }
+}
+
+inline size_t
 CalcPksSize(const std::vector<PkType>& pks) {
     size_t size = 0;
     for (auto& pk : pks) {
@@ -120,6 +205,96 @@ using ContainsType = proto::plan::JSONContainsExpr_JSONOp;
 inline bool
 IsPrimaryKeyDataType(DataType data_type) {
     return data_type == DataType::INT64 || data_type == DataType::VARCHAR;
+}
+
+inline bool
+IsIntegerDataType(DataType data_type) {
+    switch (data_type) {
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+IsFloatDataType(DataType data_type) {
+    switch (data_type) {
+        case DataType::FLOAT:
+        case DataType::DOUBLE:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+IsStringDataType(DataType data_type) {
+    switch (data_type) {
+        case DataType::VARCHAR:
+        case DataType::STRING:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+IsJsonDataType(DataType data_type) {
+    return data_type == DataType::JSON;
+}
+
+inline bool
+IsArrayDataType(DataType data_type) {
+    return data_type == DataType::ARRAY;
+}
+
+inline bool
+IsBinaryDataType(DataType data_type) {
+    return IsJsonDataType(data_type) || IsArrayDataType(data_type);
+}
+
+inline bool
+IsBinaryVectorDataType(DataType data_type) {
+    return data_type == DataType::VECTOR_BINARY;
+}
+
+inline bool
+IsDenseFloatVectorDataType(DataType data_type) {
+    switch (data_type) {
+        case DataType::VECTOR_FLOAT:
+        case DataType::VECTOR_FLOAT16:
+        case DataType::VECTOR_BFLOAT16:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+IsSparseFloatVectorDataType(DataType data_type) {
+    return data_type == DataType::VECTOR_SPARSE_FLOAT;
+}
+
+inline bool
+IsFloatVectorDataType(DataType data_type) {
+    return IsDenseFloatVectorDataType(data_type) ||
+           IsSparseFloatVectorDataType(data_type);
+}
+
+inline bool
+IsVectorDataType(DataType data_type) {
+    return IsBinaryVectorDataType(data_type) ||
+           IsFloatVectorDataType(data_type);
+}
+
+inline bool
+IsVariableDataType(DataType data_type) {
+    return IsStringDataType(data_type) || IsBinaryDataType(data_type) ||
+           IsSparseFloatVectorDataType(data_type);
 }
 
 // NOTE: dependent type
@@ -158,8 +333,9 @@ using OptFieldT = std::unordered_map<
 using SegOffset =
     fluent::NamedType<int64_t, impl::SegOffsetTag, fluent::Arithmetic>;
 
-using BitsetType = boost::dynamic_bitset<>;
-using BitsetTypePtr = std::shared_ptr<boost::dynamic_bitset<>>;
+//using BitsetType = boost::dynamic_bitset<>;
+using BitsetType = CustomBitset;
+using BitsetTypePtr = std::shared_ptr<BitsetType>;
 using BitsetTypeOpt = std::optional<BitsetType>;
 
 template <typename Type>
@@ -167,7 +343,10 @@ using FixedVector = folly::fbvector<
     Type>;  // boost::container::vector has memory leak when version > 1.79, so use folly::fbvector instead
 
 using Config = nlohmann::json;
-using TargetBitmap = FixedVector<bool>;
+//using TargetBitmap = std::vector<bool>;
+//using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
+using TargetBitmap = CustomBitset;
+using TargetBitmapView = CustomBitsetView;
 using TargetBitmapPtr = std::unique_ptr<TargetBitmap>;
 
 using BinaryPtr = knowhere::BinaryPtr;
@@ -188,9 +367,9 @@ IndexIsSparse(const IndexType& index_type) {
 // Plus 1 because we can't use greater(>) symbol
 constexpr size_t REF_SIZE_THRESHOLD = 16 + 1;
 
-using BitsetBlockType = BitsetType::block_type;
-constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
-constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
+//using BitsetBlockType = BitsetType::block_type;
+//constexpr size_t BITSET_BLOCK_SIZE = sizeof(BitsetType::block_type);
+//constexpr size_t BITSET_BLOCK_BIT_SIZE = sizeof(BitsetType::block_type) * 8;
 template <typename T>
 using MayConstRef = std::conditional_t<std::is_same_v<T, std::string> ||
                                            std::is_same_v<T, milvus::Json>,

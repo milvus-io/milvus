@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
-	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -81,8 +80,6 @@ func TestMain(t *testing.M) {
 }
 
 func TestDataNode(t *testing.T) {
-	importutil.ReportImportAttempts = 1
-
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 

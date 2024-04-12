@@ -109,9 +109,9 @@ func (action *SegmentAction) Scope() querypb.DataScope {
 
 func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool {
 	if action.Type() == ActionTypeGrow {
-		leaderSegmentDist := distMgr.LeaderViewManager.GetSealedSegmentDist(action.SegmentID())
+		views := distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(action.segmentID, false))
 		nodeSegmentDist := distMgr.SegmentDistManager.GetSegmentDist(action.SegmentID())
-		return lo.Contains(leaderSegmentDist, action.Node()) &&
+		return len(views) > 0 &&
 			lo.Contains(nodeSegmentDist, action.Node()) &&
 			action.rpcReturned.Load()
 	} else if action.Type() == ActionTypeReduce {
@@ -122,7 +122,10 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		// now, we just always commit the release task to executor once.
 		// NOTE: DO NOT create a task containing release action and the action is not the last action
 		sealed := distMgr.SegmentDistManager.GetByFilter(meta.WithNodeID(action.Node()))
-		growing := distMgr.LeaderViewManager.GetSegmentByNode(action.Node())
+		views := distMgr.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(action.Node()))
+		growing := lo.FlatMap(views, func(view *meta.LeaderView, _ int) []int64 {
+			return lo.Keys(view.GrowingSegments)
+		})
 		segments := make([]int64, 0, len(sealed)+len(growing))
 		for _, segment := range sealed {
 			segments = append(segments, segment.GetID())
@@ -154,8 +157,10 @@ func (action *ChannelAction) ChannelName() string {
 }
 
 func (action *ChannelAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	nodes := distMgr.LeaderViewManager.GetChannelDist(action.ChannelName())
-	hasNode := lo.Contains(nodes, action.Node())
+	views := distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(action.ChannelName()))
+	_, hasNode := lo.Find(views, func(v *meta.LeaderView) bool {
+		return v.ID == action.Node()
+	})
 	isGrow := action.Type() == ActionTypeGrow
 
 	return hasNode == isGrow
@@ -191,12 +196,18 @@ func (action *LeaderAction) Version() typeutil.UniqueID {
 	return action.version
 }
 
+func (action *LeaderAction) GetLeaderID() typeutil.UniqueID {
+	return action.leaderID
+}
+
 func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
-	views := distMgr.LeaderViewManager.GetLeaderView(action.leaderID)
-	view := views[action.Shard()]
-	if view == nil {
+	views := distMgr.LeaderViewManager.GetByFilter(meta.WithNodeID2LeaderView(action.leaderID), meta.WithChannelName2LeaderView(action.Shard()))
+	if len(views) == 0 {
 		return false
 	}
+	view := lo.MaxBy(views, func(v1 *meta.LeaderView, v2 *meta.LeaderView) bool {
+		return v1.Version > v2.Version
+	})
 	dist := view.Segments[action.SegmentID()]
 	switch action.Type() {
 	case ActionTypeGrow:

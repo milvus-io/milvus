@@ -63,7 +63,7 @@ func (f SegmentFilterFunc) SegmentIDs() ([]int64, bool) {
 
 func WithPartitionID(partitionID int64) SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return partitionID == common.InvalidPartitionID || info.partitionID == partitionID
+		return partitionID == common.AllPartitionsID || info.partitionID == partitionID
 	})
 }
 

@@ -1190,7 +1190,7 @@ class TestCollectionOperation(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
         self.collection_wrap.init_collection(c_name, schema=default_schema,
                                              check_task=CheckTasks.err_res, check_items=error)
         assert self.collection_wrap.collection is None
@@ -2075,7 +2075,7 @@ class TestDropCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
         collection_wr.drop(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -2176,7 +2176,7 @@ class TestHasCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
         self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2291,7 +2291,7 @@ class TestListCollections(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
         self.utility_wrap.list_collections(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2384,7 +2384,7 @@ class TestLoadCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
         collection_wr.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -2400,7 +2400,7 @@ class TestLoadCollection(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first'}
         collection_wr.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3413,7 +3413,7 @@ class TestLoadPartition(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first.'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first.'}
         partition_w.load(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -3438,7 +3438,7 @@ class TestLoadPartition(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        error = {ct.err_code: 0, ct.err_msg: 'should create connect first.'}
+        error = {ct.err_code: 1, ct.err_msg: 'should create connect first.'}
         partition_w.release(check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)

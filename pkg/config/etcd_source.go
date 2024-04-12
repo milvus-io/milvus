@@ -48,8 +48,11 @@ type EtcdSource struct {
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
 	log.Debug("init etcd source", zap.Any("etcdInfo", etcdInfo))
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := etcd.CreateEtcdClient(
 		etcdInfo.UseEmbed,
+		etcdInfo.EnableAuth,
+		etcdInfo.UserName,
+		etcdInfo.PassWord,
 		etcdInfo.UseSSL,
 		etcdInfo.Endpoints,
 		etcdInfo.CertFile,

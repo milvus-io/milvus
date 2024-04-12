@@ -1258,8 +1258,8 @@ type DataCoordCatalog_SaveChannelCheckpoints_Call struct {
 }
 
 // SaveChannelCheckpoints is a helper method to define mock.On call
-//  - ctx context.Context
-//  - positions []*msgpb.MsgPosition
+//   - ctx context.Context
+//   - positions []*msgpb.MsgPosition
 func (_e *DataCoordCatalog_Expecter) SaveChannelCheckpoints(ctx interface{}, positions interface{}) *DataCoordCatalog_SaveChannelCheckpoints_Call {
 	return &DataCoordCatalog_SaveChannelCheckpoints_Call{Call: _e.mock.On("SaveChannelCheckpoints", ctx, positions)}
 }

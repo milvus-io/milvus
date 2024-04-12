@@ -12,12 +12,8 @@
 #-------------------------------------------------------------------------------
 
 # Update KNOWHERE_VERSION for the first occurrence
-set( KNOWHERE_VERSION v2.3.0-beta )
+set( KNOWHERE_VERSION v2.3.0 )
 set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
-if ( INDEX_ENGINE STREQUAL "cardinal" )
-    set( KNOWHERE_VERSION main )
-    set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere-cloud.git")
-endif()
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 
@@ -29,6 +25,12 @@ if ( BUILD_DISK_ANN STREQUAL "ON" )
 else ()
     set(WITH_DISKANN OFF CACHE BOOL "" FORCE )
 endif ()
+
+if ( INDEX_ENGINE STREQUAL "cardinal" )
+    set(WITH_CARDINAL ON CACHE BOOL "" FORCE )
+else ()
+    set(WITH_CARDINAL OFF CACHE BOOL "" FORCE )
+endif()
 
 if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_RAFT ON CACHE BOOL "" FORCE )

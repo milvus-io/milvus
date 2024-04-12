@@ -25,19 +25,20 @@ import (
 )
 
 const (
-	BoolField        = "boolField"
-	Int8Field        = "int8Field"
-	Int16Field       = "int16Field"
-	Int32Field       = "int32Field"
-	Int64Field       = "int64Field"
-	FloatField       = "floatField"
-	DoubleField      = "doubleField"
-	VarCharField     = "varCharField"
-	JSONField        = "jsonField"
-	FloatVecField    = "floatVecField"
-	BinVecField      = "binVecField"
-	Float16VecField  = "float16VecField"
-	BFloat16VecField = "bfloat16VecField"
+	BoolField           = "boolField"
+	Int8Field           = "int8Field"
+	Int16Field          = "int16Field"
+	Int32Field          = "int32Field"
+	Int64Field          = "int64Field"
+	FloatField          = "floatField"
+	DoubleField         = "doubleField"
+	VarCharField        = "varCharField"
+	JSONField           = "jsonField"
+	FloatVecField       = "floatVecField"
+	BinVecField         = "binVecField"
+	Float16VecField     = "float16VecField"
+	BFloat16VecField    = "bfloat16VecField"
+	SparseFloatVecField = "sparseFloatVecField"
 )
 
 func ConstructSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
@@ -74,6 +75,50 @@ func ConstructSchema(collection string, dim int, autoID bool, fields ...*schemap
 			},
 		},
 		IndexParams: nil,
+	}
+	return &schemapb.CollectionSchema{
+		Name:   collection,
+		AutoID: autoID,
+		Fields: []*schemapb.FieldSchema{pk, fVec},
+	}
+}
+
+func ConstructSchemaOfVecDataType(collection string, dim int, autoID bool, dataType schemapb.DataType) *schemapb.CollectionSchema {
+	pk := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         Int64Field,
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       autoID,
+	}
+	var name string
+	var typeParams []*commonpb.KeyValuePair
+	switch dataType {
+	case schemapb.DataType_FloatVector:
+		name = FloatVecField
+		typeParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: fmt.Sprintf("%d", dim),
+			},
+		}
+	case schemapb.DataType_SparseFloatVector:
+		name = SparseFloatVecField
+		typeParams = nil
+	default:
+		panic("unsupported data type")
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         name,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     dataType,
+		TypeParams:   typeParams,
+		IndexParams:  nil,
 	}
 	return &schemapb.CollectionSchema{
 		Name:   collection,

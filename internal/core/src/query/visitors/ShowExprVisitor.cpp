@@ -11,10 +11,10 @@
 
 #include <utility>
 
+#include "common/Types.h"
 #include "query/ExprImpl.h"
 #include "query/Plan.h"
 #include "query/generated/ShowExprVisitor.h"
-#include "common/Types.h"
 
 namespace milvus::query {
 using Json = nlohmann::json;
@@ -115,7 +115,7 @@ void
 ShowExprVisitor::visit(TermExpr& expr) {
     AssertInfo(!json_opt_.has_value(),
                "[ShowExprVisitor]Ret json already has value before visit");
-    AssertInfo(datatype_is_vector(expr.column_.data_type) == false,
+    AssertInfo(IsVectorDataType(expr.column_.data_type) == false,
                "[ShowExprVisitor]Data type of expr isn't vector type");
     auto terms = [&] {
         switch (expr.column_.data_type) {
@@ -144,7 +144,7 @@ ShowExprVisitor::visit(TermExpr& expr) {
 
     Json res{{"expr_type", "Term"},
              {"field_id", expr.column_.field_id.get()},
-             {"data_type", datatype_name(expr.column_.data_type)},
+             {"data_type", GetDataTypeName(expr.column_.data_type)},
              {"terms", std::move(terms)}};
 
     json_opt_ = res;
@@ -161,7 +161,7 @@ UnaryRangeExtract(const UnaryRangeExpr& expr_raw) {
         "[ShowExprVisitor]UnaryRangeExpr cast to UnaryRangeExprImpl failed");
     Json res{{"expr_type", "UnaryRange"},
              {"field_id", expr->column_.field_id.get()},
-             {"data_type", datatype_name(expr->column_.data_type)},
+             {"data_type", GetDataTypeName(expr->column_.data_type)},
              {"op", OpType_Name(static_cast<OpType>(expr->op_type_))},
              {"value", expr->value_}};
     return res;
@@ -171,7 +171,7 @@ void
 ShowExprVisitor::visit(UnaryRangeExpr& expr) {
     AssertInfo(!json_opt_.has_value(),
                "[ShowExprVisitor]Ret json already has value before visit");
-    AssertInfo(datatype_is_vector(expr.column_.data_type) == false,
+    AssertInfo(IsVectorDataType(expr.column_.data_type) == false,
                "[ShowExprVisitor]Data type of expr isn't vector type");
     switch (expr.column_.data_type) {
         case DataType::BOOL:
@@ -213,7 +213,7 @@ BinaryRangeExtract(const BinaryRangeExpr& expr_raw) {
         "[ShowExprVisitor]BinaryRangeExpr cast to BinaryRangeExprImpl failed");
     Json res{{"expr_type", "BinaryRange"},
              {"field_id", expr->column_.field_id.get()},
-             {"data_type", datatype_name(expr->column_.data_type)},
+             {"data_type", GetDataTypeName(expr->column_.data_type)},
              {"lower_inclusive", expr->lower_inclusive_},
              {"upper_inclusive", expr->upper_inclusive_},
              {"lower_value", expr->lower_value_},
@@ -225,7 +225,7 @@ void
 ShowExprVisitor::visit(BinaryRangeExpr& expr) {
     AssertInfo(!json_opt_.has_value(),
                "[ShowExprVisitor]Ret json already has value before visit");
-    AssertInfo(datatype_is_vector(expr.column_.data_type) == false,
+    AssertInfo(IsVectorDataType(expr.column_.data_type) == false,
                "[ShowExprVisitor]Data type of expr isn't vector type");
     switch (expr.column_.data_type) {
         case DataType::BOOL:
@@ -268,9 +268,9 @@ ShowExprVisitor::visit(CompareExpr& expr) {
 
     Json res{{"expr_type", "Compare"},
              {"left_field_id", expr.left_field_id_.get()},
-             {"left_data_type", datatype_name(expr.left_data_type_)},
+             {"left_data_type", GetDataTypeName(expr.left_data_type_)},
              {"right_field_id", expr.right_field_id_.get()},
-             {"right_data_type", datatype_name(expr.right_data_type_)},
+             {"right_data_type", GetDataTypeName(expr.right_data_type_)},
              {"op", OpType_Name(static_cast<OpType>(expr.op_type_))}};
     json_opt_ = res;
 }
@@ -291,7 +291,7 @@ BinaryArithOpEvalRangeExtract(const BinaryArithOpEvalRangeExpr& expr_raw) {
 
     Json res{{"expr_type", "BinaryArithOpEvalRange"},
              {"field_offset", expr->column_.field_id.get()},
-             {"data_type", datatype_name(expr->column_.data_type)},
+             {"data_type", GetDataTypeName(expr->column_.data_type)},
              {"arith_op",
               ArithOpType_Name(static_cast<ArithOpType>(expr->arith_op_))},
              {"right_operand", expr->right_operand_},
@@ -304,7 +304,7 @@ void
 ShowExprVisitor::visit(BinaryArithOpEvalRangeExpr& expr) {
     AssertInfo(!json_opt_.has_value(),
                "[ShowExprVisitor]Ret json already has value before visit");
-    AssertInfo(datatype_is_vector(expr.column_.data_type) == false,
+    AssertInfo(IsVectorDataType(expr.column_.data_type) == false,
                "[ShowExprVisitor]Data type of expr isn't vector type");
     switch (expr.column_.data_type) {
         // see also: https://github.com/milvus-io/milvus/issues/23646.

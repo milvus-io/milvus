@@ -53,10 +53,9 @@ type client struct {
 
 func NewClient(factory msgstream.Factory, role string, nodeID int64) Client {
 	return &client{
-		role:    role,
-		nodeID:  nodeID,
-		factory: factory,
-		// managers: typeutil.NewConcurrentMap[string, DispatcherManager](),
+		role:     role,
+		nodeID:   nodeID,
+		factory:  factory,
 		managers: make(map[string]DispatcherManager),
 	}
 }

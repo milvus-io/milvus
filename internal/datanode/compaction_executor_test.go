@@ -83,7 +83,7 @@ func TestCompactionExecutor(t *testing.T) {
 			{expected: false, channel: "ch2", desc: "in dropped"},
 		}
 		ex := newCompactionExecutor()
-		ex.clearTasksByChannel("ch2")
+		ex.discardByDroppedChannel("ch2")
 		for _, test := range tests {
 			t.Run(test.desc, func(t *testing.T) {
 				assert.Equal(t, test.expected, ex.isValidChannel(test.channel))
@@ -107,7 +107,7 @@ func TestCompactionExecutor(t *testing.T) {
 			found = ex.executing.Contain(mc.getPlanID())
 		}
 
-		ex.clearTasksByChannel("mock")
+		ex.discardByDroppedChannel("mock")
 
 		select {
 		case <-mc.ctx.Done():

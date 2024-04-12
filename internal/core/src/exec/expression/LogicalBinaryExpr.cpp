@@ -21,9 +21,10 @@ namespace exec {
 
 void
 PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
-    AssertInfo(inputs_.size() == 2,
-               "logical binary expr must has two input, but now {}",
-               inputs_.size());
+    AssertInfo(
+        inputs_.size() == 2,
+        "logical binary expr must have 2 inputs, but {} inputs are provided",
+        inputs_.size());
     VectorPtr left;
     inputs_[0]->Eval(context, left);
     VectorPtr right;
@@ -31,14 +32,14 @@ PhyLogicalBinaryExpr::Eval(EvalCtx& context, VectorPtr& result) {
     auto lflat = GetColumnVector(left);
     auto rflat = GetColumnVector(right);
     auto size = left->size();
-    bool* ldata = static_cast<bool*>(lflat->GetRawData());
-    bool* rdata = static_cast<bool*>(rflat->GetRawData());
+    TargetBitmapView lview(lflat->GetRawData(), size);
+    TargetBitmapView rview(rflat->GetRawData(), size);
     if (expr_->op_type_ == expr::LogicalBinaryExpr::OpType::And) {
         LogicalElementFunc<LogicalOpType::And> func;
-        func(ldata, rdata, size);
+        func(lview, rview, size);
     } else if (expr_->op_type_ == expr::LogicalBinaryExpr::OpType::Or) {
         LogicalElementFunc<LogicalOpType::Or> func;
-        func(ldata, rdata, size);
+        func(lview, rview, size);
     } else {
         PanicInfo(OpTypeInvalid,
                   "unsupported logical operator: {}",

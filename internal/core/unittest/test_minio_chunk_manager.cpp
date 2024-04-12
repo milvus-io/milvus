@@ -44,7 +44,8 @@ class MinioChunkManagerTest : public testing::Test {
 //    auto accessKey = "";
 //    auto accessValue = "";
 //    auto rootPath = "files";
-//    auto useSSL = true;
+//    auto useSSL = false;
+//    auto sslCACert = "";
 //    auto useIam = true;
 //    auto iamEndPoint = "";
 //    auto bucketName = "vdc-infra-poc";
@@ -63,6 +64,7 @@ class MinioChunkManagerTest : public testing::Test {
 //                         logLevel,
 //                         region,
 //                         useSSL,
+//                         sslCACert,
 //                         useIam};
 //}
 

@@ -78,7 +78,7 @@ func translateToOutputFieldIDs(outputFields []string, schema *schemapb.Collectio
 	outputFieldIDs := make([]UniqueID, 0, len(outputFields)+1)
 	if len(outputFields) == 0 {
 		for _, field := range schema.Fields {
-			if field.FieldID >= common.StartOfUserFieldID && !isVectorType(field.DataType) {
+			if field.FieldID >= common.StartOfUserFieldID && !typeutil.IsVectorType(field.DataType) {
 				outputFieldIDs = append(outputFieldIDs, field.FieldID)
 			}
 		}
@@ -591,20 +591,25 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
+	retrieveLimit := typeutil.Unlimited
 	if queryParams != nil && queryParams.limit != typeutil.Unlimited {
+		retrieveLimit = queryParams.limit + queryParams.offset
 		if !queryParams.reduceStopForBest {
 			loopEnd = int(queryParams.limit)
 		}
-		if queryParams.offset > 0 {
-			for i := int64(0); i < queryParams.offset; i++ {
-				sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
-				if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
-					return ret, nil
-				}
-				cursors[sel]++
+	}
+
+	// handle offset
+	if queryParams != nil && queryParams.offset > 0 {
+		for i := int64(0); i < queryParams.offset; i++ {
+			sel, drainOneResult := typeutil.SelectMinPK(retrieveLimit, validRetrieveResults, cursors)
+			if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
+				return ret, nil
 			}
+			cursors[sel]++
 		}
 	}
+
 	reduceStopForBest := false
 	if queryParams != nil {
 		reduceStopForBest = queryParams.reduceStopForBest
@@ -613,7 +618,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
-		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPK(retrieveLimit, validRetrieveResults, cursors)
 		if sel == -1 || (reduceStopForBest && drainOneResult) {
 			break
 		}

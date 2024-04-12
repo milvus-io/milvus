@@ -719,15 +719,12 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 			Data: make([]*schemapb.ScalarField, 0, len(content)),
 		}
 
-		if len(content) > 0 {
-			data.ElementType = content[0].(*schemapb.ScalarField).GetArrayData().GetElementType()
-		}
-
 		for _, c := range content {
 			r, ok := c.(*schemapb.ScalarField)
 			if !ok {
 				return nil, errTransferType
 			}
+			data.ElementType = r.GetArrayData().GetElementType()
 			data.Data = append(data.Data, r)
 		}
 		rst = data

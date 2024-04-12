@@ -420,36 +420,6 @@ func (s *ServerSuite) TestSaveBinlogPath_NormalCase() {
 	s.EqualValues(segment.NumOfRows, 10)
 }
 
-func (s *ServerSuite) TestFlushForImport() {
-	schema := newTestSchema()
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
-
-	// normal
-	allocation, err := s.testServer.segmentManager.allocSegmentForImport(
-		context.TODO(), 0, 1, "ch-1", 1, 1)
-	s.NoError(err)
-	segmentID := allocation.SegmentID
-	req := &datapb.FlushRequest{
-		CollectionID: 0,
-		SegmentIDs:   []UniqueID{segmentID},
-	}
-	resp, err := s.testServer.flushForImport(context.TODO(), req)
-	s.NoError(err)
-	s.EqualValues(int32(0), resp.GetStatus().GetCode())
-
-	// failed
-	allocation, err = s.testServer.segmentManager.allocSegmentForImport(
-		context.TODO(), 0, 1, "ch-1", 1, 1)
-	s.NoError(err)
-	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(errors.New("mock err"))
-	s.testServer.meta.catalog = catalog
-	req.SegmentIDs = []UniqueID{allocation.SegmentID}
-	resp, err = s.testServer.flushForImport(context.TODO(), req)
-	s.NoError(err)
-	s.NotEqual(int32(0), resp.GetStatus().GetCode())
-}
-
 func (s *ServerSuite) TestFlush_NormalCase() {
 	req := &datapb.FlushRequest{
 		Base: &commonpb.MsgBase{
@@ -489,71 +459,6 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.NoError(err)
 	s.EqualValues(1, len(ids))
 	s.EqualValues(segID, ids[0])
-}
-
-func (s *ServerSuite) TestFlush_BulkLoadSegment() {
-	req := &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_Flush,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  0,
-		},
-		DbID:         0,
-		CollectionID: 0,
-	}
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
-		1: {"channel-1"},
-	})
-
-	mockCluster := NewMockCluster(s.T())
-	mockCluster.EXPECT().FlushChannels(mock.Anything, mock.Anything, mock.Anything, mock.Anything).
-		Return(nil)
-	mockCluster.EXPECT().Close().Maybe()
-	s.testServer.cluster = mockCluster
-
-	schema := newTestSchema()
-	s.testServer.meta.AddCollection(&collectionInfo{ID: 0, Schema: schema, Partitions: []int64{}})
-
-	allocations, err := s.testServer.segmentManager.allocSegmentForImport(context.TODO(), 0, 1, "channel-1", 1, 100)
-	s.NoError(err)
-	expireTs := allocations.ExpireTime
-	segID := allocations.SegmentID
-
-	resp, err := s.testServer.Flush(context.TODO(), req)
-	s.NoError(err)
-	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	s.EqualValues(0, len(resp.SegmentIDs))
-	// should not flush anything since this is a normal flush
-	s.testServer.meta.SetCurrentRows(segID, 1)
-	ids, err := s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
-	s.NoError(err)
-	s.EqualValues(0, len(ids))
-
-	req = &datapb.FlushRequest{
-		Base: &commonpb.MsgBase{
-			MsgType:   commonpb.MsgType_Flush,
-			MsgID:     0,
-			Timestamp: 0,
-			SourceID:  0,
-		},
-		DbID:         0,
-		CollectionID: 0,
-		SegmentIDs:   []int64{segID},
-		IsImport:     true,
-	}
-
-	resp, err = s.testServer.Flush(context.TODO(), req)
-	s.NoError(err)
-	s.EqualValues(commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
-	segment := s.testServer.meta.GetSegment(segID)
-	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
-
-	err = s.testServer.meta.UnsetIsImporting(segID)
-	s.NoError(err)
-	ids, err = s.testServer.segmentManager.GetFlushableSegments(context.TODO(), "channel-1", expireTs)
-	s.NoError(err)
-	s.EqualValues(0, len(ids))
 }
 
 func (s *ServerSuite) TestFlush_ClosedServer() {
@@ -654,39 +559,6 @@ func (s *ServerSuite) TestAssignSegmentID() {
 			ChannelName:  channel0,
 			CollectionID: collID,
 			PartitionID:  partID,
-		}
-
-		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{
-			NodeID:            0,
-			PeerRole:          "",
-			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
-		})
-		s.NoError(err)
-		s.EqualValues(1, len(resp.SegIDAssignments))
-		assign := resp.SegIDAssignments[0]
-		s.EqualValues(commonpb.ErrorCode_Success, assign.GetStatus().GetErrorCode())
-		s.EqualValues(collID, assign.CollectionID)
-		s.EqualValues(partID, assign.PartitionID)
-		s.EqualValues(channel0, assign.ChannelName)
-		s.EqualValues(1000, assign.Count)
-	})
-
-	s.Run("assign segment for bulkload", func() {
-		s.SetupTest()
-		defer s.TearDownTest()
-
-		schema := newTestSchema()
-		s.testServer.meta.AddCollection(&collectionInfo{
-			ID:         collID,
-			Schema:     schema,
-			Partitions: []int64{},
-		})
-		req := &datapb.SegmentIDRequest{
-			Count:        1000,
-			ChannelName:  channel0,
-			CollectionID: collID,
-			PartitionID:  partID,
-			IsImport:     true,
 		}
 
 		resp, err := s.testServer.AssignSegmentID(context.TODO(), &datapb.AssignSegmentIDRequest{

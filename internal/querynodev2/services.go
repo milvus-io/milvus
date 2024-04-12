@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -289,18 +290,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 		info := req.GetSegmentInfos()[id]
 		return id, info.GetDmlPosition().GetTimestamp()
 	})
-	pipeline.ExcludedSegments(growingInfo)
-
-	flushedInfo := lo.SliceToMap(channel.GetFlushedSegmentIds(), func(id int64) (int64, uint64) {
-		return id, typeutil.MaxTimestamp
-	})
-	pipeline.ExcludedSegments(flushedInfo)
-	for _, channelInfo := range req.GetInfos() {
-		droppedInfos := lo.SliceToMap(channelInfo.GetDroppedSegmentIds(), func(id int64) (int64, uint64) {
-			return id, typeutil.MaxTimestamp
-		})
-		pipeline.ExcludedSegments(droppedInfos)
-	}
+	delegator.AddExcludedSegments(growingInfo)
 
 	err = loadL0Segments(ctx, delegator, req)
 	if err != nil {
@@ -367,6 +357,7 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 
 		node.pipelineManager.Remove(req.GetChannelName())
 		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
+		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
 
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -542,16 +533,6 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 			return merr.Status(err), nil
 		}
 
-		// when we try to release a segment, add it to pipeline's exclude list first
-		// in case of consumed it's growing segment again
-		pipeline := node.pipelineManager.Get(req.GetShard())
-		if pipeline != nil {
-			droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
-				return id, typeutil.MaxTimestamp
-			})
-			pipeline.ExcludedSegments(droppedInfos)
-		}
-
 		req.NeedTransfer = false
 		err := delegator.ReleaseSegments(ctx, req, false)
 		if err != nil {
@@ -709,15 +690,9 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 
 // Search performs replica search tasks.
 func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (*internalpb.SearchResults, error) {
-	if req.FromShardLeader {
-		// for compatible with rolling upgrade from version before v2.2.9
-		return node.SearchSegments(ctx, req)
-	}
-
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("channels", req.GetDmlChannels()),
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64("nq", req.GetReq().GetNq()),
 	)
 
@@ -749,18 +724,17 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 
 	for i, ch := range req.GetDmlChannels() {
 		ch := ch
-		req := &querypb.SearchRequest{
+		channelReq := &querypb.SearchRequest{
 			Req:             req.Req,
 			DmlChannels:     []string{ch},
 			SegmentIDs:      req.SegmentIDs,
-			FromShardLeader: req.FromShardLeader,
 			Scope:           req.Scope,
 			TotalChannelNum: req.TotalChannelNum,
 		}
 
 		i := i
 		runningGp.Go(func() error {
-			ret, err := node.searchChannel(runningCtx, req, ch)
+			ret, err := node.searchChannel(runningCtx, channelReq, ch)
 			if err != nil {
 				return err
 			}
@@ -777,12 +751,20 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	tr.RecordSpan()
-	result, err := segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
-	if err != nil {
-		log.Warn("failed to reduce search results", zap.Error(err))
-		resp.Status = merr.Status(err)
+	var result *internalpb.SearchResults
+	var err2 error
+	if req.GetReq().GetIsAdvanced() {
+		result, err2 = segments.ReduceAdvancedSearchResults(ctx, toReduceResults, req.Req.GetNq())
+	} else {
+		result, err2 = segments.ReduceSearchResults(ctx, toReduceResults, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+	}
+
+	if err2 != nil {
+		log.Warn("failed to reduce search results", zap.Error(err2))
+		resp.Status = merr.Status(err2)
 		return resp, nil
 	}
+
 	reduceLatency := tr.RecordSpan()
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
 		Observe(float64(reduceLatency.Milliseconds()))
@@ -796,103 +778,6 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 		result.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	}
 	return result, nil
-}
-
-// HybridSearch performs replica search tasks.
-func (node *QueryNode) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest) (*querypb.HybridSearchResult, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
-		zap.Strings("channels", req.GetDmlChannels()))
-
-	log.Debug("Received HybridSearchRequest",
-		zap.Uint64("guaranteeTimestamp", req.GetReq().GetGuaranteeTimestamp()),
-		zap.Uint64("mvccTimestamp", req.GetReq().GetMvccTimestamp()))
-
-	tr := timerecord.NewTimeRecorderWithTrace(ctx, "HybridSearchRequest")
-
-	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		return &querypb.HybridSearchResult{
-			Base: &commonpb.MsgBase{
-				SourceID: node.GetNodeID(),
-			},
-			Status: merr.Status(err),
-		}, nil
-	}
-	defer node.lifetime.Done()
-
-	resp := &querypb.HybridSearchResult{
-		Base: &commonpb.MsgBase{
-			SourceID: node.GetNodeID(),
-		},
-		Status: merr.Success(),
-	}
-	collection := node.manager.Collection.Get(req.GetReq().GetCollectionID())
-	if collection == nil {
-		resp.Status = merr.Status(merr.WrapErrCollectionNotFound(req.GetReq().GetCollectionID()))
-		return resp, nil
-	}
-
-	MultipleResults := make([]*querypb.HybridSearchResult, len(req.GetDmlChannels()))
-	runningGp, runningCtx := errgroup.WithContext(ctx)
-
-	for i, ch := range req.GetDmlChannels() {
-		ch := ch
-		req := &querypb.HybridSearchRequest{
-			Req:             req.Req,
-			DmlChannels:     []string{ch},
-			TotalChannelNum: 1,
-		}
-
-		i := i
-		runningGp.Go(func() error {
-			ret, err := node.hybridSearchChannel(runningCtx, req, ch)
-			if err != nil {
-				return err
-			}
-			if err := merr.Error(ret.GetStatus()); err != nil {
-				return err
-			}
-			MultipleResults[i] = ret
-			return nil
-		})
-	}
-	if err := runningGp.Wait(); err != nil {
-		resp.Status = merr.Status(err)
-		return resp, nil
-	}
-
-	tr.RecordSpan()
-	channelsMvcc := make(map[string]uint64)
-	for i, searchReq := range req.GetReq().GetReqs() {
-		toReduceResults := make([]*internalpb.SearchResults, len(MultipleResults))
-		for index, hs := range MultipleResults {
-			toReduceResults[index] = hs.Results[i]
-		}
-		result, err := segments.ReduceSearchResults(ctx, toReduceResults, searchReq.GetNq(), searchReq.GetTopk(), searchReq.GetMetricType())
-		if err != nil {
-			log.Warn("failed to reduce search results", zap.Error(err))
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
-		for ch, ts := range result.GetChannelsMvcc() {
-			channelsMvcc[ch] = ts
-		}
-		resp.Results = append(resp.Results, result)
-	}
-	resp.ChannelsMvcc = channelsMvcc
-
-	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.HybridSearchLabel, metrics.ReduceShards).
-		Observe(float64(reduceLatency.Milliseconds()))
-
-	collector.Rate.Add(metricsinfo.SearchThroughput, float64(proto.Size(req)))
-	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.HybridSearchLabel).
-		Add(float64(proto.Size(req)))
-
-	if resp.GetCostAggregation() != nil {
-		resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
-	}
-	return resp, nil
 }
 
 // only used for delegator query segments from worker
@@ -923,10 +808,7 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		}
 	}()
 
-	log.Debug("start do query segments",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-	)
+	log.Debug("start do query segments", zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 	// add cancel when error occurs
 	queryCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
@@ -952,9 +834,8 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 		return resp, nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s,  vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))
@@ -971,11 +852,6 @@ func (node *QueryNode) QuerySegments(ctx context.Context, req *querypb.QueryRequ
 
 // Query performs replica query tasks.
 func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*internalpb.RetrieveResults, error) {
-	if req.FromShardLeader {
-		// for compatible with rolling upgrade from version before v2.2.9
-		return node.QuerySegments(ctx, req)
-	}
-
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetReq().GetCollectionID()),
 		zap.Strings("shards", req.GetDmlChannels()),
@@ -1003,11 +879,10 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	for i, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.QueryRequest{
-			Req:             req.Req,
-			DmlChannels:     []string{ch},
-			SegmentIDs:      req.SegmentIDs,
-			FromShardLeader: req.FromShardLeader,
-			Scope:           req.Scope,
+			Req:         req.Req,
+			DmlChannels: []string{ch},
+			SegmentIDs:  req.SegmentIDs,
+			Scope:       req.Scope,
 		}
 
 		idx := i
@@ -1041,10 +916,8 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
 		Observe(float64(reduceLatency.Milliseconds()))
 
-	if !req.FromShardLeader {
-		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
-		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
-	}
+	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
+	metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 
 	if ret.GetCostAggregation() != nil {
 		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
@@ -1079,11 +952,10 @@ func (node *QueryNode) QueryStream(req *querypb.QueryRequest, srv querypb.QueryN
 	for _, ch := range req.GetDmlChannels() {
 		ch := ch
 		req := &querypb.QueryRequest{
-			Req:             req.Req,
-			DmlChannels:     []string{ch},
-			SegmentIDs:      req.SegmentIDs,
-			FromShardLeader: req.FromShardLeader,
-			Scope:           req.Scope,
+			Req:         req.Req,
+			DmlChannels: []string{ch},
+			SegmentIDs:  req.SegmentIDs,
+			Scope:       req.Scope,
 		}
 
 		runningGp.Go(func() error {
@@ -1136,10 +1008,7 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 	}
 	defer node.lifetime.Done()
 
-	log.Debug("start do query with channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
-		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
-	)
+	log.Debug("start do query with channel", zap.Int64s("segmentIDs", req.GetSegmentIDs()))
 
 	tr := timerecord.NewTimeRecorder("queryChannel")
 
@@ -1150,9 +1019,8 @@ func (node *QueryNode) QueryStreamSegments(req *querypb.QueryRequest, srv queryp
 		return nil
 	}
 
-	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("do query done, traceID = %s,  vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))
@@ -1401,14 +1269,13 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			})
 		case querypb.SyncType_UpdateVersion:
 			log.Info("sync action", zap.Int64("TargetVersion", action.GetTargetVersion()))
-			pipeline := node.pipelineManager.Get(req.GetChannel())
-			if pipeline != nil {
-				droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
+			droppedInfos := lo.SliceToMap(action.GetDroppedInTarget(), func(id int64) (int64, uint64) {
+				if action.GetCheckpoint() == nil {
 					return id, typeutil.MaxTimestamp
-				})
-
-				pipeline.ExcludedSegments(droppedInfos)
-			}
+				}
+				return id, action.GetCheckpoint().Timestamp
+			})
+			shardDelegator.AddExcludedSegments(droppedInfos)
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
 		default:
@@ -1422,9 +1289,10 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 		return merr.Status(err), nil
 	}
 
+	// in case of target node offline, when try to remove segment from leader's distribution, use wildcardNodeID(-1) to skip nodeID check
 	for _, action := range removeActions {
 		shardDelegator.ReleaseSegments(ctx, &querypb.ReleaseSegmentsRequest{
-			NodeID:       action.GetNodeID(),
+			NodeID:       -1,
 			SegmentIDs:   []int64{action.GetSegmentID()},
 			Scope:        querypb.DataScope_Historical,
 			CollectionID: req.GetCollectionID(),

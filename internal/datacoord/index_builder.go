@@ -319,6 +319,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				AccessKeyID:      Params.MinioCfg.AccessKeyID.GetValue(),
 				SecretAccessKey:  Params.MinioCfg.SecretAccessKey.GetValue(),
 				UseSSL:           Params.MinioCfg.UseSSL.GetAsBool(),
+				SslCACert:        Params.MinioCfg.SslCACert.GetValue(),
 				BucketName:       Params.MinioCfg.BucketName.GetValue(),
 				RootPath:         Params.MinioCfg.RootPath.GetValue(),
 				UseIAM:           Params.MinioCfg.UseIAM.GetAsBool(),

@@ -68,10 +68,17 @@ class ColumnVector final : public BaseVector {
         values_ = InitScalarFieldData(data_type, length);
     }
 
-    ColumnVector(FixedVector<bool>&& data)
-        : BaseVector(DataType::BOOL, data.size()) {
-        values_ =
-            std::make_shared<FieldData<bool>>(DataType::BOOL, std::move(data));
+    //    ColumnVector(FixedVector<bool>&& data)
+    //        : BaseVector(DataType::BOOL, data.size()) {
+    //        values_ =
+    //            std::make_shared<FieldData<bool>>(DataType::BOOL, std::move(data));
+    //    }
+
+    // the size is the number of bits
+    ColumnVector(TargetBitmap&& bitmap)
+        : BaseVector(DataType::INT8, bitmap.size()) {
+        values_ = std::make_shared<FieldDataImpl<uint8_t, false>>(
+            bitmap.size(), DataType::INT8, std::move(bitmap).into());
     }
 
     virtual ~ColumnVector() override {

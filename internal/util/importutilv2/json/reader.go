@@ -17,10 +17,13 @@
 package json
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"io"
 	"strings"
+
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -35,8 +38,13 @@ const (
 type Row = map[storage.FieldID]any
 
 type reader struct {
-	dec    *json.Decoder
+	ctx    context.Context
+	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
+
+	fileSize *atomic.Int64
+	filePath string
+	dec      *json.Decoder
 
 	bufferSize  int
 	count       int64
@@ -45,15 +53,22 @@ type reader struct {
 	parser RowParser
 }
 
-func NewReader(r io.Reader, schema *schemapb.CollectionSchema, bufferSize int) (*reader, error) {
-	var err error
+func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, path string, bufferSize int) (*reader, error) {
+	r, err := cm.Reader(ctx, path)
+	if err != nil {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("read json file failed, path=%s, err=%s", path, err.Error()))
+	}
 	count, err := estimateReadCountPerBatch(bufferSize, schema)
 	if err != nil {
 		return nil, err
 	}
 	reader := &reader{
-		dec:        json.NewDecoder(r),
+		ctx:        ctx,
+		cm:         cm,
 		schema:     schema,
+		fileSize:   atomic.NewInt64(0),
+		filePath:   path,
+		dec:        json.NewDecoder(r),
 		bufferSize: bufferSize,
 		count:      count,
 	}
@@ -151,6 +166,18 @@ func (j *reader) Read() (*storage.InsertData, error) {
 	}
 
 	return insertData, nil
+}
+
+func (j *reader) Size() (int64, error) {
+	if size := j.fileSize.Load(); size != 0 {
+		return size, nil
+	}
+	size, err := j.cm.Size(j.ctx, j.filePath)
+	if err != nil {
+		return 0, err
+	}
+	j.fileSize.Store(size)
+	return size, nil
 }
 
 func (j *reader) Close() {}

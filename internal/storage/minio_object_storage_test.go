@@ -201,6 +201,15 @@ func TestMinioObjectStorage(t *testing.T) {
 		config.useIAM = false
 	})
 
+	t.Run("test ssl", func(t *testing.T) {
+		var err error
+		config.useSSL = true
+		config.sslCACert = "/tmp/dummy.crt"
+		_, err = newMinioObjectStorageWithConfig(ctx, &config)
+		assert.Error(t, err)
+		config.useSSL = false
+	})
+
 	t.Run("test cloud provider", func(t *testing.T) {
 		var err error
 		cloudProvider := config.cloudProvider

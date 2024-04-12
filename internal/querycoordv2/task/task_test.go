@@ -19,6 +19,7 @@ package task
 import (
 	"context"
 	"math/rand"
+	"strings"
 	"testing"
 	"time"
 
@@ -45,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -56,10 +58,11 @@ type distribution struct {
 
 type TaskSuite struct {
 	suite.Suite
+	testutils.EmbedEtcdUtil
 
 	// Data
 	collection      int64
-	replica         int64
+	replica         *meta.Replica
 	subChannels     []string
 	unsubChannels   []string
 	moveChannels    []string
@@ -85,8 +88,13 @@ type TaskSuite struct {
 
 func (suite *TaskSuite) SetupSuite() {
 	paramtable.Init()
+	addressList, err := suite.SetupEtcd()
+	suite.Require().NoError(err)
+	params := paramtable.Get()
+	params.Save(params.EtcdCfg.Endpoints.Key, strings.Join(addressList, ","))
+
 	suite.collection = 1000
-	suite.replica = 10
+	suite.replica = newReplicaDefaultRG(10)
 	suite.subChannels = []string{
 		"sub-0",
 		"sub-1",
@@ -123,6 +131,11 @@ func (suite *TaskSuite) SetupSuite() {
 			segments: typeutil.NewSet[int64](),
 		},
 	}
+}
+
+func (suite *TaskSuite) TearDownSuite() {
+	suite.TearDownEmbedEtcd()
+	paramtable.Get().Reset(paramtable.Get().EtcdCfg.Endpoints.Key)
 }
 
 func (suite *TaskSuite) SetupTest() {
@@ -191,8 +204,7 @@ func (suite *TaskSuite) BeforeTest(suiteName, testName string) {
 				PartitionID:  1,
 			},
 		})
-		suite.meta.ReplicaManager.Put(
-			utils.CreateTestReplica(suite.replica, suite.collection, []int64{1, 2, 3}))
+		suite.meta.ReplicaManager.Put(utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3}))
 	}
 }
 
@@ -349,7 +361,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 			timeout,
 			WrapIDSource(0),
 			suite.collection,
-			-1,
+			meta.NilReplica,
 			NewChannelAction(targetNode, ActionTypeReduce, channel),
 		)
 
@@ -430,6 +442,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -530,6 +543,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -624,6 +638,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -1006,6 +1021,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segmentInfos := []*datapb.SegmentInfo{}
 	for _, segment := range suite.loadSegments {
@@ -1098,6 +1114,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		CollectionID: suite.collection,
 		ChannelName:  channel.ChannelName,
 	}))
+	suite.dist.LeaderViewManager.Update(targetNode, utils.CreateTestLeaderView(targetNode, suite.collection, channel.ChannelName, map[int64]int64{}, map[int64]*meta.Segment{}))
 	tasks := []Task{}
 	segments := make([]*datapb.SegmentInfo, 0)
 	for _, segment := range suite.loadSegments {
@@ -1343,39 +1360,39 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 }
 
 func (suite *TaskSuite) TestCreateTaskBehavior() {
-	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0)
+	chanelTask, err := NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action := NewSegmentAction(0, 0, "", 0)
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, action)
+	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, action)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
 	action1 := NewChannelAction(0, 0, "fake-channel1")
 	action2 := NewChannelAction(0, 0, "fake-channel2")
-	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, action1, action2)
+	chanelTask, err = NewChannelTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, action1, action2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(chanelTask)
 
-	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0)
+	segmentTask, err := NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	channelAction := NewChannelAction(0, 0, "fake-channel1")
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, channelAction)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, channelAction)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	segmentAction1 := NewSegmentAction(0, 0, "", 0)
 	segmentAction2 := NewSegmentAction(0, 0, "", 1)
 
-	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, segmentAction1, segmentAction2)
+	segmentTask, err = NewSegmentTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, segmentAction1, segmentAction2)
 	suite.ErrorIs(err, merr.ErrParameterInvalid)
 	suite.Nil(segmentTask)
 
 	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100, 0)
-	leaderTask := NewLeaderTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, 0, 1, leaderAction)
+	leaderTask := NewLeaderTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
 	suite.NotNil(leaderTask)
 }
 
@@ -1447,8 +1464,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 		ChannelName:  Params.CommonCfg.RootCoordDml.GetValue() + "-test",
 	}
 
-	suite.meta.ReplicaManager.Put(
-		utils.CreateTestReplica(suite.replica, suite.collection, []int64{1, 2, 3, -1}))
+	suite.meta.ReplicaManager.Put(utils.CreateTestReplica(suite.replica.GetID(), suite.collection, []int64{1, 2, 3, -1}))
 
 	// Test load segment task
 	suite.dist.ChannelDistManager.Update(targetNode, meta.DmChannelFromVChannel(&datapb.VchannelInfo{
@@ -1666,7 +1682,7 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 		10*time.Second,
 		WrapIDSource(2),
 		collectionID,
-		1,
+		meta.NilReplica,
 		NewChannelAction(1, ActionTypeGrow, channel),
 		NewChannelAction(2, ActionTypeReduce, channel),
 	)
@@ -1761,7 +1777,12 @@ func (suite *TaskSuite) TestBalanceChannelWithL0SegmentTask() {
 		10*time.Second,
 		WrapIDSource(2),
 		collectionID,
-		1,
+		meta.NewReplica(
+			&querypb.Replica{
+				ID: 1,
+			},
+			typeutil.NewUniqueSet(),
+		),
 		NewChannelAction(1, ActionTypeGrow, channel),
 		NewChannelAction(2, ActionTypeReduce, channel),
 	)
@@ -1794,4 +1815,14 @@ func (suite *TaskSuite) TestBalanceChannelWithL0SegmentTask() {
 
 func TestTask(t *testing.T) {
 	suite.Run(t, new(TaskSuite))
+}
+
+func newReplicaDefaultRG(replicaID int64) *meta.Replica {
+	return meta.NewReplica(
+		&querypb.Replica{
+			ID:            replicaID,
+			ResourceGroup: meta.DefaultResourceGroupName,
+		},
+		typeutil.NewUniqueSet(),
+	)
 }

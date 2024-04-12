@@ -99,11 +99,11 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 					continue
 				}
 
-				leaderViews := c.dist.LeaderViewManager.GetByCollectionAndNode(replica.GetCollectionID(), node)
-				for ch, leaderView := range leaderViews {
-					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(ch), meta.WithReplica(replica))
-					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica.ID, leaderView, dist)...)
-					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica.ID, leaderView, dist)...)
+				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
+				for _, leaderView := range leaderViews {
+					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))
+					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, leaderView, dist)...)
+					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, leaderView, dist)...)
 				}
 			}
 		}
@@ -112,30 +112,33 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 	return tasks
 }
 
-func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int64, leaderView *meta.LeaderView, dist []*meta.Segment) []task.Task {
+func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, dist []*meta.Segment) []task.Task {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.Int64("replica", replica),
+		zap.Int64("replica", replica.GetID()),
 		zap.String("channel", leaderView.Channel),
 		zap.Int64("leaderViewID", leaderView.ID),
 	)
 	ret := make([]task.Task, 0)
-	dist = utils.FindMaxVersionSegments(dist)
-	for _, s := range dist {
+
+	latestNodeDist := utils.FindMaxVersionSegments(dist)
+	for _, s := range latestNodeDist {
 		segment := c.target.GetSealedSegment(leaderView.CollectionID, s.GetID(), meta.CurrentTargetFirst)
 		existInTarget := segment != nil
 		isL0Segment := existInTarget && segment.GetLevel() == datapb.SegmentLevel_L0
-		// should set l0 segment location to delegator. l0 segment should be reload in delegator
+		// shouldn't set l0 segment location to delegator. l0 segment should be reload in delegator
 		if !existInTarget || isL0Segment {
 			continue
 		}
 
+		// when segment's version in leader view doesn't match segment's version in dist
+		// which means leader view store wrong segment location in leader view, then we should update segment location and segment's version
 		version, ok := leaderView.Segments[s.GetID()]
-		if !ok || version.GetVersion() < s.Version {
+		if !ok || version.GetVersion() != s.Version {
 			log.RatedDebug(10, "leader checker append a segment to set",
 				zap.Int64("segmentID", s.GetID()),
 				zap.Int64("nodeID", s.Node))
-			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), s.Version)
+			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), time.Now().UnixNano())
 			t := task.NewLeaderTask(
 				ctx,
 				params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
@@ -145,8 +148,9 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 				leaderView.ID,
 				action,
 			)
-			// index task shall have lower or equal priority than balance task
-			t.SetPriority(task.TaskPriorityHigh)
+
+			// leader task shouldn't replace executing segment task
+			t.SetPriority(task.TaskPriorityLow)
 			t.SetReason("add segment to leader view")
 			ret = append(ret, t)
 		}
@@ -154,10 +158,10 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica int6
 	return ret
 }
 
-func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int64, leaderView *meta.LeaderView, dists []*meta.Segment) []task.Task {
+func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, dists []*meta.Segment) []task.Task {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", leaderView.CollectionID),
-		zap.Int64("replica", replica),
+		zap.Int64("replica", replica.GetID()),
 		zap.String("channel", leaderView.Channel),
 		zap.Int64("leaderViewID", leaderView.ID),
 	)
@@ -179,7 +183,9 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 		log.Debug("leader checker append a segment to remove",
 			zap.Int64("segmentID", sid),
 			zap.Int64("nodeID", s.NodeID))
-		action := task.NewLeaderAction(leaderView.ID, s.NodeID, task.ActionTypeReduce, leaderView.Channel, sid, 0)
+		// reduce leader action won't be execute on worker, in  order to remove segment from delegator success even when worker done
+		// set workerID to leader view's node
+		action := task.NewLeaderAction(leaderView.ID, leaderView.ID, task.ActionTypeReduce, leaderView.Channel, sid, 0)
 		t := task.NewLeaderTask(
 			ctx,
 			paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
@@ -190,7 +196,8 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica int
 			action,
 		)
 
-		t.SetPriority(task.TaskPriorityHigh)
+		// leader task shouldn't replace executing segment task
+		t.SetPriority(task.TaskPriorityLow)
 		t.SetReason("remove segment from leader view")
 		ret = append(ret, t)
 	}

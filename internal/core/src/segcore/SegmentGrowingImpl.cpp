@@ -143,7 +143,7 @@ SegmentGrowingImpl::Insert(int64_t reserved_offset,
             &insert_record_proto->fields_data(data_offset),
             field_meta,
             num_rows);
-        if (datatype_is_variable(field_meta.get_data_type())) {
+        if (IsVariableDataType(field_meta.get_data_type())) {
             SegmentInternalInterface::set_field_avg_size(
                 field_id, num_rows, field_data_size);
         }
@@ -249,7 +249,7 @@ SegmentGrowingImpl::LoadFieldData(const LoadFieldDataInfo& infos) {
 
         // update average row data size
         auto field_meta = (*schema_)[field_id];
-        if (datatype_is_variable(field_meta.get_data_type())) {
+        if (IsVariableDataType(field_meta.get_data_type())) {
             SegmentInternalInterface::set_field_avg_size(
                 field_id,
                 num_rows,
@@ -338,7 +338,7 @@ SegmentGrowingImpl::LoadFieldDataV2(const LoadFieldDataInfo& infos) {
 
         // update average row data size
         auto field_meta = (*schema_)[field_id];
-        if (datatype_is_variable(field_meta.get_data_type())) {
+        if (IsVariableDataType(field_meta.get_data_type())) {
             SegmentInternalInterface::set_field_avg_size(
                 field_id,
                 num_rows,

@@ -71,19 +71,20 @@ func (suite *ReduceSuite) SetupTest() {
 	suite.collection = NewCollection(suite.collectionID,
 		schema,
 		GenTestIndexMeta(suite.collectionID, schema),
-		querypb.LoadType_LoadCollection,
-	)
+		&querypb.LoadMetaInfo{
+			LoadType: querypb.LoadType_LoadCollection,
+		})
 	suite.segment, err = NewSegment(ctx,
 		suite.collection,
-		suite.segmentID,
-		suite.partitionID,
-		suite.collectionID,
-		"dml",
 		SegmentTypeSealed,
 		0,
-		nil,
-		nil,
-		datapb.SegmentLevel_Legacy,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     suite.segmentID,
+			CollectionID:  suite.collectionID,
+			PartitionID:   suite.partitionID,
+			InsertChannel: "dml",
+			Level:         datapb.SegmentLevel_Legacy,
+		},
 	)
 	suite.Require().NoError(err)
 

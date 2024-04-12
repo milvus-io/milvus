@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
@@ -465,6 +466,18 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	// prepate
 	suite.TestWatchDmChannelsInt64()
 
+	l0Segment := segments.NewMockSegment(suite.T())
+	l0Segment.EXPECT().ID().Return(10000)
+	l0Segment.EXPECT().Collection().Return(suite.collectionID)
+	l0Segment.EXPECT().Partition().Return(common.AllPartitionsID)
+	l0Segment.EXPECT().Level().Return(datapb.SegmentLevel_L0)
+	l0Segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
+	l0Segment.EXPECT().Indexes().Return(nil)
+	l0Segment.EXPECT().Shard().Return(suite.vchannel)
+	l0Segment.EXPECT().Release().Return()
+
+	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, l0Segment)
+
 	// data
 	req := &querypb.UnsubDmChannelRequest{
 		Base: &commonpb.MsgBase{
@@ -478,8 +491,11 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	}
 
 	status, err := suite.node.UnsubDmChannel(ctx, req)
-	suite.NoError(err)
-	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
+	suite.NoError(merr.CheckRPCCall(status, err))
+
+	suite.Len(suite.node.manager.Segment.GetBy(
+		segments.WithChannel(suite.vchannel),
+		segments.WithLevel(datapb.SegmentLevel_L0)), 0)
 }
 
 func (suite *ServiceSuite) TestUnsubDmChannels_Failed() {
@@ -867,8 +883,10 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 
-		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
-			Return(nil)
+		delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
+		delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
+		delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
+		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).Return(nil)
 		// data
 		schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 		req := &querypb.LoadSegmentsRequest{
@@ -916,6 +934,9 @@ func (suite *ServiceSuite) TestLoadSegments_Transfer() {
 		delegator := &delegator.MockShardDelegator{}
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
+		delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
+		delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
+		delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
 		delegator.EXPECT().LoadSegments(mock.Anything, mock.AnythingOfType("*querypb.LoadSegmentsRequest")).
 			Return(errors.New("mocked error"))
 		// data
@@ -1075,6 +1096,9 @@ func (suite *ServiceSuite) TestReleaseSegments_Transfer() {
 		suite.node.delegators.Insert(suite.vchannel, delegator)
 		defer suite.node.delegators.GetAndRemove(suite.vchannel)
 
+		delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
+		delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
+		delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
 		delegator.EXPECT().ReleaseSegments(mock.Anything, mock.AnythingOfType("*querypb.ReleaseSegmentsRequest"), false).
 			Return(errors.New("mocked error"))
 
@@ -1160,8 +1184,8 @@ func (suite *ServiceSuite) TestSearch_Normal() {
 
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
 	req := &querypb.SearchRequest{
-		Req:             creq,
-		FromShardLeader: false,
+		Req: creq,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1184,8 +1208,8 @@ func (suite *ServiceSuite) TestSearch_Concurrent() {
 		future := conc.Go(func() (*internalpb.SearchResults, error) {
 			creq, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
 			req := &querypb.SearchRequest{
-				Req:             creq,
-				FromShardLeader: false,
+				Req: creq,
+
 				DmlChannels:     []string{suite.vchannel},
 				TotalChannelNum: 2,
 			}
@@ -1210,8 +1234,8 @@ func (suite *ServiceSuite) TestSearch_Failed() {
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, false)
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, "invalidMetricType")
 	req := &querypb.SearchRequest{
-		Req:             creq,
-		FromShardLeader: false,
+		Req: creq,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1281,7 +1305,6 @@ func (suite *ServiceSuite) TestSearchSegments_Unhealthy() {
 	suite.node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
 	req := &querypb.SearchRequest{
-		FromShardLeader: true,
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1300,7 +1323,7 @@ func (suite *ServiceSuite) TestSearchSegments_Failed() {
 		Req: &internalpb.SearchRequest{
 			CollectionID: -1, // not exist collection id
 		},
-		FromShardLeader: true,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1321,47 +1344,6 @@ func (suite *ServiceSuite) TestSearchSegments_Failed() {
 	suite.Equal(commonpb.ErrorCode_UnexpectedError, rsp.GetStatus().GetErrorCode())
 }
 
-func (suite *ServiceSuite) TestHybridSearch_Concurrent() {
-	ctx := context.Background()
-	// pre
-	suite.TestWatchDmChannelsInt64()
-	suite.TestLoadSegments_Int64()
-
-	concurrency := 16
-	futures := make([]*conc.Future[*querypb.HybridSearchResult], 0, concurrency)
-	for i := 0; i < concurrency; i++ {
-		future := conc.Go(func() (*querypb.HybridSearchResult, error) {
-			creq1, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
-			suite.NoError(err)
-			creq2, err := suite.genCSearchRequest(30, schemapb.DataType_FloatVector, 107, defaultMetricType)
-			suite.NoError(err)
-			req := &querypb.HybridSearchRequest{
-				Req: &internalpb.HybridSearchRequest{
-					Base: &commonpb.MsgBase{
-						MsgID:    rand.Int63(),
-						TargetID: suite.node.session.ServerID,
-					},
-					CollectionID:  suite.collectionID,
-					PartitionIDs:  suite.partitionIDs,
-					MvccTimestamp: typeutil.MaxTimestamp,
-					Reqs:          []*internalpb.SearchRequest{creq1, creq2},
-				},
-				DmlChannels: []string{suite.vchannel},
-			}
-
-			return suite.node.HybridSearch(ctx, req)
-		})
-		futures = append(futures, future)
-	}
-
-	err := conc.AwaitAll(futures...)
-	suite.NoError(err)
-
-	for i := range futures {
-		suite.True(merr.Ok(futures[i].Value().GetStatus()))
-	}
-}
-
 func (suite *ServiceSuite) TestSearchSegments_Normal() {
 	ctx := context.Background()
 	// pre
@@ -1370,8 +1352,8 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 
 	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
 	req := &querypb.SearchRequest{
-		Req:             creq,
-		FromShardLeader: true,
+		Req: creq,
+
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
 	}
@@ -1414,9 +1396,9 @@ func (suite *ServiceSuite) TestQuery_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	rsp, err := suite.node.Query(ctx, req)
@@ -1433,9 +1415,9 @@ func (suite *ServiceSuite) TestQuery_Failed() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	// Delegator not found
@@ -1460,8 +1442,8 @@ func (suite *ServiceSuite) TestQuerySegments_Failed() {
 		Req: &internalpb.RetrieveRequest{
 			CollectionID: -1,
 		},
-		FromShardLeader: true,
-		DmlChannels:     []string{suite.vchannel},
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	rsp, err := suite.node.QuerySegments(ctx, req)
@@ -1495,9 +1477,9 @@ func (suite *ServiceSuite) TestQueryStream_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	client := streamrpc.NewLocalQueryClient(ctx)
@@ -1530,9 +1512,9 @@ func (suite *ServiceSuite) TestQueryStream_Failed() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: false,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	queryFunc := func(wg *sync.WaitGroup, req *querypb.QueryRequest, client *streamrpc.LocalQueryClient) {
@@ -1608,9 +1590,9 @@ func (suite *ServiceSuite) TestQuerySegments_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: true,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	rsp, err := suite.node.QuerySegments(ctx, req)
@@ -1630,9 +1612,9 @@ func (suite *ServiceSuite) TestQueryStreamSegments_Normal() {
 	creq, err := suite.genCQueryRequest(10, IndexFaissIDMap, schema)
 	suite.NoError(err)
 	req := &querypb.QueryRequest{
-		Req:             creq,
-		FromShardLeader: true,
-		DmlChannels:     []string{suite.vchannel},
+		Req: creq,
+
+		DmlChannels: []string{suite.vchannel},
 	}
 
 	client := streamrpc.NewLocalQueryClient(ctx)
@@ -1904,7 +1886,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 4)
+	suite.Len(sealedSegments[0].Segments, 3)
 
 	releaseAction = &querypb.SyncAction{
 		Type:      querypb.SyncType_Remove,
@@ -1918,7 +1900,7 @@ func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
 	sealedSegments, _ = delegator.GetSegmentInfo(false)
-	suite.Len(sealedSegments[0].Segments, 3)
+	suite.Len(sealedSegments[0].Segments, 2)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_Failed() {

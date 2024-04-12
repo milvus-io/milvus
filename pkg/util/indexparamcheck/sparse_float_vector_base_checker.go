@@ -6,6 +6,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // sparse vector don't check for dim, but baseChecker does, thus not including baseChecker
@@ -32,7 +33,7 @@ func (c sparseFloatVectorBaseChecker) CheckTrain(params map[string]string) error
 }
 
 func (c sparseFloatVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if dType != schemapb.DataType_SparseFloatVector {
+	if !typeutil.IsSparseFloatVectorType(dType) {
 		return fmt.Errorf("only sparse float vector is supported for the specified index tpye")
 	}
 	return nil

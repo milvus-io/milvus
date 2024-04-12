@@ -53,9 +53,17 @@ generateConfig(const StorageConfig& storage_config) {
     Aws::Client::ClientConfiguration config = g_config;
     config.endpointOverride = ConvertToAwsString(storage_config.address);
 
+    // Three cases:
+    // 1. no ssl, verifySSL=false
+    // 2. self-signed certificate, verifySSL=false
+    // 3. CA-signed certificate, verifySSL=true
     if (storage_config.useSSL) {
         config.scheme = Aws::Http::Scheme::HTTPS;
         config.verifySSL = true;
+        if (!storage_config.sslCACert.empty()) {
+            config.caPath = ConvertToAwsString(storage_config.sslCACert);
+            config.verifySSL = false;
+        }
     } else {
         config.scheme = Aws::Http::Scheme::HTTP;
         config.verifySSL = false;

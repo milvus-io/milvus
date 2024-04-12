@@ -86,13 +86,21 @@ service QueryCoord {
         returns (DescribeResourceGroupResponse) {
     }
 
-    // ops interfaces
-    rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {
-    }
-    rpc ActivateChecker(ActivateCheckerRequest) returns (common.Status) {
-    }
-    rpc DeactivateChecker(DeactivateCheckerRequest) returns (common.Status) {
-    }
+
+  // ops interfaces
+  rpc ListCheckers(ListCheckersRequest) returns (ListCheckersResponse) {}
+  rpc ActivateChecker(ActivateCheckerRequest) returns (common.Status) {}
+  rpc DeactivateChecker(DeactivateCheckerRequest) returns (common.Status) {}
+    
+  rpc ListQueryNode(ListQueryNodeRequest) returns (ListQueryNodeResponse) {}
+  rpc GetQueryNodeDistribution(GetQueryNodeDistributionRequest) returns (GetQueryNodeDistributionResponse) {}
+  rpc SuspendBalance(SuspendBalanceRequest) returns (common.Status)  {}
+  rpc ResumeBalance(ResumeBalanceRequest) returns (common.Status)  {}
+  rpc SuspendNode(SuspendNodeRequest) returns (common.Status) {}
+  rpc ResumeNode(ResumeNodeRequest) returns (common.Status) {}
+  rpc TransferSegment(TransferSegmentRequest) returns (common.Status) {}
+  rpc TransferChannel(TransferChannelRequest) returns (common.Status) {}
+  rpc CheckQueryNodeDistribution(CheckQueryNodeDistributionRequest) returns (common.Status) {}
 }
 
 service QueryNode {
@@ -130,8 +138,6 @@ service QueryNode {
         returns (internal.GetStatisticsResponse) {
     }
     rpc Search(SearchRequest) returns (internal.SearchResults) {
-    }
-    rpc HybridSearch(HybridSearchRequest) returns (HybridSearchResult) {
     }
     rpc SearchSegments(SearchRequest) returns (internal.SearchResults) {
     }
@@ -296,6 +302,8 @@ message LoadMetaInfo {
     int64 collectionID = 2;
     repeated int64 partitionIDs = 3;
     string metric_type = 4 [deprecated = true];
+    string db_name = 5; // Only used for metrics label.
+    string resource_group = 6; // Only used for metrics label.
 }
 
 message WatchDmChannelsRequest {
@@ -395,6 +403,7 @@ message ReleaseSegmentsRequest {
     DataScope scope = 7;  // All, Streaming, Historical
     string shard = 8;
     bool need_transfer = 11;
+    msg.MsgPosition checkpoint = 12; // channel's check point
 }
 
 message SearchRequest {
@@ -404,20 +413,6 @@ message SearchRequest {
     bool from_shard_leader = 4;
     DataScope scope = 5;  // All, Streaming, Historical
     int32 total_channel_num = 6;
-}
-
-message HybridSearchRequest {
-    internal.HybridSearchRequest req = 1;
-    repeated string dml_channels = 2;
-    int32 total_channel_num = 3;
-}
-
-message HybridSearchResult {
-    common.MsgBase base = 1;
-    common.Status status = 2;
-    repeated internal.SearchResults results = 3;
-    internal.CostAggregation costAggregation = 4;
-    map<string, uint64> channels_mvcc = 5;
 }
 
 message QueryRequest {
@@ -791,3 +786,75 @@ message CollectionTarget {
   repeated ChannelTarget Channel_targets = 2;
   int64 version = 3;
 }
+message NodeInfo {
+  int64 ID = 2;
+  string address = 3;
+  string state = 4;
+}
+
+message ListQueryNodeRequest {
+  common.MsgBase base = 1;
+}
+
+message ListQueryNodeResponse {
+  common.Status status = 1;
+  repeated NodeInfo nodeInfos = 2;
+}
+
+message GetQueryNodeDistributionRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+}
+
+message GetQueryNodeDistributionResponse {
+  common.Status status = 1;
+  int64 ID = 2;
+  repeated string channel_names = 3;
+  repeated int64 sealed_segmentIDs = 4;
+}
+
+message SuspendBalanceRequest {
+  common.MsgBase base = 1;
+}
+
+message ResumeBalanceRequest {
+  common.MsgBase base = 1;
+}
+
+message SuspendNodeRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+}
+
+message ResumeNodeRequest {
+  common.MsgBase base = 1;
+  int64 nodeID = 2;
+}
+
+message TransferSegmentRequest {
+  common.MsgBase base = 1;
+  int64 segmentID = 2;
+  int64 source_nodeID = 3;
+  int64 target_nodeID = 4;
+  bool transfer_all = 5;
+  bool to_all_nodes = 6;
+  bool copy_mode = 7;
+}
+
+message TransferChannelRequest {
+  common.MsgBase base = 1;
+  string channel_name = 2;
+  int64 source_nodeID = 3;
+  int64 target_nodeID = 4;
+  bool transfer_all = 5;
+  bool to_all_nodes = 6;
+  bool copy_mode = 7;
+}
+
+message CheckQueryNodeDistributionRequest {
+  common.MsgBase base = 1;
+  int64 source_nodeID = 3;
+  int64 target_nodeID = 4;
+}
+
+

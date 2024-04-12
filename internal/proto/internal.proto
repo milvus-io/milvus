@@ -82,6 +82,20 @@ message CreateIndexRequest {
   repeated common.KeyValuePair extra_params = 8;
 }
 
+
+message SubSearchRequest {
+  string dsl = 1;
+  // serialized `PlaceholderGroup`
+  bytes placeholder_group = 2;
+  common.DslType dsl_type = 3;
+  bytes serialized_expr_plan = 4;
+  int64  nq = 5;
+  repeated int64 partitionIDs = 6;
+  int64  topk = 7;
+  int64 offset = 8;
+  string metricType = 9;
+}
+
 message SearchRequest {
   common.MsgBase base = 1;
   int64 reqID = 2;
@@ -102,18 +116,22 @@ message SearchRequest {
   string metricType = 16;
   bool ignoreGrowing = 17; // Optional
   string username = 18;
+  repeated SubSearchRequest sub_reqs = 19;
+  bool   is_advanced = 20;
+  int64 offset = 21;
+  common.ConsistencyLevel consistency_level = 22;
 }
 
-message HybridSearchRequest {
-  common.MsgBase base = 1;
-  int64 reqID = 2;
-  int64 dbID = 3;
-  int64 collectionID = 4;
-  repeated int64 partitionIDs = 5;
-  repeated SearchRequest reqs = 6;
-  uint64 mvcc_timestamp = 11;
-  uint64 guarantee_timestamp = 12;
-  uint64 timeout_timestamp = 13;
+message SubSearchResults {
+  string metric_type = 1;
+  int64 num_queries = 2;
+  int64 top_k = 3;
+  // schema.SearchResultsData inside
+  bytes sliced_blob = 4;
+  int64 sliced_num_count = 5;
+  int64 sliced_offset = 6;
+  // to indicate it belongs to which sub request
+  int64 req_index = 7;
 }
 
 message SearchResults {
@@ -134,6 +152,8 @@ message SearchResults {
   // search request cost
   CostAggregation costAggregation = 13;
   map<string, uint64> channels_mvcc = 14;
+  repeated SubSearchResults sub_results = 15;
+  bool is_advanced = 16;
 }
 
 message CostAggregation {
@@ -312,6 +332,9 @@ message ImportTaskProgress {
   string reason = 3;
   int64 progress = 4;
   string complete_time = 5;
+  string state = 6;
+  int64 imported_rows = 7;
+  int64 total_rows = 8;
 }
 
 message GetImportProgressResponse {
@@ -322,6 +345,9 @@ message GetImportProgressResponse {
   string collection_name = 5;
   string complete_time = 6;
   repeated ImportTaskProgress task_progresses = 7;
+  int64 imported_rows = 8;
+  int64 total_rows = 9;
+  string start_time = 10;
 }
 
 message ListImportsRequestInternal {

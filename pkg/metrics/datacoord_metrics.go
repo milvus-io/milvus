@@ -82,6 +82,8 @@ var (
 			Help:      "stored l0 segment rate",
 		}, []string{})
 
+	// DataCoordNumStoredRows all metrics will be cleaned up after removing matched collectionID and
+	// segment state labels in CleanupDataCoordNumStoredRows method.
 	DataCoordNumStoredRows = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -89,17 +91,20 @@ var (
 			Name:      "stored_rows_num",
 			Help:      "number of stored rows of healthy segment",
 		}, []string{
+			databaseLabelName,
 			collectionIDLabelName,
 			segmentStateLabelName,
 		})
 
-	DataCoordNumStoredRowsCounter = prometheus.NewCounterVec(
+	DataCoordBulkVectors = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.DataCoordRole,
-			Name:      "stored_rows_count",
-			Help:      "count of all stored rows ever",
-		}, []string{})
+			Name:      "bulk_insert_vectors_count",
+			Help:      "counter of vectors successfully bulk inserted",
+		}, []string{
+			collectionIDLabelName,
+		})
 
 	DataCoordConsumeDataNodeTimeTickLag = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
@@ -130,6 +135,7 @@ var (
 			Name:      "stored_binlog_size",
 			Help:      "binlog size of healthy segments",
 		}, []string{
+			databaseLabelName,
 			collectionIDLabelName,
 			segmentIDLabelName,
 		})
@@ -284,7 +290,7 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(DataCoordNumSegments)
 	registry.MustRegister(DataCoordNumCollections)
 	registry.MustRegister(DataCoordNumStoredRows)
-	registry.MustRegister(DataCoordNumStoredRowsCounter)
+	registry.MustRegister(DataCoordBulkVectors)
 	registry.MustRegister(DataCoordConsumeDataNodeTimeTickLag)
 	registry.MustRegister(DataCoordCheckpointUnixSeconds)
 	registry.MustRegister(DataCoordStoredBinlogSize)
@@ -316,9 +322,15 @@ func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {
 
 func CleanupDataCoordNumStoredRows(collectionID int64) {
 	for _, state := range commonpb.SegmentState_name {
-		DataCoordNumStoredRows.Delete(prometheus.Labels{
+		DataCoordNumStoredRows.DeletePartialMatch(prometheus.Labels{
 			collectionIDLabelName: fmt.Sprint(collectionID),
 			segmentStateLabelName: fmt.Sprint(state),
 		})
 	}
+}
+
+func CleanupDataCoordBulkInsertVectors(collectionID int64) {
+	DataCoordBulkVectors.Delete(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
 }

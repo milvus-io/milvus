@@ -49,28 +49,46 @@ import (
 )
 
 func TestSearchTask_PostExecute(t *testing.T) {
-	t.Run("Test empty result", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
+	var err error
 
-		qt := &searchTask{
-			ctx:       ctx,
-			Condition: NewTaskCondition(context.TODO()),
-			SearchRequest: &internalpb.SearchRequest{
-				Base: &commonpb.MsgBase{
-					MsgType:  commonpb.MsgType_Search,
-					SourceID: paramtable.GetNodeID(),
-				},
+	var (
+		rc  = NewRootCoordMock()
+		qc  = mocks.NewMockQueryCoordClient(t)
+		ctx = context.TODO()
+	)
+
+	defer rc.Close()
+	require.NoError(t, err)
+	mgr := newShardClientMgr()
+	err = InitMetaCache(ctx, rc, qc, mgr)
+	require.NoError(t, err)
+
+	getSearchTask := func(t *testing.T, collName string) *searchTask {
+		task := &searchTask{
+			ctx:            ctx,
+			collectionName: collName,
+			SearchRequest:  &internalpb.SearchRequest{},
+			request: &milvuspb.SearchRequest{
+				CollectionName: collName,
+				Nq:             1,
+				SearchParams:   getBaseSearchParams(),
 			},
-			request: nil,
-			qc:      nil,
-			tr:      timerecord.NewTimeRecorder("search"),
-
-			resultBuf: &typeutil.ConcurrentSet[*internalpb.SearchResults]{},
+			qc: qc,
+			tr: timerecord.NewTimeRecorder("test-search"),
 		}
-		// no result
-		qt.resultBuf.Insert(&internalpb.SearchResults{})
+		require.NoError(t, task.OnEnqueue())
+		return task
+	}
+	t.Run("Test empty result", func(t *testing.T) {
+		collName := "test_collection_empty_result" + funcutil.GenRandomStr()
+		createColl(t, collName, rc)
+		qt := getSearchTask(t, collName)
 
+		err = qt.PreExecute(qt.ctx)
+		assert.NoError(t, err)
+
+		qt.resultBuf = typeutil.NewConcurrentSet[*internalpb.SearchResults]()
+		qt.resultBuf.Insert(&internalpb.SearchResults{})
 		err := qt.PostExecute(context.TODO())
 		assert.NoError(t, err)
 		assert.Equal(t, qt.result.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
@@ -1988,7 +2006,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.validParams, nil)
+				info, offset, err := parseSearchInfo(test.validParams, nil, false)
 				assert.NoError(t, err)
 				assert.NotNil(t, info)
 				if test.description == "offsetParam" {
@@ -2077,7 +2095,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, offset, err := parseSearchInfo(test.invalidParams, nil)
+				info, offset, err := parseSearchInfo(test.invalidParams, nil, false)
 				assert.Error(t, err)
 				assert.Nil(t, info)
 				assert.Zero(t, offset)
@@ -2155,7 +2173,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil)
+				info, _, err := parseSearchInfo(test.validParams, nil, false)
 				assert.NoError(t, err)
 				assert.NotNil(t, info)
 			})
@@ -2171,7 +2189,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil)
+				info, _, err := parseSearchInfo(test.validParams, nil, false)
 				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 				assert.Nil(t, info)
 			})
@@ -2189,7 +2207,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil)
+				info, _, err := parseSearchInfo(test.validParams, nil, false)
 				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 				assert.Nil(t, info)
 			})
@@ -2213,7 +2231,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema)
+		info, _, err := parseSearchInfo(normalParam, schema, false)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2232,7 +2250,7 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 		schema := &schemapb.CollectionSchema{
 			Fields: fields,
 		}
-		info, _, err := parseSearchInfo(normalParam, schema)
+		info, _, err := parseSearchInfo(normalParam, schema, false)
 		assert.Nil(t, info)
 		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 	})
@@ -2504,9 +2522,9 @@ func TestSearchTask_Requery(t *testing.T) {
 		qt.resultBuf.Insert(&internalpb.SearchResults{
 			SlicedBlob: bytes,
 		})
-		qt.queryInfo = &planpb.QueryInfo{
+		qt.queryInfos = []*planpb.QueryInfo{{
 			GroupByFieldId: -1,
-		}
+		}}
 		err = qt.PostExecute(ctx)
 		t.Logf("err = %s", err)
 		assert.Error(t, err)

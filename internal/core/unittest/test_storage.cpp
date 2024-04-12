@@ -50,6 +50,7 @@ get_azure_storage_config() {
                           "error",
                           "",
                           false,
+                          "",
                           false,
                           false,
                           30000};

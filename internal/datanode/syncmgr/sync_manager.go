@@ -127,7 +127,7 @@ func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[error] {
 		for {
 			targetID, err := task.CalcTargetSegment()
 			if err != nil {
-				return err, nil
+				return err, err
 			}
 			log.Info("task calculated target segment id",
 				zap.Int64("targetID", targetID),
@@ -142,7 +142,7 @@ func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[error] {
 				log.Info("target updated during submitting", zap.Error(err))
 				continue
 			}
-			return err, nil
+			return err, err
 		}
 	})
 }

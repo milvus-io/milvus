@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -65,12 +66,10 @@ const (
 	defaultMaxSearchRequest = 1024
 
 	// DefaultArithmeticIndexType name of default index type for scalar field
-	DefaultArithmeticIndexType = "STL_SORT"
+	DefaultArithmeticIndexType = indexparamcheck.IndexINVERTED
 
 	// DefaultStringIndexType name of default index type for varChar/string field
-	DefaultStringIndexType = "Trie"
-
-	InvertedIndexType = "INVERTED"
+	DefaultStringIndexType = indexparamcheck.IndexINVERTED
 
 	defaultRRFParamsValue = 60
 	maxRRFParamsValue     = 16384
@@ -92,18 +91,6 @@ func isNumber(c uint8) bool {
 		return false
 	}
 	return true
-}
-
-func isVectorType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_FloatVector ||
-		dataType == schemapb.DataType_BinaryVector ||
-		dataType == schemapb.DataType_Float16Vector ||
-		dataType == schemapb.DataType_BFloat16Vector ||
-		dataType == schemapb.DataType_SparseFloatVector
-}
-
-func isSparseVectorType(dataType schemapb.DataType) bool {
-	return dataType == schemapb.DataType_SparseFloatVector
 }
 
 func validateMaxQueryResultWindow(offset int64, limit int64) error {
@@ -258,16 +245,6 @@ func validatePartitionTag(partitionTag string, strictCheck bool) error {
 	return nil
 }
 
-func validateStringIndexType(indexType string) bool {
-	// compatible with the index type marisa-trie of attu versions prior to 2.3.0
-	return indexType == DefaultStringIndexType || indexType == "marisa-trie" || indexType == InvertedIndexType
-}
-
-func validateArithmeticIndexType(indexType string) bool {
-	// compatible with the index type Asceneding of attu versions prior to 2.3.0
-	return indexType == DefaultArithmeticIndexType || indexType == "Asceneding" || indexType == InvertedIndexType
-}
-
 func validateFieldName(fieldName string) error {
 	fieldName = strings.TrimSpace(fieldName)
 
@@ -312,7 +289,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 			break
 		}
 	}
-	if isSparseVectorType(field.DataType) {
+	if typeutil.IsSparseFloatVectorType(field.DataType) {
 		if exist {
 			return fmt.Errorf("dim should not be specified for sparse vector field %s(%d)", field.Name, field.FieldID)
 		}
@@ -326,7 +303,7 @@ func validateDimension(field *schemapb.FieldSchema) error {
 		return fmt.Errorf("invalid dimension: %d. should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
 	}
 
-	if field.DataType != schemapb.DataType_BinaryVector {
+	if typeutil.IsFloatVectorType(field.DataType) {
 		if dim > Params.ProxyCfg.MaxDimension.GetAsInt64() {
 			return fmt.Errorf("invalid dimension: %d. float vector dimension should be in range 2 ~ %d", dim, Params.ProxyCfg.MaxDimension.GetAsInt())
 		}
@@ -390,7 +367,7 @@ func validateMaxCapacityPerRow(collectionName string, field *schemapb.FieldSchem
 }
 
 func validateVectorFieldMetricType(field *schemapb.FieldSchema) error {
-	if !isVectorType(field.DataType) {
+	if !typeutil.IsVectorType(field.DataType) {
 		return nil
 	}
 	for _, params := range field.IndexParams {
@@ -531,7 +508,7 @@ func validateMetricType(dataType schemapb.DataType, metricTypeStrRaw string) err
 	metricTypeStr := strings.ToUpper(metricTypeStrRaw)
 	switch metricTypeStr {
 	case metric.L2, metric.IP, metric.COSINE:
-		if dataType == schemapb.DataType_FloatVector || dataType == schemapb.DataType_Float16Vector || dataType == schemapb.DataType_BFloat16Vector || dataType == schemapb.DataType_SparseFloatVector {
+		if typeutil.IsFloatVectorType(dataType) {
 			return nil
 		}
 	case metric.JACCARD, metric.HAMMING, metric.SUBSTRUCTURE, metric.SUPERSTRUCTURE:
@@ -592,7 +569,7 @@ func validateSchema(coll *schemapb.CollectionSchema) error {
 			if err2 != nil {
 				return err2
 			}
-			if !isSparseVectorType(field.DataType) {
+			if !typeutil.IsSparseFloatVectorType(field.DataType) {
 				dimStr, ok := typeKv[common.DimKey]
 				if !ok {
 					return fmt.Errorf("dim not found in type_params for vector field %s(%d)", field.Name, field.FieldID)
@@ -637,7 +614,7 @@ func validateMultipleVectorFields(schema *schemapb.CollectionSchema) error {
 	for i := range schema.Fields {
 		name := schema.Fields[i].Name
 		dType := schema.Fields[i].DataType
-		isVec := dType == schemapb.DataType_BinaryVector || dType == schemapb.DataType_FloatVector || dType == schemapb.DataType_Float16Vector || dType == schemapb.DataType_BFloat16Vector || dType == schemapb.DataType_SparseFloatVector
+		isVec := typeutil.IsVectorType(dType)
 		if isVec && vecExist && !enableMultipleVectorFields {
 			return fmt.Errorf(
 				"multiple vector fields is not supported, fields name: %s, %s",
@@ -1196,7 +1173,7 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 	}
 
 	if len(insertMsg.FieldsData) != requiredFieldsNum {
-		log.Warn("the number of fields is less than needed",
+		log.Warn("the number of fields is not the same as needed",
 			zap.Int("fieldNum", len(insertMsg.FieldsData)),
 			zap.Int("requiredFieldNum", requiredFieldsNum),
 			zap.String("collection", schema.GetName()))

@@ -41,9 +41,33 @@ func TestConvertArrowSchema(t *testing.T) {
 		{FieldID: 12, Name: "field11", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
 		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
 		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 15, Name: "field14", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
 	}
 
 	schema, err := ConvertToArrowSchema(fieldSchemas)
 	assert.NoError(t, err)
 	assert.Equal(t, len(fieldSchemas), len(schema.Fields()))
+}
+
+func TestConvertArrowSchemaWithoutDim(t *testing.T) {
+	fieldSchemas := []*schemapb.FieldSchema{
+		{FieldID: 1, Name: "field0", DataType: schemapb.DataType_Bool},
+		{FieldID: 2, Name: "field1", DataType: schemapb.DataType_Int8},
+		{FieldID: 3, Name: "field2", DataType: schemapb.DataType_Int16},
+		{FieldID: 4, Name: "field3", DataType: schemapb.DataType_Int32},
+		{FieldID: 5, Name: "field4", DataType: schemapb.DataType_Int64},
+		{FieldID: 6, Name: "field5", DataType: schemapb.DataType_Float},
+		{FieldID: 7, Name: "field6", DataType: schemapb.DataType_Double},
+		{FieldID: 8, Name: "field7", DataType: schemapb.DataType_String},
+		{FieldID: 9, Name: "field8", DataType: schemapb.DataType_VarChar},
+		{FieldID: 10, Name: "field9", DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 11, Name: "field10", DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "128"}}},
+		{FieldID: 12, Name: "field11", DataType: schemapb.DataType_Array, ElementType: schemapb.DataType_Int64},
+		{FieldID: 13, Name: "field12", DataType: schemapb.DataType_JSON},
+		{FieldID: 14, Name: "field13", DataType: schemapb.DataType_Float16Vector, TypeParams: []*commonpb.KeyValuePair{}},
+		{FieldID: 15, Name: "field14", DataType: schemapb.DataType_BFloat16Vector, TypeParams: []*commonpb.KeyValuePair{}},
+	}
+
+	_, err := ConvertToArrowSchema(fieldSchemas)
+	assert.Error(t, err)
 }

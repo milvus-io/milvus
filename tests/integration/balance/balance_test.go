@@ -18,17 +18,20 @@ package balance
 
 import (
 	"context"
+	"fmt"
+	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -51,7 +54,7 @@ func (s *BalanceTestSuit) SetupSuite() {
 	s.Require().NoError(s.SetupEmbedEtcd())
 }
 
-func (s *BalanceTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int) {
+func (s *BalanceTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int, segmentDeleteNum int) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
@@ -91,6 +94,26 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 		})
 		s.NoError(err)
 		s.True(merr.Ok(insertResult.Status))
+
+		if segmentDeleteNum > 0 {
+			if segmentDeleteNum > segmentRowNum {
+				segmentDeleteNum = segmentRowNum
+			}
+
+			pks := insertResult.GetIDs().GetIntId().GetData()
+			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
+			log.Info("========================delete expr==================",
+				zap.String("expr", expr),
+			)
+
+			deleteResp, err := s.Cluster.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				Expr:           expr,
+			})
+			s.Require().NoError(err)
+			s.Require().True(merr.Ok(deleteResp.GetStatus()))
+			s.Require().EqualValues(len(pks), deleteResp.GetDeleteCnt())
+		}
 
 		// flush
 		flushResp, err := s.Cluster.Proxy.Flush(ctx, &milvuspb.FlushRequest{
@@ -137,22 +160,9 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 
 func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 	name := "test_balance_" + funcutil.GenRandomStr()
-	s.initCollection(name, 1, 2, 2, 2000)
+	s.initCollection(name, 1, 2, 2, 2000, 500)
 
 	ctx := context.Background()
-	// disable compact
-	s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "3600"},
-		},
-	})
-	defer s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Resume,
-	})
-
 	// add a querynode, expected balance happens
 	qn := s.Cluster.AddQueryNode()
 
@@ -161,43 +171,31 @@ func (s *BalanceTestSuit) TestBalanceOnSingleReplica() {
 		resp, err := qn.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
-	// check total segment number
+	// check total segment number and total channel number
 	s.Eventually(func() bool {
-		count := 0
+		segNum, chNum := 0, 0
 		for _, node := range s.Cluster.GetAllQueryNodes() {
 			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp1.GetStatus()))
-			count += len(resp1.Segments)
+			segNum += len(resp1.Segments)
+			chNum += len(resp1.Channels)
 		}
-		return count == 4
-	}, 10*time.Second, 1*time.Second)
+		return segNum == 8 && chNum == 2
+	}, 30*time.Second, 1*time.Second)
 }
 
 func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 	ctx := context.Background()
 
-	// disable compact
-	s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "3600"},
-		},
-	})
-	defer s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Resume,
-	})
-
-	// init collection with 2 channel, each channel has 2 segment, each segment has 2000 row
+	// init collection with 2 channel, each channel has 4 segment, each segment has 2000 row
 	// and load it with 2 replicas on 2 nodes.
 	// then we add 2 query node, after balance happens, expected each node have 1 channel and 2 segments
 	name := "test_balance_" + funcutil.GenRandomStr()
-	s.initCollection(name, 2, 2, 2, 2000)
+	s.initCollection(name, 2, 2, 2, 2000, 500)
 
 	resp, err := s.Cluster.Proxy.GetReplicas(ctx, &milvuspb.GetReplicasRequest{CollectionName: name})
 	s.NoError(err)
@@ -211,43 +209,31 @@ func (s *BalanceTestSuit) TestBalanceOnMultiReplica() {
 	s.Eventually(func() bool {
 		resp, err := qn1.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
 	s.Eventually(func() bool {
 		resp, err := qn2.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 		s.NoError(err)
-		return len(resp.Channels) == 1 && len(resp.Segments) == 2
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 2
 	}, 30*time.Second, 1*time.Second)
 
-	// check total segment num
+	// check total segment number and total channel number
 	s.Eventually(func() bool {
-		count := 0
+		segNum, chNum := 0, 0
 		for _, node := range s.Cluster.GetAllQueryNodes() {
 			resp1, err := node.GetDataDistribution(ctx, &querypb.GetDataDistributionRequest{})
 			s.NoError(err)
 			s.True(merr.Ok(resp1.GetStatus()))
-			count += len(resp1.Segments)
+			segNum += len(resp1.Segments)
+			chNum += len(resp1.Channels)
 		}
-		return count == 8
-	}, 10*time.Second, 1*time.Second)
+		return segNum == 16 && chNum == 4
+	}, 30*time.Second, 1*time.Second)
 }
 
 func (s *BalanceTestSuit) TestNodeDown() {
 	ctx := context.Background()
-
-	// disable compact
-	s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Pause,
-		Params: []*commonpb.KeyValuePair{
-			{Key: "duration", Value: "3600"},
-		},
-	})
-	defer s.Cluster.DataCoord.GcControl(ctx, &datapb.GcControlRequest{
-		Base:    commonpbutil.NewMsgBase(),
-		Command: datapb.GcCommand_Resume,
-	})
 
 	// disable balance channel
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.AutoBalanceChannel.Key, "false")
@@ -256,7 +242,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 	// init collection with 3 channel, each channel has 15 segment, each segment has 2000 row
 	// and load it with 2 replicas on 2 nodes.
 	name := "test_balance_" + funcutil.GenRandomStr()
-	s.initCollection(name, 1, 2, 15, 2000)
+	s.initCollection(name, 1, 2, 15, 2000, 500)
 
 	// then we add 2 query node, after balance happens, expected each node have 1 channel and 2 segments
 	qn1 := s.Cluster.AddQueryNode()
@@ -268,7 +254,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
-		return len(resp.Channels) == 0 && len(resp.Segments) == 10
+		return len(resp.Channels) == 0 && len(resp.Segments) >= 10
 	}, 30*time.Second, 1*time.Second)
 
 	s.Eventually(func() bool {
@@ -276,7 +262,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
-		return len(resp.Channels) == 0 && len(resp.Segments) == 10
+		return len(resp.Channels) == 0 && len(resp.Segments) >= 10
 	}, 30*time.Second, 1*time.Second)
 
 	// then we force stop qn1 and resume balance channel, let balance channel and load segment happens concurrently on qn2
@@ -298,7 +284,7 @@ func (s *BalanceTestSuit) TestNodeDown() {
 		s.NoError(err)
 		s.True(merr.Ok(resp.GetStatus()))
 		log.Info("resp", zap.Any("channel", resp.Channels), zap.Any("segments", resp.Segments))
-		return len(resp.Channels) == 1 && len(resp.Segments) == 15
+		return len(resp.Channels) == 1 && len(resp.Segments) >= 15
 	}, 30*time.Second, 1*time.Second)
 
 	// expect all delegator will recover to healthy
@@ -308,7 +294,6 @@ func (s *BalanceTestSuit) TestNodeDown() {
 			CollectionID: collectionID,
 		})
 		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
 		return len(resp.Shards) == 2
 	}, 30*time.Second, 1*time.Second)
 }

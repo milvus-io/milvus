@@ -410,3 +410,18 @@ func ParsePrimaryKeys2IDs(pks []PrimaryKey) *schemapb.IDs {
 
 	return ret
 }
+
+func ParseInt64s2IDs(pks ...int64) *schemapb.IDs {
+	ret := &schemapb.IDs{}
+	if len(pks) == 0 {
+		return ret
+	}
+
+	ret.IdField = &schemapb.IDs_IntId{
+		IntId: &schemapb.LongArray{
+			Data: pks,
+		},
+	}
+
+	return ret
+}

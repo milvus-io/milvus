@@ -101,14 +101,3 @@ func (rc *rootCoordBroker) AllocTimestamp(ctx context.Context, num uint32) (uint
 	}
 	return resp.GetTimestamp(), resp.GetCount(), nil
 }
-
-func (rc *rootCoordBroker) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) error {
-	log := log.Ctx(ctx)
-	resp, err := rc.client.ReportImport(ctx, req)
-
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to ReportImport", zap.Error(err))
-		return err
-	}
-	return nil
-}

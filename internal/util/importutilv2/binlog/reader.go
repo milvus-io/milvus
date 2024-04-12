@@ -23,6 +23,9 @@ import (
 	"io"
 	"math"
 
+	"github.com/samber/lo"
+	"go.uber.org/atomic"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -34,6 +37,7 @@ type reader struct {
 	cm     storage.ChunkManager
 	schema *schemapb.CollectionSchema
 
+	fileSize   *atomic.Int64
 	deleteData *storage.DeleteData
 	insertLogs map[int64][]string // fieldID -> binlogs
 
@@ -50,9 +54,10 @@ func NewReader(ctx context.Context,
 ) (*reader, error) {
 	schema = typeutil.AppendSystemFields(schema)
 	r := &reader{
-		ctx:    ctx,
-		cm:     cm,
-		schema: schema,
+		ctx:      ctx,
+		cm:       cm,
+		schema:   schema,
+		fileSize: atomic.NewInt64(0),
 	}
 	err := r.init(paths, tsStart, tsEnd)
 	if err != nil {
@@ -65,8 +70,12 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if tsStart != 0 || tsEnd != math.MaxUint64 {
 		r.filters = append(r.filters, FilterWithTimeRange(tsStart, tsEnd))
 	}
-	if len(paths) < 1 {
+	if len(paths) == 0 {
 		return merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(paths) > 2 {
+		return merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", paths))
 	}
 	insertLogs, err := listInsertLogs(r.ctx, r.cm, paths[0])
 	if err != nil {
@@ -198,6 +207,18 @@ OUTER:
 		}
 	}
 	return result, nil
+}
+
+func (r *reader) Size() (int64, error) {
+	if size := r.fileSize.Load(); size != 0 {
+		return size, nil
+	}
+	size, err := storage.GetFilesSize(r.ctx, lo.Flatten(lo.Values(r.insertLogs)), r.cm)
+	if err != nil {
+		return 0, err
+	}
+	r.fileSize.Store(size)
+	return size, nil
 }
 
 func (r *reader) Close() {}

@@ -283,6 +283,78 @@ func Test_NewServer(t *testing.T) {
 			assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
 		})
 
+		t.Run("ListQueryNode", func(t *testing.T) {
+			req := &querypb.ListQueryNodeRequest{}
+			mqc.EXPECT().ListQueryNode(mock.Anything, req).Return(&querypb.ListQueryNodeResponse{Status: merr.Success()}, nil)
+			resp, err := server.ListQueryNode(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		})
+
+		t.Run("GetQueryNodeDistribution", func(t *testing.T) {
+			req := &querypb.GetQueryNodeDistributionRequest{}
+			mqc.EXPECT().GetQueryNodeDistribution(mock.Anything, req).Return(&querypb.GetQueryNodeDistributionResponse{Status: merr.Success()}, nil)
+			resp, err := server.GetQueryNodeDistribution(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		})
+
+		t.Run("SuspendBalance", func(t *testing.T) {
+			req := &querypb.SuspendBalanceRequest{}
+			mqc.EXPECT().SuspendBalance(mock.Anything, req).Return(merr.Success(), nil)
+			resp, err := server.SuspendBalance(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		})
+
+		t.Run("ResumeBalance", func(t *testing.T) {
+			req := &querypb.ResumeBalanceRequest{}
+			mqc.EXPECT().ResumeBalance(mock.Anything, req).Return(merr.Success(), nil)
+			resp, err := server.ResumeBalance(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		})
+
+		t.Run("SuspendNode", func(t *testing.T) {
+			req := &querypb.SuspendNodeRequest{}
+			mqc.EXPECT().SuspendNode(mock.Anything, req).Return(merr.Success(), nil)
+			resp, err := server.SuspendNode(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		})
+
+		t.Run("ResumeNode", func(t *testing.T) {
+			req := &querypb.ResumeNodeRequest{}
+			mqc.EXPECT().ResumeNode(mock.Anything, req).Return(merr.Success(), nil)
+			resp, err := server.ResumeNode(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		})
+
+		t.Run("TransferSegment", func(t *testing.T) {
+			req := &querypb.TransferSegmentRequest{}
+			mqc.EXPECT().TransferSegment(mock.Anything, req).Return(merr.Success(), nil)
+			resp, err := server.TransferSegment(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		})
+
+		t.Run("TransferChannel", func(t *testing.T) {
+			req := &querypb.TransferChannelRequest{}
+			mqc.EXPECT().TransferChannel(mock.Anything, req).Return(merr.Success(), nil)
+			resp, err := server.TransferChannel(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		})
+
+		t.Run("CheckQueryNodeDistribution", func(t *testing.T) {
+			req := &querypb.CheckQueryNodeDistributionRequest{}
+			mqc.EXPECT().CheckQueryNodeDistribution(mock.Anything, req).Return(merr.Success(), nil)
+			resp, err := server.CheckQueryNodeDistribution(ctx, req)
+			assert.NoError(t, err)
+			assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		})
+
 		err = server.Stop()
 		assert.NoError(t, err)
 	}

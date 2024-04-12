@@ -69,6 +69,8 @@ minio:
   accessKeyID: minioadmin # accessKeyID of MinIO/S3
   secretAccessKey: minioadmin # MinIO/S3 encryption string
   useSSL: false # Access to MinIO/S3 with SSL
+  ssl:
+    tlsCACert: /path/to/public.crt # path to your CACert file, ignore when it is empty
   bucketName: a-bucket # Bucket name in MinIO/S3
   rootPath: files # The root path where the message is stored in MinIO/S3
   # Whether to useIAM role to access S3/GCS instead of access/secret keys
@@ -174,8 +176,6 @@ rootCoord:
   maxDatabaseNum: 64 # Maximum number of database
   maxPartitionNum: 4096 # Maximum number of partitions in a collection
   minSegmentSizeToEnableIndex: 1024 # It's a threshold. When the segment size is less than this value, the segment will not be indexed
-  importTaskExpiration: 900 # (in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).
-  importTaskRetention: 86400 # (in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400, seconds (24 hours).
   enableActiveStandby: false
   # can specify ip for example
   # ip: 127.0.0.1
@@ -251,6 +251,8 @@ proxy:
     serverMaxRecvSize: 67108864
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 67108864
+  # query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.
+  slowQuerySpanInSeconds: 5
 
 # Related configuration of queryCoord, used to manage topology and load balancing for the query nodes, and handoff from growing segments to sealed segments.
 queryCoord:
@@ -354,7 +356,8 @@ queryNode:
       taskQueueExpire: 60 # 1 min by default, expire time of inner user task queue since queue is empty.
       enableCrossUserGrouping: false # false by default Enable Cross user grouping when using user-task-polling policy. (close it if task of any user can not merge others).
       maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
-  mmapEnabled: false # enable mmap global, if set true, will use mmap to load segment data
+  mmap:
+    mmapEnabled: false # enable mmap global, if set true, will use mmap to load segment data
 
   # can specify ip for example
   # ip: 127.0.0.1
@@ -438,6 +441,8 @@ dataCoord:
   import:
     filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
     taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
+    maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
+    waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
 
   enableGarbageCollection: true
   gc:
@@ -484,8 +489,6 @@ dataNode:
   memory:
     forceSyncEnable: true # `true` to force sync if memory usage is too high
     forceSyncSegmentNum: 1 # number of segments to sync, segments with top largest buffer will be synced.
-    watermarkStandalone: 0.2 # memory watermark for standalone, upon reaching this watermark, segments will be synced.
-    watermarkCluster: 0.5 # memory watermark for cluster, upon reaching this watermark, segments will be synced.
   timetick:
     byRPC: true
   channel:
@@ -498,6 +501,8 @@ dataNode:
     updateChannelCheckpointMaxParallel: 10
   import:
     maxConcurrentTaskNum: 16 # The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.
+    maxImportFileSizeInGB: 16 # The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.
+    readBufferSizeInMB: 16 # The data block size (in MB) read from chunk manager by the datanode during import.
 
 # Configures the system log output.
 log:
@@ -598,9 +603,6 @@ common:
     names: ['topic1', 'topic2']
     # need to set a separated topic to stand for currently consumed timestamp for each channel
     timeticker: 'timetick-channel'
-
-  ImportMaxFileSize: 17179869184 # 16 * 1024 * 1024 * 1024
-  # max file size to import for bulkInsert
 
   locks:
     metrics:

@@ -3274,6 +3274,70 @@ class TestQueryCount(TestcaseBase):
                            check_task=CheckTasks.check_query_results,
                            check_items={exp_res: [{count: 50}]})
 
+    @pytest.mark.tags(CaseLabel.L1)
+    def test_json_expr_on_search_n_query(self):
+        """
+        target: verify more expressions of json object, json array and json texts are supported in search and query
+        method: 1. insert data with vectors and different json format
+                2. verify insert successfully
+                3. build index and load
+                4. search and query with different expressions
+                5. verify search and query successfully
+        expected: succeed
+        """
+        # 1. initialize with data
+        c_name = cf.gen_unique_str()
+        json_int = "json_int"
+        json_float = "json_float"
+        json_string = "json_string"
+        json_bool = "json_bool"
+        json_array = "json_array"
+        json_embedded_object = "json_embedded_object"
+        json_objects_array = "json_objects_array"
+        dim = 16
+        fields = [cf.gen_int64_field(), cf.gen_float_vec_field(dim=dim),
+                  cf.gen_json_field(json_int), cf.gen_json_field(json_float), cf.gen_json_field(json_string),
+                  cf.gen_json_field(json_bool), cf.gen_json_field(json_array),
+                  cf.gen_json_field(json_embedded_object), cf.gen_json_field(json_objects_array)]
+        schema = cf.gen_collection_schema(fields=fields, primary_field=ct.default_int64_field_name, auto_id=True)
+        collection_w = self.init_collection_wrap(name=c_name, schema=schema)
+
+        # 2. insert data
+        nb = 500
+        for i in range(10):
+            data = [
+                cf.gen_vectors(nb, dim),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_int),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_float),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_string),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_bool),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_array),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_embedded_object),
+                cf.gen_json_data_for_diff_json_types(nb=nb, start=i*nb, json_type=json_objects_array)
+            ]
+            collection_w.insert(data)
+
+        # 3. build index and load
+        collection_w.create_index(ct.default_float_vec_field_name, index_params=default_index_params)
+        collection_w.load()
+
+        # 4. search and query with different expressions. All the expressions will return 10 results
+        query_exprs = [f'{json_int} < 10 ', f'{json_float} <= 200.0 and {json_float} > 190.0',
+                       f'{json_string} in ["1","2","3","4","5","6","7","8","9","10"]',
+                       f'{json_bool} == true and {json_float} <= 10',
+                       f'{json_array} == [4001,4002,4003,4004,4005,4006,4007,4008,4009,4010] or {json_int} < 9',
+                       f'{json_embedded_object}["{json_embedded_object}"]["number"] < 10',
+                       f'{json_objects_array}[0]["level2"]["level2_str"] like "99%" and {json_objects_array}[1]["float"] > 100']
+        search_data = cf.gen_vectors(2, dim)
+        search_param = {}
+        for expr in query_exprs:
+            collection_w.query(expr=expr, output_fields=[count],
+                               check_task=CheckTasks.check_query_results, check_items={exp_res: [{count: 10}]})
+            collection_w.search(data=search_data, anns_field=ct.default_float_vec_field_name,
+                                param=search_param, limit=10, expr=expr,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": 2, "limit": 10})
+
     @pytest.mark.tags(CaseLabel.L2)
     def test_count_with_pagination_param(self):
         """

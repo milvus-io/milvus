@@ -344,8 +344,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	}
 	vectorField := ""
 	for _, field := range coll.Schema.Fields {
-		if field.DataType == schemapb.DataType_BinaryVector || field.DataType == schemapb.DataType_FloatVector ||
-			field.DataType == schemapb.DataType_Float16Vector || field.DataType == schemapb.DataType_BFloat16Vector {
+		if typeutil.IsVectorType(field.DataType) {
 			vectorField = field.Name
 			break
 		}
@@ -760,7 +759,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	var vectorField *schemapb.FieldSchema
 	if len(fieldName) == 0 {
 		for _, field := range collSchema.Fields {
-			if IsVectorField(field) {
+			if typeutil.IsVectorType(field.DataType) {
 				if len(fieldName) == 0 {
 					fieldName = field.Name
 					vectorField = field
@@ -771,7 +770,7 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 		}
 	} else {
 		for _, field := range collSchema.Fields {
-			if field.Name == fieldName && IsVectorField(field) {
+			if field.Name == fieldName && typeutil.IsVectorType(field.DataType) {
 				vectorField = field
 				break
 			}
@@ -1821,25 +1820,34 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = jobIDGetter.GetJobID()
 		returnData["collectionName"] = response.GetCollectionName()
+		returnData["completeTime"] = response.GetCompleteTime()
 		returnData["state"] = response.GetState().String()
 		returnData["progress"] = response.GetProgress()
+		returnData["importedRows"] = response.GetImportedRows()
+		returnData["totalRows"] = response.GetTotalRows()
 		reason := response.GetReason()
 		if reason != "" {
 			returnData["reason"] = reason
 		}
 		details := make([]map[string]interface{}, 0)
+		totalFileSize := int64(0)
 		for _, taskProgress := range response.GetTaskProgresses() {
 			detail := make(map[string]interface{})
 			detail["fileName"] = taskProgress.GetFileName()
 			detail["fileSize"] = taskProgress.GetFileSize()
 			detail["progress"] = taskProgress.GetProgress()
 			detail["completeTime"] = taskProgress.GetCompleteTime()
+			detail["state"] = taskProgress.GetState()
+			detail["importedRows"] = taskProgress.GetImportedRows()
+			detail["totalRows"] = taskProgress.GetTotalRows()
 			reason = taskProgress.GetReason()
 			if reason != "" {
 				detail["reason"] = reason
 			}
 			details = append(details, detail)
+			totalFileSize += taskProgress.GetFileSize()
 		}
+		returnData["fileSize"] = totalFileSize
 		returnData["details"] = details
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
 	}

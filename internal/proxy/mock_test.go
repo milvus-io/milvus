@@ -18,10 +18,13 @@ package proxy
 
 import (
 	"context"
+	"encoding/binary"
+	"math"
 	"math/rand"
 	"sync"
 	"time"
 
+	"github.com/x448/float16"
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -527,21 +530,63 @@ func generateBinaryVectors(numRows, dim int) []byte {
 }
 
 func generateFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
+	total := numRows * dim
+	ret := make([]byte, total*2)
+	for i := 0; i < total; i++ {
+		v := float16.Fromfloat32(rand.Float32()).Bits()
+		binary.LittleEndian.PutUint16(ret[i*2:], v)
 	}
 	return ret
 }
 
 func generateBFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
+	total := numRows * dim
+	ret16 := make([]uint16, 0, total)
+	for i := 0; i < total; i++ {
+		f := rand.Float32()
+		bits := math.Float32bits(f)
+		bits >>= 16
+		bits &= 0x7FFF
+		ret16 = append(ret16, uint16(bits))
+	}
+	ret := make([]byte, len(ret16)*2)
+	for i, value := range ret16 {
+		binary.LittleEndian.PutUint16(ret[i*2:], value)
+	}
+	return ret
+}
+
+func generateBFloat16VectorsWithInvalidData(numRows, dim int) []byte {
+	total := numRows * dim
+	ret16 := make([]uint16, 0, total)
+	for i := 0; i < total; i++ {
+		var f float32
+		if i%2 == 0 {
+			f = float32(math.NaN())
+		} else {
+			f = float32(math.Inf(1))
+		}
+		bits := math.Float32bits(f)
+		bits >>= 16
+		bits &= 0x7FFF
+		ret16 = append(ret16, uint16(bits))
+	}
+	ret := make([]byte, len(ret16)*2)
+	for i, value := range ret16 {
+		binary.LittleEndian.PutUint16(ret[i*2:], value)
+	}
+	return ret
+}
+
+func generateFloat16VectorsWithInvalidData(numRows, dim int) []byte {
+	total := numRows * dim
+	ret := make([]byte, total*2)
+	for i := 0; i < total; i++ {
+		if i%2 == 0 {
+			binary.LittleEndian.PutUint16(ret[i*2:], uint16(float16.Inf(1)))
+		} else {
+			binary.LittleEndian.PutUint16(ret[i*2:], uint16(float16.NaN()))
+		}
 	}
 	return ret
 }
@@ -551,7 +596,6 @@ func generateVarCharArray(numRows int, maxLen int) []string {
 	for i := 0; i < numRows; i++ {
 		ret[i] = funcutil.RandomString(rand.Intn(maxLen))
 	}
-
 	return ret
 }
 

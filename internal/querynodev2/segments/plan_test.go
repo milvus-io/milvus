@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type PlanSuite struct {
@@ -43,7 +44,9 @@ func (suite *PlanSuite) SetupTest() {
 	suite.partitionID = 10
 	suite.segmentID = 1
 	schema := GenTestCollectionSchema("plan-suite", schemapb.DataType_Int64, true)
-	suite.collection = NewCollection(suite.collectionID, schema, GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
+	suite.collection = NewCollection(suite.collectionID, schema, GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection,
+	})
 	suite.collection.AddPartition(suite.partitionID)
 }
 
@@ -78,5 +81,6 @@ func (suite *PlanSuite) TestQueryPlanCollectionReleased() {
 }
 
 func TestPlan(t *testing.T) {
+	paramtable.Init()
 	suite.Run(t, new(PlanSuite))
 }

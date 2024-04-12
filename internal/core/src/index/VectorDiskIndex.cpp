@@ -59,8 +59,17 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create<T>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
+    if (get_index_obj.has_value()) {
+        index_ = get_index_obj.value();
+    } else {
+        auto err = get_index_obj.error();
+        if (err == knowhere::Status::invalid_index_error) {
+            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+        }
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
+    }
 }
 
 template <typename T>
@@ -88,8 +97,17 @@ VectorDiskAnnIndex<T>::VectorDiskAnnIndex(
     local_chunk_manager->CreateDir(local_index_path_prefix);
     auto diskann_index_pack =
         knowhere::Pack(std::shared_ptr<knowhere::FileManager>(file_manager_));
-    index_ = knowhere::IndexFactory::Instance().Create<T>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<T>(
         GetIndexType(), version, diskann_index_pack);
+    if (get_index_obj.has_value()) {
+        index_ = get_index_obj.value();
+    } else {
+        auto err = get_index_obj.error();
+        if (err == knowhere::Status::invalid_index_error) {
+            throw SegcoreError(ErrorCode::Unsupported, get_index_obj.what());
+        }
+        throw SegcoreError(ErrorCode::KnowhereError, get_index_obj.what());
+    }
 }
 
 template <typename T>
@@ -177,7 +195,7 @@ VectorDiskAnnIndex<T>::BuildV2(const Config& config) {
     knowhere::Json build_config;
     build_config.update(config);
 
-    auto local_data_path = file_manager_->CacheRawDataToDisk(space_);
+    auto local_data_path = file_manager_->CacheRawDataToDisk<T>(space_);
     build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
 
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();
@@ -224,7 +242,7 @@ VectorDiskAnnIndex<T>::Build(const Config& config) {
     AssertInfo(insert_files.has_value(),
                "insert file paths is empty when build disk ann index");
     auto local_data_path =
-        file_manager_->CacheRawDataToDisk(insert_files.value());
+        file_manager_->CacheRawDataToDisk<T>(insert_files.value());
     build_config[DISK_ANN_RAW_DATA_PATH] = local_data_path;
 
     auto local_index_path_prefix = file_manager_->GetLocalIndexObjectPrefix();

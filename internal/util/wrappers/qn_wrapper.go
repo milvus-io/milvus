@@ -93,10 +93,6 @@ func (qn *qnServerWrapper) Search(ctx context.Context, in *querypb.SearchRequest
 	return qn.QueryNode.Search(ctx, in)
 }
 
-func (qn *qnServerWrapper) HybridSearch(ctx context.Context, in *querypb.HybridSearchRequest, opts ...grpc.CallOption) (*querypb.HybridSearchResult, error) {
-	return qn.QueryNode.HybridSearch(ctx, in)
-}
-
 func (qn *qnServerWrapper) SearchSegments(ctx context.Context, in *querypb.SearchRequest, opts ...grpc.CallOption) (*internalpb.SearchResults, error) {
 	return qn.QueryNode.SearchSegments(ctx, in)
 }

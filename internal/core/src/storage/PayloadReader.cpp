@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#include "storage/PayloadReader.h"
-#include "common/EasyAssert.h"
-#include "storage/Util.h"
-#include "parquet/column_reader.h"
 #include "arrow/io/api.h"
 #include "arrow/status.h"
+#include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "parquet/arrow/reader.h"
+#include "parquet/column_reader.h"
+#include "storage/PayloadReader.h"
+#include "storage/Util.h"
 
 namespace milvus::storage {
 
@@ -60,8 +61,8 @@ PayloadReader::init(std::shared_ptr<arrow::io::BufferReader> input) {
     auto file_meta = arrow_reader->parquet_reader()->metadata();
 
     // dim is unused for sparse float vector
-    dim_ = (datatype_is_vector(column_type_) &&
-            column_type_ != DataType::VECTOR_SPARSE_FLOAT)
+    dim_ = (IsVectorDataType(column_type_) &&
+            !IsSparseFloatVectorDataType(column_type_))
                ? GetDimensionFromFileMetaData(
                      file_meta->schema()->Column(column_index), column_type_)
                : 1;

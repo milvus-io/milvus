@@ -54,9 +54,6 @@ type Broker interface {
 
 	WatchChannels(ctx context.Context, info *watchInfo) error
 	UnwatchChannels(ctx context.Context, info *watchInfo) error
-	Flush(ctx context.Context, cID int64, segIDs []int64) error
-	Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error)
-	UnsetIsImportingState(context.Context, *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error)
 	GetSegmentStates(context.Context, *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error)
 	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
@@ -186,35 +183,6 @@ func (b *ServerBroker) WatchChannels(ctx context.Context, info *watchInfo) error
 func (b *ServerBroker) UnwatchChannels(ctx context.Context, info *watchInfo) error {
 	// TODO: release flowgraph on datanodes.
 	return nil
-}
-
-func (b *ServerBroker) Flush(ctx context.Context, cID int64, segIDs []int64) error {
-	resp, err := b.s.dataCoord.Flush(ctx, &datapb.FlushRequest{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_Flush),
-			commonpbutil.WithSourceID(b.s.session.ServerID),
-		),
-		DbID:         0,
-		SegmentIDs:   segIDs,
-		CollectionID: cID,
-		IsImport:     true,
-	})
-	if err != nil {
-		return errors.New("failed to call flush to data coordinator: " + err.Error())
-	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return merr.Error(resp.GetStatus())
-	}
-	log.Info("flush on collection succeed", zap.Int64("collectionID", cID))
-	return nil
-}
-
-func (b *ServerBroker) Import(ctx context.Context, req *datapb.ImportTaskRequest) (*datapb.ImportTaskResponse, error) {
-	return b.s.dataCoord.Import(ctx, req)
-}
-
-func (b *ServerBroker) UnsetIsImportingState(ctx context.Context, req *datapb.UnsetIsImportingStateRequest) (*commonpb.Status, error) {
-	return b.s.dataCoord.UnsetIsImportingState(ctx, req)
 }
 
 func (b *ServerBroker) GetSegmentStates(ctx context.Context, req *datapb.GetSegmentStatesRequest) (*datapb.GetSegmentStatesResponse, error) {

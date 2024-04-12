@@ -18,6 +18,8 @@ package meta
 
 import (
 	"context"
+	"fmt"
+	"runtime"
 	"sync"
 
 	"github.com/cockroachdb/errors"
@@ -27,10 +29,15 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -87,6 +94,13 @@ func (mgr *TargetManager) UpdateCollectionCurrentTarget(collectionID int64) bool
 		zap.Strings("channels", newTarget.GetAllDmChannelNames()),
 		zap.Int64("version", newTarget.GetTargetVersion()),
 	)
+	for channelName, dmlChannel := range newTarget.dmChannels {
+		ts, _ := tsoutil.ParseTS(dmlChannel.GetSeekPosition().GetTimestamp())
+		metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.WithLabelValues(
+			fmt.Sprint(paramtable.GetNodeID()),
+			channelName,
+		).Set(float64(ts.Unix()))
+	}
 	return true
 }
 
@@ -220,7 +234,7 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 
 		partitionSet := typeutil.NewUniqueSet(chosenPartitionIDs...)
 		for _, segmentInfo := range segmentInfos {
-			if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.InvalidPartitionID {
+			if partitionSet.Contain(segmentInfo.GetPartitionID()) || segmentInfo.GetPartitionID() == common.AllPartitionsID {
 				segments[segmentInfo.GetID()] = segmentInfo
 			}
 		}
@@ -266,6 +280,16 @@ func (mgr *TargetManager) RemoveCollection(collectionID int64) {
 	defer mgr.rwMutex.Unlock()
 	log.Info("remove collection from targets",
 		zap.Int64("collectionID", collectionID))
+
+	current := mgr.current.getCollectionTarget(collectionID)
+	if current != nil {
+		for channelName := range current.GetAllDmChannels() {
+			metrics.QueryCoordCurrentTargetCheckpointUnixSeconds.DeleteLabelValues(
+				fmt.Sprint(paramtable.GetNodeID()),
+				channelName,
+			)
+		}
+	}
 
 	mgr.current.removeCollectionTarget(collectionID)
 	mgr.next.removeCollectionTarget(collectionID)
@@ -573,13 +597,38 @@ func (mgr *TargetManager) SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
 	if mgr.current != nil {
+		// use pool here to control maximal writer used by save target
+		pool := conc.NewPool[any](runtime.GOMAXPROCS(0) * 2)
+		// use batch write in case of the number of collections is large
+		batchSize := 16
+		var wg sync.WaitGroup
+		submit := func(tasks []typeutil.Pair[int64, *querypb.CollectionTarget]) {
+			wg.Add(1)
+			pool.Submit(func() (any, error) {
+				defer wg.Done()
+				ids := lo.Map(tasks, func(p typeutil.Pair[int64, *querypb.CollectionTarget], _ int) int64 { return p.A })
+				if err := catalog.SaveCollectionTargets(lo.Map(tasks, func(p typeutil.Pair[int64, *querypb.CollectionTarget], _ int) *querypb.CollectionTarget {
+					return p.B
+				})...); err != nil {
+					log.Warn("failed to save current target for collection", zap.Int64s("collectionIDs", ids), zap.Error(err))
+				} else {
+					log.Info("succeed to save current target for collection", zap.Int64s("collectionIDs", ids))
+				}
+				return nil, nil
+			})
+		}
+		tasks := make([]typeutil.Pair[int64, *querypb.CollectionTarget], 0, batchSize)
 		for id, target := range mgr.current.collectionTargetMap {
-			if err := catalog.SaveCollectionTarget(target.toPbMsg()); err != nil {
-				log.Warn("failed to save current target for collection", zap.Int64("collectionID", id), zap.Error(err))
-			} else {
-				log.Warn("succeed to save current target for collection", zap.Int64("collectionID", id))
+			tasks = append(tasks, typeutil.NewPair(id, target.toPbMsg()))
+			if len(tasks) >= batchSize {
+				submit(tasks)
+				tasks = make([]typeutil.Pair[int64, *querypb.CollectionTarget], 0, batchSize)
 			}
 		}
+		if len(tasks) > 0 {
+			submit(tasks)
+		}
+		wg.Wait()
 	}
 }
 

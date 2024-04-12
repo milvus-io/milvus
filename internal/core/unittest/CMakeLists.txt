@@ -144,16 +144,25 @@ if (LINUX)
     add_subdirectory(bench)
 endif ()
 
-if (USE_DYNAMIC_SIMD)
-add_executable(dynamic_simd_test
-               test_simd.cpp)
+# if (USE_DYNAMIC_SIMD)
+# add_executable(dynamic_simd_test
+#                test_simd.cpp)
+# 
+# target_link_libraries(dynamic_simd_test
+#                 milvus_simd
+#                 milvus_log
+#                 gtest
+#                 ${CONAN_LIBS})
+# 
+# install(TARGETS dynamic_simd_test DESTINATION unittest)
+# endif()
 
-target_link_libraries(dynamic_simd_test
-                milvus_simd
-                milvus_log
-                gtest
-                ${CONAN_LIBS})
-
-install(TARGETS dynamic_simd_test DESTINATION unittest)
-endif()
-
+add_executable(bitset_test 
+        test_bitset.cpp
+)
+target_link_libraries(bitset_test 
+        milvus_bitset 
+        gtest 
+        ${CONAN_LIBS}
+)
+install(TARGETS bitset_test DESTINATION unittest)

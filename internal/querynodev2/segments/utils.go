@@ -93,6 +93,28 @@ func getPKsFromRowBasedInsertMsg(msg *msgstream.InsertMsg, schema *schemapb.Coll
 					break
 				}
 			}
+		case schemapb.DataType_Float16Vector:
+			for _, t := range field.TypeParams {
+				if t.Key == common.DimKey {
+					dim, err := strconv.Atoi(t.Value)
+					if err != nil {
+						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+					}
+					offset += dim * 2
+					break
+				}
+			}
+		case schemapb.DataType_BFloat16Vector:
+			for _, t := range field.TypeParams {
+				if t.Key == common.DimKey {
+					dim, err := strconv.Atoi(t.Value)
+					if err != nil {
+						return nil, fmt.Errorf("strconv wrong on get dim, err = %s", err)
+					}
+					offset += dim * 2
+					break
+				}
+			}
 		case schemapb.DataType_SparseFloatVector:
 			return nil, fmt.Errorf("SparseFloatVector not support in row based message")
 		}
@@ -279,6 +301,10 @@ func fillFieldData(ctx context.Context, vcm storage.ChunkManager, dataPath strin
 	case schemapb.DataType_BinaryVector:
 		return fillBinVecFieldData(ctx, vcm, dataPath, fieldData, i, offset, endian)
 	case schemapb.DataType_FloatVector:
+		return fillFloatVecFieldData(ctx, vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_Float16Vector:
+		return fillFloatVecFieldData(ctx, vcm, dataPath, fieldData, i, offset, endian)
+	case schemapb.DataType_BFloat16Vector:
 		return fillFloatVecFieldData(ctx, vcm, dataPath, fieldData, i, offset, endian)
 	case schemapb.DataType_SparseFloatVector:
 		return fillSparseFloatVecFieldData(ctx, vcm, dataPath, fieldData, i, offset, endian)

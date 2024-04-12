@@ -42,6 +42,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 		&schemapb.FieldSchema{Name: integration.Int64Field, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
 		&schemapb.FieldSchema{Name: integration.FloatVecField, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
 		&schemapb.FieldSchema{Name: integration.BinVecField, DataType: schemapb.DataType_BinaryVector, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
+		&schemapb.FieldSchema{Name: integration.SparseFloatVecField, DataType: schemapb.DataType_SparseFloatVector},
 	)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
@@ -67,11 +68,12 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
 	bVecColumn := integration.NewBinaryVectorFieldData(integration.BinVecField, rowNum, dim)
+	sparseVecColumn := integration.NewSparseFloatVectorFieldData(integration.SparseFloatVecField, rowNum)
 	hashKeys := integration.GenerateHashKeys(rowNum)
 	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn},
+		FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn, sparseVecColumn},
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
@@ -143,6 +145,28 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 	}
 	s.WaitForIndexBuiltWithIndexName(ctx, collectionName, integration.BinVecField, "_default_binary")
 
+	// load with index on partial vector fields
+	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+	})
+	s.NoError(err)
+	s.Error(merr.Error(loadStatus))
+
+	// create index for sparse float vector
+	createIndexStatus, err = c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
+		CollectionName: collectionName,
+		FieldName:      integration.SparseFloatVecField,
+		IndexName:      "_default_sparse",
+		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexSparseInvertedIndex, metric.IP),
+	})
+	s.NoError(err)
+	err = merr.Error(createIndexStatus)
+	if err != nil {
+		log.Warn("createIndexStatus fail reason", zap.Error(err))
+	}
+	s.WaitForIndexBuiltWithIndexName(ctx, collectionName, integration.SparseFloatVecField, "_default_sparse")
+
 	// load with index on all vector fields
 	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
@@ -163,18 +187,21 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 
 	fParams := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
 	bParams := integration.GetSearchParams(integration.IndexFaissBinIvfFlat, metric.L2)
+	sParams := integration.GetSearchParams(integration.IndexSparseInvertedIndex, metric.IP)
 	fSearchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, fParams, nq, dim, topk, roundDecimal)
 
 	bSearchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.BinVecField, schemapb.DataType_BinaryVector, nil, metric.JACCARD, bParams, nq, dim, topk, roundDecimal)
 
+	sSearchReq := integration.ConstructSearchRequest("", collectionName, expr,
+		integration.SparseFloatVecField, schemapb.DataType_SparseFloatVector, nil, metric.IP, sParams, nq, dim, topk, roundDecimal)
 	hSearchReq := &milvuspb.HybridSearchRequest{
 		Base:           nil,
 		DbName:         dbName,
 		CollectionName: collectionName,
 		PartitionNames: nil,
-		Requests:       []*milvuspb.SearchRequest{fSearchReq, bSearchReq},
+		Requests:       []*milvuspb.SearchRequest{fSearchReq, bSearchReq, sSearchReq},
 		OutputFields:   []string{integration.FloatVecField, integration.BinVecField},
 	}
 
@@ -196,7 +223,7 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 
 	// weighted rank hybrid search
 	weightsParams := make(map[string][]float64)
-	weightsParams[proxy.WeightsParamsKey] = []float64{0.5, 0.2}
+	weightsParams[proxy.WeightsParamsKey] = []float64{0.5, 0.2, 0.1}
 	b, err = json.Marshal(weightsParams)
 	s.NoError(err)
 
@@ -206,8 +233,8 @@ func (s *HybridSearchSuite) TestHybridSearch() {
 		DbName:         dbName,
 		CollectionName: collectionName,
 		PartitionNames: nil,
-		Requests:       []*milvuspb.SearchRequest{fSearchReq, bSearchReq},
-		OutputFields:   []string{integration.FloatVecField, integration.BinVecField},
+		Requests:       []*milvuspb.SearchRequest{fSearchReq, bSearchReq, sSearchReq},
+		OutputFields:   []string{integration.FloatVecField, integration.BinVecField, integration.SparseFloatVecField},
 	}
 	hSearchReq.RankParams = []*commonpb.KeyValuePair{
 		{Key: proxy.RankTypeKey, Value: "weighted"},

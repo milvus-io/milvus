@@ -75,10 +75,6 @@ type IMetaTable interface {
 	ListAliasesByID(collID UniqueID) []string
 
 	// TODO: better to accept ctx.
-	GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) // serve for bulk insert.
-	GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) // serve for bulk insert.
-
-	// TODO: better to accept ctx.
 	AddCredential(credInfo *internalpb.CredentialInfo) error
 	GetCredential(username string) (*internalpb.CredentialInfo, error)
 	DeleteCredential(username string) error
@@ -137,11 +133,10 @@ func (mt *MetaTable) reload() error {
 	mt.names = newNameDb()
 	mt.aliases = newNameDb()
 
-	collectionNum := int64(0)
 	partitionNum := int64(0)
 
-	metrics.RootCoordNumOfCollections.Set(float64(0))
-	metrics.RootCoordNumOfPartitions.WithLabelValues().Set(float64(0))
+	metrics.RootCoordNumOfCollections.Reset()
+	metrics.RootCoordNumOfPartitions.Reset()
 
 	// recover databases.
 	dbs, err := mt.catalog.ListDatabases(mt.ctx, typeutil.MaxTimestamp)
@@ -177,6 +172,7 @@ func (mt *MetaTable) reload() error {
 		if err != nil {
 			return err
 		}
+		collectionNum := int64(0)
 		for _, collection := range collections {
 			mt.collID2Meta[collection.CollectionID] = collection
 			if collection.Available() {
@@ -185,9 +181,12 @@ func (mt *MetaTable) reload() error {
 				partitionNum += int64(collection.GetPartitionNum(true))
 			}
 		}
-	}
 
-	log.Info("recover collections from db", zap.Int64("collection_num", collectionNum), zap.Int64("partition_num", partitionNum))
+		metrics.RootCoordNumOfCollections.WithLabelValues(dbName).Add(float64(collectionNum))
+		log.Info("collections recovered from db", zap.String("db_name", dbName),
+			zap.Int64("collection_num", collectionNum),
+			zap.Int64("partition_num", partitionNum))
+	}
 
 	// recover aliases from db namespace
 	for dbName, db := range mt.dbName2Meta {
@@ -201,7 +200,6 @@ func (mt *MetaTable) reload() error {
 		}
 	}
 
-	metrics.RootCoordNumOfCollections.Add(float64(collectionNum))
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 	log.Info("RootCoord meta table reload done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
@@ -237,7 +235,7 @@ func (mt *MetaTable) reloadWithNonDatabase() error {
 		mt.aliases.insert(util.DefaultDBName, alias.Name, alias.CollectionID)
 	}
 
-	metrics.RootCoordNumOfCollections.Add(float64(collectionNum))
+	metrics.RootCoordNumOfCollections.WithLabelValues(util.DefaultDBName).Add(float64(collectionNum))
 	metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(partitionNum))
 	return nil
 }
@@ -402,12 +400,17 @@ func (mt *MetaTable) ChangeCollectionState(ctx context.Context, collectionID Uni
 	}
 	mt.collID2Meta[collectionID] = clone
 
+	db, err := mt.getDatabaseByIDInternal(ctx, coll.DBID, typeutil.MaxTimestamp)
+	if err != nil {
+		return fmt.Errorf("dbID not found for collection:%d", collectionID)
+	}
+
 	switch state {
 	case pb.CollectionState_CollectionCreated:
-		metrics.RootCoordNumOfCollections.Inc()
+		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Inc()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Add(float64(coll.GetPartitionNum(true)))
 	default:
-		metrics.RootCoordNumOfCollections.Dec()
+		metrics.RootCoordNumOfCollections.WithLabelValues(db.Name).Dec()
 		metrics.RootCoordNumOfPartitions.WithLabelValues().Sub(float64(coll.GetPartitionNum(true)))
 	}
 
@@ -1145,74 +1148,6 @@ func (mt *MetaTable) ListAliasesByID(collID UniqueID) []string {
 	defer mt.ddLock.RUnlock()
 
 	return mt.listAliasesByID(collID)
-}
-
-// GetPartitionNameByID serve for bulk insert.
-func (mt *MetaTable) GetPartitionNameByID(collID UniqueID, partitionID UniqueID, ts Timestamp) (string, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	coll, ok := mt.collID2Meta[collID]
-	if ok && coll.Available() && coll.CreateTime <= ts {
-		// cache hit.
-		for _, partition := range coll.Partitions {
-			if partition.Available() && partition.PartitionID == partitionID && partition.PartitionCreatedTimestamp <= ts {
-				// cache hit.
-				return partition.PartitionName, nil
-			}
-		}
-	}
-	// cache miss, get from catalog anyway.
-	coll, err := mt.catalog.GetCollectionByID(mt.ctx, coll.DBID, ts, collID)
-	if err != nil {
-		return "", err
-	}
-	if !coll.Available() {
-		return "", fmt.Errorf("collection not exist: %d", collID)
-	}
-	for _, partition := range coll.Partitions {
-		// no need to check time travel logic again, since catalog already did.
-		if partition.Available() && partition.PartitionID == partitionID {
-			return partition.PartitionName, nil
-		}
-	}
-	return "", merr.WrapErrPartitionNotFound(partitionID)
-}
-
-// GetPartitionByName serve for bulk insert.
-func (mt *MetaTable) GetPartitionByName(collID UniqueID, partitionName string, ts Timestamp) (UniqueID, error) {
-	mt.ddLock.RLock()
-	defer mt.ddLock.RUnlock()
-
-	coll, ok := mt.collID2Meta[collID]
-	if ok && coll.Available() && coll.CreateTime <= ts {
-		// cache hit.
-		for _, partition := range coll.Partitions {
-			if partition.Available() && partition.PartitionName == partitionName && partition.PartitionCreatedTimestamp <= ts {
-				// cache hit.
-				return partition.PartitionID, nil
-			}
-		}
-	}
-	// cache miss, get from catalog anyway.
-	coll, err := mt.catalog.GetCollectionByID(mt.ctx, coll.DBID, ts, collID)
-	if err != nil {
-		return common.InvalidPartitionID, err
-	}
-	if !coll.Available() {
-		return common.InvalidPartitionID, merr.WrapErrCollectionNotFoundWithDB(coll.DBID, collID)
-	}
-	for _, partition := range coll.Partitions {
-		// no need to check time travel logic again, since catalog already did.
-		if partition.Available() && partition.PartitionName == partitionName {
-			return partition.PartitionID, nil
-		}
-	}
-
-	log.Error("partition ID not found for partition name", zap.String("partitionName", partitionName),
-		zap.Int64("collectionID", collID), zap.String("collectionName", coll.Name))
-	return common.InvalidPartitionID, fmt.Errorf("partition ID not found for partition name '%s' in collection '%s'",
-		partitionName, coll.Name)
 }
 
 // AddCredential add credential

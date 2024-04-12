@@ -93,13 +93,13 @@ var (
 		})
 
 	// RootCoordNumOfCollections counts the number of collections.
-	RootCoordNumOfCollections = prometheus.NewGauge(
+	RootCoordNumOfCollections = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.RootCoordRole,
 			Name:      "collection_num",
 			Help:      "number of collections",
-		})
+		}, []string{databaseLabelName})
 
 	// RootCoordNumOfPartitions counts the number of partitions per collection.
 	RootCoordNumOfPartitions = prometheus.NewGaugeVec(
@@ -167,6 +167,7 @@ var (
 			Help:      "The quota states of cluster",
 		}, []string{
 			"quota_states",
+			"db_name",
 		})
 
 	// RootCoordRateLimitRatio reflects the ratio of rate limit.
@@ -185,6 +186,29 @@ var (
 			Name:      "ddl_req_latency_in_queue",
 			Help:      "latency of each DDL operations in queue",
 		}, []string{functionLabelName})
+
+	RootCoordNumEntities = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "entity_num",
+			Help:      "number of entities, clustered by collection and their status(loaded/total)",
+		}, []string{
+			collectionName,
+			statusLabelName,
+		})
+
+	RootCoordIndexedNumEntities = prometheus.NewGaugeVec(
+		prometheus.GaugeOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.RootCoordRole,
+			Name:      "indexed_entity_num",
+			Help:      "indexed number of entities, clustered by collection, index name and whether it's a vector index",
+		}, []string{
+			collectionName,
+			indexName,
+			isVectorIndex,
+		})
 )
 
 // RegisterRootCoord registers RootCoord metrics
@@ -219,4 +243,13 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordQuotaStates)
 	registry.MustRegister(RootCoordRateLimitRatio)
 	registry.MustRegister(RootCoordDDLReqLatencyInQueue)
+
+	registry.MustRegister(RootCoordNumEntities)
+	registry.MustRegister(RootCoordIndexedNumEntities)
+}
+
+func CleanupRootCoordDBMetrics(dbName string) {
+	RootCoordNumOfCollections.Delete(prometheus.Labels{
+		databaseLabelName: dbName,
+	})
 }

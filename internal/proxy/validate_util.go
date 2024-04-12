@@ -127,7 +127,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 		msg := fmt.Sprintf("the num_rows (%d) of field (%s) is not equal to passed num_rows (%d)", fieldNumRows, fieldName, numRows)
 		return merr.WrapErrParameterInvalid(fieldNumRows, numRows, msg)
 	}
-
+	errDimMismatch := func(fieldName string, dataDim int64, schemaDim int64) error {
+		msg := fmt.Sprintf("the dim (%d) of field data(%s) is not equal to schema dim (%d)", dataDim, fieldName, schemaDim)
+		return merr.WrapErrParameterInvalid(dataDim, schemaDim, msg)
+	}
 	for _, field := range data {
 		switch field.GetType() {
 		case schemapb.DataType_FloatVector:
@@ -145,6 +148,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if err != nil {
 				return err
 			}
+			dataDim := field.GetVectors().Dim
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
+			}
 
 			if n != numRows {
 				return errNumRowsMismatch(field.GetFieldName(), n)
@@ -159,6 +166,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return err
+			}
+			dataDim := field.GetVectors().Dim
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
 			}
 
 			n, err := funcutil.GetNumRowsOfBinaryVectorField(field.GetVectors().GetBinaryVector(), dim)
@@ -180,6 +191,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			if err != nil {
 				return err
 			}
+			dataDim := field.GetVectors().Dim
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
+			}
 
 			n, err := funcutil.GetNumRowsOfFloat16VectorField(field.GetVectors().GetFloat16Vector(), dim)
 			if err != nil {
@@ -199,6 +214,10 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return err
+			}
+			dataDim := field.GetVectors().Dim
+			if dataDim != dim {
+				return errDimMismatch(field.GetFieldName(), dataDim, dim)
 			}
 
 			n, err := funcutil.GetNumRowsOfBFloat16VectorField(field.GetVectors().GetBfloat16Vector(), dim)
@@ -323,12 +342,26 @@ func (v *validateUtil) checkFloatVectorFieldData(field *schemapb.FieldData, fiel
 }
 
 func (v *validateUtil) checkFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	// TODO
+	float16VecArray := field.GetVectors().GetFloat16Vector()
+	if float16VecArray == nil {
+		msg := fmt.Sprintf("float16 float field '%v' is illegal, nil Vector_Float16 type", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need vector_float16 array", "got nil", msg)
+	}
+	if v.checkNAN {
+		return typeutil.VerifyFloats16(float16VecArray)
+	}
 	return nil
 }
 
 func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	// TODO
+	bfloat16VecArray := field.GetVectors().GetBfloat16Vector()
+	if bfloat16VecArray == nil {
+		msg := fmt.Sprintf("bfloat16 float field '%v' is illegal, nil Vector_BFloat16 type", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need vector_bfloat16 array", "got nil", msg)
+	}
+	if v.checkNAN {
+		return typeutil.VerifyBFloats16(bfloat16VecArray)
+	}
 	return nil
 }
 

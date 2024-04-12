@@ -49,7 +49,6 @@ import (
 	tso2 "github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/internal/util/importutil"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	tsoutil2 "github.com/milvus-io/milvus/internal/util/tsoutil"
@@ -124,8 +123,6 @@ type Core struct {
 	session   *sessionutil.Session
 
 	factory dependency.Factory
-
-	importManager *importManager
 
 	enableActiveStandBy bool
 	activateFunc        func() error
@@ -271,17 +268,25 @@ func (c *Core) SetQueryCoordClient(s types.QueryCoordClient) error {
 // Register register rootcoord at etcd
 func (c *Core) Register() error {
 	c.session.Register()
-	if c.enableActiveStandBy {
-		if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
-			return err
-		}
+	afterRegister := func() {
+		metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Inc()
+		log.Info("RootCoord Register Finished")
+		c.session.LivenessCheck(c.ctx, func() {
+			log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
+			os.Exit(1)
+		})
 	}
-	metrics.NumNodes.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), typeutil.RootCoordRole).Inc()
-	log.Info("RootCoord Register Finished")
-	c.session.LivenessCheck(c.ctx, func() {
-		log.Error("Root Coord disconnected from etcd, process will exit", zap.Int64("Server Id", c.session.ServerID))
-		os.Exit(1)
-	})
+	if c.enableActiveStandBy {
+		go func() {
+			if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
+				log.Warn("failed to activate standby rootcoord server", zap.Error(err))
+				return
+			}
+			afterRegister()
+		}()
+	} else {
+		afterRegister()
+	}
 
 	return nil
 }
@@ -422,27 +427,6 @@ func (c *Core) initTSOAllocator() error {
 	return nil
 }
 
-func (c *Core) initImportManager() error {
-	impTaskKv, err := c.metaKVCreator()
-	if err != nil {
-		return err
-	}
-
-	f := NewImportFactory(c)
-	c.importManager = newImportManager(
-		c.ctx,
-		impTaskKv,
-		f.NewIDAllocator(),
-		f.NewImportFunc(),
-		f.NewGetSegmentStatesFunc(),
-		f.NewGetCollectionNameFunc(),
-		f.NewUnsetIsImportingStateFunc(),
-	)
-	c.importManager.init(c.ctx)
-
-	return nil
-}
-
 func (c *Core) initInternal() error {
 	c.UpdateStateCode(commonpb.StateCode_Initializing)
 	c.initKVCreator()
@@ -486,11 +470,6 @@ func (c *Core) initInternal() error {
 
 	c.quotaCenter = NewQuotaCenter(c.proxyClientManager, c.queryCoord, c.dataCoord, c.tsoAllocator, c.meta)
 	log.Debug("RootCoord init QuotaCenter done")
-
-	if err := c.initImportManager(); err != nil {
-		return err
-	}
-	log.Info("init import manager done")
 
 	if err := c.initCredentials(); err != nil {
 		return err
@@ -697,7 +676,7 @@ func (c *Core) startInternal() error {
 	}
 
 	if Params.QuotaConfig.QuotaAndLimitsEnabled.GetAsBool() {
-		go c.quotaCenter.run()
+		c.quotaCenter.Start()
 	}
 
 	c.scheduler.Start()
@@ -726,13 +705,10 @@ func (c *Core) startInternal() error {
 }
 
 func (c *Core) startServerLoop() {
-	c.wg.Add(6)
+	c.wg.Add(3)
 	go c.startTimeTickLoop()
 	go c.tsLoop()
 	go c.chanTimeTick.startWatch(&c.wg)
-	go c.importManager.cleanupLoop(&c.wg)
-	go c.importManager.sendOutTasksLoop(&c.wg)
-	go c.importManager.flipTaskStateLoop(&c.wg)
 }
 
 // Start starts RootCoord.
@@ -926,6 +902,7 @@ func (c *Core) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseReques
 	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordNumOfDatabases.Dec()
+	metrics.CleanupRootCoordDBMetrics(in.GetDbName())
 	log.Ctx(ctx).Info("done to drop database", zap.String("role", typeutil.RootCoordRole),
 		zap.String("dbName", in.GetDbName()), zap.Int64("msgID", in.GetBase().GetMsgID()),
 		zap.Uint64("ts", t.GetTs()))
@@ -1153,6 +1130,7 @@ func convertModelToDesc(collInfo *model.Collection, aliases []string, dbName str
 	resp.CollectionName = resp.Schema.Name
 	resp.Properties = collInfo.Properties
 	resp.NumPartitions = int64(len(collInfo.Partitions))
+	resp.DbId = collInfo.DBID
 	return resp
 }
 
@@ -1926,203 +1904,6 @@ func (c *Core) ListAliases(ctx context.Context, in *milvuspb.ListAliasesRequest)
 		CollectionName: in.GetCollectionName(),
 		Aliases:        aliases,
 	}, nil
-}
-
-// Import imports large files (json, numpy, etc.) on MinIO/S3 storage into Milvus storage.
-func (c *Core) Import(ctx context.Context, req *milvuspb.ImportRequest) (*milvuspb.ImportResponse, error) {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.ImportResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	// Get collection/partition ID from collection/partition name.
-	var colInfo *model.Collection
-	var err error
-	if colInfo, err = c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp); err != nil {
-		log.Error("failed to find collection ID from its name",
-			zap.String("collectionName", req.GetCollectionName()),
-			zap.Error(err))
-		return nil, err
-	}
-
-	isBackUp := importutil.IsBackup(req.GetOptions())
-	cID := colInfo.CollectionID
-	req.ChannelNames = c.meta.GetCollectionVirtualChannels(cID)
-
-	hasPartitionKey := false
-	for _, field := range colInfo.Fields {
-		if field.IsPartitionKey {
-			hasPartitionKey = true
-			break
-		}
-	}
-
-	// Get partition ID by partition name
-	var pID UniqueID
-	if isBackUp {
-		// Currently, Backup tool call import must with a partition name, each time restore a partition
-		if req.GetPartitionName() != "" {
-			if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
-				log.Warn("failed to get partition ID from its name", zap.String("partitionName", req.GetPartitionName()), zap.Error(err))
-				return &milvuspb.ImportResponse{
-					Status: merr.Status(merr.WrapErrPartitionNotFound(req.GetPartitionName())),
-				}, nil
-			}
-		} else {
-			log.Info("partition name not specified when backup recovery",
-				zap.String("collectionName", req.GetCollectionName()))
-			return &milvuspb.ImportResponse{
-				Status: merr.Status(merr.WrapErrParameterInvalidMsg("partition not specified")),
-			}, nil
-		}
-	} else {
-		if hasPartitionKey {
-			if req.GetPartitionName() != "" {
-				msg := "not allow to set partition name for collection with partition key"
-				log.Warn(msg, zap.String("collectionName", req.GetCollectionName()))
-				return &milvuspb.ImportResponse{
-					Status: merr.Status(merr.WrapErrParameterInvalidMsg(msg)),
-				}, nil
-			}
-		} else {
-			if req.GetPartitionName() == "" {
-				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
-			}
-			if pID, err = c.meta.GetPartitionByName(cID, req.GetPartitionName(), typeutil.MaxTimestamp); err != nil {
-				log.Warn("failed to get partition ID from its name",
-					zap.String("partition name", req.GetPartitionName()),
-					zap.Error(err))
-				return &milvuspb.ImportResponse{
-					Status: merr.Status(merr.WrapErrPartitionNotFound(req.GetPartitionName())),
-				}, nil
-			}
-		}
-	}
-
-	log.Info("RootCoord receive import request",
-		zap.String("collectionName", req.GetCollectionName()),
-		zap.Int64("collectionID", cID),
-		zap.String("partitionName", req.GetPartitionName()),
-		zap.Strings("virtualChannelNames", req.GetChannelNames()),
-		zap.Int64("partitionID", pID),
-		zap.Int("# of files = ", len(req.GetFiles())),
-	)
-	importJobResp := c.importManager.importJob(ctx, req, cID, pID)
-	return importJobResp, nil
-}
-
-// GetImportState returns the current state of an import task.
-func (c *Core) GetImportState(ctx context.Context, req *milvuspb.GetImportStateRequest) (*milvuspb.GetImportStateResponse, error) {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.GetImportStateResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-	return c.importManager.getTaskState(req.GetTask()), nil
-}
-
-// ListImportTasks returns id array of all import tasks.
-func (c *Core) ListImportTasks(ctx context.Context, req *milvuspb.ListImportTasksRequest) (*milvuspb.ListImportTasksResponse, error) {
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return &milvuspb.ListImportTasksResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	colID := int64(-1)
-	collectionName := req.GetCollectionName()
-	if len(collectionName) != 0 {
-		// if the collection name is specified but not found, user may input a wrong name, the collection doesn't exist or has been dropped.
-		// we will return error to notify user the name is incorrect.
-		colInfo, err := c.meta.GetCollectionByName(ctx, req.GetDbName(), req.GetCollectionName(), typeutil.MaxTimestamp)
-		if err != nil {
-			err = fmt.Errorf("failed to find collection ID from its name: '%s', error: %w", req.GetCollectionName(), err)
-			log.Error("ListImportTasks failed", zap.Error(err))
-			status := merr.Status(err)
-			return &milvuspb.ListImportTasksResponse{
-				Status: status,
-			}, nil
-		}
-		colID = colInfo.CollectionID
-	}
-
-	// if the collection name is not specified, the colID is -1, listAllTasks will return all tasks
-	tasks, err := c.importManager.listAllTasks(colID, req.GetLimit())
-	if err != nil {
-		err = fmt.Errorf("failed to list import tasks, collection name: '%s', error: %w", req.GetCollectionName(), err)
-		log.Error("ListImportTasks failed", zap.Error(err))
-		return &milvuspb.ListImportTasksResponse{
-			Status: merr.Status(err),
-		}, nil
-	}
-
-	resp := &milvuspb.ListImportTasksResponse{
-		Status: merr.Success(),
-		Tasks:  tasks,
-	}
-	return resp, nil
-}
-
-// ReportImport reports import task state to RootCoord.
-func (c *Core) ReportImport(ctx context.Context, ir *rootcoordpb.ImportResult) (*commonpb.Status, error) {
-	log.Info("RootCoord receive import state report",
-		zap.Int64("task ID", ir.GetTaskId()),
-		zap.Any("import state", ir.GetState()))
-	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
-		return merr.Status(err), nil
-	}
-
-	// This method update a busy node to idle node, and send import task to idle node
-	resendTaskFunc := func() {
-		func() {
-			c.importManager.busyNodesLock.Lock()
-			defer c.importManager.busyNodesLock.Unlock()
-			delete(c.importManager.busyNodes, ir.GetDatanodeId())
-			log.Info("a DataNode is no longer busy after processing task",
-				zap.Int64("dataNode ID", ir.GetDatanodeId()),
-				zap.Int64("task ID", ir.GetTaskId()))
-		}()
-		err := c.importManager.sendOutTasks(c.importManager.ctx)
-		if err != nil {
-			log.Error("fail to send out import task to datanodes")
-		}
-	}
-
-	// If setting ImportState_ImportCompleted, simply update the state and return directly.
-	if ir.GetState() == commonpb.ImportState_ImportCompleted {
-		log.Warn("this should not be called!")
-	}
-	// Upon receiving ReportImport request, update the related task's state in task store.
-	ti, err := c.importManager.updateTaskInfo(ir)
-	if err != nil {
-		return merr.Status(err), nil
-	}
-
-	// If task failed, send task to idle datanode
-	if ir.GetState() == commonpb.ImportState_ImportFailed {
-		// When a DataNode failed importing, remove this DataNode from the busy node list and send out import tasks again.
-		log.Info("an import task has failed, marking DataNode available and resending import task",
-			zap.Int64("task ID", ir.GetTaskId()))
-		resendTaskFunc()
-	} else if ir.GetState() == commonpb.ImportState_ImportCompleted {
-		// When a DataNode completes importing, remove this DataNode from the busy node list and send out import tasks again.
-		log.Info("an import task has completed, marking DataNode available and resending import task",
-			zap.Int64("task ID", ir.GetTaskId()))
-		resendTaskFunc()
-	} else if ir.GetState() == commonpb.ImportState_ImportPersisted {
-		// Here ir.GetState() == commonpb.ImportState_ImportPersisted
-		// Seal these import segments, so they can be auto-flushed later.
-		log.Info("an import task turns to persisted state, flush segments to be sealed",
-			zap.Int64("task ID", ir.GetTaskId()), zap.Any("segments", ir.GetSegments()))
-		if err := c.broker.Flush(ctx, ti.GetCollectionId(), ir.GetSegments()); err != nil {
-			log.Error("failed to call Flush on bulk insert segments",
-				zap.Int64("task ID", ir.GetTaskId()))
-			return merr.Status(err), nil
-		}
-	}
-
-	return merr.Success(), nil
 }
 
 // ExpireCredCache will call invalidate credential cache

@@ -25,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/parameterutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
@@ -124,14 +125,6 @@ func checkGetPrimaryKey(coll *schemapb.CollectionSchema, idResult gjson.Result) 
 
 // --------------------- collection details --------------------- //
 
-func IsVectorField(field *schemapb.FieldSchema) bool {
-	switch field.DataType {
-	case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		return true
-	}
-	return false
-}
-
 func printFields(fields []*schemapb.FieldSchema) []gin.H {
 	return printFieldDetails(fields, true)
 }
@@ -150,7 +143,7 @@ func printFieldDetails(fields []*schemapb.FieldSchema, oldVersion bool) []gin.H 
 			HTTPReturnFieldAutoID:       field.AutoID,
 			HTTPReturnDescription:       field.Description,
 		}
-		if IsVectorField(field) {
+		if typeutil.IsVectorType(field.DataType) {
 			fieldDetail[HTTPReturnFieldType] = field.DataType.String()
 			if oldVersion {
 				dim, _ := getDim(field)

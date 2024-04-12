@@ -28,6 +28,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
+	"github.com/x448/float16"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -278,6 +279,8 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType, wi
 	fieldArray := genConstantFieldSchema(simpleArrayField)
 	floatVecFieldSchema := genVectorFieldSchema(simpleFloatVecField)
 	binVecFieldSchema := genVectorFieldSchema(simpleBinVecField)
+	float16VecFieldSchema := genVectorFieldSchema(simpleFloat16VecField)
+	bfloat16VecFieldSchema := genVectorFieldSchema(simpleBFloat16VecField)
 	var pkFieldSchema *schemapb.FieldSchema
 
 	switch pkType {
@@ -302,6 +305,8 @@ func GenTestCollectionSchema(collectionName string, pkType schemapb.DataType, wi
 			binVecFieldSchema,
 			pkFieldSchema,
 			fieldArray,
+			float16VecFieldSchema,
+			bfloat16VecFieldSchema,
 		},
 	}
 
@@ -330,7 +335,7 @@ func GenTestIndexInfoList(collectionID int64, schema *schemapb.CollectionSchema)
 			TypeParams: field.GetTypeParams(),
 		}
 		switch field.GetDataType() {
-		case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector:
+		case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 			{
 				index.IndexParams = []*commonpb.KeyValuePair{
 					{Key: common.MetricTypeKey, Value: metric.L2},
@@ -500,21 +505,28 @@ func generateBinaryVectors(numRows, dim int) []byte {
 }
 
 func generateFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
+	total := numRows * dim
+	ret := make([]byte, total*2)
+	for i := 0; i < total; i++ {
+		v := float16.Fromfloat32(rand.Float32()).Bits()
+		binary.LittleEndian.PutUint16(ret[i*2:], v)
 	}
 	return ret
 }
 
 func generateBFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
+	total := numRows * dim
+	ret16 := make([]uint16, 0, total)
+	for i := 0; i < total; i++ {
+		f := rand.Float32()
+		bits := math.Float32bits(f)
+		bits >>= 16
+		bits &= 0x7FFF
+		ret16 = append(ret16, uint16(bits))
+	}
+	ret := make([]byte, len(ret16)*2)
+	for i, value := range ret16 {
+		binary.LittleEndian.PutUint16(ret[i*2:], value)
 	}
 	return ret
 }
@@ -724,6 +736,7 @@ func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath stri
 		storage.AccessKeyID(params.MinioCfg.AccessKeyID.GetValue()),
 		storage.SecretAccessKeyID(params.MinioCfg.SecretAccessKey.GetValue()),
 		storage.UseSSL(params.MinioCfg.UseSSL.GetAsBool()),
+		storage.SslCACert(params.MinioCfg.SslCACert.GetValue()),
 		storage.BucketName(params.MinioCfg.BucketName.GetValue()),
 		storage.UseIAM(params.MinioCfg.UseIAM.GetAsBool()),
 		storage.CloudProvider(params.MinioCfg.CloudProvider.GetValue()),
@@ -1008,6 +1021,10 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 		dataset = indexcgowrapper.GenBinaryVecDataset(generateBinaryVectors(msgLength, defaultDim))
 	case schemapb.DataType_FloatVector:
 		dataset = indexcgowrapper.GenFloatVecDataset(generateFloatVectors(msgLength, defaultDim))
+	case schemapb.DataType_Float16Vector:
+		dataset = indexcgowrapper.GenFloat16VecDataset(generateFloat16Vectors(msgLength, defaultDim))
+	case schemapb.DataType_BFloat16Vector:
+		dataset = indexcgowrapper.GenBFloat16VecDataset(generateBFloat16Vectors(msgLength, defaultDim))
 	case schemapb.DataType_SparseFloatVector:
 		data := testutils.GenerateSparseFloatVectors(msgLength)
 		dataset = indexcgowrapper.GenSparseFloatVecDataset(&storage.SparseFloatVectorFieldData{
@@ -1171,6 +1188,7 @@ func genStorageConfig() *indexpb.StorageConfig {
 		RootPath:        paramtable.Get().MinioCfg.RootPath.GetValue(),
 		IAMEndpoint:     paramtable.Get().MinioCfg.IAMEndpoint.GetValue(),
 		UseSSL:          paramtable.Get().MinioCfg.UseSSL.GetAsBool(),
+		SslCACert:       paramtable.Get().MinioCfg.SslCACert.GetValue(),
 		UseIAM:          paramtable.Get().MinioCfg.UseIAM.GetAsBool(),
 		StorageType:     paramtable.Get().CommonCfg.StorageType.GetValue(),
 	}
@@ -1258,7 +1276,7 @@ func genBruteForceDSL(schema *schemapb.CollectionSchema, topK int64, roundDecima
 	roundDecimalStr := strconv.FormatInt(roundDecimal, 10)
 	var fieldID int64
 	for _, f := range schema.Fields {
-		if f.DataType == schemapb.DataType_FloatVector || f.DataType == schemapb.DataType_Float16Vector || f.DataType == schemapb.DataType_BFloat16Vector {
+		if f.DataType == schemapb.DataType_FloatVector {
 			vecFieldName = f.Name
 			fieldID = f.FieldID
 			for _, p := range f.IndexParams {
@@ -1370,11 +1388,10 @@ func checkSearchResult(ctx context.Context, nq int64, plan *SearchPlan, searchRe
 func genSearchPlanAndRequests(collection *Collection, segments []int64, indexType string, nq int64) (*SearchRequest, error) {
 	iReq, _ := genSearchRequest(nq, indexType, collection)
 	queryReq := &querypb.SearchRequest{
-		Req:             iReq,
-		DmlChannels:     []string{"dml"},
-		SegmentIDs:      segments,
-		FromShardLeader: true,
-		Scope:           querypb.DataScope_Historical,
+		Req:         iReq,
+		DmlChannels: []string{"dml"},
+		SegmentIDs:  segments,
+		Scope:       querypb.DataScope_Historical,
 	}
 	return NewSearchRequest(context.Background(), collection, queryReq, queryReq.Req.GetPlaceholderGroup())
 }

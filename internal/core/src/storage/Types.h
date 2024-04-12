@@ -96,6 +96,7 @@ struct StorageConfig {
     std::string log_level = "warn";
     std::string region = "";
     bool useSSL = false;
+    std::string sslCACert = "";
     bool useIAM = false;
     bool useVirtualHost = false;
     int64_t requestTimeoutMs = 3000;
@@ -108,6 +109,7 @@ struct StorageConfig {
            << ", cloud_provider=" << cloud_provider
            << ", iam_endpoint=" << iam_endpoint << ", log_level=" << log_level
            << ", region=" << region << ", useSSL=" << std::boolalpha << useSSL
+           << ", sslCACert=" << sslCACert.size()  // only print cert length
            << ", useIAM=" << std::boolalpha << useIAM
            << ", useVirtualHost=" << std::boolalpha << useVirtualHost
            << ", requestTimeoutMs=" << requestTimeoutMs << "]";

@@ -524,10 +524,10 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 				NewMergeParam(typeutil.Unlimited, make([]int64, 0), nil, true))
 			suite.NoError(err)
 			suite.Equal(2, len(result.GetFieldsData()))
-			suite.Equal([]int64{0, 1, 2, 3, 4}, result.GetIds().GetIntId().GetData())
+			suite.Equal([]int64{0, 1, 2, 3, 4, 6}, result.GetIds().GetIntId().GetData())
 			// here, we can only get best result from 0 to 4 without 6, because we can never know whether there is
 			// one potential 5 in following result1
-			suite.Equal([]int64{11, 22, 11, 22, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
+			suite.Equal([]int64{11, 22, 11, 22, 33, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 			suite.InDeltaSlice([]float32{1, 2, 3, 4, 5, 6, 7, 8, 1, 2, 3, 4, 5, 6, 7, 8, 11, 22, 33, 44, 11, 22, 33, 44},
 				result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
 		})
@@ -562,6 +562,34 @@ func (suite *ResultSuite) TestResult_MergeStopForBestResult() {
 		suite.Equal([]int64{11, 11, 22, 22, 33}, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
 		suite.InDeltaSlice([]float32{1, 2, 3, 4, 1, 2, 3, 4, 5, 6, 7, 8, 5, 6, 7, 8, 11, 22, 33, 44},
 			result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
+	})
+
+	suite.Run("test stop internal merge for best with early termination", func() {
+		result1 := &internalpb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{0, 4, 7},
+					},
+				},
+			},
+			FieldsData: fieldDataArray1,
+		}
+		result2 := &internalpb.RetrieveResults{
+			Ids: &schemapb.IDs{
+				IdField: &schemapb.IDs_IntId{
+					IntId: &schemapb.LongArray{
+						Data: []int64{2},
+					},
+				},
+			},
+			FieldsData: fieldDataArray2,
+		}
+		result, err := MergeInternalRetrieveResult(context.Background(), []*internalpb.RetrieveResults{result1, result2},
+			NewMergeParam(3, make([]int64, 0), nil, true))
+		suite.NoError(err)
+		suite.Equal(2, len(result.GetFieldsData()))
+		suite.Equal([]int64{0, 2, 4, 7}, result.GetIds().GetIntId().GetData())
 	})
 }
 

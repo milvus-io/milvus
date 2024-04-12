@@ -219,18 +219,21 @@ func (suite *QueryNodeSuite) TestStop() {
 	suite.node.manager = segments.NewManager()
 
 	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
-	collection := segments.NewCollection(1, schema, nil, querypb.LoadType_LoadCollection)
+	collection := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection,
+	})
 	segment, err := segments.NewSegment(
 		context.Background(),
 		collection,
-		100,
-		10,
-		1,
-		"test_stop_channel",
 		segments.SegmentTypeSealed,
-		1, nil,
-		nil,
-		datapb.SegmentLevel_Legacy,
+		1,
+		&querypb.SegmentLoadInfo{
+			SegmentID:     100,
+			PartitionID:   10,
+			CollectionID:  1,
+			InsertChannel: "test_stop_channel",
+			Level:         datapb.SegmentLevel_Legacy,
+		},
 	)
 	suite.NoError(err)
 	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, segment)

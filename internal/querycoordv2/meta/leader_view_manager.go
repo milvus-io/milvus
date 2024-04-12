@@ -24,6 +24,46 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+type LeaderViewFilter = func(view *LeaderView) bool
+
+func WithChannelName2LeaderView(channelName string) LeaderViewFilter {
+	return func(view *LeaderView) bool {
+		return view.Channel == channelName
+	}
+}
+
+func WithCollectionID2LeaderView(collectionID int64) LeaderViewFilter {
+	return func(view *LeaderView) bool {
+		return view.CollectionID == collectionID
+	}
+}
+
+func WithNodeID2LeaderView(nodeID int64) LeaderViewFilter {
+	return func(view *LeaderView) bool {
+		return view.ID == nodeID
+	}
+}
+
+func WithReplica2LeaderView(replica *Replica) LeaderViewFilter {
+	return func(view *LeaderView) bool {
+		if replica == nil {
+			return false
+		}
+		return replica.GetCollectionID() == view.CollectionID && replica.Contains(view.ID)
+	}
+}
+
+func WithSegment2LeaderView(segmentID int64, isGrowing bool) LeaderViewFilter {
+	return func(view *LeaderView) bool {
+		if isGrowing {
+			_, ok := view.GrowingSegments[segmentID]
+			return ok
+		}
+		_, ok := view.Segments[segmentID]
+		return ok
+	}
+}
+
 type LeaderView struct {
 	ID               int64
 	CollectionID     int64
@@ -71,28 +111,6 @@ func NewLeaderViewManager() *LeaderViewManager {
 	}
 }
 
-// GetSegmentByNode returns all segments that the given node contains,
-// include growing segments
-func (mgr *LeaderViewManager) GetSegmentByNode(nodeID int64) []int64 {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	segments := make([]int64, 0)
-	for leaderID, views := range mgr.views {
-		for _, view := range views {
-			for segment, version := range view.Segments {
-				if version.NodeID == nodeID {
-					segments = append(segments, segment)
-				}
-			}
-			if leaderID == nodeID {
-				segments = append(segments, lo.Keys(view.GrowingSegments)...)
-			}
-		}
-	}
-	return segments
-}
-
 // Update updates the leader's views, all views have to be with the same leader ID
 func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 	mgr.rwmutex.Lock()
@@ -103,127 +121,6 @@ func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 	}
 }
 
-// GetSegmentDist returns the list of nodes the given segment on
-func (mgr *LeaderViewManager) GetSegmentDist(segmentID int64) []int64 {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	nodes := make([]int64, 0)
-	for leaderID, views := range mgr.views {
-		for _, view := range views {
-			version, ok := view.Segments[segmentID]
-			if ok {
-				nodes = append(nodes, version.NodeID)
-			}
-			if _, ok := view.GrowingSegments[segmentID]; ok {
-				nodes = append(nodes, leaderID)
-			}
-		}
-	}
-	return nodes
-}
-
-func (mgr *LeaderViewManager) GetSealedSegmentDist(segmentID int64) []int64 {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	nodes := make([]int64, 0)
-	for _, views := range mgr.views {
-		for _, view := range views {
-			version, ok := view.Segments[segmentID]
-			if ok {
-				nodes = append(nodes, version.NodeID)
-			}
-		}
-	}
-	return nodes
-}
-
-func (mgr *LeaderViewManager) GetGrowingSegmentDist(segmentID int64) []int64 {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	nodes := make([]int64, 0)
-	for leaderID, views := range mgr.views {
-		for _, view := range views {
-			if _, ok := view.GrowingSegments[segmentID]; ok {
-				nodes = append(nodes, leaderID)
-				break
-			}
-		}
-	}
-	return nodes
-}
-
-// GetLeadersByGrowingSegment returns the first leader which contains the given growing segment
-func (mgr *LeaderViewManager) GetLeadersByGrowingSegment(segmentID int64) *LeaderView {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	for _, views := range mgr.views {
-		for _, view := range views {
-			if _, ok := view.GrowingSegments[segmentID]; ok {
-				return view
-			}
-		}
-	}
-	return nil
-}
-
-// GetGrowingSegments returns all segments of the given collection and node.
-func (mgr *LeaderViewManager) GetGrowingSegments(collectionID, nodeID int64) map[int64]*Segment {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	segments := make(map[int64]*Segment, 0)
-	if viewsOnNode, ok := mgr.views[nodeID]; ok {
-		for _, view := range viewsOnNode {
-			if view.CollectionID == collectionID {
-				for ID, segment := range view.GrowingSegments {
-					segments[ID] = segment
-				}
-			}
-		}
-	}
-
-	return segments
-}
-
-// GetSegmentDist returns the list of nodes the given channel on
-func (mgr *LeaderViewManager) GetChannelDist(channel string) []int64 {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	nodes := make([]int64, 0)
-	for leaderID, views := range mgr.views {
-		_, ok := views[channel]
-		if ok {
-			nodes = append(nodes, leaderID)
-		}
-	}
-	return nodes
-}
-
-func (mgr *LeaderViewManager) GetLeaderView(id int64) map[string]*LeaderView {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	return mgr.views[id]
-}
-
-func (mgr *LeaderViewManager) GetByCollectionAndNode(collection, node int64) map[string]*LeaderView {
-	mgr.rwmutex.RLock()
-	defer mgr.rwmutex.RUnlock()
-
-	ret := make(map[string]*LeaderView)
-	for _, view := range mgr.views[node] {
-		if collection == view.CollectionID {
-			ret[view.Channel] = view
-		}
-	}
-	return ret
-}
-
 func (mgr *LeaderViewManager) GetLeaderShardView(id int64, shard string) *LeaderView {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
@@ -231,32 +128,39 @@ func (mgr *LeaderViewManager) GetLeaderShardView(id int64, shard string) *Leader
 	return mgr.views[id][shard]
 }
 
-func (mgr *LeaderViewManager) GetLeadersByShard(shard string) map[int64]*LeaderView {
+func (mgr *LeaderViewManager) GetByFilter(filters ...LeaderViewFilter) []*LeaderView {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
 
-	ret := make(map[int64]*LeaderView, 0)
-	for _, views := range mgr.views {
-		view, ok := views[shard]
-		if ok {
-			ret[view.ID] = view
+	return mgr.getByFilter(filters...)
+}
+
+func (mgr *LeaderViewManager) getByFilter(filters ...LeaderViewFilter) []*LeaderView {
+	ret := make([]*LeaderView, 0)
+	for _, viewsOnNode := range mgr.views {
+		for _, view := range viewsOnNode {
+			allMatch := true
+			for _, fn := range filters {
+				if fn != nil && !fn(view) {
+					allMatch = false
+				}
+			}
+
+			if allMatch {
+				ret = append(ret, view)
+			}
 		}
 	}
+
 	return ret
 }
 
-func (mgr *LeaderViewManager) GetLatestLeadersByReplicaShard(replica *Replica, shard string) *LeaderView {
+func (mgr *LeaderViewManager) GetLatestShardLeaderByFilter(filters ...LeaderViewFilter) *LeaderView {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
+	views := mgr.getByFilter(filters...)
 
-	var ret *LeaderView
-	for _, views := range mgr.views {
-		view, ok := views[shard]
-		if ok &&
-			replica.Contains(view.ID) &&
-			(ret == nil || ret.Version < view.Version) {
-			ret = view
-		}
-	}
-	return ret
+	return lo.MaxBy(views, func(v1, v2 *LeaderView) bool {
+		return v1.Version > v2.Version
+	})
 }

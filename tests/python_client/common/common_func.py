@@ -491,6 +491,31 @@ def gen_default_rows_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     return array
 
 
+def gen_json_data_for_diff_json_types(nb=ct.default_nb, start=0, json_type="json_embedded_object"):
+    """
+    Method: gen json data for different json types. Refer to RFC7159
+    """
+    if json_type == "json_embedded_object":                 # a json object with an embedd json object
+        return [{json_type: {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0}, "str": str(i)}
+                       for i in range(start, start + nb)]
+    if json_type == "json_objects_array":                   # a json-objects array with 2 json objects
+        return [[{"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)},
+                 {"number": i, "level2": {"level2_number": i, "level2_float": i*1.0, "level2_str": str(i)}, "float": i*1.0, "str": str(i)}
+                 ] for i in range(start, start + nb)]
+    if json_type == "json_array":                           # single array as json value
+        return [[i for i in range(j, j + 10)] for j in range(start, start + nb)]
+    if json_type == "json_int":                             # single int as json value
+        return [i for i in range(start, start + nb)]
+    if json_type == "json_float":                           # single float as json value
+        return [i*1.0 for i in range(start, start + nb)]
+    if json_type == "json_string":                          # single string as json value
+        return [str(i) for i in range(start, start + nb)]
+    if json_type == "json_bool":                            # single bool as json value
+        return [bool(i) for i in range(start, start + nb)]
+    else:
+        return []
+
+
 def gen_default_data_for_upsert(nb=ct.default_nb, dim=ct.default_dim, start=0, size=10000):
     int_values = pd.Series(data=[i for i in range(start, start + nb)])
     float_values = pd.Series(data=[np.float32(i + size) for i in range(start, start + nb)], dtype="float32")
@@ -1798,26 +1823,72 @@ def extract_vector_field_name_list(collection_w):
 
     return vector_name_list
 
+def get_activate_func_from_metric_type(metric_type):
+    activate_function = lambda x: x
+    if metric_type == "COSINE":
+        activate_function = lambda x: (1 + x) * 0.5
+    elif metric_type == "IP":
+        activate_function = lambda x: 0.5 + math.atan(x)/ math.pi
+    else:
+        activate_function  = lambda x: 1.0 - 2*math.atan(x) / math.pi
+    return activate_function
 
-def get_hybrid_search_base_results(search_res_dict_array):
+def get_hybrid_search_base_results_rrf(search_res_dict_array, round_decimal=-1):
     """
     merge the element in the dicts array
     search_res_dict_array : the dict array in which the elements to be merged
     return: the sorted id and score answer
     """
     # calculate hybrid search base line
+
     search_res_dict_merge = {}
     ids_answer = []
     score_answer = []
-    for i in range(len(search_res_dict_array) - 1):
-        for key in search_res_dict_array[i]:
-            if search_res_dict_array[i + 1].get(key):
-                search_res_dict_merge[key] = search_res_dict_array[i][key] + search_res_dict_array[i + 1][key]
-            else:
-                search_res_dict_merge[key] = search_res_dict_array[i][key]
-        for key in search_res_dict_array[i + 1]:
-            if not search_res_dict_array[i].get(key):
-                search_res_dict_merge[key] = search_res_dict_array[i + 1][key]
+
+    for i, result in enumerate(search_res_dict_array, 0):
+        for key, distance in result.items():
+            search_res_dict_merge[key] = search_res_dict_merge.get(key, 0) + distance
+
+    if round_decimal != -1 :
+        for k, v in search_res_dict_merge.items():
+            multiplier = math.pow(10.0, round_decimal)
+            v = math.floor(v*multiplier+0.5) / multiplier
+            search_res_dict_merge[k] = v
+
+    sorted_list = sorted(search_res_dict_merge.items(), key=lambda x: x[1], reverse=True)
+
+    for sort in sorted_list:
+        ids_answer.append(int(sort[0]))
+        score_answer.append(float(sort[1]))
+
+    return ids_answer, score_answer
+
+
+def get_hybrid_search_base_results(search_res_dict_array, weights, metric_types, round_decimal=-1):
+    """
+    merge the element in the dicts array
+    search_res_dict_array : the dict array in which the elements to be merged
+    return: the sorted id and score answer
+    """
+    # calculate hybrid search base line
+
+    search_res_dict_merge = {}
+    ids_answer = []
+    score_answer = []
+
+    for i, result in enumerate(search_res_dict_array, 0):
+        activate_function = get_activate_func_from_metric_type(metric_types[i])
+        for key, distance in result.items():
+            activate_distance = activate_function(distance)
+            weight = weights[i]
+            search_res_dict_merge[key] = search_res_dict_merge.get(key, 0) + activate_function(distance) * weights[i]
+
+    if round_decimal != -1 :
+        for k, v in search_res_dict_merge.items():
+            multiplier = math.pow(10.0, round_decimal)
+            v = math.floor(v*multiplier+0.5) / multiplier
+            search_res_dict_merge[k] = v
+
     sorted_list = sorted(search_res_dict_merge.items(), key=lambda x: x[1], reverse=True)
 
     for sort in sorted_list:

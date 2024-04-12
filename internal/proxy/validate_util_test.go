@@ -270,6 +270,187 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 	})
 }
 
+func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
+	nb := 5
+	dim := int64(8)
+	data := generateFloat16Vectors(nb, int(dim))
+	invalidData := generateFloat16VectorsWithInvalidData(nb, int(dim))
+
+	t.Run("not float16 vector", func(t *testing.T) {
+		f := &schemapb.FieldData{}
+		v := newValidateUtil()
+		err := v.checkFloat16VectorFieldData(f, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("no check", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: invalidData,
+					},
+				},
+			},
+		}
+		v := newValidateUtil()
+		v.checkNAN = false
+		err := v.checkFloat16VectorFieldData(f, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("has nan", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: invalidData,
+					},
+				},
+			},
+		}
+		v := newValidateUtil(withNANCheck())
+		err := v.checkFloat16VectorFieldData(f, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Float16Vector{
+						Float16Vector: data,
+					},
+				},
+			},
+		}
+		v := newValidateUtil(withNANCheck())
+		err := v.checkFloat16VectorFieldData(f, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("default", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldId:   100,
+				FieldName: "vec",
+				Type:      schemapb.DataType_Float16Vector,
+				Field:     &schemapb.FieldData_Vectors{},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "vec",
+					DataType:     schemapb.DataType_Float16Vector,
+					DefaultValue: &schemapb.ValueField{},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+		err = v.fillWithDefaultValue(data, h, 1)
+		assert.Error(t, err)
+	})
+}
+
+func Test_validateUtil_checkBfloatVectorFieldData(t *testing.T) {
+	nb := 5
+	dim := int64(8)
+	data := generateFloat16Vectors(nb, int(dim))
+	invalidData := generateBFloat16VectorsWithInvalidData(nb, int(dim))
+	t.Run("not float vector", func(t *testing.T) {
+		f := &schemapb.FieldData{}
+		v := newValidateUtil()
+		err := v.checkBFloat16VectorFieldData(f, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("no check", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: invalidData,
+					},
+				},
+			},
+		}
+		v := newValidateUtil()
+		v.checkNAN = false
+		err := v.checkBFloat16VectorFieldData(f, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("has nan", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: invalidData,
+					},
+				},
+			},
+		}
+		v := newValidateUtil(withNANCheck())
+		err := v.checkBFloat16VectorFieldData(f, nil)
+		assert.Error(t, err)
+	})
+
+	t.Run("normal case", func(t *testing.T) {
+		f := &schemapb.FieldData{
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: dim,
+					Data: &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: data,
+					},
+				},
+			},
+		}
+		v := newValidateUtil(withNANCheck())
+		err := v.checkBFloat16VectorFieldData(f, nil)
+		assert.NoError(t, err)
+	})
+
+	t.Run("default", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldId:   100,
+				FieldName: "vec",
+				Type:      schemapb.DataType_BFloat16Vector,
+				Field:     &schemapb.FieldData_Vectors{},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:      100,
+					Name:         "vec",
+					DataType:     schemapb.DataType_BFloat16Vector,
+					DefaultValue: &schemapb.ValueField{},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+		err = v.fillWithDefaultValue(data, h, 1)
+		assert.Error(t, err)
+	})
+}
+
 func Test_validateUtil_checkAligned(t *testing.T) {
 	t.Run("float vector column not found", func(t *testing.T) {
 		data := []*schemapb.FieldData{
@@ -316,6 +497,48 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("field_data dim not match schema dim", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_FloatVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_FloatVector{
+							FloatVector: &schemapb.FloatArray{
+								Data: []float32{1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8},
+							},
+						},
+						Dim: 16,
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_Float16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "8",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 1)
+
+		assert.Error(t, err)
+	})
+
 	t.Run("invalid num rows", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -328,6 +551,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 								Data: []float32{1.1, 2.2},
 							},
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -369,6 +593,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 								Data: []float32{1.1, 2.2, 3.3, 4.4, 5.5, 6.6, 7.7, 8.8},
 							},
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -445,6 +670,46 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("field data dim not match schema dim", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_BinaryVector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_BinaryVector{
+							BinaryVector: []byte("66666666"),
+						},
+						Dim: 128,
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_BinaryVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "8",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 100)
+
+		assert.Error(t, err)
+	})
+
 	t.Run("invalid num rows", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -455,6 +720,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_BinaryVector{
 							BinaryVector: []byte("not128"),
 						},
+						Dim: 128,
 					},
 				},
 			},
@@ -494,6 +760,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_BinaryVector{
 							BinaryVector: []byte{'1', '2'},
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -580,6 +847,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_Float16Vector{
 							Float16Vector: []byte("not128"),
 						},
+						Dim: 128,
 					},
 				},
 			},
@@ -619,6 +887,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_Float16Vector{
 							Float16Vector: []byte{'1', '2'},
 						},
+						Dim: 2,
 					},
 				},
 			},
@@ -644,6 +913,46 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		v := newValidateUtil()
 
 		err = v.checkAligned(data, h, 100)
+
+		assert.Error(t, err)
+	})
+
+	t.Run("field_data dim not match schema dim", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_Float16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: []byte{'1', '2', '3', '4', '5', '6'},
+						},
+						Dim: 16,
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_Float16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "3",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 1)
 
 		assert.Error(t, err)
 	})
@@ -695,6 +1004,46 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("field_data dim not match schema dim", func(t *testing.T) {
+		data := []*schemapb.FieldData{
+			{
+				FieldName: "test",
+				Type:      schemapb.DataType_BFloat16Vector,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: []byte{'1', '2', '3', '4', '5', '6'},
+						},
+						Dim: 16,
+					},
+				},
+			},
+		}
+
+		schema := &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:     "test",
+					DataType: schemapb.DataType_BFloat16Vector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   common.DimKey,
+							Value: "3",
+						},
+					},
+				},
+			},
+		}
+		h, err := typeutil.CreateSchemaHelper(schema)
+		assert.NoError(t, err)
+
+		v := newValidateUtil()
+
+		err = v.checkAligned(data, h, 1)
+
+		assert.Error(t, err)
+	})
+
 	t.Run("invalid num rows", func(t *testing.T) {
 		data := []*schemapb.FieldData{
 			{
@@ -705,6 +1054,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_Bfloat16Vector{
 							Bfloat16Vector: []byte("not128"),
 						},
+						Dim: 128,
 					},
 				},
 			},
@@ -744,6 +1094,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_Bfloat16Vector{
 							Bfloat16Vector: []byte{'1', '2'},
 						},
+						Dim: 2,
 					},
 				},
 			},
@@ -830,6 +1181,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 								Data: generateFloatVectors(10, 8),
 							},
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -841,6 +1193,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 						Data: &schemapb.VectorField_BinaryVector{
 							BinaryVector: generateBinaryVectors(10, 8),
 						},
+						Dim: 8,
 					},
 				},
 			},
@@ -1949,6 +2302,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Type:      schemapb.DataType_FloatVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
+						Dim: 8,
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
 								Data: generateFloatVectors(2, 8),
@@ -1962,6 +2316,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Type:      schemapb.DataType_BinaryVector,
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
+						Dim: 8,
 						Data: &schemapb.VectorField_BinaryVector{
 							BinaryVector: generateBinaryVectors(2, 8),
 						},

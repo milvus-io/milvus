@@ -94,7 +94,8 @@ type DataNode struct {
 
 	syncMgr            syncmgr.SyncManager
 	writeBufferManager writebuffer.BufferManager
-	importManager      *importv2.Manager
+	importTaskMgr      importv2.TaskManager
+	importScheduler    importv2.Scheduler
 
 	clearSignal              chan string // vchannel name
 	segmentCache             *Cache
@@ -227,6 +228,9 @@ func (node *DataNode) initRateCollector() error {
 }
 
 func (node *DataNode) GetNodeID() int64 {
+	if node.serverID == 0 && node.session != nil {
+		return node.session.ServerID
+	}
 	return node.serverID
 }
 
@@ -242,24 +246,25 @@ func (node *DataNode) Init() error {
 			return
 		}
 
-		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, node.GetNodeID())
+		serverID := node.session.ServerID
+		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
+
+		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, serverID)
 
 		err := node.initRateCollector()
 		if err != nil {
-			log.Error("DataNode server init rateCollector failed", zap.Int64("node ID", node.GetNodeID()), zap.Error(err))
+			log.Error("DataNode server init rateCollector failed", zap.Error(err))
 			initError = err
 			return
 		}
-		log.Info("DataNode server init rateCollector done", zap.Int64("node ID", node.GetNodeID()))
+		log.Info("DataNode server init rateCollector done")
 
-		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, node.GetNodeID())
-		log.Info("DataNode server init dispatcher client done", zap.Int64("node ID", node.GetNodeID()))
+		node.dispClient = msgdispatcher.NewClient(node.factory, typeutil.DataNodeRole, serverID)
+		log.Info("DataNode server init dispatcher client done")
 
-		alloc, err := allocator.New(context.Background(), node.rootCoord, node.GetNodeID())
+		alloc, err := allocator.New(context.Background(), node.rootCoord, serverID)
 		if err != nil {
-			log.Error("failed to create id allocator",
-				zap.Error(err),
-				zap.String("role", typeutil.DataNodeRole), zap.Int64("DataNode ID", node.GetNodeID()))
+			log.Error("failed to create id allocator", zap.Error(err))
 			initError = err
 			return
 		}
@@ -286,11 +291,11 @@ func (node *DataNode) Init() error {
 
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
-		node.importManager = importv2.NewManager(node.syncMgr, node.chunkManager)
-
+		node.importTaskMgr = importv2.NewTaskManager()
+		node.importScheduler = importv2.NewScheduler(node.importTaskMgr, node.syncMgr, node.chunkManager)
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 
-		log.Info("init datanode done", zap.Int64("nodeID", node.GetNodeID()), zap.String("Address", node.address))
+		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError
 }
@@ -315,10 +320,11 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 }
 
 // tryToReleaseFlowgraph tries to release a flowgraph
-func (node *DataNode) tryToReleaseFlowgraph(vChanName string) {
-	log.Info("try to release flowgraph", zap.String("vChanName", vChanName))
-	node.flowgraphManager.RemoveFlowgraph(vChanName)
-	node.writeBufferManager.RemoveChannel(vChanName)
+func (node *DataNode) tryToReleaseFlowgraph(channel string) {
+	log.Info("try to release flowgraph", zap.String("channel", channel))
+	node.compactionExecutor.discardPlan(channel)
+	node.flowgraphManager.RemoveFlowgraph(channel)
+	node.writeBufferManager.RemoveChannel(channel)
 }
 
 // BackGroundGC runs in background to release datanode resources
@@ -382,7 +388,7 @@ func (node *DataNode) Start() error {
 
 		go node.compactionExecutor.start(node.ctx)
 
-		go node.importManager.Start()
+		go node.importScheduler.Start()
 
 		if Params.DataNodeCfg.DataNodeTimeTickByRPC.GetAsBool() {
 			node.timeTickSender = newTimeTickSender(node.broker, node.session.ServerID,
@@ -455,8 +461,8 @@ func (node *DataNode) Stop() error {
 			node.channelCheckpointUpdater.close()
 		}
 
-		if node.importManager != nil {
-			node.importManager.Close()
+		if node.importScheduler != nil {
+			node.importScheduler.Close()
 		}
 
 		node.cancel()

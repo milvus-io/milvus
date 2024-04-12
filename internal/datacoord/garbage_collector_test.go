@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -154,7 +155,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 		gc.close()
 	})
 	t.Run("hit, no gc", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch", false)
+		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Flushed
 		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
 		segment.Statslogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, stats[0])}
@@ -181,7 +182,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 	})
 
 	t.Run("dropped gc one", func(t *testing.T) {
-		segment := buildSegment(1, 10, 100, "ch", false)
+		segment := buildSegment(1, 10, 100, "ch")
 		segment.State = commonpb.SegmentState_Dropped
 		segment.DroppedAt = uint64(time.Now().Add(-time.Hour).UnixNano())
 		segment.Binlogs = []*datapb.FieldBinlog{getFieldBinlogPaths(0, inserts[0])}
@@ -256,6 +257,14 @@ func Test_garbageCollector_scan(t *testing.T) {
 // initialize unit test sso env
 func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
 	paramtable.Init()
+
+	if Params.MinioCfg.UseSSL.GetAsBool() && len(Params.MinioCfg.SslCACert.GetValue()) > 0 {
+		err := os.Setenv("SSL_CERT_FILE", Params.MinioCfg.SslCACert.GetValue())
+		if err != nil {
+			return nil, nil, nil, nil, nil, err
+		}
+	}
+
 	cli, err := minio.New(Params.MinioCfg.Address.GetValue(), &minio.Options{
 		Creds:  credentials.NewStaticV4(Params.MinioCfg.AccessKeyID.GetValue(), Params.MinioCfg.SecretAccessKey.GetValue(), ""),
 		Secure: Params.MinioCfg.UseSSL.GetAsBool(),

@@ -192,7 +192,7 @@ func constructCollectionSchemaByDataType(collectionName string, fieldName2DataTy
 			DataType: dataType,
 		}
 		idx++
-		if isVectorType(dataType) {
+		if typeutil.IsVectorType(dataType) {
 			fieldSchema.TypeParams = []*commonpb.KeyValuePair{
 				{
 					Key:   common.DimKey,
@@ -2209,7 +2209,7 @@ func Test_checkTrain(t *testing.T) {
 		m := map[string]string{
 			common.IndexTypeKey: "scalar",
 		}
-		assert.NoError(t, checkTrain(f, m))
+		assert.Error(t, checkTrain(f, m))
 	})
 
 	t.Run("dimension mismatch", func(t *testing.T) {
@@ -2507,7 +2507,7 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	t.Run("not all vector fields with index", func(t *testing.T) {
 		vecFields := make([]*schemapb.FieldSchema, 0)
 		for _, field := range newTestSchema().GetFields() {
-			if isVectorType(field.GetDataType()) {
+			if typeutil.IsVectorType(field.GetDataType()) {
 				vecFields = append(vecFields, field)
 			}
 		}

@@ -731,6 +731,14 @@ func WrapErrNodeNotAvailable(id int64, msg ...string) error {
 	return err
 }
 
+func WrapErrNodeStateUnexpected(id int64, state string, msg ...string) error {
+	err := wrapFields(ErrNodeStateUnexpected, value("node", id), value("state", state))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrNodeNotMatch(expectedNodeID, actualNodeID int64, msg ...string) error {
 	err := wrapFields(ErrNodeNotMatch,
 		value("expectedNodeID", expectedNodeID),
@@ -856,6 +864,14 @@ func WrapErrPrivilegeNotPermitted(fmt string, args ...any) error {
 // Segcore related
 func WrapErrSegcore(code int32, msg ...string) error {
 	err := wrapFields(ErrSegcore, value("segcoreCode", code))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrSegcoreUnsupported(code int32, msg ...string) error {
+	err := wrapFields(ErrSegcoreUnsupported, value("segcoreCode", code))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

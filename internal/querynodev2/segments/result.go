@@ -102,6 +102,88 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	return searchResults, nil
 }
 
+func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64) (*internalpb.SearchResults, error) {
+	if len(results) == 1 {
+		return results[0], nil
+	}
+
+	channelsMvcc := make(map[string]uint64)
+	for _, r := range results {
+		for ch, ts := range r.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
+	}
+	searchResults := &internalpb.SearchResults{
+		IsAdvanced:   true,
+		ChannelsMvcc: channelsMvcc,
+	}
+
+	for _, result := range results {
+		if !result.GetIsAdvanced() {
+			continue
+		}
+		// we just append here, no need to split subResult and reduce
+		// defer this reduce to proxy
+		searchResults.SubResults = append(searchResults.SubResults, result.GetSubResults()...)
+		searchResults.NumQueries = result.GetNumQueries()
+	}
+	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
+		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
+			return result.GetCostAggregation(), true
+		}
+
+		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
+			return result.GetCostAggregation(), true
+		}
+
+		return nil, false
+	})
+	searchResults.CostAggregation = mergeRequestCost(requestCosts)
+	return searchResults, nil
+}
+
+func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchResults) (*internalpb.SearchResults, error) {
+	searchResults := &internalpb.SearchResults{
+		IsAdvanced: true,
+	}
+
+	channelsMvcc := make(map[string]uint64)
+	for _, r := range results {
+		for ch, ts := range r.GetChannelsMvcc() {
+			channelsMvcc[ch] = ts
+		}
+	}
+	searchResults.ChannelsMvcc = channelsMvcc
+	for index, result := range results {
+		// we just append here, no need to split subResult and reduce
+		// defer this reduce to proxy
+		subResult := &internalpb.SubSearchResults{
+			MetricType:     result.GetMetricType(),
+			NumQueries:     result.GetNumQueries(),
+			TopK:           result.GetTopK(),
+			SlicedBlob:     result.GetSlicedBlob(),
+			SlicedNumCount: result.GetSlicedNumCount(),
+			SlicedOffset:   result.GetSlicedOffset(),
+			ReqIndex:       int64(index),
+		}
+		searchResults.NumQueries = result.GetNumQueries()
+		searchResults.SubResults = append(searchResults.SubResults, subResult)
+	}
+	requestCosts := lo.FilterMap(results, func(result *internalpb.SearchResults, _ int) (*internalpb.CostAggregation, bool) {
+		if paramtable.Get().QueryNodeCfg.EnableWorkerSQCostMetrics.GetAsBool() {
+			return result.GetCostAggregation(), true
+		}
+
+		if result.GetBase().GetSourceID() == paramtable.GetNodeID() {
+			return result.GetCostAggregation(), true
+		}
+
+		return nil, false
+	})
+	searchResults.CostAggregation = mergeRequestCost(requestCosts)
+	return searchResults, nil
+}
+
 func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, nq int64, topk int64) (*schemapb.SearchResultData, error) {
 	log := log.Ctx(ctx)
 
@@ -307,7 +389,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
-		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
@@ -411,7 +493,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
-		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}

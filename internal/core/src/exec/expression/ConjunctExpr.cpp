@@ -15,7 +15,6 @@
 // limitations under the License.
 
 #include "ConjunctExpr.h"
-#include "simd/hook.h"
 
 namespace milvus {
 namespace exec {
@@ -39,48 +38,26 @@ PhyConjunctFilterExpr::ResolveType(const std::vector<DataType>& inputs) {
 
 static bool
 AllTrue(ColumnVectorPtr& vec) {
-    bool* data = static_cast<bool*>(vec->GetRawData());
-#if defined(USE_DYNAMIC_SIMD)
-    return milvus::simd::all_true(data, vec->size());
-#else
-    for (int i = 0; i < vec->size(); ++i) {
-        if (!data[i]) {
-            return false;
-        }
-    }
-    return true;
-#endif
+    TargetBitmapView data(vec->GetRawData(), vec->size());
+    return data.all();
 }
 
 static void
 AllSet(ColumnVectorPtr& vec) {
-    bool* data = static_cast<bool*>(vec->GetRawData());
-    for (int i = 0; i < vec->size(); ++i) {
-        data[i] = true;
-    }
+    TargetBitmapView data(vec->GetRawData(), vec->size());
+    data.set();
 }
 
 static void
 AllReset(ColumnVectorPtr& vec) {
-    bool* data = static_cast<bool*>(vec->GetRawData());
-    for (int i = 0; i < vec->size(); ++i) {
-        data[i] = false;
-    }
+    TargetBitmapView data(vec->GetRawData(), vec->size());
+    data.reset();
 }
 
 static bool
 AllFalse(ColumnVectorPtr& vec) {
-    bool* data = static_cast<bool*>(vec->GetRawData());
-#if defined(USE_DYNAMIC_SIMD)
-    return milvus::simd::all_false(data, vec->size());
-#else
-    for (int i = 0; i < vec->size(); ++i) {
-        if (data[i]) {
-            return false;
-        }
-    }
-    return true;
-#endif
+    TargetBitmapView data(vec->GetRawData(), vec->size());
+    return data.none();
 }
 
 int64_t

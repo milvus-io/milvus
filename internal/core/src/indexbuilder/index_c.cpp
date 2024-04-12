@@ -72,6 +72,11 @@ CreateIndexV0(enum CDataType dtype,
         *res_index = index.release();
         status.error_code = Success;
         status.error_msg = "";
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
     } catch (std::exception& e) {
         status.error_code = UnexpectedError;
         status.error_msg = strdup(e.what());
@@ -107,7 +112,7 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
             std::to_string(engine_version);
 
         // get metric type
-        if (milvus::datatype_is_vector(field_type)) {
+        if (milvus::IsVectorDataType(field_type)) {
             auto metric_type = milvus::index::GetValueFromConfig<std::string>(
                 config, "metric_type");
             AssertInfo(metric_type.has_value(), "metric type is empty");
@@ -140,6 +145,11 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
     } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedError;
@@ -170,7 +180,7 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
             std::to_string(engine_version);
 
         // get metric type
-        if (milvus::datatype_is_vector(field_type)) {
+        if (milvus::IsVectorDataType(field_type)) {
             auto metric_type = milvus::index::GetValueFromConfig<std::string>(
                 config, "metric_type");
             AssertInfo(metric_type.has_value(), "metric type is empty");
@@ -228,6 +238,11 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         index->BuildV2();
         *res_index = index.release();
         return milvus::SuccessCStatus();
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);
     }
@@ -487,6 +502,7 @@ NewBuildIndexInfo(CBuildIndexInfo* c_build_index_info,
         storage_config.cloud_provider =
             std::string(c_storage_config.cloud_provider);
         storage_config.useSSL = c_storage_config.useSSL;
+        storage_config.sslCACert = c_storage_config.sslCACert;
         storage_config.useIAM = c_storage_config.useIAM;
         storage_config.region = c_storage_config.region;
         storage_config.useVirtualHost = c_storage_config.useVirtualHost;

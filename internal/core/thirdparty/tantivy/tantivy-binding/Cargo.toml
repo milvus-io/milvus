@@ -6,10 +6,11 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-tantivy = "0.21.0"
+tantivy = "=0.21.1"
 futures = "0.3.21"
 libc = "0.2"
 scopeguard = "1.2"
+zstd-sys = "=2.0.9"
 
 [build-dependencies]
 cbindgen = "0.26.0"

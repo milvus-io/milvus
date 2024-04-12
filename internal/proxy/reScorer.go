@@ -3,7 +3,9 @@ package proxy
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"reflect"
+	"strings"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -13,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metric"
 )
 
 type rankType int
@@ -35,14 +38,25 @@ type reScorer interface {
 	name() string
 	scorerType() rankType
 	reScore(input *milvuspb.SearchResults)
+	setMetricType(metricType string)
+	getMetricType() string
 }
 
 type baseScorer struct {
 	scorerName string
+	metricType string
 }
 
 func (bs *baseScorer) name() string {
 	return bs.scorerName
+}
+
+func (bs *baseScorer) setMetricType(metricType string) {
+	bs.metricType = metricType
+}
+
+func (bs *baseScorer) getMetricType() string {
+	return bs.metricType
 }
 
 type rrfScorer struct {
@@ -65,9 +79,36 @@ type weightedScorer struct {
 	weight float32
 }
 
+type activateFunc func(float32) float32
+
+func (ws *weightedScorer) getActivateFunc() activateFunc {
+	mUpper := strings.ToUpper(ws.getMetricType())
+	isCosine := mUpper == strings.ToUpper(metric.COSINE)
+	isIP := mUpper == strings.ToUpper(metric.IP)
+	if isCosine {
+		f := func(distance float32) float32 {
+			return (1 + distance) * 0.5
+		}
+		return f
+	}
+
+	if isIP {
+		f := func(distance float32) float32 {
+			return 0.5 + float32(math.Atan(float64(distance)))/math.Pi
+		}
+		return f
+	}
+
+	f := func(distance float32) float32 {
+		return 1.0 - 2*float32(math.Atan(float64(distance)))/math.Pi
+	}
+	return f
+}
+
 func (ws *weightedScorer) reScore(input *milvuspb.SearchResults) {
-	for i, score := range input.Results.GetScores() {
-		input.Results.Scores[i] = ws.weight * score
+	activateF := ws.getActivateFunc()
+	for i, distance := range input.Results.GetScores() {
+		input.Results.Scores[i] = ws.weight * activateF(distance)
 	}
 }
 
@@ -75,13 +116,17 @@ func (ws *weightedScorer) scorerType() rankType {
 	return weightedRankType
 }
 
-func NewReScorer(reqs []*milvuspb.SearchRequest, rankParams []*commonpb.KeyValuePair) ([]reScorer, error) {
-	res := make([]reScorer, len(reqs))
+func NewReScorers(reqCnt int, rankParams []*commonpb.KeyValuePair) ([]reScorer, error) {
+	if reqCnt == 0 {
+		return []reScorer{}, nil
+	}
+
+	res := make([]reScorer, reqCnt)
 	rankTypeStr, err := funcutil.GetAttrByKeyFromRepeatedKV(RankTypeKey, rankParams)
 	if err != nil {
 		log.Info("rank strategy not specified, use rrf instead")
 		// if not set rank strategy, use rrf rank as default
-		for i := range reqs {
+		for i := 0; i < reqCnt; i++ {
 			res[i] = &rrfScorer{
 				baseScorer: baseScorer{
 					scorerName: "rrf",
@@ -123,7 +168,7 @@ func NewReScorer(reqs []*milvuspb.SearchRequest, rankParams []*commonpb.KeyValue
 			return nil, errors.New(fmt.Sprintf("The rank params k should be in range (0, %d)", maxRRFParamsValue))
 		}
 		log.Debug("rrf params", zap.Float64("k", k))
-		for i := range reqs {
+		for i := 0; i < reqCnt; i++ {
 			res[i] = &rrfScorer{
 				baseScorer: baseScorer{
 					scorerName: "rrf",
@@ -156,10 +201,10 @@ func NewReScorer(reqs []*milvuspb.SearchRequest, rankParams []*commonpb.KeyValue
 		}
 
 		log.Debug("weights params", zap.Any("weights", weights))
-		if len(reqs) != len(weights) {
-			return nil, merr.WrapErrParameterInvalid(fmt.Sprint(len(reqs)), fmt.Sprint(len(weights)), "the length of weights param mismatch with ann search requests")
+		if reqCnt != len(weights) {
+			return nil, merr.WrapErrParameterInvalid(fmt.Sprint(reqCnt), fmt.Sprint(len(weights)), "the length of weights param mismatch with ann search requests")
 		}
-		for i := range reqs {
+		for i := 0; i < reqCnt; i++ {
 			res[i] = &weightedScorer{
 				baseScorer: baseScorer{
 					scorerName: "weighted",

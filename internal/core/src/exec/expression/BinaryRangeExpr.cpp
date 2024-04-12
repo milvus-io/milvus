@@ -144,7 +144,7 @@ PhyBinaryRangeFilterExpr::PreCheckOverflow(HighPrecisionType& val1,
             cached_overflow_res_->size() == batch_size) {
             return cached_overflow_res_;
         }
-        auto res = std::make_shared<ColumnVector>(DataType::BOOL, batch_size);
+        auto res = std::make_shared<ColumnVector>(TargetBitmap(batch_size));
         return res;
     };
 
@@ -235,12 +235,13 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
         return res;
     }
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
                                  const T* data,
                                  const int size,
-                                 bool* res,
+                                 TargetBitmapView res,
                                  HighPrecisionType val1,
                                  HighPrecisionType val2) {
         if (lower_inclusive && upper_inclusive) {
@@ -295,8 +296,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
         return nullptr;
     }
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
@@ -307,7 +308,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
     auto execute_sub_batch = [lower_inclusive, upper_inclusive, pointer](
                                  const milvus::Json* data,
                                  const int size,
-                                 bool* res,
+                                 TargetBitmapView res,
                                  ValueType val1,
                                  ValueType val2) {
         if (lower_inclusive && upper_inclusive) {
@@ -345,8 +346,8 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
         return nullptr;
     }
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     bool lower_inclusive = expr_->lower_inclusive_;
     bool upper_inclusive = expr_->upper_inclusive_;
@@ -360,7 +361,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForArray() {
     auto execute_sub_batch = [lower_inclusive, upper_inclusive](
                                  const milvus::ArrayView* data,
                                  const int size,
-                                 bool* res,
+                                 TargetBitmapView res,
                                  ValueType val1,
                                  ValueType val2,
                                  int index) {

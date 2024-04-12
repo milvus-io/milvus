@@ -26,29 +26,29 @@
 
 #include "Utils.h"
 #include "Types.h"
+#include "common/Array.h"
+#include "common/Consts.h"
+#include "common/EasyAssert.h"
+#include "common/FieldData.h"
+#include "common/FieldMeta.h"
+#include "common/File.h"
 #include "common/Json.h"
 #include "common/LoadInfo.h"
-#include "common/EasyAssert.h"
-#include "common/Array.h"
-#include "google/protobuf/message_lite.h"
-#include "mmap/Column.h"
-#include "common/Consts.h"
-#include "common/FieldMeta.h"
-#include "common/FieldData.h"
+#include "common/Tracer.h"
 #include "common/Types.h"
-#include "log/Log.h"
+#include "google/protobuf/message_lite.h"
+#include "index/VectorMemIndex.h"
+#include "mmap/Column.h"
 #include "mmap/Utils.h"
-#include "pb/schema.pb.h"
 #include "mmap/Types.h"
+#include "log/Log.h"
+#include "pb/schema.pb.h"
 #include "query/ScalarIndex.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "storage/Util.h"
 #include "storage/ThreadPools.h"
 #include "storage/ChunkCacheSingleton.h"
-#include "common/File.h"
-#include "common/Tracer.h"
-#include "index/VectorMemIndex.h"
 
 namespace milvus::segcore {
 
@@ -382,7 +382,7 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         //                   "field data can't be loaded when indexing exists");
 
         std::shared_ptr<ColumnBase> column{};
-        if (datatype_is_variable(data_type)) {
+        if (IsVariableDataType(data_type)) {
             int64_t field_data_size = 0;
             switch (data_type) {
                 case milvus::DataType::STRING:
@@ -552,7 +552,7 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
 
     auto num_rows = data.row_count;
     std::shared_ptr<ColumnBase> column{};
-    if (datatype_is_variable(data_type)) {
+    if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case milvus::DataType::STRING:
             case milvus::DataType::VARCHAR: {
@@ -979,8 +979,9 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
     auto absent_fields = request_fields - field_ready_bitset;
 
     if (absent_fields.any()) {
+        // absent_fields.find_first() returns std::optional<>
         auto field_id =
-            FieldId(absent_fields.find_first() + START_USER_FIELDID);
+            FieldId(absent_fields.find_first().value() + START_USER_FIELDID);
         auto& field_meta = schema_->operator[](field_id);
         PanicInfo(
             FieldNotLoaded,
@@ -1138,7 +1139,7 @@ SegmentSealedImpl::ClearData() {
 std::unique_ptr<DataArray>
 SegmentSealedImpl::fill_with_empty(FieldId field_id, int64_t count) const {
     auto& field_meta = schema_->operator[](field_id);
-    if (datatype_is_vector(field_meta.get_data_type())) {
+    if (IsVectorDataType(field_meta.get_data_type())) {
         return CreateVectorDataArray(count, field_meta);
     }
     return CreateScalarDataArray(count, field_meta);
@@ -1328,7 +1329,7 @@ SegmentSealedImpl::bulk_subscript(FieldId field_id,
 
     if (HasIndex(field_id)) {
         // if field has load scalar index, reverse raw data from index
-        if (!datatype_is_vector(field_meta.get_data_type())) {
+        if (!IsVectorDataType(field_meta.get_data_type())) {
             AssertInfo(num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
             auto index = chunk_index_impl(field_id, 0);
@@ -1368,7 +1369,7 @@ SegmentSealedImpl::HasRawData(int64_t field_id) const {
     std::shared_lock lck(mutex_);
     auto fieldID = FieldId(field_id);
     const auto& field_meta = schema_->operator[](fieldID);
-    if (datatype_is_vector(field_meta.get_data_type())) {
+    if (IsVectorDataType(field_meta.get_data_type())) {
         if (get_bit(index_ready_bitset_, fieldID) |
             get_bit(binlog_index_bitset_, fieldID)) {
             AssertInfo(vector_indexings_.is_ready(fieldID),

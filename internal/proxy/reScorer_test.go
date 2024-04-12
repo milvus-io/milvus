@@ -7,12 +7,11 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 )
 
 func TestRescorer(t *testing.T) {
 	t.Run("default scorer", func(t *testing.T) {
-		rescorers, err := NewReScorer([]*milvuspb.SearchRequest{{}, {}}, nil)
+		rescorers, err := NewReScorers(2, nil)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(rescorers))
 		assert.Equal(t, rrfRankType, rescorers[0].scorerType())
@@ -27,7 +26,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorer([]*milvuspb.SearchRequest{{}, {}}, rankParams)
+		_, err = NewReScorers(2, rankParams)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "k not found in rank_params")
 	})
@@ -42,7 +41,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorer([]*milvuspb.SearchRequest{{}, {}}, rankParams)
+		_, err = NewReScorers(2, rankParams)
 		assert.Error(t, err)
 
 		params[RRFParamsKey] = maxRRFParamsValue + 1
@@ -53,7 +52,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorer([]*milvuspb.SearchRequest{{}, {}}, rankParams)
+		_, err = NewReScorers(2, rankParams)
 		assert.Error(t, err)
 	})
 
@@ -67,7 +66,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		rescorers, err := NewReScorer([]*milvuspb.SearchRequest{{}, {}}, rankParams)
+		rescorers, err := NewReScorers(2, rankParams)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(rescorers))
 		assert.Equal(t, rrfRankType, rescorers[0].scorerType())
@@ -83,7 +82,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorer([]*milvuspb.SearchRequest{{}, {}}, rankParams)
+		_, err = NewReScorers(2, rankParams)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "not found in rank_params")
 	})
@@ -99,7 +98,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		_, err = NewReScorer([]*milvuspb.SearchRequest{{}, {}}, rankParams)
+		_, err = NewReScorers(2, rankParams)
 		assert.Error(t, err)
 		assert.Contains(t, err.Error(), "rank param weight should be in range [0, 1]")
 	})
@@ -115,7 +114,7 @@ func TestRescorer(t *testing.T) {
 			{Key: RankParamsKey, Value: string(b)},
 		}
 
-		rescorers, err := NewReScorer([]*milvuspb.SearchRequest{{}, {}}, rankParams)
+		rescorers, err := NewReScorers(2, rankParams)
 		assert.NoError(t, err)
 		assert.Equal(t, 2, len(rescorers))
 		assert.Equal(t, weightedRankType, rescorers[0].scorerType())

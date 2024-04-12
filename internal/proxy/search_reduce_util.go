@@ -3,6 +3,8 @@ package proxy
 import (
 	"context"
 	"fmt"
+	"math"
+	"sort"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -378,4 +380,135 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 		}
 	}
 	return ret, nil
+}
+
+func rankSearchResultData(ctx context.Context,
+	nq int64,
+	params *rankParams,
+	pkType schemapb.DataType,
+	searchResults []*milvuspb.SearchResults,
+) (*milvuspb.SearchResults, error) {
+	tr := timerecord.NewTimeRecorder("rankSearchResultData")
+	defer func() {
+		tr.CtxElapse(ctx, "done")
+	}()
+
+	offset := params.offset
+	limit := params.limit
+	topk := limit + offset
+	roundDecimal := params.roundDecimal
+	log.Ctx(ctx).Debug("rankSearchResultData",
+		zap.Int("len(searchResults)", len(searchResults)),
+		zap.Int64("nq", nq),
+		zap.Int64("offset", offset),
+		zap.Int64("limit", limit))
+
+	ret := &milvuspb.SearchResults{
+		Status: merr.Success(),
+		Results: &schemapb.SearchResultData{
+			NumQueries: nq,
+			TopK:       limit,
+			FieldsData: make([]*schemapb.FieldData, 0),
+			Scores:     []float32{},
+			Ids:        &schemapb.IDs{},
+			Topks:      []int64{},
+		},
+	}
+
+	switch pkType {
+	case schemapb.DataType_Int64:
+		ret.GetResults().Ids.IdField = &schemapb.IDs_IntId{
+			IntId: &schemapb.LongArray{
+				Data: make([]int64, 0),
+			},
+		}
+	case schemapb.DataType_VarChar:
+		ret.GetResults().Ids.IdField = &schemapb.IDs_StrId{
+			StrId: &schemapb.StringArray{
+				Data: make([]string, 0),
+			},
+		}
+	default:
+		return nil, errors.New("unsupported pk type")
+	}
+
+	// []map[id]score
+	accumulatedScores := make([]map[interface{}]float32, nq)
+	for i := int64(0); i < nq; i++ {
+		accumulatedScores[i] = make(map[interface{}]float32)
+	}
+
+	for _, result := range searchResults {
+		scores := result.GetResults().GetScores()
+		start := int64(0)
+		for i := int64(0); i < nq; i++ {
+			realTopk := result.GetResults().Topks[i]
+			for j := start; j < start+realTopk; j++ {
+				id := typeutil.GetPK(result.GetResults().GetIds(), j)
+				accumulatedScores[i][id] += scores[j]
+			}
+			start += realTopk
+		}
+	}
+
+	for i := int64(0); i < nq; i++ {
+		idSet := accumulatedScores[i]
+		keys := make([]interface{}, 0)
+		for key := range idSet {
+			keys = append(keys, key)
+		}
+		if int64(len(keys)) <= offset {
+			ret.Results.Topks = append(ret.Results.Topks, 0)
+			continue
+		}
+
+		compareKeys := func(keyI, keyJ interface{}) bool {
+			switch keyI.(type) {
+			case int64:
+				return keyI.(int64) < keyJ.(int64)
+			case string:
+				return keyI.(string) < keyJ.(string)
+			}
+			return false
+		}
+
+		// sort id by score
+		big := func(i, j int) bool {
+			if idSet[keys[i]] == idSet[keys[j]] {
+				return compareKeys(keys[i], keys[j])
+			}
+			return idSet[keys[i]] > idSet[keys[j]]
+		}
+
+		sort.Slice(keys, big)
+
+		if int64(len(keys)) > topk {
+			keys = keys[:topk]
+		}
+
+		// set real topk
+		ret.Results.Topks = append(ret.Results.Topks, int64(len(keys))-offset)
+		// append id and score
+		for index := offset; index < int64(len(keys)); index++ {
+			typeutil.AppendPKs(ret.Results.Ids, keys[index])
+			score := idSet[keys[index]]
+			if roundDecimal != -1 {
+				multiplier := math.Pow(10.0, float64(roundDecimal))
+				score = float32(math.Floor(float64(score)*multiplier+0.5) / multiplier)
+			}
+			ret.Results.Scores = append(ret.Results.Scores, score)
+		}
+	}
+
+	return ret, nil
+}
+
+func fillInEmptyResult(numQueries int64) *milvuspb.SearchResults {
+	return &milvuspb.SearchResults{
+		Status: merr.Success("search result is empty"),
+		Results: &schemapb.SearchResultData{
+			NumQueries: numQueries,
+			Topks:      make([]int64, numQueries),
+		},
+	}
 }

@@ -13,6 +13,7 @@
 
 #include "common/FieldMeta.h"
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "common/type_c.h"
 #include "index/Index.h"
 #include "index/IndexFactory.h"
@@ -27,7 +28,8 @@
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
-    return knowhere::UseDiskLoad(index_type, index_engine_version);
+    return knowhere::UseDiskLoad(index_type, index_engine_version) ||
+           strcmp(index_type, milvus::index::INVERTED_INDEX_TYPE) == 0;
 }
 
 CStatus
@@ -205,7 +207,7 @@ CStatus
 AppendIndex(CLoadIndexInfo c_load_index_info, CBinarySet c_binary_set) {
     auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     auto field_type = load_index_info->field_type;
-    if (milvus::datatype_is_vector(field_type)) {
+    if (milvus::IsVectorDataType(field_type)) {
         return appendVecIndex(c_load_index_info, c_binary_set);
     }
     return appendScalarIndex(c_load_index_info, c_binary_set);
@@ -245,7 +247,7 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
         index_info.index_type = index_params.at("index_type");
 
         // get metric type
-        if (milvus::datatype_is_vector(field_type)) {
+        if (milvus::IsVectorDataType(field_type)) {
             AssertInfo(index_params.find("metric_type") != index_params.end(),
                        "metric type is empty for vector index");
             index_info.metric_type = index_params.at("metric_type");
@@ -331,7 +333,7 @@ AppendIndexV3(CLoadIndexInfo c_load_index_info) {
         index_info.index_type = index_params.at("index_type");
 
         // get metric type
-        if (milvus::datatype_is_vector(field_type)) {
+        if (milvus::IsVectorDataType(field_type)) {
             AssertInfo(index_params.find("metric_type") != index_params.end(),
                        "metric type is empty for vector index");
             index_info.metric_type = index_params.at("metric_type");

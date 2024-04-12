@@ -6,7 +6,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -39,7 +38,6 @@ func NewCoordBroker(rc types.RootCoordClient, dc types.DataCoordClient, serverID
 type RootCoord interface {
 	DescribeCollection(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*milvuspb.DescribeCollectionResponse, error)
 	ShowPartitions(ctx context.Context, dbName, collectionName string) (map[string]int64, error)
-	ReportImport(ctx context.Context, req *rootcoordpb.ImportResult) error
 	AllocTimestamp(ctx context.Context, num uint32) (ts uint64, count uint32, err error)
 }
 
@@ -52,5 +50,4 @@ type DataCoord interface {
 	SaveBinlogPaths(ctx context.Context, req *datapb.SaveBinlogPathsRequest) error
 	DropVirtualChannel(ctx context.Context, req *datapb.DropVirtualChannelRequest) (*datapb.DropVirtualChannelResponse, error)
 	UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest) error
-	SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) error
 }

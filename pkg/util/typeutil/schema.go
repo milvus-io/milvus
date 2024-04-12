@@ -241,6 +241,10 @@ func EstimateEntitySize(fieldsData []*schemapb.FieldData, rowOffset int) (int, e
 			res += int(fs.GetVectors().GetDim())
 		case schemapb.DataType_FloatVector:
 			res += int(fs.GetVectors().GetDim() * 4)
+		case schemapb.DataType_Float16Vector:
+			res += int(fs.GetVectors().GetDim() * 2)
+		case schemapb.DataType_BFloat16Vector:
+			res += int(fs.GetVectors().GetDim() * 2)
 		case schemapb.DataType_SparseFloatVector:
 			vec := fs.GetVectors().GetSparseFloatVector()
 			// counting only the size of the vector data, ignoring other
@@ -367,18 +371,30 @@ func (helper *SchemaHelper) GetVectorDimFromID(fieldID int64) (int, error) {
 	return 0, fmt.Errorf("fieldID(%d) not has dim", fieldID)
 }
 
-// IsVectorType returns true if input is a vector type, otherwise false
-func IsVectorType(dataType schemapb.DataType) bool {
+func IsBinaryVectorType(dataType schemapb.DataType) bool {
+	return dataType == schemapb.DataType_BinaryVector
+}
+
+func IsDenseFloatVectorType(dataType schemapb.DataType) bool {
 	switch dataType {
-	case schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
+	case schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return true
 	default:
 		return false
 	}
 }
 
-func IsSparseVectorType(dataType schemapb.DataType) bool {
+func IsSparseFloatVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_SparseFloatVector
+}
+
+func IsFloatVectorType(dataType schemapb.DataType) bool {
+	return IsDenseFloatVectorType(dataType) || IsSparseFloatVectorType(dataType)
+}
+
+// IsVectorType returns true if input is a vector type, otherwise false
+func IsVectorType(dataType schemapb.DataType) bool {
+	return IsBinaryVectorType(dataType) || IsFloatVectorType(dataType)
 }
 
 // IsIntegerType returns true if input is an integer type, otherwise false
@@ -526,6 +542,10 @@ func PrepareResultFieldData(sample []*schemapb.FieldData, topK int64) []*schemap
 			case *schemapb.VectorField_Float16Vector:
 				vectors.Vectors.Data = &schemapb.VectorField_Float16Vector{
 					Float16Vector: make([]byte, 0, topK*dim*2),
+				}
+			case *schemapb.VectorField_Bfloat16Vector:
+				vectors.Vectors.Data = &schemapb.VectorField_Bfloat16Vector{
+					Bfloat16Vector: make([]byte, 0, topK*dim*2),
 				}
 			case *schemapb.VectorField_BinaryVector:
 				vectors.Vectors.Data = &schemapb.VectorField_BinaryVector{
@@ -957,6 +977,24 @@ func MergeFieldData(dst []*schemapb.FieldData, src []*schemapb.FieldData) error 
 					dstBinaryVector := dstVector.Data.(*schemapb.VectorField_BinaryVector)
 					dstBinaryVector.BinaryVector = append(dstBinaryVector.BinaryVector, srcVector.BinaryVector...)
 				}
+			case *schemapb.VectorField_Float16Vector:
+				if dstVector.GetFloat16Vector() == nil {
+					dstVector.Data = &schemapb.VectorField_Float16Vector{
+						Float16Vector: srcVector.Float16Vector,
+					}
+				} else {
+					dstFloat16Vector := dstVector.Data.(*schemapb.VectorField_Float16Vector)
+					dstFloat16Vector.Float16Vector = append(dstFloat16Vector.Float16Vector, srcVector.Float16Vector...)
+				}
+			case *schemapb.VectorField_Bfloat16Vector:
+				if dstVector.GetBfloat16Vector() == nil {
+					dstVector.Data = &schemapb.VectorField_Bfloat16Vector{
+						Bfloat16Vector: srcVector.Bfloat16Vector,
+					}
+				} else {
+					dstBfloat16Vector := dstVector.Data.(*schemapb.VectorField_Bfloat16Vector)
+					dstBfloat16Vector.Bfloat16Vector = append(dstBfloat16Vector.Bfloat16Vector, srcVector.Bfloat16Vector...)
+				}
 			case *schemapb.VectorField_FloatVector:
 				if dstVector.GetFloatVector() == nil {
 					dstVector.Data = &schemapb.VectorField_FloatVector{
@@ -1072,6 +1110,12 @@ func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schema
 func GetField(schema *schemapb.CollectionSchema, fieldID int64) *schemapb.FieldSchema {
 	return lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool {
 		return field.GetFieldID() == fieldID
+	})
+}
+
+func GetFieldByName(schema *schemapb.CollectionSchema, fieldName string) *schemapb.FieldSchema {
+	return lo.FindOrElse(schema.GetFields(), nil, func(field *schemapb.FieldSchema) bool {
+		return field.GetName() == fieldName
 	})
 }
 
@@ -1280,7 +1324,7 @@ type ResultWithID interface {
 }
 
 // SelectMinPK select the index of the minPK in results T of the cursors.
-func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
+func SelectMinPK[T ResultWithID](limit int64, results []T, cursors []int64) (int, bool) {
 	var (
 		sel               = -1
 		drainResult       = false
@@ -1290,7 +1334,8 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 		minStrPK string
 	)
 	for i, cursor := range cursors {
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) {
+		// if result size < limit, this means we should ignore the result from this segment
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (GetSizeOfIDs(results[i].GetIds()) == int(limit)) {
 			drainResult = true
 			continue
 		}
@@ -1417,7 +1462,11 @@ func ValidateSparseFloatRows(rows ...[]byte) error {
 			return fmt.Errorf("invalid data length in sparse float vector: %d", len(row))
 		}
 		for i := 0; i < SparseFloatRowElementCount(row); i++ {
-			if i > 0 && SparseFloatRowIndexAt(row, i) < SparseFloatRowIndexAt(row, i-1) {
+			idx := SparseFloatRowIndexAt(row, i)
+			if idx == math.MaxUint32 {
+				return errors.New("invalid index in sparse float vector: must be less than 2^32-1")
+			}
+			if i > 0 && idx < SparseFloatRowIndexAt(row, i-1) {
 				return errors.New("unsorted indices in sparse float vector")
 			}
 			VerifyFloat(float64(SparseFloatRowValueAt(row, i)))

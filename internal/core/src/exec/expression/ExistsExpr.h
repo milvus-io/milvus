@@ -30,7 +30,7 @@ namespace exec {
 template <typename T>
 struct ExistsElementFunc {
     void
-    operator()(const T* src, size_t size, T val, bool* res) {
+    operator()(const T* src, size_t size, T val, TargetBitmapView res) {
     }
 };
 

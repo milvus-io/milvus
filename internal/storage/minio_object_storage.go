@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 	"time"
 
@@ -105,6 +106,17 @@ func newMinioClient(ctx context.Context, c *config) (*minio.Client, error) {
 			creds = credentials.NewStaticV4(c.accessKeyID, c.secretAccessKeyID, "")
 		}
 	}
+
+	// We must set the cert path by os environment variable "SSL_CERT_FILE",
+	// because the minio.DefaultTransport() need this path to read the file content,
+	// we shouldn't read this file by ourself.
+	if c.useSSL && len(c.sslCACert) > 0 {
+		err := os.Setenv("SSL_CERT_FILE", c.sslCACert)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	minioOpts := &minio.Options{
 		BucketLookup: bucketLookupType,
 		Creds:        creds,

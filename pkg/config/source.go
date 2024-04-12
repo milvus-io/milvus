@@ -36,6 +36,9 @@ type Source interface {
 // EtcdInfo has attribute for config center source initialization
 type EtcdInfo struct {
 	UseEmbed   bool
+	EnableAuth bool
+	UserName   string
+	PassWord   string
 	UseSSL     bool
 	Endpoints  []string
 	KeyPrefix  string

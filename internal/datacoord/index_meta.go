@@ -25,6 +25,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/prometheus/client_golang/prometheus"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type indexMeta struct {
@@ -383,42 +385,40 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	return state
 }
 
-func (m *indexMeta) GetSegmentIndexStateOnField(collID, segmentID, fieldID UniqueID) *indexpb.SegmentIndexState {
+func (m *indexMeta) GetIndexedSegments(collectionID int64, fieldIDs []UniqueID) []int64 {
 	m.RLock()
 	defer m.RUnlock()
 
-	state := &indexpb.SegmentIndexState{
-		SegmentID:  segmentID,
-		State:      commonpb.IndexState_IndexStateNone,
-		FailReason: "",
-	}
-	fieldIndexes, ok := m.indexes[collID]
+	fieldIndexes, ok := m.indexes[collectionID]
 	if !ok {
-		state.FailReason = fmt.Sprintf("collection not exist with ID: %d", collID)
-		return state
+		return nil
 	}
 
-	indexes, ok := m.segmentIndexes[segmentID]
-	if !ok {
-		state.FailReason = fmt.Sprintf("segment index not exist with ID: %d", segmentID)
-		state.State = commonpb.IndexState_Unissued
-		return state
-	}
+	fieldIDSet := typeutil.NewUniqueSet(fieldIDs...)
 
-	for indexID, index := range fieldIndexes {
-		if index.FieldID == fieldID && !index.IsDeleted {
-			if segIdx, ok := indexes[indexID]; ok {
-				state.IndexName = index.IndexName
-				state.State = segIdx.IndexState
-				state.FailReason = segIdx.FailReason
-				return state
+	checkSegmentState := func(indexes map[int64]*model.SegmentIndex) bool {
+		indexedFields := 0
+		for indexID, index := range fieldIndexes {
+			if !fieldIDSet.Contain(index.FieldID) || index.IsDeleted {
+				continue
 			}
-			state.State = commonpb.IndexState_Unissued
-			return state
+
+			if segIdx, ok := indexes[indexID]; ok && segIdx.IndexState == commonpb.IndexState_Finished {
+				indexedFields += 1
+			}
+		}
+
+		return indexedFields == fieldIDSet.Len()
+	}
+
+	ret := make([]int64, 0)
+	for sid, indexes := range m.segmentIndexes {
+		if checkSegmentState(indexes) {
+			ret = append(ret, sid)
 		}
 	}
-	state.FailReason = fmt.Sprintf("there is no index on fieldID: %d", fieldID)
-	return state
+
+	return ret
 }
 
 // GetIndexesForCollection gets all indexes info with the specified collection.
@@ -869,7 +869,7 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 		ret[segID] = make(map[int64]*indexpb.SegmentIndexState)
 		segIndexInfos, ok := m.segmentIndexes[segID]
 		if !ok || len(segIndexInfos) == 0 {
-			return ret
+			continue
 		}
 
 		for _, segIdx := range segIndexInfos {
@@ -885,4 +885,23 @@ func (m *indexMeta) getSegmentsIndexStates(collectionID UniqueID, segmentIDs []U
 	}
 
 	return ret
+}
+
+func (m *indexMeta) GetUnindexedSegments(collectionID int64, segmentIDs []int64) []int64 {
+	indexes := m.GetIndexesForCollection(collectionID, "")
+	if len(indexes) == 0 {
+		// doesn't have index
+		return nil
+	}
+	indexed := make([]int64, 0, len(segmentIDs))
+	segIndexStates := m.getSegmentsIndexStates(collectionID, segmentIDs)
+	for segmentID, states := range segIndexStates {
+		indexStates := lo.Filter(lo.Values(states), func(state *indexpb.SegmentIndexState, _ int) bool {
+			return state.GetState() == commonpb.IndexState_Finished
+		})
+		if len(indexStates) == len(indexes) {
+			indexed = append(indexed, segmentID)
+		}
+	}
+	return lo.Without(segmentIDs, indexed...)
 }

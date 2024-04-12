@@ -17,7 +17,6 @@
 package utils
 
 import (
-	"fmt"
 	"math/rand"
 	"sort"
 
@@ -62,8 +61,7 @@ func GetPartitions(collectionMgr *meta.CollectionManager, collectionID int64) ([
 		}
 	}
 
-	// todo(yah01): replace this error with a defined error
-	return nil, fmt.Errorf("collection/partition not loaded")
+	return nil, merr.WrapErrCollectionNotLoaded(collectionID)
 }
 
 // GroupNodesByReplica groups nodes by replica,

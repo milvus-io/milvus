@@ -9,10 +9,10 @@
 // is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
-#include <cstddef>
 #include "common/BitsetView.h"
 #include "common/QueryInfo.h"
 #include "common/Tracer.h"
+#include "common/Types.h"
 #include "SearchOnGrowing.h"
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnIndex.h"
@@ -82,7 +82,7 @@ SearchOnGrowing(const segcore::SegmentGrowingImpl& segment,
     CheckBruteForceSearchParam(field, info);
 
     auto data_type = field.get_data_type();
-    AssertInfo(datatype_is_vector(data_type),
+    AssertInfo(IsVectorDataType(data_type),
                "[SearchOnGrowing]Data type isn't vector type");
 
     auto topk = info.topk_;

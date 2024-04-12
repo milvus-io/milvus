@@ -30,6 +30,7 @@ get_default_storage_config(bool useIam) {
         "K1SZFPTOtr/KBHBeksoGMGw==";
     auto rootPath = "files";
     auto useSSL = false;
+    auto sslCACert = "";
     auto iamEndPoint = "";
     auto bucketName = "a-bucket";
 
@@ -44,6 +45,7 @@ get_default_storage_config(bool useIam) {
                          "error",
                          "",
                          useSSL,
+                         sslCACert,
                          useIam};
 }
 

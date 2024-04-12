@@ -90,11 +90,12 @@ var (
 	ErrDatabaseInvalidName      = newMilvusError("invalid database name", 802, false)
 
 	// Node related
-	ErrNodeNotFound     = newMilvusError("node not found", 901, false)
-	ErrNodeOffline      = newMilvusError("node offline", 902, false)
-	ErrNodeLack         = newMilvusError("node lacks", 903, false)
-	ErrNodeNotMatch     = newMilvusError("node not match", 904, false)
-	ErrNodeNotAvailable = newMilvusError("node not available", 905, false)
+	ErrNodeNotFound        = newMilvusError("node not found", 901, false)
+	ErrNodeOffline         = newMilvusError("node offline", 902, false)
+	ErrNodeLack            = newMilvusError("node lacks", 903, false)
+	ErrNodeNotMatch        = newMilvusError("node not match", 904, false)
+	ErrNodeNotAvailable    = newMilvusError("node not available", 905, false)
+	ErrNodeStateUnexpected = newMilvusError("node state unexpected", 906, false)
 
 	// IO related
 	ErrIoKeyNotFound = newMilvusError("key not found", 1000, false)
@@ -146,7 +147,8 @@ var (
 	ErrInvalidStreamObj     = newMilvusError("invalid stream object", 1903, false)
 
 	// Segcore related
-	ErrSegcore = newMilvusError("segcore error", 2000, false)
+	ErrSegcore            = newMilvusError("segcore error", 2000, false)
+	ErrSegcoreUnsupported = newMilvusError("segcore unsupported error", 2001, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError

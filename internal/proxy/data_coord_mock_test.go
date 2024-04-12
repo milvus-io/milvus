@@ -98,14 +98,6 @@ func (coord *DataCoordMock) Flush(ctx context.Context, req *datapb.FlushRequest,
 	panic("implement me")
 }
 
-func (coord *DataCoordMock) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	panic("implement me")
-}
-
-func (coord *DataCoordMock) UnsetIsImportingState(ctx context.Context, in *datapb.UnsetIsImportingStateRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	panic("implement me")
-}
-
 func (coord *DataCoordMock) MarkSegmentsDropped(ctx context.Context, req *datapb.MarkSegmentsDroppedRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("implement me")
 }
@@ -245,10 +237,6 @@ func (coord *DataCoordMock) DropVirtualChannel(ctx context.Context, req *datapb.
 
 func (coord *DataCoordMock) SetSegmentState(ctx context.Context, req *datapb.SetSegmentStateRequest, opts ...grpc.CallOption) (*datapb.SetSegmentStateResponse, error) {
 	return &datapb.SetSegmentStateResponse{}, nil
-}
-
-func (coord *DataCoordMock) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*datapb.ImportTaskResponse, error) {
-	return &datapb.ImportTaskResponse{}, nil
 }
 
 func (coord *DataCoordMock) UpdateSegmentStatistics(ctx context.Context, req *datapb.UpdateSegmentStatisticsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

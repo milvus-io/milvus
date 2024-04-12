@@ -1032,6 +1032,7 @@ type MinioConfig struct {
 	AccessKeyID      ParamItem `refreshable:"false"`
 	SecretAccessKey  ParamItem `refreshable:"false"`
 	UseSSL           ParamItem `refreshable:"false"`
+	SslCACert        ParamItem `refreshable:"false"`
 	BucketName       ParamItem `refreshable:"false"`
 	RootPath         ParamItem `refreshable:"false"`
 	UseIAM           ParamItem `refreshable:"false"`
@@ -1102,6 +1103,14 @@ func (p *MinioConfig) Init(base *BaseTable) {
 		Export:       true,
 	}
 	p.UseSSL.Init(base.mgr)
+
+	p.SslCACert = ParamItem{
+		Key:     "minio.ssl.tlsCACert",
+		Version: "2.3.12",
+		Doc:     "path to your CACert file",
+		Export:  true,
+	}
+	p.SslCACert.Init(base.mgr)
 
 	p.BucketName = ParamItem{
 		Key:          "minio.bucketName",

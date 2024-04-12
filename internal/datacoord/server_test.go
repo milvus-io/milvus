@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	grpcmock "github.com/milvus-io/milvus/internal/util/mock"
@@ -106,13 +105,6 @@ func (r *mockRootCoord) DescribeCollectionInternal(ctx context.Context, req *mil
 		}, nil
 	}
 	return r.RootCoordClient.DescribeCollection(ctx, req)
-}
-
-func (r *mockRootCoord) ReportImport(ctx context.Context, req *rootcoordpb.ImportResult, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{
-		ErrorCode: commonpb.ErrorCode_UnexpectedError,
-		Reason:    "something bad",
-	}, nil
 }
 
 // func TestGetComponentStates(t *testing.T) {
@@ -1530,7 +1522,7 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	s4 := &datapb.SegmentInfo{
 		ID:            4,
 		CollectionID:  0,
-		PartitionID:   common.InvalidPartitionID,
+		PartitionID:   common.AllPartitionsID,
 		InsertChannel: "ch1",
 		State:         commonpb.SegmentState_Flushed,
 		StartPosition: &msgpb.MsgPosition{
@@ -3037,109 +3029,6 @@ func TestDataCoordServer_SetSegmentState(t *testing.T) {
 	})
 }
 
-func TestDataCoord_Import(t *testing.T) {
-	storage.CheckBucketRetryAttempts = 2
-
-	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		svr.sessionManager.AddSession(&NodeInfo{
-			NodeID:  0,
-			Address: "localhost:8080",
-		})
-		err := svr.channelManager.AddNode(0)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(svr.ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		assert.NoError(t, err)
-
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.Status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("no free node", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-
-		err := svr.channelManager.AddNode(0)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(svr.ctx, &channelMeta{Name: "ch1", CollectionID: 0})
-		assert.NoError(t, err)
-
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-			WorkingNodes: []int64{0},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("no datanode available", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		Params.Save("minio.address", "minio:9000")
-		defer Params.Reset("minio.address")
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-		})
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp.Status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("with closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		closeTestServer(t, svr)
-
-		resp, err := svr.Import(svr.ctx, &datapb.ImportTaskRequest{
-			ImportTask: &datapb.ImportTask{
-				CollectionId: 100,
-				PartitionId:  100,
-			},
-		})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
-	})
-
-	t.Run("test update segment stat", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-		closeTestServer(t, svr)
-	})
-
-	t.Run("test update segment stat w/ closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		closeTestServer(t, svr)
-
-		status, err := svr.UpdateSegmentStatistics(context.TODO(), &datapb.UpdateSegmentStatisticsRequest{
-			Stats: []*commonpb.SegmentStats{{
-				SegmentID: 100,
-				NumRows:   int64(1),
-			}},
-		})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
-	})
-}
-
 func TestDataCoord_SegmentStatistics(t *testing.T) {
 	t.Run("test update imported segment stat", func(t *testing.T) {
 		svr := newTestServer(t, nil)
@@ -3196,159 +3085,98 @@ func TestDataCoord_SegmentStatistics(t *testing.T) {
 	})
 }
 
-func TestDataCoord_SaveImportSegment(t *testing.T) {
-	t.Run("test add segment", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		svr.meta.AddCollection(&collectionInfo{
-			ID: 100,
-		})
-		seg := buildSegment(100, 100, 100, "ch1", false)
-		svr.meta.AddSegment(context.TODO(), seg)
-		svr.sessionManager.AddSession(&NodeInfo{
-			NodeID:  110,
-			Address: "localhost:8080",
-		})
-		err := svr.channelManager.AddNode(110)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 100})
-		assert.NoError(t, err)
-		err = svr.meta.UpdateChannelCheckpoint("ch1", &msgpb.MsgPosition{
-			ChannelName: "ch1",
-			MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
-			Timestamp:   1000,
-		})
-		assert.NoError(t, err)
-
-		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
-			SegmentId:    100,
-			ChannelName:  "ch1",
-			CollectionId: 100,
-			PartitionId:  100,
-			RowNum:       int64(1),
-			SaveBinlogPathReq: &datapb.SaveBinlogPathsRequest{
-				Base: &commonpb.MsgBase{
-					SourceID: paramtable.GetNodeID(),
-				},
-				SegmentID:    100,
-				CollectionID: 100,
-				Importing:    true,
-				StartPositions: []*datapb.SegmentStartPosition{
-					{
-						StartPosition: &msgpb.MsgPosition{
-							ChannelName: "ch1",
-							Timestamp:   1,
-						},
-						SegmentID: 100,
-					},
-				},
-				CheckPoints: []*datapb.CheckPoint{
-					{
-						SegmentID: 100,
-						Position: &msgpb.MsgPosition{
-							ChannelName: "ch1",
-							Timestamp:   1,
-						},
-						NumOfRows: int64(1),
-					},
-				},
-			},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-	})
-
-	t.Run("test add segment w/ bad channelName", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-
-		err := svr.channelManager.AddNode(110)
-		assert.NoError(t, err)
-		err = svr.channelManager.Watch(context.TODO(), &channelMeta{Name: "ch1", CollectionID: 100})
-		assert.NoError(t, err)
-
-		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{
-			SegmentId:    100,
-			ChannelName:  "non-channel",
-			CollectionId: 100,
-			PartitionId:  100,
-			RowNum:       int64(1),
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-	})
-
-	t.Run("test add segment w/ closed server", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		closeTestServer(t, svr)
-
-		status, err := svr.SaveImportSegment(context.TODO(), &datapb.SaveImportSegmentRequest{})
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(status), merr.ErrServiceNotReady)
-	})
-}
-
-func TestDataCoord_UnsetIsImportingState(t *testing.T) {
-	t.Run("normal case", func(t *testing.T) {
-		svr := newTestServer(t, nil)
-		defer closeTestServer(t, svr)
-		seg := buildSegment(100, 100, 100, "ch1", false)
-		svr.meta.AddSegment(context.TODO(), seg)
-
-		status, err := svr.UnsetIsImportingState(context.Background(), &datapb.UnsetIsImportingStateRequest{
-			SegmentIds: []int64{100},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, status.GetErrorCode())
-
-		// Trying to unset state of a segment that does not exist.
-		status, err = svr.UnsetIsImportingState(context.Background(), &datapb.UnsetIsImportingStateRequest{
-			SegmentIds: []int64{999},
-		})
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, status.GetErrorCode())
-	})
-}
-
 func TestDataCoordServer_UpdateChannelCheckpoint(t *testing.T) {
 	mockVChannel := "fake-by-dev-rootcoord-dml-1-testchannelcp-v0"
-	mockPChannel := "fake-by-dev-rootcoord-dml-1"
 
-	t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
+	t.Run("UpdateChannelCheckpoint_Success", func(t *testing.T) {
 		svr := newTestServer(t, nil)
 		defer closeTestServer(t, svr)
 
+		datanodeID := int64(1)
+		channelManager := NewMockChannelManager(t)
+		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(true)
+
+		svr.channelManager = channelManager
 		req := &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
-				SourceID: paramtable.GetNodeID(),
+				SourceID: datanodeID,
 			},
 			VChannel: mockVChannel,
 			Position: &msgpb.MsgPosition{
-				ChannelName: mockPChannel,
+				ChannelName: mockVChannel,
 				Timestamp:   1000,
 				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 			},
 		}
 
 		resp, err := svr.UpdateChannelCheckpoint(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+
+		cp := svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.NotNil(t, cp)
+		svr.meta.DropChannelCheckpoint(mockVChannel)
 
 		req = &datapb.UpdateChannelCheckpointRequest{
 			Base: &commonpb.MsgBase{
-				SourceID: paramtable.GetNodeID(),
+				SourceID: datanodeID,
 			},
 			VChannel: mockVChannel,
 			ChannelCheckpoints: []*msgpb.MsgPosition{{
-				ChannelName: mockPChannel,
+				ChannelName: mockVChannel,
 				Timestamp:   1000,
 				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
 			}},
 		}
 
 		resp, err = svr.UpdateChannelCheckpoint(context.TODO(), req)
-		assert.NoError(t, err)
-		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		cp = svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.NotNil(t, cp)
+	})
+
+	t.Run("UpdateChannelCheckpoint_NodeNotMatch", func(t *testing.T) {
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+
+		datanodeID := int64(1)
+		channelManager := NewMockChannelManager(t)
+		channelManager.EXPECT().Match(datanodeID, mockVChannel).Return(false)
+
+		svr.channelManager = channelManager
+		req := &datapb.UpdateChannelCheckpointRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: datanodeID,
+			},
+			VChannel: mockVChannel,
+			Position: &msgpb.MsgPosition{
+				ChannelName: mockVChannel,
+				Timestamp:   1000,
+				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			},
+		}
+
+		resp, err := svr.UpdateChannelCheckpoint(context.TODO(), req)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
+		assert.ErrorIs(t, merr.CheckRPCCall(resp, err), merr.ErrChannelNotFound)
+		cp := svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.Nil(t, cp)
+
+		req = &datapb.UpdateChannelCheckpointRequest{
+			Base: &commonpb.MsgBase{
+				SourceID: datanodeID,
+			},
+			VChannel: mockVChannel,
+			ChannelCheckpoints: []*msgpb.MsgPosition{{
+				ChannelName: mockVChannel,
+				Timestamp:   1000,
+				MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
+			}},
+		}
+
+		resp, err = svr.UpdateChannelCheckpoint(context.TODO(), req)
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
+		cp = svr.meta.GetChannelCheckpoint(mockVChannel)
+		assert.Nil(t, cp)
 	})
 }
 
@@ -3389,13 +3217,28 @@ func newTestServer(t *testing.T, receiveCh chan any, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.NoError(t, err)
+
+	signal := make(chan struct{})
 	if Params.DataCoordCfg.EnableActiveStandby.GetAsBool() {
 		assert.Equal(t, commonpb.StateCode_StandBy, svr.stateCode.Load().(commonpb.StateCode))
+		activateFunc := svr.activateFunc
+		svr.activateFunc = func() error {
+			defer func() {
+				close(signal)
+			}()
+			var err error
+			if activateFunc != nil {
+				err = activateFunc()
+			}
+			return err
+		}
 	} else {
 		assert.Equal(t, commonpb.StateCode_Initializing, svr.stateCode.Load().(commonpb.StateCode))
+		close(signal)
 	}
 	err = svr.Register()
 	assert.NoError(t, err)
+	<-signal
 	err = svr.Start()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_Healthy, svr.stateCode.Load().(commonpb.StateCode))
@@ -3695,14 +3538,35 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 	err = svr.Init()
 	assert.NoError(t, err)
-	err = svr.Start()
-	assert.NoError(t, err)
+
+	signal := make(chan struct{})
+	if Params.DataCoordCfg.EnableActiveStandby.GetAsBool() {
+		assert.Equal(t, commonpb.StateCode_StandBy, svr.stateCode.Load().(commonpb.StateCode))
+		activateFunc := svr.activateFunc
+		svr.activateFunc = func() error {
+			defer func() {
+				close(signal)
+			}()
+			var err error
+			if activateFunc != nil {
+				err = activateFunc()
+			}
+			return err
+		}
+	} else {
+		assert.Equal(t, commonpb.StateCode_Initializing, svr.stateCode.Load().(commonpb.StateCode))
+		close(signal)
+	}
 	err = svr.Register()
+	assert.NoError(t, err)
+	<-signal
+
+	err = svr.Start()
 	assert.NoError(t, err)
 
 	resp, err := svr.GetComponentStates(context.Background(), nil)
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	assert.True(t, merr.Ok(resp.GetStatus()))
 	assert.Equal(t, commonpb.StateCode_Healthy, resp.GetState().GetStateCode())
 
 	// stop channal watch state watcher in tests
@@ -3718,6 +3582,7 @@ func testDataCoordBase(t *testing.T, opts ...Option) *Server {
 
 func TestDataCoord_DisableActiveStandby(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableActiveStandby.Key, "false")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableActiveStandby.Key)
 	svr := testDataCoordBase(t)
 	defer closeTestServer(t, svr)
 }

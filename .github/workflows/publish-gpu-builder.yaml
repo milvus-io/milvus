@@ -22,17 +22,10 @@ concurrency:
 
 jobs:
   publish-gpu-builder:
-    name: ${{ matrix.arch }} ${{ matrix.os }}
     runs-on: ubuntu-latest
     timeout-minutes: 500
-    strategy:
-      fail-fast: false
-      matrix:
-        os: [ubuntu20.04]
-        arch: [amd64]
     env:
-      OS_NAME: ${{ matrix.os }}
-      IMAGE_ARCH: ${{ matrix.arch }}
+      OS: ubuntu22.04
     steps:
       - name: Maximize build space
         uses: easimon/maximize-build-space@master
@@ -58,10 +51,14 @@ jobs:
           images: |
             milvusdb/milvus-env
           tags: |
-            type=raw,enable=true,value=${{ matrix.os }}-{{date 'YYYYMMDD'}}-{{sha}}
-            type=raw,enable=true,value=${{ matrix.os }}-latest
+            type=raw,enable=true,value=gpu-${{ env.OS }}-{{date 'YYYYMMDD'}}-{{sha}}
+            type=raw,enable=true,value=gpu-${{ env.OS }}-latest
       # - name: Setup upterm session
       #   uses: lhotari/action-upterm@v1
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+        with:
+          platforms: arm64
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
       - name: Login to Docker Hub
@@ -74,12 +71,12 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          platforms: linux/amd64
+          platforms: linux/amd64,linux/arm64
           push: ${{ github.event_name != 'pull_request' }}
           tags: ${{ steps.meta.outputs.tags }}
-          file: build/docker/builder/gpu/${{ matrix.os }}/Dockerfile
+          file: build/docker/builder/gpu/${{ env.OS }}/Dockerfile
       - name: Bump Builder Version
-        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && matrix.os == 'ubuntu20.04'
+        if: success() && github.event_name == 'push' && github.repository == 'milvus-io/milvus' && ${{ env.OS == 'ubuntu22.04' }}
         uses: ./.github/actions/bump-builder-version
         with:
           tag: "${{ steps.extracter.outputs.version }}-${{ steps.extracter.outputs.sha_short }}"

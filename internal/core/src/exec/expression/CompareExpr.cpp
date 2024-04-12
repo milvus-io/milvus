@@ -118,8 +118,8 @@ PhyCompareFilterExpr::ExecCompareExprDispatcher(OpType op) {
     }
 
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     auto left_data_barrier = segment_->num_chunk_data(expr_->left_field_id_);
     auto right_data_barrier = segment_->num_chunk_data(expr_->right_field_id_);
@@ -257,14 +257,16 @@ PhyCompareFilterExpr::ExecCompareRightType() {
     if (real_batch_size == 0) {
         return nullptr;
     }
+
     auto res_vec =
-        std::make_shared<ColumnVector>(DataType::BOOL, real_batch_size);
-    bool* res = (bool*)res_vec->GetRawData();
+        std::make_shared<ColumnVector>(TargetBitmap(real_batch_size));
+    TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
+
     auto expr_type = expr_->op_type_;
     auto execute_sub_batch = [expr_type](const T* left,
                                          const U* right,
                                          const int size,
-                                         bool* res) {
+                                         TargetBitmapView res) {
         switch (expr_type) {
             case proto::plan::GreaterThan: {
                 CompareElementFunc<T, U, proto::plan::GreaterThan> func;

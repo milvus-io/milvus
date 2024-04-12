@@ -12,6 +12,10 @@ minio:
     enabled: false
 pulsar:
   enabled: false
+standalone:
+  extraEnv:
+  - name: ETCD_CONFIG_PATH
+    value: /milvus/configs/advanced/etcd.yaml
 extraConfigFiles:
   user.yaml: |+
     etcd:

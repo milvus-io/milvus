@@ -93,8 +93,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		return
 	}
 
-	collection := NewCollection(collectionID, schema, meta, loadMeta.GetLoadType())
-	collection.AddPartition(loadMeta.GetPartitionIDs()...)
+	collection := NewCollection(collectionID, schema, meta, loadMeta)
 	collection.Ref(1)
 	m.collections[collectionID] = collection
 }
@@ -139,17 +138,34 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 }
 
 // Collection is a wrapper of the underlying C-structure C.CCollection
+// In a query node, `Collection` is a replica info of a collection in these query node.
 type Collection struct {
 	mu            sync.RWMutex // protects colllectionPtr
 	collectionPtr C.CCollection
 	id            int64
 	partitions    *typeutil.ConcurrentSet[int64]
 	loadType      querypb.LoadType
-	metricType    atomic.String // deprecated
-	schema        atomic.Pointer[schemapb.CollectionSchema]
-	isGpuIndex    bool
+	dbName        string
+	resourceGroup string
+	// resource group of node may be changed if node transfer,
+	// but Collection in Manager will be released before assign new replica of new resource group on these node.
+	// so we don't need to update resource group in Collection.
+	// if resource group is not updated, the reference count of collection manager works failed.
+	metricType atomic.String // deprecated
+	schema     atomic.Pointer[schemapb.CollectionSchema]
+	isGpuIndex bool
 
 	refCount *atomic.Uint32
+}
+
+// GetDBName returns the database name of collection.
+func (c *Collection) GetDBName() string {
+	return c.dbName
+}
+
+// GetResourceGroup returns the resource group of collection.
+func (c *Collection) GetResourceGroup() string {
+	return c.resourceGroup
 }
 
 // ID returns collection id
@@ -214,7 +230,7 @@ func (c *Collection) Unref(count uint32) uint32 {
 }
 
 // newCollection returns a new Collection
-func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadType querypb.LoadType) *Collection {
+func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexMeta *segcorepb.CollectionIndexMeta, loadMetaInfo *querypb.LoadMetaInfo) *Collection {
 	/*
 		CCollection
 		NewCollection(const char* schema_proto_blob);
@@ -250,9 +266,14 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		collectionPtr: collection,
 		id:            collectionID,
 		partitions:    typeutil.NewConcurrentSet[int64](),
-		loadType:      loadType,
+		loadType:      loadMetaInfo.GetLoadType(),
+		dbName:        loadMetaInfo.GetDbName(),
+		resourceGroup: loadMetaInfo.GetResourceGroup(),
 		refCount:      atomic.NewUint32(0),
 		isGpuIndex:    isGpuIndex,
+	}
+	for _, partitionID := range loadMetaInfo.GetPartitionIDs() {
+		coll.partitions.Insert(partitionID)
 	}
 	coll.schema.Store(schema)
 

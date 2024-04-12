@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var RestRequestInterceptorErr = errors.New("interceptor error placeholder")
@@ -383,7 +384,7 @@ func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
 	}
 	vectorField := ""
 	for _, field := range coll.Schema.Fields {
-		if IsVectorField(field) {
+		if typeutil.IsVectorType(field.DataType) {
 			vectorField = field.Name
 			break
 		}

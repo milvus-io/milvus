@@ -27,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -39,8 +38,6 @@ type Cluster interface {
 	Watch(ctx context.Context, ch string, collectionID UniqueID) error
 	Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error
 	FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error
-	Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest)
-	AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error)
 	PreImport(nodeID int64, in *datapb.PreImportRequest) error
 	ImportV2(nodeID int64, in *datapb.ImportRequest) error
 	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
@@ -148,22 +145,6 @@ func (c *ClusterImpl) FlushChannels(ctx context.Context, nodeID int64, flushTs T
 	}
 
 	return c.sessionManager.FlushChannels(ctx, nodeID, req)
-}
-
-// Import sends import requests to DataNodes whose ID==nodeID.
-func (c *ClusterImpl) Import(ctx context.Context, nodeID int64, it *datapb.ImportTaskRequest) {
-	c.sessionManager.Import(ctx, nodeID, it)
-}
-
-func (c *ClusterImpl) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest) (*datapb.AddImportSegmentResponse, error) {
-	// Look for the DataNode that watches the channel.
-	ok, nodeID := c.channelManager.GetNodeIDByChannelName(req.GetChannelName())
-	if !ok {
-		err := merr.WrapErrChannelNotFound(req.GetChannelName(), "no DataNode watches this channel")
-		log.Error("no DataNode found for channel", zap.String("channelName", req.GetChannelName()), zap.Error(err))
-		return nil, err
-	}
-	return c.sessionManager.AddImportSegment(ctx, nodeID, req)
 }
 
 func (c *ClusterImpl) PreImport(nodeID int64, in *datapb.PreImportRequest) error {

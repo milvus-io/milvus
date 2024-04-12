@@ -151,7 +151,7 @@ func (gc *garbageCollector) work() {
 	ticker := time.NewTicker(gc.option.checkInterval)
 	defer ticker.Stop()
 	scanTicker := time.NewTicker(gc.option.scanInterval)
-	defer ticker.Stop()
+	defer scanTicker.Stop()
 	for {
 		select {
 		case <-ticker.C:

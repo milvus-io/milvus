@@ -115,9 +115,11 @@ def get_random_json_data(uid=None):
 def get_data_by_payload(payload, nb=100):
     dim = payload.get("dimension", 128)
     vector_field = payload.get("vectorField", "vector")
+    pk_field = payload.get("primaryField", "id")
     data = []
     if nb == 1:
         data = [{
+            pk_field: int(time.time()*10000),
             vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
             **get_random_json_data()
 
@@ -125,6 +127,7 @@ def get_data_by_payload(payload, nb=100):
     else:
         for i in range(nb):
             data.append({
+                pk_field: int(time.time()*10000),
                 vector_field: preprocessing.normalize([np.array([random.random() for i in range(dim)])])[0].tolist(),
                 **get_random_json_data(uid=i)
             })

@@ -131,7 +131,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	partitionSet := typeutil.NewUniqueSet(validPartitions...)
 	for _, s := range segments {
-		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID) && s.GetPartitionID() != common.InvalidPartitionID) ||
+		if (partitionSet.Len() > 0 && !partitionSet.Contain(s.PartitionID) && s.GetPartitionID() != common.AllPartitionsID) ||
 			(s.GetStartPosition() == nil && s.GetDmlPosition() == nil) {
 			continue
 		}

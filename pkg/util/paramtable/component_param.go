@@ -230,8 +230,6 @@ type commonConfig struct {
 
 	JSONMaxLength ParamItem `refreshable:"false"`
 
-	ImportMaxFileSize ParamItem `refreshable:"true"`
-
 	MetricsPort ParamItem `refreshable:"false"`
 
 	// lock related params
@@ -633,13 +631,6 @@ like the old password verification when updating the credential`,
 	}
 	p.JSONMaxLength.Init(base.mgr)
 
-	p.ImportMaxFileSize = ParamItem{
-		Key:          "common.ImportMaxFileSize",
-		Version:      "2.2.9",
-		DefaultValue: fmt.Sprint(16 << 30),
-	}
-	p.ImportMaxFileSize.Init(base.mgr)
-
 	p.MetricsPort = ParamItem{
 		Key:          "common.MetricsPort",
 		Version:      "2.3.0",
@@ -891,10 +882,6 @@ type rootCoordConfig struct {
 	DmlChannelNum               ParamItem `refreshable:"false"`
 	MaxPartitionNum             ParamItem `refreshable:"true"`
 	MinSegmentSizeToEnableIndex ParamItem `refreshable:"true"`
-	ImportTaskExpiration        ParamItem `refreshable:"true"`
-	ImportTaskRetention         ParamItem `refreshable:"true"`
-	ImportMaxPendingTaskCount   ParamItem `refreshable:"true"`
-	ImportTaskSubPath           ParamItem `refreshable:"true"`
 	EnableActiveStandby         ParamItem `refreshable:"false"`
 	MaxDatabaseNum              ParamItem `refreshable:"false"`
 	MaxGeneralCapacity          ParamItem `refreshable:"true"`
@@ -929,38 +916,6 @@ func (p *rootCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MinSegmentSizeToEnableIndex.Init(base.mgr)
-
-	p.ImportTaskExpiration = ParamItem{
-		Key:          "rootCoord.importTaskExpiration",
-		Version:      "2.2.0",
-		DefaultValue: "900", // 15 * 60 seconds
-		Doc:          "(in seconds) Duration after which an import task will expire (be killed). Default 900 seconds (15 minutes).",
-		Export:       true,
-	}
-	p.ImportTaskExpiration.Init(base.mgr)
-
-	p.ImportTaskRetention = ParamItem{
-		Key:          "rootCoord.importTaskRetention",
-		Version:      "2.2.0",
-		DefaultValue: strconv.Itoa(24 * 60 * 60),
-		Doc:          "(in seconds) Milvus will keep the record of import tasks for at least `importTaskRetention` seconds. Default 86400, seconds (24 hours).",
-		Export:       true,
-	}
-	p.ImportTaskRetention.Init(base.mgr)
-
-	p.ImportTaskSubPath = ParamItem{
-		Key:          "rootCoord.ImportTaskSubPath",
-		Version:      "2.2.0",
-		DefaultValue: "importtask",
-	}
-	p.ImportTaskSubPath.Init(base.mgr)
-
-	p.ImportMaxPendingTaskCount = ParamItem{
-		Key:          "rootCoord.importMaxPendingTaskCount",
-		Version:      "2.2.2",
-		DefaultValue: strconv.Itoa(65535),
-	}
-	p.ImportMaxPendingTaskCount.Init(base.mgr)
 
 	p.EnableActiveStandby = ParamItem{
 		Key:          "rootCoord.enableActiveStandby",
@@ -1056,6 +1011,8 @@ type proxyConfig struct {
 	MaxConnectionNum               ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	SlowQuerySpanInSeconds ParamItem `refreshable:"true"`
 }
 
 func (p *proxyConfig) init(base *BaseTable) {
@@ -1398,6 +1355,15 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.MaxConnectionNum.Init(base.mgr)
+
+	p.SlowQuerySpanInSeconds = ParamItem{
+		Key:          "proxy.slowQuerySpanInSeconds",
+		Version:      "2.3.11",
+		Doc:          "query whose executed time exceeds the `slowQuerySpanInSeconds` can be considered slow, in seconds.",
+		DefaultValue: "5",
+		Export:       true,
+	}
+	p.SlowQuerySpanInSeconds.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2194,17 +2160,19 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.CacheEnabled.Init(base.mgr)
 
 	p.MmapDirPath = ParamItem{
-		Key:          "queryNode.mmapDirPath",
+		Key:          "queryNode.mmap.mmapDirPath",
 		Version:      "2.3.0",
 		DefaultValue: "",
+		FallbackKeys: []string{"queryNode.mmapDirPath"},
 		Doc:          "The folder that storing data files for mmap, setting to a path will enable Milvus to load data with mmap",
 	}
 	p.MmapDirPath.Init(base.mgr)
 
 	p.MmapEnabled = ParamItem{
-		Key:          "queryNode.mmapEnabled",
+		Key:          "queryNode.mmap.mmapEnabled",
 		Version:      "2.4.0",
 		DefaultValue: "false",
+		FallbackKeys: []string{"queryNode.mmapEnabled"},
 		Doc:          "Enable mmap for loading data",
 	}
 	p.MmapEnabled.Init(base.mgr)
@@ -2581,6 +2549,8 @@ type dataCoordConfig struct {
 	ImportScheduleInterval   ParamItem `refreshable:"true"`
 	ImportCheckIntervalHigh  ParamItem `refreshable:"true"`
 	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
+	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
+	WaitForIndex             ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -3116,6 +3086,26 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.ImportCheckIntervalLow.Init(base.mgr)
 
+	p.MaxFilesPerImportReq = ParamItem{
+		Key:          "dataCoord.import.maxImportFileNumPerReq",
+		Version:      "2.4.0",
+		Doc:          "The maximum number of files allowed per single import request.",
+		DefaultValue: "1024",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxFilesPerImportReq.Init(base.mgr)
+
+	p.WaitForIndex = ParamItem{
+		Key:          "dataCoord.import.waitForIndex",
+		Version:      "2.4.0",
+		Doc:          "Indicates whether the import operation waits for the completion of index building.",
+		DefaultValue: "true",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.WaitForIndex.Init(base.mgr)
+
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",
 		Version:      "2.3.7",
@@ -3158,16 +3148,11 @@ type dataNodeConfig struct {
 	MemoryForceSyncEnable     ParamItem `refreshable:"true"`
 	MemoryForceSyncSegmentNum ParamItem `refreshable:"true"`
 	MemoryCheckInterval       ParamItem `refreshable:"true"`
-	MemoryWatermark           ParamItem `refreshable:"true"`
+	MemoryForceSyncWatermark  ParamItem `refreshable:"true"`
 
 	DataNodeTimeTickByRPC ParamItem `refreshable:"false"`
 	// DataNode send timetick interval per collection
 	DataNodeTimeTickInterval ParamItem `refreshable:"false"`
-
-	// timeout for bulkinsert
-	BulkInsertTimeoutSeconds ParamItem `refreshable:"true"`
-	BulkInsertReadBufferSize ParamItem `refreshable:"true"`
-	BulkInsertMaxMemorySize  ParamItem `refreshable:"true"`
 
 	// Skip BF
 	SkipBFStatsLoad ParamItem `refreshable:"true"`
@@ -3181,7 +3166,10 @@ type dataNodeConfig struct {
 	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
+	// import
 	MaxConcurrentImportTaskNum ParamItem `refreshable:"true"`
+	MaxImportFileSizeInGB      ParamItem `refreshable:"true"`
+	ReadBufferSizeInMB         ParamItem `refreshable:"true"`
 
 	// Compaction
 	L0BatchMemoryRatio ParamItem `refreshable:"true"`
@@ -3291,26 +3279,20 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MemoryCheckInterval.Init(base.mgr)
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
-		p.MemoryWatermark = ParamItem{
-			Key:          "datanode.memory.watermarkStandalone",
-			Version:      "2.2.4",
+		p.MemoryForceSyncWatermark = ParamItem{
+			Key:          "datanode.memory.forceSyncWatermark",
+			Version:      "2.4.0",
 			DefaultValue: "0.2",
-		}
-	} else if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.ClusterDeployMode {
-		p.MemoryWatermark = ParamItem{
-			Key:          "datanode.memory.watermarkCluster",
-			Version:      "2.2.4",
-			DefaultValue: "0.5",
 		}
 	} else {
 		log.Info("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
-		p.MemoryWatermark = ParamItem{
-			Key:          "datanode.memory.watermarkCluster",
-			Version:      "2.2.4",
+		p.MemoryForceSyncWatermark = ParamItem{
+			Key:          "datanode.memory.forceSyncWatermark",
+			Version:      "2.4.0",
 			DefaultValue: "0.5",
 		}
 	}
-	p.MemoryWatermark.Init(base.mgr)
+	p.MemoryForceSyncWatermark.Init(base.mgr)
 
 	p.FlushDeleteBufferBytes = ParamItem{
 		Key:          "dataNode.segment.deleteBufBytes",
@@ -3382,30 +3364,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	}
 	p.SkipBFStatsLoad.Init(base.mgr)
 
-	p.BulkInsertTimeoutSeconds = ParamItem{
-		Key:          "datanode.bulkinsert.timeout.seconds",
-		Version:      "2.3.0",
-		PanicIfEmpty: false,
-		DefaultValue: "18000",
-	}
-	p.BulkInsertTimeoutSeconds.Init(base.mgr)
-
-	p.BulkInsertReadBufferSize = ParamItem{
-		Key:          "datanode.bulkinsert.readBufferSize",
-		Version:      "2.3.4",
-		PanicIfEmpty: false,
-		DefaultValue: "16777216",
-	}
-	p.BulkInsertReadBufferSize.Init(base.mgr)
-
-	p.BulkInsertMaxMemorySize = ParamItem{
-		Key:          "datanode.bulkinsert.maxMemorySize",
-		Version:      "2.3.4",
-		PanicIfEmpty: false,
-		DefaultValue: "6442450944",
-	}
-	p.BulkInsertMaxMemorySize.Init(base.mgr)
-
 	p.ChannelWorkPoolSize = ParamItem{
 		Key:          "datanode.channel.workPoolSize",
 		Version:      "2.3.2",
@@ -3463,6 +3421,26 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxConcurrentImportTaskNum.Init(base.mgr)
+
+	p.MaxImportFileSizeInGB = ParamItem{
+		Key:          "datanode.import.maxImportFileSizeInGB",
+		Version:      "2.4.0",
+		Doc:          "The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.MaxImportFileSizeInGB.Init(base.mgr)
+
+	p.ReadBufferSizeInMB = ParamItem{
+		Key:          "datanode.import.readBufferSizeInMB",
+		Version:      "2.4.0",
+		Doc:          "The data block size (in MB) read from chunk manager by the datanode during import.",
+		DefaultValue: "16",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ReadBufferSizeInMB.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
 		Key:          "datanode.compaction.levelZeroBatchMemoryRatio",

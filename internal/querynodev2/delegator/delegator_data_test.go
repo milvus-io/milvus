@@ -19,6 +19,7 @@ package delegator
 import (
 	"context"
 	"testing"
+	"time"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
@@ -64,6 +65,11 @@ type DelegatorDataSuite struct {
 func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
+}
+
+func (s *DelegatorDataSuite) TearDownSuite() {
+	paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key)
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
@@ -935,7 +941,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
 	s.Empty(pks)
 
-	delegator.level0Deletions[common.InvalidPartitionID] = allPartitionDeleteData
+	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
 	pks, _ = delegator.GetLevel0Deletions(partitionID)
 	s.Len(pks, 2)
 	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
@@ -956,7 +962,7 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
 	s.Empty(pks)
 
-	delegator.level0Deletions[common.InvalidPartitionID] = allPartitionDeleteData
+	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
 	pks, _ = delegator.GetLevel0Deletions(partitionID)
 	s.Len(pks, 2)
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
@@ -965,6 +971,53 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	delete(delegator.level0Deletions, partitionID)
 	pks, _ = delegator.GetLevel0Deletions(partitionID)
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
+}
+
+func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.mq.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	s.mq.EXPECT().Seek(mock.Anything, mock.Anything).Return(nil)
+	s.mq.EXPECT().Close()
+	ch := make(chan *msgstream.MsgPack, 10)
+	s.mq.EXPECT().Chan().Return(ch)
+
+	oracle := pkoracle.NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+	oracle.UpdateBloomFilter([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)})
+
+	baseMsg := &commonpb.MsgBase{MsgType: commonpb.MsgType_Delete}
+
+	datas := []*msgstream.MsgPack{
+		{EndTs: 10, EndPositions: []*msgpb.MsgPosition{{Timestamp: 10}}, Msgs: []msgstream.TsMsg{
+			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 1, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{1}}},
+			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: -1, PrimaryKeys: storage.ParseInt64s2IDs(2), Timestamps: []uint64{5}}},
+			// invalid msg because partition wrong
+			&msgstream.DeleteMsg{DeleteRequest: msgpb.DeleteRequest{Base: baseMsg, CollectionID: s.collectionID, PartitionID: 2, PrimaryKeys: storage.ParseInt64s2IDs(1), Timestamps: []uint64{10}}},
+		}},
+	}
+
+	for _, data := range datas {
+		ch <- data
+	}
+
+	result, err := s.delegator.readDeleteFromMsgstream(ctx, &msgpb.MsgPosition{Timestamp: 0}, 10, oracle)
+	s.NoError(err)
+	s.Equal(2, len(result.Pks))
+}
+
+func (s *DelegatorDataSuite) TestDelegatorData_ExcludeSegments() {
+	s.delegator.AddExcludedSegments(map[int64]uint64{
+		1: 3,
+	})
+
+	s.False(s.delegator.VerifyExcludedSegments(1, 1))
+	s.True(s.delegator.VerifyExcludedSegments(1, 5))
+
+	time.Sleep(time.Second * 1)
+	s.delegator.TryCleanExcludedSegments(4)
+	s.True(s.delegator.VerifyExcludedSegments(1, 1))
+	s.True(s.delegator.VerifyExcludedSegments(1, 5))
 }
 
 func TestDelegatorDataSuite(t *testing.T) {

@@ -18,6 +18,7 @@ package datanode
 
 import (
 	"context"
+	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -38,6 +39,10 @@ type compactionExecutor struct {
 	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionPlanResult] // planID to CompactionPlanResult
 	taskCh             chan compactor
 	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
+
+	// To prevent concurrency of release channel and compaction get results
+	// all released channel's compaction tasks will be discarded
+	resultGuard sync.RWMutex
 }
 
 func newCompactionExecutor() *compactionExecutor {
@@ -127,10 +132,15 @@ func (c *compactionExecutor) isValidChannel(channel string) bool {
 	return !c.dropped.Contain(channel)
 }
 
-func (c *compactionExecutor) clearTasksByChannel(channel string) {
+func (c *compactionExecutor) discardByDroppedChannel(channel string) {
 	c.dropped.Insert(channel)
+	c.discardPlan(channel)
+}
 
-	// stop executing tasks of channel
+func (c *compactionExecutor) discardPlan(channel string) {
+	c.resultGuard.Lock()
+	defer c.resultGuard.Unlock()
+
 	c.executing.Range(func(planID int64, task compactor) bool {
 		if task.getChannelName() == channel {
 			c.stopTask(planID)
@@ -142,7 +152,7 @@ func (c *compactionExecutor) clearTasksByChannel(channel string) {
 	c.completed.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
 		if result.GetChannel() == channel {
 			c.injectDone(planID)
-			log.Info("remove compaction results for dropped channel",
+			log.Info("remove compaction plan and results",
 				zap.String("channel", channel),
 				zap.Int64("planID", planID))
 		}
@@ -151,6 +161,8 @@ func (c *compactionExecutor) clearTasksByChannel(channel string) {
 }
 
 func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanResult {
+	c.resultGuard.RLock()
+	defer c.resultGuard.RUnlock()
 	var (
 		executing          []int64
 		completed          []int64

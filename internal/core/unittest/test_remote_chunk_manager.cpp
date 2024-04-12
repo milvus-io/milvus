@@ -41,6 +41,7 @@ get_default_remote_storage_config() {
     storage_config.storage_type = "remote";
     storage_config.cloud_provider = "";
     storage_config.useSSL = false;
+    storage_config.sslCACert = "";
     storage_config.useIAM = false;
     return storage_config;
 }

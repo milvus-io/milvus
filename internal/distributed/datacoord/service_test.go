@@ -213,13 +213,6 @@ func Test_NewServer(t *testing.T) {
 		assert.NotNil(t, resp)
 	})
 
-	t.Run("import", func(t *testing.T) {
-		mockDataCoord.EXPECT().Import(mock.Anything, mock.Anything).Return(&datapb.ImportTaskResponse{}, nil)
-		resp, err := server.Import(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
-	})
-
 	t.Run("UpdateSegmentStatistics", func(t *testing.T) {
 		mockDataCoord.EXPECT().UpdateSegmentStatistics(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 		resp, err := server.UpdateSegmentStatistics(ctx, nil)
@@ -230,20 +223,6 @@ func Test_NewServer(t *testing.T) {
 	t.Run("UpdateChannelCheckpoint", func(t *testing.T) {
 		mockDataCoord.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 		resp, err := server.UpdateChannelCheckpoint(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
-	})
-
-	t.Run("SaveImportSegment", func(t *testing.T) {
-		mockDataCoord.EXPECT().SaveImportSegment(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		resp, err := server.SaveImportSegment(ctx, nil)
-		assert.NoError(t, err)
-		assert.NotNil(t, resp)
-	})
-
-	t.Run("UnsetIsImportingState", func(t *testing.T) {
-		mockDataCoord.EXPECT().UnsetIsImportingState(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-		resp, err := server.UnsetIsImportingState(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})

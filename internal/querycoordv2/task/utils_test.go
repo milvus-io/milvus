@@ -43,7 +43,7 @@ func (s *UtilsSuite) TestPackLoadSegmentRequest() {
 		time.Second,
 		nil,
 		1,
-		10,
+		newReplicaDefaultRG(10),
 		action,
 	)
 	s.NoError(err)
@@ -96,7 +96,7 @@ func (s *UtilsSuite) TestPackLoadSegmentRequestMmap() {
 		time.Second,
 		nil,
 		1,
-		10,
+		newReplicaDefaultRG(10),
 		action,
 	)
 	s.NoError(err)

@@ -533,7 +533,7 @@ func TestMeta_GetSegmentIndexState(t *testing.T) {
 	})
 }
 
-func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
+func TestMeta_GetIndexedSegment(t *testing.T) {
 	var (
 		collID     = UniqueID(1)
 		partID     = UniqueID(2)
@@ -614,23 +614,18 @@ func TestMeta_GetSegmentIndexStateOnField(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID, segID, fieldID)
-		assert.Equal(t, commonpb.IndexState_Finished, state.GetState())
+		segments := m.GetIndexedSegments(collID, []int64{fieldID})
+		assert.Len(t, segments, 1)
 	})
 
 	t.Run("no index on field", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID, segID, fieldID+1)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
+		segments := m.GetIndexedSegments(collID, []int64{fieldID + 1})
+		assert.Len(t, segments, 0)
 	})
 
 	t.Run("no index", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID+1, segID, fieldID+1)
-		assert.Equal(t, commonpb.IndexState_IndexStateNone, state.GetState())
-	})
-
-	t.Run("segment not exist", func(t *testing.T) {
-		state := m.GetSegmentIndexStateOnField(collID, segID+1, fieldID)
-		assert.Equal(t, commonpb.IndexState_Unissued, state.GetState())
+		segments := m.GetIndexedSegments(collID+1, []int64{fieldID})
+		assert.Len(t, segments, 0)
 	})
 }
 
@@ -1332,4 +1327,20 @@ func TestRemoveSegmentIndex(t *testing.T) {
 		assert.Equal(t, len(m.segmentIndexes), 0)
 		assert.Equal(t, len(m.buildID2SegmentIndex), 0)
 	})
+}
+
+func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
+	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+
+	// normal case
+	segmentIDs := make([]int64, 0, 11)
+	for i := 0; i <= 10; i++ {
+		segmentIDs = append(segmentIDs, segID+int64(i))
+	}
+	unindexed := m.indexMeta.GetUnindexedSegments(collID, segmentIDs)
+	assert.Equal(t, 8, len(unindexed))
+
+	// no index
+	unindexed = m.indexMeta.GetUnindexedSegments(collID+1, segmentIDs)
+	assert.Equal(t, 0, len(unindexed))
 }

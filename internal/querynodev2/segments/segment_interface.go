@@ -23,7 +23,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	storage "github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -35,9 +35,23 @@ const (
 	LoadStatusInMemory LoadStatus = "in_memory"
 )
 
+// ResourceUsage is used to estimate the resource usage of a sealed segment.
+type ResourceUsage struct {
+	MemorySize     uint64
+	DiskSize       uint64
+	MmapFieldCount int
+}
+
+// Segment is the interface of a segment implementation.
+// Some methods can not apply to all segment types，such as LoadInfo, ResourceUsageEstimate.
+// Add more interface to represent different segment types is a better implementation.
 type Segment interface {
+	// ResourceUsageEstimate() ResourceUsage
+
 	// Properties
 	ID() int64
+	DatabaseName() string
+	ResourceGroup() string
 	Collection() int64
 	Partition() int64
 	Shard() string
@@ -47,7 +61,6 @@ type Segment interface {
 	Type() SegmentType
 	Level() datapb.SegmentLevel
 	LoadStatus() LoadStatus
-	IsLazyLoad() bool
 	LoadInfo() *querypb.SegmentLoadInfo
 	RLock() error
 	RUnlock()
@@ -58,6 +71,8 @@ type Segment interface {
 	// RowNum returns the number of rows, it's slow, so DO NOT call it in a loop
 	RowNum() int64
 	MemSize() int64
+	// ResourceUsageEstimate returns the estimated resource usage of the segment
+	ResourceUsageEstimate() ResourceUsage
 
 	// Index related
 	GetIndex(fieldID int64) *IndexedFieldInfo

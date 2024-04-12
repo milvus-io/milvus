@@ -26,6 +26,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -146,8 +147,8 @@ func (s *CoordSwitchSuite) checkCollections() bool {
 		TimeStamp: 0, // means now
 	}
 	resp, err := s.Cluster.Proxy.ShowCollections(context.TODO(), req)
-	s.NoError(err)
-	s.Equal(len(resp.CollectionIds), numCollections)
+	s.Require().NoError(merr.CheckRPCCall(resp, err))
+	s.Require().Equal(len(resp.CollectionIds), numCollections)
 	notLoaded := 0
 	loaded := 0
 	for _, name := range resp.CollectionNames {
@@ -181,7 +182,7 @@ func (s *CoordSwitchSuite) search(collectionName string, dim int) {
 		GuaranteeTimestamp: 0,
 	}
 	queryResult, err := c.Proxy.Query(context.TODO(), queryReq)
-	s.NoError(err)
+	s.Require().NoError(merr.CheckRPCCall(queryResult, err))
 	s.Equal(len(queryResult.FieldsData), 1)
 	numEntities := queryResult.FieldsData[0].GetScalars().GetLongData().Data[0]
 	s.Equal(numEntities, int64(rowsPerCollection))
@@ -198,10 +199,9 @@ func (s *CoordSwitchSuite) search(collectionName string, dim int) {
 	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
 		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.IP, params, nq, dim, topk, roundDecimal)
 
-	searchResult, _ := c.Proxy.Search(context.TODO(), searchReq)
+	searchResult, err := c.Proxy.Search(context.TODO(), searchReq)
 
-	err = merr.Error(searchResult.GetStatus())
-	s.NoError(err)
+	s.NoError(merr.CheckRPCCall(searchResult, err))
 }
 
 func (s *CoordSwitchSuite) insertBatchCollections(prefix string, collectionBatchSize, idxStart, dim int, wg *sync.WaitGroup) {
@@ -229,7 +229,7 @@ func (s *CoordSwitchSuite) setupData() {
 	}
 	wg.Wait()
 	log.Info("=========================Data injection finished=========================")
-	s.checkCollections()
+	s.Require().True(s.checkCollections())
 	log.Info(fmt.Sprintf("=========================start to search %s=========================", searchName))
 	s.search(searchName, Dim)
 	log.Info("=========================Search finished=========================")
@@ -238,11 +238,13 @@ func (s *CoordSwitchSuite) setupData() {
 func (s *CoordSwitchSuite) switchCoord() float64 {
 	var err error
 	c := s.Cluster
+	start := time.Now()
+	log.Info("=========================Stopping Coordinators========================")
 	c.RootCoord.Stop()
 	c.DataCoord.Stop()
 	c.QueryCoord.Stop()
-	log.Info("=========================Coordinators stopped=========================")
-	start := time.Now()
+	log.Info("=========================Coordinators stopped=========================", zap.Duration("elapsed", time.Since(start)))
+	start = time.Now()
 
 	c.RootCoord, err = grpcrootcoord.NewServer(context.TODO(), c.GetFactory())
 	s.NoError(err)

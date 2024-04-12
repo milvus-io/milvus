@@ -1,12 +1,35 @@
+import time
 from utils.utils import gen_collection_name, gen_unique_str
 import pytest
 from base.testbase import TestBase
 from pymilvus import (connections)
 
 
-@pytest.mark.L0
 class TestUserE2E(TestBase):
 
+    def teardown_method(self):
+        # because role num is limited, so we need to delete all roles after test
+        rsp = self.role_client.role_list()
+        all_roles = rsp['data']
+        # delete all roles except default roles
+        for role in all_roles:
+            if role.startswith("role") and role in self.role_client.role_names:
+                payload = {
+                    "roleName": role
+                }
+                # revoke privilege from role
+                rsp = self.role_client.role_describe(role)
+                for d in rsp['data']:
+                    payload = {
+                        "roleName": role,
+                        "objectType": d['objectType'],
+                        "objectName": d['objectName'],
+                        "privilege": d['privilege']
+                    }
+                    self.role_client.role_revoke(payload)
+                self.role_client.role_drop(payload)
+
+    @pytest.mark.L0
     def test_user_e2e(self):
         # list user before create
 
@@ -43,6 +66,7 @@ class TestUserE2E(TestBase):
         rsp = self.user_client.user_list()
         assert user_name not in rsp['data']
 
+    @pytest.mark.L1
     def test_user_binding_role(self):
         # create user
         user_name = gen_unique_str("user")
@@ -77,10 +101,13 @@ class TestUserE2E(TestBase):
         rsp = self.user_client.user_grant(payload)
         # describe user roles
         rsp = self.user_client.user_describe(user_name)
+        rsp = self.role_client.role_describe(role_name)
 
         # test user has privilege with pymilvus
         uri = self.user_client.endpoint
         connections.connect(alias="test", uri=f"{uri}", token=f"{user_name}:{password}")
+        # wait to make sure user has been updated
+        time.sleep(5)
 
         # create collection with user
         collection_name = gen_collection_name()
@@ -100,7 +127,7 @@ class TestUserE2E(TestBase):
         assert rsp['code'] == 200
 
 
-@pytest.mark.L0
+@pytest.mark.L1
 class TestUserNegative(TestBase):
 
     def test_create_user_with_short_password(self):

@@ -85,20 +85,25 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 	log := sd.getLogger(context.Background())
 	for segmentID, insertData := range insertRecords {
 		growing := sd.segmentManager.GetGrowing(segmentID)
+		newGrowingSegment := false
 		if growing == nil {
 			var err error
+			// TODO: It's a wired implementation that growing segment have load info.
+			// we should separate the growing segment and sealed segment by type system.
 			growing, err = segments.NewSegment(
 				context.Background(),
 				sd.collection,
-				segmentID,
-				insertData.PartitionID,
-				sd.collectionID,
-				sd.vchannelName,
 				segments.SegmentTypeGrowing,
 				0,
-				insertData.StartPosition,
-				insertData.StartPosition,
-				datapb.SegmentLevel_L1,
+				&querypb.SegmentLoadInfo{
+					SegmentID:     segmentID,
+					PartitionID:   insertData.PartitionID,
+					CollectionID:  sd.collectionID,
+					InsertChannel: sd.vchannelName,
+					StartPosition: insertData.StartPosition,
+					DeltaPosition: insertData.StartPosition,
+					Level:         datapb.SegmentLevel_L1,
+				},
 			)
 			if err != nil {
 				log.Error("failed to create new segment",
@@ -106,6 +111,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 					zap.Error(err))
 				panic(err)
 			}
+			newGrowingSegment = true
 		}
 
 		err := growing.Insert(context.Background(), insertData.RowIDs, insertData.Timestamps, insertData.InsertRecord)
@@ -122,6 +128,7 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			panic(err)
 		}
 		metrics.QueryNodeNumEntities.WithLabelValues(
+			growing.DatabaseName(),
 			fmt.Sprint(paramtable.GetNodeID()),
 			fmt.Sprint(growing.Collection()),
 			fmt.Sprint(growing.Partition()),
@@ -130,17 +137,29 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 		).Add(float64(len(insertData.RowIDs)))
 		growing.UpdateBloomFilter(insertData.PrimaryKeys)
 
-		if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
-			// register created growing segment after insert, avoid to add empty growing to delegator
-			sd.pkOracle.Register(growing, paramtable.GetNodeID())
-			sd.segmentManager.Put(segments.SegmentTypeGrowing, growing)
-			sd.addGrowing(SegmentEntry{
-				NodeID:        paramtable.GetNodeID(),
-				SegmentID:     segmentID,
-				PartitionID:   insertData.PartitionID,
-				Version:       0,
-				TargetVersion: initialTargetVersion,
-			})
+		if newGrowingSegment {
+			sd.growingSegmentLock.Lock()
+			// check whether segment has been excluded
+			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
+				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
+				sd.growingSegmentLock.Unlock()
+				growing.Release()
+				continue
+			}
+
+			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
+				// register created growing segment after insert, avoid to add empty growing to delegator
+				sd.pkOracle.Register(growing, paramtable.GetNodeID())
+				sd.segmentManager.Put(segments.SegmentTypeGrowing, growing)
+				sd.addGrowing(SegmentEntry{
+					NodeID:        paramtable.GetNodeID(),
+					SegmentID:     segmentID,
+					PartitionID:   insertData.PartitionID,
+					Version:       0,
+					TargetVersion: initialTargetVersion,
+				})
+			}
+			sd.growingSegmentLock.Unlock()
 		}
 
 		log.Debug("insert into growing segment",
@@ -478,7 +497,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 func (sd *shardDelegator) GetLevel0Deletions(partitionID int64) ([]storage.PrimaryKey, []storage.Timestamp) {
 	sd.level0Mut.RLock()
 	deleteData, ok1 := sd.level0Deletions[partitionID]
-	allPartitionsDeleteData, ok2 := sd.level0Deletions[common.InvalidPartitionID]
+	allPartitionsDeleteData, ok2 := sd.level0Deletions[common.AllPartitionsID]
 	sd.level0Mut.RUnlock()
 	// we may need to merge the specified partition deletions and the all partitions deletions,
 	// so release the mutex as early as possible.
@@ -644,7 +663,7 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 		deleteRecords := sd.deleteBuffer.ListAfter(position.GetTimestamp())
 		for _, entry := range deleteRecords {
 			for _, record := range entry.Data {
-				if record.PartitionID != common.InvalidPartitionID && candidate.Partition() != record.PartitionID {
+				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
 					continue
 				}
 				for i, pk := range record.DeleteData.Pks {
@@ -738,7 +757,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 			for _, tsMsg := range msgPack.Msgs {
 				if tsMsg.Type() == commonpb.MsgType_Delete {
 					dmsg := tsMsg.(*msgstream.DeleteMsg)
-					if dmsg.CollectionID != sd.collectionID || dmsg.GetPartitionID() != candidate.Partition() {
+					if dmsg.CollectionID != sd.collectionID || (dmsg.GetPartitionID() != common.AllPartitionsID && dmsg.GetPartitionID() != candidate.Partition()) {
 						continue
 					}
 
@@ -808,6 +827,20 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		sealed = lo.Map(req.GetSegmentIDs(), convertSealed)
 	}
 
+	if len(growing) > 0 {
+		sd.growingSegmentLock.Lock()
+	}
+	// when we try to release a segment, add it to pipeline's exclude list first
+	// in case of consumed it's growing segment again
+	droppedInfos := lo.SliceToMap(req.GetSegmentIDs(), func(id int64) (int64, uint64) {
+		if req.GetCheckpoint() == nil {
+			return id, typeutil.MaxTimestamp
+		}
+
+		return id, req.GetCheckpoint().GetTimestamp()
+	})
+	sd.AddExcludedSegments(droppedInfos)
+
 	signal := sd.distribution.RemoveDistributions(sealed, growing)
 	// wait cleared signal
 	<-signal
@@ -825,22 +858,26 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 		)
 	}
 
+	var releaseErr error
 	if !force {
 		worker, err := sd.workerManager.GetWorker(ctx, targetNodeID)
 		if err != nil {
-			log.Warn("delegator failed to find worker",
-				zap.Error(err),
-			)
-			return err
+			log.Warn("delegator failed to find worker", zap.Error(err))
+			releaseErr = err
 		}
 		req.Base.TargetID = targetNodeID
 		err = worker.ReleaseSegments(ctx, req)
 		if err != nil {
-			log.Warn("worker failed to release segments",
-				zap.Error(err),
-			)
+			log.Warn("worker failed to release segments", zap.Error(err))
+			releaseErr = err
 		}
-		return err
+	}
+	if len(growing) > 0 {
+		sd.growingSegmentLock.Unlock()
+	}
+
+	if releaseErr != nil {
+		return releaseErr
 	}
 
 	if hasLevel0 {
@@ -888,4 +925,18 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 
 func (sd *shardDelegator) GetTargetVersion() int64 {
 	return sd.distribution.getTargetVersion()
+}
+
+func (sd *shardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {
+	sd.excludedSegments.Insert(excludeInfo)
+}
+
+func (sd *shardDelegator) VerifyExcludedSegments(segmentID int64, ts uint64) bool {
+	return sd.excludedSegments.Verify(segmentID, ts)
+}
+
+func (sd *shardDelegator) TryCleanExcludedSegments(ts uint64) {
+	if sd.excludedSegments.ShouldClean() {
+		sd.excludedSegments.CleanInvalid(ts)
+	}
 }

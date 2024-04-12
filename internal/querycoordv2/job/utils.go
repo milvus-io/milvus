@@ -49,7 +49,7 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 				return partitionSet.Contain(segment.GetPartitionID())
 			})
 		} else {
-			channels = dist.ChannelDistManager.GetByCollection(collection)
+			channels = dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collection))
 		}
 
 		if len(channels)+len(segments) == 0 {

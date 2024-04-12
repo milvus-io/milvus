@@ -18,6 +18,7 @@ package storage
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -1199,6 +1200,32 @@ func TransferInsertDataToInsertRecord(insertData *InsertData) (*segcorepb.Insert
 					},
 				},
 			}
+		case *Float16VectorFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_Float16Vector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Float16Vector{
+							Float16Vector: rawData.Data,
+						},
+						Dim: int64(rawData.Dim),
+					},
+				},
+			}
+		case *BFloat16VectorFieldData:
+			fieldData = &schemapb.FieldData{
+				Type:    schemapb.DataType_BFloat16Vector,
+				FieldId: fieldID,
+				Field: &schemapb.FieldData_Vectors{
+					Vectors: &schemapb.VectorField{
+						Data: &schemapb.VectorField_Bfloat16Vector{
+							Bfloat16Vector: rawData.Data,
+						},
+						Dim: int64(rawData.Dim),
+					},
+				},
+			}
 		case *SparseFloatVectorFieldData:
 			fieldData = &schemapb.FieldData{
 				Type:    schemapb.DataType_SparseFloatVector,
@@ -1246,4 +1273,16 @@ func Min(a, b int64) int64 {
 		return a
 	}
 	return b
+}
+
+func GetFilesSize(ctx context.Context, paths []string, cm ChunkManager) (int64, error) {
+	totalSize := int64(0)
+	for _, filePath := range paths {
+		size, err := cm.Size(ctx, filePath)
+		if err != nil {
+			return 0, err
+		}
+		totalSize += size
+	}
+	return totalSize, nil
 }

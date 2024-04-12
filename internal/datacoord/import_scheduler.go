@@ -18,16 +18,19 @@ package datacoord
 
 import (
 	"sort"
+	"strconv"
 	"sync"
 	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 )
 
 const (
@@ -45,6 +48,8 @@ type importScheduler struct {
 	alloc   allocator
 	imeta   ImportMeta
 
+	buildIndexCh chan UniqueID
+
 	closeOnce sync.Once
 	closeChan chan struct{}
 }
@@ -53,13 +58,15 @@ func NewImportScheduler(meta *meta,
 	cluster Cluster,
 	alloc allocator,
 	imeta ImportMeta,
+	buildIndexCh chan UniqueID,
 ) ImportScheduler {
 	return &importScheduler{
-		meta:      meta,
-		cluster:   cluster,
-		alloc:     alloc,
-		imeta:     imeta,
-		closeChan: make(chan struct{}),
+		meta:         meta,
+		cluster:      cluster,
+		alloc:        alloc,
+		imeta:        imeta,
+		buildIndexCh: buildIndexCh,
+		closeChan:    make(chan struct{}),
 	}
 }
 
@@ -86,13 +93,20 @@ func (s *importScheduler) Close() {
 
 func (s *importScheduler) process() {
 	getNodeID := func(nodeSlots map[int64]int64) int64 {
-		for nodeID, slots := range nodeSlots {
-			if slots > 0 {
-				nodeSlots[nodeID]--
-				return nodeID
+		var (
+			nodeID   int64 = NullNodeID
+			maxSlots int64 = -1
+		)
+		for id, slots := range nodeSlots {
+			if slots > 0 && slots > maxSlots {
+				nodeID = id
+				maxSlots = slots
 			}
 		}
-		return NullNodeID
+		if nodeID != NullNodeID {
+			nodeSlots[nodeID]--
+		}
+		return nodeID
 	}
 
 	jobs := s.imeta.GetJobBy()
@@ -150,7 +164,7 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 		}(nodeID)
 	}
 	wg.Wait()
-	log.Info("peek slots done", zap.Any("nodeSlots", nodeSlots))
+	log.Debug("peek slots done", zap.Any("nodeSlots", nodeSlots))
 	return nodeSlots
 }
 
@@ -266,12 +280,16 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		if info.GetImportedRows() <= segment.GetNumOfRows() {
 			continue // rows not changed, no need to update
 		}
+		diff := info.GetImportedRows() - segment.GetNumOfRows()
 		op := UpdateImportedRows(info.GetSegmentID(), info.GetImportedRows())
 		err = s.meta.UpdateSegmentsInfo(op)
 		if err != nil {
 			log.Warn("update import segment rows failed", WrapTaskLog(task, zap.Error(err))...)
 			return
 		}
+		metrics.DataCoordBulkVectors.WithLabelValues(
+			strconv.FormatInt(task.GetCollectionID(), 10),
+		).Add(float64(diff))
 	}
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
@@ -282,11 +300,16 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
 				return
 			}
-			op := ReplaceBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
-			err = s.meta.UpdateSegmentsInfo(op)
+			op1 := ReplaceBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
+			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
+			err = s.meta.UpdateSegmentsInfo(op1, op2)
 			if err != nil {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)
 				return
+			}
+			select {
+			case s.buildIndexCh <- info.GetSegmentID(): // accelerate index building:
+			default:
 			}
 		}
 		completeTime := time.Now().Format("2006-01-02T15:04:05Z07:00")

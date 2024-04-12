@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var params *paramtable.ComponentParam = paramtable.Get()
@@ -422,15 +423,15 @@ func (cluster *MiniClusterV2) GetFactory() dependency.Factory {
 }
 
 func (cluster *MiniClusterV2) GetAvailablePorts(n int) ([]int, error) {
-	ports := make([]int, n)
-	for i := range ports {
+	ports := typeutil.NewSet[int]()
+	for ports.Len() < n {
 		port, err := cluster.GetAvailablePort()
 		if err != nil {
 			return nil, err
 		}
-		ports[i] = port
+		ports.Insert(port)
 	}
-	return ports, nil
+	return ports.Collect(), nil
 }
 
 func (cluster *MiniClusterV2) GetAvailablePort() (int, error) {

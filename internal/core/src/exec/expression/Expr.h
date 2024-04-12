@@ -188,7 +188,7 @@ class SegmentExpr : public Expr {
     ProcessDataChunks(
         FUNC func,
         std::function<bool(const milvus::SkipIndex&, FieldId, int)> skip_func,
-        bool* res,
+        TargetBitmapView res,
         ValTypes... values) {
         int64_t processed_size = 0;
 
@@ -225,9 +225,9 @@ class SegmentExpr : public Expr {
     }
 
     int
-    ProcessIndexOneChunk(FixedVector<bool>& result,
+    ProcessIndexOneChunk(TargetBitmap& result,
                          size_t chunk_id,
-                         const FixedVector<bool>& chunk_res,
+                         const TargetBitmap& chunk_res,
                          int processed_rows) {
         auto data_pos =
             chunk_id == current_index_chunk_ ? current_index_chunk_pos_ : 0;
@@ -235,20 +235,21 @@ class SegmentExpr : public Expr {
             std::min(size_per_chunk_ - data_pos, batch_size_ - processed_rows),
             int64_t(chunk_res.size()));
 
-        result.insert(result.end(),
-                      chunk_res.begin() + data_pos,
-                      chunk_res.begin() + data_pos + size);
+        //        result.insert(result.end(),
+        //                      chunk_res.begin() + data_pos,
+        //                      chunk_res.begin() + data_pos + size);
+        result.append(chunk_res, data_pos, size);
         return size;
     }
 
     template <typename T, typename FUNC, typename... ValTypes>
-    FixedVector<bool>
+    TargetBitmap
     ProcessIndexChunks(FUNC func, ValTypes... values) {
         typedef std::
             conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
                 IndexInnerType;
         using Index = index::ScalarIndex<IndexInnerType>;
-        FixedVector<bool> result;
+        TargetBitmap result;
         int processed_rows = 0;
 
         for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
@@ -330,7 +331,7 @@ class SegmentExpr : public Expr {
 
     // Cache for index scan to avoid search index every batch
     int64_t cached_index_chunk_id_{-1};
-    FixedVector<bool> cached_index_chunk_res_{};
+    TargetBitmap cached_index_chunk_res_{};
 };
 
 void

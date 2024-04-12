@@ -323,7 +323,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 			return err
 		}
 		// validate dense vector field type parameters
-		if isVectorType(field.DataType) {
+		if typeutil.IsVectorType(field.DataType) {
 			err = validateDimension(field)
 			if err != nil {
 				return err
@@ -1426,7 +1426,6 @@ func (t *flushTask) Execute(ctx context.Context) error {
 				commonpbutil.WithMsgType(commonpb.MsgType_Flush),
 			),
 			CollectionID: collID,
-			IsImport:     false,
 		}
 		resp, err := t.dataCoord.Flush(ctx, flushReq)
 		if err != nil {
@@ -1568,7 +1567,7 @@ func (t *loadCollectionTask) Execute(ctx context.Context) (err error) {
 
 	unindexedVecFields := make([]string, 0)
 	for _, field := range collSchema.GetFields() {
-		if isVectorType(field.GetDataType()) {
+		if typeutil.IsVectorType(field.GetDataType()) {
 			if _, ok := fieldIndexIDs[field.GetFieldID()]; !ok {
 				unindexedVecFields = append(unindexedVecFields, field.GetName())
 			}
@@ -1811,7 +1810,7 @@ func (t *loadPartitionsTask) Execute(ctx context.Context) error {
 	for _, index := range indexResponse.IndexInfos {
 		fieldIndexIDs[index.FieldID] = index.IndexID
 		for _, field := range collSchema.Fields {
-			if index.FieldID == field.FieldID && isVectorType(field.DataType) {
+			if index.FieldID == field.FieldID && typeutil.IsVectorType(field.DataType) {
 				hasVecIndex = true
 			}
 		}

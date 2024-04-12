@@ -75,9 +75,6 @@ type Manager interface {
 
 	// AllocSegment allocates rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
-	// allocSegmentForImport allocates one segment allocation for bulk insert.
-	// TODO: Remove this method and AllocSegment() above instead.
-	allocSegmentForImport(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error)
 	AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
@@ -244,7 +241,7 @@ func (s *SegmentManager) maybeResetLastExpireForSegments() error {
 	if len(s.segments) > 0 {
 		var latestTs uint64
 		allocateErr := retry.Do(context.Background(), func() error {
-			ts, tryErr := s.genExpireTs(context.Background(), false)
+			ts, tryErr := s.genExpireTs(context.Background())
 			log.Warn("failed to get ts from rootCoord for globalLastExpire", zap.Error(tryErr))
 			if tryErr != nil {
 				return tryErr
@@ -302,7 +299,7 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 		requestRows, int64(maxCountPerSegment), datapb.SegmentLevel_L1)
 
 	// create new segments and add allocations
-	expireTs, err := s.genExpireTs(ctx, false)
+	expireTs, err := s.genExpireTs(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -331,37 +328,6 @@ func (s *SegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID
 	return allocations, nil
 }
 
-// allocSegmentForImport allocates one segment allocation for bulk insert.
-func (s *SegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID,
-	partitionID UniqueID, channelName string, requestRows int64, importTaskID int64,
-) (*Allocation, error) {
-	_, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "Alloc-ImportSegment")
-	defer sp.End()
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Init allocation.
-	allocation := getAllocation(requestRows)
-	// Create new segments and add allocations to meta.
-	// To avoid mixing up with growing segments, the segment state is "Importing"
-	expireTs, err := s.genExpireTs(ctx, true)
-	if err != nil {
-		return nil, err
-	}
-
-	segment, err := s.openNewSegment(ctx, collectionID, partitionID, channelName, commonpb.SegmentState_Importing, datapb.SegmentLevel_L1)
-	if err != nil {
-		return nil, err
-	}
-
-	allocation.ExpireTime = expireTs
-	allocation.SegmentID = segment.GetID()
-	if err := s.meta.AddAllocation(segment.GetID(), allocation); err != nil {
-		return nil, err
-	}
-	return allocation, nil
-}
-
 func satisfy(segment *SegmentInfo, collectionID, partitionID UniqueID, channel string) bool {
 	return segment.GetCollectionID() == collectionID && segment.GetPartitionID() == partitionID &&
 		segment.GetInsertChannel() == channel
@@ -371,17 +337,13 @@ func isGrowing(segment *SegmentInfo) bool {
 	return segment.GetState() == commonpb.SegmentState_Growing
 }
 
-func (s *SegmentManager) genExpireTs(ctx context.Context, isImported bool) (Timestamp, error) {
+func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 	ts, err := s.allocator.allocTimestamp(ctx)
 	if err != nil {
 		return 0, err
 	}
 	physicalTs, logicalTs := tsoutil.ParseTS(ts)
 	expirePhysicalTs := physicalTs.Add(time.Duration(Params.DataCoordCfg.SegAssignmentExpiration.GetAsFloat()) * time.Millisecond)
-	// for imported segment, clean up ImportTaskExpiration
-	if isImported {
-		expirePhysicalTs = physicalTs.Add(time.Duration(Params.RootCoordCfg.ImportTaskExpiration.GetAsFloat()) * time.Second)
-	}
 	expireTs := tsoutil.ComposeTS(expirePhysicalTs.UnixNano()/int64(time.Millisecond), int64(logicalTs))
 	return expireTs, nil
 }
@@ -413,7 +375,7 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 		PartitionID:    partitionID,
 		InsertChannel:  channelName,
 		NumOfRows:      0,
-		State:          commonpb.SegmentState_Flushed,
+		State:          commonpb.SegmentState_Importing,
 		MaxRowNum:      0,
 		Level:          datapb.SegmentLevel_L1,
 		LastExpireTime: math.MaxUint64,
@@ -465,9 +427,6 @@ func (s *SegmentManager) openNewSegment(ctx context.Context, collectionID Unique
 		MaxRowNum:      int64(maxNumOfRows),
 		Level:          level,
 		LastExpireTime: 0,
-	}
-	if segmentState == commonpb.SegmentState_Importing {
-		segmentInfo.IsImporting = true
 	}
 	segment := NewSegmentInfo(segmentInfo)
 	if err := s.meta.AddSegment(ctx, segment); err != nil {

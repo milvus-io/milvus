@@ -117,6 +117,47 @@ func (_c *MockSegment_Collection_Call) RunAndReturn(run func() int64) *MockSegme
 	return _c
 }
 
+// DatabaseName provides a mock function with given fields:
+func (_m *MockSegment) DatabaseName() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockSegment_DatabaseName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DatabaseName'
+type MockSegment_DatabaseName_Call struct {
+	*mock.Call
+}
+
+// DatabaseName is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) DatabaseName() *MockSegment_DatabaseName_Call {
+	return &MockSegment_DatabaseName_Call{Call: _e.mock.On("DatabaseName")}
+}
+
+func (_c *MockSegment_DatabaseName_Call) Run(run func()) *MockSegment_DatabaseName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_DatabaseName_Call) Return(_a0 string) *MockSegment_DatabaseName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_DatabaseName_Call) RunAndReturn(run func() string) *MockSegment_DatabaseName_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Delete provides a mock function with given fields: ctx, primaryKeys, timestamps
 func (_m *MockSegment) Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []uint64) error {
 	ret := _m.Called(ctx, primaryKeys, timestamps)
@@ -455,47 +496,6 @@ func (_c *MockSegment_InsertCount_Call) Return(_a0 int64) *MockSegment_InsertCou
 }
 
 func (_c *MockSegment_InsertCount_Call) RunAndReturn(run func() int64) *MockSegment_InsertCount_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// IsLazyLoad provides a mock function with given fields:
-func (_m *MockSegment) IsLazyLoad() bool {
-	ret := _m.Called()
-
-	var r0 bool
-	if rf, ok := ret.Get(0).(func() bool); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(bool)
-	}
-
-	return r0
-}
-
-// MockSegment_IsLazyLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IsLazyLoad'
-type MockSegment_IsLazyLoad_Call struct {
-	*mock.Call
-}
-
-// IsLazyLoad is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) IsLazyLoad() *MockSegment_IsLazyLoad_Call {
-	return &MockSegment_IsLazyLoad_Call{Call: _e.mock.On("IsLazyLoad")}
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) Run(run func()) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) Return(_a0 bool) *MockSegment_IsLazyLoad_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_IsLazyLoad_Call) RunAndReturn(run func() bool) *MockSegment_IsLazyLoad_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -948,6 +948,88 @@ func (_c *MockSegment_Release_Call) Return() *MockSegment_Release_Call {
 }
 
 func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *MockSegment_Release_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResourceGroup provides a mock function with given fields:
+func (_m *MockSegment) ResourceGroup() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockSegment_ResourceGroup_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResourceGroup'
+type MockSegment_ResourceGroup_Call struct {
+	*mock.Call
+}
+
+// ResourceGroup is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) ResourceGroup() *MockSegment_ResourceGroup_Call {
+	return &MockSegment_ResourceGroup_Call{Call: _e.mock.On("ResourceGroup")}
+}
+
+func (_c *MockSegment_ResourceGroup_Call) Run(run func()) *MockSegment_ResourceGroup_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_ResourceGroup_Call) Return(_a0 string) *MockSegment_ResourceGroup_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_ResourceGroup_Call) RunAndReturn(run func() string) *MockSegment_ResourceGroup_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ResourceUsageEstimate provides a mock function with given fields:
+func (_m *MockSegment) ResourceUsageEstimate() ResourceUsage {
+	ret := _m.Called()
+
+	var r0 ResourceUsage
+	if rf, ok := ret.Get(0).(func() ResourceUsage); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(ResourceUsage)
+	}
+
+	return r0
+}
+
+// MockSegment_ResourceUsageEstimate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResourceUsageEstimate'
+type MockSegment_ResourceUsageEstimate_Call struct {
+	*mock.Call
+}
+
+// ResourceUsageEstimate is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) ResourceUsageEstimate() *MockSegment_ResourceUsageEstimate_Call {
+	return &MockSegment_ResourceUsageEstimate_Call{Call: _e.mock.On("ResourceUsageEstimate")}
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) Run(run func()) *MockSegment_ResourceUsageEstimate_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) Return(_a0 ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_ResourceUsageEstimate_Call) RunAndReturn(run func() ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
 	_c.Call.Return(run)
 	return _c
 }

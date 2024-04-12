@@ -42,6 +42,7 @@
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
 #include "exec/expression/Expr.h"
+#include "segcore/load_index_c.h"
 
 namespace chrono = std::chrono;
 
@@ -1786,6 +1787,7 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
     DeleteSegment(segment);
 }
 
+template <typename VecType = float>
 void
 testReduceSearchWithExpr(int N,
                          int topK,
@@ -1793,8 +1795,19 @@ testReduceSearchWithExpr(int N,
                          bool filter_all = false) {
     std::cerr << "testReduceSearchWithExpr(" << N << ", " << topK << ", "
               << num_queries << ")" << std::endl;
-
-    auto collection = NewCollection(get_default_schema_config());
+    std::function<const char*()> schema_fun;
+    std::function<std::string(int)> query_gen_fun;
+    if constexpr (std::is_same_v<VecType, float>) {
+        schema_fun = get_default_schema_config;
+        query_gen_fun = generate_query_data;
+    } else if constexpr (std::is_same_v<VecType, float16>) {
+        schema_fun = get_float16_schema_config;
+        query_gen_fun = generate_query_data_float16;
+    } else if constexpr (std::is_same_v<VecType, bfloat16>) {
+        schema_fun = get_bfloat16_schema_config;
+        query_gen_fun = generate_query_data_bfloat16;
+    }
+    auto collection = NewCollection(schema_fun());
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
@@ -1852,7 +1865,7 @@ testReduceSearchWithExpr(int N,
               topK % N;
     }
     auto serialized_expr_plan = fmt.str();
-    auto blob = generate_query_data(num_queries);
+    auto blob = query_gen_fun(num_queries);
 
     void* plan = nullptr;
     auto binary_plan =
@@ -1941,17 +1954,29 @@ testReduceSearchWithExpr(int N,
 }
 
 TEST(CApiTest, ReduceSearchWithExpr) {
+    //float32
     testReduceSearchWithExpr(2, 1, 1);
     testReduceSearchWithExpr(2, 10, 10);
     testReduceSearchWithExpr(100, 1, 1);
     testReduceSearchWithExpr(100, 10, 10);
     testReduceSearchWithExpr(10000, 1, 1);
     testReduceSearchWithExpr(10000, 10, 10);
+    //float16
+    testReduceSearchWithExpr(2, 10, 10, false);
+    testReduceSearchWithExpr(100, 10, 10, false);
+    //bfloat16
+    testReduceSearchWithExpr(2, 10, 10, false);
+    testReduceSearchWithExpr(100, 10, 10, false);
 }
 
 TEST(CApiTest, ReduceSearchWithExprFilterAll) {
+    //float32
     testReduceSearchWithExpr(2, 1, 1, true);
     testReduceSearchWithExpr(2, 10, 10, true);
+    //float16
+    testReduceSearchWithExpr(2, 1, 1, true);
+    //bfloat16
+    testReduceSearchWithExpr(2, 1, 1, true);
 }
 
 TEST(CApiTest, LoadIndexInfo) {
@@ -1960,9 +1985,10 @@ TEST(CApiTest, LoadIndexInfo) {
 
     auto N = 1024 * 10;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = knowhere::IndexFactory::Instance().Create<float>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<float>(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
         knowhere::Version::GetCurrentVersion().VersionNumber());
+    auto indexing = get_index_obj.value();
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -2010,9 +2036,10 @@ TEST(CApiTest, LoadIndexSearch) {
     auto N = 1024 * 10;
     auto num_query = 100;
     auto [raw_data, timestamps, uids] = generate_data(N);
-    auto indexing = knowhere::IndexFactory::Instance().Create<float>(
+    auto get_index_obj = knowhere::IndexFactory::Instance().Create<float>(
         knowhere::IndexEnum::INDEX_FAISS_IVFSQ8,
         knowhere::Version::GetCurrentVersion().VersionNumber());
+    auto indexing = get_index_obj.value();
     auto conf =
         knowhere::Json{{knowhere::meta::METRIC_TYPE, knowhere::metric::L2},
                        {knowhere::meta::DIM, DIM},
@@ -4696,41 +4723,41 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_L2) {
 }
 
 TEST(CApiTest, AssembeChunkTest) {
-    FixedVector<bool> chunk;
+    TargetBitmap chunk(1000);
     for (size_t i = 0; i < 1000; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     BitsetType result;
     milvus::query::AppendOneChunk(result, chunk);
-    std::string s;
-    boost::to_string(result, s);
-    std::cout << s << std::endl;
+    //    std::string s;
+    //    boost::to_string(result, s);
+    //    std::cout << s << std::endl;
     int index = 0;
     for (size_t i = 0; i < 1000; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 
-    chunk.clear();
+    chunk = TargetBitmap(934);
     for (int i = 0; i < 934; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     milvus::query::AppendOneChunk(result, chunk);
     for (size_t i = 0; i < 934; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 
-    chunk.clear();
+    chunk = TargetBitmap(62);
     for (int i = 0; i < 62; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     milvus::query::AppendOneChunk(result, chunk);
     for (size_t i = 0; i < 62; i++) {
         ASSERT_EQ(result[index++], chunk[i]) << i;
     }
 
-    chunk.clear();
+    chunk = TargetBitmap(105);
     for (int i = 0; i < 105; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     milvus::query::AppendOneChunk(result, chunk);
     for (size_t i = 0; i < 105; i++) {
@@ -4745,16 +4772,17 @@ search_id(const BitsetType& bitset,
           bool use_find) {
     std::vector<SegOffset> dst_offset;
     if (use_find) {
-        for (int i = bitset.find_first(); i < bitset.size();
-             i = bitset.find_next(i)) {
-            if (i == BitsetType::npos) {
-                return dst_offset;
-            }
-            auto offset = SegOffset(i);
+        auto i = bitset.find_first();
+        while (i.has_value()) {
+            auto offset = SegOffset(i.value());
             if (timestamps[offset.get()] <= timestamp) {
                 dst_offset.push_back(offset);
             }
+
+            i = bitset.find_next(i.value());
         }
+
+        return dst_offset;
     } else {
         for (int i = 0; i < bitset.size(); i++) {
             if (bitset[i]) {
@@ -4769,7 +4797,7 @@ search_id(const BitsetType& bitset,
 }
 
 TEST(CApiTest, SearchIdTest) {
-    using BitsetType = boost::dynamic_bitset<>;
+    //    using BitsetType = boost::dynamic_bitset<>;
 
     auto test = [&](int NT) {
         BitsetType bitset(1000000);
@@ -4819,9 +4847,9 @@ TEST(CApiTest, SearchIdTest) {
 }
 
 TEST(CApiTest, AssembeChunkPerfTest) {
-    FixedVector<bool> chunk;
+    TargetBitmap chunk(100000000);
     for (size_t i = 0; i < 100000000; ++i) {
-        chunk.push_back(i % 2 == 0);
+        chunk[i] = (i % 2 == 0);
     }
     BitsetType result;
     // while (true) {
@@ -5271,4 +5299,8 @@ TEST(CApiTest, RANGE_SEARCH_WITH_RADIUS_AND_RANGE_FILTER_WHEN_IP_BFLOAT16) {
     DeleteSearchResult(search_result);
     DeleteCollection(c_collection);
     DeleteSegment(segment);
+}
+
+TEST(CApiTest, IsLoadWithDisk) {
+    ASSERT_TRUE(IsLoadWithDisk(INVERTED_INDEX_TYPE, 0));
 }

@@ -243,47 +243,6 @@ func TestLastExpireReset(t *testing.T) {
 	assert.Equal(t, segmentID3, newAlloc[0].SegmentID) // segment3 still can be used to allocate
 }
 
-func TestAllocSegmentForImport(t *testing.T) {
-	ctx := context.Background()
-	paramtable.Init()
-	mockAllocator := newMockAllocator()
-	meta, err := newMemoryMeta()
-	assert.NoError(t, err)
-	segmentManager, _ := newSegmentManager(meta, mockAllocator)
-
-	schema := newTestSchema()
-	collID, err := mockAllocator.allocID(ctx)
-	assert.NoError(t, err)
-	meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-
-	t.Run("normal allocation", func(t *testing.T) {
-		allocation, err := segmentManager.allocSegmentForImport(ctx, collID, 100, "c1", 100, 0)
-		assert.NoError(t, err)
-		assert.NotNil(t, allocation)
-		assert.EqualValues(t, 100, allocation.NumOfRows)
-		assert.NotEqualValues(t, 0, allocation.SegmentID)
-		assert.NotEqualValues(t, 0, allocation.ExpireTime)
-	})
-
-	t.Run("allocation fails 1", func(t *testing.T) {
-		failsAllocator := &FailsAllocator{
-			allocTsSucceed: true,
-		}
-		segmentManager, _ := newSegmentManager(meta, failsAllocator)
-		_, err := segmentManager.allocSegmentForImport(ctx, collID, 100, "c1", 100, 0)
-		assert.Error(t, err)
-	})
-
-	t.Run("allocation fails 2", func(t *testing.T) {
-		failsAllocator := &FailsAllocator{
-			allocIDSucceed: true,
-		}
-		segmentManager, _ := newSegmentManager(meta, failsAllocator)
-		_, err := segmentManager.allocSegmentForImport(ctx, collID, 100, "c1", 100, 0)
-		assert.Error(t, err)
-	})
-}
-
 func TestSegmentManager_AllocImportSegment(t *testing.T) {
 	ctx := context.Background()
 	mockErr := errors.New("mock error")
@@ -522,36 +481,6 @@ func TestExpireAllocation(t *testing.T) {
 	segment = meta.GetHealthySegment(id)
 	assert.NotNil(t, segment)
 	assert.EqualValues(t, 0, len(segment.allocations))
-}
-
-func TestCleanExpiredBulkloadSegment(t *testing.T) {
-	t.Run("expiredBulkloadSegment", func(t *testing.T) {
-		paramtable.Init()
-		mockAllocator := newMockAllocator()
-		meta, err := newMemoryMeta()
-		assert.NoError(t, err)
-
-		schema := newTestSchema()
-		collID, err := mockAllocator.allocID(context.Background())
-		assert.NoError(t, err)
-		meta.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-		segmentManager, _ := newSegmentManager(meta, mockAllocator)
-		allocation, err := segmentManager.allocSegmentForImport(context.TODO(), collID, 0, "c1", 2, 1)
-		assert.NoError(t, err)
-
-		ids, err := segmentManager.GetFlushableSegments(context.TODO(), "c1", allocation.ExpireTime)
-		assert.NoError(t, err)
-		assert.EqualValues(t, len(ids), 0)
-
-		assert.EqualValues(t, len(segmentManager.segments), 1)
-
-		ids, err = segmentManager.GetFlushableSegments(context.TODO(), "c1", allocation.ExpireTime+1)
-		assert.NoError(t, err)
-		assert.Empty(t, ids)
-		assert.EqualValues(t, len(ids), 0)
-
-		assert.EqualValues(t, len(segmentManager.segments), 0)
-	})
 }
 
 func TestGetFlushableSegments(t *testing.T) {
@@ -951,42 +880,4 @@ func TestSegmentManager_DropSegmentsOfChannel(t *testing.T) {
 			assert.ElementsMatch(t, tt.want, s.segments)
 		})
 	}
-}
-
-func TestSegmentManager_FlushImportSegments(t *testing.T) {
-	alloc := NewNMockAllocator(t)
-	alloc.EXPECT().allocID(mock.Anything).Return(0, nil)
-	alloc.EXPECT().allocTimestamp(mock.Anything).Return(1000, nil)
-	mm, err := newMemoryMeta()
-	assert.NoError(t, err)
-
-	schema := newTestSchema()
-	assert.NoError(t, err)
-	mm.AddCollection(&collectionInfo{ID: collID, Schema: schema})
-	segmentManager, _ := newSegmentManager(mm, alloc)
-	allocation, err := segmentManager.allocSegmentForImport(context.TODO(), collID, 1, "c1", 2, 3)
-	assert.NoError(t, err)
-
-	segmentID := allocation.SegmentID
-	segment := mm.GetSegment(segmentID)
-	assert.Equal(t, commonpb.SegmentState_Importing, segment.GetState())
-
-	// normal
-	err = segmentManager.FlushImportSegments(context.TODO(), collID, []UniqueID{segmentID})
-	assert.NoError(t, err)
-	segment = mm.GetSegment(segmentID)
-	assert.Equal(t, commonpb.SegmentState_Flushed, segment.GetState())
-
-	// no segment
-	err = segmentManager.FlushImportSegments(context.TODO(), collID, []UniqueID{6})
-	assert.NoError(t, err)
-
-	// collection not match
-	mm.AddCollection(&collectionInfo{ID: 6, Schema: schema})
-	allocation, err = segmentManager.allocSegmentForImport(context.TODO(), 6, 1, "c1", 2, 3)
-	assert.NoError(t, err)
-	err = segmentManager.FlushImportSegments(context.TODO(), collID, []UniqueID{allocation.SegmentID})
-	assert.NoError(t, err)
-	segment = mm.GetSegment(allocation.SegmentID)
-	assert.Equal(t, commonpb.SegmentState_Importing, segment.GetState())
 }

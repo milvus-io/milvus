@@ -332,10 +332,3 @@ func (c *Client) Delete(ctx context.Context, req *querypb.DeleteRequest, _ ...gr
 		return client.Delete(ctx, req)
 	})
 }
-
-// HybridSearch performs replica hybrid search tasks in QueryNode.
-func (c *Client) HybridSearch(ctx context.Context, req *querypb.HybridSearchRequest, _ ...grpc.CallOption) (*querypb.HybridSearchResult, error) {
-	return wrapGrpcCall(ctx, c, func(client querypb.QueryNodeClient) (*querypb.HybridSearchResult, error) {
-		return client.HybridSearch(ctx, req)
-	})
-}

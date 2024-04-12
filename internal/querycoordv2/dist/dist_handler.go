@@ -212,7 +212,7 @@ func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDis
 	defer dh.mu.Unlock()
 
 	channels := make(map[string]*msgpb.MsgPosition)
-	for _, channel := range dh.dist.ChannelDistManager.GetByNode(dh.nodeID) {
+	for _, channel := range dh.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(dh.nodeID)) {
 		targetChannel := dh.target.GetDmChannel(channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget)
 		if targetChannel == nil {
 			continue

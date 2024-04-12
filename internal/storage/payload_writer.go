@@ -51,7 +51,7 @@ type NativePayloadWriter struct {
 func NewPayloadWriter(colType schemapb.DataType, dim ...int) (PayloadWriterInterface, error) {
 	var arrowType arrow.DataType
 	// writer for sparse float vector doesn't require dim
-	if typeutil.IsVectorType(colType) && !typeutil.IsSparseVectorType(colType) {
+	if typeutil.IsVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
 		if len(dim) != 1 {
 			return nil, fmt.Errorf("incorrect input numbers")
 		}

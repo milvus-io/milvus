@@ -522,7 +522,7 @@ func (suite *ResourceManagerSuite) TestStoreFailed() {
 	suite.ErrorIs(err, storeErr)
 
 	manager.groups["rg"] = &ResourceGroup{
-		nodes:    typeutil.NewUniqueSet(),
+		nodes:    typeutil.NewConcurrentSet[int64](),
 		capacity: 0,
 	}
 

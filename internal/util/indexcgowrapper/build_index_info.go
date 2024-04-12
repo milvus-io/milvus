@@ -51,6 +51,7 @@ func NewBuildIndexInfo(config *indexpb.StorageConfig) (*BuildIndexInfo, error) {
 	cIamEndPoint := C.CString(config.IAMEndpoint)
 	cRegion := C.CString(config.Region)
 	cCloudProvider := C.CString(config.CloudProvider)
+	cSslCACert := C.CString(config.SslCACert)
 	defer C.free(unsafe.Pointer(cAddress))
 	defer C.free(unsafe.Pointer(cBucketName))
 	defer C.free(unsafe.Pointer(cAccessKey))
@@ -60,6 +61,7 @@ func NewBuildIndexInfo(config *indexpb.StorageConfig) (*BuildIndexInfo, error) {
 	defer C.free(unsafe.Pointer(cIamEndPoint))
 	defer C.free(unsafe.Pointer(cRegion))
 	defer C.free(unsafe.Pointer(cCloudProvider))
+	defer C.free(unsafe.Pointer(cSslCACert))
 	storageConfig := C.CStorageConfig{
 		address:          cAddress,
 		bucket_name:      cBucketName,
@@ -70,6 +72,7 @@ func NewBuildIndexInfo(config *indexpb.StorageConfig) (*BuildIndexInfo, error) {
 		iam_endpoint:     cIamEndPoint,
 		cloud_provider:   cCloudProvider,
 		useSSL:           C.bool(config.UseSSL),
+		sslCACert:        cSslCACert,
 		useIAM:           C.bool(config.UseIAM),
 		region:           cRegion,
 		useVirtualHost:   C.bool(config.UseVirtualHost),

@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flushTs uint64, dbName, collectionName string) {
@@ -144,6 +145,22 @@ func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.Fiel
 	}
 }
 
+func NewSparseFloatVectorFieldData(fieldName string, numRows int) *schemapb.FieldData {
+	sparseVecs := GenerateSparseFloatArray(numRows)
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_SparseFloatVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: sparseVecs.Dim,
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: sparseVecs,
+				},
+			},
+		},
+	}
+}
+
 func GenerateInt64Array(numRows int) []int64 {
 	ret := make([]int64, numRows)
 	for i := 0; i < numRows; i++ {
@@ -187,6 +204,10 @@ func GenerateFloat16Vectors(numRows, dim int) []byte {
 		panic(err)
 	}
 	return ret
+}
+
+func GenerateSparseFloatArray(numRows int) *schemapb.SparseFloatArray {
+	return testutils.GenerateSparseFloatVectors(numRows)
 }
 
 // func GenerateBFloat16Vectors(numRows, dim int) []byte {

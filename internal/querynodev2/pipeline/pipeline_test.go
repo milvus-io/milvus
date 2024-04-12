@@ -109,7 +109,9 @@ func (suite *PipelineTestSuite) TestBasic() {
 	// init mock
 	//	mock collection manager
 	schema := segments.GenTestCollectionSchema(suite.collectionName, schemapb.DataType_Int64, true)
-	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), querypb.LoadType_LoadCollection)
+	collection := segments.NewCollection(suite.collectionID, schema, segments.GenTestIndexMeta(suite.collectionID, schema), &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection,
+	})
 	suite.collectionManager.EXPECT().Get(suite.collectionID).Return(collection)
 
 	//  mock mq factory
@@ -117,6 +119,10 @@ func (suite *PipelineTestSuite) TestBasic() {
 	suite.msgDispatcher.EXPECT().Deregister(suite.channel)
 
 	//	mock delegator
+	suite.delegator.EXPECT().AddExcludedSegments(mock.Anything).Maybe()
+	suite.delegator.EXPECT().VerifyExcludedSegments(mock.Anything, mock.Anything).Return(true).Maybe()
+	suite.delegator.EXPECT().TryCleanExcludedSegments(mock.Anything).Maybe()
+
 	suite.delegator.EXPECT().ProcessInsert(mock.Anything).Run(
 		func(insertRecords map[int64]*delegator.InsertData) {
 			for segmentID := range insertRecords {

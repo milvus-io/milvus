@@ -196,19 +196,26 @@ func (ex *Executor) loadSegment(task *SegmentTask, step int) error {
 		indexInfos,
 	)
 
-	// Get shard leader for the given replica and segment
-	leaderID, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), task.Shard())
-	if !ok {
+	// get segment's replica first, then get shard leader by replica
+	replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+	if replica == nil {
+		msg := "node doesn't belong to any replica"
+		err := merr.WrapErrNodeNotAvailable(action.Node())
+		log.Warn(msg, zap.Error(err))
+		return err
+	}
+	view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
+	if view == nil {
 		msg := "no shard leader for the segment to execute loading"
 		err = merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
 		log.Warn(msg, zap.Error(err))
 		return err
 	}
-	log = log.With(zap.Int64("shardLeader", leaderID))
+	log = log.With(zap.Int64("shardLeader", view.ID))
 
 	startTs := time.Now()
 	log.Info("load segments...")
-	status, err := ex.cluster.LoadSegments(task.Context(), leaderID, req)
+	status, err := ex.cluster.LoadSegments(task.Context(), view.ID, req)
 	err = merr.CheckRPCCall(status, err)
 	if err != nil {
 		log.Warn("failed to load segment", zap.Error(err))
@@ -239,7 +246,14 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	ctx := task.Context()
 
 	dstNode := action.Node()
+
 	req := packReleaseSegmentRequest(task, action)
+	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), task.Shard(), meta.CurrentTarget)
+	if channel != nil {
+		// if channel exists in current target, set cp to ReleaseSegmentRequest, need to use it as growing segment's exclude ts
+		req.Checkpoint = channel.GetSeekPosition()
+	}
+
 	if action.Scope() == querypb.DataScope_Streaming {
 		// Any modification to the segment distribution have to set NeedTransfer true,
 		// to protect the version, which serves search/query
@@ -248,13 +262,24 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 		req.Shard = task.shard
 
 		if ex.meta.CollectionManager.Exist(task.CollectionID()) {
-			leader, ok := getShardLeader(ex.meta.ReplicaManager, ex.dist, task.CollectionID(), action.Node(), req.GetShard())
-			if !ok {
-				log.Warn("no shard leader for the segment to execute releasing", zap.String("shard", req.GetShard()))
+			// get segment's replica first, then get shard leader by replica
+			replica := ex.meta.ReplicaManager.GetByCollectionAndNode(task.CollectionID(), action.Node())
+			if replica == nil {
+				msg := "node doesn't belong to any replica"
+				err := merr.WrapErrNodeNotAvailable(action.Node())
+				log.Warn(msg, zap.Error(err))
 				return
 			}
-			dstNode = leader
-			log = log.With(zap.Int64("shardLeader", leader))
+			view := ex.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(action.Shard()))
+			if view == nil {
+				msg := "no shard leader for the segment to execute releasing"
+				err := merr.WrapErrChannelNotFound(task.Shard(), "shard delegator not found")
+				log.Warn(msg, zap.Error(err))
+				return
+			}
+
+			dstNode = view.ID
+			log = log.With(zap.Int64("shardLeader", view.ID))
 			req.NeedTransfer = true
 		}
 	}
@@ -320,6 +345,8 @@ func (ex *Executor) subscribeChannel(task *ChannelTask, step int) error {
 	loadMeta := packLoadMeta(
 		ex.meta.GetLoadType(task.CollectionID()),
 		task.CollectionID(),
+		collectionInfo.GetDbName(),
+		task.ResourceGroup(),
 		partitions...,
 	)
 
@@ -562,10 +589,13 @@ func (ex *Executor) getMetaInfo(ctx context.Context, task Task) (*milvuspb.Descr
 	}
 
 	loadMeta := packLoadMeta(
-		ex.meta.GetLoadType(collectionID),
-		collectionID,
+		ex.meta.GetLoadType(task.CollectionID()),
+		task.CollectionID(),
+		collectionInfo.GetDbName(),
+		task.ResourceGroup(),
 		partitions...,
 	)
+
 	// get channel first, in case of target updated after segment info fetched
 	channel := ex.targetMgr.GetDmChannel(collectionID, shard, meta.NextTargetFirst)
 	if channel == nil {

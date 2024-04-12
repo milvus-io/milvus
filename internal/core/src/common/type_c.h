@@ -87,6 +87,7 @@ typedef struct CStorageConfig {
     const char* log_level;
     const char* region;
     bool useSSL;
+    const char* sslCACert;
     bool useIAM;
     bool useVirtualHost;
     int64_t requestTimeoutMs;

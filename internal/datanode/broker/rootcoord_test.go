@@ -194,48 +194,6 @@ func (s *rootCoordSuite) TestAllocTimestamp() {
 	})
 }
 
-func (s *rootCoordSuite) TestReportImport() {
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-
-	taskID := rand.Int63()
-
-	req := &rootcoordpb.ImportResult{
-		Status: merr.Status(nil),
-		TaskId: taskID,
-	}
-
-	s.Run("normal_case", func() {
-		s.rc.EXPECT().ReportImport(mock.Anything, mock.Anything).
-			Run(func(_ context.Context, req *rootcoordpb.ImportResult, _ ...grpc.CallOption) {
-				s.Equal(taskID, req.GetTaskId())
-			}).
-			Return(merr.Status(nil), nil)
-
-		err := s.broker.ReportImport(ctx, req)
-		s.NoError(err)
-		s.resetMock()
-	})
-
-	s.Run("rootcoord_return_error", func() {
-		s.rc.EXPECT().ReportImport(mock.Anything, mock.Anything).
-			Return(nil, errors.New("mock"))
-
-		err := s.broker.ReportImport(ctx, req)
-		s.Error(err)
-		s.resetMock()
-	})
-
-	s.Run("rootcoord_return_failure_status", func() {
-		s.rc.EXPECT().ReportImport(mock.Anything, mock.Anything).
-			Return(merr.Status(errors.New("mock")), nil)
-
-		err := s.broker.ReportImport(ctx, req)
-		s.Error(err)
-		s.resetMock()
-	})
-}
-
 func TestRootCoordBroker(t *testing.T) {
 	suite.Run(t, new(rootCoordSuite))
 }

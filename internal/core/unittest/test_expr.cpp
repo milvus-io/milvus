@@ -34,6 +34,7 @@
 #include "index/IndexFactory.h"
 #include "exec/expression/Expr.h"
 #include "exec/Task.h"
+#include "expr/ITypeExpr.h"
 
 using namespace milvus;
 using namespace milvus::query;
@@ -1244,94 +1245,9 @@ TEST_P(ExprTest, TestCompareExpr) {
     std::cout << "end compare test" << std::endl;
 }
 
-TEST_P(ExprTest, TestMultiLogicalExprsOptimization) {
+TEST(Expr, TestExprPerformance) {
+    GTEST_SKIP() << "Skip performance test, open it when test performance";
     auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
-    auto int64_fid = schema->AddDebugField("int64", DataType::INT64);
-    auto str1_fid = schema->AddDebugField("string1", DataType::VARCHAR);
-    schema->set_primary_field_id(str1_fid);
-
-    auto seg = CreateSealedSegment(schema);
-    size_t N = 10000;
-    auto raw_data = DataGen(schema, N);
-    auto fields = schema->get_fields();
-    for (auto field_data : raw_data.raw_->fields_data()) {
-        int64_t field_id = field_data.field_id();
-
-        auto info = FieldDataInfo(field_data.field_id(), N, "/tmp/a");
-        auto field_meta = fields.at(FieldId(field_id));
-        info.channel->push(
-            CreateFieldDataFromDataArray(N, &field_data, field_meta));
-        info.channel->close();
-
-        seg->LoadFieldData(FieldId(field_id), info);
-    }
-
-    ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
-    auto build_expr_with_optim = [&]() -> std::shared_ptr<query::Expr> {
-        ExprPtr child1_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::LessThan,
-                -1,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        ExprPtr child2_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::NotEqual,
-                100,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        return std::make_shared<query::LogicalBinaryExpr>(
-            LogicalBinaryExpr::OpType::LogicalAnd, child1_expr, child2_expr);
-    };
-    auto build_expr = [&]() -> std::shared_ptr<query::Expr> {
-        ExprPtr child1_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::GreaterThan,
-                10,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        ExprPtr child2_expr =
-            std::make_unique<query::UnaryRangeExprImpl<int64_t>>(
-                ColumnInfo(int64_fid, DataType::INT64),
-                proto::plan::OpType::NotEqual,
-                100,
-                proto::plan::GenericValue::ValCase::kInt64Val);
-        return std::make_shared<query::LogicalBinaryExpr>(
-            LogicalBinaryExpr::OpType::LogicalAnd, child1_expr, child2_expr);
-    };
-    auto expr = build_expr_with_optim();
-    auto cost_op = 0;
-    for (int i = 0; i < 10; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*expr);
-        auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now() - start)
-                        .count();
-        std::cout << "cost: " << cost << "us" << std::endl;
-        cost_op += cost;
-    }
-    cost_op = cost_op / 10.0;
-    std::cout << cost_op << std::endl;
-    expr = build_expr();
-    auto cost_no_op = 0;
-    for (int i = 0; i < 10; ++i) {
-        auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*expr);
-        auto cost = std::chrono::duration_cast<std::chrono::microseconds>(
-                        std::chrono::steady_clock::now() - start)
-                        .count();
-        std::cout << "cost: " << cost << "us" << std::endl;
-        cost_no_op += cost;
-    }
-    cost_no_op = cost_no_op / 10.0;
-    std::cout << cost_no_op << std::endl;
-    ASSERT_LT(cost_op, cost_no_op);
-}
-
-TEST_P(ExprTest, TestExprs) {
-    auto schema = std::make_shared<Schema>();
-    auto vec_fid = schema->AddDebugField("fakevec", data_type, 16, metric_type);
     auto int8_fid = schema->AddDebugField("int8", DataType::INT8);
     auto int8_1_fid = schema->AddDebugField("int81", DataType::INT8);
     auto int16_fid = schema->AddDebugField("int16", DataType::INT16);
@@ -1346,8 +1262,16 @@ TEST_P(ExprTest, TestExprs) {
     auto double_fid = schema->AddDebugField("double", DataType::DOUBLE);
     schema->set_primary_field_id(str1_fid);
 
+    std::map<DataType, FieldId> fids = {{DataType::INT8, int8_fid},
+                                        {DataType::INT16, int16_fid},
+                                        {DataType::INT32, int32_fid},
+                                        {DataType::INT64, int64_fid},
+                                        {DataType::VARCHAR, str2_fid},
+                                        {DataType::FLOAT, float_fid},
+                                        {DataType::DOUBLE, double_fid}};
+
     auto seg = CreateSealedSegment(schema);
-    int N = 10000;
+    int N = 1000000;
     auto raw_data = DataGen(schema, N);
 
     // load field data
@@ -1364,8 +1288,6 @@ TEST_P(ExprTest, TestExprs) {
         seg->LoadFieldData(FieldId(field_id), info);
     }
 
-    ExecExprVisitor visitor(*seg, seg->get_row_count(), MAX_TIMESTAMP);
-
     enum ExprType {
         UnaryRangeExpr = 0,
         TermExprImpl = 1,
@@ -1376,128 +1298,313 @@ TEST_P(ExprTest, TestExprs) {
         BinaryArithOpEvalRangeExpr = 6,
     };
 
-    auto build_expr = [&](enum ExprType test_type,
-                          int n) -> std::shared_ptr<query::Expr> {
-        switch (test_type) {
-            case UnaryRangeExpr:
-                return std::make_shared<query::UnaryRangeExprImpl<int8_t>>(
-                    ColumnInfo(int8_fid, DataType::INT8),
-                    proto::plan::OpType::GreaterThan,
-                    10,
-                    proto::plan::GenericValue::ValCase::kInt64Val);
-                break;
-            case TermExprImpl: {
-                std::vector<std::string> retrieve_ints;
-                for (int i = 0; i < n; ++i) {
-                    retrieve_ints.push_back("xxxxxx" + std::to_string(i % 10));
-                }
-                return std::make_shared<query::TermExprImpl<std::string>>(
-                    ColumnInfo(str1_fid, DataType::VARCHAR),
-                    retrieve_ints,
-                    proto::plan::GenericValue::ValCase::kStringVal);
-                // std::vector<double> retrieve_ints;
-                // for (int i = 0; i < n; ++i) {
-                //     retrieve_ints.push_back(i);
-                // }
-                // return std::make_shared<query::TermExprImpl<double>>(
-                //     ColumnInfo(double_fid, DataType::DOUBLE),
-                //     retrieve_ints,
-                //     proto::plan::GenericValue::ValCase::kFloatVal);
-                break;
-            }
-            case CompareExpr: {
-                auto compare_expr = std::make_shared<query::CompareExpr>();
-                compare_expr->op_type_ = OpType::LessThan;
-
-                compare_expr->left_data_type_ = DataType::INT8;
-                compare_expr->left_field_id_ = int8_fid;
-
-                compare_expr->right_data_type_ = DataType::INT8;
-                compare_expr->right_field_id_ = int8_1_fid;
-                return compare_expr;
-                break;
-            }
-            case BinaryRangeExpr: {
-                return std::make_shared<query::BinaryRangeExprImpl<int64_t>>(
-                    ColumnInfo(int64_fid, DataType::INT64),
-                    proto::plan::GenericValue::ValCase::kInt64Val,
-                    true,
-                    true,
-                    10,
-                    45);
-                break;
-            }
-            case LogicalUnaryExpr: {
-                ExprPtr child_expr =
-                    std::make_unique<query::UnaryRangeExprImpl<int32_t>>(
-                        ColumnInfo(int32_fid, DataType::INT32),
-                        proto::plan::OpType::GreaterThan,
-                        10,
-                        proto::plan::GenericValue::ValCase::kInt64Val);
-                return std::make_shared<query::LogicalUnaryExpr>(
-                    LogicalUnaryExpr::OpType::LogicalNot, child_expr);
-                break;
-            }
-            case LogicalBinaryExpr: {
-                ExprPtr child1_expr =
-                    std::make_unique<query::UnaryRangeExprImpl<int8_t>>(
-                        ColumnInfo(int8_fid, DataType::INT8),
-                        proto::plan::OpType::GreaterThan,
-                        10,
-                        proto::plan::GenericValue::ValCase::kInt64Val);
-                ExprPtr child2_expr =
-                    std::make_unique<query::UnaryRangeExprImpl<int8_t>>(
-                        ColumnInfo(int8_fid, DataType::INT8),
-                        proto::plan::OpType::NotEqual,
-                        10,
-                        proto::plan::GenericValue::ValCase::kInt64Val);
-                return std::make_shared<query::LogicalBinaryExpr>(
-                    LogicalBinaryExpr::OpType::LogicalXor,
-                    child1_expr,
-                    child2_expr);
-                break;
-            }
-            case BinaryArithOpEvalRangeExpr: {
-                return std::make_shared<
-                    query::BinaryArithOpEvalRangeExprImpl<int8_t>>(
-                    ColumnInfo(int8_fid, DataType::INT8),
-                    proto::plan::GenericValue::ValCase::kInt64Val,
-                    proto::plan::ArithOpType::Add,
-                    10,
-                    proto::plan::OpType::Equal,
-                    100);
-                break;
-            }
-            default:
-                return std::make_shared<query::BinaryRangeExprImpl<int64_t>>(
-                    ColumnInfo(int64_fid, DataType::INT64),
-                    proto::plan::GenericValue::ValCase::kInt64Val,
-                    true,
-                    true,
-                    10,
-                    45);
-                break;
+    auto build_unary_range_expr = [&](DataType data_type,
+                                      int64_t value) -> expr::TypedExprPtr {
+        if (IsIntegerDataType(data_type)) {
+            proto::plan::GenericValue val;
+            val.set_int64_val(value);
+            return std::make_shared<expr::UnaryRangeFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                proto::plan::OpType::LessThan,
+                val);
+        } else if (IsFloatDataType(data_type)) {
+            proto::plan::GenericValue val;
+            val.set_float_val(float(value));
+            return std::make_shared<expr::UnaryRangeFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                proto::plan::OpType::LessThan,
+                val);
+        } else if (IsStringDataType(data_type)) {
+            proto::plan::GenericValue val;
+            val.set_string_val(std::to_string(value));
+            return std::make_shared<expr::UnaryRangeFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                proto::plan::OpType::LessThan,
+                val);
+        } else {
+            throw std::runtime_error("not supported type");
         }
     };
-    auto test_case = [&](int n) {
-        auto expr = build_expr(TermExprImpl, n);
-        std::cout << "start test" << std::endl;
+
+    auto build_binary_range_expr = [&](DataType data_type,
+                                       int64_t low,
+                                       int64_t high) -> expr::TypedExprPtr {
+        if (IsIntegerDataType(data_type)) {
+            proto::plan::GenericValue val1;
+            val1.set_int64_val(low);
+            proto::plan::GenericValue val2;
+            val2.set_int64_val(high);
+            return std::make_shared<expr::BinaryRangeFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                val1,
+                val2,
+                true,
+                true);
+        } else if (IsFloatDataType(data_type)) {
+            proto::plan::GenericValue val1;
+            val1.set_float_val(float(low));
+            proto::plan::GenericValue val2;
+            val2.set_float_val(float(high));
+            return std::make_shared<expr::BinaryRangeFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                val1,
+                val2,
+                true,
+                true);
+        } else if (IsStringDataType(data_type)) {
+            proto::plan::GenericValue val1;
+            val1.set_string_val(std::to_string(low));
+            proto::plan::GenericValue val2;
+            val2.set_string_val(std::to_string(low));
+            return std::make_shared<expr::BinaryRangeFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                val1,
+                val2,
+                true,
+                true);
+        } else {
+            throw std::runtime_error("not supported type");
+        }
+    };
+
+    auto build_term_expr =
+        [&](DataType data_type,
+            std::vector<int64_t> in_vals) -> expr::TypedExprPtr {
+        if (IsIntegerDataType(data_type)) {
+            std::vector<proto::plan::GenericValue> vals;
+            for (auto& v : in_vals) {
+                proto::plan::GenericValue val;
+                val.set_int64_val(v);
+                vals.push_back(val);
+            }
+            return std::make_shared<expr::TermFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type), vals, false);
+        } else if (IsFloatDataType(data_type)) {
+            std::vector<proto::plan::GenericValue> vals;
+            for (auto& v : in_vals) {
+                proto::plan::GenericValue val;
+                val.set_float_val(float(v));
+                vals.push_back(val);
+            }
+            return std::make_shared<expr::TermFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type), vals, false);
+        } else if (IsStringDataType(data_type)) {
+            std::vector<proto::plan::GenericValue> vals;
+            for (auto& v : in_vals) {
+                proto::plan::GenericValue val;
+                val.set_string_val(std::to_string(v));
+                vals.push_back(val);
+            }
+            return std::make_shared<expr::TermFilterExpr>(
+                expr::ColumnInfo(fids[data_type], data_type), vals, false);
+        } else {
+            throw std::runtime_error("not supported type");
+        }
+    };
+
+    auto build_compare_expr = [&](DataType data_type) -> expr::TypedExprPtr {
+        if (IsIntegerDataType(data_type) || IsFloatDataType(data_type) ||
+            IsStringDataType(data_type)) {
+            return std::make_shared<expr::CompareExpr>(
+                fids[data_type],
+                fids[data_type],
+                data_type,
+                data_type,
+                proto::plan::OpType::LessThan);
+        } else {
+            throw std::runtime_error("not supported type");
+        }
+    };
+
+    auto build_logical_unary_expr =
+        [&](DataType data_type) -> expr::TypedExprPtr {
+        auto child_expr = build_unary_range_expr(data_type, 10);
+        return std::make_shared<expr::LogicalUnaryExpr>(
+            expr::LogicalUnaryExpr::OpType::LogicalNot, child_expr);
+    };
+
+    auto build_logical_binary_expr =
+        [&](DataType data_type) -> expr::TypedExprPtr {
+        auto child1_expr = build_unary_range_expr(data_type, 10);
+        auto child2_expr = build_unary_range_expr(data_type, 10);
+        return std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, child1_expr, child2_expr);
+    };
+
+    auto build_multi_logical_binary_expr =
+        [&](DataType data_type) -> expr::TypedExprPtr {
+        auto child1_expr = build_unary_range_expr(data_type, 100);
+        auto child2_expr = build_unary_range_expr(data_type, 100);
+        auto child3_expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, child1_expr, child2_expr);
+        auto child4_expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, child1_expr, child2_expr);
+        auto child5_expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, child3_expr, child4_expr);
+        auto child6_expr = std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, child3_expr, child4_expr);
+        return std::make_shared<expr::LogicalBinaryExpr>(
+            expr::LogicalBinaryExpr::OpType::And, child5_expr, child6_expr);
+    };
+
+    auto build_arith_op_expr = [&](DataType data_type,
+                                   int64_t right_val,
+                                   int64_t val) -> expr::TypedExprPtr {
+        if (IsIntegerDataType(data_type)) {
+            proto::plan::GenericValue val1;
+            val1.set_int64_val(right_val);
+            proto::plan::GenericValue val2;
+            val2.set_int64_val(val);
+            return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                proto::plan::OpType::Equal,
+                proto::plan::ArithOpType::Add,
+                val1,
+                val2);
+        } else if (IsFloatDataType(data_type)) {
+            proto::plan::GenericValue val1;
+            val1.set_float_val(float(right_val));
+            proto::plan::GenericValue val2;
+            val2.set_float_val(float(val));
+            return std::make_shared<expr::BinaryArithOpEvalRangeExpr>(
+                expr::ColumnInfo(fids[data_type], data_type),
+                proto::plan::OpType::Equal,
+                proto::plan::ArithOpType::Add,
+                val1,
+                val2);
+        } else {
+            throw std::runtime_error("not supported type");
+        }
+    };
+
+    auto test_case_base = [=, &seg](expr::TypedExprPtr expr) {
+        query::ExecPlanNodeVisitor visitor(*seg, MAX_TIMESTAMP);
+        std::cout << expr->ToString() << std::endl;
+        BitsetType final;
+        auto plan =
+            std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
         auto start = std::chrono::steady_clock::now();
-        auto final = visitor.call_child(*expr);
-        std::cout << n << "cost: "
+        for (int i = 0; i < 100; i++) {
+            visitor.ExecuteExprNode(plan, seg.get(), N, final);
+            EXPECT_EQ(final.size(), N);
+        }
+        std::cout << "cost: "
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
-                         .count()
+                             .count() /
+                         100.0
                   << "us" << std::endl;
     };
-    test_case(3);
-    test_case(10);
-    test_case(20);
-    test_case(30);
-    test_case(50);
-    test_case(100);
-    test_case(200);
-    // test_case(500);
+
+    std::cout << "test unary range operator" << std::endl;
+    auto expr = build_unary_range_expr(DataType::INT8, 10);
+    test_case_base(expr);
+    expr = build_unary_range_expr(DataType::INT16, 10);
+    test_case_base(expr);
+    expr = build_unary_range_expr(DataType::INT32, 10);
+    test_case_base(expr);
+    expr = build_unary_range_expr(DataType::INT64, 10);
+    test_case_base(expr);
+    expr = build_unary_range_expr(DataType::FLOAT, 10);
+    test_case_base(expr);
+    expr = build_unary_range_expr(DataType::DOUBLE, 10);
+    test_case_base(expr);
+    expr = build_unary_range_expr(DataType::VARCHAR, 10);
+    test_case_base(expr);
+
+    std::cout << "test binary range operator" << std::endl;
+    expr = build_binary_range_expr(DataType::INT8, 10, 100);
+    test_case_base(expr);
+    expr = build_binary_range_expr(DataType::INT16, 10, 100);
+    test_case_base(expr);
+    expr = build_binary_range_expr(DataType::INT32, 10, 100);
+    test_case_base(expr);
+    expr = build_binary_range_expr(DataType::INT64, 10, 100);
+    test_case_base(expr);
+    expr = build_binary_range_expr(DataType::FLOAT, 10, 100);
+    test_case_base(expr);
+    expr = build_binary_range_expr(DataType::DOUBLE, 10, 100);
+    test_case_base(expr);
+    expr = build_binary_range_expr(DataType::VARCHAR, 10, 100);
+    test_case_base(expr);
+
+    std::cout << "test compare expr operator" << std::endl;
+    expr = build_compare_expr(DataType::INT8);
+    test_case_base(expr);
+    expr = build_compare_expr(DataType::INT16);
+    test_case_base(expr);
+    expr = build_compare_expr(DataType::INT32);
+    test_case_base(expr);
+    expr = build_compare_expr(DataType::INT64);
+    test_case_base(expr);
+    expr = build_compare_expr(DataType::FLOAT);
+    test_case_base(expr);
+    expr = build_compare_expr(DataType::DOUBLE);
+    test_case_base(expr);
+    expr = build_compare_expr(DataType::VARCHAR);
+    test_case_base(expr);
+
+    std::cout << "test artih op val operator" << std::endl;
+    expr = build_arith_op_expr(DataType::INT8, 10, 100);
+    test_case_base(expr);
+    expr = build_arith_op_expr(DataType::INT16, 10, 100);
+    test_case_base(expr);
+    expr = build_arith_op_expr(DataType::INT32, 10, 100);
+    test_case_base(expr);
+    expr = build_arith_op_expr(DataType::INT64, 10, 100);
+    test_case_base(expr);
+    expr = build_arith_op_expr(DataType::FLOAT, 10, 100);
+    test_case_base(expr);
+    expr = build_arith_op_expr(DataType::DOUBLE, 10, 100);
+    test_case_base(expr);
+
+    std::cout << "test logical unary expr operator" << std::endl;
+    expr = build_logical_unary_expr(DataType::INT8);
+    test_case_base(expr);
+    expr = build_logical_unary_expr(DataType::INT16);
+    test_case_base(expr);
+    expr = build_logical_unary_expr(DataType::INT32);
+    test_case_base(expr);
+    expr = build_logical_unary_expr(DataType::INT64);
+    test_case_base(expr);
+    expr = build_logical_unary_expr(DataType::FLOAT);
+    test_case_base(expr);
+    expr = build_logical_unary_expr(DataType::DOUBLE);
+    test_case_base(expr);
+    expr = build_logical_unary_expr(DataType::VARCHAR);
+    test_case_base(expr);
+
+    std::cout << "test logical binary expr operator" << std::endl;
+    expr = build_logical_binary_expr(DataType::INT8);
+    test_case_base(expr);
+    expr = build_logical_binary_expr(DataType::INT16);
+    test_case_base(expr);
+    expr = build_logical_binary_expr(DataType::INT32);
+    test_case_base(expr);
+    expr = build_logical_binary_expr(DataType::INT64);
+    test_case_base(expr);
+    expr = build_logical_binary_expr(DataType::FLOAT);
+    test_case_base(expr);
+    expr = build_logical_binary_expr(DataType::DOUBLE);
+    test_case_base(expr);
+    expr = build_logical_binary_expr(DataType::VARCHAR);
+    test_case_base(expr);
+
+    std::cout << "test multi logical binary expr operator" << std::endl;
+    expr = build_multi_logical_binary_expr(DataType::INT8);
+    test_case_base(expr);
+    expr = build_multi_logical_binary_expr(DataType::INT16);
+    test_case_base(expr);
+    expr = build_multi_logical_binary_expr(DataType::INT32);
+    test_case_base(expr);
+    expr = build_multi_logical_binary_expr(DataType::INT64);
+    test_case_base(expr);
+    expr = build_multi_logical_binary_expr(DataType::FLOAT);
+    test_case_base(expr);
+    expr = build_multi_logical_binary_expr(DataType::DOUBLE);
+    test_case_base(expr);
+    expr = build_multi_logical_binary_expr(DataType::VARCHAR);
+    test_case_base(expr);
 }
 
 TEST_P(ExprTest, test_term_pk) {

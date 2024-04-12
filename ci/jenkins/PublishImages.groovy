@@ -70,6 +70,7 @@ pipeline {
                                         export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
                                         export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
                                         export MILVUS_IMAGE_TAG="${imageTag}-amd64"
+                                        export DOCKER_BUILDKIT=1
                                         build/build_image.sh
                                         docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                         docker logout
@@ -121,6 +122,7 @@ pipeline {
                                     export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
                                     export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
                                     export MILVUS_IMAGE_TAG="${imageTag}-arm64"
+                                    export DOCKER_BUILDKIT=1
                                     BUILD_ARGS="--build-arg TARGETARCH=arm64" build/build_image.sh
                                     docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                     docker logout

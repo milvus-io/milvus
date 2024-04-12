@@ -1562,6 +1562,31 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
+	constructSubSearchRequest := func(nq int) *milvuspb.SubSearchRequest {
+		plg := constructVectorsPlaceholderGroup(nq)
+		plgBs, err := proto.Marshal(plg)
+		assert.NoError(t, err)
+
+		params := make(map[string]string)
+		params["nprobe"] = strconv.Itoa(nprobe)
+		b, err := json.Marshal(params)
+		assert.NoError(t, err)
+		searchParams := []*commonpb.KeyValuePair{
+			{Key: MetricTypeKey, Value: metric.L2},
+			{Key: SearchParamsKey, Value: string(b)},
+			{Key: AnnsFieldKey, Value: floatVecField},
+			{Key: TopKKey, Value: strconv.Itoa(topk)},
+			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
+		}
+
+		return &milvuspb.SubSearchRequest{
+			Dsl:              expr,
+			PlaceholderGroup: plgBs,
+			DslType:          commonpb.DslType_BoolExprV1,
+			SearchParams:     searchParams,
+		}
+	}
+
 	wg.Add(1)
 	t.Run("search", func(t *testing.T) {
 		defer wg.Done()
@@ -1572,7 +1597,7 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
 
-	constructHybridSearchRequest := func(reqs []*milvuspb.SearchRequest) *milvuspb.HybridSearchRequest {
+	constructAdvancedSearchRequest := func() *milvuspb.SearchRequest {
 		params := make(map[string]float64)
 		params[RRFParamsKey] = 60
 		b, err := json.Marshal(params)
@@ -1584,32 +1609,33 @@ func TestProxy(t *testing.T) {
 			{Key: RoundDecimalKey, Value: strconv.Itoa(roundDecimal)},
 		}
 
-		return &milvuspb.HybridSearchRequest{
+		req1 := constructSubSearchRequest(nq)
+		req2 := constructSubSearchRequest(nq)
+		ret := &milvuspb.SearchRequest{
 			Base:               nil,
 			DbName:             dbName,
 			CollectionName:     collectionName,
-			Requests:           reqs,
 			PartitionNames:     nil,
 			OutputFields:       nil,
-			RankParams:         rankParams,
+			SearchParams:       rankParams,
 			TravelTimestamp:    0,
 			GuaranteeTimestamp: 0,
 		}
+		ret.SubReqs = append(ret.SubReqs, req1)
+		ret.SubReqs = append(ret.SubReqs, req2)
+		return ret
 	}
 
 	wg.Add(1)
-	nq = 1
-	t.Run("hybrid search", func(t *testing.T) {
+	t.Run("advanced search", func(t *testing.T) {
 		defer wg.Done()
-		req1 := constructSearchRequest(nq)
-		req2 := constructSearchRequest(nq)
-
-		resp, err := proxy.HybridSearch(ctx, constructHybridSearchRequest([]*milvuspb.SearchRequest{req1, req2}))
+		req := constructAdvancedSearchRequest()
+		resp, err := proxy.Search(ctx, req)
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.Status.ErrorCode)
 	})
-	nq = 10
 
+	nq = 10
 	constructPrimaryKeysPlaceholderGroup := func() *commonpb.PlaceholderGroup {
 		expr := fmt.Sprintf("%v in [%v]", int64Field, insertedIds[0])
 		exprBytes := []byte(expr)
@@ -2401,6 +2427,18 @@ func TestProxy(t *testing.T) {
 
 		_, err = globalMetaCache.GetCollectionID(ctx, dbName, collectionName)
 		assert.Error(t, err)
+
+		resp, err = proxy.InvalidateCollectionMetaCache(ctx, &proxypb.InvalidateCollMetaCacheRequest{
+			Base: &commonpb.MsgBase{
+				MsgType: commonpb.MsgType_DropDatabase,
+			},
+			DbName: dbName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.ErrorCode)
+
+		hasDatabase := globalMetaCache.HasDatabase(ctx, dbName)
+		assert.False(t, hasDatabase)
 	})
 
 	wg.Add(1)

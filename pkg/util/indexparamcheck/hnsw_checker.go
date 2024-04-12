@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type hnswChecker struct {
@@ -32,8 +33,8 @@ func (c hnswChecker) CheckTrain(params map[string]string) error {
 
 func (c hnswChecker) CheckValidDataType(dType schemapb.DataType) error {
 	// TODO(SPARSE) we'll add sparse vector support in HNSW later in cardinal
-	if dType != schemapb.DataType_FloatVector && dType != schemapb.DataType_BinaryVector && dType != schemapb.DataType_Float16Vector && dType != schemapb.DataType_BFloat16Vector {
-		return fmt.Errorf("only support float vector or binary vector")
+	if !typeutil.IsDenseFloatVectorType(dType) {
+		return fmt.Errorf("HNSW only support float vector data type")
 	}
 	return nil
 }

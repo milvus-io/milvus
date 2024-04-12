@@ -174,7 +174,7 @@ jobs:
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_go_codecov.sh
-          ./build/builder.sh /bin/bash -c ./scripts/run_go_codecov.sh
+          ./build/builder.sh /bin/bash -c "make codecov-go-without-build"
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
@@ -219,7 +219,7 @@ jobs:
         run: |
           chmod +x build/builder.sh
           chmod +x scripts/run_intergration_test.sh
-          ./build/builder.sh /bin/bash -c ./scripts/run_intergration_test.sh
+          ./build/builder.sh /bin/bash -c "make integration-test" 
       - name: Archive result
         uses: actions/upload-artifact@v4
         with:
@@ -254,20 +254,22 @@ jobs:
         run: |
           ls -lah
       - name: Upload coverage to Codecov
-        if: "github.repository == 'milvus-io/milvus'"
-        uses: codecov/codecov-action@v3.1.1
+        if: ${{ github.repository == 'milvus-io/milvus' }}
+        uses: codecov/codecov-action@v4
         id: upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
+          disable_safe_directory: true
       - name: Retry Upload coverage to Codecov
-        if: "${{ failure() }} && github.repository == 'milvus-io/milvus'"
-        uses: codecov/codecov-action@v3.1.1
+        if: ${{ failure()  && github.repository == 'milvus-io/milvus' }}
+        uses: codecov/codecov-action@v4
         id: retry_upload_cov
         with:
           token: ${{ secrets.CODECOV_TOKEN }}
           files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
           name: ubuntu-20.04-unittests
           fail_ci_if_error: true
+          disable_safe_directory: true

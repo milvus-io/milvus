@@ -342,9 +342,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 		taskType := GetTaskType(task)
 
 		if taskType == TaskTypeMove {
-			leaderSegmentDist := scheduler.distMgr.LeaderViewManager.GetSealedSegmentDist(task.SegmentID())
+			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(task.SegmentID(), false))
 			nodeSegmentDist := scheduler.distMgr.SegmentDistManager.GetSegmentDist(task.SegmentID())
-			if !lo.Contains(leaderSegmentDist, task.Actions()[1].Node()) ||
+			if len(views) == 0 ||
 				!lo.Contains(nodeSegmentDist, task.Actions()[1].Node()) {
 				return merr.WrapErrServiceInternal("source segment released, stop balancing")
 			}
@@ -370,14 +370,16 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 
 		taskType := GetTaskType(task)
 		if taskType == TaskTypeGrow {
-			nodesWithChannel := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
+			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(task.Channel()))
+			nodesWithChannel := lo.Map(views, func(v *meta.LeaderView, _ int) UniqueID { return v.ID })
 			replicaNodeMap := utils.GroupNodesByReplica(scheduler.meta.ReplicaManager, task.CollectionID(), nodesWithChannel)
 			if _, ok := replicaNodeMap[task.ReplicaID()]; ok {
 				return merr.WrapErrServiceInternal("channel subscribed, it can be only balanced")
 			}
 		} else if taskType == TaskTypeMove {
-			channelDist := scheduler.distMgr.LeaderViewManager.GetChannelDist(task.Channel())
-			if !lo.Contains(channelDist, task.Actions()[1].Node()) {
+			views := scheduler.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(task.Channel()))
+			_, ok := lo.Find(views, func(v *meta.LeaderView) bool { return v.ID == task.Actions()[1].Node() })
+			if !ok {
 				return merr.WrapErrServiceInternal("source channel unsubscribed, stop balancing")
 			}
 		}
@@ -850,12 +852,16 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
 			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
 				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTarget)
 			} else {
-				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTarget)
+				segment = scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.NextTargetFirst)
 			}
 			if segment == nil {
 				log.Warn("task stale due to the segment to load not exists in targets",
@@ -894,6 +900,10 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+				log.Warn("task stale due to node offline", zap.String("channel", task.Channel()))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
 			if scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.NextTargetFirst) == nil {
 				log.Warn("the task is stale, the channel to subscribe not exists in targets",
 					zap.String("channel", task.Channel()))
@@ -919,6 +929,11 @@ func (scheduler *taskScheduler) checkLeaderTaskStale(task *LeaderTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.(*LeaderAction).GetLeaderID()); ok {
+				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
+
 			taskType := GetTaskType(task)
 			segment := scheduler.targetMgr.GetSealedSegment(task.CollectionID(), task.SegmentID(), meta.CurrentTargetFirst)
 			if segment == nil {

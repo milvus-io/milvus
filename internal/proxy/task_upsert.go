@@ -245,7 +245,7 @@ func (it *upsertTask) deletePreExecute(ctx context.Context) error {
 		// multi entities with same pk and diff partition keys may be hashed to multi physical partitions
 		// if deleteMsg.partitionID = common.InvalidPartition,
 		// all segments with this pk under the collection will have the delete record
-		it.upsertMsg.DeleteMsg.PartitionID = common.InvalidPartitionID
+		it.upsertMsg.DeleteMsg.PartitionID = common.AllPartitionsID
 	} else {
 		// partition name could be defaultPartitionName or name specified by sdk
 		partName := it.upsertMsg.DeleteMsg.PartitionName

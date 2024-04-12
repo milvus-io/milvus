@@ -16,6 +16,7 @@
 
 #include "index/IndexFactory.h"
 #include "common/EasyAssert.h"
+#include "common/Types.h"
 #include "index/VectorMemIndex.h"
 #include "index/Utils.h"
 #include "index/Meta.h"
@@ -110,7 +111,7 @@ IndexBasePtr
 IndexFactory::CreateIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
-    if (datatype_is_vector(create_index_info.field_type)) {
+    if (IsVectorDataType(create_index_info.field_type)) {
         return CreateVectorIndex(create_index_info, file_manager_context);
     }
 
@@ -122,7 +123,7 @@ IndexFactory::CreateIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context,
     std::shared_ptr<milvus_storage::Space> space) {
-    if (datatype_is_vector(create_index_info.field_type)) {
+    if (IsVectorDataType(create_index_info.field_type)) {
         return CreateVectorIndex(
             create_index_info, file_manager_context, space);
     }
@@ -188,15 +189,14 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorDiskAnnIndex<float>>(
                     index_type, metric_type, version, file_manager_context);
             }
-            // // Uncomment after adding diskann part
-            // case DataType::VECTOR_FLOAT16: {
-            //     return std::make_unique<VectorDiskAnnIndex<float16>>(
-            //         index_type, metric_type, version, file_manager_context);
-            // }
-            // case DataType::VECTOR_BFLOAT16: {
-            //     return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
-            //         index_type, metric_type, version, file_manager_context);
-            // }
+            case DataType::VECTOR_FLOAT16: {
+                return std::make_unique<VectorDiskAnnIndex<float16>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
             default:
                 throw SegcoreError(
                     DataTypeInvalid,
@@ -295,15 +295,22 @@ IndexFactory::CreateVectorIndex(
                     space,
                     file_manager_context);
             }
-            // // Uncomment after adding diskann part
-            // case DataType::VECTOR_FLOAT16: {
-            //     return std::make_unique<VectorDiskAnnIndex<float16>>(
-            //         index_type, metric_type, version, file_manager_context);
-            // }
-            // case DataType::VECTOR_BFLOAT16: {
-            //     return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
-            //         index_type, metric_type, version, file_manager_context);
-            // }
+            case DataType::VECTOR_FLOAT16: {
+                return std::make_unique<VectorDiskAnnIndex<float16>>(
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
+            }
+            case DataType::VECTOR_BFLOAT16: {
+                return std::make_unique<VectorDiskAnnIndex<bfloat16>>(
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
+            }
             default:
                 throw SegcoreError(
                     DataTypeInvalid,

@@ -112,6 +112,18 @@ func BuildRecord(b *array.RecordBuilder, data *storage.InsertData, fields []*sch
 			for i := 0; i < length; i++ {
 				builder.Append(data[i*byteLength : (i+1)*byteLength])
 			}
+		case schemapb.DataType_BFloat16Vector:
+			vecData := data.Data[field.FieldID].(*storage.BFloat16VectorFieldData)
+			builder := fBuilder.(*array.FixedSizeBinaryBuilder)
+			dim := vecData.Dim
+			data := vecData.Data
+			byteLength := dim * 2
+			length := len(data) / byteLength
+
+			builder.Reserve(length)
+			for i := 0; i < length; i++ {
+				builder.Append(data[i*byteLength : (i+1)*byteLength])
+			}
 
 		default:
 			return merr.WrapErrParameterInvalidMsg("unknown type %v", field.DataType.String())

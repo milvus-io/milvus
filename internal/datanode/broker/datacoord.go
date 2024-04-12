@@ -146,15 +146,3 @@ func (dc *dataCoordBroker) UpdateSegmentStatistics(ctx context.Context, req *dat
 
 	return nil
 }
-
-func (dc *dataCoordBroker) SaveImportSegment(ctx context.Context, req *datapb.SaveImportSegmentRequest) error {
-	log := log.Ctx(ctx)
-
-	resp, err := dc.client.SaveImportSegment(ctx, req)
-	if err := merr.CheckRPCCall(resp, err); err != nil {
-		log.Warn("failed to UpdateSegmentStatistics", zap.Error(err))
-		return err
-	}
-
-	return nil
-}

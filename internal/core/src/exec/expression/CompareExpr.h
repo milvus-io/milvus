@@ -24,7 +24,6 @@
 #include "common/Vector.h"
 #include "exec/expression/Expr.h"
 #include "segcore/SegmentInterface.h"
-#include "simd/interface.h"
 
 namespace milvus {
 namespace exec {
@@ -42,7 +41,12 @@ using ChunkDataAccessor = std::function<const number(int)>;
 template <typename T, typename U, proto::plan::OpType op>
 struct CompareElementFunc {
     void
-    operator_base(const T* left, const U* right, size_t size, bool* res) {
+    operator()(const T* left,
+               const U* right,
+               size_t size,
+               TargetBitmapView res) {
+        /*
+        // This is the original code, kept here for the documentation purposes
         for (int i = 0; i < size; ++i) {
             if constexpr (op == proto::plan::OpType::Equal) {
                 res[i] = left[i] == right[i];
@@ -63,24 +67,31 @@ struct CompareElementFunc {
                                 op));
             }
         }
-    }
+        */
 
-    void
-    operator()(const T* left, const U* right, size_t size, bool* res) {
-#if defined(USE_DYNAMIC_SIMD)
-        if constexpr (std::is_same_v<T, U>) {
-            milvus::simd::compare_col_func<T>(
-                static_cast<milvus::simd::CompareType>(op),
-                left,
-                right,
-                size,
-                res);
+        if constexpr (op == proto::plan::OpType::Equal) {
+            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::EQ>(
+                left, right, size);
+        } else if constexpr (op == proto::plan::OpType::NotEqual) {
+            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::NE>(
+                left, right, size);
+        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GT>(
+                left, right, size);
+        } else if constexpr (op == proto::plan::OpType::LessThan) {
+            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LT>(
+                left, right, size);
+        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::GE>(
+                left, right, size);
+        } else if constexpr (op == proto::plan::OpType::LessEqual) {
+            res.inplace_compare_column<T, U, milvus::bitset::CompareOpType::LE>(
+                left, right, size);
         } else {
-            operator_base(left, right, size, res);
+            PanicInfo(OpTypeInvalid,
+                      fmt::format(
+                          "unsupported op_type:{} for CompareElementFunc", op));
         }
-#else
-        operator_base(left, right, size, res);
-#endif
     }
 };
 
@@ -148,7 +159,7 @@ class PhyCompareFilterExpr : public Expr {
 
     template <typename T, typename U, typename FUNC, typename... ValTypes>
     int64_t
-    ProcessBothDataChunks(FUNC func, bool* res, ValTypes... values) {
+    ProcessBothDataChunks(FUNC func, TargetBitmapView res, ValTypes... values) {
         int64_t processed_size = 0;
 
         for (size_t i = current_chunk_id_; i < num_chunk_; i++) {

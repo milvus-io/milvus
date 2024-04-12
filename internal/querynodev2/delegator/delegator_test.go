@@ -266,7 +266,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				if req.GetScope() == querypb.DataScope_Streaming {
 					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
@@ -279,7 +279,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -334,7 +334,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -374,7 +374,7 @@ func (s *DelegatorSuite) TestSearch() {
 		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
 			Run(func(_ context.Context, req *querypb.SearchRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -462,251 +462,6 @@ func (s *DelegatorSuite) TestSearch() {
 
 		_, err := s.delegator.Search(ctx, &querypb.SearchRequest{
 			Req:         &internalpb.SearchRequest{Base: commonpbutil.NewMsgBase()},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.Error(err)
-	})
-}
-
-func (s *DelegatorSuite) TestHybridSearch() {
-	s.delegator.Start()
-	paramtable.SetNodeID(1)
-	s.initSegments()
-	s.Run("normal", func() {
-		defer func() {
-			s.workerManager.ExpectedCalls = nil
-		}()
-		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
-
-		workers[1] = worker1
-		workers[2] = worker2
-
-		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				s.EqualValues(1, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
-				if req.GetScope() == querypb.DataScope_Streaming {
-					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
-					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
-				}
-				if req.GetScope() == querypb.DataScope_Historical {
-					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
-					s.ElementsMatch([]int64{1000, 1001}, req.GetSegmentIDs())
-				}
-			}).Return(&internalpb.SearchResults{}, nil)
-		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
-				s.Equal(querypb.DataScope_Historical, req.GetScope())
-				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
-				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
-			}).Return(&internalpb.SearchResults{}, nil)
-
-		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
-			return workers[nodeID]
-		}, nil)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		results, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base: commonpbutil.NewMsgBase(),
-				Reqs: []*internalpb.SearchRequest{
-					{Base: commonpbutil.NewMsgBase()},
-					{Base: commonpbutil.NewMsgBase()},
-				},
-			},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.NoError(err)
-		s.Equal(2, len(results.Results))
-	})
-
-	s.Run("partition_not_loaded", func() {
-		defer func() {
-			s.workerManager.ExpectedCalls = nil
-		}()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base: commonpbutil.NewMsgBase(),
-				// not load partation -1,will return error
-				PartitionIDs: []int64{-1},
-			},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.True(errors.Is(err, merr.ErrPartitionNotLoaded))
-	})
-
-	s.Run("worker_return_error", func() {
-		defer func() {
-			s.workerManager.ExpectedCalls = nil
-		}()
-		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
-
-		workers[1] = worker1
-		workers[2] = worker2
-
-		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).Return(nil, errors.New("mock error"))
-		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
-				s.Equal(querypb.DataScope_Historical, req.GetScope())
-				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
-				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
-			}).Return(&internalpb.SearchResults{}, nil)
-
-		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
-			return workers[nodeID]
-		}, nil)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base: commonpbutil.NewMsgBase(),
-				Reqs: []*internalpb.SearchRequest{
-					{
-						Base: commonpbutil.NewMsgBase(),
-					},
-				},
-			},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.Error(err)
-	})
-
-	s.Run("worker_return_failure_code", func() {
-		defer func() {
-			s.workerManager.ExpectedCalls = nil
-		}()
-		workers := make(map[int64]*cluster.MockWorker)
-		worker1 := &cluster.MockWorker{}
-		worker2 := &cluster.MockWorker{}
-
-		workers[1] = worker1
-		workers[2] = worker2
-
-		worker1.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).Return(&internalpb.SearchResults{
-			Status: &commonpb.Status{
-				ErrorCode: commonpb.ErrorCode_UnexpectedError,
-				Reason:    "mocked error",
-			},
-		}, nil)
-		worker2.EXPECT().SearchSegments(mock.Anything, mock.AnythingOfType("*querypb.SearchRequest")).
-			Run(func(_ context.Context, req *querypb.SearchRequest) {
-				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
-				s.Equal(querypb.DataScope_Historical, req.GetScope())
-				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
-				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
-			}).Return(&internalpb.SearchResults{}, nil)
-
-		s.workerManager.EXPECT().GetWorker(mock.Anything, mock.AnythingOfType("int64")).Call.Return(func(_ context.Context, nodeID int64) cluster.Worker {
-			return workers[nodeID]
-		}, nil)
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base: commonpbutil.NewMsgBase(),
-				Reqs: []*internalpb.SearchRequest{
-					{
-						Base: commonpbutil.NewMsgBase(),
-					},
-				},
-			},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.Error(err)
-	})
-
-	s.Run("wrong_channel", func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			DmlChannels: []string{"non_exist_channel"},
-		})
-
-		s.Error(err)
-	})
-
-	s.Run("wait_tsafe_timeout", func() {
-		ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*100)
-		defer cancel()
-
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base:               commonpbutil.NewMsgBase(),
-				GuaranteeTimestamp: 10100,
-			},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.Error(err)
-	})
-
-	s.Run("tsafe_behind_max_lag", func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base:               commonpbutil.NewMsgBase(),
-				GuaranteeTimestamp: uint64(paramtable.Get().QueryNodeCfg.MaxTimestampLag.GetAsDuration(time.Second)) + 10001,
-			},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.Error(err)
-	})
-
-	s.Run("distribution_not_serviceable", func() {
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		sd, ok := s.delegator.(*shardDelegator)
-		s.Require().True(ok)
-		sd.distribution.AddOfflines(1001)
-
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
-			DmlChannels: []string{s.vchannelName},
-		})
-
-		s.Error(err)
-	})
-
-	s.Run("cluster_not_serviceable", func() {
-		s.delegator.Close()
-
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		_, err := s.delegator.HybridSearch(ctx, &querypb.HybridSearchRequest{
-			Req: &internalpb.HybridSearchRequest{
-				Base: commonpbutil.NewMsgBase(),
-			},
 			DmlChannels: []string{s.vchannelName},
 		})
 
@@ -732,7 +487,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker1.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				if req.GetScope() == querypb.DataScope_Streaming {
 					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
@@ -745,7 +500,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -799,7 +554,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -836,7 +591,7 @@ func (s *DelegatorSuite) TestQuery() {
 		worker2.EXPECT().QuerySegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest")).
 			Run(func(_ context.Context, req *querypb.QueryRequest) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -929,7 +684,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		worker1.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(1, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				if req.GetScope() == querypb.DataScope_Streaming {
 					s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 					s.ElementsMatch([]int64{1004}, req.GetSegmentIDs())
@@ -952,7 +707,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())
@@ -1085,7 +840,7 @@ func (s *DelegatorSuite) TestQueryStream() {
 		worker2.EXPECT().QueryStreamSegments(mock.Anything, mock.AnythingOfType("*querypb.QueryRequest"), mock.Anything).
 			Run(func(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) {
 				s.EqualValues(2, req.Req.GetBase().GetTargetID())
-				s.True(req.GetFromShardLeader())
+
 				s.Equal(querypb.DataScope_Historical, req.GetScope())
 				s.EqualValues([]string{s.vchannelName}, req.GetDmlChannels())
 				s.ElementsMatch([]int64{1002, 1003}, req.GetSegmentIDs())

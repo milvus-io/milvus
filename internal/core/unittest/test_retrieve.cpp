@@ -14,9 +14,7 @@
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "query/Expr.h"
-#include "query/ExprImpl.h"
 #include "test_utils/DataGen.h"
-#include "exec/expression/Expr.h"
 #include "plan/PlanNode.h"
 
 using namespace milvus;
@@ -35,10 +33,8 @@ class RetrieveTest : public ::testing::TestWithParam<Param> {
     void
     SetUp() override {
         data_type = GetParam();
-        metric_type = datatype_is_sparse_vector(data_type)
-                          ? knowhere::metric::IP
-                          : knowhere::metric::L2;
-        is_sparse = datatype_is_sparse_vector(data_type);
+        is_sparse = IsSparseFloatVectorDataType(data_type);
+        metric_type = is_sparse ? knowhere::metric::IP : knowhere::metric::L2;
     }
 
     DataType data_type;

@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"sort"
 	"time"
@@ -308,7 +309,7 @@ func getPreImportingProgress(jobID int64, imeta ImportMeta) float32 {
 	return float32(len(completedTasks)) / float32(len(tasks))
 }
 
-func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
+func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, int64, int64) {
 	var (
 		importedRows int64
 		totalRows    int64
@@ -349,31 +350,38 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) float32 {
 	if totalSegment != 0 {
 		completedProgress = float32(unsetIsImportingSegment) / float32(totalSegment)
 	}
-	return importingProgress*0.8 + completedProgress*0.2
+	return importingProgress*0.5 + completedProgress*0.5, importedRows, totalRows
 }
 
-func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, string) {
+func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := imeta.GetJob(jobID)
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
 		progress := getPendingProgress(jobID, imeta)
-		return int64(progress * 10), internalpb.ImportJobState_Pending, ""
+		return int64(progress * 10), internalpb.ImportJobState_Pending, 0, 0, ""
 
 	case internalpb.ImportJobState_PreImporting:
 		progress := getPreImportingProgress(jobID, imeta)
-		return 10 + int64(progress*40), internalpb.ImportJobState_Importing, ""
+		return 10 + int64(progress*30), internalpb.ImportJobState_Importing, 0, 0, ""
 
 	case internalpb.ImportJobState_Importing:
-		progress := getImportingProgress(jobID, imeta, meta)
-		return 10 + 40 + int64(progress*50), internalpb.ImportJobState_Importing, ""
+		progress, importedRows, totalRows := getImportingProgress(jobID, imeta, meta)
+		return 10 + 30 + int64(progress*60), internalpb.ImportJobState_Importing, importedRows, totalRows, ""
 
 	case internalpb.ImportJobState_Completed:
-		return 100, internalpb.ImportJobState_Completed, ""
+		totalRows := int64(0)
+		tasks := imeta.GetTaskBy(WithJob(jobID), WithType(ImportTaskType))
+		for _, task := range tasks {
+			totalRows += lo.SumBy(task.GetFileStats(), func(file *datapb.ImportFileStats) int64 {
+				return file.GetTotalRows()
+			})
+		}
+		return 100, internalpb.ImportJobState_Completed, totalRows, totalRows, ""
 
 	case internalpb.ImportJobState_Failed:
-		return 0, internalpb.ImportJobState_Failed, job.GetReason()
+		return 0, internalpb.ImportJobState_Failed, 0, 0, job.GetReason()
 	}
-	return 0, internalpb.ImportJobState_None, "unknown import job state"
+	return 0, internalpb.ImportJobState_None, 0, 0, "unknown import job state"
 }
 
 func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.ImportTaskProgress {
@@ -395,6 +403,9 @@ func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.
 				Reason:       task.GetReason(),
 				Progress:     progress,
 				CompleteTime: task.(*importTask).GetCompleteTime(),
+				State:        task.GetState().String(),
+				ImportedRows: progress * fileStat.GetTotalRows() / 100,
+				TotalRows:    fileStat.GetTotalRows(),
 			})
 		}
 	}
@@ -418,8 +429,12 @@ func DropImportTask(task ImportTask, cluster Cluster, tm ImportMeta) error {
 }
 
 func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, importFile *internalpb.ImportFile) ([]*internalpb.ImportFile, error) {
-	if len(importFile.GetPaths()) < 1 {
+	if len(importFile.GetPaths()) == 0 {
 		return nil, merr.WrapErrImportFailed("no insert binlogs to import")
+	}
+	if len(importFile.GetPaths()) > 2 {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("too many input paths for binlog import. "+
+			"Valid paths length should be one or two, but got paths:%s", importFile.GetPaths()))
 	}
 
 	insertPrefix := importFile.GetPaths()[0]

@@ -129,6 +129,8 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 			}
 			continue
 		}
+		// try to update segment version after load delta logs
+		node.manager.Segment.UpdateBy(segments.IncreaseVersion(req.GetVersion()), segments.WithType(segments.SegmentTypeSealed), segments.WithID(info.GetSegmentID()))
 	}
 
 	if finalErr != nil {
@@ -191,7 +193,6 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}()
 
 	log.Debug("start do query with channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
 	// add cancel when error occurs
@@ -216,9 +217,8 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}
 
 	// reduce result
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))
@@ -266,7 +266,6 @@ func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.Quer
 	}()
 
 	log.Debug("start do streaming query with channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
 
@@ -351,7 +350,6 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	}()
 
 	log.Debug("start to search channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
 	searchCtx, cancel := context.WithCancel(ctx)
@@ -374,14 +372,18 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	}
 
 	// reduce result
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s,  vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))
 
-	resp, err := segments.ReduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+	var resp *internalpb.SearchResults
+	if req.GetReq().GetIsAdvanced() {
+		resp, err = segments.ReduceAdvancedSearchResults(ctx, results, req.Req.GetNq())
+	} else {
+		resp, err = segments.ReduceSearchResults(ctx, results, req.Req.GetNq(), req.Req.GetTopk(), req.Req.GetMetricType())
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -398,63 +400,6 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	metrics.QueryNodeSearchNQ.WithLabelValues(fmt.Sprint(node.GetNodeID())).Observe(float64(req.Req.GetNq()))
 	metrics.QueryNodeSearchTopK.WithLabelValues(fmt.Sprint(node.GetNodeID())).Observe(float64(req.Req.GetTopk()))
 	return resp, nil
-}
-
-func (node *QueryNode) hybridSearchChannel(ctx context.Context, req *querypb.HybridSearchRequest, channel string) (*querypb.HybridSearchResult, error) {
-	log := log.Ctx(ctx).With(
-		zap.Int64("msgID", req.GetReq().GetBase().GetMsgID()),
-		zap.Int64("collectionID", req.Req.GetCollectionID()),
-		zap.String("channel", channel),
-	)
-	traceID := trace.SpanFromContext(ctx).SpanContext().TraceID()
-
-	if err := node.lifetime.Add(merr.IsHealthy); err != nil {
-		return nil, err
-	}
-	defer node.lifetime.Done()
-
-	var err error
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.HybridSearchLabel, metrics.TotalLabel, metrics.Leader).Inc()
-	defer func() {
-		if err != nil {
-			metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.HybridSearchLabel, metrics.FailLabel, metrics.Leader).Inc()
-		}
-	}()
-
-	log.Debug("start to search channel")
-	searchCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	// From Proxy
-	tr := timerecord.NewTimeRecorder("hybridSearchDelegator")
-	// get delegator
-	sd, ok := node.delegators.Get(channel)
-	if !ok {
-		err := merr.WrapErrChannelNotFound(channel)
-		log.Warn("Query failed, failed to get shard delegator for search", zap.Error(err))
-		return nil, err
-	}
-	// do hybrid search
-	result, err := sd.HybridSearch(searchCtx, req)
-	if err != nil {
-		log.Warn("failed to hybrid search on delegator", zap.Error(err))
-		return nil, err
-	}
-
-	tr.CtxElapse(ctx, fmt.Sprintf("do search with channel done , traceID = %s, vChannel = %s",
-		traceID,
-		channel,
-	))
-
-	// update metric to prometheus
-	latency := tr.ElapseSpan()
-	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.HybridSearchLabel, metrics.Leader).Observe(float64(latency.Milliseconds()))
-	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.HybridSearchLabel, metrics.SuccessLabel, metrics.Leader).Inc()
-	for _, searchReq := range req.GetReq().GetReqs() {
-		metrics.QueryNodeSearchNQ.WithLabelValues(fmt.Sprint(node.GetNodeID())).Observe(float64(searchReq.GetNq()))
-		metrics.QueryNodeSearchTopK.WithLabelValues(fmt.Sprint(node.GetNodeID())).Observe(float64(searchReq.GetTopk()))
-	}
-	return result, nil
 }
 
 func (node *QueryNode) getChannelStatistics(ctx context.Context, req *querypb.GetStatisticsRequest, channel string) (*internalpb.GetStatisticsResponse, error) {

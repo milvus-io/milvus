@@ -39,7 +39,10 @@ struct UnaryElementFuncForMatch {
             IndexInnerType;
 
     void
-    operator()(const T* src, size_t size, IndexInnerType val, bool* res) {
+    operator()(const T* src,
+               size_t size,
+               IndexInnerType val,
+               TargetBitmapView res) {
         if constexpr (std::is_same_v<T, std::string_view>) {
             // translate the pattern match in advance, which avoid computing it every loop.
             std::regex reg(TranslatePatternMatchToRegex(val));
@@ -65,13 +68,18 @@ struct UnaryElementFunc {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     void
-    operator()(const T* src, size_t size, IndexInnerType val, bool* res) {
+    operator()(const T* src,
+               size_t size,
+               IndexInnerType val,
+               TargetBitmapView res) {
         if constexpr (op == proto::plan::OpType::Match) {
             UnaryElementFuncForMatch<T> func;
             func(src, size, val, res);
             return;
         }
 
+        /*
+        // This is the original code, which is kept for the documentation purposes
         for (int i = 0; i < size; ++i) {
             if constexpr (op == proto::plan::OpType::Equal) {
                 res[i] = src[i] == val;
@@ -94,6 +102,36 @@ struct UnaryElementFunc {
                     fmt::format("unsupported op_type:{} for UnaryElementFunc",
                                 op));
             }
+        }
+        */
+
+        if constexpr (op == proto::plan::OpType::PrefixMatch) {
+            for (int i = 0; i < size; ++i) {
+                res[i] = milvus::query::Match(
+                    src[i], val, proto::plan::OpType::PrefixMatch);
+            }
+        } else if constexpr (op == proto::plan::OpType::Equal) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::EQ>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::NotEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::NE>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::GreaterThan) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GT>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::LessThan) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LT>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::GreaterEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::GE>(
+                src, size, val);
+        } else if constexpr (op == proto::plan::OpType::LessEqual) {
+            res.inplace_compare_val<T, milvus::bitset::CompareOpType::LE>(
+                src, size, val);
+        } else {
+            PanicInfo(
+                OpTypeInvalid,
+                fmt::format("unsupported op_type:{} for UnaryElementFunc", op));
         }
     }
 };
@@ -122,7 +160,7 @@ struct UnaryElementFuncForArray {
                size_t size,
                ValueType val,
                int index,
-               bool* res) {
+               TargetBitmapView res) {
         for (int i = 0; i < size; ++i) {
             if constexpr (op == proto::plan::OpType::Equal) {
                 if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
@@ -172,7 +210,7 @@ struct UnaryIndexFuncForMatch {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    FixedVector<bool>
+    TargetBitmap
     operator()(Index* index, IndexInnerType val) {
         if constexpr (!std::is_same_v<T, std::string_view> &&
                       !std::is_same_v<T, std::string>) {
@@ -207,7 +245,7 @@ struct UnaryIndexFunc {
         conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
             IndexInnerType;
     using Index = index::ScalarIndex<IndexInnerType>;
-    FixedVector<bool>
+    TargetBitmap
     operator()(Index* index, IndexInnerType val) {
         if constexpr (op == proto::plan::OpType::Equal) {
             return index->In(1, &val);

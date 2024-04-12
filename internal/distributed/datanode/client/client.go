@@ -190,17 +190,6 @@ func (c *Client) GetCompactionState(ctx context.Context, req *datapb.CompactionS
 	})
 }
 
-// Import data files(json, numpy, etc.) on MinIO/S3 storage, read and parse them into sealed segments
-func (c *Client) Import(ctx context.Context, req *datapb.ImportTaskRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(c.serverID))
-	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*commonpb.Status, error) {
-		return client.Import(ctx, req)
-	})
-}
-
 func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegmentStatsRequest, opts ...grpc.CallOption) (*datapb.ResendSegmentStatsResponse, error) {
 	req = typeutil.Clone(req)
 	commonpbutil.UpdateMsgBase(
@@ -208,17 +197,6 @@ func (c *Client) ResendSegmentStats(ctx context.Context, req *datapb.ResendSegme
 		commonpbutil.FillMsgBaseFromClient(c.serverID))
 	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.ResendSegmentStatsResponse, error) {
 		return client.ResendSegmentStats(ctx, req)
-	})
-}
-
-// AddImportSegment is the DataNode client side code for AddImportSegment call.
-func (c *Client) AddImportSegment(ctx context.Context, req *datapb.AddImportSegmentRequest, opts ...grpc.CallOption) (*datapb.AddImportSegmentResponse, error) {
-	req = typeutil.Clone(req)
-	commonpbutil.UpdateMsgBase(
-		req.GetBase(),
-		commonpbutil.FillMsgBaseFromClient(c.serverID))
-	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.AddImportSegmentResponse, error) {
-		return client.AddImportSegment(ctx, req)
 	})
 }
 

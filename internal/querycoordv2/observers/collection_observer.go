@@ -22,6 +22,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -195,16 +196,16 @@ func (ob *CollectionObserver) observePartitionLoadStatus(ctx context.Context, pa
 	loadPercentage := int32(0)
 
 	for _, channel := range channelTargets {
-		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
-			partition.GetCollectionID(),
-			ob.dist.LeaderViewManager.GetChannelDist(channel.GetChannelName()))
+		views := ob.dist.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
+		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
+		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, partition.GetCollectionID(), nodes)
 		loadedCount += len(group)
 	}
 	subChannelCount := loadedCount
 	for _, segment := range segmentTargets {
-		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager,
-			partition.GetCollectionID(),
-			ob.dist.LeaderViewManager.GetSealedSegmentDist(segment.GetID()))
+		views := ob.dist.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(segment.GetID(), false))
+		nodes := lo.Map(views, func(view *meta.LeaderView, _ int) int64 { return view.ID })
+		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, partition.GetCollectionID(), nodes)
 		loadedCount += len(group)
 	}
 	if loadedCount > 0 {

@@ -50,12 +50,12 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
 
         auto data_type = DataType(child.data_type());
 
-        if (datatype_is_vector(data_type)) {
+        if (IsVectorDataType(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());
             auto index_map = RepeatedKeyValToMap(child.index_params());
 
             int64_t dim = 0;
-            if (!datatype_is_sparse_vector(data_type)) {
+            if (!IsSparseFloatVectorDataType(data_type)) {
                 AssertInfo(type_map.count("dim"), "dim not found");
                 dim = boost::lexical_cast<int64_t>(type_map.at("dim"));
             }
@@ -65,13 +65,13 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
                 auto metric_type = index_map.at("metric_type");
                 schema->AddField(name, field_id, data_type, dim, metric_type);
             }
-        } else if (datatype_is_string(data_type)) {
+        } else if (IsStringDataType(data_type)) {
             auto type_map = RepeatedKeyValToMap(child.type_params());
             AssertInfo(type_map.count(MAX_LENGTH), "max_length not found");
             auto max_len =
                 boost::lexical_cast<int64_t>(type_map.at(MAX_LENGTH));
             schema->AddField(name, field_id, data_type, max_len);
-        } else if (datatype_is_array(data_type)) {
+        } else if (IsArrayDataType(data_type)) {
             schema->AddField(
                 name, field_id, data_type, DataType(child.element_type()));
         } else {
