@@ -97,7 +97,7 @@ class VectorMemIndex : public VectorIndex {
     knowhere::expected<
         std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
     VectorIterators(const DatasetPtr dataset,
-                    const SearchInfo& search_info,
+                    const knowhere::Json& json,
                     const BitsetView& bitset) const override;
 
  protected:

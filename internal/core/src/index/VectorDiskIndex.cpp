@@ -419,10 +419,9 @@ VectorDiskAnnIndex<T>::Query(const DatasetPtr dataset,
 template <typename T>
 knowhere::expected<std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
 VectorDiskAnnIndex<T>::VectorIterators(const DatasetPtr dataset,
-                                       const SearchInfo& search_info,
+                                       const knowhere::Json& conf,
                                        const BitsetView& bitset) const {
-    return this->index_.AnnIterator(
-        *dataset, search_info.search_params_, bitset);
+    return this->index_.AnnIterator(*dataset, conf, bitset);
 }
 
 template <typename T>
