@@ -4667,6 +4667,10 @@ func TestDataCoord_EnableActiveStandby(t *testing.T) {
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableActiveStandby.Key)
 	svr := testDataCoordBase(t)
 	defer closeTestServer(t, svr)
+	assert.Eventually(t, func() bool {
+		// return svr.
+		return svr.GetStateCode() == commonpb.StateCode_Healthy
+	}, time.Second*5, time.Millisecond*100)
 }
 
 func TestDataNodeTtChannel(t *testing.T) {
