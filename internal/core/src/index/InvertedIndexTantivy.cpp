@@ -34,7 +34,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     auto field =
         std::to_string(disk_file_manager_->GetFieldDataMeta().field_id);
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
-    path_ = fmt::format("/tmp/{}", prefix);
+    path_ = prefix;
     boost::filesystem::create_directories(path_);
     d_type_ = cfg_.to_tantivy_data_type();
     if (tantivy_index_exist(path_.c_str())) {
