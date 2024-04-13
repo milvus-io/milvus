@@ -264,10 +264,10 @@ type GrantReq struct {
 }
 
 type IndexParam struct {
-	FieldName   string            `json:"fieldName" binding:"required"`
-	IndexName   string            `json:"indexName" binding:"required"`
-	MetricType  string            `json:"metricType" binding:"required"`
-	IndexConfig map[string]string `json:"indexConfig"`
+	FieldName  string                 `json:"fieldName" binding:"required"`
+	IndexName  string                 `json:"indexName" binding:"required"`
+	MetricType string                 `json:"metricType" binding:"required"`
+	Params     map[string]interface{} `json:"params"`
 }
 
 type IndexParamReq struct {
@@ -294,12 +294,12 @@ func (req *IndexReq) GetIndexName() string {
 }
 
 type FieldSchema struct {
-	FieldName         string            `json:"fieldName" binding:"required"`
-	DataType          string            `json:"dataType" binding:"required"`
-	ElementDataType   string            `json:"elementDataType"`
-	IsPrimary         bool              `json:"isPrimary"`
-	IsPartitionKey    bool              `json:"isPartitionKey"`
-	ElementTypeParams map[string]string `json:"elementTypeParams" binding:"required"`
+	FieldName         string                 `json:"fieldName" binding:"required"`
+	DataType          string                 `json:"dataType" binding:"required"`
+	ElementDataType   string                 `json:"elementDataType"`
+	IsPrimary         bool                   `json:"isPrimary"`
+	IsPartitionKey    bool                   `json:"isPartitionKey"`
+	ElementTypeParams map[string]interface{} `json:"elementTypeParams" binding:"required"`
 }
 
 type CollectionSchema struct {
