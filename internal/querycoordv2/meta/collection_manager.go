@@ -178,9 +178,11 @@ func (m *CollectionManager) Recover(broker Broker) error {
 				continue
 			}
 
-			m.partitions[partition.PartitionID] = &Partition{
-				PartitionLoadInfo: partition,
-			}
+			m.putPartition([]*Partition{
+				{
+					PartitionLoadInfo: partition,
+				},
+			}, false)
 		}
 	}
 
@@ -300,7 +302,6 @@ func (m *CollectionManager) calculateLoadPercentage(collectionID typeutil.Unique
 	_, ok := m.collections[collectionID]
 	if ok {
 		partitions := m.getPartitionsByCollection(collectionID)
-		log.Warn("CQX calc load perc", zap.Any("partitions", lo.Map(partitions, func(part *Partition, _ int) int64 { return part.GetPartitionID() })))
 		if len(partitions) > 0 {
 			return lo.SumBy(partitions, func(partition *Partition) int32 {
 				return partition.LoadPercentage
