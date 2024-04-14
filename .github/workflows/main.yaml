@@ -18,7 +18,7 @@ on:
       - go.mod
       - '!**.md'
       - '!build/ci/jenkins/**'
-  pull_request:
+  pull_request_target:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'scripts/**'
