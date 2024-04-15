@@ -420,14 +420,7 @@ func (h *ServerHandler) FinishDropChannel(channel string, collectionID int64) er
 	// Channel checkpoints are cleaned up during garbage collection.
 
 	// clean collection info cache
-	hasCollection, err := h.HasCollection(context.TODO(), collectionID)
-	if err != nil {
-		log.Warn("failed to clean collection info cache", zap.Int64("collectionID", collectionID), zap.Error(err))
-		return err
-	}
-	if !hasCollection {
-		h.s.meta.DropCollection(collectionID)
-	}
+	h.s.meta.DropCollection(collectionID)
 
 	return nil
 }
