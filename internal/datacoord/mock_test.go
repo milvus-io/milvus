@@ -718,7 +718,7 @@ func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 	return false
 }
 
-func (h *mockHandler) FinishDropChannel(channel string) error {
+func (h *mockHandler) FinishDropChannel(channel string, collectionID int64) error {
 	return nil
 }
 
