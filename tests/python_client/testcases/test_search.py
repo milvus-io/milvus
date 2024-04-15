@@ -2212,9 +2212,8 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": limit,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -2225,8 +2224,6 @@ class TestCollectionSearch(TestcaseBase):
         method: test search after different index and corresponding search params
         expected: search successfully with limit(topK)
         """
-        if index == "DISKANN":
-            pytest.skip("https://github.com/milvus-io/milvus/issues/30793")
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
@@ -3164,7 +3161,6 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
     def test_search_with_expression_bool(self, dim, auto_id, _async, bool_type, enable_dynamic_field):
         """
