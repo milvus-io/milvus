@@ -2061,6 +2061,42 @@ func TestValidateSparseFloatRows(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("same index", func(t *testing.T) {
+		rows := [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{100, 100, 500}, []float32{1.0, 2.0, 3.0}),
+		}
+		err := ValidateSparseFloatRows(rows...)
+		assert.Error(t, err)
+	})
+
+	t.Run("negative value", func(t *testing.T) {
+		rows := [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{100, 200, 500}, []float32{-1.0, 2.0, 3.0}),
+		}
+		err := ValidateSparseFloatRows(rows...)
+		assert.Error(t, err)
+	})
+
+	t.Run("invalid value", func(t *testing.T) {
+		rows := [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{100, 200, 500}, []float32{float32(math.NaN()), 2.0, 3.0}),
+		}
+		err := ValidateSparseFloatRows(rows...)
+		assert.Error(t, err)
+
+		rows = [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{100, 200, 500}, []float32{float32(math.Inf(1)), 2.0, 3.0}),
+		}
+		err = ValidateSparseFloatRows(rows...)
+		assert.Error(t, err)
+
+		rows = [][]byte{
+			testutils.CreateSparseFloatRow([]uint32{100, 200, 500}, []float32{float32(math.Inf(-1)), 2.0, 3.0}),
+		}
+		err = ValidateSparseFloatRows(rows...)
+		assert.Error(t, err)
+	})
+
 	t.Run("invalid index", func(t *testing.T) {
 		rows := [][]byte{
 			testutils.CreateSparseFloatRow([]uint32{3, 5, math.MaxUint32}, []float32{1.0, 2.0, 3.0}),
