@@ -1095,7 +1095,6 @@ func TestChannelManager_BalanceBehaviour(t *testing.T) {
 		var channelBalanced string
 
 		chManager.AddNode(2)
-		channelBalanced = "channel-1"
 
 		watchPrefix := path.Join(prefix, "1")
 		channelBalanced = waitPrefixAndStore(t, watchkv, watchPrefix, datapb.ChannelWatchState_ToRelease, datapb.ChannelWatchState_ReleaseSuccess)
