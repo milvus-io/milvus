@@ -35,7 +35,7 @@ elseif (${CMAKE_SYSTEM_PROCESSOR} MATCHES "arm*")
     # targeting AWS graviton, 
     #  https://github.com/aws/aws-graviton-getting-started/blob/main/c-c%2B%2B.md
 
-    set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
+    #set_source_files_properties(detail/platform/arm/sve-inst.cpp PROPERTIES COMPILE_FLAGS "-mcpu=neoverse-v1")
 endif()
 
 add_library(milvus_bitset ${BITSET_SRCS})
