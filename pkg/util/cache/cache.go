@@ -2,17 +2,15 @@ package cache
 
 import (
 	"container/list"
-	"fmt"
 	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
-	"go.uber.org/atomic"
-	"golang.org/x/sync/singleflight"
-
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"go.uber.org/atomic"
 )
 
 var (
@@ -143,9 +141,9 @@ func newWaiter[K comparable](key K) Waiter[K] {
 type lruCache[K comparable, V any] struct {
 	rwlock sync.RWMutex
 	// the value is *cacheItem[V]
-	items              map[K]*list.Element
-	accessList         *list.List
-	loaderSingleFlight singleflight.Group
+	items          map[K]*list.Element
+	accessList     *list.List
+	loaderKeyLocks *lock.KeyLock[K]
 
 	waitQueue *list.List
 
@@ -216,14 +214,14 @@ func newLRUCache[K comparable, V any](
 	reloader Loader[K, V],
 ) Cache[K, V] {
 	return &lruCache[K, V]{
-		items:              make(map[K]*list.Element),
-		accessList:         list.New(),
-		waitQueue:          list.New(),
-		loaderSingleFlight: singleflight.Group{},
-		loader:             loader,
-		finalizer:          finalizer,
-		scavenger:          scavenger,
-		reloader:           reloader,
+		items:          make(map[K]*list.Element),
+		accessList:     list.New(),
+		waitQueue:      list.New(),
+		loaderKeyLocks: lock.NewKeyLock[K](),
+		loader:         loader,
+		finalizer:      finalizer,
+		scavenger:      scavenger,
+		reloader:       reloader,
 	}
 }
 
@@ -298,7 +296,7 @@ func (c *lruCache[K, V]) Unpin(key K) {
 
 	log := log.With(zap.Any("UnPinedKey", key))
 	if item.pinCount.Load() == 0 && c.waitQueue.Len() > 0 {
-		log.Info("Unpin item to zero ref, trigger activating waiters")
+		log.Debug("Unpin item to zero ref, trigger activating waiters")
 		// Notify waiters
 		// collector := c.scavenger.Spare(key)
 		for e := c.waitQueue.Front(); e != nil; e = e.Next() {
@@ -308,7 +306,7 @@ func (c *lruCache[K, V]) Unpin(key K) {
 			// we try best to activate as many waiters as possible every time
 		}
 	} else {
-		log.Info("Miss to trigger activating waiters",
+		log.Debug("Miss to trigger activating waiters",
 			zap.Int32("PinCount", item.pinCount.Load()),
 			zap.Int("wait_len", c.waitQueue.Len()))
 	}
@@ -337,8 +335,12 @@ func (c *lruCache[K, V]) peekAndPin(key K) *cacheItem[K, V] {
 		}
 		c.accessList.MoveToFront(e)
 		item.pinCount.Inc()
+		log.Debug("peeked item success",
+			zap.Int32("PinCount", item.pinCount.Load()),
+			zap.Any("key", key))
 		return item
 	}
+	log.Debug("failed to peek item", zap.Any("key", key))
 	return nil
 }
 
@@ -355,31 +357,24 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], bool, error) {
 			log.Warn("getAndPin ran into scavenge failure, return", zap.Any("key", key))
 			return nil, true, ErrNotEnoughSpace
 		}
-
-		strKey := fmt.Sprint(key)
-		item, err, _ := c.loaderSingleFlight.Do(strKey, func() (interface{}, error) {
-			if item := c.peekAndPin(key); item != nil {
-				return item, nil
-			}
-
-			value, ok := c.loader(key)
-			if !ok {
-				return nil, ErrNoSuchItem
-			}
-
-			item, err := c.setAndPin(key, value)
-			if err != nil {
-				return nil, err
-			}
-			return item, nil
-		})
-
-		if err == nil {
-			return item.(*cacheItem[K, V]), true, nil
+		c.loaderKeyLocks.Lock(key)
+		defer c.loaderKeyLocks.Unlock(key)
+		if item := c.peekAndPin(key); item != nil {
+			return item, false, nil
 		}
-		return nil, true, err
-	}
+		value, ok := c.loader(key)
+		if !ok {
+			log.Debug("loader failed for key", zap.Any("key", key))
+			return nil, true, ErrNoSuchItem
+		}
 
+		item, err := c.setAndPin(key, value)
+		if err != nil {
+			log.Debug("setAndPin failed for key", zap.Any("key", key), zap.Error(err))
+			return nil, true, err
+		}
+		return item, true, nil
+	}
 	return nil, true, ErrNoSuchItem
 }
 
@@ -433,13 +428,14 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 
 	for _, ek := range toEvict {
 		c.evict(ek)
-		log.Info("setAndPin trigger releasing memory back", zap.Any("ek", ek))
+		log.Debug("cache evicting", zap.Any("key", ek), zap.Any("by", key))
 	}
 
 	c.scavenger.Collect(key)
 	e := c.accessList.PushFront(item)
 	c.items[item.key] = e
-	log.Info("setAndPin set up item", zap.Any("item.key", item.key))
+	log.Debug("setAndPin set up item", zap.Any("item.key", item.key),
+		zap.Int32("pinCount", item.pinCount.Load()))
 	return item, nil
 }
 
