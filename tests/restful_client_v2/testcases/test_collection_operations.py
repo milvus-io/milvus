@@ -2,7 +2,7 @@ import datetime
 import logging
 import time
 from utils.util_log import test_log as logger
-from utils.utils import gen_collection_name
+from utils.utils import gen_collection_name, gen_unique_str
 import pytest
 from api.milvus import CollectionClient
 from base.testbase import TestBase
@@ -996,6 +996,38 @@ class TestDescribeCollectionNegative(TestBase):
         rsp = client.collection_describe(invalid_name)
         assert rsp['code'] == 100
         assert "can't find collection" in rsp['message']
+
+    def test_describe_collections_with_new_user(self):
+        """
+        target: test describe collection with invalid collection name
+        method: describe collection with invalid collection name
+        expected: raise error with right error code and message
+        """
+        name = gen_collection_name()
+        dim = 128
+        client = self.collection_client
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+        }
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 200
+        rsp = client.collection_list()
+        all_collections = rsp['data']
+        assert name in all_collections
+        # describe collection with new user which has no permission
+        # create new user
+        user_name = gen_unique_str("user")
+        password = "12345678"
+        payload = {
+            "userName": user_name,
+            "password": password
+        }
+        rsp = self.user_client.user_create(payload)
+        self.collection_client.api_key = f"{user_name}:{password}"
+        rsp = client.collection_describe(name)
+        assert "PermissionDenied" in rsp['message']
+
 
 
 @pytest.mark.L0

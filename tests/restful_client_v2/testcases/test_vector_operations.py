@@ -1218,9 +1218,10 @@ class TestAdvancedSearchVector(TestBase):
     @pytest.mark.parametrize("is_partition_key", [True])
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
-    @pytest.mark.parametrize("dim", [2])
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("nq", [1, 2])
     def test_advanced_search_vector_with_multi_float32_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema, nq):
         """
         Insert a vector with a simple payload
         """
@@ -1289,13 +1290,13 @@ class TestAdvancedSearchVector(TestBase):
         payload = {
             "collectionName": name,
             "search": [{
-                "data": [gen_vector(datatype="FloatVector", dim=dim)],
+                "data": [gen_vector(datatype="FloatVector", dim=dim) for i in range(nq)],
                 "annsField": "float_vector_1",
                 "limit": 10,
                 "outputFields": ["*"]
             },
                 {
-                "data": [gen_vector(datatype="FloatVector", dim=dim)],
+                "data": [gen_vector(datatype="FloatVector", dim=dim) for i in range(nq)],
                 "annsField": "float_vector_2",
                 "limit": 10,
                 "outputFields": ["*"]

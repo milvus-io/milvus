@@ -13,6 +13,9 @@ class TestAliasE2E(TestBase):
     def test_alias_e2e(self):
         """
         """
+        db_name = "default"
+        self.create_database(db_name)
+        self.update_database(db_name)
         # list alias before create
         rsp = self.alias_client.list_alias()
         name = gen_collection_name()
@@ -35,7 +38,8 @@ class TestAliasE2E(TestBase):
         alias_name = name + "_alias"
         payload = {
             "collectionName": name,
-            "aliasName": alias_name
+            "aliasName": alias_name,
+            "dbName": db_name,
         }
         rsp = self.alias_client.create_alias(payload)
         assert rsp['code'] == 200

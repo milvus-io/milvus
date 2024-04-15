@@ -143,3 +143,4 @@ class TestBase(Base):
         self.collection_client.db_name = db_name
         self.vector_client.db_name = db_name
         self.import_job_client.db_name = db_name
+        self.alias_client.db_name = db_name

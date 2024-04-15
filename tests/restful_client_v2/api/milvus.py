@@ -713,9 +713,13 @@ class AliasClient(Requests):
         }
         return headers
 
-    def list_alias(self):
+    def list_alias(self, db_name="default"):
+        data = {}
+        if self.db_name is not None:
+            db_name = self.db_name
+        data.update({"dbName": db_name})
         url = f'{self.endpoint}/v2/vectordb/aliases/list'
-        response = self.post(url, headers=self.update_headers())
+        response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
@@ -724,23 +728,31 @@ class AliasClient(Requests):
         data = {
             "aliasName": alias_name
         }
+        if self.db_name is not None:
+            data.update({"dbName": self.db_name})
         response = self.post(url, headers=self.update_headers(), data=data)
         res = response.json()
         return res
 
     def alter_alias(self, payload):
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
         url = f'{self.endpoint}/v2/vectordb/aliases/alter'
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def drop_alias(self, payload):
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
         url = f'{self.endpoint}/v2/vectordb/aliases/drop'
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
         return res
 
     def create_alias(self, payload):
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
         url = f'{self.endpoint}/v2/vectordb/aliases/create'
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
