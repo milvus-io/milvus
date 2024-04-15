@@ -1057,10 +1057,15 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		collector.Rate.Add(metricsinfo.NQPerSecond, 1)
 		metrics.QueryNodeExecuteCounter.WithLabelValues(strconv.FormatInt(node.GetNodeID(), 10), metrics.QueryLabel).Add(float64(proto.Size(req)))
 	}
+	relatedDataSize := lo.Reduce(toMergeResults, func(acc int64, result *internalpb.RetrieveResults, _ int) int64 {
+		return acc + result.GetCostAggregation().GetTotalRelatedDataSize()
+	}, 0)
 
-	if ret.GetCostAggregation() != nil {
-		ret.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
+	if ret.CostAggregation == nil {
+		ret.CostAggregation = &internalpb.CostAggregation{}
 	}
+	ret.CostAggregation.ResponseTime = tr.ElapseSpan().Milliseconds()
+	ret.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	return ret, nil
 }
 

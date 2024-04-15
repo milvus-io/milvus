@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 
@@ -134,6 +135,10 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 
+	relatedDataSize := lo.Reduce(querySegments, func(acc int64, seg segments.Segment, _ int) int64 {
+		return acc + seg.MemSize()
+	}, 0)
+
 	t.result = &internalpb.RetrieveResults{
 		Base: &commonpb.MsgBase{
 			SourceID: paramtable.GetNodeID(),
@@ -142,7 +147,8 @@ func (t *QueryTask) Execute() error {
 		Ids:        reducedResult.Ids,
 		FieldsData: reducedResult.FieldsData,
 		CostAggregation: &internalpb.CostAggregation{
-			ServiceTime: tr.ElapseSpan().Milliseconds(),
+			ServiceTime:          tr.ElapseSpan().Milliseconds(),
+			TotalRelatedDataSize: relatedDataSize,
 		},
 		AllRetrieveCount: reducedResult.GetAllRetrieveCount(),
 	}

@@ -74,6 +74,7 @@ type searchTask struct {
 	lb              LBPolicy
 	queryChannelsTs map[string]Timestamp
 	queryInfo       *planpb.QueryInfo
+	relatedDataSize int64
 }
 
 func getPartitionIDs(ctx context.Context, dbName string, collectionName string, partitionNames []string) (partitionIDs []UniqueID, err error) {
@@ -305,11 +306,6 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 		log.Warn("get collection schema failed", zap.Error(err))
 		return err
 	}
-	t.dimension, err = typeutil.GetCollectionDim(t.schema.CollectionSchema)
-	if err != nil {
-		log.Warn("get collection dimension failed", zap.Error(err))
-		return err
-	}
 
 	t.partitionKeyMode, err = isPartitionKeyMode(ctx, t.request.GetDbName(), collectionName)
 	if err != nil {
@@ -425,7 +421,9 @@ func (t *searchTask) PostExecute(ctx context.Context) error {
 	}
 
 	t.queryChannelsTs = make(map[string]uint64)
+	t.relatedDataSize = 0
 	for _, r := range toReduceResults {
+		t.relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
 		for ch, ts := range r.GetChannelsMvcc() {
 			t.queryChannelsTs[ch] = ts
 		}

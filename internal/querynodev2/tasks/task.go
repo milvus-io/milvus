@@ -11,6 +11,7 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -210,6 +211,10 @@ func (t *SearchTask) Execute() error {
 		return nil
 	}
 
+	relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
+		return acc + seg.MemSize()
+	}, 0)
+
 	tr.RecordSpan()
 	blobs, err := segments.ReduceSearchResultsAndFillData(
 		t.ctx,
@@ -259,7 +264,8 @@ func (t *SearchTask) Execute() error {
 			SlicedOffset:   1,
 			SlicedNumCount: 1,
 			CostAggregation: &internalpb.CostAggregation{
-				ServiceTime: tr.ElapseSpan().Milliseconds(),
+				ServiceTime:          tr.ElapseSpan().Milliseconds(),
+				TotalRelatedDataSize: relatedDataSize,
 			},
 		}
 	}

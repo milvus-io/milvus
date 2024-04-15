@@ -13,8 +13,10 @@ type cntReducer struct{}
 func (r *cntReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveResults) (*internalpb.RetrieveResults, error) {
 	cnt := int64(0)
 	allRetrieveCount := int64(0)
+	relatedDataSize := int64(0)
 	for _, res := range results {
 		allRetrieveCount += res.GetAllRetrieveCount()
+		relatedDataSize += res.GetCostAggregation().GetTotalRelatedDataSize()
 		c, err := funcutil.CntOfInternalResult(res)
 		if err != nil {
 			return nil, err
@@ -23,6 +25,9 @@ func (r *cntReducer) Reduce(ctx context.Context, results []*internalpb.RetrieveR
 	}
 	res := funcutil.WrapCntToInternalResult(cnt)
 	res.AllRetrieveCount = allRetrieveCount
+	res.CostAggregation = &internalpb.CostAggregation{
+		TotalRelatedDataSize: relatedDataSize,
+	}
 	return res, nil
 }
 
