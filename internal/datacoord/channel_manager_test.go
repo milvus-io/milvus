@@ -580,7 +580,7 @@ func TestChannelManager(t *testing.T) {
 		handler.EXPECT().
 			CheckShouldDropChannel(mock.Anything).
 			Return(true)
-		handler.EXPECT().FinishDropChannel(mock.Anything).Return(nil)
+		handler.EXPECT().FinishDropChannel(mock.Anything, mock.Anything).Return(nil)
 		chManager, err := NewChannelManager(watchkv, handler)
 		require.NoError(t, err)
 
@@ -658,7 +658,7 @@ func TestChannelManager(t *testing.T) {
 		handler.EXPECT().
 			CheckShouldDropChannel(mock.Anything).
 			Return(true)
-		handler.EXPECT().FinishDropChannel(mock.Anything).Return(nil)
+		handler.EXPECT().FinishDropChannel(mock.Anything, mock.Anything).Return(nil)
 		chManager, err := NewChannelManager(watchkv, handler)
 		require.NoError(t, err)
 
