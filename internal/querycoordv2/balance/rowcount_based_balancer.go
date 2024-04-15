@@ -21,6 +21,7 @@ import (
 	"math"
 	"sort"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -86,9 +87,12 @@ func (b *RowCountBasedBalancer) AssignSegment(collectionID int64, segments []*me
 func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan {
 	// skip out suspend node and stopping node during assignment, but skip this check for manual balance
 	if !manualBalance {
+		versionRangeFilter := semver.MustParseRange(">2.3.x")
 		nodes = lo.Filter(nodes, func(node int64, _ int) bool {
 			info := b.nodeManager.Get(node)
-			return info != nil && info.GetState() == session.NodeStateNormal
+			// balance channel to qn with version < 2.4 is not allowed since l0 segment supported
+			// if watch channel on qn with version < 2.4, it may cause delete data loss
+			return info != nil && info.GetState() == session.NodeStateNormal && versionRangeFilter(info.Version())
 		})
 	}
 
