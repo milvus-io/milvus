@@ -278,50 +278,57 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 
 // applyDelete handles delete record and apply them to corresponding workers.
 func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
-	var offlineSegments []int64
+	offlineSegments := typeutil.NewConcurrentSet[int64]()
 	log := sd.getLogger(ctx)
+	eg, ctx := errgroup.WithContext(ctx)
 	for _, segmentEntry := range entries {
-		log := log.With(
-			zap.Int64("segmentID", segmentEntry.SegmentID),
-			zap.Int64("workerID", nodeID),
-		)
-		delRecord, ok := delRecords[segmentEntry.SegmentID]
-		if ok {
-			log.Debug("delegator plan to applyDelete via worker")
-			err := retry.Handle(ctx, func() (bool, error) {
-				if sd.Stopped() {
-					return false, merr.WrapErrChannelNotAvailable(sd.vchannelName, "channel is unsubscribing")
-				}
+		segmentEntry := segmentEntry
+		eg.Go(func() error {
+			log := log.With(
+				zap.Int64("segmentID", segmentEntry.SegmentID),
+				zap.Int64("workerID", nodeID),
+			)
+			delRecord, ok := delRecords[segmentEntry.SegmentID]
+			if ok {
+				log.Debug("delegator plan to applyDelete via worker")
+				err := retry.Handle(ctx, func() (bool, error) {
+					if sd.Stopped() {
+						return false, merr.WrapErrChannelNotAvailable(sd.vchannelName, "channel is unsubscribing")
+					}
 
-				err := worker.Delete(ctx, &querypb.DeleteRequest{
-					Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(nodeID)),
-					CollectionId: sd.collectionID,
-					PartitionId:  segmentEntry.PartitionID,
-					VchannelName: sd.vchannelName,
-					SegmentId:    segmentEntry.SegmentID,
-					PrimaryKeys:  storage.ParsePrimaryKeys2IDs(delRecord.PrimaryKeys),
-					Timestamps:   delRecord.Timestamps,
-					Scope:        scope,
-				})
-				if errors.Is(err, merr.ErrNodeNotFound) {
-					log.Warn("try to delete data on non-exist node")
-					return false, err
-				} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
-					log.Warn("try to delete data of released segment")
+					err := worker.Delete(ctx, &querypb.DeleteRequest{
+						Base:         commonpbutil.NewMsgBase(commonpbutil.WithTargetID(nodeID)),
+						CollectionId: sd.collectionID,
+						PartitionId:  segmentEntry.PartitionID,
+						VchannelName: sd.vchannelName,
+						SegmentId:    segmentEntry.SegmentID,
+						PrimaryKeys:  storage.ParsePrimaryKeys2IDs(delRecord.PrimaryKeys),
+						Timestamps:   delRecord.Timestamps,
+						Scope:        scope,
+					})
+					if errors.Is(err, merr.ErrNodeNotFound) {
+						log.Warn("try to delete data on non-exist node")
+						return false, err
+					} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
+						log.Warn("try to delete data of released segment")
+						return false, nil
+					} else if err != nil {
+						log.Warn("worker failed to delete on segment", zap.Error(err))
+						return true, err
+					}
 					return false, nil
-				} else if err != nil {
-					log.Warn("worker failed to delete on segment", zap.Error(err))
-					return true, err
+				}, retry.Attempts(10))
+				if err != nil {
+					log.Warn("apply delete for segment failed, marking it offline")
+					offlineSegments.Insert(segmentEntry.SegmentID)
 				}
-				return false, nil
-			}, retry.Attempts(10))
-			if err != nil {
-				log.Warn("apply delete for segment failed, marking it offline")
-				offlineSegments = append(offlineSegments, segmentEntry.SegmentID)
 			}
-		}
+			return nil
+		})
 	}
-	return offlineSegments
+	// ignore error, error converted to offline done
+	_ = eg.Wait()
+	return offlineSegments.Collect()
 }
 
 // markSegmentOffline makes segment go offline and waits for QueryCoord to fix.
