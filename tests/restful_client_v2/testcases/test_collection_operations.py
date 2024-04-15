@@ -1000,7 +1000,7 @@ class TestDescribeCollectionNegative(TestBase):
     def test_describe_collections_with_new_user(self):
         """
         target: test describe collection with invalid collection name
-        method: describe collection with invalid collection name
+        method: describe collection with new user which has no permission
         expected: raise error with right error code and message
         """
         name = gen_collection_name()
