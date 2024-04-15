@@ -35,13 +35,17 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	paramtable.Get().Save(paramtable.Get().AutoIndexConfig.EnableOptimize.Key, "true")
 
 	suite.Run("normal_run", func() {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
 		mockHook := NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
 		}).Return(nil)
 		suite.queryHook = mockHook
-		defer func() { suite.queryHook = nil }()
+		defer func() {
+			paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+			suite.queryHook = nil
+		}()
 
 		plan := &planpb.PlanNode{
 			Node: &planpb.PlanNode_VectorAnns{
@@ -66,7 +70,37 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 		suite.verifyQueryInfo(req, 50, `{"param": 2}`)
 	})
 
+	suite.Run("disable optimization", func() {
+		mockHook := NewMockQueryHook(suite.T())
+		suite.queryHook = mockHook
+		defer func() { suite.queryHook = nil }()
+
+		plan := &planpb.PlanNode{
+			Node: &planpb.PlanNode_VectorAnns{
+				VectorAnns: &planpb.VectorANNS{
+					QueryInfo: &planpb.QueryInfo{
+						Topk:         100,
+						SearchParams: `{"param": 1}`,
+					},
+				},
+			},
+		}
+		bs, err := proto.Marshal(plan)
+		suite.Require().NoError(err)
+
+		req, err := OptimizeSearchParams(ctx, &querypb.SearchRequest{
+			Req: &internalpb.SearchRequest{
+				SerializedExprPlan: bs,
+			},
+			TotalChannelNum: 2,
+		}, suite.queryHook, 2)
+		suite.NoError(err)
+		suite.verifyQueryInfo(req, 100, `{"param": 1}`)
+	})
+
 	suite.Run("no_hook", func() {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
 		suite.queryHook = nil
 		plan := &planpb.PlanNode{
 			Node: &planpb.PlanNode_VectorAnns{
@@ -92,13 +126,17 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	})
 
 	suite.Run("other_plannode", func() {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
 		mockHook := NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
 		}).Return(nil).Maybe()
 		suite.queryHook = mockHook
-		defer func() { suite.queryHook = nil }()
+		defer func() {
+			paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+			suite.queryHook = nil
+		}()
 
 		plan := &planpb.PlanNode{
 			Node: &planpb.PlanNode_Query{},
@@ -117,6 +155,8 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	})
 
 	suite.Run("no_serialized_plan", func() {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
+		defer paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
 		mockHook := NewMockQueryHook(suite.T())
 		suite.queryHook = mockHook
 		defer func() { suite.queryHook = nil }()
@@ -129,13 +169,17 @@ func (suite *QueryHookSuite) TestOptimizeSearchParam() {
 	})
 
 	suite.Run("hook_run_error", func() {
+		paramtable.Get().Save(paramtable.Get().AutoIndexConfig.Enable.Key, "true")
 		mockHook := NewMockQueryHook(suite.T())
 		mockHook.EXPECT().Run(mock.Anything).Run(func(params map[string]any) {
 			params[common.TopKKey] = int64(50)
 			params[common.SearchParamKey] = `{"param": 2}`
 		}).Return(merr.WrapErrServiceInternal("mocked"))
 		suite.queryHook = mockHook
-		defer func() { suite.queryHook = nil }()
+		defer func() {
+			paramtable.Get().Reset(paramtable.Get().AutoIndexConfig.Enable.Key)
+			suite.queryHook = nil
+		}()
 
 		plan := &planpb.PlanNode{
 			Node: &planpb.PlanNode_VectorAnns{
