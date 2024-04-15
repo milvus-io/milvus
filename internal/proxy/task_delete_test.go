@@ -118,6 +118,7 @@ func TestDeleteTask_GetChannels(t *testing.T) {
 		mock.AnythingOfType("string"),
 		mock.AnythingOfType("string"),
 	).Return(collectionID, nil)
+
 	globalMetaCache = cache
 	chMgr := NewMockChannelsMgr(t)
 	chMgr.EXPECT().getChannels(mock.Anything).Return(channels, nil)
@@ -265,6 +266,19 @@ func TestDeleteRunner_Init(t *testing.T) {
 		assert.Error(t, dr.Init(context.Background()))
 	})
 
+	t.Run("fail to get database info", func(t *testing.T) {
+		dr := deleteRunner{
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+			},
+		}
+		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock error"))
+		globalMetaCache = cache
+
+		assert.Error(t, dr.Init(context.Background()))
+	})
+
 	t.Run("fail to get collection id", func(t *testing.T) {
 		dr := deleteRunner{
 			req: &milvuspb.DeleteRequest{
@@ -272,11 +286,13 @@ func TestDeleteRunner_Init(t *testing.T) {
 			},
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
 			mock.AnythingOfType("string"),
 		).Return(int64(0), errors.New("mock GetCollectionID err"))
+
 		globalMetaCache = cache
 		assert.Error(t, dr.Init(context.Background()))
 	})
@@ -287,6 +303,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			DbName:         dbName,
 		}}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -309,6 +326,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			PartitionName:  partitionName,
 		}}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -347,6 +365,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			},
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -372,6 +391,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			},
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),
@@ -405,6 +425,7 @@ func TestDeleteRunner_Init(t *testing.T) {
 			chMgr: chMgr,
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),

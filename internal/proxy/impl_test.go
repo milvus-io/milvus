@@ -1111,7 +1111,7 @@ func TestProxyAlterDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1164,7 +1164,7 @@ func TestProxyDescribeDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.simpleLimiter = NewSimpleLimiter()
+	node.simpleLimiter = NewSimpleLimiter(0, 0)
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1287,6 +1287,7 @@ func TestProxy_Delete(t *testing.T) {
 			Expr:           "pk in [1, 2, 3]",
 		}
 		cache := NewMockCache(t)
+		cache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(&databaseInfo{dbID: 0}, nil)
 		cache.On("GetCollectionID",
 			mock.Anything, // context.Context
 			mock.AnythingOfType("string"),

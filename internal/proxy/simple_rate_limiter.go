@@ -52,7 +52,7 @@ type SimpleLimiter struct {
 // NewSimpleLimiter returns a new SimpleLimiter.
 func NewSimpleLimiter(allocWaitInterval time.Duration, allocRetryTimes uint) *SimpleLimiter {
 	rootRateLimiter := newClusterLimiter()
-	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter)}
+	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter), allocWaitInterval: allocWaitInterval, allocRetryTimes: allocRetryTimes}
 	return m
 }
 

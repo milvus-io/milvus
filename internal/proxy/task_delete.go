@@ -235,6 +235,7 @@ type deleteRunner struct {
 
 	// delete info
 	schema           *schemaInfo
+	dbID             UniqueID
 	collectionID     UniqueID
 	partitionID      UniqueID
 	partitionKeyMode bool
@@ -260,6 +261,13 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 	if err := validateCollectionName(collName); err != nil {
 		return ErrWithLog(log, "Invalid collection name", err)
 	}
+
+	db, err := globalMetaCache.GetDatabaseInfo(ctx, dr.req.GetDbName())
+	if err != nil {
+		return err
+	}
+	dr.dbID = db.dbID
+
 	dr.collectionID, err = globalMetaCache.GetCollectionID(ctx, dr.req.GetDbName(), collName)
 	if err != nil {
 		return ErrWithLog(log, "Failed to get collection id", err)
@@ -429,7 +437,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 		}
 
 		taskCh := make(chan *deleteTask, 256)
-		go dr.receiveQueryResult(ctx, client, taskCh)
+		go dr.receiveQueryResult(ctx, client, taskCh, partitionIDs)
 		var allQueryCnt int64
 		// wait all task finish
 		for task := range taskCh {
@@ -450,7 +458,7 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 	}
 }
 
-func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask) {
+func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.QueryNode_QueryStreamClient, taskCh chan *deleteTask, partitionIDs []int64) {
 	defer func() {
 		close(taskCh)
 	}()
@@ -474,7 +482,7 @@ func (dr *deleteRunner) receiveQueryResult(ctx context.Context, client querypb.Q
 		}
 
 		if dr.limiter != nil {
-			err := dr.limiter.Alloc(ctx, []int64{dr.collectionID}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
+			err := dr.limiter.Alloc(ctx, dr.dbID, map[int64][]int64{dr.collectionID: partitionIDs}, internalpb.RateType_DMLDelete, proto.Size(result.GetIds()))
 			if err != nil {
 				dr.err = err
 				log.Warn("query stream for delete failed because rate limiter", zap.Int64("msgID", dr.msgID), zap.Error(err))
