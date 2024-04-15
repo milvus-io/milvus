@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 // check replica, find read only nodes and remove it from replica if all segment/channel has been moved
@@ -67,18 +68,24 @@ func (ob *ReplicaObserver) schedule(ctx context.Context) {
 	defer ob.wg.Done()
 	log.Info("Start check replica loop")
 
-	ticker := time.NewTicker(params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))
-	defer ticker.Stop()
+	listener := ob.meta.ResourceManager.ListenNodeChanged()
 	for {
-		select {
-		case <-ctx.Done():
-			log.Info("Close replica observer")
+		ob.waitNodeChangedOrTimeout(ctx, listener)
+		// stop if the context is canceled.
+		if ctx.Err() != nil {
+			log.Info("Stop check replica observer")
 			return
-
-		case <-ticker.C:
-			ob.checkNodesInReplica()
 		}
+
+		// do check once.
+		ob.checkNodesInReplica()
 	}
+}
+
+func (ob *ReplicaObserver) waitNodeChangedOrTimeout(ctx context.Context, listener *syncutil.VersionedListener) {
+	ctxWithTimeout, cancel := context.WithTimeout(ctx, params.Params.QueryCoordCfg.CheckNodeInReplicaInterval.GetAsDuration(time.Second))
+	defer cancel()
+	listener.Wait(ctxWithTimeout)
 }
 
 func (ob *ReplicaObserver) checkNodesInReplica() {

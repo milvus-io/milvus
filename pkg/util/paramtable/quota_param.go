@@ -122,12 +122,13 @@ type quotaConfig struct {
 	DQLMinQueryRatePerPartition   ParamItem `refreshable:"true"`
 
 	// limits
-	MaxCollectionNum      ParamItem `refreshable:"true"`
-	MaxCollectionNumPerDB ParamItem `refreshable:"true"`
-	TopKLimit             ParamItem `refreshable:"true"`
-	NQLimit               ParamItem `refreshable:"true"`
-	MaxQueryResultWindow  ParamItem `refreshable:"true"`
-	MaxOutputSize         ParamItem `refreshable:"true"`
+	MaxCollectionNum               ParamItem `refreshable:"true"`
+	MaxCollectionNumPerDB          ParamItem `refreshable:"true"`
+	TopKLimit                      ParamItem `refreshable:"true"`
+	NQLimit                        ParamItem `refreshable:"true"`
+	MaxQueryResultWindow           ParamItem `refreshable:"true"`
+	MaxOutputSize                  ParamItem `refreshable:"true"`
+	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
 
 	// limit writing
 	ForceDenyWriting                     ParamItem `refreshable:"true"`
@@ -1533,6 +1534,15 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		DefaultValue: "104857600", // 100 MB, 100 * 1024 * 1024
 	}
 	p.MaxOutputSize.Init(base.mgr)
+
+	p.MaxResourceGroupNumOfQueryNode = ParamItem{
+		Key:          "quotaAndLimits.limits.maxResourceGroupNumOfQueryNode",
+		Version:      "2.4.1",
+		Doc:          `maximum number of resource groups of query nodes`,
+		DefaultValue: "1024", // 1024
+		Export:       true,
+	}
+	p.MaxResourceGroupNumOfQueryNode.Init(base.mgr)
 
 	// limit writing
 	p.ForceDenyWriting = ParamItem{

@@ -21,10 +21,10 @@ import (
 
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
-	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
@@ -82,8 +82,14 @@ func (suite *ReplicaObserverSuite) SetupTest() {
 }
 
 func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
-	suite.meta.ResourceManager.AddResourceGroup("rg1")
-	suite.meta.ResourceManager.AddResourceGroup("rg2")
+	suite.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
+	suite.meta.ResourceManager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
 		Address:  "localhost:8080",
@@ -104,60 +110,86 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 		Address:  "localhost:8080",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg1", 1)
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg1", 1)
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 3)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg2", 1)
-	suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 4)
-	suite.meta.ResourceManager.TransferNode(meta.DefaultResourceGroupName, "rg2", 1)
+	suite.meta.ResourceManager.HandleNodeUp(1)
+	suite.meta.ResourceManager.HandleNodeUp(2)
+	suite.meta.ResourceManager.HandleNodeUp(3)
+	suite.meta.ResourceManager.HandleNodeUp(4)
 
-	err := suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 1))
+	err := suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(suite.collectionID, 2))
 	suite.NoError(err)
-	replicas := make([]*meta.Replica, 2)
-	replicas[0] = meta.NewReplica(
-		&querypb.Replica{
-			ID:            10000,
-			CollectionID:  suite.collectionID,
-			ResourceGroup: "rg1",
-			Nodes:         []int64{1, 2, 3},
-		},
-		typeutil.NewUniqueSet(1, 2, 3),
-	)
-
-	replicas[1] = meta.NewReplica(
-		&querypb.Replica{
-			ID:            10001,
-			CollectionID:  suite.collectionID,
-			ResourceGroup: "rg2",
-			Nodes:         []int64{4},
-		},
-		typeutil.NewUniqueSet(4),
-	)
-	err = suite.meta.ReplicaManager.Put(replicas...)
+	replicas, err := suite.meta.Spawn(suite.collectionID, map[string]int{
+		"rg1": 1,
+		"rg2": 1,
+	})
 	suite.NoError(err)
-	suite.distMgr.ChannelDistManager.Update(1, utils.CreateTestChannel(suite.collectionID, 1, 1, "test-insert-channel1"))
-	suite.distMgr.SegmentDistManager.Update(1, utils.CreateTestSegment(suite.collectionID, suite.partitionID, 1, 1, 1, "test-insert-channel1"))
-	suite.distMgr.ChannelDistManager.Update(2, utils.CreateTestChannel(suite.collectionID, 2, 1, "test-insert-channel2"))
-	suite.distMgr.SegmentDistManager.Update(2, utils.CreateTestSegment(suite.collectionID, suite.partitionID, 2, 2, 1, "test-insert-channel2"))
-	suite.distMgr.ChannelDistManager.Update(3, utils.CreateTestChannel(suite.collectionID, 3, 1, "test-insert-channel3"))
-	suite.distMgr.SegmentDistManager.Update(3, utils.CreateTestSegment(suite.collectionID, suite.partitionID, 2, 3, 1, "test-insert-channel3"))
+	suite.Equal(2, len(replicas))
 
 	suite.Eventually(func() bool {
-		replica0 := suite.meta.ReplicaManager.Get(10000)
-		replica1 := suite.meta.ReplicaManager.Get(10001)
-		return (replica0.Contains(3) || replica0.ContainRONode(3)) && suite.NotContains(replica1.GetNodes(), int64(3)) && suite.Len(replica1.GetNodes(), 1)
+		availableNodes := typeutil.NewUniqueSet()
+		for _, r := range replicas {
+			replica := suite.meta.ReplicaManager.Get(r.GetID())
+			suite.NotNil(replica)
+			if replica.RWNodesCount() != 2 {
+				return false
+			}
+			if replica.RONodesCount() != 0 {
+				return false
+			}
+			availableNodes.Insert(replica.GetNodes()...)
+		}
+		return availableNodes.Len() == 4
 	}, 6*time.Second, 2*time.Second)
 
-	suite.distMgr.ChannelDistManager.Update(3)
-	suite.distMgr.SegmentDistManager.Update(3)
+	// Add some segment on nodes.
+	for i := 0; i < 4; i++ {
+		suite.distMgr.ChannelDistManager.Update(
+			int64(i),
+			utils.CreateTestChannel(suite.collectionID, 1, 1, "test-insert-channel1"))
+		suite.distMgr.SegmentDistManager.Update(
+			int64(i),
+			utils.CreateTestSegment(suite.collectionID, suite.partitionID, 1, 1, 1, "test-insert-channel1"))
+	}
+
+	// Do a replica transfer.
+	suite.meta.ReplicaManager.TransferReplica(suite.collectionID, "rg1", "rg2", 1)
+
+	// All replica should in the rg2 but not rg1
+	// And some nodes will become ro nodes before all segment and channel on it is cleaned.
+	suite.Eventually(func() bool {
+		for _, r := range replicas {
+			replica := suite.meta.ReplicaManager.Get(r.GetID())
+			suite.NotNil(replica)
+			suite.Equal("rg2", replica.GetResourceGroup())
+			// all replica should have ro nodes.
+			// transferred replica should have 2 ro nodes.
+			// not transferred replica should have 1 ro nodes for balancing.
+			if !(replica.RONodesCount()+replica.RWNodesCount() == 2 && replica.RONodesCount() > 0) {
+				return false
+			}
+		}
+		return true
+	}, 30*time.Second, 2*time.Second)
+
+	// Add some segment on nodes.
+	for i := 0; i < 4; i++ {
+		suite.distMgr.ChannelDistManager.Update(int64(i))
+		suite.distMgr.SegmentDistManager.Update(int64(i))
+	}
 
 	suite.Eventually(func() bool {
-		replica0 := suite.meta.ReplicaManager.Get(10000)
-		replica1 := suite.meta.ReplicaManager.Get(10001)
-		return (!replica0.Contains(3) && !replica0.ContainRONode(3)) && suite.Contains(replica1.GetNodes(), int64(3)) && suite.Len(replica1.GetNodes(), 2)
-	}, 6*time.Second, 2*time.Second)
+		for _, r := range replicas {
+			replica := suite.meta.ReplicaManager.Get(r.GetID())
+			suite.NotNil(replica)
+			suite.Equal("rg2", replica.GetResourceGroup())
+			if replica.RONodesCount() > 0 {
+				return false
+			}
+			if replica.RWNodesCount() != 1 {
+				return false
+			}
+		}
+		return true
+	}, 30*time.Second, 2*time.Second)
 }
 
 func (suite *ReplicaObserverSuite) TearDownSuite() {

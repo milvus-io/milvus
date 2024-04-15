@@ -119,8 +119,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -184,8 +184,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -269,8 +269,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -343,8 +343,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{

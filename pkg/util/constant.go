@@ -122,6 +122,7 @@ var (
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeManageOwnership.String()),
 
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeCreateResourceGroup.String()),
+			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeUpdateResourceGroups.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDropResourceGroup.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeDescribeResourceGroup.String()),
 			MetaStore2API(commonpb.ObjectPrivilege_PrivilegeListResourceGroups.String()),

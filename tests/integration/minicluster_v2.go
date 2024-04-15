@@ -253,6 +253,14 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 	return cluster, nil
 }
 
+func (cluster *MiniClusterV2) AddQueryNodes(k int) []*grpcquerynode.Server {
+	servers := make([]*grpcquerynode.Server, k)
+	for i := 0; i < k; i++ {
+		servers = append(servers, cluster.AddQueryNode())
+	}
+	return servers
+}
+
 func (cluster *MiniClusterV2) AddQueryNode() *grpcquerynode.Server {
 	cluster.ptmu.Lock()
 	defer cluster.ptmu.Unlock()
