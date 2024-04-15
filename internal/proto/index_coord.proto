@@ -4,7 +4,6 @@ package milvus.proto.index;
 
 option go_package = "github.com/milvus-io/milvus/internal/proto/indexpb";
 
-import "google/protobuf/any.proto";
 import "common.proto";
 import "internal.proto";
 import "milvus.proto";
@@ -405,20 +404,20 @@ enum JobType {
     JobTypeAnalyzeJob = 2;
 }
 
-message JobDescriptor {
-    JobType job_type = 1;
-    google.protobuf.Any parameters = 2;
-}
+//message JobDescriptor {
+//    JobType job_type = 1;
+//    google.protobuf.Any parameters = 2;
+//}
 
 message CreateJobV2Request {
     string clusterID = 1;
     int64 taskID = 2;
-//    JobType job_type = 3;
-//    oneof request {
-//        AnalyzeRequest analyze_request = 4;
-//        CreateJobRequest index_request = 5;
-//    }
-    JobDescriptor job = 3;
+    JobType job_type = 3;
+    oneof request {
+        AnalyzeRequest analyze_request = 4;
+        CreateJobRequest index_request = 5;
+    }
+//    JobDescriptor job = 3;
 }
 
 message QueryJobsV2Request {

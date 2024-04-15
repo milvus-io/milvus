@@ -20,9 +20,6 @@ import (
 	"context"
 	"path"
 
-	"go.uber.org/zap"
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -35,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
 )
 
 type indexBuildTask struct {
@@ -254,22 +252,14 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		}
 	}
 
-	anyParams, err := anypb.New(req)
-	if err != nil {
-		log.Ctx(ctx).Warn("marshal index request to any params failed", zap.Int64("taskID", it.GetTaskID()),
-			zap.Error(err))
-		it.SetState(indexpb.JobState_JobStateRetry, err.Error())
-		return false
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
 		ClusterID: req.GetClusterID(),
 		TaskID:    req.GetBuildID(),
-		Job: &indexpb.JobDescriptor{
-			JobType:    indexpb.JobType_JobTypeIndexJob,
-			Parameters: anyParams,
+		JobType:   indexpb.JobType_JobTypeIndexJob,
+		Request: &indexpb.CreateJobV2Request_IndexRequest{
+			IndexRequest: req,
 		},
 	})
 	if err == nil {

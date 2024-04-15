@@ -24,8 +24,6 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
-	"google.golang.org/protobuf/types/known/anypb"
-
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -151,22 +149,14 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		}
 	}
 
-	anyParams, err := anypb.New(req)
-	if err != nil {
-		log.Ctx(ctx).Warn("marshal analyze request to any params failed", zap.Int64("taskID", at.GetTaskID()),
-			zap.Error(err))
-		at.SetState(indexpb.JobState_JobStateRetry, err.Error())
-		return false
-	}
-
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
 		ClusterID: req.GetClusterID(),
 		TaskID:    req.GetTaskID(),
-		Job: &indexpb.JobDescriptor{
-			JobType:    indexpb.JobType_JobTypeAnalyzeJob,
-			Parameters: anyParams,
+		JobType:   indexpb.JobType_JobTypeAnalyzeJob,
+		Request: &indexpb.CreateJobV2Request_AnalyzeRequest{
+			AnalyzeRequest: req,
 		},
 	})
 	if err == nil {
