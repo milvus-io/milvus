@@ -3094,7 +3094,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			hookutil.DatabaseKey:        dbName,
 			hookutil.UsernameKey:        username,
 			hookutil.ResultDataSizeKey:  sentSize,
-			hookutil.RelatedDataSizeKey: qt.relatedDataSize,
+			hookutil.RelatedDataSizeKey: 0,
 			hookutil.RelatedCntKey:      qt.result.GetResults().GetAllSearchCount(),
 		})
 		SetReportValue(qt.result.GetStatus(), v)
