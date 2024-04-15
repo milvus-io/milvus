@@ -221,6 +221,9 @@ StreamReducerHelper::FilterSearchResults() {
     uint32_t valid_index = 0;
     for (auto& search_result : search_results_to_merge_) {
         // skip when results num is 0
+        AssertInfo(search_result != nullptr,
+                   "search_result to merge cannot be nullptr, there must be "
+                   "sth wrong in the code");
         if (search_result->unity_topK_ == 0) {
             continue;
         }
@@ -519,7 +522,7 @@ std::vector<char>
 StreamReducerHelper::GetSearchResultDataSlice(int slice_index) {
     auto nq_begin = slice_nqs_prefix_sum_[slice_index];
     auto nq_end = slice_nqs_prefix_sum_[slice_index + 1];
-    
+
     auto search_result_data =
         std::make_unique<milvus::proto::schema::SearchResultData>();
     // set unify_topK and total_nq
