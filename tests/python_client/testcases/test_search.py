@@ -2214,7 +2214,6 @@ class TestCollectionSearch(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -3164,7 +3163,6 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
     def test_search_with_expression_bool(self, dim, auto_id, _async, bool_type, enable_dynamic_field):
         """
@@ -3205,8 +3203,7 @@ class TestCollectionSearch(TestcaseBase):
 
         # 4. search with different expressions
         expression = f"{default_bool_field_name} == {bool_type}"
-        log.info(
-            "test_search_with_expression_bool: searching with bool expression: %s" % expression)
+        log.info("test_search_with_expression_bool: searching with bool expression: %s" % expression)
         vectors = [[random.random() for _ in range(dim)] for _ in range(default_nq)]
 
         search_res, _ = collection_w.search(vectors[:default_nq], default_search_field,
@@ -3403,7 +3400,7 @@ class TestCollectionSearch(TestcaseBase):
                      "&& int8 >= 0 && float >= 0 && double >= 0"
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         for search_field in vector_name_list:
-            vector_data_type = search_field[:-9].lstrip("multiple_vector_")
+            vector_data_type = search_field.lstrip("multiple_vector_")
             vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
             res = collection_w.search(vectors[:nq], search_field,
                                       default_search_params, default_limit,
