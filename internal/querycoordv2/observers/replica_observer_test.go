@@ -141,13 +141,13 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	}, 6*time.Second, 2*time.Second)
 
 	// Add some segment on nodes.
-	for i := 0; i < 4; i++ {
+	for nodeID := int64(1); nodeID <= 4; nodeID++ {
 		suite.distMgr.ChannelDistManager.Update(
-			int64(i),
-			utils.CreateTestChannel(suite.collectionID, 1, 1, "test-insert-channel1"))
+			nodeID,
+			utils.CreateTestChannel(suite.collectionID, nodeID, 1, "test-insert-channel1"))
 		suite.distMgr.SegmentDistManager.Update(
-			int64(i),
-			utils.CreateTestSegment(suite.collectionID, suite.partitionID, 1, 1, 1, "test-insert-channel1"))
+			nodeID,
+			utils.CreateTestSegment(suite.collectionID, suite.partitionID, 1, nodeID, 1, "test-insert-channel1"))
 	}
 
 	// Do a replica transfer.
@@ -171,9 +171,9 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	}, 30*time.Second, 2*time.Second)
 
 	// Add some segment on nodes.
-	for i := 0; i < 4; i++ {
-		suite.distMgr.ChannelDistManager.Update(int64(i))
-		suite.distMgr.SegmentDistManager.Update(int64(i))
+	for nodeID := int64(1); nodeID <= 4; nodeID++ {
+		suite.distMgr.ChannelDistManager.Update(nodeID)
+		suite.distMgr.SegmentDistManager.Update(nodeID)
 	}
 
 	suite.Eventually(func() bool {
