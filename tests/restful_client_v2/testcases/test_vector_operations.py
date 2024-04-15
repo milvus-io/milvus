@@ -586,7 +586,7 @@ class TestSearchVector(TestBase):
             for i in range(nb):
                 if auto_id:
                     tmp = {
-                        "user_id": i%100,
+                        "user_id": i%10,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
@@ -597,7 +597,7 @@ class TestSearchVector(TestBase):
                 else:
                     tmp = {
                         "book_id": i,
-                        "user_id": i%100,
+                        "user_id": i%10,
                         "word_count": i,
                         "book_describe": f"book_{i}",
                         "float_vector": gen_vector(datatype="FloatVector", dim=dim),
@@ -634,6 +634,9 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 200
+        # assert no dup user_id
+        user_ids = [r["user_id"]for r in rsp['data']]
+        assert len(user_ids) == len(set(user_ids))
 
     @pytest.mark.parametrize("insert_round", [1])
     @pytest.mark.parametrize("auto_id", [True])
@@ -712,6 +715,93 @@ class TestSearchVector(TestBase):
                 "params": {
                     "radius": "0.1",
                     "range_filter": "0.8"
+                }
+            },
+            "limit": 100,
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 200
+        assert len(rsp['data']) == 100
+
+
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True])
+    @pytest.mark.parametrize("is_partition_key", [True])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.xfail(reason="issue https://github.com/milvus-io/milvus/issues/32214")
+    def test_search_vector_with_sparse_float_vector_datatype(self, nb, dim, insert_round, auto_id,
+                                                      is_partition_key, enable_dynamic_schema):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "sparse_float_vector", "dataType": "SparseFloatVector"},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "sparse_float_vector", "indexName": "sparse_float_vector", "metricType": "IP",
+                 "indexConfig": {"index_type": "SPARSE_INVERTED_INDEX", "drop_ratio_build": "0.2"}}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 200
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 200
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": i%100,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": i%100,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 200
+            assert rsp['data']['insertCount'] == nb
+        # search data
+        payload = {
+            "collectionName": name,
+            "data": [gen_vector(datatype="SparseFloatVector", dim=dim)],
+            "filter": "word_count > 100",
+            "groupingField": "user_id",
+            "outputFields": ["*"],
+            "searchParams": {
+                "metricType": "IP",
+                "params": {
+                    "drop_ratio_search": "0.2",
                 }
             },
             "limit": 100,
