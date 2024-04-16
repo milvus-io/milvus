@@ -101,10 +101,11 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 			}
 
 			pks := insertResult.GetIDs().GetIntId().GetData()
-			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
 			log.Info("========================delete expr==================",
-				zap.String("expr", expr),
+				zap.Int("length of pk", len(pks)),
 			)
+
+			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
 
 			deleteResp, err := s.Cluster.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
 				CollectionName: collectionName,
