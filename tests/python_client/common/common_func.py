@@ -182,7 +182,6 @@ def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=Fals
     return float_vec_field
 
 
-
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True,
                                   multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
@@ -407,7 +406,7 @@ def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
         vectors = gen_bf16_vectors(nb, dim)[1]
 
     if dim > 1:
-        if vector_data_type=="FLOAT_VECTOR":
+        if vector_data_type == "FLOAT_VECTOR":
             vectors = preprocessing.normalize(vectors, axis=1, norm='l2')
             vectors = vectors.tolist()
     return vectors
@@ -765,9 +764,9 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
                 dict[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i],
                                                                   ct.vector_data_type_all[i])[0]
     if len(multiple_dim_array) != 0:
-        with open(ct.rows_all_data_type_file_path + f'_{partition_id}' + '.txt', 'wb') as json_file:
+        with open(ct.rows_all_data_type_file_path + f'_{partition_id}' + f'_dim{dim}.txt', 'wb') as json_file:
             pickle.dump(array, json_file)
-            log.info("generated rows data file")
+            log.info("generated rows data")
 
     return array
 
@@ -1746,22 +1745,21 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                                       multiple_vector_field_name=vector_name_list,
                                                                       auto_id=auto_id, primary_field=primary_field)
                 else:
-                    if os.path.exists(ct.rows_all_data_type_file_path + f'_{i}' + '.txt'):
-                        with open(ct.rows_all_data_type_file_path + f'_{i}' + '.txt', 'rb') as f:
+                    if os.path.exists(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt'):
+                        with open(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt', 'rb') as f:
                             default_data = pickle.load(f)
                     else:
                         default_data = gen_default_rows_data_all_data_type(nb // num, dim=dim, start=start,
                                                                            with_json=with_json,
                                                                            multiple_dim_array=multiple_dim_array,
                                                                            multiple_vector_field_name=vector_name_list,
-                                                                           partition_id = i, auto_id=auto_id,
+                                                                           partition_id=i, auto_id=auto_id,
                                                                            primary_field=primary_field)
         else:
             default_data, binary_raw_data = gen_default_binary_dataframe_data(nb // num, dim=dim, start=start,
                                                                               auto_id=auto_id,
                                                                               primary_field=primary_field)
             binary_raw_vectors.extend(binary_raw_data)
-        # insert
         insert_res = collection_w.insert(default_data, par[i].name)[0]
         log.info(f"inserted {nb // num} data into collection {collection_w.name}")
         time_stamp = insert_res.timestamp
@@ -2019,6 +2017,7 @@ def gen_bf16_vectors(num, dim):
         raw_vectors.append(raw_vector)
         bf16_vector = tf.cast(raw_vector, dtype=tf.bfloat16).numpy()
         bf16_vectors.append(bf16_vector)
+
     return raw_vectors, bf16_vectors
 
 
