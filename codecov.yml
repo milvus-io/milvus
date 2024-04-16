@@ -39,6 +39,7 @@ ignore:
   - "**/*.proto"
   - "internal/metastore/db/dbmodel/mocks/.*"
   - "**/mock_*.go"
+  - "cmd/.*"
 
 
 
