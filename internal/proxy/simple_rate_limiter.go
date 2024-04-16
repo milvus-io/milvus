@@ -169,12 +169,24 @@ func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
 	m.quotaStatesMu.Lock()
 	defer m.quotaStatesMu.Unlock()
 
-	// Reset the cluster&db limiter (which with DDL rate limitations) rates due to potential changes in configurations.
-	clusterLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Cluster)
-	initLimiter(m.rateLimiter.GetRootLimiters(), clusterLimiterConfigs)
-	databaseLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Database)
-	m.rateLimiter.GetRootLimiters().GetChildren().Range(func(_ int64, child *rlu.RateLimiterNode) bool {
-		initLimiter(child, databaseLimiterConfigs)
+	// Reset the limiter rates due to potential changes in configurations.
+	var (
+		clusterConfigs    = getDefaultLimiterConfig(internalpb.RateScope_Cluster)
+		databaseConfigs   = getDefaultLimiterConfig(internalpb.RateScope_Database)
+		collectionConfigs = getDefaultLimiterConfig(internalpb.RateScope_Collection)
+		partitionConfigs  = getDefaultLimiterConfig(internalpb.RateScope_Partition)
+	)
+	initLimiter(m.rateLimiter.GetRootLimiters(), clusterConfigs)
+	m.rateLimiter.GetRootLimiters().GetChildren().Range(func(_ int64, dbLimiter *rlu.RateLimiterNode) bool {
+		initLimiter(dbLimiter, databaseConfigs)
+		dbLimiter.GetChildren().Range(func(_ int64, collLimiter *rlu.RateLimiterNode) bool {
+			initLimiter(collLimiter, collectionConfigs)
+			collLimiter.GetChildren().Range(func(_ int64, partitionLimiter *rlu.RateLimiterNode) bool {
+				initLimiter(partitionLimiter, partitionConfigs)
+				return true
+			})
+			return true
+		})
 		return true
 	})
 
@@ -225,8 +237,8 @@ func newCollectionLimiters() *rlinternal.RateLimiterNode {
 
 func newPartitionLimiters() *rlinternal.RateLimiterNode {
 	partRateLimiters := rlinternal.NewRateLimiterNode(internalpb.RateScope_Partition)
-	collectionLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Partition)
-	initLimiter(partRateLimiters, collectionLimiterConfigs)
+	partitionLimiterConfigs := getDefaultLimiterConfig(internalpb.RateScope_Partition)
+	initLimiter(partRateLimiters, partitionLimiterConfigs)
 	return partRateLimiters
 }
 
