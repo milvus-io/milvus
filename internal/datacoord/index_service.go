@@ -48,7 +48,6 @@ func (s *Server) serverID() int64 {
 }
 
 func (s *Server) startIndexService(ctx context.Context) {
-	s.indexBuilder.Start()
 
 	s.serverLoopWg.Add(1)
 	go s.createIndexForSegmentLoop(ctx)
@@ -73,7 +72,13 @@ func (s *Server) createIndexForSegment(segment *SegmentInfo, indexID UniqueID) e
 	if err = s.meta.indexMeta.AddSegmentIndex(segIndex); err != nil {
 		return err
 	}
-	s.indexBuilder.enqueue(buildID)
+	s.taskScheduler.enqueue(&indexBuildTask{
+		buildID: buildID,
+		taskInfo: &indexpb.IndexTaskInfo{
+			BuildID: buildID,
+			State:   commonpb.IndexState_Unissued,
+		},
+	})
 	return nil
 }
 
@@ -185,10 +190,10 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	}
 	metrics.IndexRequestCounter.WithLabelValues(metrics.TotalLabel).Inc()
 
-	/* just for test analysis task
+	/* just for test analyze task
 	taskID, err := s.allocator.allocID(ctx)
 	if err != nil {
-		log.Error("analysis failed", zap.Error(err))
+		log.Error("analyze failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
 
@@ -199,7 +204,7 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		return t.ID
 	})
 
-	task := &model.AnalysisTask{
+	task := &model.AnalyzeTask{
 		TenantID:                  "",
 		CollectionID:              req.GetCollectionID(),
 		PartitionID:               segments[0].GetPartitionID(),
@@ -217,12 +222,12 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		Dim:                       128,
 	}
 
-	err = s.analysisMeta.AddAnalysisTask(task)
+	err = s.analyzeMeta.AddAnalyzeTask(task)
 	if err != nil {
-		log.Error("analysis task add failed", zap.Error(err))
+		log.Error("analyze task add failed", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	s.analysisScheduler.enqueue(taskID)
+	s.analyzeScheduler.enqueue(taskID)
 	return merr.Success(), nil
 	*/
 

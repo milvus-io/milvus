@@ -90,19 +90,9 @@ func TestIndexNodeManager_SelectNodeAndAssignTask(t *testing.T) {
 			},
 		}
 
-		err := nm.SelectNodeAndAssignTask(func(selectNodeID int64, client types.IndexNodeClient) error {
-			assert.NotNil(t, client)
-			assert.Contains(t, []UniqueID{8, 9}, selectNodeID)
-			return nil
-		})
-		assert.NoError(t, err)
-
-		err = nm.SelectNodeAndAssignTask(func(selectNodeID int64, client types.IndexNodeClient) error {
-			assert.NotNil(t, client)
-			assert.Contains(t, []UniqueID{8, 9}, selectNodeID)
-			return errors.New("error")
-		})
-		assert.Error(t, err)
+		selectNodeID, client := nm.PickClient()
+		assert.NotNil(t, client)
+		assert.Contains(t, []UniqueID{8, 9}, selectNodeID)
 	})
 }
 

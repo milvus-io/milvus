@@ -853,28 +853,28 @@ func (kc *Catalog) DropClusteringCompactionInfo(ctx context.Context, info *datap
 	return kc.MetaKv.Remove(key)
 }
 
-func (kc *Catalog) ListAnalysisTasks(ctx context.Context) ([]*model.AnalysisTask, error) {
-	tasks := make([]*model.AnalysisTask, 0)
+func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*model.AnalyzeTask, error) {
+	tasks := make([]*model.AnalyzeTask, 0)
 
-	_, values, err := kc.MetaKv.LoadWithPrefix(AnalysisTaskPrefix)
+	_, values, err := kc.MetaKv.LoadWithPrefix(AnalyzeTaskPrefix)
 	if err != nil {
 		return nil, err
 	}
 	for _, value := range values {
-		task := &indexpb.AnalysisTask{}
+		task := &indexpb.AnalyzeTask{}
 		err = proto.Unmarshal([]byte(value), task)
 		if err != nil {
 			return nil, err
 		}
-		tasks = append(tasks, model.UnmarshalAnalysisTask(task))
+		tasks = append(tasks, model.UnmarshalAnalyzeTask(task))
 	}
 	return tasks, nil
 }
 
-func (kc *Catalog) SaveAnalysisTask(ctx context.Context, task *model.AnalysisTask) error {
-	key := buildAnalysisTaskKey(task.TaskID)
+func (kc *Catalog) SaveAnalyzeTask(ctx context.Context, task *model.AnalyzeTask) error {
+	key := buildAnalyzeTaskKey(task.TaskID)
 
-	value, err := proto.Marshal(model.MarshalAnalysisTask(task))
+	value, err := proto.Marshal(model.MarshalAnalyzeTask(task))
 	if err != nil {
 		return err
 	}
@@ -886,7 +886,7 @@ func (kc *Catalog) SaveAnalysisTask(ctx context.Context, task *model.AnalysisTas
 	return nil
 }
 
-func (kc *Catalog) DropAnalysisTask(ctx context.Context, taskID typeutil.UniqueID) error {
-	key := buildAnalysisTaskKey(taskID)
+func (kc *Catalog) DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildAnalyzeTaskKey(taskID)
 	return kc.MetaKv.Remove(key)
 }

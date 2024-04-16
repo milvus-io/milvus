@@ -14,12 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package analysiscgowrapper
+package analyzecgowrapper
 
 /*
 #cgo pkg-config: milvus_indexbuilder
 #include <stdlib.h>	// free
-#include "indexbuilder/analysis_c.h"
+#include "indexbuilder/analyze_c.h"
 */
 import "C"
 
@@ -30,12 +30,12 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
-type AnalysisInfo struct {
-	cAnalysisInfo C.CAnalysisInfo
+type AnalyzeInfo struct {
+	cAnalyzeInfo C.CAnalyzeInfo
 }
 
-func NewAnalysisInfo(config *indexpb.StorageConfig) (*AnalysisInfo, error) {
-	var cAnalysisInfo C.CAnalysisInfo
+func NewAnalyzeInfo(config *indexpb.StorageConfig) (*AnalyzeInfo, error) {
+	var cAnalyzeInfo C.CAnalyzeInfo
 
 	cAddress := C.CString(config.Address)
 	cBucketName := C.CString(config.BucketName)
@@ -71,63 +71,56 @@ func NewAnalysisInfo(config *indexpb.StorageConfig) (*AnalysisInfo, error) {
 		requestTimeoutMs: C.int64_t(config.RequestTimeoutMs),
 	}
 
-	status := C.NewAnalysisInfo(&cAnalysisInfo, storageConfig)
-	if err := HandleCStatus(&status, "NewAnalysisInfo failed"); err != nil {
+	status := C.NewAnalyzeInfo(&cAnalyzeInfo, storageConfig)
+	if err := HandleCStatus(&status, "NewAnalyzeInfo failed"); err != nil {
 		return nil, err
 	}
-	return &AnalysisInfo{cAnalysisInfo: cAnalysisInfo}, nil
+	return &AnalyzeInfo{cAnalyzeInfo: cAnalyzeInfo}, nil
 }
 
-func DeleteAnalysisInfo(info *AnalysisInfo) {
-	C.DeleteAnalysisInfo(info.cAnalysisInfo)
+func DeleteAnalyzeInfo(info *AnalyzeInfo) {
+	C.DeleteAnalyzeInfo(info.cAnalyzeInfo)
 }
 
-func (ai *AnalysisInfo) AppendAnalysisFieldMetaInfo(collectionID int64, partitionID int64, fieldID int64, fieldType schemapb.DataType, fieldName string, dim int64) error {
+func (ai *AnalyzeInfo) AppendAnalyzeInfo(collectionID int64,
+	partitionID int64,
+	fieldID int64,
+	taskID int64,
+	version int64,
+	fieldName string,
+	fieldType schemapb.DataType,
+	dim int64,
+	segmentSize int64,
+	trainSize int64) error {
 	cColID := C.int64_t(collectionID)
 	cParID := C.int64_t(partitionID)
 	cFieldID := C.int64_t(fieldID)
-	cintDType := uint32(fieldType)
-	cFieldName := C.CString(fieldName)
-	cDim := C.int64_t(dim)
-	defer C.free(unsafe.Pointer(cFieldName))
-	status := C.AppendAnalysisFieldMetaInfo(ai.cAnalysisInfo, cColID, cParID, cFieldID, cFieldName, cintDType, cDim)
-	return HandleCStatus(&status, "appendFieldMetaInfo failed")
-}
-
-func (ai *AnalysisInfo) AppendAnalysisInfo(taskID int64, version int64) error {
 	cTaskID := C.int64_t(taskID)
 	cVersion := C.int64_t(version)
+	cFieldName := C.CString(fieldName)
+	cFieldType := uint32(fieldType)
+	cDim := C.int64_t(dim)
+	cSegmentSize := C.int64_t(segmentSize)
+	cTrainSize := C.int64_t(trainSize)
+	defer C.free(unsafe.Pointer(cFieldName))
 
-	status := C.AppendAnalysisInfo(ai.cAnalysisInfo, cTaskID, cVersion)
-	return HandleCStatus(&status, "appendAnalysisMetaInfo failed")
+	status := C.AppendAnalyzeInfo(ai.cAnalyzeInfo, cColID, cParID, cFieldID, cTaskID, cVersion, cFieldName, cFieldType, cDim, cSegmentSize, cTrainSize)
+	return HandleCStatus(&status, "appendAnalyzeInfo failed")
 }
 
-func (ai *AnalysisInfo) AppendSegmentID(segID int64) error {
-	cSegID := C.int64_t(segID)
-
-	status := C.AppendSegmentID(ai.cAnalysisInfo, cSegID)
-	return HandleCStatus(&status, "appendAnalysisSegmentID failed")
-}
-
-func (ai *AnalysisInfo) AppendSegmentInsertFile(segID int64, filePath string) error {
+func (ai *AnalyzeInfo) AppendSegmentInsertFile(segID int64, filePath string) error {
 	cSegID := C.int64_t(segID)
 	cInsertFilePath := C.CString(filePath)
 	defer C.free(unsafe.Pointer(cInsertFilePath))
 
-	status := C.AppendSegmentInsertFile(ai.cAnalysisInfo, cSegID, cInsertFilePath)
+	status := C.AppendSegmentInsertFile(ai.cAnalyzeInfo, cSegID, cInsertFilePath)
 	return HandleCStatus(&status, "appendInsertFile failed")
 }
 
-func (ai *AnalysisInfo) AppendSegmentSize(size int64) error {
-	cSize := C.int64_t(size)
+func (ai *AnalyzeInfo) AppendNumRows(segID int64, numRows int64) error {
+	cSegID := C.int64_t(segID)
+	cNumRows := C.int64_t(numRows)
 
-	status := C.AppendSegmentSize(ai.cAnalysisInfo, cSize)
-	return HandleCStatus(&status, "appendSegmentSize failed")
-}
-
-func (ai *AnalysisInfo) AppendTrainSize(size int64) error {
-	cSize := C.int64_t(size)
-
-	status := C.AppendTrainSize(ai.cAnalysisInfo, cSize)
-	return HandleCStatus(&status, "appendTrainSize failed")
+	status := C.AppendSegmentNumRows(ai.cAnalyzeInfo, cSegID, cNumRows)
+	return HandleCStatus(&status, "appendNumRows failed")
 }

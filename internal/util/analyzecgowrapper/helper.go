@@ -14,13 +14,14 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package analysiscgowrapper
+package analyzecgowrapper
 
 /*
 #cgo pkg-config: milvus_indexbuilder
 
 #include <stdlib.h>	// free
-#include "indexbuilder/analysis_c.h"
+#include "common/binary_set_c.h"
+#include "indexbuilder/analyze_c.h"
 */
 import "C"
 
@@ -31,6 +32,29 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
+
+func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
+	size := int(C.GetBinarySetSize(cBinarySet))
+	if size == 0 {
+		return nil, fmt.Errorf("BinarySet size is zero")
+	}
+	datas := make([]unsafe.Pointer, size)
+
+	C.GetBinarySetKeys(cBinarySet, unsafe.Pointer(&datas[0]))
+	ret := make([]string, size)
+	for i := 0; i < size; i++ {
+		ret[i] = C.GoString((*C.char)(datas[i]))
+	}
+
+	return ret, nil
+}
+
+func GetBinarySetSize(cBinarySet C.CBinarySet, key string) (int64, error) {
+	cKey := C.CString(key)
+	defer C.free(unsafe.Pointer(cKey))
+	ret := C.GetBinarySetValueSize(cBinarySet, cKey)
+	return int64(ret), nil
+}
 
 // HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {
@@ -44,20 +68,4 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
 	log.Warn(logMsg)
 	return merr.WrapErrSegcore(int32(errorCode), logMsg)
-}
-
-func GetCentroidsFile() (string, error) {
-	// need malloc size
-	//var path unsafe.Pointer
-	//return C.GoString((*C.char)(C.GetCentroidsFile(path))), nil
-	return "centroids", nil
-}
-
-func GetSegmentOffsetMapping(segID int64) (string, error) {
-	// need malloc size
-
-	//var path unsafe.Pointer
-	//cSegID := C.int64_t(segID)
-	//return C.GoString((*C.char)(C.GetSegmentOffsetMapping(cSegID, path))), nil
-	return fmt.Sprintf("offsets-mapping-%d", segID), nil
 }

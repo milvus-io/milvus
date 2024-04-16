@@ -23,7 +23,6 @@ import (
 
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -31,22 +30,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
-type analysisMeta struct {
+type analyzeMeta struct {
+	sync.RWMutex
+
 	ctx     context.Context
-	lock    sync.RWMutex
 	catalog metastore.DataCoordCatalog
 
 	// taskID -> analyzeStats
 	// TODO: when to mark as dropped?
-	tasks map[int64]*model.AnalysisTask
+	tasks map[int64]*model.AnalyzeTask
 }
 
-func newAnalysisMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*analysisMeta, error) {
-	mt := &analysisMeta{
+func newAnalyzeMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*analyzeMeta, error) {
+	mt := &analyzeMeta{
 		ctx:     ctx,
-		lock:    sync.RWMutex{},
 		catalog: catalog,
-		tasks:   make(map[int64]*model.AnalysisTask),
+		tasks:   make(map[int64]*model.AnalyzeTask),
 	}
 
 	if err := mt.reloadFromKV(); err != nil {
@@ -55,25 +54,25 @@ func newAnalysisMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*
 	return mt, nil
 }
 
-func (m *analysisMeta) reloadFromKV() error {
-	record := timerecord.NewTimeRecorder("analysisMeta-reloadFromKV")
+func (m *analyzeMeta) reloadFromKV() error {
+	record := timerecord.NewTimeRecorder("analyzeMeta-reloadFromKV")
 
-	// load analysis stats
-	analysisTasks, err := m.catalog.ListAnalysisTasks(m.ctx)
+	// load analyze stats
+	analyzeTasks, err := m.catalog.ListAnalyzeTasks(m.ctx)
 	if err != nil {
-		log.Warn("analysisMeta reloadFromKV load analysis tasks failed", zap.Error(err))
+		log.Warn("analyzeMeta reloadFromKV load analyze tasks failed", zap.Error(err))
 		return err
 	}
 
-	for _, analysisTask := range analysisTasks {
-		m.tasks[analysisTask.TaskID] = analysisTask
+	for _, analyzeTask := range analyzeTasks {
+		m.tasks[analyzeTask.TaskID] = analyzeTask
 	}
-	log.Info("analysisMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	log.Info("analyzeMeta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
 
-func (m *analysisMeta) saveTask(newTask *model.AnalysisTask) error {
-	if err := m.catalog.SaveAnalysisTask(m.ctx, newTask); err != nil {
+func (m *analyzeMeta) saveTask(newTask *model.AnalyzeTask) error {
+	if err := m.catalog.SaveAnalyzeTask(m.ctx, newTask); err != nil {
 		return err
 	}
 	m.tasks[newTask.TaskID] = newTask
@@ -82,7 +81,7 @@ func (m *analysisMeta) saveTask(newTask *model.AnalysisTask) error {
 
 // checkTask is checking and prompting only when creating tasks.
 // Please don't use it.
-func (m *analysisMeta) checkTask(task *model.AnalysisTask) {
+func (m *analyzeMeta) checkTask(task *model.AnalyzeTask) {
 	if t := m.tasks[task.TaskID]; t != nil {
 		log.Warn("task already exist with taskID", zap.Int64("taskID", task.TaskID),
 			zap.Int64("collectionID", task.CollectionID), zap.Int64("partitionID", task.PartitionID))
@@ -90,7 +89,7 @@ func (m *analysisMeta) checkTask(task *model.AnalysisTask) {
 
 	for _, t := range m.tasks {
 		if t.CollectionID == task.CollectionID && t.PartitionID == task.PartitionID &&
-			t.State != commonpb.IndexState_Finished && t.State != commonpb.IndexState_Failed {
+			t.State != indexpb.JobState_JobStateFinished && t.State != indexpb.JobState_JobStateFailed {
 			log.Warn("there is already exist task with partition and it not finished",
 				zap.Int64("taskID", task.TaskID),
 				zap.Int64("collectionID", task.CollectionID), zap.Int64("partitionID", task.PartitionID))
@@ -99,30 +98,30 @@ func (m *analysisMeta) checkTask(task *model.AnalysisTask) {
 	}
 }
 
-func (m *analysisMeta) GetTask(taskID int64) *model.AnalysisTask {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
+func (m *analyzeMeta) GetTask(taskID int64) *model.AnalyzeTask {
+	m.RLock()
+	defer m.RUnlock()
 
-	return model.CloneAnalysisTask(m.tasks[taskID])
+	return model.CloneAnalyzeTask(m.tasks[taskID])
 }
 
-func (m *analysisMeta) AddAnalysisTask(task *model.AnalysisTask) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
+func (m *analyzeMeta) AddAnalyzeTask(task *model.AnalyzeTask) error {
+	m.Lock()
+	defer m.Unlock()
 
 	m.checkTask(task)
-	log.Info("add analysis task", zap.Int64("taskID", task.TaskID),
+	log.Info("add analyze task", zap.Int64("taskID", task.TaskID),
 		zap.Int64("collectionID", task.CollectionID), zap.Int64("partitionID", task.PartitionID))
 	return m.saveTask(task)
 }
 
-func (m *analysisMeta) DropAnalysisTask(taskID int64) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
+func (m *analyzeMeta) DropAnalyzeTask(taskID int64) error {
+	m.Lock()
+	defer m.Unlock()
 
-	log.Info("drop analysis task", zap.Int64("taskID", taskID))
-	if err := m.catalog.DropAnalysisTask(m.ctx, taskID); err != nil {
-		log.Warn("drop analysis task by catalog failed", zap.Int64("taskID", taskID),
+	log.Info("drop analyze task", zap.Int64("taskID", taskID))
+	if err := m.catalog.DropAnalyzeTask(m.ctx, taskID); err != nil {
+		log.Warn("drop analyze task by catalog failed", zap.Int64("taskID", taskID),
 			zap.Error(err))
 		return err
 	}
@@ -131,41 +130,41 @@ func (m *analysisMeta) DropAnalysisTask(taskID int64) error {
 	return nil
 }
 
-func (m *analysisMeta) UpdateVersion(taskID int64) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
+func (m *analyzeMeta) UpdateVersion(taskID int64) error {
+	m.Lock()
+	defer m.Unlock()
 
 	t, ok := m.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("there is no task with taskID: %d", taskID)
 	}
 
-	cloneT := model.CloneAnalysisTask(t)
+	cloneT := model.CloneAnalyzeTask(t)
 	cloneT.Version++
 	log.Info("update task version", zap.Int64("taskID", taskID), zap.Int64("newVersion", cloneT.Version))
 	return m.saveTask(cloneT)
 }
 
-func (m *analysisMeta) BuildingTask(taskID, nodeID int64) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
+func (m *analyzeMeta) BuildingTask(taskID, nodeID int64) error {
+	m.Lock()
+	defer m.Unlock()
 
 	t, ok := m.tasks[taskID]
 	if !ok {
 		return fmt.Errorf("there is no task with taskID: %d", taskID)
 	}
 
-	cloneT := model.CloneAnalysisTask(t)
+	cloneT := model.CloneAnalyzeTask(t)
 	cloneT.NodeID = nodeID
-	cloneT.State = commonpb.IndexState_InProgress
+	cloneT.State = indexpb.JobState_JobStateInProgress
 	log.Info("task will be building", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
 
 	return m.saveTask(cloneT)
 }
 
-func (m *analysisMeta) FinishTask(taskID int64, result *indexpb.AnalysisResult) error {
-	m.lock.Lock()
-	defer m.lock.Unlock()
+func (m *analyzeMeta) FinishTask(taskID int64, result *indexpb.AnalyzeResult) error {
+	m.Lock()
+	defer m.Unlock()
 
 	t, ok := m.tasks[taskID]
 	if !ok {
@@ -173,25 +172,23 @@ func (m *analysisMeta) FinishTask(taskID int64, result *indexpb.AnalysisResult) 
 	}
 
 	log.Info("finish task meta...", zap.Int64("taskID", taskID), zap.String("state", result.GetState().String()),
-		zap.String("centroidsFile", result.GetCentroidsFile()),
-		zap.Any("segmentOffsetMapping", result.GetSegmentOffsetMappingFiles()),
 		zap.String("failReason", result.GetFailReason()))
 
-	cloneT := model.CloneAnalysisTask(t)
+	cloneT := model.CloneAnalyzeTask(t)
 	cloneT.State = result.GetState()
 	cloneT.FailReason = result.GetFailReason()
 	cloneT.CentroidsFile = result.GetCentroidsFile()
-	cloneT.SegmentOffsetMappingFiles = result.GetSegmentOffsetMappingFiles()
+	cloneT.OffsetMapping = result.GetOffsetMapping()
 	return m.saveTask(cloneT)
 }
 
-func (m *analysisMeta) GetAllTasks() map[int64]*model.AnalysisTask {
-	m.lock.RLock()
-	defer m.lock.RUnlock()
+func (m *analyzeMeta) GetAllTasks() map[int64]*model.AnalyzeTask {
+	m.RLock()
+	defer m.RUnlock()
 
-	tasks := make(map[int64]*model.AnalysisTask)
+	tasks := make(map[int64]*model.AnalyzeTask)
 	for taskID, t := range m.tasks {
-		tasks[taskID] = model.CloneAnalysisTask(t)
+		tasks[taskID] = model.CloneAnalyzeTask(t)
 	}
 	return tasks
 }

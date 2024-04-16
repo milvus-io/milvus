@@ -30,61 +30,6 @@ func (_m *MockIndexNode) EXPECT() *MockIndexNode_Expecter {
 	return &MockIndexNode_Expecter{mock: &_m.Mock}
 }
 
-// Analysis provides a mock function with given fields: _a0, _a1
-func (_m *MockIndexNode) Analysis(_a0 context.Context, _a1 *indexpb.AnalysisRequest) (*commonpb.Status, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *commonpb.Status
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalysisRequest) (*commonpb.Status, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalysisRequest) *commonpb.Status); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*commonpb.Status)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.AnalysisRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockIndexNode_Analysis_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Analysis'
-type MockIndexNode_Analysis_Call struct {
-	*mock.Call
-}
-
-// Analysis is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *indexpb.AnalysisRequest
-func (_e *MockIndexNode_Expecter) Analysis(_a0 interface{}, _a1 interface{}) *MockIndexNode_Analysis_Call {
-	return &MockIndexNode_Analysis_Call{Call: _e.mock.On("Analysis", _a0, _a1)}
-}
-
-func (_c *MockIndexNode_Analysis_Call) Run(run func(_a0 context.Context, _a1 *indexpb.AnalysisRequest)) *MockIndexNode_Analysis_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.AnalysisRequest))
-	})
-	return _c
-}
-
-func (_c *MockIndexNode_Analysis_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNode_Analysis_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockIndexNode_Analysis_Call) RunAndReturn(run func(context.Context, *indexpb.AnalysisRequest) (*commonpb.Status, error)) *MockIndexNode_Analysis_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // CreateJob provides a mock function with given fields: _a0, _a1
 func (_m *MockIndexNode) CreateJob(_a0 context.Context, _a1 *indexpb.CreateJobRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
@@ -140,16 +85,16 @@ func (_c *MockIndexNode_CreateJob_Call) RunAndReturn(run func(context.Context, *
 	return _c
 }
 
-// DropAnalysisTasks provides a mock function with given fields: _a0, _a1
-func (_m *MockIndexNode) DropAnalysisTasks(_a0 context.Context, _a1 *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error) {
+// CreateJobV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) CreateJobV2(_a0 context.Context, _a1 *indexpb.CreateJobV2Request) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)
 
 	var r0 *commonpb.Status
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.CreateJobV2Request) (*commonpb.Status, error)); ok {
 		return rf(_a0, _a1)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropAnalysisTasksRequest) *commonpb.Status); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.CreateJobV2Request) *commonpb.Status); ok {
 		r0 = rf(_a0, _a1)
 	} else {
 		if ret.Get(0) != nil {
@@ -157,7 +102,7 @@ func (_m *MockIndexNode) DropAnalysisTasks(_a0 context.Context, _a1 *indexpb.Dro
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.DropAnalysisTasksRequest) error); ok {
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.CreateJobV2Request) error); ok {
 		r1 = rf(_a0, _a1)
 	} else {
 		r1 = ret.Error(1)
@@ -166,31 +111,31 @@ func (_m *MockIndexNode) DropAnalysisTasks(_a0 context.Context, _a1 *indexpb.Dro
 	return r0, r1
 }
 
-// MockIndexNode_DropAnalysisTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropAnalysisTasks'
-type MockIndexNode_DropAnalysisTasks_Call struct {
+// MockIndexNode_CreateJobV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateJobV2'
+type MockIndexNode_CreateJobV2_Call struct {
 	*mock.Call
 }
 
-// DropAnalysisTasks is a helper method to define mock.On call
+// CreateJobV2 is a helper method to define mock.On call
 //   - _a0 context.Context
-//   - _a1 *indexpb.DropAnalysisTasksRequest
-func (_e *MockIndexNode_Expecter) DropAnalysisTasks(_a0 interface{}, _a1 interface{}) *MockIndexNode_DropAnalysisTasks_Call {
-	return &MockIndexNode_DropAnalysisTasks_Call{Call: _e.mock.On("DropAnalysisTasks", _a0, _a1)}
+//   - _a1 *indexpb.CreateJobV2Request
+func (_e *MockIndexNode_Expecter) CreateJobV2(_a0 interface{}, _a1 interface{}) *MockIndexNode_CreateJobV2_Call {
+	return &MockIndexNode_CreateJobV2_Call{Call: _e.mock.On("CreateJobV2", _a0, _a1)}
 }
 
-func (_c *MockIndexNode_DropAnalysisTasks_Call) Run(run func(_a0 context.Context, _a1 *indexpb.DropAnalysisTasksRequest)) *MockIndexNode_DropAnalysisTasks_Call {
+func (_c *MockIndexNode_CreateJobV2_Call) Run(run func(_a0 context.Context, _a1 *indexpb.CreateJobV2Request)) *MockIndexNode_CreateJobV2_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.DropAnalysisTasksRequest))
+		run(args[0].(context.Context), args[1].(*indexpb.CreateJobV2Request))
 	})
 	return _c
 }
 
-func (_c *MockIndexNode_DropAnalysisTasks_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNode_DropAnalysisTasks_Call {
+func (_c *MockIndexNode_CreateJobV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNode_CreateJobV2_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockIndexNode_DropAnalysisTasks_Call) RunAndReturn(run func(context.Context, *indexpb.DropAnalysisTasksRequest) (*commonpb.Status, error)) *MockIndexNode_DropAnalysisTasks_Call {
+func (_c *MockIndexNode_CreateJobV2_Call) RunAndReturn(run func(context.Context, *indexpb.CreateJobV2Request) (*commonpb.Status, error)) *MockIndexNode_CreateJobV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -246,6 +191,61 @@ func (_c *MockIndexNode_DropJobs_Call) Return(_a0 *commonpb.Status, _a1 error) *
 }
 
 func (_c *MockIndexNode_DropJobs_Call) RunAndReturn(run func(context.Context, *indexpb.DropJobsRequest) (*commonpb.Status, error)) *MockIndexNode_DropJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropJobsV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) DropJobsV2(_a0 context.Context, _a1 *indexpb.DropJobsV2Request) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropJobsV2Request) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.DropJobsV2Request) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.DropJobsV2Request) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNode_DropJobsV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropJobsV2'
+type MockIndexNode_DropJobsV2_Call struct {
+	*mock.Call
+}
+
+// DropJobsV2 is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.DropJobsV2Request
+func (_e *MockIndexNode_Expecter) DropJobsV2(_a0 interface{}, _a1 interface{}) *MockIndexNode_DropJobsV2_Call {
+	return &MockIndexNode_DropJobsV2_Call{Call: _e.mock.On("DropJobsV2", _a0, _a1)}
+}
+
+func (_c *MockIndexNode_DropJobsV2_Call) Run(run func(_a0 context.Context, _a1 *indexpb.DropJobsV2Request)) *MockIndexNode_DropJobsV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.DropJobsV2Request))
+	})
+	return _c
+}
+
+func (_c *MockIndexNode_DropJobsV2_Call) Return(_a0 *commonpb.Status, _a1 error) *MockIndexNode_DropJobsV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNode_DropJobsV2_Call) RunAndReturn(run func(context.Context, *indexpb.DropJobsV2Request) (*commonpb.Status, error)) *MockIndexNode_DropJobsV2_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -552,61 +552,6 @@ func (_c *MockIndexNode_Init_Call) RunAndReturn(run func() error) *MockIndexNode
 	return _c
 }
 
-// QueryAnalysisResult provides a mock function with given fields: _a0, _a1
-func (_m *MockIndexNode) QueryAnalysisResult(_a0 context.Context, _a1 *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error) {
-	ret := _m.Called(_a0, _a1)
-
-	var r0 *indexpb.QueryAnalysisResultResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error)); ok {
-		return rf(_a0, _a1)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryAnalysisResultRequest) *indexpb.QueryAnalysisResultResponse); ok {
-		r0 = rf(_a0, _a1)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*indexpb.QueryAnalysisResultResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.QueryAnalysisResultRequest) error); ok {
-		r1 = rf(_a0, _a1)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockIndexNode_QueryAnalysisResult_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryAnalysisResult'
-type MockIndexNode_QueryAnalysisResult_Call struct {
-	*mock.Call
-}
-
-// QueryAnalysisResult is a helper method to define mock.On call
-//   - _a0 context.Context
-//   - _a1 *indexpb.QueryAnalysisResultRequest
-func (_e *MockIndexNode_Expecter) QueryAnalysisResult(_a0 interface{}, _a1 interface{}) *MockIndexNode_QueryAnalysisResult_Call {
-	return &MockIndexNode_QueryAnalysisResult_Call{Call: _e.mock.On("QueryAnalysisResult", _a0, _a1)}
-}
-
-func (_c *MockIndexNode_QueryAnalysisResult_Call) Run(run func(_a0 context.Context, _a1 *indexpb.QueryAnalysisResultRequest)) *MockIndexNode_QueryAnalysisResult_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*indexpb.QueryAnalysisResultRequest))
-	})
-	return _c
-}
-
-func (_c *MockIndexNode_QueryAnalysisResult_Call) Return(_a0 *indexpb.QueryAnalysisResultResponse, _a1 error) *MockIndexNode_QueryAnalysisResult_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockIndexNode_QueryAnalysisResult_Call) RunAndReturn(run func(context.Context, *indexpb.QueryAnalysisResultRequest) (*indexpb.QueryAnalysisResultResponse, error)) *MockIndexNode_QueryAnalysisResult_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // QueryJobs provides a mock function with given fields: _a0, _a1
 func (_m *MockIndexNode) QueryJobs(_a0 context.Context, _a1 *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -658,6 +603,61 @@ func (_c *MockIndexNode_QueryJobs_Call) Return(_a0 *indexpb.QueryJobsResponse, _
 }
 
 func (_c *MockIndexNode_QueryJobs_Call) RunAndReturn(run func(context.Context, *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)) *MockIndexNode_QueryJobs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// QueryJobsV2 provides a mock function with given fields: _a0, _a1
+func (_m *MockIndexNode) QueryJobsV2(_a0 context.Context, _a1 *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *indexpb.QueryJobsV2Response
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.QueryJobsV2Request) *indexpb.QueryJobsV2Response); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexpb.QueryJobsV2Response)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *indexpb.QueryJobsV2Request) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockIndexNode_QueryJobsV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QueryJobsV2'
+type MockIndexNode_QueryJobsV2_Call struct {
+	*mock.Call
+}
+
+// QueryJobsV2 is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.QueryJobsV2Request
+func (_e *MockIndexNode_Expecter) QueryJobsV2(_a0 interface{}, _a1 interface{}) *MockIndexNode_QueryJobsV2_Call {
+	return &MockIndexNode_QueryJobsV2_Call{Call: _e.mock.On("QueryJobsV2", _a0, _a1)}
+}
+
+func (_c *MockIndexNode_QueryJobsV2_Call) Run(run func(_a0 context.Context, _a1 *indexpb.QueryJobsV2Request)) *MockIndexNode_QueryJobsV2_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.QueryJobsV2Request))
+	})
+	return _c
+}
+
+func (_c *MockIndexNode_QueryJobsV2_Call) Return(_a0 *indexpb.QueryJobsV2Response, _a1 error) *MockIndexNode_QueryJobsV2_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockIndexNode_QueryJobsV2_Call) RunAndReturn(run func(context.Context, *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error)) *MockIndexNode_QueryJobsV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

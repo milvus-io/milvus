@@ -164,21 +164,21 @@ func TestIndexNodeClient(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
-	t.Run("Analysis", func(t *testing.T) {
-		req := &indexpb.AnalysisRequest{}
-		_, err := inc.Analysis(ctx, req)
+	t.Run("CreateJobV2", func(t *testing.T) {
+		req := &indexpb.CreateJobV2Request{}
+		_, err := inc.CreateJobV2(ctx, req)
 		assert.NoError(t, err)
 	})
 
-	t.Run("QueryAnalysisResult", func(t *testing.T) {
-		req := &indexpb.QueryAnalysisResultRequest{}
-		_, err := inc.QueryAnalysisResult(ctx, req)
+	t.Run("QueryJobsV2", func(t *testing.T) {
+		req := &indexpb.QueryJobsV2Request{}
+		_, err := inc.QueryJobsV2(ctx, req)
 		assert.NoError(t, err)
 	})
 
-	t.Run("DropAnalysisTasks", func(t *testing.T) {
-		req := &indexpb.DropAnalysisTasksRequest{}
-		_, err := inc.DropAnalysisTasks(ctx, req)
+	t.Run("DropJobsV2", func(t *testing.T) {
+		req := &indexpb.DropJobsV2Request{}
+		_, err := inc.DropJobsV2(ctx, req)
 		assert.NoError(t, err)
 	})
 

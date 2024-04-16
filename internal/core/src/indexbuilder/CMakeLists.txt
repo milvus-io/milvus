@@ -12,7 +12,7 @@
 
 set(INDEXBUILDER_FILES
         VecIndexCreator.cpp
-        analysis_c.cpp
+        analyze_c.cpp
         index_c.cpp
         init_c.cpp
         ScalarIndexCreator.cpp

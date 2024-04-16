@@ -17,94 +17,97 @@
 package model
 
 import (
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
-type AnalysisTask struct {
-	TenantID                  string
-	CollectionID              int64
-	PartitionID               int64
-	FieldID                   int64
-	FieldName                 string
-	FieldType                 schemapb.DataType
-	SegmentIDs                []int64
-	TaskID                    int64
-	Version                   int64
-	NodeID                    int64
-	State                     commonpb.IndexState
-	FailReason                string
-	CentroidsFile             string
-	SegmentOffsetMappingFiles map[int64]string
-	Dim                       int64
+type AnalyzeTask struct {
+	TenantID      string
+	CollectionID  int64
+	PartitionID   int64
+	FieldID       int64
+	FieldName     string
+	FieldType     schemapb.DataType
+	SegmentIDs    []int64
+	TaskID        int64
+	Version       int64
+	NodeID        int64
+	State         indexpb.JobState
+	FailReason    string
+	Dim           int64
+	Deleted       bool
+	CentroidsFile string
+	OffsetMapping map[int64]string
 }
 
-func UnmarshalAnalysisTask(info *indexpb.AnalysisTask) *AnalysisTask {
+func UnmarshalAnalyzeTask(info *indexpb.AnalyzeTask) *AnalyzeTask {
 	if info == nil {
 		return nil
 	}
-	return &AnalysisTask{
-		TenantID:                  "",
-		CollectionID:              info.GetCollectionID(),
-		PartitionID:               info.GetPartitionID(),
-		FieldID:                   info.GetFieldID(),
-		FieldName:                 info.GetFieldName(),
-		FieldType:                 info.GetFieldType(),
-		SegmentIDs:                info.GetSegmentIDs(),
-		TaskID:                    info.GetTaskID(),
-		Version:                   info.GetVersion(),
-		NodeID:                    info.GetNodeID(),
-		State:                     info.GetState(),
-		FailReason:                info.GetFailReason(),
-		CentroidsFile:             info.GetCentroidsFile(),
-		SegmentOffsetMappingFiles: info.GetSegmentOffsetMappingFiles(),
-		Dim:                       info.GetDim(),
+	return &AnalyzeTask{
+		TenantID:      "",
+		CollectionID:  info.GetCollectionID(),
+		PartitionID:   info.GetPartitionID(),
+		FieldID:       info.GetFieldID(),
+		FieldName:     info.GetFieldName(),
+		FieldType:     info.GetFieldType(),
+		SegmentIDs:    info.GetSegmentIDs(),
+		TaskID:        info.GetTaskID(),
+		Version:       info.GetVersion(),
+		NodeID:        info.GetNodeID(),
+		State:         info.GetState(),
+		FailReason:    info.GetFailReason(),
+		Dim:           info.GetDim(),
+		Deleted:       info.GetDeleted(),
+		CentroidsFile: info.GetCentroidsFile(),
+		OffsetMapping: info.GetOffsetMapping(),
 	}
 }
 
-func MarshalAnalysisTask(t *AnalysisTask) *indexpb.AnalysisTask {
+func MarshalAnalyzeTask(t *AnalyzeTask) *indexpb.AnalyzeTask {
 	if t == nil {
 		return nil
 	}
 
-	return &indexpb.AnalysisTask{
-		CollectionID:              t.CollectionID,
-		PartitionID:               t.PartitionID,
-		FieldID:                   t.FieldID,
-		FieldName:                 t.FieldName,
-		FieldType:                 t.FieldType,
-		TaskID:                    t.TaskID,
-		Version:                   t.Version,
-		SegmentIDs:                t.SegmentIDs,
-		NodeID:                    t.NodeID,
-		State:                     t.State,
-		FailReason:                t.FailReason,
-		CentroidsFile:             t.CentroidsFile,
-		SegmentOffsetMappingFiles: t.SegmentOffsetMappingFiles,
-		Dim:                       t.Dim,
+	return &indexpb.AnalyzeTask{
+		CollectionID:  t.CollectionID,
+		PartitionID:   t.PartitionID,
+		FieldID:       t.FieldID,
+		FieldName:     t.FieldName,
+		FieldType:     t.FieldType,
+		TaskID:        t.TaskID,
+		Version:       t.Version,
+		SegmentIDs:    t.SegmentIDs,
+		NodeID:        t.NodeID,
+		State:         t.State,
+		FailReason:    t.FailReason,
+		Dim:           t.Dim,
+		CentroidsFile: t.CentroidsFile,
+		OffsetMapping: t.OffsetMapping,
+		Deleted:       t.Deleted,
 	}
 }
 
-func CloneAnalysisTask(t *AnalysisTask) *AnalysisTask {
+func CloneAnalyzeTask(t *AnalyzeTask) *AnalyzeTask {
 	if t == nil {
 		return t
 	}
-	return &AnalysisTask{
-		TenantID:                  t.TenantID,
-		CollectionID:              t.CollectionID,
-		PartitionID:               t.PartitionID,
-		FieldID:                   t.FieldID,
-		FieldName:                 t.FieldName,
-		FieldType:                 t.FieldType,
-		SegmentIDs:                t.SegmentIDs,
-		TaskID:                    t.TaskID,
-		Version:                   t.Version,
-		NodeID:                    t.NodeID,
-		State:                     t.State,
-		FailReason:                t.FailReason,
-		CentroidsFile:             t.CentroidsFile,
-		SegmentOffsetMappingFiles: t.SegmentOffsetMappingFiles,
-		Dim:                       t.Dim,
+	return &AnalyzeTask{
+		TenantID:      t.TenantID,
+		CollectionID:  t.CollectionID,
+		PartitionID:   t.PartitionID,
+		FieldID:       t.FieldID,
+		FieldName:     t.FieldName,
+		FieldType:     t.FieldType,
+		SegmentIDs:    t.SegmentIDs,
+		TaskID:        t.TaskID,
+		Version:       t.Version,
+		NodeID:        t.NodeID,
+		State:         t.State,
+		FailReason:    t.FailReason,
+		Dim:           t.Dim,
+		Deleted:       t.Deleted,
+		CentroidsFile: t.CentroidsFile,
+		OffsetMapping: t.OffsetMapping,
 	}
 }

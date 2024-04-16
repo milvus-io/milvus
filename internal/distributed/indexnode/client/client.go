@@ -164,20 +164,20 @@ func (c *Client) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest
 	})
 }
 
-func (c *Client) Analysis(ctx context.Context, req *indexpb.AnalysisRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Request, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
-		return client.Analysis(ctx, req)
+		return client.CreateJobV2(ctx, req)
 	})
 }
 
-func (c *Client) QueryAnalysisResult(ctx context.Context, req *indexpb.QueryAnalysisResultRequest, opts ...grpc.CallOption) (*indexpb.QueryAnalysisResultResponse, error) {
-	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*indexpb.QueryAnalysisResultResponse, error) {
-		return client.QueryAnalysisResult(ctx, req)
+func (c *Client) QueryJobsV2(ctx context.Context, req *indexpb.QueryJobsV2Request, opts ...grpc.CallOption) (*indexpb.QueryJobsV2Response, error) {
+	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*indexpb.QueryJobsV2Response, error) {
+		return client.QueryJobsV2(ctx, req)
 	})
 }
 
-func (c *Client) DropAnalysisTasks(ctx context.Context, req *indexpb.DropAnalysisTasksRequest, opt ...grpc.CallOption) (*commonpb.Status, error) {
+func (c *Client) DropJobsV2(ctx context.Context, req *indexpb.DropJobsV2Request, opt ...grpc.CallOption) (*commonpb.Status, error) {
 	return wrapGrpcCall(ctx, c, func(client indexpb.IndexNodeClient) (*commonpb.Status, error) {
-		return client.DropAnalysisTasks(ctx, req)
+		return client.DropJobsV2(ctx, req)
 	})
 }

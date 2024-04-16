@@ -154,12 +154,10 @@ type Server struct {
 	// indexCoord             types.IndexCoord
 
 	// segReferManager  *SegmentReferenceManager
-	indexBuilder              *indexBuilder
 	indexNodeManager          WorkerManager
 	indexEngineVersionManager IndexEngineVersionManager
 
-	analysisMeta      *analysisMeta
-	analysisScheduler *analysisTaskScheduler
+	taskScheduler *taskScheduler
 
 	// manage ways that data coord access other coord
 	broker broker.Broker
@@ -370,7 +368,7 @@ func (s *Server) initDataCoord() error {
 	}
 	log.Info("init service discovery done")
 
-	s.initAnalysisScheduler()
+	s.initTaskScheduler(storageCli)
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.createCompactionHandler()
 		s.createCompactionTrigger()
@@ -383,7 +381,6 @@ func (s *Server) initDataCoord() error {
 	log.Info("init segment manager done")
 
 	s.initGarbageCollection(storageCli)
-	s.initIndexBuilder(storageCli)
 
 	s.importMeta, err = NewImportMeta(s.meta.catalog)
 	if err != nil {
@@ -417,7 +414,7 @@ func (s *Server) Start() error {
 func (s *Server) startDataCoord() {
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.compactionHandler.start()
-		s.analysisScheduler.Start()
+		s.taskScheduler.Start()
 		s.compactionTrigger.start()
 		s.compactionViewManager.Start()
 	}
@@ -520,7 +517,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.clusteringCompactionManager = newClusteringCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler, s.analysisScheduler)
+	s.clusteringCompactionManager = newClusteringCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler, s.taskScheduler)
 	s.compactionTrigger = newCompactionTrigger(s.ctx, s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager, s.clusteringCompactionManager)
 }
 
@@ -651,24 +648,14 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
-		s.analysisMeta, err = newAnalysisMeta(s.ctx, catalog)
-		if err != nil {
-			return err
-		}
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
 }
 
-func (s *Server) initIndexBuilder(manager storage.ChunkManager) {
-	if s.indexBuilder == nil {
-		s.indexBuilder = newIndexBuilder(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
-	}
-}
-
-func (s *Server) initAnalysisScheduler() {
-	if s.analysisScheduler == nil {
-		s.analysisScheduler = newAnalysisTaskScheduler(s.ctx, s.meta, s.analysisMeta, s.indexNodeManager)
+func (s *Server) initTaskScheduler(manager storage.ChunkManager) {
+	if s.taskScheduler == nil {
+		s.taskScheduler = newTaskScheduler(s.ctx, s.meta, s.indexNodeManager, manager, s.indexEngineVersionManager, s.handler)
 	}
 }
 
@@ -1143,7 +1130,7 @@ func (s *Server) Stop() error {
 	}
 	logutil.Logger(s.ctx).Info("datacoord compaction stopped")
 
-	s.indexBuilder.Stop()
+	s.taskScheduler.Stop()
 	logutil.Logger(s.ctx).Info("datacoord index builder stopped")
 
 	s.cluster.Close()

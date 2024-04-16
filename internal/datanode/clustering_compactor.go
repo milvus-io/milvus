@@ -274,7 +274,7 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 	// 2, final clean up
 	defer t.cleanUp(ctx)
 
-	// todo move analyze to indexnode Analysis method
+	// todo move analyze to indexnode Analyze method
 	if t.isVectorClusteringKey {
 		analyzeResultPath := t.plan.AnalyzeResultPath
 		centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), "centroids")

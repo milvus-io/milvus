@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"sync"
 
 	"go.uber.org/zap"
@@ -35,7 +34,7 @@ type WorkerManager interface {
 	AddNode(nodeID UniqueID, address string) error
 	RemoveNode(nodeID UniqueID)
 	StoppingNode(nodeID UniqueID)
-	SelectNodeAndAssignTask(assignTask func(selectNodeID int64, client types.IndexNodeClient) error) error
+	PickClient() (UniqueID, types.IndexNodeClient)
 	ClientSupportDisk() bool
 	GetAllClients() map[UniqueID]types.IndexNodeClient
 	GetClientByID(nodeID UniqueID) (types.IndexNodeClient, bool)
@@ -106,16 +105,16 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 	return nil
 }
 
-func (nm *IndexNodeManager) SelectNodeAndAssignTask(assignTask func(selectNodeID int64, client types.IndexNodeClient) error) error {
+func (nm *IndexNodeManager) PickClient() (UniqueID, types.IndexNodeClient) {
 	nm.lock.Lock()
 	defer nm.lock.Unlock()
 
 	// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
 	ctx, cancel := context.WithCancel(nm.ctx)
 	var (
-		selectNodeID = UniqueID(0)
-		nodeMutex    = sync.Mutex{}
-		wg           = sync.WaitGroup{}
+		pickNodeID = UniqueID(0)
+		nodeMutex  = sync.Mutex{}
+		wg         = sync.WaitGroup{}
 	)
 
 	for nodeID, client := range nm.nodeClients {
@@ -138,8 +137,8 @@ func (nm *IndexNodeManager) SelectNodeAndAssignTask(assignTask func(selectNodeID
 				if resp.GetTaskSlots() > 0 {
 					nodeMutex.Lock()
 					defer nodeMutex.Unlock()
-					if selectNodeID == 0 {
-						selectNodeID = nodeID
+					if pickNodeID == 0 {
+						pickNodeID = nodeID
 					}
 					cancel()
 					// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
@@ -150,12 +149,12 @@ func (nm *IndexNodeManager) SelectNodeAndAssignTask(assignTask func(selectNodeID
 	}
 	wg.Wait()
 	cancel()
-	if selectNodeID != 0 {
-		log.Info("select indexNode success", zap.Int64("nodeID", selectNodeID))
-		return assignTask(selectNodeID, nm.nodeClients[selectNodeID])
+	if pickNodeID != 0 {
+		log.Info("pick indexNode success", zap.Int64("nodeID", pickNodeID))
+		return pickNodeID, nm.nodeClients[pickNodeID]
 	}
 
-	return fmt.Errorf("there is no idle indexNode")
+	return 0, nil
 }
 
 func (nm *IndexNodeManager) ClientSupportDisk() bool {

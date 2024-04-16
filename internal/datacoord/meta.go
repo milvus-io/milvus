@@ -71,7 +71,8 @@ type meta struct {
 	chunkManager          storage.ChunkManager
 	clusteringCompactions map[string]*datapb.ClusteringCompactionInfo
 
-	indexMeta *indexMeta
+	indexMeta   *indexMeta
+	analyzeMeta *analyzeMeta
 }
 
 type channelCPs struct {
@@ -104,18 +105,23 @@ type collectionInfo struct {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
-	indexMeta, err := newIndexMeta(ctx, catalog)
+	im, err := newIndexMeta(ctx, catalog)
 	if err != nil {
 		return nil, err
 	}
 
+	am, err := newAnalyzeMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
 	mt := &meta{
 		ctx:                   ctx,
 		catalog:               catalog,
 		collections:           make(map[UniqueID]*collectionInfo),
 		segments:              NewSegmentsInfo(),
 		channelCPs:            newChannelCps(),
-		indexMeta:             indexMeta,
+		indexMeta:             im,
+		analyzeMeta:           am,
 		chunkManager:          chunkManager,
 		clusteringCompactions: make(map[string]*datapb.ClusteringCompactionInfo, 0),
 	}
@@ -1594,7 +1600,7 @@ func (m *meta) GetClonedClusteringCompactionInfos() []*datapb.ClusteringCompacti
 			CompletedPlans:  info.GetCompletedPlans(),
 			FailedPlans:     info.GetFailedPlans(),
 			TimeoutPlans:    info.GetTimeoutPlans(),
-			AnalysisTaskID:  info.GetAnalysisTaskID(),
+			AnalyzeTaskID:   info.GetAnalyzeTaskID(),
 		}
 		infos = append(infos, cloneInfo)
 	}

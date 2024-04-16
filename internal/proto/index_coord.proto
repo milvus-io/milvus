@@ -61,9 +61,12 @@ service IndexNode {
         returns (milvus.GetMetricsResponse) {
     }
 
-    rpc Analysis(AnalysisRequest) returns (common.Status) {}
-    rpc QueryAnalysisResult(QueryAnalysisResultRequest) returns (QueryAnalysisResultResponse) {}
-    rpc DropAnalysisTasks(DropAnalysisTasksRequest) returns (common.Status) {}
+    rpc CreateJobV2(CreateJobV2Request) returns (common.Status) {
+    }
+    rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {
+    }
+    rpc DropJobsV2(DropJobsV2Request) returns (common.Status) {
+    }
 }
 
 message IndexInfo {
@@ -349,7 +352,7 @@ message ListIndexesResponse {
     repeated IndexInfo index_infos = 2;
 }
 
-message AnalysisTask {
+message AnalyzeTask {
     int64 collectionID = 1;
     int64 partitionID = 2;
     int64 fieldID = 3;
@@ -359,11 +362,12 @@ message AnalysisTask {
     int64 version = 7;
     repeated int64 segmentIDs = 8;
     int64 nodeID = 9;
-    common.IndexState state = 10;
+    JobState state = 10;
     string fail_reason = 11;
-    string centroids_file = 12;
-    map<int64, string> segment_offset_mapping_files = 13;
-    int64 dim = 14;
+    int64 dim = 12;
+    string centroids_file = 13;
+    map<int64, string> offset_mapping = 14;
+    bool deleted = 15;
 }
 
 message SegmentStats {
@@ -372,7 +376,7 @@ message SegmentStats {
     repeated int64 logIDs = 3;
 }
 
-message AnalysisRequest {
+message AnalyzeRequest {
     string clusterID = 1;
     int64 taskID =2;
     int64 collectionID = 3;
@@ -386,26 +390,71 @@ message AnalysisRequest {
     int64 dim = 11;
 }
 
-message QueryAnalysisResultRequest {
+message AnalyzeResult {
+    int64 taskID = 1;
+    JobState state = 2;
+    string fail_reason = 3;
+    string centroids_file = 4;
+    map<int64, string> offset_mapping = 5;
+}
+
+enum JobType {
+    JobTypeNone = 0;
+    JobTypeIndexJob = 1;
+    JobTypeAnalyzeJob = 2;
+}
+
+//message JobDescriptor {
+//    JobType job_type = 1;
+//    google.protobuf.Any parameters = 2;
+//}
+
+message CreateJobV2Request {
+    string clusterID = 1;
+    int64 taskID = 2;
+    JobType job_type = 3;
+    oneof request {
+        AnalyzeRequest analyze_request = 4;
+        CreateJobRequest index_request = 5;
+    }
+//    JobDescriptor job = 3;
+}
+
+message QueryJobsV2Request {
     string clusterID = 1;
     repeated int64 taskIDs = 2;
+    JobType job_type = 3;
 }
 
-message AnalysisResult {
-    int64 taskID = 1;
-    common.IndexState state = 2;
-    string centroids_file = 3;
-    map<int64, string> segment_offset_mapping_files = 4;
-    string fail_reason = 5;
+message IndexJobResults {
+    repeated IndexTaskInfo results = 1;
 }
 
-message QueryAnalysisResultResponse {
+message AnalyzeResults {
+    repeated AnalyzeResult results = 1;
+}
+
+message QueryJobsV2Response {
     common.Status status = 1;
     string clusterID = 2;
-    map<int64, AnalysisResult> results = 3;
+    oneof result {
+        IndexJobResults index_job_results = 3;
+        AnalyzeResults analyze_job_results = 4;
+    }
 }
 
-message DropAnalysisTasksRequest {
+message DropJobsV2Request {
     string clusterID = 1;
     repeated int64 taskIDs = 2;
+    JobType job_type = 3;
+}
+
+
+enum JobState {
+    JobStateNone = 0;
+    JobStateInit = 1;
+    JobStateInProgress = 2;
+    JobStateFinished = 3;
+    JobStateFailed = 4;
+    JobStateRetry = 5;
 }
