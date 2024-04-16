@@ -49,7 +49,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		wg       sync.WaitGroup
 	)
 
-	plan.ignoreNonPk = len(segments) > 1
+	plan.ignoreNonPk = len(segments) > 1 && plan.ShouldIgnoreNonPk()
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {

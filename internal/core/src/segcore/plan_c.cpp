@@ -170,3 +170,13 @@ DeleteRetrievePlan(CRetrievePlan c_plan) {
     auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
     delete plan;
 }
+
+bool
+ShouldIgnoreNonPk(CRetrievePlan c_plan) {
+    auto plan = static_cast<milvus::query::RetrievePlan*>(c_plan);
+    auto pk_field = plan->schema_.get_primary_field_id();
+    auto only_contain_pk = pk_field.has_value() &&
+                           plan->field_ids_.size() == 1 &&
+                           pk_field.value() == plan->field_ids_[0];
+    return !only_contain_pk;
+}

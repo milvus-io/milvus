@@ -199,6 +199,10 @@ func NewRetrievePlan(ctx context.Context, col *Collection, expr []byte, timestam
 	return newPlan, nil
 }
 
+func (plan *RetrievePlan) ShouldIgnoreNonPk() bool {
+	return bool(C.ShouldIgnoreNonPk(plan.cRetrievePlan))
+}
+
 func (plan *RetrievePlan) Delete() {
 	C.DeleteRetrievePlan(plan.cRetrievePlan)
 }
