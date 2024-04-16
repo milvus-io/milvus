@@ -3,8 +3,9 @@ package main
 import (
 	"encoding/csv"
 	"fmt"
-	"os"
+	"io"
 	"reflect"
+	"sort"
 	"strings"
 
 	"github.com/samber/lo"
@@ -47,6 +48,13 @@ func collect() []DocContent {
 	return result
 }
 
+func quoteIfNeeded(s string) string {
+	if strings.ContainsAny(s, "[],{}") {
+		return fmt.Sprintf("\"%s\"", s)
+	}
+	return s
+}
+
 func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val *reflect.Value) {
 	if val.Kind() != reflect.Struct {
 		return
@@ -63,6 +71,7 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			log.Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
 			*data = append(*data, DocContent{item.Key, defaultValue, item.Version, refreshable, item.Export, item.Doc})
 			for _, fk := range item.FallbackKeys {
+				defaultValue = params.GetWithDefault(fk, item.DefaultValue)
 				log.Debug("got fallback key", zap.String("key", fk), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
 				*data = append(*data, DocContent{fk, defaultValue, item.Version, refreshable, item.Export, item.Doc})
 			}
@@ -70,20 +79,26 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			item := subVal.Interface().(paramtable.ParamGroup)
 			log.Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
 			refreshable := tag.Get("refreshable")
-			*data = append(*data, DocContent{item.KeyPrefix, "", item.Version, refreshable, item.Export, item.Doc})
+
+			// Sort group items to stablize the output order
+			m := item.GetValue()
+			keys := make([]string, 0, len(m))
+			for k := range m {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			for _, key := range keys {
+				value := m[key]
+				log.Debug("got group entry", zap.String("key", key), zap.String("value", value))
+				*data = append(*data, DocContent{fmt.Sprintf("%s%s", item.KeyPrefix, key), quoteIfNeeded(value), item.Version, refreshable, item.Export, ""})
+			}
 		} else {
 			collectRecursive(params, data, &subVal)
 		}
 	}
 }
 
-func WriteCsv() {
-	f, err := os.Create("configs.csv")
-	defer f.Close()
-	if err != nil {
-		log.Error("create file failed", zap.Error(err))
-		os.Exit(-2)
-	}
+func WriteCsv(f io.Writer) {
 	w := csv.NewWriter(f)
 	w.Write([]string{"key", "defaultValue", "sinceVersion", "refreshable", "exportToUser", "comment"})
 
@@ -101,7 +116,7 @@ type YamlGroup struct {
 }
 
 type YamlMarshaller struct {
-	writer *os.File
+	writer io.Writer
 	groups []YamlGroup
 	data   []DocContent
 }
@@ -142,19 +157,19 @@ func (m *YamlMarshaller) writeYamlRecursive(data []DocContent, level int) {
 		isDisabled := slices.Contains(disabledGroups, strings.Split(content.key, ".")[0])
 		if strings.Count(content.key, ".") == level {
 			if isDisabled {
-				m.writer.WriteString("# ")
+				io.WriteString(m.writer, "# ")
 			}
 			m.writeContent(key, content.defaultValue, content.comment, level)
 			continue
 		}
 		extra, ok := extraHeaders[key]
 		if ok {
-			m.writer.WriteString(extra + "\n")
+			io.WriteString(m.writer, extra+"\n")
 		}
 		if isDisabled {
-			m.writer.WriteString("# ")
+			io.WriteString(m.writer, "# ")
 		}
-		m.writer.WriteString(fmt.Sprintf("%s%s:\n", strings.Repeat(" ", level*2), key))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s:\n", strings.Repeat(" ", level*2), key))
 		m.writeYamlRecursive(contents, level+1)
 	}
 }
@@ -163,27 +178,20 @@ func (m *YamlMarshaller) writeContent(key, value, comment string, level int) {
 	if strings.Contains(comment, "\n") {
 		multilines := strings.Split(comment, "\n")
 		for _, line := range multilines {
-			m.writer.WriteString(fmt.Sprintf("%s# %s\n", strings.Repeat(" ", level*2), line))
+			io.WriteString(m.writer, fmt.Sprintf("%s# %s\n", strings.Repeat(" ", level*2), line))
 		}
-		m.writer.WriteString(fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
 	} else if comment != "" {
-		m.writer.WriteString(fmt.Sprintf("%s%s: %s # %s\n", strings.Repeat(" ", level*2), key, value, comment))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s: %s # %s\n", strings.Repeat(" ", level*2), key, value, comment))
 	} else {
-		m.writer.WriteString(fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
+		io.WriteString(m.writer, fmt.Sprintf("%s%s: %s\n", strings.Repeat(" ", level*2), key, value))
 	}
 }
 
-func WriteYaml() {
-	f, err := os.Create("milvus.yaml")
-	defer f.Close()
-	if err != nil {
-		log.Error("create file failed", zap.Error(err))
-		os.Exit(-2)
-	}
-
+func WriteYaml(w io.Writer) {
 	result := collect()
 
-	f.WriteString(`# Licensed to the LF AI & Data foundation under one
+	io.WriteString(w, `# Licensed to the LF AI & Data foundation under one
 # or more contributor license agreements. See the NOTICE file
 # distributed with this work for additional information
 # regarding copyright ownership. The ASF licenses this file
@@ -208,6 +216,13 @@ func WriteYaml() {
 			name: "metastore",
 		},
 		{
+			name: "tikv",
+			header: `
+# Related configuration of tikv, used to store Milvus metadata.
+# Notice that when TiKV is enabled for metastore, you still need to have etcd for service discovery.
+# TiKV is a good option when the metadata size requires better horizontal scalability.`,
+		},
+		{
 			name: "localStorage",
 		},
 		{
@@ -217,13 +232,17 @@ func WriteYaml() {
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.`,
 		},
 		{
+			name: "mq",
+			header: `
+# Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
+# You can change your mq by setting mq.type field.
+# If you don't set mq.type field as default, there is a note about enabling priority if we config multiple mq in this file.
+# 1. standalone(local) mode: rocksmq(default) > natsmq > Pulsar > Kafka
+# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq and natsmq is unsupported in cluster mode)`,
+		},
+		{
 			name: "pulsar",
 			header: `
-# Milvus supports three MQ: rocksmq(based on RockDB), Pulsar and Kafka, which should be reserved in config what you use.
-# There is a note about enabling priority if we config multiple mq in this file
-# 1. standalone(local) mode: rocksmq(default) > Pulsar > Kafka
-# 2. cluster mode:  Pulsar(default) > Kafka (rocksmq is unsupported)
-
 # Related configuration of pulsar, used to manage Milvus logs of recent mutation operations, output streaming log, and provide log publish-subscribe services.`,
 		},
 		{
@@ -233,6 +252,12 @@ func WriteYaml() {
 		},
 		{
 			name: "rocksmq",
+		},
+		{
+			name: "natsmq",
+			header: `
+# natsmq configuration.
+# more detail: https://docs.nats.io/running-a-nats-service/configuration`,
 		},
 		{
 			name:   "rootCoord",
@@ -294,8 +319,18 @@ func WriteYaml() {
 		{
 			name: "trace",
 		},
+		{
+			name: "gpu",
+			header: `
+#when using GPU indexing, Milvus will utilize a memory pool to avoid frequent memory allocation and deallocation.
+#here, you can set the size of the memory occupied by the memory pool, with the unit being MB.
+#note that there is a possibility of Milvus crashing when the actual memory demand exceeds the value set by maxMemSize.
+#if initMemSize and MaxMemSize both set zero,
+#milvus will automatically initialize half of the available GPU memory,
+#maxMemSize will the whole available GPU memory.`,
+		},
 	}
-	marshller := YamlMarshaller{f, groups, result}
+	marshller := YamlMarshaller{w, groups, result}
 	marshller.writeYamlRecursive(lo.Filter(result, func(d DocContent, _ int) bool {
 		return d.exportToUser
 	}), 0)

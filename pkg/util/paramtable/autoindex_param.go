@@ -67,6 +67,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 		Key:          "autoIndex.params.build",
 		Version:      "2.2.0",
 		DefaultValue: `{"M": 18,"efConstruction": 240,"index_type": "HNSW", "metric_type": "IP"}`,
+		Export:       true,
 	}
 	p.IndexParams.Init(base.mgr)
 
