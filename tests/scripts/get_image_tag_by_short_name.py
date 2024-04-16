@@ -43,11 +43,14 @@ def get_image_tag_by_short_name(repository, tag, arch):
     res = []
     # Iterate through all tags and find the ones with the same DIGEST
     for tag_info in data["results"]:
-        if "digest" in tag_info["images"][0] and tag_info["images"][0]["digest"] == digest:
-            # Extract the image name
-            image_name = tag_info["name"].split(":")[0]
-            if image_name != tag and arch in [x["architecture"] for x in tag_info["images"]]:
-                res.append(image_name)
+        try:
+            if "digest" in tag_info["images"][0] and tag_info["images"][0]["digest"] == digest:
+                # Extract the image name
+                image_name = tag_info["name"].split(":")[0]
+                if image_name != tag and arch in [x["architecture"] for x in tag_info["images"]]:
+                    res.append(image_name)
+        except Exception as e:
+            continue
     # In case of no match, try to find the latest tag with the same arch
     # there is a case: push master-xxx-arm64 and master-latest, but master-latest-amd64 is not pushed,
     # then there will be no tag matched, so we need to find the latest tag with the same arch even it is not the latest tag
