@@ -129,7 +129,7 @@ var (
 			Name:      "task_latency",
 			Help:      "latency of all kind of task in query coord scheduler scheduler",
 			Buckets:   longTaskBuckets,
-		}, []string{taskTypeLabel, collectionIDLabelName, channelNameLabelName})
+		}, []string{taskTypeLabel, channelNameLabelName})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
