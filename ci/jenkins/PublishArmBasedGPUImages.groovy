@@ -30,7 +30,7 @@ pipeline {
                         . ${WORKSPACE}/.env
                         set +a  # stop automatically
 
-                        docker run -v \$(pwd):/root/milvus -v \$(pwd)/.docker/.conan:/root/.conan -w /root/milvus milvusdb/milvus-env:ubuntu22.04-\${GPU_DATE_VERSION} sh -c "make clean && make gpu-install"
+                        docker run -v \$(pwd):/root/milvus -v \$(pwd)/.docker/.conan:/root/.conan -w /root/milvus milvusdb/milvus-env:gpu-ubuntu22.04-\${GPU_DATE_VERSION} sh -c "make clean && make gpu-install"
                         """
 
                         def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
