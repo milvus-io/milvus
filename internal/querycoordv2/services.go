@@ -1089,21 +1089,6 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		return merr.Status(err), nil
 	}
 
-	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
-		err := merr.WrapErrParameterInvalid("valid resource group", req.GetSourceResourceGroup(), "source resource group not found")
-		return merr.Status(err), nil
-	}
-
-	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetTargetResourceGroup()); !ok {
-		err := merr.WrapErrParameterInvalid("valid resource group", req.GetTargetResourceGroup(), "target resource group not found")
-		return merr.Status(err), nil
-	}
-
-	if req.GetNumNode() <= 0 {
-		err := merr.WrapErrParameterInvalid("NumNode > 0", fmt.Sprintf("invalid NumNode %d", req.GetNumNode()))
-		return merr.Status(err), nil
-	}
-
 	// Move node from source resource group to target resource group.
 	if err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode())); err != nil {
 		log.Warn("failed to transfer node", zap.Error(err))
@@ -1139,11 +1124,6 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		err := merr.WrapErrResourceGroupNotFound(req.GetTargetResourceGroup())
 		return merr.Status(errors.Wrap(err,
 			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()))), nil
-	}
-
-	if req.GetNumReplica() <= 0 {
-		err := merr.WrapErrParameterInvalid("NumReplica > 0", fmt.Sprintf("invalid NumReplica %d", req.GetNumReplica()))
-		return merr.Status(err), nil
 	}
 
 	// Apply change into replica manager.
