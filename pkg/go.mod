@@ -14,7 +14,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.17.7
 	github.com/lingdor/stackerror v0.0.0-20191119040541-976d8885ed76
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.0-rc.1.0.20240410094111-e3012ae615bc
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.4.0
 	github.com/nats-io/nats-server/v2 v2.10.12
 	github.com/nats-io/nats.go v1.34.1
 	github.com/panjf2000/ants/v2 v2.7.2
