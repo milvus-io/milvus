@@ -51,7 +51,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		label = metrics.GrowingSegmentLabel
 	}
 
-	retriever := func(s Segment) error {
+	retriever := func(ctx context.Context, s Segment) error {
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 		result, err := s.Retrieve(ctx, plan)
 		resultCh <- result
@@ -82,12 +82,12 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 					return
 				}
 				var missing bool
-				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, retriever)
+				missing, err = mgr.DiskCache.DoWait(ctx, seg.ID(), timeout, retriever)
 				if missing {
 					accessRecord.CacheMissing()
 				}
 			} else {
-				err = retriever(seg)
+				err = retriever(ctx, seg)
 			}
 			if err != nil {
 				errs[i] = err

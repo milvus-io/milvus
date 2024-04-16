@@ -3,6 +3,7 @@
 package segments
 
 import (
+	"context"
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	mock "github.com/stretchr/testify/mock"
 
@@ -23,7 +24,7 @@ func (_m *MockSegmentManager) EXPECT() *MockSegmentManager_Expecter {
 }
 
 // Clear provides a mock function with given fields:
-func (_m *MockSegmentManager) Clear() {
+func (_m *MockSegmentManager) Clear(ctx context.Context) {
 	_m.Called()
 }
 
@@ -466,7 +467,7 @@ func (_c *MockSegmentManager_GetWithType_Call) RunAndReturn(run func(int64, comm
 }
 
 // Put provides a mock function with given fields: segmentType, segments
-func (_m *MockSegmentManager) Put(segmentType commonpb.SegmentState, segments ...Segment) {
+func (_m *MockSegmentManager) Put(ctx context.Context, segmentType commonpb.SegmentState, segments ...Segment) {
 	_va := make([]interface{}, len(segments))
 	for _i := range segments {
 		_va[_i] = segments[_i]
@@ -514,7 +515,7 @@ func (_c *MockSegmentManager_Put_Call) RunAndReturn(run func(commonpb.SegmentSta
 }
 
 // Remove provides a mock function with given fields: segmentID, scope
-func (_m *MockSegmentManager) Remove(segmentID int64, scope querypb.DataScope) (int, int) {
+func (_m *MockSegmentManager) Remove(ctx context.Context, segmentID int64, scope querypb.DataScope) (int, int) {
 	ret := _m.Called(segmentID, scope)
 
 	var r0 int
@@ -567,7 +568,7 @@ func (_c *MockSegmentManager_Remove_Call) RunAndReturn(run func(int64, querypb.D
 }
 
 // RemoveBy provides a mock function with given fields: filters
-func (_m *MockSegmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
+func (_m *MockSegmentManager) RemoveBy(ctx context.Context, filters ...SegmentFilter) (int, int) {
 	_va := make([]interface{}, len(filters))
 	for _i := range filters {
 		_va[_i] = filters[_i]

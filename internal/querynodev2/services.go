@@ -312,7 +312,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	defer func() {
 		if err != nil {
 			// remove legacy growing
-			node.manager.Segment.RemoveBy(segments.WithChannel(channel.GetChannelName()),
+			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
 				segments.WithType(segments.SegmentTypeGrowing))
 		}
 	}()
@@ -368,8 +368,8 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		delegator.Close()
 
 		node.pipelineManager.Remove(req.GetChannelName())
-		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
+		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
+		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
 
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -568,7 +568,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	log.Info("start to release segments")
 	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
-		_, count := node.manager.Segment.Remove(id, req.GetScope())
+		_, count := node.manager.Segment.Remove(ctx, id, req.GetScope())
 		sealedCount += count
 	}
 	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))

@@ -54,7 +54,7 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		searchLabel = metrics.GrowingSegmentLabel
 	}
 
-	searcher := func(s Segment) error {
+	searcher := func(ctx context.Context, s Segment) error {
 		// record search time
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
 		searchResult, err := s.Search(ctx, searchReq)
@@ -94,12 +94,12 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 					return
 				}
 				var missing bool
-				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
+				missing, err = mgr.DiskCache.DoWait(ctx, seg.ID(), timeout, searcher)
 				if missing {
 					accessRecord.CacheMissing()
 				}
 			} else {
-				err = searcher(seg)
+				err = searcher(ctx, seg)
 			}
 			if err != nil {
 				errs[i] = err
@@ -140,7 +140,7 @@ func searchSegmentsStreamly(ctx context.Context,
 	searchResultsToClear := make([]*SearchResult, 0)
 	var reduceMutex sync.Mutex
 	var sumReduceDuration atomic.Duration
-	searcher := func(seg Segment) error {
+	searcher := func(ctx context.Context, seg Segment) error {
 		// record search time
 		tr := timerecord.NewTimeRecorder("searchOnSegments")
 		searchResult, searchErr := seg.Search(ctx, searchReq)
@@ -187,7 +187,7 @@ func searchSegmentsStreamly(ctx context.Context,
 					return
 				}
 				var missing bool
-				missing, err = mgr.DiskCache.DoWait(seg.ID(), timeout, searcher)
+				missing, err = mgr.DiskCache.DoWait(ctx, seg.ID(), timeout, searcher)
 				if err != nil {
 					log.Error("failed to do search for disk cache", zap.Int64("seg_id", seg.ID()), zap.Error(err))
 					errs[i] = err
@@ -198,7 +198,7 @@ func searchSegmentsStreamly(ctx context.Context,
 				}
 				log.Debug("after doing stream search in DiskCache", zap.Int64("segID", seg.ID()), zap.Error(err))
 			} else {
-				err = searcher(seg)
+				err = searcher(ctx, seg)
 			}
 			if err != nil {
 				errs[i] = err
