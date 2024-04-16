@@ -20,10 +20,15 @@ package contextutil
 
 import (
 	"context"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc/metadata"
+
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/crypto"
 )
 
 func TestAppendToIncomingContext(t *testing.T) {
@@ -41,4 +46,35 @@ func TestAppendToIncomingContext(t *testing.T) {
 		assert.True(t, ok)
 		assert.Equal(t, "bar", md.Get("foo")[0])
 	})
+}
+
+func TestGetCurUserFromContext(t *testing.T) {
+	_, err := GetCurUserFromContext(context.Background())
+	assert.Error(t, err)
+	_, err = GetCurUserFromContext(metadata.NewIncomingContext(context.Background(), metadata.New(map[string]string{})))
+	assert.Error(t, err)
+	_, err = GetCurUserFromContext(GetContext(context.Background(), "123456"))
+	assert.Error(t, err)
+	root := "root"
+	password := "123456"
+	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+	assert.NoError(t, err)
+	assert.Equal(t, root, username)
+
+	{
+		u, p, e := GetAuthInfoFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+		assert.NoError(t, e)
+		assert.Equal(t, "root", u)
+		assert.Equal(t, password, p)
+	}
+}
+
+func GetContext(ctx context.Context, originValue string) context.Context {
+	authKey := strings.ToLower(util.HeaderAuthorize)
+	authValue := crypto.Base64Encode(originValue)
+	contextMap := map[string]string{
+		authKey: authValue,
+	}
+	md := metadata.New(contextMap)
+	return metadata.NewIncomingContext(ctx, md)
 }

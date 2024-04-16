@@ -2,6 +2,7 @@ package proxy
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
 
@@ -11,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -106,6 +108,14 @@ func TestPrivilegeInterceptor(t *testing.T) {
 			CollectionName: "col1",
 		})
 		assert.Error(t, err)
+		{
+			_, err = PrivilegeInterceptor(GetContext(context.Background(), "foo:"+util.PasswordHolder), &milvuspb.LoadCollectionRequest{
+				DbName:         "db_test",
+				CollectionName: "col1",
+			})
+			assert.Error(t, err)
+			assert.True(t, strings.Contains(err.Error(), "apikey user"))
+		}
 		_, err = PrivilegeInterceptor(ctx, &milvuspb.InsertRequest{
 			DbName:         "db_test",
 			CollectionName: "col1",
