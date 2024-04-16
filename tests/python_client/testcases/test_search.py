@@ -566,7 +566,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, is_index=False)[0]
         index_param = {"index_type": "IVF_FLAT",
-                       "metric_type": "L2", "params": {"nlist": 100}}
+                       "metric_type": "COSINE", "params": {"nlist": 100}}
         collection_w.create_index("float_vector", index_param)
         collection_w.load()
         log.info(
