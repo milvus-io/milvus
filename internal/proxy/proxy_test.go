@@ -358,68 +358,20 @@ func TestProxy(t *testing.T) {
 	rc := runRootCoord(ctx, localMsg)
 	log.Info("running RootCoord ...")
 
-	if rc != nil {
-		defer func() {
-			err := rc.Stop()
-			assert.NoError(t, err)
-			log.Info("stop RootCoord")
-		}()
-	}
-
 	dc := runDataCoord(ctx, localMsg)
 	log.Info("running DataCoord ...")
-
-	if dc != nil {
-		defer func() {
-			err := dc.Stop()
-			assert.NoError(t, err)
-			log.Info("stop DataCoord")
-		}()
-	}
 
 	dn := runDataNode(ctx, localMsg, alias)
 	log.Info("running DataNode ...")
 
-	if dn != nil {
-		defer func() {
-			err := dn.Stop()
-			assert.NoError(t, err)
-			log.Info("stop DataNode")
-		}()
-	}
-
 	qc := runQueryCoord(ctx, localMsg)
 	log.Info("running QueryCoord ...")
-
-	if qc != nil {
-		defer func() {
-			err := qc.Stop()
-			assert.NoError(t, err)
-			log.Info("stop QueryCoord")
-		}()
-	}
 
 	qn := runQueryNode(ctx, localMsg, alias)
 	log.Info("running QueryNode ...")
 
-	if qn != nil {
-		defer func() {
-			err := qn.Stop()
-			assert.NoError(t, err)
-			log.Info("stop query node")
-		}()
-	}
-
 	in := runIndexNode(ctx, localMsg, alias)
 	log.Info("running IndexNode ...")
-
-	if in != nil {
-		defer func() {
-			err := in.Stop()
-			assert.NoError(t, err)
-			log.Info("stop IndexNode")
-		}()
-	}
 
 	time.Sleep(10 * time.Millisecond)
 
@@ -488,8 +440,52 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	log.Info("Register proxy done")
 	defer func() {
-		err := proxy.Stop()
-		assert.NoError(t, err)
+		a := []any{rc, dc, qc, qn, in, dn, proxy}
+		fmt.Println(len(a))
+		// HINT: the order of stopping service refers to the `roles.go` file
+		log.Info("start to stop the services")
+		{
+			err := rc.Stop()
+			assert.NoError(t, err)
+			log.Info("stop RootCoord")
+		}
+
+		{
+			err := dc.Stop()
+			assert.NoError(t, err)
+			log.Info("stop DataCoord")
+		}
+
+		{
+			err := qc.Stop()
+			assert.NoError(t, err)
+			log.Info("stop QueryCoord")
+		}
+
+		{
+			err := qn.Stop()
+			assert.NoError(t, err)
+			log.Info("stop query node")
+		}
+
+		{
+			err := in.Stop()
+			assert.NoError(t, err)
+			log.Info("stop IndexNode")
+		}
+
+		{
+			err := dn.Stop()
+			assert.NoError(t, err)
+			log.Info("stop DataNode")
+		}
+
+		{
+			err := proxy.Stop()
+			assert.NoError(t, err)
+			log.Info("stop Proxy")
+		}
+		cancel()
 	}()
 
 	t.Run("get component states", func(t *testing.T) {
@@ -3848,11 +3844,9 @@ func TestProxy(t *testing.T) {
 		assert.Equal(t, 0, len(resp.ErrIndex))
 		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
 	})
-
 	testServer.gracefulStop()
-
 	wg.Wait()
-	cancel()
+	log.Info("case done")
 }
 
 func testProxyRole(ctx context.Context, t *testing.T, proxy *Proxy) {
