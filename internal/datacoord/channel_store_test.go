@@ -40,10 +40,7 @@ func genNodeChannelInfos(id int64, num int) *NodeChannelInfo {
 		name := fmt.Sprintf("ch%d", i)
 		channels = append(channels, &channelMeta{Name: name, CollectionID: 1, WatchInfo: &datapb.ChannelWatchInfo{}})
 	}
-	return &NodeChannelInfo{
-		NodeID:   id,
-		Channels: channels,
-	}
+	return NewNodeChannelInfo(id, channels...)
 }
 
 func genChannelOperations(from, to int64, num int) *ChannelOpSet {
@@ -85,7 +82,7 @@ func TestChannelStore_Update(t *testing.T) {
 				txnKv,
 				map[int64]*NodeChannelInfo{
 					1: genNodeChannelInfos(1, 500),
-					2: {NodeID: 2},
+					2: NewNodeChannelInfo(2),
 				},
 			},
 			args{
