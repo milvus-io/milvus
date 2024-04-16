@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -436,7 +437,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 
 			// 4. balance and verify result
@@ -548,7 +549,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 		})
 		nodeInfo.SetState(balanceCase.states[i])
 		suite.balancer.nodeManager.Add(nodeInfo)
-		suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, balanceCase.nodes[i])
+		suite.balancer.meta.ResourceManager.HandleNodeUp(balanceCase.nodes[i])
 	}
 
 	// 4. first round balance
@@ -697,11 +698,11 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
 				nodeInfo.SetState(c.states[i])
 				suite.balancer.nodeManager.Add(nodeInfo)
-				suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, c.nodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
 
 			for i := range c.outBoundNodes {
-				suite.balancer.meta.ResourceManager.UnassignNode(meta.DefaultResourceGroupName, c.outBoundNodes[i])
+				suite.balancer.meta.ResourceManager.HandleNodeDown(c.outBoundNodes[i])
 			}
 			utils.RecoverAllCollection(balancer.meta)
 
@@ -813,11 +814,12 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 					nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
 						NodeID:  nodes[i],
 						Address: "127.0.0.1:0",
+						Version: common.Version,
 					})
 					nodeInfo.UpdateStats(session.WithChannelCnt(len(c.channelDist[nodes[i]])))
 					nodeInfo.SetState(c.states[i])
 					suite.balancer.nodeManager.Add(nodeInfo)
-					suite.balancer.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, nodes[i])
+					suite.balancer.meta.ResourceManager.HandleNodeUp(nodes[i])
 				}
 			}
 

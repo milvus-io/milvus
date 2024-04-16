@@ -14,8 +14,12 @@ FROM rockylinux/rockylinux:8
 
 ARG TARGETARCH
 
-RUN dnf install -y wget libgomp libaio libatomic openblas-devel && \
-    rm -rf /var/cache/yum/*
+RUN dnf install -y wget libgomp libaio libatomic
+
+# install openblas-devel
+RUN dnf -y install dnf-plugins-core && \
+    dnf config-manager --set-enabled powertools && \
+    dnf -y install openblas-devel
 
 COPY ./bin/ /milvus/bin/
 

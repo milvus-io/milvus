@@ -1399,10 +1399,7 @@ class TestCollectionSearch(TestcaseBase):
     def random_primary_key(self, request):
         yield request.param
 
-    # skip fp16/bf16 for now, the case need to be modified
-    # see also https://github.com/milvus-io/milvus/issues/31625
-    # @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR"])
+    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
     def vector_data_type(self, request):
         yield request.param
 
@@ -2215,9 +2212,8 @@ class TestCollectionSearch(TestcaseBase):
                                          "limit": limit,
                                          "_async": _async})
 
-    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.tags(CaseLabel.GPU)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
@@ -2228,8 +2224,6 @@ class TestCollectionSearch(TestcaseBase):
         method: test search after different index and corresponding search params
         expected: search successfully with limit(topK)
         """
-        if index == "DISKANN":
-            pytest.skip("https://github.com/milvus-io/milvus/issues/30793")
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
@@ -3167,7 +3161,6 @@ class TestCollectionSearch(TestcaseBase):
             assert set(ids).issubset(filter_ids_set)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31958")
     @pytest.mark.parametrize("bool_type", [True, False, "true", "false"])
     def test_search_with_expression_bool(self, dim, auto_id, _async, bool_type, enable_dynamic_field):
         """
@@ -4077,7 +4070,6 @@ class TestCollectionSearch(TestcaseBase):
                                            default_search_params, tmp_limit, round_decimal=round_decimal)
 
         abs_tol = pow(10, 1 - round_decimal)
-        # log.debug(f'abs_tol: {abs_tol}')
         for i in range(tmp_limit):
             dis_expect = round(res[0][i].distance, round_decimal)
             dis_actual = res_round[0][i].distance
@@ -9973,7 +9965,7 @@ class TestSearchIterator(TestcaseBase):
 class TestSearchGroupBy(TestcaseBase):
     """ Test case of search group by """
 
-    @pytest.mark.tags(CaseLabel.L0)
+    @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("index_type, metric", zip(["FLAT", "IVF_FLAT", "HNSW"], ct.float_metrics))
     @pytest.mark.parametrize("vector_data_type", ["FLOAT16_VECTOR", "FLOAT_VECTOR", "BFLOAT16_VECTOR"])
     def test_search_group_by_default(self, index_type, metric, vector_data_type):
@@ -10527,6 +10519,10 @@ class TestSearchGroupBy(TestcaseBase):
 class TestCollectionHybridSearchValid(TestcaseBase):
     """ Test case of search interface """
 
+    @pytest.fixture(scope="function", params=[1, 10])
+    def nq(self, request):
+        yield request.param
+
     @pytest.fixture(scope="function", params=[default_nb_medium])
     def nb(self, request):
         yield request.param
@@ -10563,10 +10559,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     def random_primary_key(self, request):
         yield request.param
 
-    # skip fp16/bf16 for now, the case need to be modified
-    # see also https://github.com/milvus-io/milvus/issues/31625
-    # @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
-    @pytest.fixture(scope="function", params=["FLOAT_VECTOR"])
+    @pytest.fixture(scope="function", params=["FLOAT_VECTOR", "FLOAT16_VECTOR", "BFLOAT16_VECTOR"])
     def vector_data_type(self, request):
         yield request.param
 
@@ -10577,9 +10570,9 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("offset", [1, 5])
+    @pytest.mark.parametrize("offset", [0, 5])
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_hybrid_search_normal(self, dim, auto_id, is_flush, enable_dynamic_field, offset,
+    def test_hybrid_search_normal(self, nq, dim, auto_id, is_flush, enable_dynamic_field, offset,
                                   primary_field, vector_data_type):
         """
         target: test hybrid search normal case
@@ -10602,10 +10595,11 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         weights = [0.2, 0.3, 0.5]
         metrics = []
         search_res_dict_array = []
+        search_res_dict_array_nq = []
+        vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
+
+        # get hybrid search req list
         for i in range(len(vector_name_list)):
-            # 4. generate search data
-            vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
-            search_res_dict = {}
             search_param = {
                 "data": vectors,
                 "anns_field": vector_name_list[i],
@@ -10615,31 +10609,45 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
             metrics.append("COSINE")
-            # 5. search to get the base line of hybrid_search
-            search_res = collection_w.search(vectors[:1], vector_name_list[i],
-                                             default_search_params, default_limit,
+
+        # get the result of search with the same params of the following hybrid search
+        single_search_param = {"metric_type": "COSINE", "params": {"nprobe": 10}, "offset": offset}
+        for k in range(nq):
+            for i in range(len(vector_name_list)):
+                search_res_dict = {}
+                search_res_dict_array = []
+                vectors_search = vectors[k]
+                # 5. search to get the base line of hybrid_search
+                search_res = collection_w.search([vectors_search], vector_name_list[i],
+                                             single_search_param, default_limit,
                                              default_search_exp,
                                              check_task=CheckTasks.check_search_results,
                                              check_items={"nq": 1,
                                                           "ids": insert_ids,
                                                           "limit": default_limit})[0]
-            ids = search_res[0].ids
-            distance_array = search_res[0].distances
-            for j in range(len(ids)):
-                search_res_dict[ids[j]] = distance_array[j]
-            search_res_dict_array.append(search_res_dict)
+                ids = search_res[0].ids
+                distance_array = search_res[0].distances
+                for j in range(len(ids)):
+                    search_res_dict[ids[j]] = distance_array[j]
+                search_res_dict_array.append(search_res_dict)
+            search_res_dict_array_nq.append(search_res_dict_array)
+
         # 6. calculate hybrid search base line
-        ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array, weights, metrics)
+        score_answer_nq = []
+        for k in range(nq):
+            ids_answer, score_answer = cf.get_hybrid_search_base_results(search_res_dict_array_nq[k], weights, metrics)
+            score_answer_nq.append(score_answer)
         # 7. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit,
                                                 offset = offset,
                                                 check_task=CheckTasks.check_search_results,
-                                                check_items={"nq": 1,
+                                                check_items={"nq": nq,
                                                              "ids": insert_ids,
                                                              "limit": default_limit})[0]
         # 8. compare results through the re-calculated distances
-        for i in range(len(score_answer[:default_limit])):
-            assert score_answer[i] - hybrid_res[0].distances[i] < hybrid_search_epsilon
+        for k in range(len(score_answer_nq)):
+            for i in range(len(score_answer_nq[k][:default_limit])):
+                assert score_answer_nq[k][i] - hybrid_res[k].distances[i] < hybrid_search_epsilon
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -10664,13 +10672,14 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="issue 29839")
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_hybrid_search_as_search(self, primary_field, dim, auto_id, is_flush, enable_dynamic_field):
+    def test_hybrid_search_as_search(self, nq, primary_field, dim, auto_id, is_flush, enable_dynamic_field):
         """
         target: test hybrid search to search as the original search interface
         method: create connection, collection, insert and search
         expected: hybrid search successfully with limit(topK), and the result should be equal to search
         """
         # 1. initialize collection with data
+        dim = 3
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, auto_id=auto_id, dim=dim, is_flush=is_flush,
                                          primary_field=primary_field,
@@ -10678,7 +10687,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
 
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         vector_name_list.append(ct.default_float_vec_field_name)
-        vectors = [[random.random() for _ in range(dim)] for _ in range(1)]
+        vectors = [[random.random() for _ in range(dim)] for _ in range(nq)]
         for search_field in vector_name_list:
             # 2. prepare search params
             req_list = []
@@ -10693,25 +10702,26 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             # 3. hybrid search
             hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(1), default_limit,
                                                     check_task=CheckTasks.check_search_results,
-                                                    check_items={"nq": 1,
-                                                                "ids": insert_ids,
-                                                                "limit": default_limit})[0]
-            search_res = collection_w.search(vectors[:1], search_field,
+                                                    check_items={"nq": nq,
+                                                                 "ids": insert_ids,
+                                                                 "limit": default_limit})[0]
+            search_res = collection_w.search(vectors[:nq], search_field,
                                             default_search_params, default_limit,
                                             default_search_exp,
                                             check_task=CheckTasks.check_search_results,
-                                            check_items={"nq": 1,
-                                                        "ids": insert_ids,
-                                                        "limit": default_limit})[0]
+                                            check_items={"nq": nq,
+                                                         "ids": insert_ids,
+                                                         "limit": default_limit})[0]
             # 4. the effect of hybrid search to one field should equal to search
             log.info("The distance list is:\n")
-            log.info(hybrid_res[0].distances)
-            log.info(search_res[0].distances)
-            assert hybrid_res[0].ids == search_res[0].ids
+            for i in range(nq):
+                log.info(hybrid_res[0].distances)
+                log.info(search_res[0].distances)
+                assert hybrid_res[i].ids == search_res[i].ids
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_hybrid_search_different_metric_type(self, primary_field, dim, auto_id, is_flush,
+    def test_hybrid_search_different_metric_type(self, nq, primary_field, dim, auto_id, is_flush,
                                                  enable_dynamic_field, metric_type):
         """
         target: test hybrid search for fields with different metric type
@@ -10734,7 +10744,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req_list = []
         for vector_name in vector_name_list:
             search_param = {
-                "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+                "data": [[random.random() for _ in range(dim)] for _ in range(nq)],
                 "anns_field": vector_name,
                 "param": {"metric_type": metric_type, "offset": 0},
                 "limit": default_limit,
@@ -10744,13 +10754,13 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 4. hybrid search
         collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 1), default_limit,
                                    check_task=CheckTasks.check_search_results,
-                                   check_items={"nq": 1,
+                                   check_items={"nq": nq,
                                                 "ids": insert_ids,
                                                 "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_hybrid_search_different_metric_type_each_field(self, primary_field, dim, auto_id, is_flush,
+    def test_hybrid_search_different_metric_type_each_field(self, nq, primary_field, dim, auto_id, is_flush,
                                                  enable_dynamic_field, metric_type):
         """
         target: test hybrid search for fields with different metric type
@@ -10765,7 +10775,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 2. extract vector field name
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         vector_name_list.append(ct.default_float_vec_field_name)
-        log.debug(vector_name_list)
         flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "L2"}
         collection_w.create_index(vector_name_list[0], flat_index)
         flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "IP"}
@@ -10776,7 +10785,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 3. prepare search params
         req_list = []
         search_param = {
-            "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+            "data": [[random.random() for _ in range(dim)] for _ in range(nq)],
             "anns_field": vector_name_list[0],
             "param": {"metric_type": "L2", "offset": 0},
             "limit": default_limit,
@@ -10784,7 +10793,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req = AnnSearchRequest(**search_param)
         req_list.append(req)
         search_param = {
-            "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+            "data": [[random.random() for _ in range(dim)] for _ in range(nq)],
             "anns_field": vector_name_list[1],
             "param": {"metric_type": "IP", "offset": 0},
             "limit": default_limit,
@@ -10792,7 +10801,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req = AnnSearchRequest(**search_param)
         req_list.append(req)
         search_param = {
-            "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+            "data": [[random.random() for _ in range(dim)] for _ in range(nq)],
             "anns_field": vector_name_list[2],
             "param": {"metric_type": "COSINE", "offset": 0},
             "limit": default_limit,
@@ -10802,14 +10811,14 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 4. hybrid search
         hybrid_search = collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 1), default_limit,
                                                    check_task=CheckTasks.check_search_results,
-                                                   check_items={"nq": 1,
+                                                   check_items={"nq": nq,
                                                                 "ids": insert_ids,
                                                                 "limit": default_limit})[0]
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     @pytest.mark.xfail(reason="issue 29923")
-    def test_hybrid_search_different_dim(self, primary_field, dim, enable_dynamic_field, metric_type):
+    def test_hybrid_search_different_dim(self, nq, primary_field, dim, enable_dynamic_field, metric_type):
         """
         target: test hybrid search for fields with different dim
         method: create connection, collection, insert and search
@@ -10832,7 +10841,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         req_list = []
         for i in range(len(vector_name_list)):
             search_param = {
-                "data": [[random.random() for _ in range(multiple_dim_array[i])] for _ in range(1)],
+                "data": [[random.random() for _ in range(multiple_dim_array[i])] for _ in range(nq)],
                 "anns_field": vector_name_list[i],
                 "param": {"metric_type": metric_type, "offset": 0},
                 "limit": default_limit,
@@ -10842,24 +10851,21 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         # 4. hybrid search
         hybrid_search_0 = collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9), default_limit,
                                                      check_task=CheckTasks.check_search_results,
-                                                     check_items={"nq": 1,
+                                                     check_items={"nq": nq,
                                                                   "ids": insert_ids,
                                                                   "limit": default_limit})[0]
         hybrid_search_1 = collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9), default_limit,
                                                      check_task=CheckTasks.check_search_results,
-                                                     check_items={"nq": 1,
+                                                     check_items={"nq": nq,
                                                                   "ids": insert_ids,
                                                                   "limit": default_limit})[0]
-        log.debug(hybrid_search_0[0].ids )
-        log.debug(hybrid_search_1[0].ids)
-        log.debug(hybrid_search_0[0].distances)
-        log.debug(hybrid_search_1[0].distances)
-        assert hybrid_search_0[0].ids == hybrid_search_1[0].ids
-        assert hybrid_search_0[0].distances == hybrid_search_1[0].distances
+        for i in range(nq):
+            assert hybrid_search_0[i].ids == hybrid_search_1[i].ids
+            assert hybrid_search_0[i].distances == hybrid_search_1[i].distances
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
-    def test_hybrid_search_overall_limit_larger_sum_each_limit(self, primary_field, dim,
+    def test_hybrid_search_overall_limit_larger_sum_each_limit(self, nq, primary_field, dim,
                                                                enable_dynamic_field, metric_type):
         """
         target: test hybrid search: overall limit which is larger than sum of each limit
@@ -10880,31 +10886,45 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         collection_w.load()
         # 3. prepare search params
         req_list = []
-        id_list = []
+        id_list_nq = []
+        vectors = []
+        default_search_params = {"metric_type": metric_type, "offset": 0}
         for i in range(len(vector_name_list)):
-            vectors = [[random.random() for _ in range(multiple_dim_array[i])] for _ in range(1)]
-            search_params = {"metric_type": metric_type, "offset": 0}
+            vectors.append([])
+        for i in range(nq):
+            id_list_nq.append([])
+        for k in range(nq):
+            for i in range(len(vector_name_list)):
+                vectors_search = [random.random() for _ in range(multiple_dim_array[i])]
+                vectors[i].append(vectors_search)
+        # 4. search for the comparision for hybrid search
+        for i in range(len(vector_name_list)):
+            search_res = collection_w.search(vectors[i], vector_name_list[i],
+                                             default_search_params, default_limit,
+                                             default_search_exp,
+                                             check_task=CheckTasks.check_search_results,
+                                             check_items={"nq": nq,
+                                                          "ids": insert_ids,
+                                                          "limit": default_limit})[0]
+            for k in range(nq):
+                id_list_nq[k].extend(search_res[k].ids)
+        # 5. prepare hybrid search params
+        for i in range(len(vector_name_list)):
             search_param = {
-                "data": vectors,
+                "data": vectors[i],
                 "anns_field": vector_name_list[i],
-                "param": search_params,
+                "param": default_search_params,
                 "limit": default_limit,
                 "expr": default_search_exp}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
-            search_res = collection_w.search(vectors[:1], vector_name_list[i],
-                                             search_params, default_limit,
-                                             default_search_exp,
-                                             check_task=CheckTasks.check_search_results,
-                                             check_items={"nq": 1,
-                                                          "ids": insert_ids,
-                                                          "limit": default_limit})[0]
-            id_list.extend(search_res[0].ids)
-        # 4. hybrid search
+        # 6. hybrid search
         hybrid_search = \
             collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9), default_limit * len(req_list) + 1)[0]
-        assert len(hybrid_search) == 1
-        assert len(hybrid_search[0].ids) == len(list(set(id_list)))
+        assert len(hybrid_search) == nq
+        for i in range(nq):
+            assert len(hybrid_search[i].ids) == len(list(set(id_list_nq[i])))
+            assert set(hybrid_search[i].ids) == set(id_list_nq[i])
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
@@ -11417,10 +11437,6 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                                                              "ids": insert_ids,
                                                              "limit": default_limit})[0]
 
-        log.debug(hybrid_search_0[0].ids)
-        log.debug(hybrid_search_1[0].ids)
-        log.debug(hybrid_search_0[0].distances)
-        log.debug(hybrid_search_1[0].distances)
         assert hybrid_search_0[0].ids == hybrid_search_1[0].ids
         assert hybrid_search_0[0].distances == hybrid_search_1[0].distances
 

@@ -1184,7 +1184,7 @@ func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 
 func GetSizeOfIDs(data *schemapb.IDs) int {
 	result := 0
-	if data.IdField == nil {
+	if data.GetIdField() == nil {
 		return result
 	}
 
@@ -1470,10 +1470,16 @@ func ValidateSparseFloatRows(rows ...[]byte) error {
 			if idx == math.MaxUint32 {
 				return errors.New("invalid index in sparse float vector: must be less than 2^32-1")
 			}
-			if i > 0 && idx < SparseFloatRowIndexAt(row, i-1) {
-				return errors.New("unsorted indices in sparse float vector")
+			if i > 0 && idx <= SparseFloatRowIndexAt(row, i-1) {
+				return errors.New("unsorted or same indices in sparse float vector")
 			}
-			VerifyFloat(float64(SparseFloatRowValueAt(row, i)))
+			val := SparseFloatRowValueAt(row, i)
+			if err := VerifyFloat(float64(val)); err != nil {
+				return err
+			}
+			if val < 0 {
+				return errors.New("negative value in sparse float vector")
+			}
 		}
 	}
 	return nil

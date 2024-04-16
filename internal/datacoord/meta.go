@@ -164,12 +164,22 @@ func (m *meta) reloadFromKV() error {
 // AddCollection adds a collection into meta
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *collectionInfo) {
-	log.Debug("meta update: add collection", zap.Int64("collectionID", collection.ID))
+	log.Info("meta update: add collection", zap.Int64("collectionID", collection.ID))
 	m.Lock()
 	defer m.Unlock()
 	m.collections[collection.ID] = collection
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 	log.Info("meta update: add collection - complete", zap.Int64("collectionID", collection.ID))
+}
+
+// DropCollection drop a collection from meta
+func (m *meta) DropCollection(collectionID int64) {
+	log.Info("meta update: drop collection", zap.Int64("collectionID", collectionID))
+	m.Lock()
+	defer m.Unlock()
+	delete(m.collections, collectionID)
+	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
+	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
 }
 
 // GetCollection returns collection info with provided collection id from local cache

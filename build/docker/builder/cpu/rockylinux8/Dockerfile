@@ -4,10 +4,10 @@ RUN dnf install -y make automake gcc gcc-c++ curl zip unzip tar git which \
         libaio libuuid-devel wget python3 python3-pip \
         pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool 
 
-RUN dnf -y update && \
-    dnf -y install dnf-plugins-core && \
+# install openblas-devel and texinfo
+RUN dnf -y install dnf-plugins-core && \
     dnf config-manager --set-enabled powertools && \
-    dnf -y install texinfo
+    dnf -y install texinfo openblas-devel
 
 RUN pip3 install conan==1.61.0
 RUN wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz && tar -xvf go1.21.6.linux-amd64.tar.gz -C /usr/local

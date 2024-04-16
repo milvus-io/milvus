@@ -550,7 +550,6 @@ The implemented SDK and its API documentation are listed below:
 - [Node SDK](https://github.com/milvus-io/milvus-sdk-node)
 - [Rust SDK](https://github.com/milvus-io/milvus-sdk-rust)(under development)
 - [CSharp SDK](https://github.com/milvus-io/milvus-sdk-csharp)(under development)
-- [Ruby SDK](https://github.com/andreibondarev/milvus)(under development)
 
 ### Attu
 

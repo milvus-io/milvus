@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -119,8 +120,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -178,14 +179,16 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 		NodeID:   1,
 		Address:  "localhost",
 		Hostname: "localhost",
+		Version:  common.Version,
 	}))
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   2,
 		Address:  "localhost",
 		Hostname: "localhost",
+		Version:  common.Version,
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -269,8 +272,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{
@@ -343,8 +346,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 1)
-	checker.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, 2)
+	checker.meta.ResourceManager.HandleNodeUp(1)
+	checker.meta.ResourceManager.HandleNodeUp(2)
 
 	// set target
 	segments := []*datapb.SegmentInfo{

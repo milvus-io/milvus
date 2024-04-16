@@ -79,6 +79,7 @@ const (
 	AlterCollectionTaskName       = "AlterCollectionTask"
 	UpsertTaskName                = "UpsertTask"
 	CreateResourceGroupTaskName   = "CreateResourceGroupTask"
+	UpdateResourceGroupsTaskName  = "UpdateResourceGroupsTask"
 	DropResourceGroupTaskName     = "DropResourceGroupTask"
 	TransferNodeTaskName          = "TransferNodeTask"
 	TransferReplicaTaskName       = "TransferReplicaTask"
@@ -2030,6 +2031,74 @@ func (t *CreateResourceGroupTask) PostExecute(ctx context.Context) error {
 	return nil
 }
 
+type UpdateResourceGroupsTask struct {
+	baseTask
+	Condition
+	*milvuspb.UpdateResourceGroupsRequest
+	ctx        context.Context
+	queryCoord types.QueryCoordClient
+	result     *commonpb.Status
+}
+
+func (t *UpdateResourceGroupsTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *UpdateResourceGroupsTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *UpdateResourceGroupsTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *UpdateResourceGroupsTask) Name() string {
+	return UpdateResourceGroupsTaskName
+}
+
+func (t *UpdateResourceGroupsTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *UpdateResourceGroupsTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *UpdateResourceGroupsTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *UpdateResourceGroupsTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *UpdateResourceGroupsTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	return nil
+}
+
+func (t *UpdateResourceGroupsTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_UpdateResourceGroups
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *UpdateResourceGroupsTask) Execute(ctx context.Context) error {
+	var err error
+	t.result, err = t.queryCoord.UpdateResourceGroups(ctx, &querypb.UpdateResourceGroupsRequest{
+		Base:           t.UpdateResourceGroupsRequest.GetBase(),
+		ResourceGroups: t.UpdateResourceGroupsRequest.GetResourceGroups(),
+	})
+	return err
+}
+
+func (t *UpdateResourceGroupsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
 type DropResourceGroupTask struct {
 	baseTask
 	Condition
@@ -2202,6 +2271,8 @@ func (t *DescribeResourceGroupTask) Execute(ctx context.Context) error {
 				NumLoadedReplica: numLoadedReplica,
 				NumOutgoingNode:  numOutgoingNode,
 				NumIncomingNode:  numIncomingNode,
+				Config:           rgInfo.Config,
+				Nodes:            rgInfo.Nodes,
 			},
 		}
 	} else {

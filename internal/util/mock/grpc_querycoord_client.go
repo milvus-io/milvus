@@ -110,6 +110,10 @@ func (m *GrpcQueryCoordClient) CreateResourceGroup(ctx context.Context, req *mil
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcQueryCoordClient) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcQueryCoordClient) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }

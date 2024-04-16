@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -185,12 +186,10 @@ func (suite *JobSuite) SetupTest() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 1000)
-	suite.NoError(err)
-	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 2000)
-	suite.NoError(err)
-	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 3000)
-	suite.NoError(err)
+
+	suite.meta.HandleNodeUp(1000)
+	suite.meta.HandleNodeUp(2000)
+	suite.meta.HandleNodeUp(3000)
 
 	suite.checkerController = &checkers.CheckerController{}
 }
@@ -318,9 +317,18 @@ func (suite *JobSuite) TestLoadCollection() {
 		suite.NoError(err)
 	}
 
-	suite.meta.ResourceManager.AddResourceGroup("rg1")
-	suite.meta.ResourceManager.AddResourceGroup("rg2")
-	suite.meta.ResourceManager.AddResourceGroup("rg3")
+	cfg := &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 0,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 0,
+		},
+	}
+
+	suite.meta.ResourceManager.AddResourceGroup("rg1", cfg)
+	suite.meta.ResourceManager.AddResourceGroup("rg2", cfg)
+	suite.meta.ResourceManager.AddResourceGroup("rg3", cfg)
 
 	// Load with 3 replica on 1 rg
 	req := &querypb.LoadCollectionRequest{
@@ -597,9 +605,17 @@ func (suite *JobSuite) TestLoadPartition() {
 		suite.NoError(err)
 	}
 
-	suite.meta.ResourceManager.AddResourceGroup("rg1")
-	suite.meta.ResourceManager.AddResourceGroup("rg2")
-	suite.meta.ResourceManager.AddResourceGroup("rg3")
+	cfg := &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+		Limits: &rgpb.ResourceGroupLimit{
+			NodeNum: 1,
+		},
+	}
+	suite.meta.ResourceManager.AddResourceGroup("rg1", cfg)
+	suite.meta.ResourceManager.AddResourceGroup("rg2", cfg)
+	suite.meta.ResourceManager.AddResourceGroup("rg3", cfg)
 
 	// test load 3 replica in 1 rg, should pass rg check
 	req := &querypb.LoadPartitionsRequest{
@@ -1091,12 +1107,9 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
 
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
-	err := suite.meta.AssignNode(meta.DefaultResourceGroupName, 1000)
-	suite.NoError(err)
-	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 2000)
-	suite.NoError(err)
-	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 3000)
-	suite.NoError(err)
+	suite.meta.HandleNodeUp(1000)
+	suite.meta.HandleNodeUp(2000)
+	suite.meta.HandleNodeUp(3000)
 
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadCollection {
@@ -1134,14 +1147,11 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 	suite.meta = meta.NewMeta(RandomIncrementIDAllocator(), store, suite.nodeMgr)
 
 	store.EXPECT().SaveResourceGroup(mock.Anything, mock.Anything).Return(nil)
-	err := suite.meta.AssignNode(meta.DefaultResourceGroupName, 1000)
-	suite.NoError(err)
-	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 2000)
-	suite.NoError(err)
-	err = suite.meta.AssignNode(meta.DefaultResourceGroupName, 3000)
-	suite.NoError(err)
+	suite.meta.HandleNodeUp(1000)
+	suite.meta.HandleNodeUp(2000)
+	suite.meta.HandleNodeUp(3000)
 
-	err = errors.New("failed to store collection")
+	err := errors.New("failed to store collection")
 	for _, collection := range suite.collections {
 		if suite.loadTypes[collection] != querypb.LoadType_LoadPartition {
 			continue
