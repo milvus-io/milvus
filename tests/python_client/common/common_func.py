@@ -733,6 +733,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
 
     return insert_list
 
+
 def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                         multiple_dim_array=[], multiple_vector_field_name=[], partition_id=0,
                                         auto_id=False, primary_field=ct.default_int64_field_name):
@@ -1714,7 +1715,7 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                                   multiple_dim_array=multiple_dim_array,
                                                                   multiple_vector_field_name=vector_name_list,
                                                                   vector_data_type=vector_data_type,
-                                                                  auto_id = auto_id, primary_field=primary_field)
+                                                                  auto_id=auto_id, primary_field=primary_field)
                     elif vector_data_type == "FLOAT16_VECTOR" or "BFLOAT16_VECTOR":
                         default_data = gen_general_default_list_data(nb // num, dim=dim, start=start, with_json=with_json,
                                                                      random_primary_key=random_primary_key,

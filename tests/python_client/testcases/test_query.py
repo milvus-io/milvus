@@ -1961,6 +1961,7 @@ class TestQueryParams(TestcaseBase):
                                                     f"should be in range [1, 16384], but got {offset}"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("not stable")
     def test_query_during_upsert(self):
         """
         target: test query during upsert

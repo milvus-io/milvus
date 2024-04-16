@@ -172,11 +172,10 @@ class TestInsertParams(TestcaseBase):
         """
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
-        mutation_res, _ = collection_w.insert(data=None)
-        assert mutation_res.insert_count == 0
-        assert len(mutation_res.primary_keys) == 0
-        assert collection_w.is_empty
-        assert collection_w.num_entities == 0
+        mutation_res, _ = collection_w.insert(data=None, check_task=CheckTasks.err_res,
+                                              check_items={ct.err_code: 1,
+                                                           ct.err_msg: "The type of data should be List, "
+                                                                       "pd.DataFrame or Dict"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_insert_numpy_data(self):
@@ -248,10 +247,9 @@ class TestInsertParams(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         dim = 129
         df = cf.gen_default_dataframe_data(ct.default_nb, dim=dim)
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 65535,
                  ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_binary_dim_not_match(self):
@@ -265,10 +263,10 @@ class TestInsertParams(TestcaseBase):
             name=c_name, schema=default_binary_schema)
         dim = 120
         df, _ = cf.gen_default_binary_dataframe_data(ct.default_nb, dim=dim)
-        error = {ct.err_code: 1,
-                 ct.err_msg: f'Collection field dim is {ct.default_dim}, but entities field dim is {dim}'}
-        collection_w.insert(
-            data=df, check_task=CheckTasks.err_res, check_items=error)
+        error = {ct.err_code: 1100,
+                 ct.err_msg: f'the dim ({dim}) of field data(binary_vector) is not equal to schema dim '
+                             f'({ct.default_dim}): invalid parameter[expected={dim}][actual={ct.default_dim}]'}
+        collection_w.insert(data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_insert_field_name_not_match(self):
@@ -1784,8 +1782,9 @@ class TestUpsertValid(TestcaseBase):
         """
         collection_w = self.init_collection_general(pre_upsert, insert_data=True, is_index=False)[0]
         assert collection_w.num_entities == ct.default_nb
-        collection_w.upsert(data=None)
-        assert collection_w.num_entities == ct.default_nb
+        collection_w.upsert(data=None, check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 1,
+                                         ct.err_msg: "The type of data should be List, pd.DataFrame or Dict"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_upsert_in_specific_partition(self):
@@ -2139,7 +2138,7 @@ class TestUpsertInvalid(TestcaseBase):
         """
         collection_w = self.init_collection_general(pre_upsert, True, is_binary=True)[0]
         data = cf.gen_default_binary_dataframe_data(dim=dim)[0]
-        error = {ct.err_code: 1,
+        error = {ct.err_code: 1100,
                  ct.err_msg: f"Collection field dim is 128, but entities field dim is {dim}"}
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
