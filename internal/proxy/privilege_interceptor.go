@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 )
 
@@ -94,7 +95,7 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 		log.RatedInfo(60, "GetPrivilegeExtObj err", zap.Error(err))
 		return ctx, nil
 	}
-	username, err := GetCurUserFromContext(ctx)
+	username, password, err := contextutil.GetAuthInfoFromContext(ctx)
 	if err != nil {
 		log.Warn("GetCurUserFromContext fail", zap.Error(err))
 		return ctx, err
@@ -174,7 +175,13 @@ func PrivilegeInterceptor(ctx context.Context, req interface{}) (context.Context
 	}
 
 	log.Info("permission deny", zap.Strings("roles", roleNames))
-	return ctx, status.Error(codes.PermissionDenied, fmt.Sprintf("%s: permission deny to %s", objectPrivilege, username))
+
+	if password == util.PasswordHolder {
+		username = "apikey user"
+	}
+
+	return ctx, status.Error(codes.PermissionDenied,
+		fmt.Sprintf("%s: permission deny to %s in the `%s` database", objectPrivilege, username, dbName))
 }
 
 // isCurUserObject Determine whether it is an Object of type User that operates on its own user information,
