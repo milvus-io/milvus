@@ -1229,23 +1229,51 @@ TEST(Sealed, BF_Overflow) {
 }
 
 TEST(Sealed, DeleteCount) {
-    auto schema = std::make_shared<Schema>();
-    auto pk = schema->AddDebugField("pk", DataType::INT64);
-    schema->set_primary_field_id(pk);
-    auto segment = CreateSealedSegment(schema);
+    {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateSealedSegment(schema);
 
-    int64_t c = 10;
-    auto offset = segment->get_deleted_count();
-    ASSERT_EQ(offset, 0);
+        int64_t c = 10;
+        auto offset = segment->get_deleted_count();
+        ASSERT_EQ(offset, 0);
 
-    Timestamp begin_ts = 100;
-    auto tss = GenTss(c, begin_ts);
-    auto pks = GenPKs(c, 0);
-    auto status = segment->Delete(offset, c, pks.get(), tss.data());
-    ASSERT_TRUE(status.ok());
+        Timestamp begin_ts = 100;
+        auto tss = GenTss(c, begin_ts);
+        auto pks = GenPKs(c, 0);
+        auto status = segment->Delete(offset, c, pks.get(), tss.data());
+        ASSERT_TRUE(status.ok());
 
-    auto cnt = segment->get_deleted_count();
-    ASSERT_EQ(cnt, 0);
+        // shouldn't be filtered for empty segment.
+        auto cnt = segment->get_deleted_count();
+        ASSERT_EQ(cnt, 10);
+    }
+    {
+        auto schema = std::make_shared<Schema>();
+        auto pk = schema->AddDebugField("pk", DataType::INT64);
+        schema->set_primary_field_id(pk);
+        auto segment = CreateSealedSegment(schema);
+
+        int64_t c = 10;
+        auto dataset = DataGen(schema, c);
+        auto pks = dataset.get_col<int64_t>(pk);
+        SealedLoadFieldData(dataset, *segment);
+
+        auto offset = segment->get_deleted_count();
+        ASSERT_EQ(offset, 0);
+
+        auto iter = std::max_element(pks.begin(), pks.end());
+        auto delete_pks = GenPKs(c, *iter);
+        Timestamp begin_ts = 100;
+        auto tss = GenTss(c, begin_ts);
+        auto status = segment->Delete(offset, c, delete_pks.get(), tss.data());
+        ASSERT_TRUE(status.ok());
+
+        // 9 of element should be filtered.
+        auto cnt = segment->get_deleted_count();
+        ASSERT_EQ(cnt, 1);
+    }
 }
 
 TEST(Sealed, RealCount) {
