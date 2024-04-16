@@ -1132,7 +1132,7 @@ class TestCreateImportJobNegative(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "dynamic_ksy": i,
+                "dynamic_key": i,
                 "book_intro": [random.random() for _ in range(dim)]
             }
             if not auto_id:
