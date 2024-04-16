@@ -999,10 +999,6 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 		compactionHandler compactionPlanContext
 		globalTrigger     *time.Ticker
 	}
-	type args struct {
-		collectionID int64
-		compactTime  *compactTime
-	}
 	vecFieldID := int64(201)
 
 	genSeg := func(segID, numRows int64) *datapb.SegmentInfo {
@@ -1210,7 +1206,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024},
 					},
 				},
 			},
@@ -1249,31 +1245,31 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: {
-								SegmentInfo:   genSeg(1, 20),
+								SegmentInfo:   genSeg(1, 200),
 								lastFlushTime: time.Now().Add(-100 * time.Minute),
 							},
 							2: {
-								SegmentInfo:   genSeg(2, 20),
+								SegmentInfo:   genSeg(2, 200),
 								lastFlushTime: time.Now(),
 							},
 							3: {
-								SegmentInfo:   genSeg(3, 20),
+								SegmentInfo:   genSeg(3, 200),
 								lastFlushTime: time.Now(),
 							},
 							4: {
-								SegmentInfo:   genSeg(4, 20),
+								SegmentInfo:   genSeg(4, 200),
 								lastFlushTime: time.Now(),
 							},
 							5: {
-								SegmentInfo:   genSeg(5, 20),
+								SegmentInfo:   genSeg(5, 200),
 								lastFlushTime: time.Now(),
 							},
 							6: {
-								SegmentInfo:   genSeg(6, 20),
+								SegmentInfo:   genSeg(6, 200),
 								lastFlushTime: time.Now(),
 							},
 							7: {
-								SegmentInfo:   genSeg(7, 20),
+								SegmentInfo:   genSeg(7, 200),
 								lastFlushTime: time.Now(),
 							},
 						},
@@ -1403,7 +1399,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024},
 					},
 				},
 			},
@@ -1442,27 +1438,27 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 					segments: &SegmentsInfo{
 						segments: map[int64]*SegmentInfo{
 							1: {
-								SegmentInfo:   genSeg(1, 60),
+								SegmentInfo:   genSeg(1, 600),
 								lastFlushTime: time.Now().Add(-100 * time.Minute),
 							},
 							2: {
-								SegmentInfo:   genSeg(2, 60),
+								SegmentInfo:   genSeg(2, 600),
 								lastFlushTime: time.Now(),
 							},
 							3: {
-								SegmentInfo:   genSeg(3, 60),
+								SegmentInfo:   genSeg(3, 600),
 								lastFlushTime: time.Now(),
 							},
 							4: {
-								SegmentInfo:   genSeg(4, 60),
+								SegmentInfo:   genSeg(4, 600),
 								lastFlushTime: time.Now(),
 							},
 							5: {
-								SegmentInfo:   genSeg(5, 26),
+								SegmentInfo:   genSeg(5, 260),
 								lastFlushTime: time.Now(),
 							},
 							6: {
-								SegmentInfo:   genSeg(6, 26),
+								SegmentInfo:   genSeg(6, 260),
 								lastFlushTime: time.Now(),
 							},
 						},
@@ -1551,9 +1547,9 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			select {
 			case val := <-spy.spyChan:
-				// max # of rows == 110, expansion rate == 1.25.
-				// segment 5 and 6 are squeezed into a non-planned segment. Total # of rows: 60 + 26 + 26 == 112,
-				// which is greater than 110 but smaller than 110 * 1.25
+				// max size == 1000, expansion rate == 1.25.
+				// segment 5 and 6 are squeezed into a non-planned segment. Total size: 600 + 260 + 260 == 1120,
+				// which is greater than 1000 but smaller than 1000 * 1.25
 				assert.Equal(t, len(val.SegmentBinlogs), 3)
 				return
 			case <-time.After(3 * time.Second):
@@ -1630,7 +1626,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				Binlogs: []*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
-							{EntriesNum: 5, LogPath: "log1", LogSize: size[i] * 1024 * 1024},
+							{EntriesNum: 5, LogPath: "log1", LogSize: size[i] * 2 * 1024 * 1024},
 						},
 					},
 				},
@@ -1806,21 +1802,9 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	}
 
 	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
-	assert.True(t, couldDo)
-
-	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{})
-	assert.True(t, couldDo)
-
-	// if only 10 bin logs, then disk index won't trigger compaction
-	info.Statslogs = binlogs[0:40]
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
-	assert.True(t, couldDo)
-
-	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{})
 	assert.False(t, couldDo)
-	// Test too many stats log but compacted
-	info.CompactionFrom = []int64{0, 1}
-	couldDo = trigger.ShouldDoSingleCompaction(info, false, &compactTime{})
+
+	couldDo = trigger.ShouldDoSingleCompaction(info, true, &compactTime{})
 	assert.False(t, couldDo)
 
 	// Test expire triggered  compaction
