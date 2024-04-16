@@ -320,6 +320,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		}
 
 		fieldID := ib.meta.indexMeta.GetFieldIDByIndexID(meta.CollectionID, meta.IndexID)
+		log.Ctx(ib.ctx).Info("segment info", zap.Any("segment", segment))
 		binlogIDs := getBinLogIDs(segment, fieldID)
 		if isDiskANNIndex(GetIndexType(indexParams)) {
 			var err error
@@ -538,6 +539,7 @@ func (ib *indexBuilder) dropIndexTask(buildID, nodeID UniqueID) bool {
 func (ib *indexBuilder) assignTask(builderClient types.IndexNodeClient, req *indexpb.CreateJobRequest) error {
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
+	log.Ctx(ib.ctx).Info("print create index request", zap.Any("req", req))
 	resp, err := builderClient.CreateJob(ctx, req)
 	if err == nil {
 		err = merr.Error(resp)
