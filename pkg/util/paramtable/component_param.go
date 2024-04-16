@@ -669,6 +669,7 @@ like the old password verification when updating the credential`,
 		Key:          "common.storage.enablev2",
 		Version:      "2.3.1",
 		DefaultValue: "false",
+		Export:       true,
 	}
 	p.EnableStorageV2.Init(base.mgr)
 
@@ -676,6 +677,7 @@ like the old password verification when updating the credential`,
 		Key:          "common.storage.scheme",
 		Version:      "2.3.4",
 		DefaultValue: "s3",
+		Export:       true,
 	}
 	p.StorageScheme.Init(base.mgr)
 
@@ -691,6 +693,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.2",
 		DefaultValue: "true",
 		Doc:          "Whether the instance disable sending ts messages",
+		Export:       true,
 	}
 	p.TTMsgEnabled.Init(base.mgr)
 
@@ -699,6 +702,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.4",
 		DefaultValue: "0",
 		Doc:          "trace request info",
+		Export:       true,
 	}
 	p.TraceLogMode.Init(base.mgr)
 
@@ -707,6 +711,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.2",
 		DefaultValue: "100000",
 		Doc:          "bloom filter initial size",
+		Export:       true,
 	}
 	p.BloomFilterSize.Init(base.mgr)
 
@@ -715,6 +720,7 @@ like the old password verification when updating the credential`,
 		Version:      "2.3.2",
 		DefaultValue: "0.05",
 		Doc:          "max false positive rate for bloom filter",
+		Export:       true,
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
 }
@@ -755,8 +761,9 @@ func (t *traceConfig) init(base *BaseTable) {
 		Key:     "trace.exporter",
 		Version: "2.3.0",
 		Doc: `trace exporter type, default is stdout,
-optional values: ['stdout', 'jaeger']`,
-		Export: true,
+optional values: ['stdout', 'jaeger', 'otlp']`,
+		DefaultValue: "stdout",
+		Export:       true,
 	}
 	t.Exporter.Init(base.mgr)
 
@@ -783,6 +790,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Key:     "trace.otlp.endpoint",
 		Version: "2.3.0",
 		Doc:     "example: \"127.0.0.1:4318\"",
+		Export:  true,
 	}
 	t.OtlpEndpoint.Init(base.mgr)
 
@@ -790,6 +798,7 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Key:          "trace.otlp.secure",
 		Version:      "2.4.0",
 		DefaultValue: "true",
+		Export:       true,
 	}
 	t.OtlpSecure.Init(base.mgr)
 }
@@ -1182,6 +1191,7 @@ please adjust in embedded Milvus: false`,
 		Version:      "2.2.0",
 		DefaultValue: "false",
 		Doc:          "if use access log",
+		Export:       true,
 	}
 	p.AccessLog.Enable.Init(base.mgr)
 
@@ -1190,6 +1200,7 @@ please adjust in embedded Milvus: false`,
 		Version:      "2.2.0",
 		DefaultValue: "false",
 		Doc:          "if upload sealed access log file to minio",
+		Export:       true,
 	}
 	p.AccessLog.MinioEnable.Init(base.mgr)
 
@@ -1215,6 +1226,7 @@ please adjust in embedded Milvus: false`,
 		Version:      "2.2.0",
 		DefaultValue: "64",
 		Doc:          "Max size for a single file, in MB.",
+		Export:       true,
 	}
 	p.AccessLog.MaxSize.Init(base.mgr)
 
@@ -1223,6 +1235,7 @@ please adjust in embedded Milvus: false`,
 		Version:      "2.3.2",
 		DefaultValue: "10240",
 		Doc:          "Size of log of memory cache, in B",
+		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
 
@@ -1239,6 +1252,7 @@ please adjust in embedded Milvus: false`,
 		Version:      "2.2.0",
 		DefaultValue: "0",
 		Doc:          "Max time for single access log file in seconds",
+		Export:       true,
 	}
 	p.AccessLog.RotatedTime.Init(base.mgr)
 
@@ -1247,6 +1261,7 @@ please adjust in embedded Milvus: false`,
 		Version:      "2.2.0",
 		DefaultValue: "access_log/",
 		Doc:          "File path in minIO",
+		Export:       true,
 	}
 	p.AccessLog.RemotePath.Init(base.mgr)
 
@@ -1255,12 +1270,15 @@ please adjust in embedded Milvus: false`,
 		Version:      "2.2.0",
 		DefaultValue: "0",
 		Doc:          "Max time for log file in minIO, in hours",
+		Export:       true,
 	}
 	p.AccessLog.RemoteMaxTime.Init(base.mgr)
 
 	p.AccessLog.Formatter = ParamGroup{
 		KeyPrefix: "proxy.accessLog.formatters.",
 		Version:   "2.3.4",
+		Export:    true,
+		Doc:       "access log formatters for specified methods, if not set, use the base formatter.",
 	}
 	p.AccessLog.Formatter.Init(base.mgr)
 
@@ -2179,6 +2197,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "false",
 		FallbackKeys: []string{"queryNode.mmapEnabled"},
 		Doc:          "Enable mmap for loading data",
+		Export:       true,
 	}
 	p.MmapEnabled.Init(base.mgr)
 
@@ -2187,6 +2206,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Version:      "2.4.0",
 		DefaultValue: "false",
 		Doc:          "Enable lazyload for loading data",
+		Export:       true,
 	}
 	p.LazyLoadEnabled.Init(base.mgr)
 
@@ -2195,6 +2215,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Version:      "2.3.2",
 		DefaultValue: "willneed",
 		Doc:          "The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`",
+		Export:       true,
 	}
 	p.ReadAheadPolicy.Init(base.mgr)
 
@@ -2208,6 +2229,7 @@ Specifies the necessity for warming up the chunk cache.
 chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
 for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
 2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.`,
+		Export: true,
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
 
@@ -2308,7 +2330,9 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				// use local storage path to check correct device
 				localStoragePath := base.Get("localStorage.path")
 				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
-					os.MkdirAll(localStoragePath, os.ModePerm)
+					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
+						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+					}
 				}
 				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
@@ -2387,7 +2411,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.gracefulStopTimeout",
 		Version:      "2.2.1",
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
-		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 
@@ -2427,7 +2450,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Key:          "queryNode.scheduler.scheduleReadPolicy.name",
 		Version:      "2.3.0",
 		DefaultValue: "fifo",
-		Doc:          "Control how to schedule query/search read task in query node",
+		Doc: `fifo: A FIFO queue support the schedule.
+user-task-polling:
+	The user's tasks will be polled one by one and scheduled.
+	Scheduling is fair on task granularity.
+	The policy is based on the username for authentication.
+	And an empty username is considered the same user.
+	When there are no multi-users, the policy decay into FIFO"`,
+		Export: true,
 	}
 	p.SchedulePolicyName.Init(base.mgr)
 	p.SchedulePolicyTaskQueueExpire = ParamItem{
@@ -2435,6 +2465,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.3.0",
 		DefaultValue: "60",
 		Doc:          "Control how long (many seconds) that queue retains since queue is empty",
+		Export:       true,
 	}
 	p.SchedulePolicyTaskQueueExpire.Init(base.mgr)
 	p.SchedulePolicyEnableCrossUserGrouping = ParamItem{
@@ -2442,6 +2473,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.3.0",
 		DefaultValue: "false",
 		Doc:          "Enable Cross user grouping when using user-task-polling policy. (Disable it if user's task can not merge each other)",
+		Export:       true,
 	}
 	p.SchedulePolicyEnableCrossUserGrouping.Init(base.mgr)
 	p.SchedulePolicyMaxPendingTaskPerUser = ParamItem{
@@ -2449,6 +2481,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.3.0",
 		DefaultValue: "1024",
 		Doc:          "Max pending task per user in scheduler",
+		Export:       true,
 	}
 	p.SchedulePolicyMaxPendingTaskPerUser.Init(base.mgr)
 
@@ -2498,6 +2531,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Version:      "2.3.4",
 		DefaultValue: "false",
 		Doc:          "use partition prune function on shard delegator",
+		Export:       true,
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
 	p.DefaultSegmentFilterRatio = ParamItem{
@@ -2888,6 +2922,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.0",
 		Doc:          "The minmum size in bytes to force trigger a LevelZero Compaction, default as 8MB",
 		DefaultValue: "8388608",
+		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerMinSize.Init(base.mgr)
 
@@ -2896,6 +2931,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.0",
 		Doc:          "The maxmum size in bytes to force trigger a LevelZero Compaction, default as 64MB",
 		DefaultValue: "67108864",
+		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerMaxSize.Init(base.mgr)
 
@@ -2904,6 +2940,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.0",
 		Doc:          "The minimum number of deltalog files to force trigger a LevelZero Compaction",
 		DefaultValue: "10",
+		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMinNum.Init(base.mgr)
 
@@ -2912,6 +2949,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Version:      "2.4.0",
 		Doc:          "The maxmum number of deltalog files to force trigger a LevelZero Compaction, default as 30",
 		DefaultValue: "30",
+		Export:       true,
 	}
 	p.LevelZeroCompactionTriggerDeltalogMaxNum.Init(base.mgr)
 
@@ -3237,7 +3275,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlowGraphMaxParallelism.Init(base.mgr)
 
 	p.FlowGraphSkipModeEnable = ParamItem{
-		Key:          "datanode.dataSync.skipMode.enable",
+		Key:          "dataNode.dataSync.skipMode.enable",
 		Version:      "2.3.4",
 		DefaultValue: "true",
 		PanicIfEmpty: false,
@@ -3247,7 +3285,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlowGraphSkipModeEnable.Init(base.mgr)
 
 	p.FlowGraphSkipModeSkipNum = ParamItem{
-		Key:          "datanode.dataSync.skipMode.skipNum",
+		Key:          "dataNode.dataSync.skipMode.skipNum",
 		Version:      "2.3.4",
 		DefaultValue: "4",
 		PanicIfEmpty: false,
@@ -3257,7 +3295,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlowGraphSkipModeSkipNum.Init(base.mgr)
 
 	p.FlowGraphSkipModeColdTime = ParamItem{
-		Key:          "datanode.dataSync.skipMode.coldTime",
+		Key:          "dataNode.dataSync.skipMode.coldTime",
 		Version:      "2.3.4",
 		DefaultValue: "60",
 		PanicIfEmpty: false,
@@ -3271,7 +3309,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Version:      "2.3.0",
 		DefaultValue: "6",
 		Doc:          "deprecated, legacy flush manager max conurrency number",
-		Export:       true,
+		Export:       false,
 	}
 	p.MaxParallelSyncTaskNum.Init(base.mgr)
 
@@ -3296,21 +3334,25 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FlushInsertBufferSize.Init(base.mgr)
 
 	p.MemoryForceSyncEnable = ParamItem{
-		Key:          "datanode.memory.forceSyncEnable",
+		Key:          "dataNode.memory.forceSyncEnable",
 		Version:      "2.2.4",
 		DefaultValue: "true",
+		Doc:          "Set true to force sync if memory usage is too high",
+		Export:       true,
 	}
 	p.MemoryForceSyncEnable.Init(base.mgr)
 
 	p.MemoryForceSyncSegmentNum = ParamItem{
-		Key:          "datanode.memory.forceSyncSegmentNum",
+		Key:          "dataNode.memory.forceSyncSegmentNum",
 		Version:      "2.2.4",
 		DefaultValue: "1",
+		Doc:          "number of segments to sync, segments with top largest buffer will be synced.",
+		Export:       true,
 	}
 	p.MemoryForceSyncSegmentNum.Init(base.mgr)
 
 	p.MemoryCheckInterval = ParamItem{
-		Key:          "datanode.memory.checkInterval",
+		Key:          "dataNode.memory.checkInterval",
 		Version:      "2.4.0",
 		DefaultValue: "3000", // milliseconds
 		Doc:          "the interal to check datanode memory usage, in milliseconds",
@@ -3320,16 +3362,20 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 
 	if os.Getenv(metricsinfo.DeployModeEnvKey) == metricsinfo.StandaloneDeployMode {
 		p.MemoryForceSyncWatermark = ParamItem{
-			Key:          "datanode.memory.forceSyncWatermark",
+			Key:          "dataNode.memory.forceSyncWatermark",
 			Version:      "2.4.0",
 			DefaultValue: "0.2",
+			Doc:          "memory watermark for standalone, upon reaching this watermark, segments will be synced.",
+			Export:       true,
 		}
 	} else {
 		log.Info("DeployModeEnv is not set, use default", zap.Float64("default", 0.5))
 		p.MemoryForceSyncWatermark = ParamItem{
-			Key:          "datanode.memory.forceSyncWatermark",
+			Key:          "dataNode.memory.forceSyncWatermark",
 			Version:      "2.4.0",
 			DefaultValue: "0.5",
+			Doc:          "memory watermark for standalone, upon reaching this watermark, segments will be synced.",
+			Export:       true,
 		}
 	}
 	p.MemoryForceSyncWatermark.Init(base.mgr)
@@ -3360,7 +3406,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.SyncPeriod.Init(base.mgr)
 
 	p.WatchEventTicklerInterval = ParamItem{
-		Key:          "datanode.segment.watchEventTicklerInterval",
+		Key:          "dataNode.segment.watchEventTicklerInterval",
 		Version:      "2.2.3",
 		DefaultValue: "15",
 	}
@@ -3381,18 +3427,20 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.FileReadConcurrency.Init(base.mgr)
 
 	p.DataNodeTimeTickByRPC = ParamItem{
-		Key:          "datanode.timetick.byRPC",
+		Key:          "dataNode.timetick.byRPC",
 		Version:      "2.2.9",
 		PanicIfEmpty: false,
 		DefaultValue: "true",
+		Export:       true,
 	}
 	p.DataNodeTimeTickByRPC.Init(base.mgr)
 
 	p.DataNodeTimeTickInterval = ParamItem{
-		Key:          "datanode.timetick.interval",
+		Key:          "dataNode.timetick.interval",
 		Version:      "2.2.5",
 		PanicIfEmpty: false,
 		DefaultValue: "500",
+		Export:       true,
 	}
 	p.DataNodeTimeTickInterval.Init(base.mgr)
 
@@ -3405,55 +3453,66 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.SkipBFStatsLoad.Init(base.mgr)
 
 	p.ChannelWorkPoolSize = ParamItem{
-		Key:          "datanode.channel.workPoolSize",
+		Key:          "dataNode.channel.workPoolSize",
 		Version:      "2.3.2",
 		PanicIfEmpty: false,
 		DefaultValue: "-1",
+		Doc: `specify the size of global work pool of all channels
+if this parameter <= 0, will set it as the maximum number of CPUs that can be executing
+suggest to set it bigger on large collection numbers to avoid blocking`,
+		Export: true,
 	}
 	p.ChannelWorkPoolSize.Init(base.mgr)
 
 	p.UpdateChannelCheckpointMaxParallel = ParamItem{
-		Key:          "datanode.channel.updateChannelCheckpointMaxParallel",
+		Key:          "dataNode.channel.updateChannelCheckpointMaxParallel",
 		Version:      "2.3.4",
 		PanicIfEmpty: false,
 		DefaultValue: "10",
+		Doc: `specify the size of global work pool for channel checkpoint updating
+if this parameter <= 0, will set it as 10`,
+		Export: true,
 	}
 	p.UpdateChannelCheckpointMaxParallel.Init(base.mgr)
 
 	p.UpdateChannelCheckpointInterval = ParamItem{
-		Key:          "datanode.channel.updateChannelCheckpointInterval",
+		Key:          "dataNode.channel.updateChannelCheckpointInterval",
 		Version:      "2.4.0",
 		Doc:          "the interval duration(in seconds) for datanode to update channel checkpoint of each channel",
 		DefaultValue: "60",
+		Export:       true,
 	}
 	p.UpdateChannelCheckpointInterval.Init(base.mgr)
 
 	p.UpdateChannelCheckpointRPCTimeout = ParamItem{
-		Key:          "datanode.channel.updateChannelCheckpointRPCTimeout",
+		Key:          "dataNode.channel.updateChannelCheckpointRPCTimeout",
 		Version:      "2.4.0",
 		Doc:          "timeout in seconds for UpdateChannelCheckpoint RPC call",
 		DefaultValue: "20",
+		Export:       true,
 	}
 	p.UpdateChannelCheckpointRPCTimeout.Init(base.mgr)
 
 	p.MaxChannelCheckpointsPerRPC = ParamItem{
-		Key:          "datanode.channel.maxChannelCheckpointsPerPRC",
+		Key:          "dataNode.channel.maxChannelCheckpointsPerPRC",
 		Version:      "2.4.0",
 		Doc:          "The maximum number of channel checkpoints per UpdateChannelCheckpoint RPC.",
 		DefaultValue: "128",
+		Export:       true,
 	}
 	p.MaxChannelCheckpointsPerRPC.Init(base.mgr)
 
 	p.ChannelCheckpointUpdateTickInSeconds = ParamItem{
-		Key:          "datanode.channel.channelCheckpointUpdateTickInSeconds",
+		Key:          "dataNode.channel.channelCheckpointUpdateTickInSeconds",
 		Version:      "2.4.0",
 		Doc:          "The frequency, in seconds, at which the channel checkpoint updater executes updates.",
 		DefaultValue: "10",
+		Export:       true,
 	}
 	p.ChannelCheckpointUpdateTickInSeconds.Init(base.mgr)
 
 	p.MaxConcurrentImportTaskNum = ParamItem{
-		Key:          "datanode.import.maxConcurrentTaskNum",
+		Key:          "dataNode.import.maxConcurrentTaskNum",
 		Version:      "2.4.0",
 		Doc:          "The maximum number of import/pre-import tasks allowed to run concurrently on a datanode.",
 		DefaultValue: "16",
@@ -3463,7 +3522,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxConcurrentImportTaskNum.Init(base.mgr)
 
 	p.MaxImportFileSizeInGB = ParamItem{
-		Key:          "datanode.import.maxImportFileSizeInGB",
+		Key:          "dataNode.import.maxImportFileSizeInGB",
 		Version:      "2.4.0",
 		Doc:          "The maximum file size (in GB) for an import file, where an import file refers to either a Row-Based file or a set of Column-Based files.",
 		DefaultValue: "16",
@@ -3473,7 +3532,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.MaxImportFileSizeInGB.Init(base.mgr)
 
 	p.ReadBufferSizeInMB = ParamItem{
-		Key:          "datanode.import.readBufferSizeInMB",
+		Key:          "dataNode.import.readBufferSizeInMB",
 		Version:      "2.4.0",
 		Doc:          "The data block size (in MB) read from chunk manager by the datanode during import.",
 		DefaultValue: "16",
@@ -3483,7 +3542,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.ReadBufferSizeInMB.Init(base.mgr)
 
 	p.L0BatchMemoryRatio = ParamItem{
-		Key:          "datanode.compaction.levelZeroBatchMemoryRatio",
+		Key:          "dataNode.compaction.levelZeroBatchMemoryRatio",
 		Version:      "2.4.0",
 		Doc:          "The minimal memory ratio of free memory for level zero compaction executing in batch mode",
 		DefaultValue: "0.05",
@@ -3492,7 +3551,7 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 	p.L0BatchMemoryRatio.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
-		Key:          "datanode.gracefulStopTimeout",
+		Key:          "dataNode.gracefulStopTimeout",
 		Version:      "2.3.7",
 		DefaultValue: strconv.Itoa(DefaultGracefulStopTimeout),
 		Doc:          "seconds. force stop node without graceful stop",
@@ -3566,7 +3625,6 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Version:      "2.2.1",
 		FallbackKeys: []string{"common.gracefulStopTimeout"},
 		Doc:          "seconds. force stop node without graceful stop",
-		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
 }

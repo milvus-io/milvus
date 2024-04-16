@@ -1485,13 +1485,15 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		Key:          "quotaAndLimits.limits.maxCollectionNum",
 		Version:      "2.2.0",
 		DefaultValue: "65536",
+		Export:       true,
 	}
 	p.MaxCollectionNum.Init(base.mgr)
 
 	p.MaxCollectionNumPerDB = ParamItem{
 		Key:          "quotaAndLimits.limits.maxCollectionNumPerDB",
 		Version:      "2.2.0",
-		DefaultValue: "64",
+		DefaultValue: "65536",
+		Export:       true,
 	}
 	p.MaxCollectionNumPerDB.Init(base.mgr)
 

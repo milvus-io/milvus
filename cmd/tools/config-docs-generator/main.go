@@ -12,8 +12,10 @@ import (
 	"gopkg.in/yaml.v3"
 )
 
-var inputFile = "configs/milvus.yaml"
-var outputPath = os.Getenv("PWD")
+var (
+	inputFile  = "configs/milvus.yaml"
+	outputPath = os.Getenv("PWD")
+)
 
 func main() {
 	flag.StringVar(&inputFile, "i", inputFile, "input file")
@@ -168,13 +170,13 @@ For the convenience of maintenance, Milvus classifies its configurations into %s
 
 `
 	const fileName = "system_configuration.md"
-	var fileContent = head
+	fileContent := head
 	for _, sec := range secs {
 		fileContent += sec.systemConfiguratinContent()
 		sectionFileContent := sec.sectionPageContent()
-		os.WriteFile(filepath.Join(outputPath, sec.fileName()), []byte(sectionFileContent), 0644)
+		os.WriteFile(filepath.Join(outputPath, sec.fileName()), []byte(sectionFileContent), 0o644)
 	}
-	err := os.WriteFile(filepath.Join(outputPath, fileName), []byte(fileContent), 0644)
+	err := os.WriteFile(filepath.Join(outputPath, fileName), []byte(fileContent), 0o644)
 	return errors.Wrapf(err, "writefile %s", fileName)
 }
 
