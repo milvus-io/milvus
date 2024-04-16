@@ -9,7 +9,7 @@ if [[ "$IS_NETWORK_MODE_HOST" == "true" ]]; then
   sed -i '/gpubuilder:/,/^\s*$/s/image: \${IMAGE_REPO}\/milvus-env:gpu-\${OS_NAME}-\${GPU_DATE_VERSION}/&\n    network_mode: "host"/'   $toplevel/docker-compose.yml
 fi
 
-export OS_NAME="${OS_NAME:-ubuntu20.04}"
+export OS_NAME="${OS_NAME:-ubuntu22.04}"
 
 pushd "${toplevel}"
 
@@ -50,7 +50,7 @@ fi
 if [[ "$(id -u)" != "0" ]]; then
     docker-compose run --no-deps --rm -u "$uid:$gid" gpubuilder "$@"
 else
-    docker-compose run --no-deps --rm --entrypoint "/tini -- /entrypoint.sh" gpubuilder "$@"
+    docker-compose run --no-deps --rm gpubuilder "$@"
 fi
 
 popd
