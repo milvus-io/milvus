@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"go.opentelemetry.io/otel"
+	"golang.org/x/sync/errgroup"
 	"math"
 
 	"github.com/golang/protobuf/proto"
@@ -567,28 +568,57 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		// target entry not retrieved.
 		ctx, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-RetrieveByOffsets-AppendFieldData")
 		defer span2.End()
-		segmentResults := make([]*segcorepb.RetrieveResults, 0, len(validRetrieveResults))
-		for i, offsets := range selectedOffsets {
-			if len(offsets) == 0 {
-				segmentResults = append(segmentResults, nil)
-				log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
-				continue
+		segmentResults := make([]*segcorepb.RetrieveResults, len(validRetrieveResults))
+		if false {
+			for i, offsets := range selectedOffsets {
+				if len(offsets) == 0 {
+					log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
+					continue
+				}
+				r, err := validSegments[i].RetrieveByOffsets(ctx, plan, offsets)
+				if err != nil {
+					return nil, err
+				}
+				segmentResults[i] = r
 			}
-			r, err := validSegments[i].RetrieveByOffsets(ctx, plan, offsets)
-			if err != nil {
+		} else {
+			eg, ctx := errgroup.WithContext(ctx)
+			for i, offsets := range selectedOffsets {
+				if len(offsets) == 0 {
+					log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
+					continue
+				}
+				idx, theOffsets := i, offsets
+				eg.Go(func() error {
+					r, err := validSegments[idx].RetrieveByOffsets(ctx, plan, theOffsets)
+					if err != nil {
+						return err
+					}
+					segmentResults[idx] = r
+					return nil
+				})
+			}
+			if err := eg.Wait(); err != nil {
 				return nil, err
 			}
-			segmentResults = append(segmentResults, r)
+		}
+
+		for _, r := range segmentResults {
+			if len(r.GetFieldsData()) != 0 {
+				ret.FieldsData = make([]*schemapb.FieldData, len(r.GetFieldsData()))
+				if false {
+					for idx, src := range r.GetFieldsData() {
+						_, span4 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-ReserveSize")
+						typeutil.ReserveSize(ret.FieldsData[idx], src, int64(len(selected)))
+						span4.End()
+					}
+				}
+				break
+			}
 		}
 
 		_, span3 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
 		defer span3.End()
-		for _, r := range segmentResults {
-			if len(r.GetFieldsData()) != 0 {
-				ret.FieldsData = make([]*schemapb.FieldData, len(r.GetFieldsData()))
-				break
-			}
-		}
 		cursors = make([]int64, len(segmentResults))
 		for _, sel := range selected {
 			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[sel].GetFieldsData(), cursors[sel])
