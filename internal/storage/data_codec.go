@@ -957,7 +957,7 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 		if err != nil {
 			return nil, err
 		}
-		err = eventWriter.AddOneStringToPayload(string(serializedPayload), nil)
+		err = eventWriter.AddOneStringToPayload(string(serializedPayload), true)
 		if err != nil {
 			return nil, err
 		}
@@ -1143,7 +1143,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req, nil)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}
@@ -1153,7 +1153,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req, nil)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}
@@ -1163,7 +1163,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req, nil)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}
@@ -1173,7 +1173,7 @@ func (dataDefinitionCodec *DataDefinitionCodec) Serialize(ts []Timestamp, ddRequ
 			if err != nil {
 				return nil, err
 			}
-			err = eventWriter.AddOneStringToPayload(req, nil)
+			err = eventWriter.AddOneStringToPayload(req, true)
 			if err != nil {
 				return nil, err
 			}

@@ -117,19 +117,19 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 	case schemapb.DataType_VarChar:
 		values := data.(*storage.StringFieldData).Data
 		for _, val := range values {
-			err = evt.AddOneStringToPayload(val, nil)
+			err = evt.AddOneStringToPayload(val, true)
 			assert.NoError(t, err)
 		}
 	case schemapb.DataType_JSON:
 		rows := data.(*storage.JSONFieldData).Data
 		for i := 0; i < len(rows); i++ {
-			err = evt.AddOneJSONToPayload(rows[i], nil)
+			err = evt.AddOneJSONToPayload(rows[i], true)
 			assert.NoError(t, err)
 		}
 	case schemapb.DataType_Array:
 		rows := data.(*storage.ArrayFieldData).Data
 		for i := 0; i < len(rows); i++ {
-			err = evt.AddOneArrayToPayload(rows[i], nil)
+			err = evt.AddOneArrayToPayload(rows[i], true)
 			assert.NoError(t, err)
 		}
 	case schemapb.DataType_BinaryVector:

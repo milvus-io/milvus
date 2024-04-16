@@ -134,19 +134,58 @@ func (w *NativePayloadWriter) AddDataToPayload(data interface{}, validData []boo
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddOneStringToPayload(val, validData)
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		return w.AddOneStringToPayload(val, isValid)
 	case schemapb.DataType_Array:
 		val, ok := data.(*schemapb.ScalarField)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddOneArrayToPayload(val, validData)
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		return w.AddOneArrayToPayload(val, isValid)
 	case schemapb.DataType_JSON:
 		val, ok := data.([]byte)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		return w.AddOneJSONToPayload(val, validData)
+		isValid := true
+		if len(validData) > 1 {
+			return merr.WrapErrParameterInvalidMsg("wrong input length when add data to payload")
+		}
+		if len(validData) == 0 && w.nullable {
+			return merr.WrapErrParameterInvalidMsg("need pass valid_data when nullable==true")
+		}
+		if len(validData) == 1 {
+			if !w.nullable {
+				return merr.WrapErrParameterInvalidMsg("no need pass valid_data when nullable==false")
+			}
+			isValid = validData[0]
+		}
+		return w.AddOneJSONToPayload(val, isValid)
 	case schemapb.DataType_BinaryVector:
 		val, ok := data.([]byte)
 		if !ok {
@@ -410,19 +449,13 @@ func (w *NativePayloadWriter) AddDoubleToPayload(data []float64, validData []boo
 	return nil
 }
 
-func (w *NativePayloadWriter) AddOneStringToPayload(data string, validData []bool) error {
+func (w *NativePayloadWriter) AddOneStringToPayload(data string, isValid bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished string payload")
 	}
 
-	if !w.nullable && len(validData) != 0 {
-		msg := fmt.Sprintf("length of validData(%d) must be 0 when not nullable", len(validData))
-		return merr.WrapErrParameterInvalidMsg(msg)
-	}
-
-	if w.nullable && len(validData) != 1 {
-		msg := fmt.Sprintf("length of validData(%d) must equal to data(%d) when nullable", len(validData), len(data))
-		return merr.WrapErrParameterInvalidMsg(msg)
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
 	}
 
 	builder, ok := w.builder.(*array.StringBuilder)
@@ -430,7 +463,7 @@ func (w *NativePayloadWriter) AddOneStringToPayload(data string, validData []boo
 		return errors.New("failed to cast StringBuilder")
 	}
 
-	if w.nullable && !validData[0] {
+	if w.nullable && !isValid {
 		builder.AppendNull()
 	} else {
 		builder.Append(data)
@@ -439,19 +472,13 @@ func (w *NativePayloadWriter) AddOneStringToPayload(data string, validData []boo
 	return nil
 }
 
-func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, validData []bool) error {
+func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, isValid bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished array payload")
 	}
 
-	if !w.nullable && len(validData) != 0 {
-		msg := fmt.Sprintf("length of validData(%d) must be 0 when not nullable", len(validData))
-		return merr.WrapErrParameterInvalidMsg(msg)
-	}
-
-	if w.nullable && len(validData) != 1 {
-		msg := fmt.Sprintf("length of validData(%d) must equal to data(%d) when nullable", len(validData), 1)
-		return merr.WrapErrParameterInvalidMsg(msg)
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
 	}
 
 	bytes, err := proto.Marshal(data)
@@ -464,7 +491,7 @@ func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, v
 		return errors.New("failed to cast BinaryBuilder")
 	}
 
-	if w.nullable && !validData[0] {
+	if w.nullable && !isValid {
 		builder.AppendNull()
 	} else {
 		builder.Append(bytes)
@@ -473,19 +500,13 @@ func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, v
 	return nil
 }
 
-func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, validData []bool) error {
+func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) error {
 	if w.finished {
 		return errors.New("can't append data to finished json payload")
 	}
 
-	if !w.nullable && len(validData) != 0 {
-		msg := fmt.Sprintf("length of validData(%d) must be 0 when not nullable", len(validData))
-		return merr.WrapErrParameterInvalidMsg(msg)
-	}
-
-	if w.nullable && len(validData) != 1 {
-		msg := fmt.Sprintf("length of validData(%d) must equal to data(%d) when nullable", len(validData), 1)
-		return merr.WrapErrParameterInvalidMsg(msg)
+	if !w.nullable && !isValid {
+		return merr.WrapErrParameterInvalidMsg("not support null when nullable is false")
 	}
 
 	builder, ok := w.builder.(*array.BinaryBuilder)
@@ -493,7 +514,7 @@ func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, validData []bool)
 		return errors.New("failed to cast JsonBuilder")
 	}
 
-	if w.nullable && !validData[0] {
+	if w.nullable && !isValid {
 		builder.AppendNull()
 	} else {
 		builder.Append(data)

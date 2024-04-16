@@ -35,9 +35,9 @@ type PayloadWriterInterface interface {
 	AddInt64ToPayload(msgs []int64, valids []bool) error
 	AddFloatToPayload(msgs []float32, valids []bool) error
 	AddDoubleToPayload(msgs []float64, valids []bool) error
-	AddOneStringToPayload(msgs string, valids []bool) error
-	AddOneArrayToPayload(msg *schemapb.ScalarField, valids []bool) error
-	AddOneJSONToPayload(msg []byte, valids []bool) error
+	AddOneStringToPayload(msgs string, isValid bool) error
+	AddOneArrayToPayload(msg *schemapb.ScalarField, isValid bool) error
+	AddOneJSONToPayload(msg []byte, isValid bool) error
 	AddBinaryVectorToPayload(binVec []byte, dim int) error
 	AddFloatVectorToPayload(binVec []float32, dim int) error
 	AddFloat16VectorToPayload(binVec []byte, dim int) error

@@ -557,7 +557,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		for i := int64(0); i < dData.RowCount; i++ {
 			int64PkValue := dData.Pks[i].(*Int64PrimaryKey).Value
 			ts := dData.Tss[i]
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts), nil)
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts), true)
 			assert.NoError(t, err)
 			sizeTotal += binary.Size(int64PkValue)
 			sizeTotal += binary.Size(ts)
@@ -595,7 +595,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		for i := int64(0); i < dData.RowCount; i++ {
 			int64PkValue := dData.Pks[i].(*Int64PrimaryKey).Value
 			ts := dData.Tss[i]
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d,?", int64PkValue, ts), nil)
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d,?", int64PkValue, ts), true)
 			assert.NoError(t, err)
 		}
 		eventWriter.SetEventTimestamp(100, 200)
@@ -626,7 +626,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 
 		for i := int64(0); i < dData.RowCount; i++ {
 			ts := dData.Tss[i]
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("abc,%d", ts), nil)
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("abc,%d", ts), true)
 			assert.NoError(t, err)
 		}
 		eventWriter.SetEventTimestamp(100, 200)
@@ -657,7 +657,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 
 		for i := int64(0); i < dData.RowCount; i++ {
 			int64PkValue := dData.Pks[i].(*Int64PrimaryKey).Value
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,abc", int64PkValue), nil)
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,abc", int64PkValue), true)
 			assert.NoError(t, err)
 		}
 		eventWriter.SetEventTimestamp(100, 200)

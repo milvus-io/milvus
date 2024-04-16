@@ -1171,7 +1171,7 @@ func TestIndexFileBinlogV2(t *testing.T) {
 
 	e, err := w.NextIndexFileEventWriter()
 	assert.NoError(t, err)
-	err = e.AddOneStringToPayload(typeutil.UnsafeBytes2str(payload), nil)
+	err = e.AddOneStringToPayload(typeutil.UnsafeBytes2str(payload), true)
 	assert.NoError(t, err)
 	e.SetEventTimestamp(timestamp, timestamp)
 
