@@ -59,7 +59,7 @@ func (codec *IndexFileBinlogCodec) serializeImpl(
 	}
 	defer eventWriter.Close()
 
-	err = eventWriter.AddOneStringToPayload(typeutil.UnsafeBytes2str(value))
+	err = eventWriter.AddOneStringToPayload(typeutil.UnsafeBytes2str(value), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +221,8 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 			switch dataType {
 			// just for backward compatibility
 			case schemapb.DataType_Int8:
-				content, err := eventReader.GetByteFromPayload()
+				// todo: smellthemoon, valid_data may need to check when create index
+				content, _, err := eventReader.GetByteFromPayload()
 				if err != nil {
 					log.Warn("failed to get byte from payload",
 						zap.Error(err))
@@ -239,7 +240,7 @@ func (codec *IndexFileBinlogCodec) DeserializeImpl(blobs []*Blob) (
 				}
 
 			case schemapb.DataType_String:
-				content, err := eventReader.GetStringFromPayload()
+				content, _, err := eventReader.GetStringFromPayload()
 				if err != nil {
 					log.Warn("failed to get string from payload", zap.Error(err))
 					eventReader.Close()

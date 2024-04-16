@@ -161,177 +161,179 @@ func TestInsertEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(dt, pBuf)
+		pR, err := NewPayloadReader(dt, pBuf, false)
 		assert.NoError(t, err)
-		values, _, err := pR.GetDataFromPayload()
+		values, _, _, err := pR.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, values, ev)
 		pR.Close()
 
-		r, err := newEventReader(dt, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(dt, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
-		payload, _, err := r.GetDataFromPayload()
+		payload, nulls, _, err := r.GetDataFromPayload()
 		assert.NoError(t, err)
+		// smellthemoon check nulls
+		assert.Nil(t, nulls)
 		assert.Equal(t, payload, ev)
 
 		r.Close()
 	}
 
 	t.Run("insert_bool", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Bool)
+		w, err := newInsertEventWriter(schemapb.DataType_Bool, false)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Bool, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]bool{true, false, true})
+				return w.AddDataToPayload([]bool{true, false, true}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]bool{false, true, false})
+				return w.AddDataToPayload([]bool{false, true, false}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]bool{true, false, true, false, true, false})
 	})
 
 	t.Run("insert_int8", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int8)
+		w, err := newInsertEventWriter(schemapb.DataType_Int8, false)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int8, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int8{1, 2, 3})
+				return w.AddDataToPayload([]int8{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int8{4, 5, 6})
+				return w.AddDataToPayload([]int8{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int8{1, 2, 3, 4, 5, 6})
 	})
 
 	t.Run("insert_int16", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int16)
+		w, err := newInsertEventWriter(schemapb.DataType_Int16, false)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int16, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int16{1, 2, 3})
+				return w.AddDataToPayload([]int16{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int16{4, 5, 6})
+				return w.AddDataToPayload([]int16{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int16{1, 2, 3, 4, 5, 6})
 	})
 
 	t.Run("insert_int32", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int32)
+		w, err := newInsertEventWriter(schemapb.DataType_Int32, false)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int32, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int32{1, 2, 3})
+				return w.AddDataToPayload([]int32{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int32{4, 5, 6})
+				return w.AddDataToPayload([]int32{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int32{1, 2, 3, 4, 5, 6})
 	})
 
 	t.Run("insert_int64", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Int64)
+		w, err := newInsertEventWriter(schemapb.DataType_Int64, false)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Int64, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int64{1, 2, 3})
+				return w.AddDataToPayload([]int64{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int64{4, 5, 6})
+				return w.AddDataToPayload([]int64{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]int64{1, 2, 3, 4, 5, 6})
 	})
 
 	t.Run("insert_float32", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Float)
+		w, err := newInsertEventWriter(schemapb.DataType_Float, false)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Float, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{1, 2, 3})
+				return w.AddDataToPayload([]float32{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{4, 5, 6})
+				return w.AddDataToPayload([]float32{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]float32{1, 2, 3, 4, 5, 6})
 	})
 
 	t.Run("insert_float64", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_Double)
+		w, err := newInsertEventWriter(schemapb.DataType_Double, false)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_Double, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float64{1, 2, 3})
+				return w.AddDataToPayload([]float64{1, 2, 3}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float64{4, 5, 6})
+				return w.AddDataToPayload([]float64{4, 5, 6}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5})
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5}, nil)
 			},
 			[]float64{1, 2, 3, 4, 5, 6})
 	})
 
 	t.Run("insert_binary_vector", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_BinaryVector, 16)
+		w, err := newInsertEventWriter(schemapb.DataType_BinaryVector, false, 16)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_BinaryVector, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]byte{1, 2, 3, 4}, 16)
+				return w.AddDataToPayload([]byte{1, 2, 3, 4}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]byte{5, 6, 7, 8}, 16)
+				return w.AddDataToPayload([]byte{5, 6, 7, 8}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, 16)
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, nil)
 			},
 			[]byte{1, 2, 3, 4, 5, 6, 7, 8})
 	})
 
 	t.Run("insert_float_vector", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_FloatVector, 2)
+		w, err := newInsertEventWriter(schemapb.DataType_FloatVector, false, 2)
 		assert.NoError(t, err)
 		insertT(t, schemapb.DataType_FloatVector, w,
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{1, 2, 3, 4}, 2)
+				return w.AddDataToPayload([]float32{1, 2, 3, 4}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]float32{5, 6, 7, 8}, 2)
+				return w.AddDataToPayload([]float32{5, 6, 7, 8}, nil)
 			},
 			func(w *insertEventWriter) error {
-				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, 2)
+				return w.AddDataToPayload([]int{1, 2, 3, 4, 5, 6}, nil)
 			},
 			[]float32{1, 2, 3, 4, 5, 6, 7, 8})
 	})
 
 	t.Run("insert_string", func(t *testing.T) {
-		w, err := newInsertEventWriter(schemapb.DataType_String)
+		w, err := newInsertEventWriter(schemapb.DataType_String, false)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234")
+		err = w.AddDataToPayload("1234", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("567890")
+		err = w.AddOneStringToPayload("567890", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("abcdefg")
+		err = w.AddOneStringToPayload("abcdefg", nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3})
+		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -349,20 +351,20 @@ func TestInsertEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, true)
 		assert.NoError(t, err)
 
-		s, err := pR.GetStringFromPayload()
+		s, _, err := pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
 		assert.Equal(t, s[2], "abcdefg")
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
 
-		s, err = pR.GetStringFromPayload()
+		s, _, err = pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -379,13 +381,13 @@ func TestDeleteEvent(t *testing.T) {
 		w, err := newDeleteEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234")
+		err = w.AddDataToPayload("1234", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("567890")
+		err = w.AddOneStringToPayload("567890", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("abcdefg")
+		err = w.AddOneStringToPayload("abcdefg", nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3})
+		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -403,10 +405,10 @@ func TestDeleteEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, true)
 		assert.NoError(t, err)
 
-		s, err := pR.GetStringFromPayload()
+		s, _, err := pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -414,10 +416,10 @@ func TestDeleteEvent(t *testing.T) {
 
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
 
-		s, err = pR.GetStringFromPayload()
+		s, _, err = pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -439,11 +441,11 @@ func TestCreateCollectionEvent(t *testing.T) {
 		w, err := newCreateCollectionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3})
+		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6})
+		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6})
+		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -461,16 +463,16 @@ func TestCreateCollectionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(createCollectionEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf, true)
 		assert.NoError(t, err)
-		values, _, err := pR.GetDataFromPayload()
+		values, _, _, err := pR.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
-		payload, _, err := r.GetDataFromPayload()
+		payload, _, _, err := r.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, payload, []int64{1, 2, 3, 4, 5, 6})
 
@@ -481,13 +483,13 @@ func TestCreateCollectionEvent(t *testing.T) {
 		w, err := newCreateCollectionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234")
+		err = w.AddDataToPayload("1234", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("567890")
+		err = w.AddOneStringToPayload("567890", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("abcdefg")
+		err = w.AddOneStringToPayload("abcdefg", nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3})
+		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -505,10 +507,10 @@ func TestCreateCollectionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, true)
 		assert.NoError(t, err)
 
-		s, err := pR.GetStringFromPayload()
+		s, _, err := pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -516,10 +518,10 @@ func TestCreateCollectionEvent(t *testing.T) {
 
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf), true)
 		assert.NoError(t, err)
 
-		s, err = pR.GetStringFromPayload()
+		s, _, err = pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -541,11 +543,11 @@ func TestDropCollectionEvent(t *testing.T) {
 		w, err := newDropCollectionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3})
+		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6})
+		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6})
+		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -563,16 +565,16 @@ func TestDropCollectionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(createCollectionEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf, false)
 		assert.NoError(t, err)
-		values, _, err := pR.GetDataFromPayload()
+		values, _, _, err := pR.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
-		payload, _, err := r.GetDataFromPayload()
+		payload, _, _, err := r.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, payload, []int64{1, 2, 3, 4, 5, 6})
 
@@ -583,13 +585,13 @@ func TestDropCollectionEvent(t *testing.T) {
 		w, err := newDropCollectionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234")
+		err = w.AddDataToPayload("1234", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("567890")
+		err = w.AddOneStringToPayload("567890", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("abcdefg")
+		err = w.AddOneStringToPayload("abcdefg", nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3})
+		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -607,10 +609,10 @@ func TestDropCollectionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, false)
 		assert.NoError(t, err)
 
-		s, err := pR.GetStringFromPayload()
+		s, _, err := pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -618,10 +620,10 @@ func TestDropCollectionEvent(t *testing.T) {
 
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
 
-		s, err = r.GetStringFromPayload()
+		s, _, err = r.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -643,11 +645,11 @@ func TestCreatePartitionEvent(t *testing.T) {
 		w, err := newCreatePartitionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3})
+		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6})
+		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6})
+		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -665,16 +667,16 @@ func TestCreatePartitionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(createCollectionEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf, false)
 		assert.NoError(t, err)
-		values, _, err := pR.GetDataFromPayload()
+		values, _, _, err := pR.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
-		payload, _, err := r.GetDataFromPayload()
+		payload, _, _, err := r.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, payload, []int64{1, 2, 3, 4, 5, 6})
 
@@ -685,13 +687,13 @@ func TestCreatePartitionEvent(t *testing.T) {
 		w, err := newCreatePartitionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234")
+		err = w.AddDataToPayload("1234", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("567890")
+		err = w.AddOneStringToPayload("567890", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("abcdefg")
+		err = w.AddOneStringToPayload("abcdefg", nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3})
+		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -709,10 +711,10 @@ func TestCreatePartitionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, false)
 		assert.NoError(t, err)
 
-		s, err := pR.GetStringFromPayload()
+		s, _, err := pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -720,10 +722,10 @@ func TestCreatePartitionEvent(t *testing.T) {
 
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
 
-		s, err = pR.GetStringFromPayload()
+		s, _, err = pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -745,11 +747,11 @@ func TestDropPartitionEvent(t *testing.T) {
 		w, err := newDropPartitionEventWriter(schemapb.DataType_Int64)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload([]int64{1, 2, 3})
+		err = w.AddDataToPayload([]int64{1, 2, 3}, nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{4, 5, 6})
+		err = w.AddDataToPayload([]int{4, 5, 6}, nil)
 		assert.Error(t, err)
-		err = w.AddDataToPayload([]int64{4, 5, 6})
+		err = w.AddDataToPayload([]int64{4, 5, 6}, nil)
 		assert.NoError(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -767,16 +769,16 @@ func TestDropPartitionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(createCollectionEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf, false)
 		assert.NoError(t, err)
-		values, _, err := pR.GetDataFromPayload()
+		values, _, _, err := pR.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, values, []int64{1, 2, 3, 4, 5, 6})
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_Int64, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
-		payload, _, err := r.GetDataFromPayload()
+		payload, _, _, err := r.GetDataFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, payload, []int64{1, 2, 3, 4, 5, 6})
 
@@ -787,13 +789,13 @@ func TestDropPartitionEvent(t *testing.T) {
 		w, err := newDropPartitionEventWriter(schemapb.DataType_String)
 		assert.NoError(t, err)
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-		err = w.AddDataToPayload("1234")
+		err = w.AddDataToPayload("1234", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("567890")
+		err = w.AddOneStringToPayload("567890", nil)
 		assert.NoError(t, err)
-		err = w.AddOneStringToPayload("abcdefg")
+		err = w.AddOneStringToPayload("abcdefg", nil)
 		assert.NoError(t, err)
-		err = w.AddDataToPayload([]int{1, 2, 3})
+		err = w.AddDataToPayload([]int{1, 2, 3}, nil)
 		assert.Error(t, err)
 		err = w.Finish()
 		assert.NoError(t, err)
@@ -811,10 +813,10 @@ func TestDropPartitionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, false)
 		assert.NoError(t, err)
 
-		s, err := pR.GetStringFromPayload()
+		s, _, err := pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -822,10 +824,10 @@ func TestDropPartitionEvent(t *testing.T) {
 
 		pR.Close()
 
-		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+		r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf), false)
 		assert.NoError(t, err)
 
-		s, err = pR.GetStringFromPayload()
+		s, _, err = pR.GetStringFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, s[0], "1234")
 		assert.Equal(t, s[1], "567890")
@@ -843,7 +845,7 @@ func TestIndexFileEvent(t *testing.T) {
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
 		payload := funcutil.GenRandomBytes()
-		err = w.AddOneStringToPayload(typeutil.UnsafeBytes2str(payload))
+		err = w.AddOneStringToPayload(typeutil.UnsafeBytes2str(payload), nil)
 		assert.NoError(t, err)
 
 		err = w.Finish()
@@ -862,10 +864,10 @@ func TestIndexFileEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, false)
 		assert.NoError(t, err)
 		assert.Equal(t, pR.numRows, int64(1))
-		value, err := pR.GetStringFromPayload()
+		value, _, err := pR.GetStringFromPayload()
 
 		assert.Equal(t, len(value), 1)
 
@@ -880,7 +882,7 @@ func TestIndexFileEvent(t *testing.T) {
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
 		payload := funcutil.GenRandomBytes()
-		err = w.AddByteToPayload(payload)
+		err = w.AddByteToPayload(payload, nil)
 		assert.NoError(t, err)
 
 		err = w.Finish()
@@ -899,10 +901,10 @@ func TestIndexFileEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_Int8, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_Int8, pBuf, false)
 		assert.Equal(t, pR.numRows, int64(len(payload)))
 		assert.NoError(t, err)
-		value, err := pR.GetByteFromPayload()
+		value, _, err := pR.GetByteFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, payload, value)
 		pR.Close()
@@ -914,7 +916,7 @@ func TestIndexFileEvent(t *testing.T) {
 		w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
 
 		payload := funcutil.GenRandomBytesWithLength(1000)
-		err = w.AddByteToPayload(payload)
+		err = w.AddByteToPayload(payload, nil)
 		assert.NoError(t, err)
 
 		err = w.Finish()
@@ -933,10 +935,10 @@ func TestIndexFileEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(indexFileEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_Int8, pBuf)
+		pR, err := NewPayloadReader(schemapb.DataType_Int8, pBuf, false)
 		assert.Equal(t, pR.numRows, int64(len(payload)))
 		assert.NoError(t, err)
-		value, err := pR.GetByteFromPayload()
+		value, _, err := pR.GetByteFromPayload()
 		assert.NoError(t, err)
 		assert.Equal(t, payload, value)
 		pR.Close()
@@ -1044,7 +1046,7 @@ func TestReadFixPartError(t *testing.T) {
 
 func TestEventReaderError(t *testing.T) {
 	buf := new(bytes.Buffer)
-	r, err := newEventReader(schemapb.DataType_Int64, buf)
+	r, err := newEventReader(schemapb.DataType_Int64, buf, false)
 	assert.Nil(t, r)
 	assert.Error(t, err)
 
@@ -1052,7 +1054,7 @@ func TestEventReaderError(t *testing.T) {
 	err = header.Write(buf)
 	assert.NoError(t, err)
 
-	r, err = newEventReader(schemapb.DataType_Int64, buf)
+	r, err = newEventReader(schemapb.DataType_Int64, buf, false)
 	assert.Nil(t, r)
 	assert.Error(t, err)
 
@@ -1061,7 +1063,7 @@ func TestEventReaderError(t *testing.T) {
 	err = header.Write(buf)
 	assert.NoError(t, err)
 
-	r, err = newEventReader(schemapb.DataType_Int64, buf)
+	r, err = newEventReader(schemapb.DataType_Int64, buf, false)
 	assert.Nil(t, r)
 	assert.Error(t, err)
 
@@ -1078,16 +1080,16 @@ func TestEventReaderError(t *testing.T) {
 	err = binary.Write(buf, common.Endian, insertData)
 	assert.NoError(t, err)
 
-	r, err = newEventReader(schemapb.DataType_Int64, buf)
+	r, err = newEventReader(schemapb.DataType_Int64, buf, false)
 	assert.Nil(t, r)
 	assert.Error(t, err)
 }
 
 func TestEventClose(t *testing.T) {
-	w, err := newInsertEventWriter(schemapb.DataType_String)
+	w, err := newInsertEventWriter(schemapb.DataType_String, false)
 	assert.NoError(t, err)
 	w.SetEventTimestamp(tsoutil.ComposeTS(10, 0), tsoutil.ComposeTS(100, 0))
-	err = w.AddDataToPayload("1234")
+	err = w.AddDataToPayload("1234", nil)
 	assert.NoError(t, err)
 	err = w.Finish()
 	assert.NoError(t, err)
@@ -1098,7 +1100,7 @@ func TestEventClose(t *testing.T) {
 	w.Close()
 
 	wBuf := buf.Bytes()
-	r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf))
+	r, err := newEventReader(schemapb.DataType_String, bytes.NewBuffer(wBuf), false)
 	assert.NoError(t, err)
 
 	r.Close()

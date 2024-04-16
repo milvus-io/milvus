@@ -374,16 +374,16 @@ func TestInsertCodec(t *testing.T) {
 
 	insertDataEmpty := &InsertData{
 		Data: map[int64]FieldData{
-			RowIDField:          &Int64FieldData{[]int64{}},
-			TimestampField:      &Int64FieldData{[]int64{}},
-			BoolField:           &BoolFieldData{[]bool{}},
-			Int8Field:           &Int8FieldData{[]int8{}},
-			Int16Field:          &Int16FieldData{[]int16{}},
-			Int32Field:          &Int32FieldData{[]int32{}},
-			Int64Field:          &Int64FieldData{[]int64{}},
-			FloatField:          &FloatFieldData{[]float32{}},
-			DoubleField:         &DoubleFieldData{[]float64{}},
-			StringField:         &StringFieldData{[]string{}, schemapb.DataType_VarChar},
+			RowIDField:          &Int64FieldData{[]int64{}, nil},
+			TimestampField:      &Int64FieldData{[]int64{}, nil},
+			BoolField:           &BoolFieldData{[]bool{}, nil},
+			Int8Field:           &Int8FieldData{[]int8{}, nil},
+			Int16Field:          &Int16FieldData{[]int16{}, nil},
+			Int32Field:          &Int32FieldData{[]int32{}, nil},
+			Int64Field:          &Int64FieldData{[]int64{}, nil},
+			FloatField:          &FloatFieldData{[]float32{}, nil},
+			DoubleField:         &DoubleFieldData{[]float64{}, nil},
+			StringField:         &StringFieldData{[]string{}, schemapb.DataType_VarChar, nil},
 			BinaryVectorField:   &BinaryVectorFieldData{[]byte{}, 8},
 			FloatVectorField:    &FloatVectorFieldData{[]float32{}, 4},
 			Float16VectorField:  &Float16VectorFieldData{[]byte{}, 4},
@@ -394,8 +394,8 @@ func TestInsertCodec(t *testing.T) {
 					Contents: [][]byte{},
 				},
 			},
-			ArrayField: &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}},
-			JSONField:  &JSONFieldData{[][]byte{}},
+			ArrayField: &ArrayFieldData{schemapb.DataType_Int32, []*schemapb.ScalarField{}, nil},
+			JSONField:  &JSONFieldData{[][]byte{}, nil},
 		},
 	}
 	b, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
@@ -557,7 +557,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		for i := int64(0); i < dData.RowCount; i++ {
 			int64PkValue := dData.Pks[i].(*Int64PrimaryKey).Value
 			ts := dData.Tss[i]
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts))
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d", int64PkValue, ts), nil)
 			assert.NoError(t, err)
 			sizeTotal += binary.Size(int64PkValue)
 			sizeTotal += binary.Size(ts)
@@ -595,7 +595,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 		for i := int64(0); i < dData.RowCount; i++ {
 			int64PkValue := dData.Pks[i].(*Int64PrimaryKey).Value
 			ts := dData.Tss[i]
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d,?", int64PkValue, ts))
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,%d,?", int64PkValue, ts), nil)
 			assert.NoError(t, err)
 		}
 		eventWriter.SetEventTimestamp(100, 200)
@@ -626,7 +626,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 
 		for i := int64(0); i < dData.RowCount; i++ {
 			ts := dData.Tss[i]
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("abc,%d", ts))
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("abc,%d", ts), nil)
 			assert.NoError(t, err)
 		}
 		eventWriter.SetEventTimestamp(100, 200)
@@ -657,7 +657,7 @@ func TestUpgradeDeleteLog(t *testing.T) {
 
 		for i := int64(0); i < dData.RowCount; i++ {
 			int64PkValue := dData.Pks[i].(*Int64PrimaryKey).Value
-			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,abc", int64PkValue))
+			err = eventWriter.AddOneStringToPayload(fmt.Sprintf("%d,abc", int64PkValue), nil)
 			assert.NoError(t, err)
 		}
 		eventWriter.SetEventTimestamp(100, 200)
@@ -845,16 +845,16 @@ func TestMemorySize(t *testing.T) {
 
 	insertDataEmpty := &InsertData{
 		Data: map[int64]FieldData{
-			RowIDField:        &Int64FieldData{[]int64{}},
-			TimestampField:    &Int64FieldData{[]int64{}},
-			BoolField:         &BoolFieldData{[]bool{}},
-			Int8Field:         &Int8FieldData{[]int8{}},
-			Int16Field:        &Int16FieldData{[]int16{}},
-			Int32Field:        &Int32FieldData{[]int32{}},
-			Int64Field:        &Int64FieldData{[]int64{}},
-			FloatField:        &FloatFieldData{[]float32{}},
-			DoubleField:       &DoubleFieldData{[]float64{}},
-			StringField:       &StringFieldData{[]string{}, schemapb.DataType_VarChar},
+			RowIDField:        &Int64FieldData{[]int64{}, nil},
+			TimestampField:    &Int64FieldData{[]int64{}, nil},
+			BoolField:         &BoolFieldData{[]bool{}, nil},
+			Int8Field:         &Int8FieldData{[]int8{}, nil},
+			Int16Field:        &Int16FieldData{[]int16{}, nil},
+			Int32Field:        &Int32FieldData{[]int32{}, nil},
+			Int64Field:        &Int64FieldData{[]int64{}, nil},
+			FloatField:        &FloatFieldData{[]float32{}, nil},
+			DoubleField:       &DoubleFieldData{[]float64{}, nil},
+			StringField:       &StringFieldData{[]string{}, schemapb.DataType_VarChar, nil},
 			BinaryVectorField: &BinaryVectorFieldData{[]byte{}, 8},
 			FloatVectorField:  &FloatVectorFieldData{[]float32{}, 4},
 		},

@@ -1451,7 +1451,7 @@ func (loader *segmentLoader) patchEntryNumber(ctx context.Context, segment *Loca
 			return err
 		}
 
-		rowIDs, err := er.GetInt64FromPayload()
+		rowIDs, _, err := er.GetInt64FromPayload()
 		if err != nil {
 			return err
 		}

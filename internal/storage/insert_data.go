@@ -149,6 +149,7 @@ type FieldData interface {
 	AppendRow(row interface{}) error
 	AppendRows(rows interface{}) error
 	GetDataType() schemapb.DataType
+	GetNullable() bool
 }
 
 func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema, cap int) (FieldData, error) {
@@ -194,50 +195,60 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		return &SparseFloatVectorFieldData{}, nil
 	case schemapb.DataType_Bool:
 		return &BoolFieldData{
-			Data: make([]bool, 0, cap),
+			Data:      make([]bool, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 
 	case schemapb.DataType_Int8:
 		return &Int8FieldData{
-			Data: make([]int8, 0, cap),
+			Data:      make([]int8, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 
 	case schemapb.DataType_Int16:
 		return &Int16FieldData{
-			Data: make([]int16, 0, cap),
+			Data:      make([]int16, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 
 	case schemapb.DataType_Int32:
 		return &Int32FieldData{
-			Data: make([]int32, 0, cap),
+			Data:      make([]int32, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 
 	case schemapb.DataType_Int64:
 		return &Int64FieldData{
-			Data: make([]int64, 0, cap),
+			Data:      make([]int64, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 	case schemapb.DataType_Float:
 		return &FloatFieldData{
-			Data: make([]float32, 0, cap),
+			Data:      make([]float32, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 
 	case schemapb.DataType_Double:
 		return &DoubleFieldData{
-			Data: make([]float64, 0, cap),
+			Data:      make([]float64, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 	case schemapb.DataType_JSON:
 		return &JSONFieldData{
-			Data: make([][]byte, 0, cap),
+			Data:      make([][]byte, 0),
+			ValidData: make([]bool, 0),
 		}, nil
 	case schemapb.DataType_Array:
 		return &ArrayFieldData{
 			Data:        make([]*schemapb.ScalarField, 0, cap),
 			ElementType: fieldSchema.GetElementType(),
+			ValidData:   make([]bool, 0),
 		}, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		return &StringFieldData{
-			Data:     make([]string, 0, cap),
-			DataType: dataType,
+			Data:      make([]string, 0),
+			DataType:  dataType,
+			ValidData: make([]bool, 0),
 		}, nil
 	default:
 		return nil, fmt.Errorf("Unexpected schema data type: %d", dataType)
@@ -245,36 +256,46 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 }
 
 type BoolFieldData struct {
-	Data []bool
+	Data      []bool
+	ValidData []bool
 }
 type Int8FieldData struct {
-	Data []int8
+	Data      []int8
+	ValidData []bool
 }
 type Int16FieldData struct {
-	Data []int16
+	Data      []int16
+	ValidData []bool
 }
 type Int32FieldData struct {
-	Data []int32
+	Data      []int32
+	ValidData []bool
 }
 type Int64FieldData struct {
-	Data []int64
+	Data      []int64
+	ValidData []bool
 }
 type FloatFieldData struct {
-	Data []float32
+	Data      []float32
+	ValidData []bool
 }
 type DoubleFieldData struct {
-	Data []float64
+	Data      []float64
+	ValidData []bool
 }
 type StringFieldData struct {
-	Data     []string
-	DataType schemapb.DataType
+	Data      []string
+	DataType  schemapb.DataType
+	ValidData []bool
 }
 type ArrayFieldData struct {
 	ElementType schemapb.DataType
 	Data        []*schemapb.ScalarField
+	ValidData   []bool
 }
 type JSONFieldData struct {
-	Data [][]byte
+	Data      [][]byte
+	ValidData []bool
 }
 type BinaryVectorFieldData struct {
 	Data []byte
@@ -671,13 +692,27 @@ func (data *SparseFloatVectorFieldData) AppendRows(rows interface{}) error {
 }
 
 // GetMemorySize implements FieldData.GetMemorySize
-func (data *BoolFieldData) GetMemorySize() int           { return binary.Size(data.Data) }
-func (data *Int8FieldData) GetMemorySize() int           { return binary.Size(data.Data) }
-func (data *Int16FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
-func (data *Int32FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
-func (data *Int64FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
-func (data *FloatFieldData) GetMemorySize() int          { return binary.Size(data.Data) }
-func (data *DoubleFieldData) GetMemorySize() int         { return binary.Size(data.Data) }
+func (data *BoolFieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData)
+}
+func (data *Int8FieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData)
+}
+func (data *Int16FieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData)
+}
+func (data *Int32FieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData)
+}
+func (data *Int64FieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData)
+}
+func (data *FloatFieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData)
+}
+func (data *DoubleFieldData) GetMemorySize() int {
+	return binary.Size(data.Data) + binary.Size(data.ValidData)
+}
 func (data *BinaryVectorFieldData) GetMemorySize() int   { return binary.Size(data.Data) + 4 }
 func (data *FloatVectorFieldData) GetMemorySize() int    { return binary.Size(data.Data) + 4 }
 func (data *Float16VectorFieldData) GetMemorySize() int  { return binary.Size(data.Data) + 4 }
@@ -801,4 +836,64 @@ func (data *ArrayFieldData) GetRowSize(i int) int {
 
 func (data *SparseFloatVectorFieldData) GetRowSize(i int) int {
 	return len(data.Contents[i])
+}
+
+func (data *BoolFieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *Int8FieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *Int16FieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *Int32FieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *Int64FieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *FloatFieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *DoubleFieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *BFloat16VectorFieldData) GetNullable() bool {
+	return false
+}
+
+func (data *BinaryVectorFieldData) GetNullable() bool {
+	return false
+}
+
+func (data *FloatVectorFieldData) GetNullable() bool {
+	return false
+}
+
+func (data *SparseFloatVectorFieldData) GetNullable() bool {
+	return false
+}
+
+func (data *Float16VectorFieldData) GetNullable() bool {
+	return false
+}
+
+func (data *StringFieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *ArrayFieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
+}
+
+func (data *JSONFieldData) GetNullable() bool {
+	return len(data.ValidData) != 0
 }
