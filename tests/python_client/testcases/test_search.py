@@ -10059,7 +10059,7 @@ class TestSearchGroupBy(TestcaseBase):
         """
         collection_w = self.init_collection_general(prefix, auto_id=True, insert_data=False, is_index=False,
                                                     is_binary=True)[0]
-        _index = {"index_type": "HNSW", "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
+        _index = {"index_type": "BIN_FLAT", "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
         collection_w.create_index(ct.default_binary_vec_field_name, index_params=_index)
         # insert with the same values for scalar fields
         for _ in range(10):
