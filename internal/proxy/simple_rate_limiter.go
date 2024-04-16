@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/util/quota"
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
-	rlu "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -177,11 +176,11 @@ func (m *SimpleLimiter) SetRates(rootLimiter *proxypb.LimiterNode) error {
 		partitionConfigs  = getDefaultLimiterConfig(internalpb.RateScope_Partition)
 	)
 	initLimiter(m.rateLimiter.GetRootLimiters(), clusterConfigs)
-	m.rateLimiter.GetRootLimiters().GetChildren().Range(func(_ int64, dbLimiter *rlu.RateLimiterNode) bool {
+	m.rateLimiter.GetRootLimiters().GetChildren().Range(func(_ int64, dbLimiter *rlinternal.RateLimiterNode) bool {
 		initLimiter(dbLimiter, databaseConfigs)
-		dbLimiter.GetChildren().Range(func(_ int64, collLimiter *rlu.RateLimiterNode) bool {
+		dbLimiter.GetChildren().Range(func(_ int64, collLimiter *rlinternal.RateLimiterNode) bool {
 			initLimiter(collLimiter, collectionConfigs)
-			collLimiter.GetChildren().Range(func(_ int64, partitionLimiter *rlu.RateLimiterNode) bool {
+			collLimiter.GetChildren().Range(func(_ int64, partitionLimiter *rlinternal.RateLimiterNode) bool {
 				initLimiter(partitionLimiter, partitionConfigs)
 				return true
 			})
