@@ -215,7 +215,7 @@ func (t *clusteringCompactionTask) init() error {
 }
 
 func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
-	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("L2Compact-%d", t.getPlanID()))
+	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("clusteringCompaction-%d", t.getPlanID()))
 	defer span.End()
 	log := log.With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
 	if t.plan.GetType() != datapb.CompactionType_ClusteringCompaction {
@@ -873,7 +873,7 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 	if err != nil {
 		return err
 	}
-	newStatsPath := t.io.JoinFullPath(common.PartitionStatsTempPath,
+	newStatsPath := t.io.JoinFullPath(common.PartitionStatsPath,
 		path.Join(strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10), t.plan.GetChannel(), strconv.FormatInt(version, 10)))
 	kv := map[string][]byte{
 		newStatsPath: partitionStatsBytes,

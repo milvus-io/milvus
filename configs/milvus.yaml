@@ -440,7 +440,9 @@ dataCoord:
     clustering:
       enable: true
       autoEnable: false
-      checkInterval: 10
+      triggerInterval: 600
+      stateCheckInterval: 10
+      gcInterval: 600
       minInterval: 3600
       maxInterval: 86400
       newDataRatioThreshold: 0.2
