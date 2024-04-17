@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // QueryHook is the interface for search/query parameter optimizer.
@@ -23,8 +24,8 @@ type QueryHook interface {
 }
 
 func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
-	// no hook applied, just return
-	if queryHook == nil {
+	// no hook applied or disabled, just return
+	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		return req, nil
 	}
 
