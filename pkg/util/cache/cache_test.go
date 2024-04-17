@@ -140,7 +140,7 @@ func TestLRUCache(t *testing.T) {
 		cache := cacheBuilder.WithReloader(func(key int) (int, bool) {
 			return -key, true
 		}).Build()
-		err := cache.Do(1, func(i int) error { return nil })
+		_, err := cache.Do(1, func(i int) error { return nil })
 		assert.NoError(t, err)
 		exist := cache.MarkItemNeedReload(1)
 		assert.True(t, exist)
@@ -154,7 +154,7 @@ func TestLRUCache(t *testing.T) {
 		cache := cacheBuilder.WithCapacity(1).Build()
 		exist := cache.MarkItemNeedReload(1)
 		assert.False(t, exist)
-		err := cache.Do(1, func(i int) error { return nil })
+		_, err := cache.Do(1, func(i int) error { return nil })
 		assert.NoError(t, err)
 		exist = cache.MarkItemNeedReload(1)
 		assert.True(t, exist)
