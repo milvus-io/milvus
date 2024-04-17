@@ -1353,7 +1353,7 @@ class DeleteChecker(Checker):
                                        output_fields=[self.int64_field_name],
                                        partition_name=self.p_name)
             all_ids = [r[self.int64_field_name] for r in res]
-        delete_ids = all_ids[:len(all_ids) // 2]  # delete half of ids
+        delete_ids = all_ids[:3000]  # delete 3000 ids
         self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
 
     @trace()
