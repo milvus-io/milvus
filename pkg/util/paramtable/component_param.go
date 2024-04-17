@@ -770,8 +770,8 @@ func (t *traceConfig) init(base *BaseTable) {
 		Key:     "trace.exporter",
 		Version: "2.3.0",
 		Doc: `trace exporter type, default is stdout,
-optional values: ['stdout', 'jaeger', 'otlp']`,
-		DefaultValue: "stdout",
+optional values: ['noop','stdout', 'jaeger', 'otlp']`,
+		DefaultValue: "noop",
 		Export:       true,
 	}
 	t.Exporter.Init(base.mgr)

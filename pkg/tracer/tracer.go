@@ -36,24 +36,25 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func Init() {
+func Init() error {
 	params := paramtable.Get()
 
 	exp, err := CreateTracerExporter(params)
 	if err != nil {
 		log.Warn("Init tracer faield", zap.Error(err))
-		return
+		return err
 	}
 
 	SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
 	otel.SetTextMapPropagator(propagation.NewCompositeTextMapPropagator(propagation.TraceContext{}, propagation.Baggage{}))
 	log.Info("Init tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+	return nil
 }
 
-func CloseTracerProvider() error {
+func CloseTracerProvider(ctx context.Context) error {
 	provider, ok := otel.GetTracerProvider().(*sdk.TracerProvider)
 	if ok {
-		err := provider.Shutdown(context.Background())
+		err := provider.Shutdown(ctx)
 		if err != nil {
 			return err
 		}
@@ -100,6 +101,8 @@ func CreateTracerExporter(params *paramtable.ComponentParam) (sdk.SpanExporter, 
 		exp, err = otlptracegrpc.New(context.Background(), opts...)
 	case "stdout":
 		exp, err = stdout.New()
+	case "noop":
+		return nil, nil
 	default:
 		err = errors.New("Empty Trace")
 	}

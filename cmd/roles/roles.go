@@ -404,7 +404,7 @@ func (mr *MilvusRoles) Run() {
 		}
 
 		// close old provider
-		err = tracer.CloseTracerProvider()
+		err = tracer.CloseTracerProvider(context.Background())
 		if err != nil {
 			log.Warn("Close old provider failed, stop reset", zap.Error(err))
 			return

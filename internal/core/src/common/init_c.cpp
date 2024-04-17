@@ -93,3 +93,14 @@ InitTrace(CTraceConfig* config) {
         },
         traceConfig);
 }
+
+void
+SetTrace(CTraceConfig* config) {
+    auto traceConfig = milvus::tracer::TraceConfig{config->exporter,
+                                                   config->sampleFraction,
+                                                   config->jaegerURL,
+                                                   config->otlpEndpoint,
+                                                   config->oltpSecure,
+                                                   config->nodeID};
+    milvus::tracer::initTelemetry(traceConfig);
+}
