@@ -128,10 +128,6 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	return searchResults, nil
 }
 
-const (
-	defaultStreamConcurrency = 1
-)
-
 // searchSegmentsStreamly performs search on listed segments in a stream mode instead of a batch mode
 // all segment ids are validated before calling this function
 func searchSegmentsStreamly(ctx context.Context,
@@ -152,8 +148,8 @@ func searchSegmentsStreamly(ctx context.Context,
 		if searchErr != nil {
 			return searchErr
 		}
-		searchResultsToClear = append(searchResultsToClear, searchResult)
 		reduceMutex.Lock()
+		searchResultsToClear = append(searchResultsToClear, searchResult)
 		reducedErr := streamReduce(searchResult)
 		reduceMutex.Unlock()
 		reduceDuration := tr.RecordSpan()
@@ -210,10 +206,9 @@ func searchSegmentsStreamly(ctx context.Context,
 		}(segment, i)
 	}
 	wg.Wait()
-
+	DeleteSearchResults(searchResultsToClear)
 	for _, err := range errs {
 		if err != nil {
-			DeleteSearchResults(searchResultsToClear)
 			return err
 		}
 	}
