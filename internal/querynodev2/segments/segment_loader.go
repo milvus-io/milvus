@@ -1034,6 +1034,10 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		return nil
 	}
 	defer func() {
+		if err != nil {
+			// Release partial loaded segment data if load failed.
+			segment.ReleaseSegmentData()
+		}
 		stateLockGuard.Done(err)
 	}()
 

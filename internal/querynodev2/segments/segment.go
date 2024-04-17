@@ -1379,8 +1379,7 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	// wait all read ops finished
 	ptr := s.ptr
 	if options.Scope == ReleaseScopeData {
-		C.ClearSegmentData(ptr)
-		s.ResetIndexesLazyLoad(true)
+		s.ReleaseSegmentData()
 		log.Info("release segment data done and the field indexes info has been set lazy load=true")
 		return
 	}
@@ -1403,6 +1402,12 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	}
 
 	log.Info("delete segment from memory")
+}
+
+// ReleaseSegmentData releases the segment data.
+func (s *LocalSegment) ReleaseSegmentData() {
+	C.ClearSegmentData(s.ptr)
+	s.ResetIndexesLazyLoad(true)
 }
 
 // StartLoadData starts the loading process of the segment.
