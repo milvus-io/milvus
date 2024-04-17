@@ -508,13 +508,12 @@ func (c *ChannelManagerImpl) GetBufferChannels() *NodeChannelInfo {
 func (c *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
 	nodeChs := make(map[UniqueID][]string)
 	for _, nodeChannels := range c.GetAssignedChannels() {
-		filtered := lo.Filter(nodeChannels.Channels, func(channel RWChannel, _ int) bool {
-			return channel.GetCollectionID() == collectionID
-		})
-		channelNames := lo.Map(filtered, func(channel RWChannel, _ int) string {
-			return channel.GetName()
-		})
-
+		var channelNames []string
+		for name, ch := range nodeChannels.Channels {
+			if ch.GetCollectionID() == collectionID {
+				channelNames = append(channelNames, name)
+			}
+		}
 		nodeChs[nodeChannels.NodeID] = channelNames
 	}
 	return nodeChs
@@ -524,11 +523,11 @@ func (c *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID UniqueID
 func (c *ChannelManagerImpl) GetChannelsByCollectionID(collectionID UniqueID) []RWChannel {
 	channels := make([]RWChannel, 0)
 	for _, nodeChannels := range c.GetAssignedChannels() {
-		filtered := lo.Filter(nodeChannels.Channels, func(channel RWChannel, _ int) bool {
-			return channel.GetCollectionID() == collectionID
-		})
-
-		channels = append(channels, filtered...)
+		for _, ch := range nodeChannels.Channels {
+			if ch.GetCollectionID() == collectionID {
+				channels = append(channels, ch)
+			}
+		}
 	}
 	return channels
 }
@@ -807,7 +806,7 @@ func (c *ChannelManagerImpl) Reassign(originNodeID UniqueID, channelName string)
 	}
 	c.mu.RUnlock()
 
-	reallocates := &NodeChannelInfo{originNodeID, []RWChannel{ch}}
+	reallocates := NewNodeChannelInfo(originNodeID, ch)
 	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
@@ -862,7 +861,7 @@ func (c *ChannelManagerImpl) CleanupAndReassign(nodeID UniqueID, channelName str
 		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}
 
-	reallocates := &NodeChannelInfo{nodeID, []RWChannel{chToCleanUp}}
+	reallocates := NewNodeChannelInfo(nodeID, chToCleanUp)
 	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
