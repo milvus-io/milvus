@@ -434,6 +434,7 @@ func (node *DataNode) Stop() error {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 
+		node.flowgraphManager.Close()
 		node.eventManager.CloseAll()
 
 		if node.writeBufferManager != nil {

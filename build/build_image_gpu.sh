@@ -24,7 +24,7 @@ set -x
 # Absolute path to the toplevel milvus directory.
 toplevel=$(dirname "$(cd "$(dirname "${0}")"; pwd)")
 
-OS_NAME="${OS_NAME:-ubuntu20.04}"
+OS_NAME="${OS_NAME:-ubuntu22.04}"
 MILVUS_IMAGE_REPO="${MILVUS_IMAGE_REPO:-milvusdb/milvus}"
 MILVUS_IMAGE_TAG="${MILVUS_IMAGE_TAG:-gpu-latest}"
 
@@ -41,7 +41,7 @@ if [[ ${OS_NAME} == "ubuntu20.04" && ${BUILD_BASE_IMAGE} == "true" ]]; then
   BUILD_ARGS="--build-arg MILVUS_BASE_IMAGE_REPO=${MILVUS_BASE_IMAGE_REPO} --build-arg MILVUS_BASE_IMAGE_TAG=${MILVUS_BASE_IMAGE_TAG}"
 fi 
 
-docker build ${BUILD_ARGS} -f "./build/docker/milvus/gpu/${OS_NAME}/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
+docker build --network host ${BUILD_ARGS} -f "./build/docker/milvus/gpu/${OS_NAME}/Dockerfile" -t "${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}" .
 
 image_size=$(docker inspect ${MILVUS_IMAGE_REPO}:${MILVUS_IMAGE_TAG}  -f '{{.Size}}'| awk '{ byte =$1 /1024/1024/1024; print byte " GB" }')
 
