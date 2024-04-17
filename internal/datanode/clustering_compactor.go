@@ -126,7 +126,7 @@ type SpillSignal struct {
 func newClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	//stagingIO io.BinlogIO,
+//stagingIO io.BinlogIO,
 	alloc allocator.Allocator,
 	metaCache metacache.MetaCache,
 	syncMgr syncmgr.SyncManager,
@@ -509,7 +509,9 @@ func (t *clusteringCompactionTask) mappingSegment(
 	}
 
 	for _, path := range fieldBinlogPaths {
+		log.Info("mapping segment input", zap.Strings("fieldBinlogPaths", path))
 		bytesArr, err := t.io.Download(ctx, path)
+		log.Info("finish download binlog", zap.Strings("path", path))
 		blobs := make([]*Blob, len(bytesArr))
 		for i := range bytesArr {
 			blobs[i] = &Blob{Value: bytesArr[i]}
@@ -528,6 +530,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		rowSize := pkIter.DataSize() / pkIter.RowNum()
 
 		var offset int64 = -1
+		log.Info("mapping segment start iter")
 		for pkIter.HasNext() {
 			vInter, _ := pkIter.Next()
 			v, ok := vInter.(*storage.Value)
@@ -594,6 +597,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 						if currentSize < t.getSpillMemorySizeThreshold() {
 							break loop
 						}
+						log.Info("memory loop", zap.Int64("currentSize", currentSize), zap.Int64("threshold", t.getSpillMemorySizeThreshold()))
 						time.Sleep(time.Millisecond * 50)
 					}
 				}
@@ -610,6 +614,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 }
 
 func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *ClusterBuffer, value *storage.Value, rowSize int) error {
+	log.Info("writeToBuffer", zap.Int("bufferID", clusterBuffer.id))
 	pk := value.PK
 	timestamp := value.Timestamp
 	row, ok := value.Value.(map[UniqueID]interface{})
@@ -680,6 +685,7 @@ func (t *clusteringCompactionTask) backgroundSpill(ctx context.Context) {
 			log.Info("clustering compaction task done")
 			return
 		case signal := <-t.spillChan:
+			log.Info("receive spill signal", zap.Int("id", signal.buffer.id))
 			var err error
 			if signal.buffer == nil {
 				err = t.spillLargestBuffers(ctx)
