@@ -59,7 +59,7 @@ func ConstructLabel(subs ...string) string {
 
 func init() {
 	var err error
-	Rate, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity)
+	Rate, err = ratelimitutil.NewRateCollector(ratelimitutil.DefaultWindow, ratelimitutil.DefaultGranularity, false)
 	if err != nil {
 		log.Fatal("failed to initialize querynode rate collector", zap.Error(err))
 	}

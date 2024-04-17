@@ -1202,6 +1202,10 @@ func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 	return false
 }
 
+func IsFieldDataTypeSupportMaterializedView(fieldSchema *schemapb.FieldSchema) bool {
+	return fieldSchema.DataType == schemapb.DataType_VarChar || fieldSchema.DataType == schemapb.DataType_String
+}
+
 // GetPrimaryFieldData get primary field data from all field data inserted from sdk
 func GetPrimaryFieldData(datas []*schemapb.FieldData, primaryFieldSchema *schemapb.FieldSchema) (*schemapb.FieldData, error) {
 	primaryFieldID := primaryFieldSchema.FieldID
@@ -1295,7 +1299,7 @@ func AppendIDs(dst *schemapb.IDs, src *schemapb.IDs, idx int) {
 
 func GetSizeOfIDs(data *schemapb.IDs) int {
 	result := 0
-	if data.IdField == nil {
+	if data.GetIdField() == nil {
 		return result
 	}
 
@@ -1439,7 +1443,7 @@ type ResultWithID interface {
 }
 
 // SelectMinPK select the index of the minPK in results T of the cursors.
-func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
+func SelectMinPK[T ResultWithID](limit int64, results []T, cursors []int64) (int, bool) {
 	var (
 		sel               = -1
 		drainResult       = false
@@ -1449,7 +1453,8 @@ func SelectMinPK[T ResultWithID](results []T, cursors []int64) (int, bool) {
 		minStrPK string
 	)
 	for i, cursor := range cursors {
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) {
+		// if result size < limit, this means we should ignore the result from this segment
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (GetSizeOfIDs(results[i].GetIds()) == int(limit)) {
 			drainResult = true
 			continue
 		}
@@ -1576,10 +1581,20 @@ func ValidateSparseFloatRows(rows ...[]byte) error {
 			return fmt.Errorf("invalid data length in sparse float vector: %d", len(row))
 		}
 		for i := 0; i < SparseFloatRowElementCount(row); i++ {
-			if i > 0 && SparseFloatRowIndexAt(row, i) < SparseFloatRowIndexAt(row, i-1) {
-				return errors.New("unsorted indices in sparse float vector")
+			idx := SparseFloatRowIndexAt(row, i)
+			if idx == math.MaxUint32 {
+				return errors.New("invalid index in sparse float vector: must be less than 2^32-1")
 			}
-			VerifyFloat(float64(SparseFloatRowValueAt(row, i)))
+			if i > 0 && idx <= SparseFloatRowIndexAt(row, i-1) {
+				return errors.New("unsorted or same indices in sparse float vector")
+			}
+			val := SparseFloatRowValueAt(row, i)
+			if err := VerifyFloat(float64(val)); err != nil {
+				return err
+			}
+			if val < 0 {
+				return errors.New("negative value in sparse float vector")
+			}
 		}
 	}
 	return nil

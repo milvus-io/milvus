@@ -410,7 +410,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
-		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
@@ -528,7 +528,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; j++ {
-		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
@@ -560,7 +560,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
 		cursors = make([]int64, len(validRetrieveResults))
 		for _, sel := range selected {
-			// cant use `cursors[sel]` directly, since some of them may be skipped.
+			// cannot use `cursors[sel]` directly, since some of them may be skipped.
 			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), selectedIndexes[sel][cursors[sel]])
 			cursors[sel]++
 		}
@@ -569,50 +569,29 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		ctx, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-RetrieveByOffsets-AppendFieldData")
 		defer span2.End()
 		segmentResults := make([]*segcorepb.RetrieveResults, len(validRetrieveResults))
-		if false {
-			for i, offsets := range selectedOffsets {
-				if len(offsets) == 0 {
-					log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
-					continue
-				}
-				r, err := validSegments[i].RetrieveByOffsets(ctx, plan, offsets)
+		eg, ctx := errgroup.WithContext(ctx)
+		for i, offsets := range selectedOffsets {
+			if len(offsets) == 0 {
+				log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
+				continue
+			}
+			idx, theOffsets := i, offsets
+			eg.Go(func() error {
+				r, err := validSegments[idx].RetrieveByOffsets(ctx, plan, theOffsets)
 				if err != nil {
-					return nil, err
+					return err
 				}
-				segmentResults[i] = r
-			}
-		} else {
-			eg, ctx := errgroup.WithContext(ctx)
-			for i, offsets := range selectedOffsets {
-				if len(offsets) == 0 {
-					log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
-					continue
-				}
-				idx, theOffsets := i, offsets
-				eg.Go(func() error {
-					r, err := validSegments[idx].RetrieveByOffsets(ctx, plan, theOffsets)
-					if err != nil {
-						return err
-					}
-					segmentResults[idx] = r
-					return nil
-				})
-			}
-			if err := eg.Wait(); err != nil {
-				return nil, err
-			}
+				segmentResults[idx] = r
+				return nil
+			})
+		}
+		if err := eg.Wait(); err != nil {
+			return nil, err
 		}
 
 		for _, r := range segmentResults {
 			if len(r.GetFieldsData()) != 0 {
 				ret.FieldsData = make([]*schemapb.FieldData, len(r.GetFieldsData()))
-				if false {
-					for idx, src := range r.GetFieldsData() {
-						_, span4 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-ReserveSize")
-						typeutil.ReserveSize(ret.FieldsData[idx], src, int64(len(selected)))
-						span4.End()
-					}
-				}
 				break
 			}
 		}

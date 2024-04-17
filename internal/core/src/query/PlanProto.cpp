@@ -23,6 +23,7 @@
 #include "generated/ExtractInfoPlanNodeVisitor.h"
 #include "pb/plan.pb.h"
 #include "query/Utils.h"
+#include "knowhere/comp/materialized_view.h"
 
 namespace milvus::query {
 namespace planpb = milvus::proto::plan;
@@ -232,6 +233,25 @@ ProtoParser::PlanNodeFromProto(const planpb::PlanNode& plan_node_proto) {
         plan_node->filter_plannode_ = std::move(expr_parser());
     }
     plan_node->search_info_ = std::move(search_info);
+
+    if (plan_node->search_info_.materialized_view_involved &&
+        plan_node->filter_plannode_.has_value()) {
+        const auto expr_info =
+            plan_node->filter_plannode_.value()->GatherInfo();
+        knowhere::MaterializedViewSearchInfo materialized_view_search_info;
+        for (const auto& [expr_field_id, vals] : expr_info.field_id_to_values) {
+            materialized_view_search_info
+                .field_id_to_touched_categories_cnt[expr_field_id] =
+                vals.size();
+        }
+        materialized_view_search_info.is_pure_and = expr_info.is_pure_and;
+        materialized_view_search_info.has_not = expr_info.has_not;
+
+        plan_node->search_info_
+            .search_params_[knowhere::meta::MATERIALIZED_VIEW_SEARCH_INFO] =
+            materialized_view_search_info;
+    }
+
     return plan_node;
 }
 

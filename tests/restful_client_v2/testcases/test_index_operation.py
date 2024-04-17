@@ -72,9 +72,9 @@ class TestCreateIndex(TestBase):
                              "metricType": f"{metric_type}"}]
         }
         if index_type == "HNSW":
-            payload["indexParams"][0]["indexConfig"] = {"index_type": "HNSW", "M": "16", "efConstruction": "200"}
+            payload["indexParams"][0]["params"] = {"index_type": "HNSW", "M": "16", "efConstruction": "200"}
         if index_type == "AUTOINDEX":
-            payload["indexParams"][0]["indexConfig"] = {"index_type": "AUTOINDEX"}
+            payload["indexParams"][0]["params"] = {"index_type": "AUTOINDEX"}
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 200
         time.sleep(10)
@@ -90,7 +90,7 @@ class TestCreateIndex(TestBase):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
             assert expected_index[i]['metricType'] == actual_index[i]['metricType']
-            assert expected_index[i]["indexConfig"]['index_type'] == actual_index[i]['indexType']
+            assert expected_index[i]["params"]['index_type'] == actual_index[i]['indexType']
 
         # drop index
         for i in range(len(actual_index)):
@@ -153,7 +153,7 @@ class TestCreateIndex(TestBase):
         payload = {
             "collectionName": name,
             "indexParams": [{"fieldName": "word_count", "indexName": "word_count_vector",
-                             "indexConfig": {"index_type": "INVERTED"}}]
+                             "params": {"index_type": "INVERTED"}}]
         }
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 200
@@ -169,7 +169,7 @@ class TestCreateIndex(TestBase):
         for i in range(len(expected_index)):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['indexConfig']['index_type'] == actual_index[i]['indexType']
+            assert expected_index[i]['params']['index_type'] == actual_index[i]['indexType']
 
     @pytest.mark.parametrize("index_type", ["BIN_FLAT", "BIN_IVF_FLAT"])
     @pytest.mark.parametrize("metric_type", ["JACCARD", "HAMMING"])
@@ -221,10 +221,10 @@ class TestCreateIndex(TestBase):
         payload = {
             "collectionName": name,
             "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type,
-                             "indexConfig": {"index_type": index_type}}]
+                             "params": {"index_type": index_type}}]
         }
         if index_type == "BIN_IVF_FLAT":
-            payload["indexParams"][0]["indexConfig"]["nlist"] = "16384"
+            payload["indexParams"][0]["params"]["nlist"] = "16384"
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 200
         time.sleep(10)
@@ -239,7 +239,7 @@ class TestCreateIndex(TestBase):
         for i in range(len(expected_index)):
             assert expected_index[i]['fieldName'] == actual_index[i]['fieldName']
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
-            assert expected_index[i]['indexConfig']['index_type'] == actual_index[i]['indexType']
+            assert expected_index[i]['params']['index_type'] == actual_index[i]['indexType']
 
 
 @pytest.mark.L1
@@ -292,10 +292,10 @@ class TestCreateIndexNegative(TestBase):
         payload = {
             "collectionName": name,
             "indexParams": [{"fieldName": "binary_vector", "indexName": index_name, "metricType": metric_type,
-                             "indexConfig": {"index_type": index_type}}]
+                             "params": {"index_type": index_type}}]
         }
         if index_type == "BIN_IVF_FLAT":
-            payload["indexParams"][0]["indexConfig"]["nlist"] = "16384"
+            payload["indexParams"][0]["params"]["nlist"] = "16384"
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 1100
         assert "not supported" in rsp['message']

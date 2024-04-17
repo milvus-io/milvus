@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -400,6 +401,7 @@ func TestMeta_Basic(t *testing.T) {
 		Schema:         testSchema,
 		Partitions:     []UniqueID{partID0, partID1},
 		StartPositions: []*commonpb.KeyDataPair{},
+		DatabaseName:   util.DefaultDBName,
 	}
 	collInfoWoPartition := &collectionInfo{
 		ID:         collID,
@@ -601,7 +603,13 @@ func TestMeta_Basic(t *testing.T) {
 		assert.NoError(t, err)
 
 		// check TotalBinlogSize
-		total, collectionBinlogSize := meta.GetCollectionBinlogSize()
+		total, collectionBinlogSize, _ := meta.GetCollectionBinlogSize()
+		assert.Len(t, collectionBinlogSize, 1)
+		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
+		assert.Equal(t, int64(size0+size1), total)
+
+		meta.collections[collID] = collInfo
+		total, collectionBinlogSize, _ = meta.GetCollectionBinlogSize()
 		assert.Len(t, collectionBinlogSize, 1)
 		assert.Equal(t, int64(size0+size1), collectionBinlogSize[collID])
 		assert.Equal(t, int64(size0+size1), total)

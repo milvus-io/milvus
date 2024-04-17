@@ -627,8 +627,6 @@ SegmentSealedImpl::LoadDeletedRecord(const LoadDeletedRecordInfo& info) {
 
     // step 2: fill pks and timestamps
     deleted_record_.push(pks, timestamps);
-
-    stats_.mem_size += sizeof(Timestamp) * info.row_count + CalcPksSize(pks);
 }
 
 void
@@ -1125,15 +1123,20 @@ SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
 
 void
 SegmentSealedImpl::ClearData() {
-    field_data_ready_bitset_.reset();
-    index_ready_bitset_.reset();
-    binlog_index_bitset_.reset();
-    system_ready_count_ = 0;
-    num_rows_ = std::nullopt;
-    scalar_indexings_.clear();
-    vector_indexings_.clear();
-    insert_record_.clear();
-    fields_.clear();
+    {
+        std::unique_lock lck(mutex_);
+        field_data_ready_bitset_.reset();
+        index_ready_bitset_.reset();
+        binlog_index_bitset_.reset();
+        system_ready_count_ = 0;
+        num_rows_ = std::nullopt;
+        scalar_indexings_.clear();
+        vector_indexings_.clear();
+        insert_record_.clear();
+        fields_.clear();
+        variable_fields_avg_size_.clear();
+        stats_.mem_size = 0;
+    }
     auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
     if (cc == nullptr) {
         return;
@@ -1459,14 +1462,18 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     for (int i = 0; i < size; i++) {
         ordering[i] = std::make_tuple(timestamps_raw[i], pks[i]);
     }
-    auto end =
-        std::remove_if(ordering.begin(),
-                       ordering.end(),
-                       [&](const std::tuple<Timestamp, PkType>& record) {
-                           return !insert_record_.contain(std::get<1>(record));
-                       });
-    size = end - ordering.begin();
-    ordering.resize(size);
+    // if insert_record_ is empty (may be only-load meta but not data for lru-cache at go side),
+    // filtering may cause the deletion lost, skip the filtering to avoid it.
+    if (!insert_record_.empty_pks()) {
+        auto end = std::remove_if(
+            ordering.begin(),
+            ordering.end(),
+            [&](const std::tuple<Timestamp, PkType>& record) {
+                return !insert_record_.contain(std::get<1>(record));
+            });
+        size = end - ordering.begin();
+        ordering.resize(size);
+    }
     if (size == 0) {
         return SegcoreError::success();
     }
@@ -1483,9 +1490,6 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     }
 
     deleted_record_.push(sort_pks, sort_timestamps.data());
-
-    stats_.mem_size +=
-        sizeof(Timestamp) * sort_pks.size() + CalcPksSize(sort_pks);
     return SegcoreError::success();
 }
 

@@ -193,7 +193,6 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}()
 
 	log.Debug("start do query with channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
 	// add cancel when error occurs
@@ -218,9 +217,8 @@ func (node *QueryNode) queryChannel(ctx context.Context, req *querypb.QueryReque
 	}
 
 	// reduce result
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))
@@ -268,7 +266,6 @@ func (node *QueryNode) queryChannelStream(ctx context.Context, req *querypb.Quer
 	}()
 
 	log.Debug("start do streaming query with channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
 
@@ -353,7 +350,6 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	}()
 
 	log.Debug("start to search channel",
-		zap.Bool("fromShardLeader", req.GetFromShardLeader()),
 		zap.Int64s("segmentIDs", req.GetSegmentIDs()),
 	)
 	searchCtx, cancel := context.WithCancel(ctx)
@@ -376,9 +372,8 @@ func (node *QueryNode) searchChannel(ctx context.Context, req *querypb.SearchReq
 	}
 
 	// reduce result
-	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s, fromShardLeader = %t, vChannel = %s, segmentIDs = %v",
+	tr.CtxElapse(ctx, fmt.Sprintf("start reduce query result, traceID = %s,  vChannel = %s, segmentIDs = %v",
 		traceID,
-		req.GetFromShardLeader(),
 		channel,
 		req.GetSegmentIDs(),
 	))

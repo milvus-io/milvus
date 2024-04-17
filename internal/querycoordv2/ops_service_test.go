@@ -589,7 +589,7 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
+		suite.meta.ResourceManager.HandleNodeUp(node)
 	}
 
 	// test transfer segment success, expect generate 1 balance segment task
@@ -807,7 +807,7 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
+		suite.meta.ResourceManager.HandleNodeUp(node)
 	}
 
 	// test transfer channel success, expect generate 1 balance channel task

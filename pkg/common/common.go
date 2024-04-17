@@ -108,6 +108,8 @@ const (
 	DimKey         = "dim"
 	MaxLengthKey   = "max_length"
 	MaxCapacityKey = "max_capacity"
+
+	DropRatioBuildKey = "drop_ratio_build"
 )
 
 //  Collection properties key
@@ -130,6 +132,8 @@ const (
 	CollectionSearchRateMaxKey   = "collection.searchRate.max.vps"
 	CollectionSearchRateMinKey   = "collection.searchRate.min.vps"
 	CollectionDiskQuotaKey       = "collection.diskProtection.diskQuota.mb"
+
+	PartitionDiskQuotaKey = "partition.diskProtection.diskQuota.mb"
 )
 
 // common properties

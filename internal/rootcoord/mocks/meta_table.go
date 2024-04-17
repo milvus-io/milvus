@@ -843,6 +843,61 @@ func (_c *IMetaTable_GetCollectionByID_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// GetCollectionByIDWithMaxTs provides a mock function with given fields: ctx, collectionID
+func (_m *IMetaTable) GetCollectionByIDWithMaxTs(ctx context.Context, collectionID int64) (*model.Collection, error) {
+	ret := _m.Called(ctx, collectionID)
+
+	var r0 *model.Collection
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) (*model.Collection, error)); ok {
+		return rf(ctx, collectionID)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, int64) *model.Collection); ok {
+		r0 = rf(ctx, collectionID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*model.Collection)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, int64) error); ok {
+		r1 = rf(ctx, collectionID)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// IMetaTable_GetCollectionByIDWithMaxTs_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCollectionByIDWithMaxTs'
+type IMetaTable_GetCollectionByIDWithMaxTs_Call struct {
+	*mock.Call
+}
+
+// GetCollectionByIDWithMaxTs is a helper method to define mock.On call
+//   - ctx context.Context
+//   - collectionID int64
+func (_e *IMetaTable_Expecter) GetCollectionByIDWithMaxTs(ctx interface{}, collectionID interface{}) *IMetaTable_GetCollectionByIDWithMaxTs_Call {
+	return &IMetaTable_GetCollectionByIDWithMaxTs_Call{Call: _e.mock.On("GetCollectionByIDWithMaxTs", ctx, collectionID)}
+}
+
+func (_c *IMetaTable_GetCollectionByIDWithMaxTs_Call) Run(run func(ctx context.Context, collectionID int64)) *IMetaTable_GetCollectionByIDWithMaxTs_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionByIDWithMaxTs_Call) Return(_a0 *model.Collection, _a1 error) *IMetaTable_GetCollectionByIDWithMaxTs_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *IMetaTable_GetCollectionByIDWithMaxTs_Call) RunAndReturn(run func(context.Context, int64) (*model.Collection, error)) *IMetaTable_GetCollectionByIDWithMaxTs_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollectionByName provides a mock function with given fields: ctx, dbName, collectionName, ts
 func (_m *IMetaTable) GetCollectionByName(ctx context.Context, dbName string, collectionName string, ts uint64) (*model.Collection, error) {
 	ret := _m.Called(ctx, dbName, collectionName, ts)

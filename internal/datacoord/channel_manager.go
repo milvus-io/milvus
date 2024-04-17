@@ -258,7 +258,7 @@ func (c *ChannelManagerImpl) unwatchDroppedChannels() {
 				log.Warn("unable to remove channel", zap.String("channel", ch.GetName()), zap.Error(err))
 				continue
 			}
-			err = c.h.FinishDropChannel(ch.GetName())
+			err = c.h.FinishDropChannel(ch.GetName(), ch.GetCollectionID())
 			if err != nil {
 				log.Warn("FinishDropChannel failed when unwatchDroppedChannels", zap.String("channel", ch.GetName()), zap.Error(err))
 			}
@@ -508,13 +508,12 @@ func (c *ChannelManagerImpl) GetBufferChannels() *NodeChannelInfo {
 func (c *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
 	nodeChs := make(map[UniqueID][]string)
 	for _, nodeChannels := range c.GetAssignedChannels() {
-		filtered := lo.Filter(nodeChannels.Channels, func(channel RWChannel, _ int) bool {
-			return channel.GetCollectionID() == collectionID
-		})
-		channelNames := lo.Map(filtered, func(channel RWChannel, _ int) string {
-			return channel.GetName()
-		})
-
+		var channelNames []string
+		for name, ch := range nodeChannels.Channels {
+			if ch.GetCollectionID() == collectionID {
+				channelNames = append(channelNames, name)
+			}
+		}
 		nodeChs[nodeChannels.NodeID] = channelNames
 	}
 	return nodeChs
@@ -524,11 +523,11 @@ func (c *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID UniqueID
 func (c *ChannelManagerImpl) GetChannelsByCollectionID(collectionID UniqueID) []RWChannel {
 	channels := make([]RWChannel, 0)
 	for _, nodeChannels := range c.GetAssignedChannels() {
-		filtered := lo.Filter(nodeChannels.Channels, func(channel RWChannel, _ int) bool {
-			return channel.GetCollectionID() == collectionID
-		})
-
-		channels = append(channels, filtered...)
+		for _, ch := range nodeChannels.Channels {
+			if ch.GetCollectionID() == collectionID {
+				channels = append(channels, ch)
+			}
+		}
 	}
 	return channels
 }
@@ -807,7 +806,7 @@ func (c *ChannelManagerImpl) Reassign(originNodeID UniqueID, channelName string)
 	}
 	c.mu.RUnlock()
 
-	reallocates := &NodeChannelInfo{originNodeID, []RWChannel{ch}}
+	reallocates := NewNodeChannelInfo(originNodeID, ch)
 	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
@@ -821,7 +820,7 @@ func (c *ChannelManagerImpl) Reassign(originNodeID UniqueID, channelName string)
 		if err := c.remove(originNodeID, ch); err != nil {
 			return fmt.Errorf("failed to remove watch info: %v,%s", ch, err.Error())
 		}
-		if err := c.h.FinishDropChannel(channelName); err != nil {
+		if err := c.h.FinishDropChannel(channelName, ch.GetCollectionID()); err != nil {
 			return fmt.Errorf("FinishDropChannel failed, err=%w", err)
 		}
 		log.Info("removed channel assignment", zap.String("channelName", channelName))
@@ -862,7 +861,7 @@ func (c *ChannelManagerImpl) CleanupAndReassign(nodeID UniqueID, channelName str
 		msgstream.UnsubscribeChannels(c.ctx, c.msgstreamFactory, subName, []string{pchannelName})
 	}
 
-	reallocates := &NodeChannelInfo{nodeID, []RWChannel{chToCleanUp}}
+	reallocates := NewNodeChannelInfo(nodeID, chToCleanUp)
 	isDropped := c.isMarkedDrop(channelName)
 
 	c.mu.Lock()
@@ -878,7 +877,7 @@ func (c *ChannelManagerImpl) CleanupAndReassign(nodeID UniqueID, channelName str
 		}
 
 		log.Info("try to cleanup removal flag ", zap.String("channelName", channelName))
-		if err := c.h.FinishDropChannel(channelName); err != nil {
+		if err := c.h.FinishDropChannel(channelName, chToCleanUp.GetCollectionID()); err != nil {
 			return fmt.Errorf("FinishDropChannel failed, err=%w", err)
 		}
 

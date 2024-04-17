@@ -1150,6 +1150,10 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 	return s.proxy.CreateResourceGroup(ctx, req)
 }
 
+func (s *Server) UpdateResourceGroups(ctx context.Context, req *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+	return s.proxy.UpdateResourceGroups(ctx, req)
+}
+
 func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResourceGroupRequest) (*commonpb.Status, error) {
 	return s.proxy.DropResourceGroup(ctx, req)
 }

@@ -19,49 +19,21 @@ def get_image_tag_by_short_name(repository, tag, arch):
 
     # Get the latest tag with the same arch and prefix
     sorted_images = sorted(data["results"], key=lambda x: x["last_updated"], reverse=True)
+    # print(sorted_images)
     candidate_tag = None
     for tag_info in sorted_images:
         # print(tag_info)
-        if arch in [x["architecture"] for x in tag_info["images"]]:
-            if tag == "2.2.0-latest": # special case for 2.2.0-latest, for 2.2.0 branch, there is no arm amd and gpu as suffix
+        if tag == "2.2.0-latest": # special case for 2.2.0-latest, for 2.2.0 branch, there is no arm amd and gpu as suffix
+            candidate_tag = tag_info["name"]
+        else:
+            if arch in tag_info["name"]:
                 candidate_tag = tag_info["name"]
             else:
-                if arch in tag_info["name"]:
-                    candidate_tag = tag_info["name"]
-                else:
-                    continue
-            if candidate_tag == tag:
                 continue
-            else:
-                # print(f"candidate_tag: {candidate_tag}")
-                break
-    # Get the DIGEST of the short tag
-    url = f"https://hub.docker.com/v2/repositories/{repository}/tags/{tag}"
-    response = requests.get(url)
-    cur_tag_info = response.json()
-    digest = cur_tag_info["images"][0]["digest"]
-    res = []
-    # Iterate through all tags and find the ones with the same DIGEST
-    for tag_info in data["results"]:
-        if "digest" in tag_info["images"][0] and tag_info["images"][0]["digest"] == digest:
-            # Extract the image name
-            image_name = tag_info["name"].split(":")[0]
-            if image_name != tag and arch in [x["architecture"] for x in tag_info["images"]]:
-                res.append(image_name)
-    # In case of no match, try to find the latest tag with the same arch
-    # there is a case: push master-xxx-arm64 and master-latest, but master-latest-amd64 is not pushed,
-    # then there will be no tag matched, so we need to find the latest tag with the same arch even it is not the latest tag
-    for tag_info in data["results"]:
-        image_name = tag_info["name"].split(":")[0]
-        if image_name != tag and arch in image_name:
-            res.append(image_name)
-    # print(res)
-    if len(res) == 0 or (candidate_tag is not None and candidate_tag > res[0]):
-        if candidate_tag is None:
-            return tag
-        return candidate_tag
-    else:
-        return res[0]
+        if candidate_tag == tag:
+            continue
+        else:
+            return candidate_tag
 
 
 if __name__ == "__main__":

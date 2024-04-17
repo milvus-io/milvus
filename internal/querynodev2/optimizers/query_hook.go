@@ -24,8 +24,8 @@ type QueryHook interface {
 }
 
 func OptimizeSearchParams(ctx context.Context, req *querypb.SearchRequest, queryHook QueryHook, numSegments int) (*querypb.SearchRequest, error) {
-	// no hook applied, just return
-	if queryHook == nil {
+	// no hook applied or disabled, just return
+	if queryHook == nil || !paramtable.Get().AutoIndexConfig.Enable.GetAsBool() {
 		return req, nil
 	}
 

@@ -1264,9 +1264,13 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	// Need to reset global etcd to follow new path
 	kvfactory.CloseEtcdClient()
 	paramtable.Get().Save(Params.RootCoordCfg.EnableActiveStandby.Key, "true")
+	defer paramtable.Get().Reset(Params.RootCoordCfg.EnableActiveStandby.Key)
 	paramtable.Get().Save(Params.CommonCfg.RootCoordTimeTick.Key, fmt.Sprintf("rootcoord-time-tick-%d", randVal))
+	defer paramtable.Get().Reset(Params.CommonCfg.RootCoordTimeTick.Key)
 	paramtable.Get().Save(Params.CommonCfg.RootCoordStatistics.Key, fmt.Sprintf("rootcoord-statistics-%d", randVal))
+	defer paramtable.Get().Reset(Params.CommonCfg.RootCoordStatistics.Key)
 	paramtable.Get().Save(Params.CommonCfg.RootCoordDml.Key, fmt.Sprintf("rootcoord-dml-test-%d", randVal))
+	defer paramtable.Get().Reset(Params.CommonCfg.RootCoordDml.Key)
 
 	ctx := context.Background()
 	coreFactory := dependency.NewDefaultFactory(true)
@@ -1288,12 +1292,15 @@ func TestRootcoord_EnableActiveStandby(t *testing.T) {
 	err = core.Init()
 	assert.NoError(t, err)
 	assert.Equal(t, commonpb.StateCode_StandBy, core.GetStateCode())
-	err = core.Start()
-	assert.NoError(t, err)
 	core.session.TriggerKill = false
 	err = core.Register()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Healthy, core.GetStateCode())
+	err = core.Start()
+	assert.NoError(t, err)
+
+	assert.Eventually(t, func() bool {
+		return core.GetStateCode() == commonpb.StateCode_Healthy
+	}, time.Second*5, time.Millisecond*200)
 	resp, err := core.DescribeCollection(ctx, &milvuspb.DescribeCollectionRequest{
 		Base: &commonpb.MsgBase{
 			MsgType:   commonpb.MsgType_DescribeCollection,
@@ -1433,6 +1440,43 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.NotEmpty(t, resp.Reasons)
+	})
+}
+
+func TestRootCoord_DescribeDatabase(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("add task failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("execute task failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp.GetStatus(), nil))
 	})
 }
 

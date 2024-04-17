@@ -44,6 +44,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) (err error) {
 	if err != nil {
 		return err
 	}
+
 	aliases := t.core.meta.ListAliasesByID(coll.CollectionID)
 	db, err := t.core.meta.GetDatabaseByID(ctx, coll.DBID, t.GetTs())
 	if err != nil {

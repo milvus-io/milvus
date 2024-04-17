@@ -98,7 +98,7 @@ func (s *scheduler) Start() {
 			for taskID, fs := range futures {
 				err := conc.AwaitAll(fs...)
 				if err != nil {
-					return
+					continue
 				}
 				s.manager.Update(taskID, UpdateState(datapb.ImportTaskStateV2_Completed))
 				log.Info("preimport/import done", zap.Int64("taskID", taskID))

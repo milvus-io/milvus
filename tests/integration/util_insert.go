@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func (s *MiniClusterSuite) WaitForFlush(ctx context.Context, segIDs []int64, flushTs uint64, dbName, collectionName string) {
@@ -91,6 +92,22 @@ func NewInt64SameFieldData(fieldName string, numRows int, value int64) *schemapb
 				Data: &schemapb.ScalarField_LongData{
 					LongData: &schemapb.LongArray{
 						Data: GenerateSameInt64Array(numRows, value),
+					},
+				},
+			},
+		},
+	}
+}
+
+func NewVarCharSameFieldData(fieldName string, numRows int, value string) *schemapb.FieldData {
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_String,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: GenerateSameStringArray(numRows, value),
 					},
 				},
 			},
@@ -176,6 +193,22 @@ func NewBinaryVectorFieldData(fieldName string, numRows, dim int) *schemapb.Fiel
 	}
 }
 
+func NewSparseFloatVectorFieldData(fieldName string, numRows int) *schemapb.FieldData {
+	sparseVecs := GenerateSparseFloatArray(numRows)
+	return &schemapb.FieldData{
+		Type:      schemapb.DataType_SparseFloatVector,
+		FieldName: fieldName,
+		Field: &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: sparseVecs.Dim,
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: sparseVecs,
+				},
+			},
+		},
+	}
+}
+
 func GenerateInt64Array(numRows int, start int64) []int64 {
 	ret := make([]int64, numRows)
 	for i := 0; i < numRows; i++ {
@@ -186,6 +219,14 @@ func GenerateInt64Array(numRows int, start int64) []int64 {
 
 func GenerateSameInt64Array(numRows int, value int64) []int64 {
 	ret := make([]int64, numRows)
+	for i := 0; i < numRows; i++ {
+		ret[i] = value
+	}
+	return ret
+}
+
+func GenerateSameStringArray(numRows int, value string) []string {
+	ret := make([]string, numRows)
 	for i := 0; i < numRows; i++ {
 		ret[i] = value
 	}
@@ -227,6 +268,10 @@ func GenerateFloat16Vectors(numRows, dim int) []byte {
 		panic(err)
 	}
 	return ret
+}
+
+func GenerateSparseFloatArray(numRows int) *schemapb.SparseFloatArray {
+	return testutils.GenerateSparseFloatVectors(numRows)
 }
 
 // func GenerateBFloat16Vectors(numRows, dim int) []byte {

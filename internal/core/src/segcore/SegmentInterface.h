@@ -80,10 +80,8 @@ class SegmentInterface {
              const int64_t* offsets,
              int64_t size) const = 0;
 
-    size_t
-    GetMemoryUsageInBytes() const {
-        return stats_.mem_size;
-    };
+    virtual size_t
+    GetMemoryUsageInBytes() const = 0;
 
     virtual int64_t
     get_row_count() const = 0;
@@ -131,9 +129,6 @@ class SegmentInterface {
 
     virtual bool
     HasRawData(int64_t field_id) const = 0;
-
- protected:
-    SegmentStats stats_{};
 };
 
 // internal API for DSL calculation

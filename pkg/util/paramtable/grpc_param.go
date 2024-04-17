@@ -58,6 +58,7 @@ type grpcConfig struct {
 	Domain        string    `refreshable:"false"`
 	IP            string    `refreshable:"false"`
 	TLSMode       ParamItem `refreshable:"false"`
+	IPItem        ParamItem `refreshable:"false"`
 	Port          ParamItem `refreshable:"false"`
 	InternalPort  ParamItem `refreshable:"false"`
 	ServerPemPath ParamItem `refreshable:"false"`
@@ -67,14 +68,14 @@ type grpcConfig struct {
 
 func (p *grpcConfig) init(domain string, base *BaseTable) {
 	p.Domain = domain
-	ipItem := ParamItem{
-		Key:          p.Domain + ".ip",
-		Version:      "2.3.3",
-		DefaultValue: "",
-		Export:       true,
+	p.IPItem = ParamItem{
+		Key:     p.Domain + ".ip",
+		Version: "2.3.3",
+		Doc:     "if not specified, use the first unicastable address",
+		Export:  true,
 	}
-	ipItem.Init(base.mgr)
-	p.IP = funcutil.GetIP(ipItem.GetValue())
+	p.IPItem.Init(base.mgr)
+	p.IP = funcutil.GetIP(p.IPItem.GetValue())
 
 	p.Port = ParamItem{
 		Key:          p.Domain + ".port",

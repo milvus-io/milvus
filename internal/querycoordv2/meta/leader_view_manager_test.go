@@ -23,7 +23,6 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type LeaderViewManagerSuite struct {
@@ -134,14 +133,11 @@ func (suite *LeaderViewManagerSuite) TestGetByFilter() {
 
 	// Test WithReplica
 	for i, collectionID := range suite.collections {
-		replica := &Replica{
-			Replica: &querypb.Replica{
-				ID:           int64(i),
-				CollectionID: collectionID,
-				Nodes:        suite.nodes,
-			},
-			nodes: typeutil.NewUniqueSet(suite.nodes...),
-		}
+		replica := newReplica(&querypb.Replica{
+			ID:           int64(i),
+			CollectionID: collectionID,
+			Nodes:        suite.nodes,
+		})
 		views := suite.mgr.GetByFilter(WithReplica2LeaderView(replica))
 		suite.Len(views, 2)
 	}

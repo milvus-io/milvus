@@ -31,6 +31,7 @@ import (
 	"google.golang.org/grpc/status"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
@@ -103,14 +104,14 @@ func (s *LogFormatterSuite) TestFormatNames() {
 	formatter := NewFormatter(fmt)
 
 	for _, req := range s.reqs {
-		info := NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
-		fs := formatter.Format(info)
-		s.False(strings.Contains(fs, unknownString))
+		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
+		fs := formatter.Format(i)
+		s.False(strings.Contains(fs, info.Unknown))
 	}
 
-	info := NewGrpcAccessInfo(s.ctx, s.serverinfo, nil)
-	fs := formatter.Format(info)
-	s.True(strings.Contains(fs, unknownString))
+	i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, nil)
+	fs := formatter.Format(i)
+	s.True(strings.Contains(fs, info.Unknown))
 }
 
 func (s *LogFormatterSuite) TestFormatTime() {
@@ -118,13 +119,13 @@ func (s *LogFormatterSuite) TestFormatTime() {
 	formatter := NewFormatter(fmt)
 
 	for id, req := range s.reqs {
-		info := NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
-		fs := formatter.Format(info)
-		s.True(strings.Contains(fs, unknownString))
-		info.UpdateCtx(s.ctx)
-		info.SetResult(s.resps[id], s.errs[id])
-		fs = formatter.Format(info)
-		s.False(strings.Contains(fs, unknownString))
+		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
+		fs := formatter.Format(i)
+		s.True(strings.Contains(fs, info.Unknown))
+		i.UpdateCtx(s.ctx)
+		i.SetResult(s.resps[id], s.errs[id])
+		fs = formatter.Format(i)
+		s.False(strings.Contains(fs, info.Unknown))
 	}
 }
 
@@ -133,25 +134,25 @@ func (s *LogFormatterSuite) TestFormatUserInfo() {
 	formatter := NewFormatter(fmt)
 
 	for _, req := range s.reqs {
-		info := NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
-		fs := formatter.Format(info)
-		s.False(strings.Contains(fs, unknownString))
+		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
+		fs := formatter.Format(i)
+		s.False(strings.Contains(fs, info.Unknown))
 	}
 
 	// test unknown
-	info := NewGrpcAccessInfo(context.Background(), &grpc.UnaryServerInfo{}, nil)
-	fs := formatter.Format(info)
-	s.True(strings.Contains(fs, unknownString))
+	i := info.NewGrpcAccessInfo(context.Background(), &grpc.UnaryServerInfo{}, nil)
+	fs := formatter.Format(i)
+	s.True(strings.Contains(fs, info.Unknown))
 }
 
 func (s *LogFormatterSuite) TestFormatMethodInfo() {
 	fmt := "$method_name: $method_status $trace_id"
 	formatter := NewFormatter(fmt)
 
-	metaContext := metadata.AppendToOutgoingContext(s.ctx, clientRequestIDKey, s.traceID)
+	metaContext := metadata.AppendToOutgoingContext(s.ctx, info.ClientRequestIDKey, s.traceID)
 	for _, req := range s.reqs {
-		info := NewGrpcAccessInfo(metaContext, s.serverinfo, req)
-		fs := formatter.Format(info)
+		i := info.NewGrpcAccessInfo(metaContext, s.serverinfo, req)
+		fs := formatter.Format(i)
 		log.Info(fs)
 		s.True(strings.Contains(fs, s.traceID))
 	}
@@ -159,8 +160,8 @@ func (s *LogFormatterSuite) TestFormatMethodInfo() {
 	traceContext, traceSpan := otel.Tracer(typeutil.ProxyRole).Start(s.ctx, "test")
 	trueTraceID := traceSpan.SpanContext().TraceID().String()
 	for _, req := range s.reqs {
-		info := NewGrpcAccessInfo(traceContext, s.serverinfo, req)
-		fs := formatter.Format(info)
+		i := info.NewGrpcAccessInfo(traceContext, s.serverinfo, req)
+		fs := formatter.Format(i)
 		log.Info(fs)
 		s.True(strings.Contains(fs, trueTraceID))
 	}
@@ -171,13 +172,13 @@ func (s *LogFormatterSuite) TestFormatMethodResult() {
 	formatter := NewFormatter(fmt)
 
 	for id, req := range s.reqs {
-		info := NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
-		fs := formatter.Format(info)
-		s.True(strings.Contains(fs, unknownString))
+		i := info.NewGrpcAccessInfo(s.ctx, s.serverinfo, req)
+		fs := formatter.Format(i)
+		s.True(strings.Contains(fs, info.Unknown))
 
-		info.SetResult(s.resps[id], s.errs[id])
-		fs = formatter.Format(info)
-		s.False(strings.Contains(fs, unknownString))
+		i.SetResult(s.resps[id], s.errs[id])
+		fs = formatter.Format(i)
+		s.False(strings.Contains(fs, info.Unknown))
 	}
 }
 

@@ -85,6 +85,7 @@ type collectionInfo struct {
 	Properties     map[string]string
 	CreatedAt      Timestamp
 	DatabaseName   string
+	DatabaseID     int64
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -163,12 +164,22 @@ func (m *meta) reloadFromKV() error {
 // AddCollection adds a collection into meta
 // Note that collection info is just for caching and will not be set into etcd from datacoord
 func (m *meta) AddCollection(collection *collectionInfo) {
-	log.Debug("meta update: add collection", zap.Int64("collectionID", collection.ID))
+	log.Info("meta update: add collection", zap.Int64("collectionID", collection.ID))
 	m.Lock()
 	defer m.Unlock()
 	m.collections[collection.ID] = collection
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 	log.Info("meta update: add collection - complete", zap.Int64("collectionID", collection.ID))
+}
+
+// DropCollection drop a collection from meta
+func (m *meta) DropCollection(collectionID int64) {
+	log.Info("meta update: drop collection", zap.Int64("collectionID", collectionID))
+	m.Lock()
+	defer m.Unlock()
+	delete(m.collections, collectionID)
+	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
+	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
 }
 
 // GetCollection returns collection info with provided collection id from local cache
@@ -200,6 +211,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
 		Properties:     clonedProperties,
 		DatabaseName:   coll.DatabaseName,
+		DatabaseID:     coll.DatabaseID,
 	}
 
 	return cloneColl
@@ -257,10 +269,11 @@ func (m *meta) GetNumRowsOfCollection(collectionID UniqueID) int64 {
 }
 
 // GetCollectionBinlogSize returns the total binlog size and binlog size of collections.
-func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
+func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueID]map[UniqueID]int64) {
 	m.RLock()
 	defer m.RUnlock()
 	collectionBinlogSize := make(map[UniqueID]int64)
+	partitionBinlogSize := make(map[UniqueID]map[UniqueID]int64)
 	collectionRowsNum := make(map[UniqueID]map[commonpb.SegmentState]int64)
 	segments := m.segments.GetSegments()
 	var total int64
@@ -269,8 +282,22 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 		if isSegmentHealthy(segment) && !segment.GetIsImporting() {
 			total += segmentSize
 			collectionBinlogSize[segment.GetCollectionID()] += segmentSize
-			metrics.DataCoordStoredBinlogSize.WithLabelValues(
-				fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+
+			partBinlogSize, ok := partitionBinlogSize[segment.GetCollectionID()]
+			if !ok {
+				partBinlogSize = make(map[int64]int64)
+				partitionBinlogSize[segment.GetCollectionID()] = partBinlogSize
+			}
+			partBinlogSize[segment.GetPartitionID()] += segmentSize
+
+			coll, ok := m.collections[segment.GetCollectionID()]
+			if ok {
+				metrics.DataCoordStoredBinlogSize.WithLabelValues(coll.DatabaseName,
+					fmt.Sprint(segment.GetCollectionID()), fmt.Sprint(segment.GetID())).Set(float64(segmentSize))
+			} else {
+				log.Warn("not found database name", zap.Int64("collectionID", segment.GetCollectionID()))
+			}
+
 			if _, ok := collectionRowsNum[segment.GetCollectionID()]; !ok {
 				collectionRowsNum[segment.GetCollectionID()] = make(map[commonpb.SegmentState]int64)
 			}
@@ -287,7 +314,7 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64) {
 			}
 		}
 	}
-	return total, collectionBinlogSize
+	return total, collectionBinlogSize, partitionBinlogSize
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {

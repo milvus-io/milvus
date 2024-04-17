@@ -450,6 +450,61 @@ func (_c *MockCache_GetCredentialInfo_Call) RunAndReturn(run func(context.Contex
 	return _c
 }
 
+// GetDatabaseInfo provides a mock function with given fields: ctx, database
+func (_m *MockCache) GetDatabaseInfo(ctx context.Context, database string) (*databaseInfo, error) {
+	ret := _m.Called(ctx, database)
+
+	var r0 *databaseInfo
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (*databaseInfo, error)); ok {
+		return rf(ctx, database)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, string) *databaseInfo); ok {
+		r0 = rf(ctx, database)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*databaseInfo)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
+		r1 = rf(ctx, database)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockCache_GetDatabaseInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDatabaseInfo'
+type MockCache_GetDatabaseInfo_Call struct {
+	*mock.Call
+}
+
+// GetDatabaseInfo is a helper method to define mock.On call
+//   - ctx context.Context
+//   - database string
+func (_e *MockCache_Expecter) GetDatabaseInfo(ctx interface{}, database interface{}) *MockCache_GetDatabaseInfo_Call {
+	return &MockCache_GetDatabaseInfo_Call{Call: _e.mock.On("GetDatabaseInfo", ctx, database)}
+}
+
+func (_c *MockCache_GetDatabaseInfo_Call) Run(run func(ctx context.Context, database string)) *MockCache_GetDatabaseInfo_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string))
+	})
+	return _c
+}
+
+func (_c *MockCache_GetDatabaseInfo_Call) Return(_a0 *databaseInfo, _a1 error) *MockCache_GetDatabaseInfo_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockCache_GetDatabaseInfo_Call) RunAndReturn(run func(context.Context, string) (*databaseInfo, error)) *MockCache_GetDatabaseInfo_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetPartitionID provides a mock function with given fields: ctx, database, collectionName, partitionName
 func (_m *MockCache) GetPartitionID(ctx context.Context, database string, collectionName string, partitionName string) (int64, error) {
 	ret := _m.Called(ctx, database, collectionName, partitionName)

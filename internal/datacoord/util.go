@@ -192,10 +192,6 @@ func isFlatIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
 }
 
-func isOptionalScalarFieldSupported(indexType string) bool {
-	return indexType == indexparamcheck.IndexHNSW
-}
-
 func isDiskANNIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexDISKANN
 }

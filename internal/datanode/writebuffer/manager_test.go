@@ -7,6 +7,7 @@ import (
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -199,24 +200,32 @@ func (s *ManagerSuite) TestMemoryCheck() {
 
 	param.Save(param.DataNodeCfg.MemoryCheckInterval.Key, "50")
 	param.Save(param.DataNodeCfg.MemoryForceSyncEnable.Key, "false")
-	param.Save(param.DataNodeCfg.MemoryWatermark.Key, "0.7")
+	param.Save(param.DataNodeCfg.MemoryForceSyncWatermark.Key, "0.7")
 
 	defer func() {
 		param.Reset(param.DataNodeCfg.MemoryCheckInterval.Key)
 		param.Reset(param.DataNodeCfg.MemoryForceSyncEnable.Key)
-		param.Reset(param.DataNodeCfg.MemoryWatermark.Key)
+		param.Reset(param.DataNodeCfg.MemoryForceSyncWatermark.Key)
 	}()
 
 	wb := NewMockWriteBuffer(s.T())
 
+	flag := atomic.NewBool(false)
 	memoryLimit := hardware.GetMemoryCount()
 	signal := make(chan struct{}, 1)
-	wb.EXPECT().MemorySize().Return(int64(float64(memoryLimit) * 0.6))
+	wb.EXPECT().MemorySize().RunAndReturn(func() int64 {
+		if flag.Load() {
+			return int64(float64(memoryLimit) * 0.4)
+		}
+		return int64(float64(memoryLimit) * 0.6)
+	})
+	//.Return(int64(float64(memoryLimit) * 0.6))
 	wb.EXPECT().EvictBuffer(mock.Anything).Run(func(polices ...SyncPolicy) {
 		select {
 		case signal <- struct{}{}:
 		default:
 		}
+		flag.Store(true)
 	}).Return()
 	manager.mut.Lock()
 	manager.buffers[s.channelName] = wb
@@ -232,7 +241,7 @@ func (s *ManagerSuite) TestMemoryCheck() {
 
 	<-time.After(time.Millisecond * 100)
 	wb.AssertNotCalled(s.T(), "SetMemoryHighFlag")
-	param.Save(param.DataNodeCfg.MemoryWatermark.Key, "0.5")
+	param.Save(param.DataNodeCfg.MemoryForceSyncWatermark.Key, "0.5")
 
 	<-signal
 	wb.AssertExpectations(s.T())
