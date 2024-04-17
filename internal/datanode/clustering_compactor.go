@@ -126,7 +126,7 @@ type SpillSignal struct {
 func newClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-//stagingIO io.BinlogIO,
+	//stagingIO io.BinlogIO,
 	alloc allocator.Allocator,
 	metaCache metacache.MetaCache,
 	syncMgr syncmgr.SyncManager,
@@ -583,6 +583,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 			// block here, wait for memory release by spill
 			currentSize := t.totalBufferSize.Load()
 			if currentSize > t.getSpillMemorySizeThreshold() {
+				t.spillChan <- SpillSignal{}
 			loop:
 				for {
 					select {
