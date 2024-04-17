@@ -729,6 +729,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 		return err
 	}
 
+	s.insertCount.Sub(int64(len(primaryKeys)))
 	s.rowNum.Store(-1)
 	s.lastDeltaTimestamp.Store(timestamps[len(timestamps)-1])
 
