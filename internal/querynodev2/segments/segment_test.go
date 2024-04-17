@@ -71,6 +71,7 @@ func (suite *SegmentSuite) SetupTest() {
 			PartitionID:   suite.partitionID,
 			InsertChannel: "dml",
 			Level:         datapb.SegmentLevel_Legacy,
+			NumOfRows:     int64(msgLength),
 			BinlogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 101,
@@ -97,7 +98,7 @@ func (suite *SegmentSuite) SetupTest() {
 	g, err := suite.sealed.(*LocalSegment).StartLoadData()
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
+		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, binlog)
 		suite.Require().NoError(err)
 	}
 	g.Done(nil)

@@ -92,6 +92,7 @@ func (suite *RetrieveSuite) SetupTest() {
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
 			InsertChannel: "dml",
+			NumOfRows:     int64(msgLength),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
@@ -107,7 +108,7 @@ func (suite *RetrieveSuite) SetupTest() {
 	)
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
+		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, binlog)
 		suite.Require().NoError(err)
 	}
 
