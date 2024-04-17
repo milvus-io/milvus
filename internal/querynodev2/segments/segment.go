@@ -29,7 +29,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"unsafe"
 
@@ -729,7 +728,6 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 		return err
 	}
 
-	s.insertCount.Sub(int64(len(primaryKeys)))
 	s.rowNum.Store(-1)
 	s.lastDeltaTimestamp.Store(timestamps[len(timestamps)-1])
 
@@ -1365,15 +1363,6 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	}
 
 	C.DeleteSegment(ptr)
-
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		s.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(s.Collection()),
-		fmt.Sprint(s.Partition()),
-		s.Type().String(),
-		strconv.FormatInt(int64(len(s.Indexes())), 10),
-	).Sub(float64(s.InsertCount()))
 
 	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
 	// ignore error here, shall not block releasing
