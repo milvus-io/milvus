@@ -157,7 +157,10 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			dbName = getter.GetDbName()
 		}
 		if dbName == "" {
-			dbName = DefaultDbName
+			dbName = c.Request.Header.Get(HTTPHeaderDBName)
+			if dbName == "" {
+				dbName = DefaultDbName
+			}
 		}
 		username, _ := c.Get(ContextUsername)
 		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(context.Background(), c.Request.URL.Path)
