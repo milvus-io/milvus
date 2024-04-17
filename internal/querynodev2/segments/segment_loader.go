@@ -482,7 +482,7 @@ func (loader *segmentLoaderV2) loadSealedSegmentFields(ctx context.Context, segm
 	runningGroup, _ := errgroup.WithContext(ctx)
 	fields.Range(func(fieldID int64, field *schemapb.FieldSchema) bool {
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(ctx, fieldID, rowCount, nil)
+			return segment.LoadFieldData(ctx, fieldID, nil)
 		})
 		return true
 	})
@@ -1002,13 +1002,13 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, segment *Loc
 				zap.String("index", info.IndexInfo.GetIndexName()),
 			)
 			// for scalar index's raw data, only load to mmap not memory
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
+			if err = segment.LoadFieldData(ctx, fieldID, info.FieldBinlog); err != nil {
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
 		}
 	}
-	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
+	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs); err != nil {
 		return err
 	}
 	// https://github.com/milvus-io/milvus/23654
@@ -1033,7 +1033,9 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	if stateLockGuard == nil {
 		return nil
 	}
-	defer stateLockGuard.Done(err)
+	defer func() {
+		stateLockGuard.Done(err)
+	}()
 
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
@@ -1076,16 +1078,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 			return err
 		}
 	}
-
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		segment.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(segment.Collection()),
-		fmt.Sprint(segment.Partition()),
-		segment.Type().String(),
-		strconv.FormatInt(int64(len(segment.Indexes())), 10),
-	).Add(float64(loadInfo.GetNumOfRows()))
-
 	return nil
 }
 
@@ -1109,7 +1101,7 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result, storage.DefaultStatsType
 }
 
-func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
+func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
 		fieldBinLog := field
@@ -1117,7 +1109,6 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 		runningGroup.Go(func() error {
 			return segment.LoadFieldData(ctx,
 				fieldID,
-				rowCount,
 				fieldBinLog,
 			)
 		})
@@ -1306,14 +1297,6 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		segment.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(segment.Collection()),
-		fmt.Sprint(segment.Partition()),
-		segment.Type().String(),
-		strconv.FormatInt(int64(len(segment.Indexes())), 10),
-	).Sub(float64(deltaData.RowCount))
 	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.RowCount))
 	return nil
 }
