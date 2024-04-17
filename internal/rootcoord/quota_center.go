@@ -471,10 +471,6 @@ func (q *QuotaCenter) collectMetrics() error {
 				fields := lo.KeyBy(coll.Fields, func(v *model.Field) int64 { return v.FieldID })
 				for _, indexInfo := range datacoordCollectionMetric.IndexInfo {
 					if _, ok := fields[indexInfo.FieldID]; !ok {
-						log.Warn("field id not found, ignore to report indexed num entities",
-							zap.Int64("collection", collectionID),
-							zap.Int64("field", indexInfo.FieldID),
-						)
 						continue
 					}
 					field := fields[indexInfo.FieldID]
