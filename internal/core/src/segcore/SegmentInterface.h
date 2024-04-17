@@ -307,7 +307,8 @@ class SegmentInternalInterface : public SegmentInterface {
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
         const int64_t* offsets,
         int64_t size,
-        bool ignore_non_pk) const;
+        bool ignore_non_pk,
+        bool pk_in_ids) const;
 
  protected:
     // internal API: return chunk_data in span
