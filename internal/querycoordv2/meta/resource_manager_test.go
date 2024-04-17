@@ -465,6 +465,66 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.Equal(0, suite.manager.GetResourceGroup("rg3").NodeNum())
 	suite.Equal(40, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 
+	suite.testTransferNode()
+
+	// Test redundant nodes recover to default resource group.
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(1, 1),
+		"rg3":                    newResourceGroupConfig(0, 0),
+		"rg2":                    newResourceGroupConfig(0, 0),
+		"rg1":                    newResourceGroupConfig(0, 0),
+	})
+	// Even default resource group has 1 node limit,
+	// all redundant nodes will be assign to default resource group if there's no resource group can hold.
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup("rg3")
+	suite.Equal(0, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(100, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	// Test redundant recover to missing nodes and missing nodes from redundant nodes.
+	// Initialize
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(0, 0),
+		"rg3":                    newResourceGroupConfig(10, 10),
+		"rg2":                    newResourceGroupConfig(80, 80),
+		"rg1":                    newResourceGroupConfig(10, 10),
+	})
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup("rg3")
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(80, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(10, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(0, 5),
+		"rg3":                    newResourceGroupConfig(5, 5),
+		"rg2":                    newResourceGroupConfig(80, 80),
+		"rg1":                    newResourceGroupConfig(20, 30),
+	})
+	suite.manager.AutoRecoverResourceGroup("rg3") // recover redundant to missing rg.
+	suite.Equal(15, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(80, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(5, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+	suite.manager.updateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(5, 5),
+		"rg3":                    newResourceGroupConfig(5, 10),
+		"rg2":                    newResourceGroupConfig(80, 80),
+		"rg1":                    newResourceGroupConfig(10, 10),
+	})
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName) // recover missing from redundant rg.
+	suite.Equal(10, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(80, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(5, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(5, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
 	// Test down all nodes.
 	for i := 1; i <= 100; i++ {
 		suite.manager.nodeMgr.Remove(int64(i))
@@ -474,4 +534,53 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
 	suite.Zero(suite.manager.GetResourceGroup("rg3").NodeNum())
 	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+}
+
+func (suite *ResourceManagerSuite) testTransferNode() {
+	// Test TransferNode.
+	// param error.
+	err := suite.manager.TransferNode("rg1", "rg1", 1)
+	suite.Error(err)
+
+	err = suite.manager.TransferNode("rg1", "rg2", 0)
+	suite.Error(err)
+
+	err = suite.manager.TransferNode("rg3", "rg2", 1)
+	suite.Error(err)
+
+	err = suite.manager.TransferNode("rg1", "rg10086", 1)
+	suite.Error(err)
+
+	err = suite.manager.TransferNode("rg10086", "rg2", 1)
+	suite.Error(err)
+
+	// success
+	err = suite.manager.TransferNode("rg1", "rg3", 5)
+	suite.NoError(err)
+
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.manager.AutoRecoverResourceGroup("rg3")
+
+	suite.Equal(15, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(40, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(5, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(40, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+}
+
+func (suite *ResourceManagerSuite) TestIncomingNode() {
+	suite.manager.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+	suite.manager.incomingNode.Insert(1)
+
+	suite.Equal(1, suite.manager.CheckIncomingNodeNum())
+	suite.manager.AssignPendingIncomingNode()
+	suite.Equal(0, suite.manager.CheckIncomingNodeNum())
+	nodes, err := suite.manager.GetNodes(DefaultResourceGroupName)
+	suite.NoError(err)
+	suite.Len(nodes, 1)
 }

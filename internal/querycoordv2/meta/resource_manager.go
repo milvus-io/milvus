@@ -226,6 +226,13 @@ func (rm *ResourceManager) updateResourceGroups(rgs map[string]*rgpb.ResourceGro
 // go:deprecated TransferNode transfer node from source resource group to target resource group.
 // Deprecated, use Declarative API `UpdateResourceGroups` instead.
 func (rm *ResourceManager) TransferNode(sourceRGName string, targetRGName string, nodeNum int) error {
+	if sourceRGName == targetRGName {
+		return merr.WrapErrParameterInvalidMsg("source resource group and target resource group should not be the same, resource group: %s", sourceRGName)
+	}
+	if nodeNum <= 0 {
+		return merr.WrapErrParameterInvalid("NumNode > 0", fmt.Sprintf("invalid NumNode %d", nodeNum))
+	}
+
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
