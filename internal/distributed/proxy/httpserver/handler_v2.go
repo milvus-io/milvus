@@ -837,7 +837,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartitionNames:     httpReq.PartitionNames,
 		SearchParams:       searchParams,
 		GuaranteeTimestamp: BoundedTimestamp,
-		Nq:                 int64(1),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
