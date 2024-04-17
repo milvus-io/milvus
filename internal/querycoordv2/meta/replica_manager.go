@@ -162,6 +162,13 @@ func (m *ReplicaManager) putReplicaInMemory(replicas ...*Replica) {
 
 // TransferReplica transfers N replicas from srcRGName to dstRGName.
 func (m *ReplicaManager) TransferReplica(collectionID typeutil.UniqueID, srcRGName string, dstRGName string, replicaNum int) error {
+	if srcRGName == dstRGName {
+		return merr.WrapErrParameterInvalidMsg("source resource group and target resource group should not be the same, resource group: %s", srcRGName)
+	}
+	if replicaNum <= 0 {
+		return merr.WrapErrParameterInvalid("NumReplica > 0", fmt.Sprintf("invalid NumReplica %d", replicaNum))
+	}
+
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
