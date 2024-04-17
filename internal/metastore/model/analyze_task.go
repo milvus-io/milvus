@@ -22,7 +22,6 @@ import (
 )
 
 type AnalyzeTask struct {
-	TenantID      string
 	CollectionID  int64
 	PartitionID   int64
 	FieldID       int64
@@ -45,7 +44,6 @@ func UnmarshalAnalyzeTask(info *indexpb.AnalyzeTask) *AnalyzeTask {
 		return nil
 	}
 	return &AnalyzeTask{
-		TenantID:      "",
 		CollectionID:  info.GetCollectionID(),
 		PartitionID:   info.GetPartitionID(),
 		FieldID:       info.GetFieldID(),
@@ -93,7 +91,6 @@ func CloneAnalyzeTask(t *AnalyzeTask) *AnalyzeTask {
 		return t
 	}
 	return &AnalyzeTask{
-		TenantID:      t.TenantID,
 		CollectionID:  t.CollectionID,
 		PartitionID:   t.PartitionID,
 		FieldID:       t.FieldID,

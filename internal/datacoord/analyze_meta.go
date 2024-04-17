@@ -79,37 +79,17 @@ func (m *analyzeMeta) saveTask(newTask *model.AnalyzeTask) error {
 	return nil
 }
 
-// checkTask is checking and prompting only when creating tasks.
-// Please don't use it.
-func (m *analyzeMeta) checkTask(task *model.AnalyzeTask) {
-	if t := m.tasks[task.TaskID]; t != nil {
-		log.Warn("task already exist with taskID", zap.Int64("taskID", task.TaskID),
-			zap.Int64("collectionID", task.CollectionID), zap.Int64("partitionID", task.PartitionID))
-	}
-
-	for _, t := range m.tasks {
-		if t.CollectionID == task.CollectionID && t.PartitionID == task.PartitionID &&
-			t.State != indexpb.JobState_JobStateFinished && t.State != indexpb.JobState_JobStateFailed {
-			log.Warn("there is already exist task with partition and it not finished",
-				zap.Int64("taskID", task.TaskID),
-				zap.Int64("collectionID", task.CollectionID), zap.Int64("partitionID", task.PartitionID))
-			break
-		}
-	}
-}
-
 func (m *analyzeMeta) GetTask(taskID int64) *model.AnalyzeTask {
 	m.RLock()
 	defer m.RUnlock()
 
-	return model.CloneAnalyzeTask(m.tasks[taskID])
+	return m.tasks[taskID]
 }
 
 func (m *analyzeMeta) AddAnalyzeTask(task *model.AnalyzeTask) error {
 	m.Lock()
 	defer m.Unlock()
 
-	m.checkTask(task)
 	log.Info("add analyze task", zap.Int64("taskID", task.TaskID),
 		zap.Int64("collectionID", task.CollectionID), zap.Int64("partitionID", task.PartitionID))
 	return m.saveTask(task)
@@ -186,9 +166,5 @@ func (m *analyzeMeta) GetAllTasks() map[int64]*model.AnalyzeTask {
 	m.RLock()
 	defer m.RUnlock()
 
-	tasks := make(map[int64]*model.AnalyzeTask)
-	for taskID, t := range m.tasks {
-		tasks[taskID] = model.CloneAnalyzeTask(t)
-	}
-	return tasks
+	return m.tasks
 }
