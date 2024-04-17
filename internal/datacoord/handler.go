@@ -397,7 +397,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 	ctx2, cancel := context.WithTimeout(ctx, time.Second*10)
 	defer cancel()
 	if err := retry.Do(ctx2, func() error {
-		err := h.s.loadCollectionFromRootCoord(ctx, collectionID)
+		err := h.s.loadCollectionFromRootCoord(ctx2, collectionID)
 		if err != nil {
 			log.Warn("failed to load collection from rootcoord", zap.Int64("collectionID", collectionID), zap.Error(err))
 			return err
@@ -407,6 +407,7 @@ func (h *ServerHandler) GetCollection(ctx context.Context, collectionID UniqueID
 		log.Ctx(ctx2).Warn("datacoord ServerHandler GetCollection finally failed",
 			zap.Int64("collectionID", collectionID),
 			zap.Error(err))
+		return nil, err
 	}
 
 	return h.s.meta.GetCollection(collectionID), nil
