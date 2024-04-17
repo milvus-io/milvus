@@ -19,13 +19,13 @@ package segments
 import (
 	"context"
 	"fmt"
-	"go.opentelemetry.io/otel"
-	"golang.org/x/sync/errgroup"
 	"math"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
