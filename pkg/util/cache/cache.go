@@ -1,3 +1,19 @@
+// Licensed to the LF AI & Data foundation under one
+// or more contributor license agreements. See the NOTICE file
+// distributed with this work for additional information
+// regarding copyright ownership. The ASF licenses this file
+// to you under the Apache License, Version 2.0 (the
+// "License"); you may not use this file except in compliance
+// with the License. You may obtain a copy of the License at
+//
+//     http://www.apache.org/licenses/LICENSE-2.0
+//
+// Unless required by applicable law or agreed to in writing, software
+// distributed under the License is distributed on an "AS IS" BASIS,
+// WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+// See the License for the specific language governing permissions and
+// limitations under the License.
+
 package cache
 
 import (
@@ -114,9 +130,30 @@ func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
 	}
 }
 
+type Stats struct {
+	HitCount            atomic.Uint64
+	MissCount           atomic.Uint64
+	LoadSuccessCount    atomic.Uint64
+	LoadFailCount       atomic.Uint64
+	TotalLoadTimeMs     atomic.Uint64
+	TotalFinalizeTimeMs atomic.Uint64
+	EvictionCount       atomic.Uint64
+}
+
 type Cache[K comparable, V any] interface {
-	Do(key K, doer func(V) error) (bool, error)
-	DoWait(key K, timeout time.Duration, doer func(V) error) (bool, error)
+	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
+	// completes.
+	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
+	// Throws `ErrNotEnoughSpace` if there is no room for the operation.
+	Do(key K, doer func(V) error) (missing bool, err error)
+	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
+	// completes. The function waits for `timeout` if there is not enough space for the given key.
+	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
+	// Throws `ErrTimeOut` if timed out.
+	DoWait(key K, timeout time.Duration, doer func(V) error) (missing bool, err error)
+	// Get stats
+	Stats() *Stats
+
 	MarkItemNeedReload(key K) bool
 
 	// Expire removes the item from the cache.
@@ -144,8 +181,8 @@ type lruCache[K comparable, V any] struct {
 	items          map[K]*list.Element
 	accessList     *list.List
 	loaderKeyLocks *lock.KeyLock[K]
-
-	waitQueue *list.List
+	stats          *Stats
+	waitQueue      *list.List
 
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
@@ -218,6 +255,7 @@ func newLRUCache[K comparable, V any](
 		accessList:     list.New(),
 		waitQueue:      list.New(),
 		loaderKeyLocks: lock.NewKeyLock[K](),
+		stats:          new(Stats),
 		loader:         loader,
 		finalizer:      finalizer,
 		scavenger:      scavenger,
@@ -284,6 +322,10 @@ func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error
 	}
 }
 
+func (c *lruCache[K, V]) Stats() *Stats {
+	return c.stats
+}
+
 func (c *lruCache[K, V]) Unpin(key K) {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
@@ -347,9 +389,11 @@ func (c *lruCache[K, V]) peekAndPin(key K) *cacheItem[K, V] {
 // GetAndPin gets and pins the given key if it exists
 func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], bool, error) {
 	if item := c.peekAndPin(key); item != nil {
+		c.stats.HitCount.Inc()
 		return item, false, nil
 	}
 
+	c.stats.MissCount.Inc()
 	if c.loader != nil {
 		// Try scavenge if there is room. If not, fail fast.
 		//	Note that the test is not accurate since we are not locking `loader` here.
@@ -362,12 +406,16 @@ func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], bool, error) {
 		if item := c.peekAndPin(key); item != nil {
 			return item, false, nil
 		}
+		timer := time.Now()
 		value, ok := c.loader(key)
+		c.stats.TotalLoadTimeMs.Add(uint64(time.Since(timer).Milliseconds()))
 		if !ok {
+			c.stats.LoadFailCount.Inc()
 			log.Debug("loader failed for key", zap.Any("key", key))
 			return nil, true, ErrNoSuchItem
 		}
 
+		c.stats.LoadSuccessCount.Inc()
 		item, err := c.setAndPin(key, value)
 		if err != nil {
 			log.Debug("setAndPin failed for key", zap.Any("key", key), zap.Error(err))
@@ -459,6 +507,7 @@ func (c *lruCache[K, V]) Expire(key K) (evicted bool) {
 }
 
 func (c *lruCache[K, V]) evict(key K) {
+	c.stats.EvictionCount.Inc()
 	e := c.items[key]
 	delete(c.items, key)
 	c.accessList.Remove(e)
