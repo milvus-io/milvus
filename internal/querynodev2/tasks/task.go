@@ -435,7 +435,6 @@ func (t *StreamingSearchTask) Execute() error {
 			reduceErr := t.streamReduce(t.ctx, searchReq.Plan(), result, t.originNqs, t.originTopks)
 			return reduceErr
 		}
-		defer segments.DeleteStreamReduceHelper(t.streamReducer)
 		pinnedSegments, err = segments.SearchHistoricalStreamly(
 			t.ctx,
 			t.segmentManager,
@@ -444,6 +443,7 @@ func (t *StreamingSearchTask) Execute() error {
 			nil,
 			req.GetSegmentIDs(),
 			streamReduceFunc)
+		defer segments.DeleteStreamReduceHelper(t.streamReducer)
 		if err != nil {
 			log.Error("Failed to search sealed segments streamly", zap.Error(err))
 			return err
