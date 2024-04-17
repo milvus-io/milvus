@@ -119,7 +119,7 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		FieldType:     t.FieldType,
 		Dim:           t.Dim,
 		SegmentStats:  make(map[int64]*indexpb.SegmentStats),
-		Version:       t.Version + 1,
+		Version:       t.Version,
 		StorageConfig: storageConfig,
 	}
 
