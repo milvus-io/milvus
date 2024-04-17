@@ -160,6 +160,68 @@ func TestLRUCache(t *testing.T) {
 	})
 }
 
+func TestStats(t *testing.T) {
+	cacheBuilder := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+		return key, true
+	})
+
+	t.Run("test loader", func(t *testing.T) {
+		size := 10
+		cache := cacheBuilder.WithCapacity(int64(size)).Build()
+		stats := cache.Stats()
+		assert.Equal(t, uint64(0), stats.HitCount.Load())
+		assert.Equal(t, uint64(0), stats.MissCount.Load())
+		assert.Equal(t, uint64(0), stats.EvictionCount.Load())
+		assert.Equal(t, uint64(0), stats.TotalLoadTimeMs.Load())
+		assert.Equal(t, uint64(0), stats.TotalFinalizeTimeMs.Load())
+		assert.Equal(t, uint64(0), stats.LoadSuccessCount.Load())
+		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
+
+		for i := 0; i < size; i++ {
+			_, err := cache.Do(i, func(v int) error {
+				assert.Equal(t, i, v)
+				return nil
+			})
+			assert.NoError(t, err)
+		}
+		assert.Equal(t, uint64(0), stats.HitCount.Load())
+		assert.Equal(t, uint64(size), stats.MissCount.Load())
+		assert.Equal(t, uint64(0), stats.EvictionCount.Load())
+		// assert.True(t, stats.TotalLoadTimeMs.Load() > 0)
+		assert.Equal(t, uint64(0), stats.TotalFinalizeTimeMs.Load())
+		assert.Equal(t, uint64(size), stats.LoadSuccessCount.Load())
+		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
+
+		for i := 0; i < size; i++ {
+			_, err := cache.Do(i, func(v int) error {
+				assert.Equal(t, i, v)
+				return nil
+			})
+			assert.NoError(t, err)
+		}
+		assert.Equal(t, uint64(size), stats.HitCount.Load())
+		assert.Equal(t, uint64(size), stats.MissCount.Load())
+		assert.Equal(t, uint64(0), stats.EvictionCount.Load())
+		assert.Equal(t, uint64(0), stats.TotalFinalizeTimeMs.Load())
+		assert.Equal(t, uint64(size), stats.LoadSuccessCount.Load())
+		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
+
+		for i := size; i < size*2; i++ {
+			_, err := cache.Do(i, func(v int) error {
+				assert.Equal(t, i, v)
+				return nil
+			})
+			assert.NoError(t, err)
+		}
+		assert.Equal(t, uint64(size), stats.HitCount.Load())
+		assert.Equal(t, uint64(size*2), stats.MissCount.Load())
+		assert.Equal(t, uint64(size), stats.EvictionCount.Load())
+		// assert.True(t, stats.TotalFinalizeTimeMs.Load() > 0)
+		assert.Equal(t, uint64(size*2), stats.LoadSuccessCount.Load())
+		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
+	})
+}
+
 func TestLRUCacheConcurrency(t *testing.T) {
 	t.Run("test race condition", func(t *testing.T) {
 		numEvict := new(atomic.Int32)
