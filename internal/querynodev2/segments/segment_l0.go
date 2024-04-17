@@ -87,7 +87,7 @@ func (s *L0Segment) MemSize() int64 {
 	defer s.dataGuard.RUnlock()
 	return lo.SumBy(s.pks, func(pk storage.PrimaryKey) int64 {
 		return pk.Size() + 8
-	})
+	}) + int64(len(s.tss))*8
 }
 
 func (s *L0Segment) LastDeltaTimestamp() uint64 {
