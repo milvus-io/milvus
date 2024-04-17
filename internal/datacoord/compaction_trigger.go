@@ -23,7 +23,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -313,34 +311,17 @@ func (t *compactionTrigger) allocSignalID() (UniqueID, error) {
 	return t.allocator.allocID(ctx)
 }
 
-func (t *compactionTrigger) reCalcSegmentMaxNumOfRows(collectionID UniqueID, isDisk bool) (int, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
-	defer cancel()
-	collMeta, err := t.handler.GetCollection(ctx, collectionID)
-	if err != nil {
-		return -1, fmt.Errorf("failed to get collection %d", collectionID)
-	}
-	if isDisk {
-		return t.estimateDiskSegmentPolicy(collMeta.Schema)
-	}
-	return t.estimateNonDiskSegmentPolicy(collMeta.Schema)
-}
-
-// TODO: Updated segment info should be written back to meta and etcd, write in here without lock is very dangerous
-func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool, error) {
-	if len(segments) == 0 {
-		return false, nil
-	}
-
-	collectionID := segments[0].GetCollectionID()
-	indexInfos := t.meta.indexMeta.GetIndexesForCollection(segments[0].GetCollectionID(), "")
+func (t *compactionTrigger) getExpectedSegmentSize(collectionID int64) int64 {
+	indexInfos := t.meta.indexMeta.GetIndexesForCollection(collectionID, "")
 
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 	collMeta, err := t.handler.GetCollection(ctx, collectionID)
 	if err != nil {
-		return false, fmt.Errorf("failed to get collection %d", collectionID)
+		log.Warn("failed to get collection", zap.Int64("collectionID", collectionID), zap.Error(err))
+		return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
+
 	vectorFields := typeutil.GetVectorFieldSchemas(collMeta.Schema)
 	fieldIndexTypes := lo.SliceToMap(indexInfos, func(t *model.Index) (int64, indexparamcheck.IndexType) {
 		return t.FieldID, GetIndexType(t.IndexParams)
@@ -352,49 +333,13 @@ func (t *compactionTrigger) updateSegmentMaxSize(segments []*SegmentInfo) (bool,
 		return false
 	})
 
-	updateSegments := func(segments []*SegmentInfo, newMaxRows int64, isDiskAnn bool) error {
-		for idx, segmentInfo := range segments {
-			if segmentInfo.GetMaxRowNum() != newMaxRows {
-				log.Info("segment max row recalculated",
-					zap.Int64("segmentID", segmentInfo.GetID()),
-					zap.Int64("old max rows", segmentInfo.GetMaxRowNum()),
-					zap.Int64("new max rows", newMaxRows),
-					zap.Bool("isDiskANN", isDiskAnn),
-				)
-				err := t.meta.UpdateSegment(segmentInfo.GetID(), SetMaxRowCount(newMaxRows))
-				if err != nil && !errors.Is(err, merr.ErrSegmentNotFound) {
-					return err
-				}
-				segments[idx] = t.meta.GetSegment(segmentInfo.GetID())
-			}
-		}
-		return nil
-	}
-
 	allDiskIndex := len(vectorFields) == len(vectorFieldsWithDiskIndex)
 	if allDiskIndex {
 		// Only if all vector fields index type are DiskANN, recalc segment max size here.
-		newMaxRows, err := t.reCalcSegmentMaxNumOfRows(collectionID, true)
-		if err != nil {
-			return false, err
-		}
-		err = updateSegments(segments, int64(newMaxRows), true)
-		if err != nil {
-			return false, err
-		}
+		return Params.DataCoordCfg.DiskSegmentMaxSize.GetAsInt64() * 1024 * 1024
 	}
 	// If some vector fields index type are not DiskANN, recalc segment max size using default policy.
-	if !allDiskIndex && !t.testingOnly {
-		newMaxRows, err := t.reCalcSegmentMaxNumOfRows(collectionID, false)
-		if err != nil {
-			return allDiskIndex, err
-		}
-		err = updateSegments(segments, int64(newMaxRows), true)
-		if err != nil {
-			return false, err
-		}
-	}
-	return allDiskIndex, nil
+	return Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
 }
 
 func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
@@ -451,12 +396,6 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			group.segments = FilterInIndexedSegments(t.handler, t.meta, group.segments...)
 		}
 
-		isDiskIndex, err := t.updateSegmentMaxSize(group.segments)
-		if err != nil {
-			log.Warn("failed to update segment max size", zap.Error(err))
-			continue
-		}
-
 		coll, err := t.getCollection(group.collectionID)
 		if err != nil {
 			log.Warn("get collection info failed, skip handling compaction", zap.Error(err))
@@ -479,7 +418,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			return err
 		}
 
-		plans := t.generatePlans(group.segments, signal.isForce, isDiskIndex, ct)
+		plans := t.generatePlans(group.segments, signal.isForce, ct)
 		for _, plan := range plans {
 			segIDs := fetchSegIDs(plan.GetSegmentBinlogs())
 
@@ -551,12 +490,6 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	isDiskIndex, err := t.updateSegmentMaxSize(segments)
-	if err != nil {
-		log.Warn("failed to update segment max size", zap.Error(err))
-		return
-	}
-
 	ts, err := t.allocTs()
 	if err != nil {
 		log.Warn("allocate ts failed, skip to handle compaction", zap.Int64("collectionID", signal.collectionID),
@@ -589,7 +522,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		return
 	}
 
-	plans := t.generatePlans(segments, signal.isForce, isDiskIndex, ct)
+	plans := t.generatePlans(segments, signal.isForce, ct)
 	for _, plan := range plans {
 		if t.compactionHandler.isFull() {
 			log.Warn("compaction plan skipped due to handler full", zap.Int64("collection", signal.collectionID), zap.Int64("planID", plan.PlanID))
@@ -618,20 +551,25 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 }
 
-func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, isDiskIndex bool, compactTime *compactTime) []*datapb.CompactionPlan {
+func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, force bool, compactTime *compactTime) []*datapb.CompactionPlan {
+	if len(segments) == 0 {
+		log.Warn("the number of candidate segments is 0, skip to generate compaction plan")
+		return []*datapb.CompactionPlan{}
+	}
+
 	// find segments need internal compaction
 	// TODO add low priority candidates, for example if the segment is smaller than full 0.9 * max segment size but larger than small segment boundary, we only execute compaction when there are no compaction running actively
 	var prioritizedCandidates []*SegmentInfo
 	var smallCandidates []*SegmentInfo
 	var nonPlannedSegments []*SegmentInfo
 
-	expectedSize := Params.DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	expectedSize := t.getExpectedSegmentSize(segments[0].CollectionID)
 
 	// TODO, currently we lack of the measurement of data distribution, there should be another compaction help on redistributing segment based on scalar/vector field distribution
 	for _, segment := range segments {
 		segment := segment.ShadowClone()
 		// TODO should we trigger compaction periodically even if the segment has no obvious reason to be compacted?
-		if force || t.ShouldDoSingleCompaction(segment, isDiskIndex, compactTime) {
+		if force || t.ShouldDoSingleCompaction(segment, compactTime) {
 			prioritizedCandidates = append(prioritizedCandidates, segment)
 		} else if t.isSmallSegment(segment, expectedSize) {
 			smallCandidates = append(smallCandidates, segment)
@@ -866,7 +804,7 @@ func isExpandableSmallSegment(segment *SegmentInfo, expectedSize int64) bool {
 	return segment.getSegmentSize() < int64(float64(expectedSize)*(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()-1))
 }
 
-func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, isDiskIndex bool, compactTime *compactTime) bool {
+func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compactTime *compactTime) bool {
 	// no longer restricted binlog numbers because this is now related to field numbers
 
 	binlogCount := GetBinlogCount(segment.GetBinlogs())
