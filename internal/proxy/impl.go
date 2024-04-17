@@ -2706,17 +2706,16 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	return it.result, nil
 }
 
-func GetDBAndCollectionRateSubLabels(req any) []string {
-	subLabels := make([]string, 2)
+func GetCollectionRateSubLabel(req any) string {
 	dbName, _ := requestutil.GetDbNameFromRequest(req)
-	if dbName != "" {
-		subLabels[0] = ratelimitutil.GetDBSubLabel(dbName.(string))
+	if dbName == "" {
+		return ""
 	}
 	collectionName, _ := requestutil.GetCollectionNameFromRequest(req)
-	if collectionName != "" {
-		subLabels[1] = ratelimitutil.GetCollectionSubLabel(dbName.(string), collectionName.(string))
+	if collectionName == "" {
+		return ""
 	}
-	return subLabels
+	return ratelimitutil.GetCollectionSubLabel(dbName.(string), collectionName.(string))
 }
 
 // Search searches the most similar records of requests.
@@ -2753,8 +2752,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		request.GetCollectionName(),
 	).Add(float64(request.GetNq()))
 
-	subLabels := GetDBAndCollectionRateSubLabels(request)
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()), subLabels...)
+	subLabel := GetCollectionRateSubLabel(request)
+	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()), subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -2931,7 +2930,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		}
 
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabels...)
+		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -2962,12 +2961,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		request.GetCollectionName(),
 	).Add(float64(receiveSize))
 
-	subLabels := GetDBAndCollectionRateSubLabels(request)
+	subLabel := GetCollectionRateSubLabel(request)
 	allNQ := int64(0)
 	for _, searchRequest := range request.Requests {
 		allNQ += searchRequest.GetNq()
 	}
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(allNQ), subLabels...)
+	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(allNQ), subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -3128,7 +3127,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		}
 
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabels...)
+		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -3275,8 +3274,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		request.GetCollectionName(),
 	).Add(float64(1))
 
-	subLabels := GetDBAndCollectionRateSubLabels(request)
-	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabels...)
+	subLabel := GetCollectionRateSubLabel(request)
+	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -3394,7 +3393,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	sentSize := proto.Size(qt.result)
-	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabels...)
+	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 
 	return qt.result, nil
