@@ -18,7 +18,9 @@ package indexnode
 
 import (
 	"context"
+	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -105,9 +107,9 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 			}
 		}
 	}
-	
+
 	// compute num clusters to train
-	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(at.req.GetDim()) * typeutil.VectorTypeSize(at.req.GetFieldType())   // Byte
+	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(at.req.GetDim()) * typeutil.VectorTypeSize(at.req.GetFieldType()) // Byte
 	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / float64(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())))
 	log.Info("plan to analyze with", zap.Float64("total segments raw data size(GB)", float64(totalSegmentsRawDataSize)/1024.0/1024.0/1024.0), zap.Int64("num_clusters", numClusters))
 
@@ -148,39 +150,42 @@ func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
 			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-	// No upload interface. TODO(xiaocai): help refine this
-	// files, err := at.analyze.UpLoad()
-	// if err != nil {
-	// 	log.Error("failed to upload index", zap.Error(err))
-	// 	gc()
-	// 	return err
-	// }
-	// centroidsFile := ""
-	// segmentOffsetMapping := make(map[int64]string)
-	// for file := range files {
-	// 	if strings.Contains(file, "centroid") {
-	// 		centroidsFile = file
-	// 		continue
-	// 	}
-	// 	for segID := range at.req.GetSegmentStats() {
-	// 		if strings.Contains(file, fmt.Sprintf("%d", segID)) {
-	// 			segmentOffsetMapping[segID] = file
-	// 			break
-	// 		}
-	// 	}
-	// }
-	// encodeIndexFileDur := at.tr.Record("index serialize and upload done")
-	// metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
+
+	centroidsFile, centroidsFileSize, offsetMappingFiles, offsetMappingFilesSize, err := at.analyze.UpLoad(len(at.req.GetSegmentStats()))
+	if err != nil {
+		log.Error("failed to upload index", zap.Error(err))
+		gc()
+		return err
+	}
+	log.Info("debug for analyze result", zap.String("centroidsFile", centroidsFile),
+		zap.Int64("centroidsFileSize", centroidsFileSize))
+	segmentsOffsetMappingFiles := make(map[int64]string)
+	segmentsOffsetMappingFilesSize := make(map[string]int64)
+	for i, file := range offsetMappingFiles {
+		for segID := range at.req.GetSegmentStats() {
+			if strings.Contains(file, fmt.Sprintf("%d", segID)) {
+				segmentsOffsetMappingFiles[segID] = file
+				segmentsOffsetMappingFilesSize[file] = offsetMappingFilesSize[i]
+				log.Info("debug for analyze result", zap.Int64("segID", segID),
+					zap.String("offsetMappingFile", file),
+					zap.Int64("offsetMappingFileSize", offsetMappingFilesSize[i]))
+				break
+			}
+		}
+	}
 
 	// early release analyze for gc, and we can ensure that Delete is idempotent.
 	gc()
 
 	at.endTime = time.Now().UnixMicro()
-	// saveIndexFileDur := at.tr.RecordSpan()
-	// metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
-	// at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(), at.req.GetTaskID(), centroidsFile, segmentOffsetMapping)
-	// at.tr.Elapse("index building all done")
-	// log.Info("Successfully save analyze files")
+	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(),
+		at.req.GetTaskID(),
+		centroidsFile,
+		segmentsOffsetMappingFiles,
+		centroidsFileSize,
+		segmentsOffsetMappingFilesSize)
+	at.tr.Elapse("index building all done")
+	log.Info("Successfully save analyze files")
 	return nil
 }
 

@@ -658,7 +658,7 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 	return &analyzeMeta{
 		ctx:     context.Background(),
 		catalog: catalog,
-		tasks: map[int64]*model.AnalyzeTask{
+		tasks: map[int64]*indexpb.AnalyzeTask{
 			1: {
 				CollectionID: s.collectionID,
 				PartitionID:  s.partitionID,
@@ -807,7 +807,7 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 
 	s.Run("enqueue", func() {
 		taskID := int64(6)
-		newTask := &model.AnalyzeTask{
+		newTask := &indexpb.AnalyzeTask{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
 			FieldID:      s.fieldID,

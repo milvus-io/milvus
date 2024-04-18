@@ -21,7 +21,6 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/milvus-io/milvus/internal/storage"
 )
 

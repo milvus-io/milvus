@@ -29,7 +29,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -358,7 +357,7 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 
 		// clustering compaction firstly analyze the plan, then decide whether to execute compaction
 		if typeutil.IsVectorType(job.clusteringKeyType) {
-			newAnalyzeTask := &model.AnalyzeTask{
+			newAnalyzeTask := &indexpb.AnalyzeTask{
 				CollectionID: job.collectionID,
 				PartitionID:  plan.SegmentBinlogs[0].PartitionID,
 				FieldID:      job.clusteringKeyID,
@@ -366,6 +365,7 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 				FieldType:    job.clusteringKeyType,
 				SegmentIDs:   segIDs,
 				TaskID:       analyzeTaskID,
+				State:        indexpb.JobState_JobStateInit,
 			}
 			err = t.meta.analyzeMeta.AddAnalyzeTask(newAnalyzeTask)
 			if err != nil {
@@ -381,7 +381,7 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 			})
 			log.Info("submit analyze task", zap.Int64("id", analyzeTaskID))
 
-			var analyzeTask *model.AnalyzeTask
+			var analyzeTask *indexpb.AnalyzeTask
 			analyzeFinished := func() bool {
 				analyzeTask = t.meta.analyzeMeta.GetTask(analyzeTaskID)
 				log.Debug("check analyze task state", zap.Int64("id", analyzeTaskID), zap.String("state", analyzeTask.State.String()))

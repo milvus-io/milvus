@@ -31,10 +31,15 @@ import "C"
 
 import (
 	"context"
+	"runtime"
+	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type CodecAnalyze interface {
 	Delete() error
+	UpLoad(size int) (string, int64, []string, []int64, error)
 }
 
 func Analyze(ctx context.Context, analyzeInfo *AnalyzeInfo) (CodecAnalyze, error) {
@@ -64,5 +69,51 @@ func (ca *CgoAnalyze) Delete() error {
 	status := C.DeleteAnalyze(ca.analyzePtr)
 	ca.close = true
 	return HandleCStatus(&status, "failed to delete analyze")
-	// return nil
+}
+
+func (ca *CgoAnalyze) UpLoad(size int) (string, int64, []string, []int64, error) {
+	var cBinarySet C.CBinarySet
+
+	status := C.SerializeAnalyzeAndUpLoad(ca.analyzePtr, &cBinarySet)
+	defer func() {
+		if cBinarySet != nil {
+			C.DeleteBinarySet(cBinarySet)
+		}
+	}()
+	if err := HandleCStatus(&status, "failed to upload analyze result"); err != nil {
+		return "", 0, nil, nil, err
+	}
+
+	cOffsetMappingFilesPath := make([]unsafe.Pointer, size)
+	cOffsetMappingFilesSize := make([]C.int64_t, size)
+	cCentroidsFilePath := C.CString("")
+	cCentroidsFileSize := C.int64_t(0)
+	defer C.free(unsafe.Pointer(cCentroidsFilePath))
+
+	status = C.GetAnalyzeResult(ca.analyzePtr,
+		&cCentroidsFilePath,
+		&cCentroidsFileSize,
+		unsafe.Pointer(&cOffsetMappingFilesPath[0]),
+		&cOffsetMappingFilesSize[0],
+	)
+	if err := HandleCStatus(&status, "failed to delete analyze"); err != nil {
+		return "", 0, nil, nil, err
+	}
+	offsetMappingFilesPath := make([]string, size)
+	offsetMappingFilesSize := make([]int64, size)
+	centroidsFilePath := C.GoString(cCentroidsFilePath)
+	centroidsFileSize := int64(cCentroidsFileSize)
+
+	for i := 0; i < size; i++ {
+		offsetMappingFilesPath[i] = C.GoString((*C.char)(cOffsetMappingFilesPath[i]))
+		offsetMappingFilesSize[i] = int64(C.int64_t(cOffsetMappingFilesSize[i]))
+	}
+
+	runtime.SetFinalizer(ca, func(ca *CgoAnalyze) {
+		if ca != nil && !ca.close {
+			log.Error("there is leakage in analyze object, please check.")
+		}
+	})
+
+	return centroidsFilePath, centroidsFileSize, offsetMappingFilesPath, offsetMappingFilesSize, nil
 }

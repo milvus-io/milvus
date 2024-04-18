@@ -429,10 +429,6 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 
 	err = t.Prepare(context.Background())
 	suite.NoError(err)
-	//err = t.BuildIndex(context.Background())
-	//suite.NoError(err)
-	//err = t.SaveIndexFiles(context.Background())
-	//suite.NoError(err)
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {

@@ -21,10 +21,10 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -38,14 +38,14 @@ type analyzeMeta struct {
 
 	// taskID -> analyzeStats
 	// TODO: when to mark as dropped?
-	tasks map[int64]*model.AnalyzeTask
+	tasks map[int64]*indexpb.AnalyzeTask
 }
 
 func newAnalyzeMeta(ctx context.Context, catalog metastore.DataCoordCatalog) (*analyzeMeta, error) {
 	mt := &analyzeMeta{
 		ctx:     ctx,
 		catalog: catalog,
-		tasks:   make(map[int64]*model.AnalyzeTask),
+		tasks:   make(map[int64]*indexpb.AnalyzeTask),
 	}
 
 	if err := mt.reloadFromKV(); err != nil {
@@ -71,7 +71,7 @@ func (m *analyzeMeta) reloadFromKV() error {
 	return nil
 }
 
-func (m *analyzeMeta) saveTask(newTask *model.AnalyzeTask) error {
+func (m *analyzeMeta) saveTask(newTask *indexpb.AnalyzeTask) error {
 	if err := m.catalog.SaveAnalyzeTask(m.ctx, newTask); err != nil {
 		return err
 	}
@@ -79,14 +79,14 @@ func (m *analyzeMeta) saveTask(newTask *model.AnalyzeTask) error {
 	return nil
 }
 
-func (m *analyzeMeta) GetTask(taskID int64) *model.AnalyzeTask {
+func (m *analyzeMeta) GetTask(taskID int64) *indexpb.AnalyzeTask {
 	m.RLock()
 	defer m.RUnlock()
 
 	return m.tasks[taskID]
 }
 
-func (m *analyzeMeta) AddAnalyzeTask(task *model.AnalyzeTask) error {
+func (m *analyzeMeta) AddAnalyzeTask(task *indexpb.AnalyzeTask) error {
 	m.Lock()
 	defer m.Unlock()
 
@@ -119,7 +119,7 @@ func (m *analyzeMeta) UpdateVersion(taskID int64) error {
 		return fmt.Errorf("there is no task with taskID: %d", taskID)
 	}
 
-	cloneT := model.CloneAnalyzeTask(t)
+	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.Version++
 	log.Info("update task version", zap.Int64("taskID", taskID), zap.Int64("newVersion", cloneT.Version))
 	return m.saveTask(cloneT)
@@ -134,7 +134,7 @@ func (m *analyzeMeta) BuildingTask(taskID, nodeID int64) error {
 		return fmt.Errorf("there is no task with taskID: %d", taskID)
 	}
 
-	cloneT := model.CloneAnalyzeTask(t)
+	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.NodeID = nodeID
 	cloneT.State = indexpb.JobState_JobStateInProgress
 	log.Info("task will be building", zap.Int64("taskID", taskID), zap.Int64("nodeID", nodeID))
@@ -154,7 +154,7 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *indexpb.AnalyzeResult) er
 	log.Info("finish task meta...", zap.Int64("taskID", taskID), zap.String("state", result.GetState().String()),
 		zap.String("failReason", result.GetFailReason()))
 
-	cloneT := model.CloneAnalyzeTask(t)
+	cloneT := proto.Clone(t).(*indexpb.AnalyzeTask)
 	cloneT.State = result.GetState()
 	cloneT.FailReason = result.GetFailReason()
 	cloneT.CentroidsFile = result.GetCentroidsFile()
@@ -162,7 +162,7 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *indexpb.AnalyzeResult) er
 	return m.saveTask(cloneT)
 }
 
-func (m *analyzeMeta) GetAllTasks() map[int64]*model.AnalyzeTask {
+func (m *analyzeMeta) GetAllTasks() map[int64]*indexpb.AnalyzeTask {
 	m.RLock()
 	defer m.RUnlock()
 

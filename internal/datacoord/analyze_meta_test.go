@@ -24,9 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 )
 
@@ -50,7 +48,7 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	s.initParams()
 
 	catalog := mocks.NewDataCoordCatalog(s.T())
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*model.AnalyzeTask{
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*indexpb.AnalyzeTask{
 		{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
@@ -119,7 +117,7 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	})
 
 	s.Run("AddAnalyzeTask", func() {
-		t := &model.AnalyzeTask{
+		t := &indexpb.AnalyzeTask{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
 			FieldID:      s.fieldID,
@@ -151,7 +149,7 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 	s.Run("BuildingTask", func() {
 		err := am.BuildingTask(1, 1)
 		s.NoError(err)
-		s.Equal(commonpb.IndexState_InProgress, am.GetTask(1).State)
+		s.Equal(indexpb.JobState_JobStateInProgress, am.GetTask(1).State)
 	})
 
 	s.Run("FinishTask", func() {
@@ -160,7 +158,7 @@ func (s *AnalyzeMetaSuite) Test_AnalyzeMeta() {
 			State:  indexpb.JobState_JobStateFinished,
 		})
 		s.NoError(err)
-		s.Equal(commonpb.IndexState_Finished, am.GetTask(1).State)
+		s.Equal(indexpb.JobState_JobStateFinished, am.GetTask(1).State)
 	})
 }
 
@@ -174,7 +172,7 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 	s.Error(err)
 	s.Nil(am)
 
-	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*model.AnalyzeTask{
+	catalog.EXPECT().ListAnalyzeTasks(mock.Anything).Return([]*indexpb.AnalyzeTask{
 		{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
@@ -192,7 +190,7 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
 	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
 	s.Run("AddAnalyzeTask", func() {
-		t := &model.AnalyzeTask{
+		t := &indexpb.AnalyzeTask{
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
 			FieldID:      s.fieldID,
@@ -226,7 +224,7 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 		err = am.BuildingTask(1, 1)
 		s.Error(err)
 		s.Equal(int64(0), am.GetTask(1).NodeID)
-		s.Equal(commonpb.IndexState_Unissued, am.GetTask(1).State)
+		s.Equal(indexpb.JobState_JobStateInit, am.GetTask(1).State)
 	})
 
 	s.Run("FinishTask", func() {
@@ -238,7 +236,7 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 			State:  indexpb.JobState_JobStateFinished,
 		})
 		s.Error(err)
-		s.Equal(commonpb.IndexState_Unissued, am.GetTask(1).State)
+		s.Equal(indexpb.JobState_JobStateInit, am.GetTask(1).State)
 	})
 }
 

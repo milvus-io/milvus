@@ -853,8 +853,8 @@ func (kc *Catalog) DropClusteringCompactionInfo(ctx context.Context, info *datap
 	return kc.MetaKv.Remove(key)
 }
 
-func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*model.AnalyzeTask, error) {
-	tasks := make([]*model.AnalyzeTask, 0)
+func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
+	tasks := make([]*indexpb.AnalyzeTask, 0)
 
 	_, values, err := kc.MetaKv.LoadWithPrefix(AnalyzeTaskPrefix)
 	if err != nil {
@@ -866,15 +866,15 @@ func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*model.AnalyzeTask, 
 		if err != nil {
 			return nil, err
 		}
-		tasks = append(tasks, model.UnmarshalAnalyzeTask(task))
+		tasks = append(tasks, task)
 	}
 	return tasks, nil
 }
 
-func (kc *Catalog) SaveAnalyzeTask(ctx context.Context, task *model.AnalyzeTask) error {
+func (kc *Catalog) SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error {
 	key := buildAnalyzeTaskKey(task.TaskID)
 
-	value, err := proto.Marshal(model.MarshalAnalyzeTask(task))
+	value, err := proto.Marshal(task)
 	if err != nil {
 		return err
 	}

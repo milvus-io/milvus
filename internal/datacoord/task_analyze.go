@@ -20,6 +20,9 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
+
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -151,6 +154,30 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		}
 	}
 
+	collInfo, err := dependency.handler.GetCollection(ctx, segments[0].GetCollectionID())
+	if err != nil {
+		log.Ctx(ctx).Info("analyze task get collection info failed", zap.Int64("collectionID",
+			segments[0].GetCollectionID()), zap.Error(err))
+		at.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return false, false
+	}
+
+	schema := collInfo.Schema
+	var field *schemapb.FieldSchema
+
+	for _, f := range schema.Fields {
+		if f.FieldID == t.FieldID {
+			field = f
+			break
+		}
+	}
+
+	dim, err := storage.GetDimFromParams(field.TypeParams)
+	if err != nil {
+		at.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return false, false
+	}
+	req.Dim = int64(dim)
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
 	collInfo, err := dependency.handler.GetCollection(ctx, segments[0].GetCollectionID())
@@ -199,11 +226,7 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 }
 
 func (at *analyzeTask) setResult(result *indexpb.AnalyzeResult) {
-	at.taskInfo.TaskID = at.GetTaskID()
-	at.taskInfo.State = result.GetState()
-	at.taskInfo.FailReason = result.GetFailReason()
-	at.taskInfo.CentroidsFile = result.GetCentroidsFile()
-	at.taskInfo.OffsetMapping = result.GetOffsetMapping()
+	at.taskInfo = result
 }
 
 func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {

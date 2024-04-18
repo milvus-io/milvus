@@ -20,6 +20,8 @@ import (
 	"context"
 	"path"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -32,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"go.uber.org/zap"
 )
 
 type indexBuildTask struct {
@@ -278,11 +279,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 }
 
 func (it *indexBuildTask) setResult(info *indexpb.IndexTaskInfo) {
-	it.taskInfo.State = info.GetState()
-	it.taskInfo.IndexFileKeys = info.GetIndexFileKeys()
-	it.taskInfo.SerializedSize = info.GetSerializedSize()
-	it.taskInfo.FailReason = info.GetFailReason()
-	it.taskInfo.CurrentIndexVersion = info.GetCurrentIndexVersion()
+	it.taskInfo = info
 }
 
 func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeClient) {
