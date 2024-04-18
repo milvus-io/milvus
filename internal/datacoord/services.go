@@ -194,7 +194,13 @@ func (s *Server) AssignSegmentID(ctx context.Context, req *datapb.AssignSegmentI
 			r.CollectionID, r.PartitionID, r.ChannelName, int64(r.Count))
 		if err != nil {
 			log.Warn("failed to alloc segment", zap.Any("request", r), zap.Error(err))
-			return nil, err
+			assigns = append(assigns, &datapb.SegmentIDAssignment{
+				ChannelName:  r.ChannelName,
+				CollectionID: r.CollectionID,
+				PartitionID:  r.PartitionID,
+				Status:       merr.Status(err),
+			})
+			continue
 		}
 
 		log.Info("success to assign segments", zap.Int64("collectionID", r.GetCollectionID()), zap.Any("assignments", segmentAllocations))
