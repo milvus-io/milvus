@@ -428,6 +428,44 @@ func TestDatabaseWrapper(t *testing.T) {
 			}
 		})
 	}
+
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		Status:  &StatusSuccess,
+		DbNames: []string{DefaultCollectionName, "default"},
+	}, nil).Once()
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		Status:  &StatusSuccess,
+		DbNames: []string{DefaultCollectionName, "test"},
+	}, nil).Once()
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{Status: commonErrorStatus}, nil).Once()
+	rawTestCases := []rawTestCase{
+		{
+			errMsg:  "database not found, database: test",
+			errCode: 800, // ErrDatabaseNotFound
+		},
+		{},
+		{
+			errMsg:  "",
+			errCode: 65535,
+		},
+	}
+	for _, testcase := range rawTestCases {
+		t.Run("post with db"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
+			req.Header.Set(HTTPHeaderDBName, "test")
+			w := httptest.NewRecorder()
+			ginHandler.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			if testcase.errCode != 0 {
+				returnBody := &ReturnErrMsg{}
+				err := json.Unmarshal(w.Body.Bytes(), returnBody)
+				assert.Nil(t, err)
+				assert.Equal(t, testcase.errCode, returnBody.Code)
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
 }
 
 func TestCreateCollection(t *testing.T) {
