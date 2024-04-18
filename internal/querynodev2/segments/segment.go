@@ -225,6 +225,8 @@ type LocalSegment struct {
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
 	fieldIndexes       *typeutil.ConcurrentMap[int64, *IndexedFieldInfo]
 	space              *milvus_storage.Space
+
+	released *atomic.Bool
 }
 
 func NewSegment(ctx context.Context,
@@ -287,6 +289,7 @@ func NewSegment(ctx context.Context,
 		memSize:     atomic.NewInt64(-1),
 		rowNum:      atomic.NewInt64(-1),
 		insertCount: atomic.NewInt64(0),
+		released:    atomic.NewBool(false),
 	}
 
 	if segmentType != SegmentTypeSealed {
@@ -354,6 +357,7 @@ func NewSegmentV2(
 		memSize:            atomic.NewInt64(-1),
 		rowNum:             atomic.NewInt64(-1),
 		insertCount:        atomic.NewInt64(0),
+		released:           atomic.NewBool(false),
 	}
 
 	if segmentType != SegmentTypeSealed {
@@ -731,6 +735,7 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 
 	s.rowNum.Store(-1)
 	s.lastDeltaTimestamp.Store(timestamps[len(timestamps)-1])
+	s.released.Store(true)
 
 	return nil
 }
@@ -1276,11 +1281,19 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 
 			cFieldID := C.int64_t(fieldID)
 			status = C.WarmupChunkCache(s.ptr, cFieldID)
-			if err := HandleCStatus(ctx, &status, ""); err != nil {
+			if err := HandleCStatus(ctx, &status, "warming up chunk cache failed"); err != nil {
 				log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
 				return nil, err
 			}
 			log.Info("warming up chunk cache asynchronously done")
+			if s.released.Load() {
+				status = C.ReleaseChunkCache(s.ptr)
+				if err := HandleCStatus(ctx, &status, "release chunk cache failed"); err != nil {
+					log.Warn("release chunk cache failed", zap.Error(err))
+					return nil, err
+				}
+				log.Info("release chunk cache due to segment is deleted")
+			}
 			return nil, nil
 		})
 	default:

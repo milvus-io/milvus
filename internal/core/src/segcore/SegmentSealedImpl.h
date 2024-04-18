@@ -271,6 +271,9 @@ class SegmentSealedImpl : public SegmentSealed {
     void
     WarmupChunkCache(const FieldId field_id) override;
 
+    void
+    ReleaseChunkCache() override;
+
     bool
     generate_interim_index(const FieldId field_id);
 

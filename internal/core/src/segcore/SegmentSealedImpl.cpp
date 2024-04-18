@@ -151,6 +151,20 @@ SegmentSealedImpl::WarmupChunkCache(const FieldId field_id) {
 }
 
 void
+SegmentSealedImpl::ReleaseChunkCache() {
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    if (cc == nullptr) {
+        return;
+    }
+    // munmap and remove binlog from chunk cache
+    for (const auto& iter : field_data_info_.field_infos) {
+        for (const auto& binlog : iter.second.insert_files) {
+            cc->Remove(binlog);
+        }
+    }
+}
+
+void
 SegmentSealedImpl::LoadScalarIndex(const LoadIndexInfo& info) {
     // NOTE: lock only when data is ready to avoid starvation
     auto field_id = FieldId(info.field_id);
@@ -1003,16 +1017,7 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
 }
 
 SegmentSealedImpl::~SegmentSealedImpl() {
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
-    if (cc == nullptr) {
-        return;
-    }
-    // munmap and remove binlog from chunk cache
-    for (const auto& iter : field_data_info_.field_infos) {
-        for (const auto& binlog : iter.second.insert_files) {
-            cc->Remove(binlog);
-        }
-    }
+    ReleaseChunkCache();
 }
 
 void
@@ -1137,16 +1142,7 @@ SegmentSealedImpl::ClearData() {
         variable_fields_avg_size_.clear();
         stats_.mem_size = 0;
     }
-    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
-    if (cc == nullptr) {
-        return;
-    }
-    // munmap and remove binlog from chunk cache
-    for (const auto& iter : field_data_info_.field_infos) {
-        for (const auto& binlog : iter.second.insert_files) {
-            cc->Remove(binlog);
-        }
-    }
+    ReleaseChunkCache();
 }
 
 std::unique_ptr<DataArray>

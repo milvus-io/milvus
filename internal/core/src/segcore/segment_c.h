@@ -132,6 +132,9 @@ AddFieldDataInfoForSealed(CSegmentInterface c_segment,
 CStatus
 WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id);
 
+CStatus
+ReleaseChunkCache(CSegmentInterface c_segment);
+
 //////////////////////////////    interfaces for SegmentInterface    //////////////////////////////
 CStatus
 ExistPk(CSegmentInterface c_segment,

@@ -444,3 +444,18 @@ WarmupChunkCache(CSegmentInterface c_segment, int64_t field_id) {
         return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
     }
 }
+
+CStatus
+ReleaseChunkCache(CSegmentInterface c_segment) {
+    try {
+        auto segment_interface =
+            reinterpret_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto segment =
+            dynamic_cast<milvus::segcore::SegmentSealed*>(segment_interface);
+        AssertInfo(segment != nullptr, "segment conversion failed");
+        segment->ReleaseChunkCache();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(milvus::UnexpectedError, e.what());
+    }
+}

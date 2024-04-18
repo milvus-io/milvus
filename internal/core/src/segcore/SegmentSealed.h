@@ -42,6 +42,8 @@ class SegmentSealed : public SegmentInternalInterface {
     AddFieldDataInfoForSealed(const LoadFieldDataInfo& field_data_info) = 0;
     virtual void
     WarmupChunkCache(const FieldId field_id) = 0;
+    virtual void
+    ReleaseChunkCache() = 0;
 
     SegmentType
     type() const override {
