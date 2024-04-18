@@ -45,6 +45,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 180
     steps:
+      - name: 'Setup $HOME'
+        # hot fix
+        run: |
+            # Check if $HOME is not set
+            if [ -z "$HOME" ]; then
+                # Set $HOME to /root if it is not set
+                echo '$HOME was no set'
+                export HOME=/home/zilliz-user
+            fi
+            echo "HOME variable is:$HOME"
       - name: Setup mold
         uses: rui314/setup-mold@v1
       - name: Maximize build space
