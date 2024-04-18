@@ -203,7 +203,14 @@ func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeCl
 			log.Ctx(ctx).Info("query analysis task info successfully",
 				zap.Int64("taskID", at.GetTaskID()), zap.String("result state", result.GetState().String()),
 				zap.String("failReason", result.GetFailReason()))
-			at.setResult(result)
+			if result.GetState() == indexpb.JobState_JobStateFinished || result.GetState() == indexpb.JobState_JobStateFailed ||
+				result.GetState() == indexpb.JobState_JobStateRetry {
+				// state is retry or finished or failed
+				at.setResult(result)
+			} else if result.GetState() == indexpb.JobState_JobStateNone {
+				at.SetState(indexpb.JobState_JobStateRetry, "analyze task state is none in info response")
+			}
+			// inProgress or unissued/init, keep InProgress state
 			return
 		}
 	}
