@@ -98,7 +98,7 @@ func (suite *SegmentSuite) SetupTest() {
 	g, err := suite.sealed.(*LocalSegment).StartLoadData()
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
-		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, binlog)
+		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
 	g.Done(nil)

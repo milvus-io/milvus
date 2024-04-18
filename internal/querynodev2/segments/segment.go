@@ -84,7 +84,7 @@ type baseSegment struct {
 
 	segmentType    SegmentType
 	bloomFilterSet *pkoracle.BloomFilterSet
-	loadInfo       *querypb.SegmentLoadInfo
+	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
 	isLazyLoad     bool
 
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
@@ -95,7 +95,7 @@ type baseSegment struct {
 func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) baseSegment {
 	return baseSegment{
 		collection:         collection,
-		loadInfo:           loadInfo,
+		loadInfo:           atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
 		version:            atomic.NewInt64(version),
 		isLazyLoad:         isLazyLoad(collection, segmentType),
 		segmentType:        segmentType,
@@ -115,11 +115,11 @@ func isLazyLoad(collection *Collection, segmentType SegmentType) bool {
 
 // ID returns the identity number.
 func (s *baseSegment) ID() int64 {
-	return s.loadInfo.GetSegmentID()
+	return s.loadInfo.Load().GetSegmentID()
 }
 
 func (s *baseSegment) Collection() int64 {
-	return s.loadInfo.GetCollectionID()
+	return s.loadInfo.Load().GetCollectionID()
 }
 
 func (s *baseSegment) GetCollection() *Collection {
@@ -127,7 +127,7 @@ func (s *baseSegment) GetCollection() *Collection {
 }
 
 func (s *baseSegment) Partition() int64 {
-	return s.loadInfo.GetPartitionID()
+	return s.loadInfo.Load().GetPartitionID()
 }
 
 func (s *baseSegment) DatabaseName() string {
@@ -139,7 +139,7 @@ func (s *baseSegment) ResourceGroup() string {
 }
 
 func (s *baseSegment) Shard() string {
-	return s.loadInfo.GetInsertChannel()
+	return s.loadInfo.Load().GetInsertChannel()
 }
 
 func (s *baseSegment) Type() SegmentType {
@@ -147,11 +147,11 @@ func (s *baseSegment) Type() SegmentType {
 }
 
 func (s *baseSegment) Level() datapb.SegmentLevel {
-	return s.loadInfo.GetLevel()
+	return s.loadInfo.Load().GetLevel()
 }
 
 func (s *baseSegment) StartPosition() *msgpb.MsgPosition {
-	return s.loadInfo.GetStartPosition()
+	return s.loadInfo.Load().GetStartPosition()
 }
 
 func (s *baseSegment) Version() int64 {
@@ -163,11 +163,7 @@ func (s *baseSegment) CASVersion(old, newVersion int64) bool {
 }
 
 func (s *baseSegment) LoadInfo() *querypb.SegmentLoadInfo {
-	if s.segmentType == SegmentTypeGrowing {
-		// Growing segment do not have load info.
-		return nil
-	}
-	return s.loadInfo
+	return s.loadInfo.Load()
 }
 
 func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
@@ -192,7 +188,7 @@ func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 		return *cache
 	}
 
-	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.loadInfo, resourceEstimateFactor{
+	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
 		memoryUsageFactor:        1.0,
 		memoryIndexUsageFactor:   1.0,
 		enableTempSegmentIndex:   false,
@@ -216,7 +212,7 @@ func (s *baseSegment) NeedUpdatedVersion() int64 {
 }
 
 func (s *baseSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
-	s.loadInfo = loadInfo
+	s.loadInfo.Store(loadInfo)
 }
 
 func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
@@ -382,7 +378,8 @@ func NewSegmentV2(
 }
 
 func (s *LocalSegment) initializeSegment() error {
-	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(s.loadInfo)
+	loadInfo := s.loadInfo.Load()
+	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
 	schemaHelper, _ := typeutil.CreateSchemaHelper(s.collection.Schema())
 
 	for fieldID, info := range indexedFieldInfos {
@@ -401,7 +398,7 @@ func (s *LocalSegment) initializeSegment() error {
 		if !typeutil.IsVectorType(field.GetDataType()) && !s.HasRawData(fieldID) {
 			s.fields.Insert(fieldID, &FieldInfo{
 				FieldBinlog: *info.FieldBinlog,
-				RowCount:    s.loadInfo.GetNumOfRows(),
+				RowCount:    loadInfo.GetNumOfRows(),
 			})
 		}
 	}
@@ -409,12 +406,12 @@ func (s *LocalSegment) initializeSegment() error {
 	for _, binlogs := range fieldBinlogs {
 		s.fields.Insert(binlogs.FieldID, &FieldInfo{
 			FieldBinlog: *binlogs,
-			RowCount:    s.loadInfo.GetNumOfRows(),
+			RowCount:    loadInfo.GetNumOfRows(),
 		})
 	}
 
 	// Update the insert count when initialize the segment and update the metrics.
-	s.insertCount.Store(s.loadInfo.GetNumOfRows())
+	s.insertCount.Store(loadInfo.GetNumOfRows())
 	metrics.QueryNodeNumEntities.WithLabelValues(
 		s.DatabaseName(),
 		fmt.Sprint(paramtable.GetNodeID()),
@@ -422,7 +419,7 @@ func (s *LocalSegment) initializeSegment() error {
 		fmt.Sprint(s.Partition()),
 		s.Type().String(),
 		strconv.FormatInt(int64(len(s.Indexes())), 10),
-	).Add(float64(s.loadInfo.GetNumOfRows()))
+	).Add(float64(loadInfo.GetNumOfRows()))
 
 	return nil
 }
@@ -448,7 +445,6 @@ func (s *LocalSegment) InsertCount() int64 {
 func (s *LocalSegment) RowNum() int64 {
 	// if segment is not loaded, return 0 (maybe not loaded or release by lru)
 	if !s.ptrLock.RLockIf(state.IsDataLoaded) {
-		log.Warn("segment is not valid", zap.Int64("segmentID", s.ID()))
 		return 0
 	}
 	defer s.ptrLock.RUnlock()
@@ -806,8 +802,9 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 
 // -------------------------------------------------------------------------------------- interfaces for sealed segment
 func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
-	rowCount := s.loadInfo.GetNumOfRows()
-	fields := s.loadInfo.GetBinlogPaths()
+	loadInfo := s.loadInfo.Load()
+	rowCount := loadInfo.GetNumOfRows()
+	fields := loadInfo.GetBinlogPaths()
 
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
@@ -873,9 +870,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, field *datapb.FieldBinlog) error {
-	rowCount := s.loadInfo.GetNumOfRows()
-
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -1433,7 +1428,7 @@ func (s *LocalSegment) RemoveFieldFile(fieldId int64) {
 
 func (s *LocalSegment) RemoveUnusedFieldFiles() error {
 	schema := s.collection.Schema()
-	indexInfos, _ := separateIndexAndBinlog(s.loadInfo)
+	indexInfos, _ := separateIndexAndBinlog(s.LoadInfo())
 	for _, indexInfo := range indexInfos {
 		need, err := s.indexNeedLoadRawData(schema, indexInfo)
 		if err != nil {
