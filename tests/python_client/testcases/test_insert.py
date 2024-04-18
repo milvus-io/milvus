@@ -2143,6 +2143,7 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/2042")
     @pytest.mark.parametrize("dim", [127, 129, 200])
     def test_upsert_dim_unmatch(self, dim):
         """
