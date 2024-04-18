@@ -385,7 +385,7 @@ func (m *indexMeta) GetSegmentIndexState(collID, segmentID UniqueID, indexID Uni
 	return state
 }
 
-func (m *indexMeta) GetIndexedSegments(collectionID int64, fieldIDs []UniqueID) []int64 {
+func (m *indexMeta) GetIndexedSegments(collectionID int64, segmentIDs, fieldIDs []UniqueID) []int64 {
 	m.RLock()
 	defer m.RUnlock()
 
@@ -412,9 +412,11 @@ func (m *indexMeta) GetIndexedSegments(collectionID int64, fieldIDs []UniqueID) 
 	}
 
 	ret := make([]int64, 0)
-	for sid, indexes := range m.segmentIndexes {
-		if checkSegmentState(indexes) {
-			ret = append(ret, sid)
+	for _, sid := range segmentIDs {
+		if indexes, ok := m.segmentIndexes[sid]; ok {
+			if checkSegmentState(indexes) {
+				ret = append(ret, sid)
+			}
 		}
 	}
 

@@ -399,43 +399,35 @@ func (c *ChannelStore) GetNodesChannels() []*NodeChannelInfo {
 
 // GetBufferChannelInfo returns all unassigned channels.
 func (c *ChannelStore) GetBufferChannelInfo() *NodeChannelInfo {
-	for id, info := range c.channelsInfo {
-		if id == bufferID {
-			return info
-		}
+	if info, ok := c.channelsInfo[bufferID]; ok {
+		return info
 	}
 	return nil
 }
 
 // GetNode returns the channel info of a given node.
 func (c *ChannelStore) GetNode(nodeID int64) *NodeChannelInfo {
-	for id, info := range c.channelsInfo {
-		if id == nodeID {
-			return info
-		}
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		return info
 	}
 	return nil
 }
 
 func (c *ChannelStore) GetNodeChannelCount(nodeID int64) int {
-	for id, info := range c.channelsInfo {
-		if id == nodeID {
-			return len(info.Channels)
-		}
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		return len(info.Channels)
 	}
 	return 0
 }
 
 // Delete removes the given node from the channel store and returns its channels.
 func (c *ChannelStore) Delete(nodeID int64) ([]RWChannel, error) {
-	for id, info := range c.channelsInfo {
-		if id == nodeID {
-			if err := c.remove(nodeID); err != nil {
-				return nil, err
-			}
-			delete(c.channelsInfo, id)
-			return lo.Values(info.Channels), nil
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		if err := c.remove(nodeID); err != nil {
+			return nil, err
 		}
+		delete(c.channelsInfo, nodeID)
+		return lo.Values(info.Channels), nil
 	}
 	return nil, nil
 }
