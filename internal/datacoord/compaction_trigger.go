@@ -84,7 +84,6 @@ type compactionTrigger struct {
 	quit              chan struct{}
 	wg                sync.WaitGroup
 
-	clusteringCompactionTicker  *time.Ticker
 	clusteringCompactionManager *ClusteringCompactionManager
 
 	indexEngineVersionManager IndexEngineVersionManager
@@ -122,7 +121,6 @@ func newCompactionTrigger(
 func (t *compactionTrigger) start() {
 	t.quit = make(chan struct{})
 	t.globalTrigger = time.NewTicker(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
-	t.clusteringCompactionTicker = time.NewTicker(Params.DataCoordCfg.ClusteringCompactionInterval.GetAsDuration(time.Second))
 	t.wg.Add(3)
 	go func() {
 		defer logutil.LogPanic()
@@ -188,19 +186,21 @@ func (t *compactionTrigger) startGlobalCompactionLoop() {
 func (t *compactionTrigger) startClusteringCompactionLoop() {
 	defer logutil.LogPanic()
 	defer t.wg.Done()
-
 	t.clusteringCompactionManager.start()
+	clusteringCompactionTicker := time.NewTicker(paramtable.Get().DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
+	defer clusteringCompactionTicker.Stop()
 	for {
 		select {
 		case <-t.quit:
-			t.clusteringCompactionTicker.Stop()
+			clusteringCompactionTicker.Stop()
 			log.Info("clustering compaction loop exit")
 			return
-		case <-t.clusteringCompactionTicker.C:
+		case <-clusteringCompactionTicker.C:
 			err := t.triggerClusteringCompaction()
 			if err != nil {
 				log.Warn("unable to triggerClusteringCompaction", zap.Error(err))
 			}
+			clusteringCompactionTicker.Reset(paramtable.Get().DataCoordCfg.ClusteringCompactionTriggerInterval.GetAsDuration(time.Second))
 		}
 	}
 }
@@ -594,14 +594,20 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 }
 
 func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionSignal) error {
-	t.forceMu.Lock()
-	defer t.forceMu.Unlock()
-
 	if !Params.DataCoordCfg.ClusteringCompactionEnable.GetAsBool() {
 		err := merr.WrapErrClusteringCompactionClusterNotSupport()
 		log.Warn(err.Error())
 		return err
 	}
+
+	ts, err := t.allocTs()
+	if err != nil {
+		log.Warn("allocate ts failed, skip to handle compaction")
+		return err
+	}
+
+	t.forceMu.Lock()
+	defer t.forceMu.Unlock()
 
 	log := log.With(zap.Int64("compactionID", signal.id), zap.Int64("collectionID", signal.collectionID))
 
@@ -641,12 +647,6 @@ func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionS
 		return nil
 	}
 
-	ts, err := t.allocTs()
-	if err != nil {
-		log.Warn("allocate ts failed, skip to handle compaction")
-		return err
-	}
-
 	clusteringCompactionJob := &ClusteringCompactionJob{
 		triggerID:         signal.id,
 		collectionID:      signal.collectionID,
@@ -655,7 +655,7 @@ func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionS
 		clusteringKeyType: clusteringKeyField.DataType,
 		startTime:         ts,
 		state:             pipelining,
-		pipeliningPlans:   make([]*datapb.CompactionPlan, 0),
+		compactionPlans:   make([]*datapb.CompactionPlan, 0),
 	}
 
 	for _, group := range partSegments {
@@ -690,13 +690,12 @@ func (t *compactionTrigger) handleClusteringCompactionSignal(signal *compactionS
 
 		plans := t.clusteringCompactionManager.fillClusteringCompactionPlans(group.segments, clusteringKeyField.FieldID, ct)
 		// mark all segments prepare for clustering compaction
-		// todo： for now, no need to set compacting = false, as they will be set after compaction done or failed
-		// however, if we split clustering compaction into multi sub compaction task and support retry fail sub task,
-		// we need to manage compacting state correctly
 		t.setSegmentsCompacting(plans, true)
-		clusteringCompactionJob.pipeliningPlans = append(clusteringCompactionJob.pipeliningPlans, plans...)
+		for _, plan := range plans {
+			clusteringCompactionJob.addCompactionPlan(plan, pipelining)
+		}
 	}
-	if len(clusteringCompactionJob.pipeliningPlans) > 0 {
+	if len(clusteringCompactionJob.compactionPlans) > 0 {
 		t.clusteringCompactionManager.submit(clusteringCompactionJob)
 	}
 	return nil

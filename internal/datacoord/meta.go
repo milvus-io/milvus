@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
 
@@ -70,6 +71,7 @@ type meta struct {
 	channelCPs            *channelCPs                  // vChannel -> channel checkpoint/see position
 	chunkManager          storage.ChunkManager
 	clusteringCompactions map[string]*datapb.ClusteringCompactionInfo
+	partitionStatsInfos   map[string]*datapb.PartitionStatsInfo
 
 	indexMeta   *indexMeta
 	analyzeMeta *analyzeMeta
@@ -124,6 +126,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		analyzeMeta:           am,
 		chunkManager:          chunkManager,
 		clusteringCompactions: make(map[string]*datapb.ClusteringCompactionInfo, 0),
+		partitionStatsInfos:   make(map[string]*datapb.PartitionStatsInfo, 0),
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -186,6 +189,14 @@ func (m *meta) reloadFromKV() error {
 	}
 	for _, info := range compactionInfos {
 		m.clusteringCompactions[fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID)] = info
+	}
+
+	partitionStatsInfos, err := m.catalog.ListPartitionStatsInfos(m.ctx)
+	if err != nil {
+		return err
+	}
+	for _, info := range partitionStatsInfos {
+		m.partitionStatsInfos[fmt.Sprintf("%d/%d/%s/%d", info.CollectionID, info.PartitionID, info.VChannel, info.Version)] = info
 	}
 
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
@@ -1582,38 +1593,37 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 	segToUpdate.State = targetState
 }
 
-// GetClonedClusteringCompactionInfos returns cloned ClusteringCompactionInfos from local cache
-func (m *meta) GetClonedClusteringCompactionInfos() []*datapb.ClusteringCompactionInfo {
+// GetClusteringCompactionInfos returns cloned ClusteringCompactionInfos from local cache
+func (m *meta) GetClusteringCompactionInfos() []*datapb.ClusteringCompactionInfo {
 	m.RLock()
 	defer m.RUnlock()
 	infos := make([]*datapb.ClusteringCompactionInfo, 0)
 	for _, info := range m.clusteringCompactions {
-		cloneInfo := &datapb.ClusteringCompactionInfo{
-			TriggerID:       info.GetTriggerID(),
-			CollectionID:    info.GetCollectionID(),
-			ClusteringKeyID: info.GetClusteringKeyID(),
-			State:           info.GetState(),
-			StartTime:       info.GetStartTime(),
-			LastUpdateTime:  info.GetLastUpdateTime(),
-			PipeliningPlans: info.GetPipeliningPlans(),
-			ExecutingPlans:  info.GetExecutingPlans(),
-			CompletedPlans:  info.GetCompletedPlans(),
-			FailedPlans:     info.GetFailedPlans(),
-			TimeoutPlans:    info.GetTimeoutPlans(),
-			AnalyzeTaskID:   info.GetAnalyzeTaskID(),
-		}
-		infos = append(infos, cloneInfo)
+		infos = append(infos, info)
 	}
 	return infos
 }
 
-// GetClusteringCompactionInfos get clustering compaction infos by collection id
-func (m *meta) GetClusteringCompactionInfos(collectionID UniqueID) []*datapb.ClusteringCompactionInfo {
+// GetClusteringCompactionInfosByID get clustering compaction infos by collection id
+func (m *meta) GetClusteringCompactionInfosByID(collectionID UniqueID) []*datapb.ClusteringCompactionInfo {
 	m.RLock()
 	defer m.RUnlock()
 	res := make([]*datapb.ClusteringCompactionInfo, 0)
 	for _, info := range m.clusteringCompactions {
 		if info.CollectionID == collectionID {
+			res = append(res, info)
+		}
+	}
+	return res
+}
+
+// GetClusteringCompactionInfosByTriggerID get clustering compaction infos by collection id
+func (m *meta) GetClusteringCompactionInfosByTriggerID(triggerID UniqueID) []*datapb.ClusteringCompactionInfo {
+	m.RLock()
+	defer m.RUnlock()
+	res := make([]*datapb.ClusteringCompactionInfo, 0)
+	for _, info := range m.clusteringCompactions {
+		if info.TriggerID == triggerID {
 			res = append(res, info)
 		}
 	}
@@ -1641,5 +1651,55 @@ func (m *meta) SaveClusteringCompactionInfo(info *datapb.ClusteringCompactionInf
 		return err
 	}
 	m.clusteringCompactions[fmt.Sprintf("%d-%d", info.CollectionID, info.TriggerID)] = info
+	return nil
+}
+
+func (m *meta) ListAllPartitionStatsInfos() []*datapb.PartitionStatsInfo {
+	m.RLock()
+	defer m.RUnlock()
+	res := make([]*datapb.PartitionStatsInfo, 0)
+	for _, partitionStats := range m.partitionStatsInfos {
+		res = append(res, partitionStats)
+	}
+	return res
+}
+
+func (m *meta) ListPartitionStatsInfos(collectionID int64, partitionID int64, vchannel string) []*datapb.PartitionStatsInfo {
+	m.RLock()
+	defer m.RUnlock()
+	res := make([]*datapb.PartitionStatsInfo, 0)
+	keyPrefix := fmt.Sprintf("%d/%d/%s/", collectionID, partitionID, vchannel)
+	for key, partitionStats := range m.partitionStatsInfos {
+		if strings.HasPrefix(key, keyPrefix) {
+			res = append(res, partitionStats)
+		}
+	}
+	return res
+}
+
+func (m *meta) SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
+	m.Lock()
+	defer m.Unlock()
+	if err := m.catalog.SavePartitionStatsInfo(m.ctx, info); err != nil {
+		log.Error("meta update: update PartitionStatsInfo info fail", zap.Error(err))
+		return err
+	}
+	m.partitionStatsInfos[fmt.Sprintf("%d/%d/%s/%d", info.CollectionID, info.PartitionID, info.VChannel, info.Version)] = info
+	return nil
+}
+
+func (m *meta) DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
+	m.Lock()
+	defer m.Unlock()
+	if err := m.catalog.DropPartitionStatsInfo(m.ctx, info); err != nil {
+		log.Error("meta update: drop PartitionStatsInfo info fail",
+			zap.Int64("collectionID", info.CollectionID),
+			zap.Int64("partitionID", info.PartitionID),
+			zap.String("vchannel", info.VChannel),
+			zap.Int64("version", info.Version),
+			zap.Error(err))
+		return err
+	}
+	delete(m.partitionStatsInfos, fmt.Sprintf("%d/%d/%s/%d", info.CollectionID, info.PartitionID, info.VChannel, info.Version))
 	return nil
 }

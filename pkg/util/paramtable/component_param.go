@@ -2591,8 +2591,9 @@ type dataCoordConfig struct {
 	// Clustering Compaction
 	ClusteringCompactionEnable                ParamItem `refreshable:"true"`
 	ClusteringCompactionAutoEnable            ParamItem `refreshable:"true"`
-	ClusteringCompactionInterval              ParamItem `refreshable:"false"`
+	ClusteringCompactionTriggerInterval       ParamItem `refreshable:"true"`
 	ClusteringCompactionStateCheckInterval    ParamItem `refreshable:"true"`
+	ClusteringCompactionGCInterval            ParamItem `refreshable:"true"`
 	ClusteringCompactionMinInterval           ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxInterval           ParamItem `refreshable:"true"`
 	ClusteringCompactionNewDataRatioThreshold ParamItem `refreshable:"true"`
@@ -2983,12 +2984,12 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.ClusteringCompactionAutoEnable.Init(base.mgr)
 
-	p.ClusteringCompactionInterval = ParamItem{
-		Key:          "dataCoord.compaction.clustering.interval",
+	p.ClusteringCompactionTriggerInterval = ParamItem{
+		Key:          "dataCoord.compaction.clustering.triggerInterval",
 		Version:      "2.4.0",
 		DefaultValue: "600",
 	}
-	p.ClusteringCompactionInterval.Init(base.mgr)
+	p.ClusteringCompactionTriggerInterval.Init(base.mgr)
 
 	p.ClusteringCompactionStateCheckInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.stateCheckInterval",
@@ -2996,6 +2997,13 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "10",
 	}
 	p.ClusteringCompactionStateCheckInterval.Init(base.mgr)
+
+	p.ClusteringCompactionGCInterval = ParamItem{
+		Key:          "dataCoord.compaction.clustering.gcInterval",
+		Version:      "2.4.0",
+		DefaultValue: "600",
+	}
+	p.ClusteringCompactionGCInterval.Init(base.mgr)
 
 	p.ClusteringCompactionMinInterval = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minInterval",

@@ -2,10 +2,12 @@ package delegator
 
 import (
 	"context"
+	"fmt"
 	"sort"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -17,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/exprutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -38,6 +41,8 @@ func PruneSegments(ctx context.Context,
 	info PruneInfo,
 ) {
 	log := log.Ctx(ctx)
+	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("segmentPrune"))
+	defer span.End()
 	// 1. calculate filtered segments
 	filteredSegments := make(map[UniqueID]struct{}, 0)
 	clusteringKeyField := clustering.GetClusteringKeyField(schema)
@@ -46,10 +51,13 @@ func PruneSegments(ctx context.Context,
 		return
 	}
 
+	var collectionID int64
 	var expr []byte
 	if searchReq != nil {
+		collectionID = searchReq.CollectionID
 		expr = searchReq.GetSerializedExprPlan()
 	} else {
+		collectionID = queryReq.CollectionID
 		expr = queryReq.GetSerializedExprPlan()
 	}
 
@@ -114,10 +122,13 @@ func PruneSegments(ctx context.Context,
 			item.Segments = newSegments
 			sealedSegments[idx] = item
 		}
+		metrics.QueryNodeSegmentPruneRatio.
+			WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
+			Observe(float64(realFilteredSegments / totalSegNum))
 		log.RatedInfo(30, "Pruned segment for search/query",
 			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
-			zap.Float32("filtered_rate", float32(len(filteredSegments)/totalSegNum)),
+			zap.Float32("filtered_ratio", float32(realFilteredSegments/totalSegNum)),
 		)
 	}
 }

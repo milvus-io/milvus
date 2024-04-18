@@ -156,6 +156,10 @@ type DataCoordCatalog interface {
 	ListAnalyzeTasks(ctx context.Context) ([]*model.AnalyzeTask, error)
 	SaveAnalyzeTask(ctx context.Context, task *model.AnalyzeTask) error
 	DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error
+
+	ListPartitionStatsInfos(ctx context.Context) ([]*datapb.PartitionStatsInfo, error)
+	SavePartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
+	DropPartitionStatsInfo(ctx context.Context, info *datapb.PartitionStatsInfo) error
 }
 
 type QueryCoordCatalog interface {
