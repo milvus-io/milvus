@@ -128,6 +128,7 @@ type quotaConfig struct {
 	NQLimit                        ParamItem `refreshable:"true"`
 	MaxQueryResultWindow           ParamItem `refreshable:"true"`
 	MaxOutputSize                  ParamItem `refreshable:"true"`
+	MaxInsertSize                  ParamItem `refreshable:"true"`
 	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
 
 	// limit writing
@@ -1536,6 +1537,15 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		DefaultValue: "104857600", // 100 MB, 100 * 1024 * 1024
 	}
 	p.MaxOutputSize.Init(base.mgr)
+
+	p.MaxInsertSize = ParamItem{
+		Key:          "quotaAndLimits.limits.maxInsertSize",
+		Version:      "2.4.1",
+		DefaultValue: "-1", // -1 means no limit, the unit is byte
+		Doc:          `maximum size of a single insert request, in bytes, -1 means no limit`,
+		Export:       true,
+	}
+	p.MaxInsertSize.Init(base.mgr)
 
 	p.MaxResourceGroupNumOfQueryNode = ParamItem{
 		Key:          "quotaAndLimits.limits.maxResourceGroupNumOfQueryNode",

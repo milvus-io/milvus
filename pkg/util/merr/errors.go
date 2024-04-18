@@ -109,8 +109,9 @@ var (
 	ErrIoUnexpectEOF = newMilvusError("unexpected EOF", 1002, true)
 
 	// Parameter related
-	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
-	ErrParameterMissing = newMilvusError("missing parameter", 1101, false)
+	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)
+	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false)
+	ErrParameterTooLarge = newMilvusError("parameter too large", 1102, false)
 
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)

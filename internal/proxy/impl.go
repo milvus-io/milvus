@@ -2802,6 +2802,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		node:                   node,
 		lb:                     node.lbPolicy,
 		enableMaterializedView: node.enableMaterializedView,
+		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
 	guaranteeTs := request.GuaranteeTimestamp
@@ -2998,11 +2999,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: newSearchReq,
-		tr:      timerecord.NewTimeRecorder(method),
-		qc:      node.queryCoord,
-		node:    node,
-		lb:      node.lbPolicy,
+		request:             newSearchReq,
+		tr:                  timerecord.NewTimeRecorder(method),
+		qc:                  node.queryCoord,
+		node:                node,
+		lb:                  node.lbPolicy,
+		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
 	guaranteeTs := request.GuaranteeTimestamp
@@ -3412,9 +3414,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: request,
-		qc:      node.queryCoord,
-		lb:      node.lbPolicy,
+		request:             request,
+		qc:                  node.queryCoord,
+		lb:                  node.lbPolicy,
+		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 	res, err := node.query(ctx, qt)
 	if merr.Ok(res.Status) && err == nil {

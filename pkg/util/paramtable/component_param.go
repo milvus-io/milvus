@@ -1011,6 +1011,7 @@ type proxyConfig struct {
 	RetryTimesOnReplica          ParamItem `refreshable:"true"`
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
 	PartitionNameRegexp          ParamItem `refreshable:"true"`
+	MustUsePartitionKey          ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -1337,6 +1338,15 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall use partition name as regexp when searching",
 	}
 	p.PartitionNameRegexp.Init(base.mgr)
+
+	p.MustUsePartitionKey = ParamItem{
+		Key:          "proxy.mustUsePartitionKey",
+		Version:      "2.4.1",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy must use partition key for the collection",
+		Export:       true,
+	}
+	p.MustUsePartitionKey.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",

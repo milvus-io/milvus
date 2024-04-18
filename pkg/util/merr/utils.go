@@ -863,6 +863,14 @@ func WrapErrParameterMissing[T any](param T, msg ...string) error {
 	return err
 }
 
+func WrapErrParameterTooLarge(name string, msg ...string) error {
+	err := wrapFields(ErrParameterTooLarge, value("message", name))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 // Metrics related
 func WrapErrMetricNotFound(name string, msg ...string) error {
 	err := wrapFields(ErrMetricNotFound, value("metric", name))
