@@ -277,7 +277,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 	return true
 }
 
-func (it *indexBuildTask) setIndexInfo(info *indexpb.IndexTaskInfo) {
+func (it *indexBuildTask) setResult(info *indexpb.IndexTaskInfo) {
 	it.taskInfo.State = info.GetState()
 	it.taskInfo.IndexFileKeys = info.GetIndexFileKeys()
 	it.taskInfo.SerializedSize = info.GetSerializedSize()
@@ -307,7 +307,14 @@ func (it *indexBuildTask) QueryResult(ctx context.Context, node types.IndexNodeC
 			log.Ctx(ctx).Info("query task index info successfully",
 				zap.Int64("taskID", it.GetTaskID()), zap.String("result state", info.GetState().String()),
 				zap.String("failReason", info.GetFailReason()))
-			it.setIndexInfo(info)
+			if info.GetState() == commonpb.IndexState_Finished || info.GetState() == commonpb.IndexState_Failed ||
+				info.GetState() == commonpb.IndexState_Retry {
+				// state is retry or finished or failed
+				it.setResult(info)
+			} else if info.GetState() == commonpb.IndexState_IndexStateNone {
+				it.SetState(indexpb.JobState_JobStateRetry, "index state is none in info response")
+			}
+			// inProgress or unissued, keep InProgress state
 			return
 		}
 	}
