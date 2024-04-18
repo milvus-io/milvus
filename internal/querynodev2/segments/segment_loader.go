@@ -482,7 +482,7 @@ func (loader *segmentLoaderV2) loadSealedSegmentFields(ctx context.Context, segm
 	runningGroup, _ := errgroup.WithContext(ctx)
 	fields.Range(func(fieldID int64, field *schemapb.FieldSchema) bool {
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(ctx, fieldID, nil)
+			return segment.LoadFieldData(ctx, fieldID, rowCount, nil)
 		})
 		return true
 	})
@@ -971,8 +971,7 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 	return indexedFieldInfos, fieldBinlogs
 }
 
-func (loader *segmentLoader) loadSealedSegment(ctx context.Context, segment *LocalSegment) error {
-	loadInfo := segment.LoadInfo()
+func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment) error {
 	collection := segment.GetCollection()
 
 	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
@@ -1002,13 +1001,13 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, segment *Loc
 				zap.String("index", info.IndexInfo.GetIndexName()),
 			)
 			// for scalar index's raw data, only load to mmap not memory
-			if err = segment.LoadFieldData(ctx, fieldID, info.FieldBinlog); err != nil {
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
 		}
 	}
-	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs); err != nil {
+	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 		return err
 	}
 	// https://github.com/milvus-io/milvus/23654
@@ -1064,7 +1063,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	defer debug.FreeOSMemory()
 
 	if segment.Type() == SegmentTypeSealed {
-		if err := loader.loadSealedSegment(ctx, segment); err != nil {
+		if err := loader.loadSealedSegment(ctx, loadInfo, segment); err != nil {
 			return err
 		}
 	} else {
@@ -1105,7 +1104,7 @@ func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBi
 	return result, storage.DefaultStatsType
 }
 
-func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog) error {
+func loadSealedSegmentFields(ctx context.Context, collection *Collection, segment *LocalSegment, fields []*datapb.FieldBinlog, rowCount int64) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	for _, field := range fields {
 		fieldBinLog := field
@@ -1113,6 +1112,7 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 		runningGroup.Go(func() error {
 			return segment.LoadFieldData(ctx,
 				fieldID,
+				rowCount,
 				fieldBinLog,
 			)
 		})

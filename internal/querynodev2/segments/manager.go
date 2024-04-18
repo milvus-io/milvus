@@ -173,20 +173,20 @@ func NewManager() *Manager {
 	}
 
 	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithLazyScavenger(func(key int64) int64 {
-		if segment, ok := segMgr.sealedSegments[key]; ok {
-			return int64(segment.ResourceUsageEstimate().DiskSize)
+		segments := segMgr.GetBy(WithID(key), WithType(SegmentTypeSealed))
+		if len(segments) == 0 {
+			return 0
 		}
-		return 0
+		return int64(segments[0].ResourceUsageEstimate().DiskSize)
 	}, diskCap).WithLoader(func(key int64) (Segment, bool) {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
-		segMgr.mu.RLock()
-		defer segMgr.mu.RUnlock()
-
-		segment, ok := segMgr.sealedSegments[key]
-		if !ok {
+		segments := segMgr.GetBy(WithID(key), WithType(SegmentTypeSealed))
+		if len(segments) == 0 {
 			// the segment has been released, just ignore it
+			log.Debug("segment is not found when loading", zap.Int64("segmentID", key))
 			return nil, false
 		}
+		segment := segments[0]
 
 		info := segment.LoadInfo()
 		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (nop interface{}, err error) {
@@ -217,13 +217,14 @@ func NewManager() *Manager {
 		segment.Release(WithReleaseScope(ReleaseScopeData))
 		return nil
 	}).WithReloader(func(key int64) (Segment, bool) {
-		segMgr.mu.RLock()
-		defer segMgr.mu.RUnlock()
-		segment, ok := segMgr.sealedSegments[key]
-		if !ok {
+		segments := segMgr.GetBy(WithID(key), WithType(SegmentTypeSealed))
+		if len(segments) == 0 {
 			// the segment has been released, just ignore it
+			log.Debug("segment is not found when reloading", zap.Int64("segmentID", key))
 			return nil, false
 		}
+		segment := segments[0]
+
 		localSegment := segment.(*LocalSegment)
 		err := manager.Loader.LoadIndex(context.Background(), localSegment, segment.LoadInfo(), segment.NeedUpdatedVersion())
 		if err != nil {
