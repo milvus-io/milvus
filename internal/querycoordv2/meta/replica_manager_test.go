@@ -319,21 +319,21 @@ func (suite *ReplicaManagerV2Suite) SetupSuite() {
 		"RG5": typeutil.NewUniqueSet(11, 12, 13, 14, 15),
 	}
 	suite.collections = map[int64]collectionLoadConfig{
-		// 1000: {
-		// 	spawnConfig: map[string]int{"RG1": 1},
-		// },
-		// 1001: {
-		// 	spawnConfig: map[string]int{"RG2": 2},
-		// },
-		// 1002: {
-		// 	spawnConfig: map[string]int{"RG3": 2},
-		// },
-		// 1003: {
-		// 	spawnConfig: map[string]int{"RG1": 1, "RG2": 1, "RG3": 1},
-		// },
-		// 1004: {
-		// 	spawnConfig: map[string]int{"RG4": 2, "RG5": 3},
-		// },
+		1000: {
+			spawnConfig: map[string]int{"RG1": 1},
+		},
+		1001: {
+			spawnConfig: map[string]int{"RG2": 2},
+		},
+		1002: {
+			spawnConfig: map[string]int{"RG3": 2},
+		},
+		1003: {
+			spawnConfig: map[string]int{"RG1": 1, "RG2": 1, "RG3": 1},
+		},
+		1004: {
+			spawnConfig: map[string]int{"RG4": 2, "RG5": 3},
+		},
 		1005: {
 			spawnConfig: map[string]int{"RG4": 3, "RG5": 2},
 		},
@@ -420,7 +420,16 @@ func (suite *ReplicaManagerV2Suite) testIfBalanced() {
 }
 
 func (suite *ReplicaManagerV2Suite) TestTransferReplica() {
-	suite.mgr.TransferReplica(1005, "RG4", "RG5", 1)
+	// param error
+	err := suite.mgr.TransferReplica(10086, "RG4", "RG5", 1)
+	suite.Error(err)
+	err = suite.mgr.TransferReplica(1005, "RG4", "RG5", 0)
+	suite.Error(err)
+	err = suite.mgr.TransferReplica(1005, "RG4", "RG4", 1)
+	suite.Error(err)
+
+	err = suite.mgr.TransferReplica(1005, "RG4", "RG5", 1)
+	suite.NoError(err)
 	suite.recoverReplica(2, true)
 	suite.testIfBalanced()
 }

@@ -1,4 +1,35 @@
+FROM rockylinux/rockylinux:8 as vcpkg-installer
+
+RUN dnf -y install curl wget tar zip unzip git \
+            gcc gcc-c++ make cmake \
+            perl-IPC-Cmd perl-Digest-SHA
+
+# install ninjia
+RUN dnf -y update && \
+    dnf -y install dnf-plugins-core && \
+    dnf config-manager --set-enabled powertools && \
+    dnf -y install ninja-build
+
+ENV VCPKG_FORCE_SYSTEM_BINARIES 1
+
+# install vcpkg
+RUN mkdir /opt/vcpkg &&  \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    rm -rf vcpkg.tar.gz
+
+# empty the vscpkg toolchains linux.cmake file to avoid the error
+RUN echo "" > /opt/vcpkg/scripts/toolchains/linux.cmake
+
+# install azure-identity-cpp azure-storage-blobs-cpp gtest via vcpkg
+RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && \
+    ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && \
+    vcpkg version && \
+    vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest 
+
+########################################################################################
 FROM rockylinux/rockylinux:8
+
+ARG TARGETARCH
 
 RUN dnf install -y make automake gcc gcc-c++ curl zip unzip tar git which \
         libaio libuuid-devel wget python3 python3-pip \
@@ -10,12 +41,19 @@ RUN dnf -y install dnf-plugins-core && \
     dnf -y install texinfo openblas-devel
 
 RUN pip3 install conan==1.61.0
-RUN wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz && tar -xvf go1.21.6.linux-amd64.tar.gz -C /usr/local
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.20.7.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go 
 RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.73 -y
 
 ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
+
+ENV VCPKG_FORCE_SYSTEM_BINARIES 1
+
+# Copy the vcpkg installed libraries
+COPY --from=vcpkg-installer /opt/vcpkg \
+                            /opt/vcpkg
+
 
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
 
