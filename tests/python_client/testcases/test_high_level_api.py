@@ -130,6 +130,7 @@ class TestHighLevelApi(TestcaseBase):
                                    check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/29880")
     def test_high_level_search_not_consistent_metric_type(self, metric_type):
         """
         target: test search with inconsistent metric type (default is IP) with that of index
