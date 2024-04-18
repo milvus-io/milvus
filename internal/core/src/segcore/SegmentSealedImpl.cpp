@@ -1028,7 +1028,7 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                                   int64_t count,
                                   void* output) const {
     AssertInfo(is_system_field_ready(),
-               "System field isn't ready when do bulk_insert");
+               "System field isn't ready when do bulk_insert, segID:{}", id_);
     switch (system_type) {
         case SystemFieldType::Timestamp:
             AssertInfo(
