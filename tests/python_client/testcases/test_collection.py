@@ -4134,6 +4134,7 @@ class TestCollectionARRAY(TestcaseBase):
         self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/2041")
     def test_collection_array_field_no_capacity(self):
         """
         target: Create a field without giving max_capacity

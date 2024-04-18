@@ -18,7 +18,7 @@ on:
       - go.mod
       - '!**.md'
       - '!build/ci/jenkins/**'
-  pull_request_target:
+  pull_request:
     # file paths to consider in the event. Optional; defaults to all.
     paths:
       - 'scripts/**'
@@ -50,11 +50,11 @@ jobs:
         run: |
             # Check if $HOME is not set
             if [ -z "$HOME" ]; then
-                # Set $HOME to /root if it is not set
                 echo '$HOME was no set'
-                export HOME=/home/zilliz-user
+                echo "HOME=/home/zilliz-user" >> $GITHUB_ENV
             fi
             echo "HOME variable is:$HOME"
+            echo "GITHUB_ENV variable is:$GITHUB_ENV"
       - name: Setup mold
         uses: rui314/setup-mold@v1
       - name: Maximize build space

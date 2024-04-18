@@ -329,6 +329,8 @@ type AliasReq struct {
 	AliasName string `json:"aliasName" binding:"required"`
 }
 
+func (req *AliasReq) GetDbName() string { return req.DbName }
+
 func (req *AliasReq) GetAliasName() string {
 	return req.AliasName
 }
