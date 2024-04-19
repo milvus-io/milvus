@@ -460,6 +460,10 @@ func (m *mockRootCoordClient) ListDatabases(ctx context.Context, in *milvuspb.Li
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) AlterCollection(ctx context.Context, request *milvuspb.AlterCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }

@@ -236,6 +236,10 @@ func Test_NewClient(t *testing.T) {
 			r, err := client.ListDatabases(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
+		{
+			r, err := client.AlterDatabase(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
 	}
 
 	client.(*Client).grpcClient = &mock.GRPCClientBase[rootcoordpb.RootCoordClient]{

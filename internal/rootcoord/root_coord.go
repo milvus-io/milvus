@@ -1290,6 +1290,58 @@ func (c *Core) AlterCollection(ctx context.Context, in *milvuspb.AlterCollection
 	return merr.Success(), nil
 }
 
+func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	method := "AlterDatabase"
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.TotalLabel).Inc()
+	tr := timerecord.NewTimeRecorder(method)
+
+	log.Ctx(ctx).Info("received request to alter database",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetDbName()),
+		zap.Any("props", in.Properties))
+
+	t := &alterDatabaseTask{
+		baseTask: newBaseTask(ctx, c),
+		Req:      in,
+	}
+
+	if err := c.scheduler.AddTask(t); err != nil {
+		log.Warn("failed to enqueue request to alter database",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.String("name", in.GetDbName()),
+			zap.Error(err))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("failed to alter database",
+			zap.String("role", typeutil.RootCoordRole),
+			zap.Error(err),
+			zap.String("name", in.GetDbName()),
+			zap.Uint64("ts", t.GetTs()))
+
+		metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
+	metrics.RootCoordDDLReqCounter.WithLabelValues(method, metrics.SuccessLabel).Inc()
+	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
+
+	log.Info("done to alter database",
+		zap.String("role", typeutil.RootCoordRole),
+		zap.String("name", in.GetDbName()),
+		zap.Uint64("ts", t.GetTs()))
+	return merr.Success(), nil
+}
+
 // CreatePartition create partition
 func (c *Core) CreatePartition(ctx context.Context, in *milvuspb.CreatePartitionRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(c.GetStateCode()); err != nil {
