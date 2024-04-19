@@ -17,7 +17,7 @@
 #pragma once
 
 #include "common/QueryInfo.h"
-#include "knowhere/index_node.h"
+#include "knowhere/index/index_node.h"
 #include "segcore/SegmentInterface.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "segcore/SegmentSealedImpl.h"

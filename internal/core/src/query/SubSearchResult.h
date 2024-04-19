@@ -17,7 +17,7 @@
 
 #include "common/Types.h"
 #include "common/Utils.h"
-#include "knowhere/index_node.h"
+#include "knowhere/index/index_node.h"
 
 namespace milvus::query {
 class SubSearchResult {
