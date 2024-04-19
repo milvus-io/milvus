@@ -146,6 +146,32 @@ func (m *ChannelDistManager) GetByFilter(filters ...ChannelDistFilter) []*DmChan
 	return ret
 }
 
+// GetByFilterForNodes return segment list which match all given filters for given nodes
+func (m *ChannelDistManager) GetByFilterForNodes(nodes []int64, filters ...ChannelDistFilter) []*DmChannel {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	mergedFilters := func(ch *DmChannel) bool {
+		for _, fn := range filters {
+			if fn != nil && !fn(ch) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	ret := make([]*DmChannel, 0)
+	for _, nodeid := range nodes {
+		for _, channel := range m.channels[nodeid] {
+			if mergedFilters(channel) {
+				ret = append(ret, channel)
+			}
+		}
+	}
+	return ret
+}
+
 func (m *ChannelDistManager) Update(nodeID UniqueID, channels ...*DmChannel) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()

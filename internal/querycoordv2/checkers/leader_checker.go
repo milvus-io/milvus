@@ -81,6 +81,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 	collectionIDs := c.meta.CollectionManager.GetAll()
 	tasks := make([]task.Task, 0)
 
+	leaderViewsByCollectionAndNode := c.dist.LeaderViewManager.GroupByCollectionAndNode()
 	for _, collectionID := range collectionIDs {
 		if !c.readyToCheck(collectionID) {
 			continue
@@ -99,9 +100,16 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 					continue
 				}
 
-				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
+				leaderViewsByNode, ok := leaderViewsByCollectionAndNode[replica.GetCollectionID()]
+				if !ok {
+					continue
+				}
+				leaderViews, ok := leaderViewsByNode[node]
+				if !ok {
+					continue
+				}
 				for _, leaderView := range leaderViews {
-					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))
+					dist := c.dist.SegmentDistManager.GetByFilterForNodes(replica.GetRWNodes(), meta.WithChannel(leaderView.Channel))
 					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, leaderView, dist)...)
 					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, leaderView, dist)...)
 				}

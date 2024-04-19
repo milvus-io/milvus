@@ -162,7 +162,7 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel {
 	dist := make([]*meta.DmChannel, 0)
 	for _, nodeID := range replica.GetNodes() {
-		dist = append(dist, c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(nodeID))...)
+		dist = append(dist, c.dist.ChannelDistManager.GetByFilterForNodes([]int64{nodeID}, meta.WithCollectionID2Channel(replica.GetCollectionID()))...)
 	}
 	return dist
 }

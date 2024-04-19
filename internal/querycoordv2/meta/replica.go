@@ -103,6 +103,11 @@ func (replica *Replica) Contains(node int64) bool {
 	return replica.rwNodes.Contain(node)
 }
 
+// GetRWNodes returns the IDs of rw nodes.
+func (replica *Replica) GetRWNodes() []int64 {
+	return replica.rwNodes.Collect()
+}
+
 // ContainRONode checks if the node is in ro nodes of the replica.
 func (replica *Replica) ContainRONode(node int64) bool {
 	return replica.roNodes.Contain(node)

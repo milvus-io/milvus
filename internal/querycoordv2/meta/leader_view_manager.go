@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type LeaderViewFilter = func(view *LeaderView) bool
@@ -148,6 +149,69 @@ func (mgr *LeaderViewManager) getByFilter(filters ...LeaderViewFilter) []*Leader
 
 			if allMatch {
 				ret = append(ret, view)
+			}
+		}
+	}
+
+	return ret
+}
+
+func (mgr *LeaderViewManager) GroupByChannel() map[string][]*LeaderView {
+	mgr.rwmutex.RLock()
+	defer mgr.rwmutex.RUnlock()
+
+	ret := make(map[string][]*LeaderView)
+	for _, viewsOnNode := range mgr.views {
+		for channel, view := range viewsOnNode {
+			if _, ok := ret[channel]; !ok {
+				ret[channel] = make([]*LeaderView, 0)
+			}
+			ret[channel] = append(ret[channel], view)
+		}
+	}
+	return ret
+}
+
+func (mgr *LeaderViewManager) GroupByCollectionAndNode() map[int64]map[int64][]*LeaderView {
+	mgr.rwmutex.RLock()
+	defer mgr.rwmutex.RUnlock()
+
+	ret := make(map[int64]map[int64][]*LeaderView)
+	for _, viewsOnNode := range mgr.views {
+		for _, view := range viewsOnNode {
+			if _, ok := ret[view.CollectionID]; !ok {
+				ret[view.CollectionID] = make(map[int64][]*LeaderView)
+			}
+			if _, ok := ret[view.CollectionID][view.ID]; !ok {
+				ret[view.CollectionID][view.ID] = make([]*LeaderView, 0)
+			}
+			ret[view.CollectionID][view.ID] = append(ret[view.CollectionID][view.ID], view)
+		}
+	}
+	return ret
+}
+
+func (mgr *LeaderViewManager) GroupBySegment(isGrowing bool) map[int64]typeutil.Set[*LeaderView] {
+	mgr.rwmutex.RLock()
+	defer mgr.rwmutex.RUnlock()
+
+	ret := make(map[int64]typeutil.Set[*LeaderView])
+	for _, viewsOnNode := range mgr.views {
+		for _, view := range viewsOnNode {
+			if isGrowing {
+				for segmentID := range view.GrowingSegments {
+					if _, ok := ret[segmentID]; !ok {
+						ret[segmentID] = typeutil.NewSet[*LeaderView]()
+					}
+					ret[segmentID].Insert(view)
+				}
+			} else {
+				for segmentID := range view.Segments {
+					if _, ok := ret[segmentID]; !ok {
+						ret[segmentID] = typeutil.NewSet[*LeaderView]()
+					}
+					ret[segmentID].Insert(view)
+				}
 			}
 		}
 	}

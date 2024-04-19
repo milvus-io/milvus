@@ -313,8 +313,9 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 		return false
 	}
 
+	perChannelViews := ob.distMgr.LeaderViewManager.GroupByChannel()
 	for _, channel := range channelNames {
-		views := ob.distMgr.LeaderViewManager.GetByFilter(meta.WithChannelName2LeaderView(channel.GetChannelName()))
+		views := perChannelViews[channel.GetChannelName()]
 		nodes := lo.Map(views, func(v *meta.LeaderView, _ int) int64 { return v.ID })
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
 		if int32(len(group)) < replicaNum {
@@ -328,9 +329,10 @@ func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collect
 
 	// and last check historical segment
 	SealedSegments := ob.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.NextTarget)
+	perSegmentViews := ob.distMgr.LeaderViewManager.GroupBySegment(false)
 	for _, segment := range SealedSegments {
-		views := ob.distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(segment.GetID(), false))
-		nodes := lo.Map(views, func(view *meta.LeaderView, _ int) int64 { return view.ID })
+		views := perSegmentViews[segment.GetID()]
+		nodes := lo.MapToSlice(views, func(view *meta.LeaderView, _ struct{}) int64 { return view.ID })
 		group := utils.GroupNodesByReplica(ob.meta.ReplicaManager, collectionID, nodes)
 		if int32(len(group)) < replicaNum {
 			log.RatedInfo(10, "segment not ready",

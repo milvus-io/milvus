@@ -296,7 +296,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 func (c *SegmentChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
 	ret := make([]*meta.Segment, 0)
 	for _, node := range replica.GetNodes() {
-		ret = append(ret, c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))...)
+		ret = append(ret, c.dist.SegmentDistManager.GetByFilterForNodes([]int64{node}, meta.WithCollectionID(replica.GetCollectionID()))...)
 	}
 	return ret
 }
