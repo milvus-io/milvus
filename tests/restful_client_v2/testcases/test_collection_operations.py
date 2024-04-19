@@ -155,7 +155,7 @@ class TestCreateCollection(TestBase):
         payload = {
             "collectionName": name,
             "enableDynamicField": True,
-            "params":{
+            "params": {
                 "shardsNum": f"{num_shards}",
                 "partitionsNum": f"{num_partitions}",
                 "consistencyLevel": f"{consistency_level}",
@@ -165,11 +165,11 @@ class TestCreateCollection(TestBase):
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": True, "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": 256}},
                     {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}},
                     {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64",
                      "elementTypeParams": {"max_capacity": "1024"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": dim}}
                 ]
             },
             "indexParams": [

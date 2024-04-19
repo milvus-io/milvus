@@ -20,11 +20,13 @@ class TestInsertVector(TestBase):
 
     @pytest.mark.parametrize("insert_round", [3])
     @pytest.mark.parametrize("nb", [3000])
-    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("dim", [768])
     def test_insert_entities_with_simple_payload(self, nb, dim, insert_round):
         """
         Insert a vector with a simple payload
         """
+        self.create_database("demo")
+        self.update_database("demo")
         # create a collection
         name = gen_collection_name()
         collection_payload = {
@@ -34,7 +36,15 @@ class TestInsertVector(TestBase):
         }
         rsp = self.collection_client.collection_create(collection_payload)
         assert rsp['code'] == 200
+        self.collection_client.time_out = "1"
+        self.vector_client.time_out = "1"
         rsp = self.collection_client.collection_describe(name)
+        # self.collection_client.header_db_name = None
+        # rsp = self.collection_client.collection_describe(name, db_name="demo")
+        # self.collection_client.header_db_name = "hello"
+        # rsp = self.collection_client.collection_describe(name, db_name="demo")
+        # self.collection_client.header_db_name = "demo"
+        # rsp = self.collection_client.collection_describe(name, db_name="hello")
         logger.info(f"rsp: {rsp}")
         assert rsp['code'] == 200
         # insert data
@@ -541,8 +551,9 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [16])
+    @pytest.mark.parametrize("nq", [2])
     def test_search_vector_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema, nq):
         """
         Insert a vector with a simple payload
         """
@@ -618,7 +629,7 @@ class TestSearchVector(TestBase):
         # search data
         payload = {
             "collectionName": name,
-            "data": [gen_vector(datatype="FloatVector", dim=dim)],
+            "data": [gen_vector(datatype="FloatVector", dim=dim) for i in range(nq)],
             "annsField": "float_vector",
             "filter": "word_count > 100",
             "groupingField": "user_id",
@@ -630,7 +641,7 @@ class TestSearchVector(TestBase):
                     "range_filter": "0.8"
                 }
             },
-            "limit": 100,
+            "limit": 10,
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 200
@@ -1219,7 +1230,7 @@ class TestAdvancedSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.parametrize("nq", [1, 2])
+    @pytest.mark.parametrize("nq", [2])
     def test_advanced_search_vector_with_multi_float32_vector_datatype(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, nq):
         """

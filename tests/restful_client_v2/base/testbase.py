@@ -140,7 +140,11 @@ class TestBase(Base):
     def update_database(self, db_name="default"):
         self.create_database(db_name=db_name)
         db.using_database(db_name=db_name)
-        self.collection_client.db_name = db_name
-        self.vector_client.db_name = db_name
-        self.import_job_client.db_name = db_name
-        self.alias_client.db_name = db_name
+        # self.collection_client.db_name = db_name
+        # self.vector_client.db_name = db_name
+        # self.import_job_client.db_name = db_name
+        # self.alias_client.db_name = db_name
+        self.collection_client.header_db_name = db_name
+        self.vector_client.header_db_name = db_name
+        self.import_job_client.header_db_name = db_name
+        self.alias_client.header_db_name = db_name

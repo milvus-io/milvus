@@ -10,10 +10,10 @@ from base.testbase import TestBase
 @pytest.mark.L0
 class TestAliasE2E(TestBase):
 
-    def test_alias_e2e(self):
+    @pytest.mark.parametrize("db_name", ["default", "demo_db"])
+    def test_alias_e2e(self, db_name):
         """
         """
-        db_name = "default"
         self.create_database(db_name)
         self.update_database(db_name)
         # list alias before create
