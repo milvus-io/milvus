@@ -582,9 +582,9 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		log.Warn("DropVChannel failed to ReleaseAndRemove", zap.String("channel", channel), zap.Error(err))
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
+	s.meta.MarkChannelCheckpointDropped(ctx, channel)
 
 	metrics.CleanupDataCoordNumStoredRows(collectionID)
-	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 
 	// no compaction triggered in Drop procedure
 	return resp, nil
