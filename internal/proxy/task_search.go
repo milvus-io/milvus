@@ -61,6 +61,7 @@ type searchTask struct {
 	requery                bool
 	partitionKeyMode       bool
 	enableMaterializedView bool
+	mustUsePartitionKey    bool
 
 	userOutputFields []string
 
@@ -134,6 +135,10 @@ func (t *searchTask) PreExecute(ctx context.Context) error {
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
+	}
+	if t.mustUsePartitionKey && !t.partitionKeyMode {
+		return merr.WrapErrParameterInvalidMsg("must use partition key in the search request " +
+			"because the mustUsePartitionKey config is true")
 	}
 
 	if !t.partitionKeyMode && len(t.request.GetPartitionNames()) > 0 {

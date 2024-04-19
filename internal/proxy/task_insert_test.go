@@ -11,6 +11,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestInsertTask_CheckAligned(t *testing.T) {
@@ -283,5 +285,25 @@ func TestInsertTask(t *testing.T) {
 		resChannels := it.getChannels()
 		assert.ElementsMatch(t, channels, resChannels)
 		assert.ElementsMatch(t, channels, it.pChannels)
+	})
+}
+
+func TestMaxInsertSize(t *testing.T) {
+	t.Run("test MaxInsertSize", func(t *testing.T) {
+		paramtable.Init()
+		Params.Save(Params.QuotaConfig.MaxInsertSize.Key, "1")
+		defer Params.Reset(Params.QuotaConfig.MaxInsertSize.Key)
+		it := insertTask{
+			ctx: context.Background(),
+			insertMsg: &msgstream.InsertMsg{
+				InsertRequest: msgpb.InsertRequest{
+					DbName:         "hooooooo",
+					CollectionName: "fooooo",
+				},
+			},
+		}
+		err := it.PreExecute(context.Background())
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterTooLarge)
 	})
 }

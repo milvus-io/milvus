@@ -112,6 +112,13 @@ func (it *insertTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
+	maxInsertSize := Params.QuotaConfig.MaxInsertSize.GetAsInt()
+	if maxInsertSize != -1 && it.insertMsg.Size() > maxInsertSize {
+		log.Warn("insert request size exceeds maxInsertSize",
+			zap.Int("request size", it.insertMsg.Size()), zap.Int("maxInsertSize", maxInsertSize))
+		return merr.WrapErrParameterTooLarge("insert request size exceeds maxInsertSize")
+	}
+
 	schema, err := globalMetaCache.GetCollectionSchema(ctx, it.insertMsg.GetDbName(), collectionName)
 	if err != nil {
 		log.Warn("get collection schema from global meta cache failed", zap.String("collectionName", collectionName), zap.Error(err))
