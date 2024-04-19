@@ -2411,8 +2411,8 @@ func Test_dropCollectionTask_PostExecute(t *testing.T) {
 }
 
 func Test_loadCollectionTask_Execute(t *testing.T) {
-	rc := newMockRootCoord()
-	dc := NewDataCoordMock()
+	rc := mocks.NewMockRootCoordClient(t)
+	dc := mocks.NewMockDataCoordClient(t)
 
 	qc := getQueryCoordClient()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
@@ -2431,18 +2431,22 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	ctx := context.Background()
 	indexID := int64(1000)
 
+	rc.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{}, nil)
+	rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Success(),
+		Schema:         newTestSchema(),
+		CollectionID:   collectionID,
+		CollectionName: collectionName,
+	}, nil)
+	rc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
+		Status:         merr.Success(),
+		PartitionNames: []string{"p1", "p2", "p3"},
+		PartitionIDs:   []int64{1, 2, 3},
+	}, nil)
+
 	shardMgr := newShardClientMgr()
 	// failed to get collection id.
 	_ = InitMetaCache(ctx, rc, qc, shardMgr)
-
-	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Success(),
-			Schema:         newTestSchema(),
-			CollectionID:   collectionID,
-			CollectionName: request.CollectionName,
-		}, nil
-	}
 
 	lct := &loadCollectionTask{
 		LoadCollectionRequest: &milvuspb.LoadCollectionRequest{
@@ -2470,41 +2474,37 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "fail reason",
-				},
-			}, nil
-		}
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "fail reason",
+			},
+		}, nil)
 
 		err := lct.Execute(ctx)
 		assert.Error(t, err)
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
-				Status: merr.Success(),
-				IndexInfos: []*indexpb.IndexInfo{
-					{
-						CollectionID:         collectionID,
-						FieldID:              100,
-						IndexName:            indexName,
-						IndexID:              indexID,
-						TypeParams:           nil,
-						IndexParams:          nil,
-						IndexedRows:          1025,
-						TotalRows:            1025,
-						State:                commonpb.IndexState_Finished,
-						IndexStateFailReason: "",
-						IsAutoIndex:          false,
-						UserIndexParams:      nil,
-					},
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexInfos: []*indexpb.IndexInfo{
+				{
+					CollectionID:         collectionID,
+					FieldID:              100,
+					IndexName:            indexName,
+					IndexID:              indexID,
+					TypeParams:           nil,
+					IndexParams:          nil,
+					IndexedRows:          1025,
+					TotalRows:            1025,
+					State:                commonpb.IndexState_Finished,
+					IndexStateFailReason: "",
+					IsAutoIndex:          false,
+					UserIndexParams:      nil,
 				},
-			}, nil
-		}
+			},
+		}, nil)
 
 		err := lct.Execute(ctx)
 		assert.Error(t, err)
@@ -2519,28 +2519,25 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 		}
 
 		assert.GreaterOrEqual(t, len(vecFields), 2)
-
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
-				Status: merr.Success(),
-				IndexInfos: []*indexpb.IndexInfo{
-					{
-						CollectionID:         collectionID,
-						FieldID:              vecFields[0].FieldID,
-						IndexName:            indexName,
-						IndexID:              indexID,
-						TypeParams:           nil,
-						IndexParams:          nil,
-						IndexedRows:          1025,
-						TotalRows:            1025,
-						State:                commonpb.IndexState_Finished,
-						IndexStateFailReason: "",
-						IsAutoIndex:          false,
-						UserIndexParams:      nil,
-					},
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexInfos: []*indexpb.IndexInfo{
+				{
+					CollectionID:         collectionID,
+					FieldID:              vecFields[0].FieldID,
+					IndexName:            indexName,
+					IndexID:              indexID,
+					TypeParams:           nil,
+					IndexParams:          nil,
+					IndexedRows:          1025,
+					TotalRows:            1025,
+					State:                commonpb.IndexState_Finished,
+					IndexStateFailReason: "",
+					IsAutoIndex:          false,
+					UserIndexParams:      nil,
 				},
-			}, nil
-		}
+			},
+		}, nil)
 
 		err := lct.Execute(ctx)
 		assert.Error(t, err)
@@ -2548,8 +2545,8 @@ func Test_loadCollectionTask_Execute(t *testing.T) {
 }
 
 func Test_loadPartitionTask_Execute(t *testing.T) {
-	rc := newMockRootCoord()
-	dc := NewDataCoordMock()
+	rc := mocks.NewMockRootCoordClient(t)
+	dc := mocks.NewMockDataCoordClient(t)
 
 	qc := getQueryCoordClient()
 	qc.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&querypb.ShowPartitionsResponse{
@@ -2568,18 +2565,17 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	ctx := context.Background()
 	indexID := int64(1000)
 
+	rc.EXPECT().ListPolicy(mock.Anything, mock.Anything).Return(&internalpb.ListPolicyResponse{}, nil)
+	rc.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Status:         merr.Success(),
+		Schema:         newTestSchema(),
+		CollectionID:   collectionID,
+		CollectionName: collectionName,
+	}, nil)
+
 	shardMgr := newShardClientMgr()
 	// failed to get collection id.
 	_ = InitMetaCache(ctx, rc, qc, shardMgr)
-
-	rc.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Success(),
-			Schema:         newTestSchema(),
-			CollectionID:   collectionID,
-			CollectionName: request.CollectionName,
-		}, nil
-	}
 
 	lpt := &loadPartitionsTask{
 		LoadPartitionsRequest: &milvuspb.LoadPartitionsRequest{
@@ -2607,41 +2603,37 @@ func Test_loadPartitionTask_Execute(t *testing.T) {
 	})
 
 	t.Run("indexcoord describe index not success", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
-				Status: &commonpb.Status{
-					ErrorCode: commonpb.ErrorCode_UnexpectedError,
-					Reason:    "fail reason",
-				},
-			}, nil
-		}
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+			Status: &commonpb.Status{
+				ErrorCode: commonpb.ErrorCode_UnexpectedError,
+				Reason:    "fail reason",
+			},
+		}, nil)
 
 		err := lpt.Execute(ctx)
 		assert.Error(t, err)
 	})
 
 	t.Run("no vector index", func(t *testing.T) {
-		dc.DescribeIndexFunc = func(ctx context.Context, request *indexpb.DescribeIndexRequest, opts ...grpc.CallOption) (*indexpb.DescribeIndexResponse, error) {
-			return &indexpb.DescribeIndexResponse{
-				Status: merr.Success(),
-				IndexInfos: []*indexpb.IndexInfo{
-					{
-						CollectionID:         collectionID,
-						FieldID:              100,
-						IndexName:            indexName,
-						IndexID:              indexID,
-						TypeParams:           nil,
-						IndexParams:          nil,
-						IndexedRows:          1025,
-						TotalRows:            1025,
-						State:                commonpb.IndexState_Finished,
-						IndexStateFailReason: "",
-						IsAutoIndex:          false,
-						UserIndexParams:      nil,
-					},
+		dc.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&indexpb.DescribeIndexResponse{
+			Status: merr.Success(),
+			IndexInfos: []*indexpb.IndexInfo{
+				{
+					CollectionID:         collectionID,
+					FieldID:              100,
+					IndexName:            indexName,
+					IndexID:              indexID,
+					TypeParams:           nil,
+					IndexParams:          nil,
+					IndexedRows:          1025,
+					TotalRows:            1025,
+					State:                commonpb.IndexState_Finished,
+					IndexStateFailReason: "",
+					IsAutoIndex:          false,
+					UserIndexParams:      nil,
 				},
-			}, nil
-		}
+			},
+		}, nil)
 
 		err := lpt.Execute(ctx)
 		assert.Error(t, err)

@@ -27,7 +27,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"go.uber.org/zap"
-	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -92,10 +91,14 @@ func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("proxy health check is ok", func(t *testing.T) {
 		qc := &mocks.MockQueryCoordClient{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
+		dc := mocks.NewMockDataCoordClient(t)
+		dc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
-			rootCoord:  NewRootCoordMock(),
+			rootCoord:  rc,
 			queryCoord: qc,
-			dataCoord:  NewDataCoordMock(),
+			dataCoord:  dc,
 			session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		}
 		node.simpleLimiter = NewSimpleLimiter()
@@ -108,28 +111,25 @@ func TestProxy_CheckHealth(t *testing.T) {
 	})
 
 	t.Run("proxy health check is fail", func(t *testing.T) {
-		checkHealthFunc1 := func(ctx context.Context,
-			req *milvuspb.CheckHealthRequest,
-			opts ...grpc.CallOption,
-		) (*milvuspb.CheckHealthResponse, error) {
-			return &milvuspb.CheckHealthResponse{
-				IsHealthy: false,
-				Reasons:   []string{"unHealth"},
-			}, nil
-		}
-
-		dataCoordMock := NewDataCoordMock()
-		dataCoordMock.checkHealthFunc = checkHealthFunc1
-
 		qc := &mocks.MockQueryCoordClient{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(nil, errors.New("test"))
+
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{
+			IsHealthy: false,
+			Reasons:   []string{"unHealth"},
+		}, nil)
+
+		dc := mocks.NewMockDataCoordClient(t)
+		dc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{
+			IsHealthy: false,
+			Reasons:   []string{"unHealth"},
+		}, nil)
 		node := &Proxy{
-			session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
-			rootCoord: NewRootCoordMock(func(mock *RootCoordMock) {
-				mock.checkHealthFunc = checkHealthFunc1
-			}),
+			session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
+			rootCoord:  rc,
 			queryCoord: qc,
-			dataCoord:  dataCoordMock,
+			dataCoord:  dc,
 		}
 		node.simpleLimiter = NewSimpleLimiter()
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -143,9 +143,13 @@ func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("check quota state", func(t *testing.T) {
 		qc := &mocks.MockQueryCoordClient{}
 		qc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
+		dc := mocks.NewMockDataCoordClient(t)
+		dc.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{IsHealthy: true}, nil)
 		node := &Proxy{
-			rootCoord:  NewRootCoordMock(),
-			dataCoord:  NewDataCoordMock(),
+			rootCoord:  rc,
+			dataCoord:  dc,
 			queryCoord: qc,
 		}
 		node.simpleLimiter = NewSimpleLimiter()

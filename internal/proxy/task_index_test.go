@@ -25,7 +25,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -55,9 +54,12 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 	indexName := ""
 	ctx := context.Background()
 
-	rootCoord := newMockRootCoord()
-	queryCoord := getMockQueryCoord()
-	datacoord := NewDataCoordMock()
+	rootCoord := mocks.NewMockRootCoordClient(t)
+	datacoord := mocks.NewMockDataCoordClient(t)
+
+	mockCache := NewMockCache(t)
+	mockCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(int64(1), nil)
+	globalMetaCache = mockCache
 
 	gist := &getIndexStateTask{
 		GetIndexStateRequest: &milvuspb.GetIndexStateRequest{
@@ -77,35 +79,15 @@ func TestGetIndexStateTask_Execute(t *testing.T) {
 		collectionID: collectionID,
 	}
 
-	shardMgr := newShardClientMgr()
-	// failed to get collection id.
-	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
-	assert.NoError(t, err)
+	datacoord.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
 	assert.Error(t, gist.Execute(ctx))
 
-	rootCoord.DescribeCollectionFunc = func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-		return &milvuspb.DescribeCollectionResponse{
-			Status:         merr.Success(),
-			Schema:         newTestSchema(),
-			CollectionID:   collectionID,
-			CollectionName: request.CollectionName,
-		}, nil
-	}
-
-	rootCoord.ShowPartitionsFunc = func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-		return &milvuspb.ShowPartitionsResponse{
-			Status: merr.Success(),
-		}, nil
-	}
-
-	datacoord.GetIndexStateFunc = func(ctx context.Context, request *indexpb.GetIndexStateRequest, opts ...grpc.CallOption) (*indexpb.GetIndexStateResponse, error) {
-		return &indexpb.GetIndexStateResponse{
-			Status:     merr.Success(),
-			State:      commonpb.IndexState_Finished,
-			FailReason: "",
-		}, nil
-	}
-
+	datacoord.ExpectedCalls = nil
+	datacoord.EXPECT().GetIndexState(mock.Anything, mock.Anything).Return(&indexpb.GetIndexStateResponse{
+		Status:     merr.Success(),
+		State:      commonpb.IndexState_Finished,
+		FailReason: "",
+	}, nil)
 	assert.NoError(t, gist.Execute(ctx))
 	assert.Equal(t, commonpb.IndexState_Finished, gist.result.GetState())
 }

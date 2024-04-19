@@ -23,7 +23,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"google.golang.org/grpc"
 
@@ -34,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
-	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1113,105 +1111,4 @@ func (coord *RootCoordMock) RenameCollection(ctx context.Context, req *milvuspb.
 
 func (coord *RootCoordMock) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
 	return &rootcoordpb.DescribeDatabaseResponse{}, nil
-}
-
-type DescribeCollectionFunc func(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error)
-
-type ShowPartitionsFunc func(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error)
-
-type ShowSegmentsFunc func(ctx context.Context, request *milvuspb.ShowSegmentsRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentsResponse, error)
-
-type DescribeSegmentsFunc func(ctx context.Context, request *rootcoordpb.DescribeSegmentsRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeSegmentsResponse, error)
-
-type ImportFunc func(ctx context.Context, req *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error)
-
-type DropCollectionFunc func(ctx context.Context, request *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error)
-
-type GetGetCredentialFunc func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error)
-
-type mockRootCoord struct {
-	types.RootCoordClient
-	DescribeCollectionFunc
-	ShowPartitionsFunc
-	ShowSegmentsFunc
-	DescribeSegmentsFunc
-	ImportFunc
-	DropCollectionFunc
-	GetGetCredentialFunc
-}
-
-func (m *mockRootCoord) GetCredential(ctx context.Context, request *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
-	if m.GetGetCredentialFunc != nil {
-		return m.GetGetCredentialFunc(ctx, request)
-	}
-	return nil, errors.New("mock")
-}
-
-func (m *mockRootCoord) DescribeCollection(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-	if m.DescribeCollectionFunc != nil {
-		return m.DescribeCollectionFunc(ctx, request)
-	}
-	return nil, errors.New("mock")
-}
-
-func (m *mockRootCoord) DescribeCollectionInternal(ctx context.Context, request *milvuspb.DescribeCollectionRequest, opts ...grpc.CallOption) (*milvuspb.DescribeCollectionResponse, error) {
-	return m.DescribeCollection(ctx, request)
-}
-
-func (m *mockRootCoord) ShowPartitions(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-	if m.ShowPartitionsFunc != nil {
-		return m.ShowPartitionsFunc(ctx, request)
-	}
-	return nil, errors.New("mock")
-}
-
-func (m *mockRootCoord) ShowPartitionsInternal(ctx context.Context, request *milvuspb.ShowPartitionsRequest, opts ...grpc.CallOption) (*milvuspb.ShowPartitionsResponse, error) {
-	return m.ShowPartitions(ctx, request)
-}
-
-func (m *mockRootCoord) ShowSegments(ctx context.Context, request *milvuspb.ShowSegmentsRequest, opts ...grpc.CallOption) (*milvuspb.ShowSegmentsResponse, error) {
-	if m.ShowSegmentsFunc != nil {
-		return m.ShowSegmentsFunc(ctx, request)
-	}
-	return nil, errors.New("mock")
-}
-
-func (m *mockRootCoord) Import(ctx context.Context, request *milvuspb.ImportRequest, opts ...grpc.CallOption) (*milvuspb.ImportResponse, error) {
-	if m.ImportFunc != nil {
-		return m.ImportFunc(ctx, request)
-	}
-	return nil, errors.New("mock")
-}
-
-func (m *mockRootCoord) DropCollection(ctx context.Context, request *milvuspb.DropCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	if m.DropCollectionFunc != nil {
-		return m.DropCollectionFunc(ctx, request)
-	}
-	return nil, errors.New("mock")
-}
-
-func (m *mockRootCoord) ListPolicy(ctx context.Context, in *internalpb.ListPolicyRequest, opts ...grpc.CallOption) (*internalpb.ListPolicyResponse, error) {
-	return &internalpb.ListPolicyResponse{}, nil
-}
-
-func (m *mockRootCoord) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error) {
-	return &milvuspb.CheckHealthResponse{
-		IsHealthy: true,
-	}, nil
-}
-
-func (m *mockRootCoord) CreateDatabase(ctx context.Context, in *milvuspb.CreateDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, nil
-}
-
-func (m *mockRootCoord) DropDatabase(ctx context.Context, in *milvuspb.DropDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
-	return &commonpb.Status{}, nil
-}
-
-func (m *mockRootCoord) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
-	return &milvuspb.ListDatabasesResponse{}, nil
-}
-
-func newMockRootCoord() *mockRootCoord {
-	return &mockRootCoord{}
 }

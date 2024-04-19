@@ -24,6 +24,7 @@ import (
 	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -37,12 +38,10 @@ func TestProxy_metrics(t *testing.T) {
 
 	ctx := context.Background()
 
-	rc := NewRootCoordMock()
-	defer rc.Close()
+	rc := mocks.NewMockRootCoordClient(t)
 
 	qc := getQueryCoordClient()
-	dc := NewDataCoordMock()
-	defer dc.Close()
+	dc := mocks.NewMockDataCoordClient(t)
 
 	proxy := &Proxy{
 		rootCoord:  rc,
@@ -51,7 +50,7 @@ func TestProxy_metrics(t *testing.T) {
 		session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{Address: funcutil.GenRandomStr()}},
 	}
 
-	rc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	rcGetMetricsFunc := func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 		id := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
 		rootCoordTopology := metricsinfo.RootCoordTopology{
@@ -88,8 +87,9 @@ func TestProxy_metrics(t *testing.T) {
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.RootCoordRole, id),
 		}, nil
 	}
+	rc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(rcGetMetricsFunc(nil, nil))
 
-	getMetricsFunc := func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	qcGetMetricsFunc := func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 		id := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
 		clusterTopology := metricsinfo.QueryClusterTopology{
@@ -137,9 +137,9 @@ func TestProxy_metrics(t *testing.T) {
 			ComponentName: metricsinfo.ConstructComponentName(typeutil.QueryCoordRole, id),
 		}, nil
 	}
-	qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(getMetricsFunc(nil, nil))
+	qc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(qcGetMetricsFunc(nil, nil))
 
-	dc.getMetricsFunc = func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+	dcGetMetricsFunc := func(ctx context.Context, request *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 		id := typeutil.UniqueID(uniquegenerator.GetUniqueIntGeneratorIns().GetInt())
 
 		clusterTopology := metricsinfo.DataClusterTopology{
@@ -195,11 +195,10 @@ func TestProxy_metrics(t *testing.T) {
 		}, nil
 	}
 
+	dc.EXPECT().GetMetrics(mock.Anything, mock.Anything).Return(dcGetMetricsFunc(nil, nil))
+
 	req, _ := metricsinfo.ConstructRequestByMetricType(metricsinfo.SystemInfoMetrics)
 	resp, err := getSystemInfoMetrics(ctx, req, proxy)
 	assert.NoError(t, err)
 	assert.NotNil(t, resp)
-
-	rc.getMetricsFunc = nil
-	dc.getMetricsFunc = nil
 }

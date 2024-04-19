@@ -25,6 +25,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 	"github.com/tikv/client-go/v2/txnkv"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
@@ -36,76 +37,10 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
-
-type mockCore struct {
-	types.RootCoordComponent
-}
-
-func (m *mockCore) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
-}
-
-func (m *mockCore) DropDatabase(ctx context.Context, request *milvuspb.DropDatabaseRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
-}
-
-func (m *mockCore) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
-	return &milvuspb.ListDatabasesResponse{
-		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
-	}, nil
-}
-
-func (m *mockCore) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
-	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
-}
-
-func (m *mockCore) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
-	return &milvuspb.CheckHealthResponse{
-		IsHealthy: true,
-	}, nil
-}
-
-func (m *mockCore) UpdateStateCode(commonpb.StateCode) {
-}
-
-func (m *mockCore) SetAddress(address string) {
-}
-
-func (m *mockCore) SetEtcdClient(etcdClient *clientv3.Client) {
-}
-
-func (m *mockCore) SetTiKVClient(client *txnkv.Client) {
-}
-
-func (m *mockCore) SetDataCoordClient(client types.DataCoordClient) error {
-	return nil
-}
-
-func (m *mockCore) SetQueryCoordClient(client types.QueryCoordClient) error {
-	return nil
-}
-
-func (m *mockCore) SetProxyCreator(func(ctx context.Context, addr string, nodeID int64) (types.ProxyClient, error)) {
-}
-
-func (m *mockCore) Register() error {
-	return nil
-}
-
-func (m *mockCore) Init() error {
-	return nil
-}
-
-func (m *mockCore) Start() error {
-	return nil
-}
-
-func (m *mockCore) Stop() error {
-	return fmt.Errorf("stop error")
-}
 
 func TestRun(t *testing.T) {
 	paramtable.Init()
@@ -119,12 +54,25 @@ func TestRun(t *testing.T) {
 		defer func() {
 			getTiKVClient = tikv.GetTiKVClient
 		}()
+
 		svr := Server{
-			rootCoord:   &mockCore{},
 			ctx:         ctx,
 			cancel:      cancel,
 			grpcErrChan: make(chan error),
 		}
+
+		mockRootCoord := mocks.NewRootCoord(t)
+		mockRootCoord.EXPECT().Register().Return(nil).Maybe()
+		mockRootCoord.EXPECT().Init().Return(nil).Maybe()
+		mockRootCoord.EXPECT().Start().Return(nil).Maybe()
+		mockRootCoord.EXPECT().Stop().Return(nil).Maybe()
+		mockRootCoord.EXPECT().SetEtcdClient(mock.Anything).Maybe()
+		mockRootCoord.EXPECT().SetTiKVClient(mock.Anything).Maybe()
+		mockRootCoord.EXPECT().SetAddress(mock.Anything).Maybe()
+		mockRootCoord.EXPECT().SetDataCoordClient(mock.Anything).Return(nil).Maybe()
+		mockRootCoord.EXPECT().SetQueryCoordClient(mock.Anything).Return(nil).Maybe()
+		svr.rootCoord = mockRootCoord
+
 		rcServerConfig := &paramtable.Get().RootCoordGrpcServerCfg
 		paramtable.Get().Save(rcServerConfig.Port.Key, "1000000")
 		err := svr.Run()
@@ -170,29 +118,38 @@ func TestRun(t *testing.T) {
 		assert.NoError(t, err)
 
 		t.Run("CheckHealth", func(t *testing.T) {
+			mockRootCoord.EXPECT().CheckHealth(mock.Anything, mock.Anything).Return(&milvuspb.CheckHealthResponse{
+				IsHealthy: true,
+			}, nil)
 			ret, err := svr.CheckHealth(ctx, nil)
 			assert.NoError(t, err)
 			assert.Equal(t, true, ret.IsHealthy)
 		})
 
 		t.Run("RenameCollection", func(t *testing.T) {
+			mockRootCoord.EXPECT().RenameCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 			_, err := svr.RenameCollection(ctx, nil)
 			assert.NoError(t, err)
 		})
 
 		t.Run("CreateDatabase", func(t *testing.T) {
+			mockRootCoord.EXPECT().CreateDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 			ret, err := svr.CreateDatabase(ctx, nil)
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, ret.ErrorCode)
 		})
 
 		t.Run("DropDatabase", func(t *testing.T) {
+			mockRootCoord.EXPECT().DropDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 			ret, err := svr.DropDatabase(ctx, nil)
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, ret.ErrorCode)
 		})
 
 		t.Run("ListDatabases", func(t *testing.T) {
+			mockRootCoord.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+				Status: merr.Success(),
+			}, nil)
 			ret, err := svr.ListDatabases(ctx, nil)
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, ret.GetStatus().GetErrorCode())

@@ -926,11 +926,11 @@ func TestPasswordVerify(t *testing.T) {
 	credCache := make(map[string]*internalpb.CredentialInfo, 0)
 	invokedCount := 0
 
-	mockedRootCoord := newMockRootCoord()
-	mockedRootCoord.GetGetCredentialFunc = func(ctx context.Context, req *rootcoordpb.GetCredentialRequest, opts ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
+	mockedRootCoord := mocks.NewMockRootCoordClient(t)
+	mockedRootCoord.EXPECT().GetCredential(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, gcr *rootcoordpb.GetCredentialRequest, co ...grpc.CallOption) (*rootcoordpb.GetCredentialResponse, error) {
 		invokedCount++
 		return nil, fmt.Errorf("get cred not found credential")
-	}
+	})
 
 	metaCache := &MetaCache{
 		credMap:   credCache,
