@@ -636,52 +636,86 @@ quotaAndLimits:
     enabled: false
     collectionRate: -1 # qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
     partitionRate: -1 # qps, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
+    db:
+      collectionRate: -1 # qps of db level , default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
+      partitionRate: -1 # qps of db level, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition
   indexRate:
     enabled: false
     max: -1 # qps, default no limit, rate for CreateIndex, DropIndex
+    db:
+      max: -1 # qps of db level, default no limit, rate for CreateIndex, DropIndex
   flushRate:
     enabled: false
     max: -1 # qps, default no limit, rate for flush
     collection:
       max: -1 # qps, default no limit, rate for flush at collection level.
+    db:
+      max: -1 # qps of db level, default no limit, rate for flush
   compactionRate:
     enabled: false
     max: -1 # qps, default no limit, rate for manualCompaction
+    db:
+      max: -1 # qps of db level, default no limit, rate for manualCompaction
   dml:
     # dml limit rates, default no limit.
     # The maximum rate will not be greater than max.
     enabled: false
     insertRate:
       max: -1 # MB/s, default no limit
+      db:
+        max: -1 # MB/s, default no limit
       collection:
+        max: -1 # MB/s, default no limit
+      partition:
         max: -1 # MB/s, default no limit
     upsertRate:
       max: -1 # MB/s, default no limit
+      db:
+        max: -1 # MB/s, default no limit
       collection:
+        max: -1 # MB/s, default no limit
+      partition:
         max: -1 # MB/s, default no limit
     deleteRate:
       max: -1 # MB/s, default no limit
+      db:
+        max: -1 # MB/s, default no limit
       collection:
+        max: -1 # MB/s, default no limit
+      partition:
         max: -1 # MB/s, default no limit
     bulkLoadRate:
       max: -1 # MB/s, default no limit, not support yet. TODO: limit bulkLoad rate
+      db:
+        max: -1 # MB/s, default no limit, not support yet. TODO: limit db bulkLoad rate
       collection:
         max: -1 # MB/s, default no limit, not support yet. TODO: limit collection bulkLoad rate
+      partition:
+        max: -1 # MB/s, default no limit, not support yet. TODO: limit partition bulkLoad rate
   dql:
     # dql limit rates, default no limit.
     # The maximum rate will not be greater than max.
     enabled: false
     searchRate:
       max: -1 # vps (vectors per second), default no limit
+      db:
+        max: -1 # vps (vectors per second), default no limit
       collection:
+        max: -1 # vps (vectors per second), default no limit
+      partition:
         max: -1 # vps (vectors per second), default no limit
     queryRate:
       max: -1 # qps, default no limit
+      db:
+        max: -1 # qps, default no limit
       collection:
+        max: -1 # qps, default no limit
+      partition:
         max: -1 # qps, default no limit
   limits:
     maxCollectionNum: 65536
     maxCollectionNumPerDB: 65536
+    maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
   limitWriting:
     # forceDeny false means dml requests are allowed (except for some
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.
@@ -713,7 +747,9 @@ quotaAndLimits:
     diskProtection:
       enabled: true # When the total file size of object storage is greater than `diskQuota`, all dml requests would be rejected;
       diskQuota: -1 # MB, (0, +inf), default no limit
+      diskQuotaPerDB: -1 # MB, (0, +inf), default no limit
       diskQuotaPerCollection: -1 # MB, (0, +inf), default no limit
+      diskQuotaPerPartition: -1 # MB, (0, +inf), default no limit
   limitReading:
     # forceDeny false means dql requests are allowed (except for some
     # specific conditions, such as collection has been dropped), true means always reject all dql requests.
@@ -738,6 +774,8 @@ quotaAndLimits:
       # until the read result rate no longer exceeds maxReadResultRate.
       # MB/s, default no limit
       maxReadResultRate: -1
+      maxReadResultRatePerDB: -1
+      maxReadResultRatePerCollection: -1
     # colOffSpeed is the speed of search&query rates cool off.
     # (0, 1]
     coolOffSpeed: 0.9
