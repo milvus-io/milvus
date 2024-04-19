@@ -65,7 +65,6 @@ func NewCollectionObserver(
 	targetObserver *TargetObserver,
 	checherController *checkers.CheckerController,
 ) *CollectionObserver {
-
 	ob := &CollectionObserver{
 		dist:                 dist,
 		meta:                 meta,
