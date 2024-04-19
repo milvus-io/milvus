@@ -65,7 +65,8 @@ func NewCollectionObserver(
 	targetObserver *TargetObserver,
 	checherController *checkers.CheckerController,
 ) *CollectionObserver {
-	return &CollectionObserver{
+
+	ob := &CollectionObserver{
 		dist:                 dist,
 		meta:                 meta,
 		targetMgr:            targetMgr,
@@ -74,6 +75,14 @@ func NewCollectionObserver(
 		partitionLoadedCount: make(map[int64]int),
 		loadTasks:            typeutil.NewConcurrentMap[string, LoadTask](),
 	}
+
+	// Add load task for collection recovery
+	collections := meta.GetAllCollections()
+	for _, collection := range collections {
+		ob.LoadCollection(context.Background(), collection.GetCollectionID())
+	}
+
+	return ob
 }
 
 func (ob *CollectionObserver) Start() {
@@ -128,7 +137,7 @@ func (ob *CollectionObserver) LoadPartitions(ctx context.Context, collectionID i
 	traceID := span.SpanContext().TraceID()
 	key := traceID.String()
 	if !traceID.IsValid() {
-		key = fmt.Sprintf("LoaPartition_%d_%v", collectionID, partitionIDs)
+		key = fmt.Sprintf("LoadPartition_%d_%v", collectionID, partitionIDs)
 	}
 
 	ob.loadTasks.Insert(key, LoadTask{LoadType: querypb.LoadType_LoadPartition, CollectionID: collectionID, PartitionIDs: partitionIDs})
@@ -162,7 +171,7 @@ func (ob *CollectionObserver) observeTimeout() {
 				ob.loadTasks.Remove(traceID)
 			}
 		case querypb.LoadType_LoadPartition:
-			partitionIDs := typeutil.NewSet[int64](task.PartitionIDs...)
+			partitionIDs := typeutil.NewSet(task.PartitionIDs...)
 			partitions := ob.meta.GetPartitionsByCollection(task.CollectionID)
 			partitions = lo.Filter(partitions, func(partition *meta.Partition, _ int) bool {
 				return partitionIDs.Contain(partition.GetPartitionID())
