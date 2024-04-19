@@ -48,7 +48,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type meta struct {
@@ -1367,9 +1366,10 @@ func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string)
 	m.channelCPs.Lock()
 	defer m.channelCPs.Unlock()
 
-	cp := m.channelCPs.checkpoints[channel]
-	cp = typeutil.Clone(cp)
-	cp.Timestamp = math.MaxUint64
+	cp := &msgpb.MsgPosition{
+		ChannelName: channel,
+		Timestamp:   math.MaxUint64,
+	}
 
 	err := m.catalog.SaveChannelCheckpoints(ctx, []*msgpb.MsgPosition{cp})
 	if err != nil {
