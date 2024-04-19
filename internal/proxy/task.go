@@ -212,6 +212,12 @@ func (t *createCollectionTask) validatePartitionKey() error {
 		}
 	}
 
+	mustPartitionKey := Params.ProxyCfg.MustUsePartitionKey.GetAsBool()
+	if mustPartitionKey && idx == -1 {
+		return merr.WrapErrParameterInvalidMsg("partition key must be set when creating the collection" +
+			" because the mustUsePartitionKey config is true")
+	}
+
 	if idx == -1 {
 		if t.GetNumPartitions() != 0 {
 			return fmt.Errorf("num_partitions should only be specified with partition key field enabled")
