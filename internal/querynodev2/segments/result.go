@@ -506,7 +506,9 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			continue
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
-		validSegments = append(validSegments, segments[i])
+		if plan.ignoreNonPk {
+			validSegments = append(validSegments, segments[i])
+		}
 		selectedOffsets = append(selectedOffsets, make([]int64, 0, len(r.GetOffset())))
 		selectedIndexes = append(selectedIndexes, make([]int64, 0, len(r.GetOffset())))
 		loopEnd += size
