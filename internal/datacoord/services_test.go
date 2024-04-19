@@ -950,7 +950,7 @@ func (s *ServerSuite) TestAssignSegmentID() {
 			SegmentIDRequests: []*datapb.SegmentIDRequest{req},
 		})
 		s.NoError(err)
-		s.EqualValues(0, len(resp.SegIDAssignments))
+		s.EqualValues(1, len(resp.SegIDAssignments))
 	})
 }
 

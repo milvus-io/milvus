@@ -16,6 +16,14 @@ from uuid import uuid4
 IMPORT_TIMEOUT = 360
 
 
+class NumpyEncoder(json.JSONEncoder):
+    def default(self, obj):
+        if isinstance(obj, np.float32):
+            return float(obj)
+        return super(NumpyEncoder, self).default(obj)
+
+
+
 @pytest.mark.BulkInsert
 class TestCreateImportJob(TestBase):
 
@@ -50,7 +58,7 @@ class TestCreateImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -61,7 +69,7 @@ class TestCreateImportJob(TestBase):
         file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -141,7 +149,7 @@ class TestCreateImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -152,7 +160,7 @@ class TestCreateImportJob(TestBase):
         file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -231,7 +239,7 @@ class TestCreateImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -242,7 +250,7 @@ class TestCreateImportJob(TestBase):
         file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
         # create partition
@@ -326,7 +334,7 @@ class TestCreateImportJob(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
@@ -335,7 +343,7 @@ class TestCreateImportJob(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w") as f:
-                json.dump(data, f)
+                json.dump(data, f, cls=NumpyEncoder)
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -406,7 +414,7 @@ class TestCreateImportJob(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
@@ -486,7 +494,7 @@ class TestCreateImportJob(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             file_list = []
@@ -573,7 +581,7 @@ class TestCreateImportJob(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             file_list = []
@@ -598,7 +606,7 @@ class TestCreateImportJob(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
@@ -617,14 +625,14 @@ class TestCreateImportJob(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(1000*file_num, 1000*(file_num+1))]
 
             # dump data to file
             file_name = f"bulk_insert_data_{file_num}_{uuid4()}.json"
             file_path = f"/tmp/{file_name}"
             with open(file_path, "w") as f:
-                json.dump(data, f)
+                json.dump(data, f, cls=NumpyEncoder)
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -735,9 +743,9 @@ class TestCreateImportJob(TestBase):
                         "int_array": [i],
                         "varchar_array": [f"varchar_{i}"],
                         "bool_array": [random.choice([True, False])],
-                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                        "text_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
                             0].tolist(),
-                        "image_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                        "image_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
                             0].tolist(),
                     }
                 else:
@@ -751,9 +759,9 @@ class TestCreateImportJob(TestBase):
                         "int_array": [i],
                         "varchar_array": [f"varchar_{i}"],
                         "bool_array": [random.choice([True, False])],
-                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                        "text_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
                             0].tolist(),
-                        "image_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                        "image_emb": preprocessing.normalize([np.array([np.float32(random.random()) for _ in range(dim)])])[
                             0].tolist(),
                     }
                 if enable_dynamic_schema:
@@ -846,7 +854,7 @@ class TestImportJobAdvance(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(batch_size*file_num, batch_size*(file_num+1))]
 
             # dump data to file
@@ -855,7 +863,7 @@ class TestImportJobAdvance(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w") as f:
-                json.dump(data, f)
+                json.dump(data, f, cls=NumpyEncoder)
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -946,7 +954,7 @@ class TestCreateImportJobAdvance(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(batch_size*file_num, batch_size*(file_num+1))]
 
             # dump data to file
@@ -955,7 +963,7 @@ class TestCreateImportJobAdvance(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w") as f:
-                json.dump(data, f)
+                json.dump(data, f, cls=NumpyEncoder)
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -1035,7 +1043,7 @@ class TestCreateImportJobAdvance(TestBase):
                 "book_id": i,
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]}
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]}
                 for i in range(batch_size*file_num, batch_size*(file_num+1))]
 
             # dump data to file
@@ -1044,7 +1052,7 @@ class TestCreateImportJobAdvance(TestBase):
             # create dir for file path
             Path(file_path).parent.mkdir(parents=True, exist_ok=True)
             with open(file_path, "w") as f:
-                json.dump(data, f)
+                json.dump(data, f, cls=NumpyEncoder)
             # upload file to minio storage
             self.storage_client.upload_file(file_path, file_name)
             file_names.append([file_name])
@@ -1287,14 +1295,14 @@ class TestCreateImportJobNegative(TestBase):
             "book_id": i,
             "word_count": i,
             "book_describe": f"book_{i}",
-            "book_intro": [random.random() for _ in range(dim)]}
+            "book_intro": [np.float32(random.random()) for _ in range(dim)]}
             for i in range(10000)]
 
         # dump data to file
         file_name = f"bulk_insert_data_{uuid4()}.txt"
         file_path = f"/tmp/{file_name}"
 
-        json_data = json.dumps(data)
+        json_data = json.dumps(data, cls=NumpyEncoder)
 
         # 将JSON数据保存到txt文件
         with open(file_path, 'w') as file:
@@ -1333,14 +1341,14 @@ class TestCreateImportJobNegative(TestBase):
             "book_id": i,
             "word_count": i,
             "book_describe": f"book_{i}",
-            "book_intro": [random.random() for _ in range(dim)]}
+            "book_intro": [np.float32(random.random()) for _ in range(dim)]}
             for i in range(0)]
 
         # dump data to file
         file_name = "bulk_insert_empty_data.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -1404,7 +1412,7 @@ class TestCreateImportJobNegative(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -1416,7 +1424,7 @@ class TestCreateImportJobNegative(TestBase):
         file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -1462,7 +1470,7 @@ class TestCreateImportJobNegative(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -1473,7 +1481,7 @@ class TestCreateImportJobNegative(TestBase):
         file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -1560,7 +1568,7 @@ class TestListImportJob(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -1571,7 +1579,7 @@ class TestListImportJob(TestBase):
         file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
 
@@ -1633,7 +1641,7 @@ class TestGetImportJobProgress(TestBase):
             tmp = {
                 "word_count": i,
                 "book_describe": f"book_{i}",
-                "book_intro": [random.random() for _ in range(dim)]
+                "book_intro": [np.float32(random.random()) for _ in range(dim)]
             }
             if not auto_id:
                 tmp["book_id"] = i
@@ -1644,7 +1652,7 @@ class TestGetImportJobProgress(TestBase):
         file_name = f"bulk_insert_data_{uuid4()}.json"
         file_path = f"/tmp/{file_name}"
         with open(file_path, "w") as f:
-            json.dump(data, f)
+            json.dump(data, f, cls=NumpyEncoder)
         # upload file to minio storage
         self.storage_client.upload_file(file_path, file_name)
         job_id_list = []

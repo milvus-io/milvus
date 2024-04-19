@@ -136,6 +136,7 @@ func (s *ErrSuite) TestWrap() {
 	s.ErrorIs(WrapErrParameterInvalid(8, 1, "failed to create"), ErrParameterInvalid)
 	s.ErrorIs(WrapErrParameterInvalidRange(1, 1<<16, 0, "topk should be in range"), ErrParameterInvalid)
 	s.ErrorIs(WrapErrParameterMissing("alias_name", "no alias parameter"), ErrParameterMissing)
+	s.ErrorIs(WrapErrParameterTooLarge("unit test"), ErrParameterTooLarge)
 
 	// Metrics related
 	s.ErrorIs(WrapErrMetricNotFound("unknown", "failed to get metric"), ErrMetricNotFound)

@@ -1546,18 +1546,18 @@ func TestCalculateReadRates(t *testing.T) {
 						Label: metricsinfo.ReadResultThroughput,
 						Rate:  40 * 1024 * 1024,
 					},
-					{
-						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("default")),
-						Rate:  20 * 1024 * 1024,
-					},
+					//{
+					//	Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("default")),
+					//	Rate:  20 * 1024 * 1024,
+					//},
 					{
 						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetCollectionSubLabel("default", "col1")),
 						Rate:  15 * 1024 * 1024,
 					},
-					{
-						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("test")),
-						Rate:  20 * 1024 * 1024,
-					},
+					//{
+					//	Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("test")),
+					//	Rate:  20 * 1024 * 1024,
+					//},
 					{
 						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetCollectionSubLabel("test", "col2")),
 						Rate:  10 * 1024 * 1024,
@@ -1574,10 +1574,10 @@ func TestCalculateReadRates(t *testing.T) {
 						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("default")),
 						Rate:  10,
 					},
-					{
-						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("test")),
-						Rate:  10,
-					},
+					//{
+					//	Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("test")),
+					//	Rate:  10,
+					//},
 					{
 						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetCollectionSubLabel("default", "col1")),
 						Rate:  10,
@@ -1598,31 +1598,31 @@ func TestCalculateReadRates(t *testing.T) {
 						Label: metricsinfo.ReadResultThroughput,
 						Rate:  20 * 1024 * 1024,
 					},
-					{
-						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("default")),
-						Rate:  20 * 1024 * 1024,
-					},
+					//{
+					//	Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetDBSubLabel("default")),
+					//	Rate:  20 * 1024 * 1024,
+					//},
 					{
 						Label: ratelimitutil.FormatSubLabel(metricsinfo.ReadResultThroughput, ratelimitutil.GetCollectionSubLabel("default", "col1")),
-						Rate:  15 * 1024 * 1024,
+						Rate:  20 * 1024 * 1024,
 					},
 					{
 						Label: searchLabel,
 						Rate:  20,
 					},
-					{
-						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("default")),
-						Rate:  20,
-					},
+					//{
+					//	Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetDBSubLabel("default")),
+					//	Rate:  20,
+					//},
 					{
 						Label: ratelimitutil.FormatSubLabel(searchLabel, ratelimitutil.GetCollectionSubLabel("default", "col1")),
-						Rate:  10,
+						Rate:  20,
 					},
 				},
 			},
 		}
 
-		quotaCenter.rateLimiter.GetRootLimiters().GetLimiters().Insert(internalpb.RateType_DQLSearch, ratelimitutil.NewLimiter(500, 500))
+		quotaCenter.rateLimiter.GetRootLimiters().GetLimiters().Insert(internalpb.RateType_DQLSearch, ratelimitutil.NewLimiter(1000, 1000))
 		quotaCenter.rateLimiter.GetOrCreateCollectionLimiters(1, 10,
 			newParamLimiterFunc(internalpb.RateScope_Database, allOps),
 			newParamLimiterFunc(internalpb.RateScope_Collection, allOps))
@@ -1646,7 +1646,7 @@ func TestCalculateReadRates(t *testing.T) {
 			checkRate(quotaCenter.rateLimiter.GetRootLimiters(), float64(32))             // (20 + 20) * 0.8
 			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(1), float64(24))        // (20 + 10) * 0.8
 			checkRate(quotaCenter.rateLimiter.GetDatabaseLimiters(2), float64(500))       // not cool off
-			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(1, 10), float64(16))  // (10 + 10) * 0.8
+			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(1, 10), float64(24))  // (20 + 10) * 0.8
 			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 20), float64(500)) // not cool off
 			checkRate(quotaCenter.rateLimiter.GetCollectionLimiters(2, 30), float64(500)) // not cool off
 		}

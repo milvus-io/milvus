@@ -430,7 +430,7 @@ def gen_binary_vectors(num, dim):
 
 def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
-                               vector_data_type="FLOAT_VECTOR", auto_id = False, primary_field = ct.default_int64_field_name):
+                               vector_data_type="FLOAT_VECTOR", auto_id=False, primary_field = ct.default_int64_field_name):
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -464,6 +464,7 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
             df[multiple_vector_field_name[i]] = new_float_vec_values
 
     return df
+
 
 def gen_general_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                   random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
@@ -650,7 +651,7 @@ def gen_dataframe_multi_string_fields(string_fields, nb=ct.default_nb):
 
 def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                 auto_id=False, random_primary_key=False, multiple_dim_array=[],
-                                multiple_vector_field_name=[], primary_field = ct.default_int64_field_name):
+                                multiple_vector_field_name=[], primary_field=ct.default_int64_field_name):
     if not random_primary_key:
         int64_values = pd.Series(data=[i for i in range(start, start + nb)])
     else:
@@ -693,6 +694,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
     log.debug("generated data completed")
 
     return df
+
 
 def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                    auto_id=False, random_primary_key=False, multiple_dim_array=[],
@@ -1734,11 +1736,11 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
             else:
                 if not enable_dynamic_field:
                     if vector_data_type == "FLOAT_VECTOR":
-                        default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
-                                                                   random_primary_key=random_primary_key,
-                                                                   multiple_dim_array=multiple_dim_array,
-                                                                   multiple_vector_field_name=vector_name_list,
-                                                                   auto_id=auto_id, primary_field=primary_field)
+                        default_data = gen_general_list_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
+                                                                      random_primary_key=random_primary_key,
+                                                                      multiple_dim_array=multiple_dim_array,
+                                                                      multiple_vector_field_name=vector_name_list,
+                                                                      auto_id=auto_id, primary_field=primary_field)
                     elif vector_data_type == "FLOAT16_VECTOR" or "BFLOAT16_VECTOR":
                         default_data = gen_general_list_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
                                                                       random_primary_key=random_primary_key,
@@ -1929,6 +1931,7 @@ def extract_vector_field_name_list(collection_w):
 
     return vector_name_list
 
+
 def get_activate_func_from_metric_type(metric_type):
     activate_function = lambda x: x
     if metric_type == "COSINE":
@@ -1938,6 +1941,7 @@ def get_activate_func_from_metric_type(metric_type):
     else:
         activate_function  = lambda x: 1.0 - 2*math.atan(x) / math.pi
     return activate_function
+
 
 def get_hybrid_search_base_results_rrf(search_res_dict_array, round_decimal=-1):
     """

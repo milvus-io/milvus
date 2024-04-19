@@ -140,6 +140,21 @@ func FormatSubLabel(label, subLabel string) string {
 	return fmt.Sprintf("%s-%s", label, subLabel)
 }
 
+func IsSubLabel(label string) bool {
+	return strings.Contains(label, "-")
+}
+
+func SplitCollectionSubLabel(label string) (mainLabel, database, collection string, ok bool) {
+	if !IsSubLabel(label) {
+		ok = false
+		return
+	}
+	subMark := strings.Index(label, "-")
+	mainLabel = label[:subMark]
+	database, collection, ok = GetCollectionFromSubLabel(mainLabel, label)
+	return
+}
+
 func GetDBFromSubLabel(label, fullLabel string) (string, bool) {
 	if !strings.HasPrefix(fullLabel, FormatSubLabel(label, GetDBSubLabel(""))) {
 		return "", false
