@@ -33,7 +33,7 @@ import (
 
 func Test_alterDatabaseTask_Prepare(t *testing.T) {
 	t.Run("invalid collectionID", func(t *testing.T) {
-		task := &alterDatabaseTask{Req: &rootcoordpb.AlterDatabaseRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterDatabase}}}
+		task := &alterDatabaseTask{Req: &rootcoordpb.AlterDatabaseRequest{}}
 		err := task.Prepare(context.Background())
 		assert.Error(t, err)
 	})
@@ -41,7 +41,6 @@ func Test_alterDatabaseTask_Prepare(t *testing.T) {
 	t.Run("normal case", func(t *testing.T) {
 		task := &alterDatabaseTask{
 			Req: &rootcoordpb.AlterDatabaseRequest{
-				Base:   &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterDatabase},
 				DbName: "cn",
 			},
 		}
@@ -59,7 +58,7 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 	}
 
 	t.Run("properties is empty", func(t *testing.T) {
-		task := &alterDatabaseTask{Req: &rootcoordpb.AlterDatabaseRequest{Base: &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterDatabase}}}
+		task := &alterDatabaseTask{Req: &rootcoordpb.AlterDatabaseRequest{}}
 		err := task.Execute(context.Background())
 		assert.Error(t, err)
 	})
@@ -69,7 +68,6 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 		task := &alterDatabaseTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &rootcoordpb.AlterDatabaseRequest{
-				Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterDatabase},
 				DbName:     "cn",
 				Properties: properties,
 			},
@@ -97,7 +95,6 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 		task := &alterDatabaseTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &rootcoordpb.AlterDatabaseRequest{
-				Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterDatabase},
 				DbName:     "cn",
 				Properties: properties,
 			},
@@ -126,7 +123,6 @@ func Test_alterDatabaseTask_Execute(t *testing.T) {
 		task := &alterDatabaseTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &rootcoordpb.AlterDatabaseRequest{
-				Base:       &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterDatabase},
 				DbName:     "cn",
 				Properties: properties,
 			},
