@@ -297,6 +297,9 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 ) bool {
 	log := log.With(zap.Int64("segmentID", segment.ID))
 
+	if !gc.isExpire(segment.GetDroppedAt()) {
+		return false
+	}
 	isCompacted := childSegment != nil || segment.GetCompacted()
 	if isCompacted {
 		// For compact A, B -> C, don't GC A or B if C is not indexed,
@@ -306,10 +309,6 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 			log.WithRateGroup("GC_FAIL_COMPACT_TO_NOT_INDEXED", 1, 60).
 				RatedInfo(60, "skipping GC when compact target segment is not indexed",
 					zap.Int64("child segment ID", childSegment.GetID()))
-			return false
-		}
-	} else {
-		if !gc.isExpire(segment.GetDroppedAt()) {
 			return false
 		}
 	}
