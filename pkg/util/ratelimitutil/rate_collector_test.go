@@ -246,4 +246,23 @@ func TestLabelUtil(t *testing.T) {
 		_, _, ok := GetCollectionFromSubLabel("foo", "aaa")
 		assert.False(t, ok)
 	}
+
+	{
+		ok := IsSubLabel(FormatSubLabel("foo", "bar"))
+		assert.True(t, ok)
+	}
+
+	{
+		_, _, _, ok := SplitCollectionSubLabel("foo")
+		assert.False(t, ok)
+	}
+
+	{
+		label := FormatSubLabel("foo", GetCollectionSubLabel("db1", "col1"))
+		mainLabel, db, col, ok := SplitCollectionSubLabel(label)
+		assert.True(t, ok)
+		assert.Equal(t, "foo", mainLabel)
+		assert.Equal(t, "db1", db)
+		assert.Equal(t, "col1", col)
+	}
 }
