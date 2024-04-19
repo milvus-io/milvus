@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 )
@@ -409,7 +410,15 @@ func TestAvgReassignPolicy(t *testing.T) {
 		}
 		t.Run(tt.name, func(t *testing.T) {
 			got := AverageReassignPolicy(tt.args.store, tt.args.reassigns)
-			assert.ElementsMatch(t, tt.want.Collect(), got.Collect())
+
+			wantMap, gotMap := tt.want.SplitByChannel(), got.SplitByChannel()
+			assert.ElementsMatch(t, lo.Keys(wantMap), lo.Keys(gotMap))
+
+			for k, opSet := range wantMap {
+				gotOpSet, ok := gotMap[k]
+				require.True(t, ok)
+				assert.ElementsMatch(t, opSet.Collect(), gotOpSet.Collect())
+			}
 		})
 	}
 }
