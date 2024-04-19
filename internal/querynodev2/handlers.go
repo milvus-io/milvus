@@ -488,11 +488,11 @@ func (node *QueryNode) getChannelStatistics(ctx context.Context, req *querypb.Ge
 			results, readSegments, err = segments.StatisticStreaming(ctx, node.manager, req.Req.GetCollectionID(), req.Req.GetPartitionIDs(), req.GetSegmentIDs())
 		}
 
+		defer node.manager.Segment.Unpin(readSegments)
 		if err != nil {
 			log.Warn("get segments statistics failed", zap.Error(err))
 			return nil, err
 		}
-		defer node.manager.Segment.Unpin(readSegments)
 		return segmentStatsResponse(results), nil
 	}
 
