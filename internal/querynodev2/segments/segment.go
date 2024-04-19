@@ -1352,7 +1352,7 @@ func WithReleaseScope(scope ReleaseScope) releaseOption {
 	}
 }
 
-func (s *LocalSegment) Release(opts ...releaseOption) {
+func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 	options := newReleaseOptions()
 	for _, opt := range opts {
 		opt(options)
@@ -1364,7 +1364,7 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	// release will never fail
 	defer stateLockGuard.Done(nil)
 
-	log := log.With(zap.Int64("collectionID", s.Collection()),
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),

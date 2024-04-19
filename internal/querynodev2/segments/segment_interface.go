@@ -78,7 +78,7 @@ type Segment interface {
 	Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
 	LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error
 	LastDeltaTimestamp() uint64
-	Release(opts ...releaseOption)
+	Release(ctx context.Context, opts ...releaseOption)
 
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)

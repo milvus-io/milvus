@@ -916,7 +916,7 @@ func (_c *MockSegment_PinIfNotReleased_Call) RunAndReturn(run func() error) *Moc
 }
 
 // Release provides a mock function with given fields: opts
-func (_m *MockSegment) Release(opts ...releaseOption) {
+func (_m *MockSegment) Release(ctx context.Context, opts ...releaseOption) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]

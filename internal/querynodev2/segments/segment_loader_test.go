@@ -97,7 +97,7 @@ func (suite *SegmentLoaderSuite) SetupTest() {
 func (suite *SegmentLoaderSuite) TearDownTest() {
 	ctx := context.Background()
 	for i := 0; i < suite.segmentNum; i++ {
-		suite.manager.Segment.Remove(suite.segmentID+int64(i), querypb.DataScope_All)
+		suite.manager.Segment.Remove(context.Background(), suite.segmentID+int64(i), querypb.DataScope_All)
 	}
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
@@ -450,7 +450,7 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 		seg := segment.(*LocalSegment)
 		// nothing would happen as the delta logs have been all applied,
 		// so the released segment won't cause error
-		seg.Release()
+		seg.Release(ctx)
 		loadInfos[i].Deltalogs[0].Binlogs[0].TimestampTo--
 		err := suite.loader.LoadDeltaLogs(ctx, seg, loadInfos[i].GetDeltalogs())
 		suite.NoError(err)
@@ -866,7 +866,7 @@ func (suite *SegmentLoaderV2Suite) SetupTest() {
 func (suite *SegmentLoaderV2Suite) TearDownTest() {
 	ctx := context.Background()
 	for i := 0; i < suite.segmentNum; i++ {
-		suite.manager.Segment.Remove(suite.segmentID+int64(i), querypb.DataScope_All)
+		suite.manager.Segment.Remove(context.Background(), suite.segmentID+int64(i), querypb.DataScope_All)
 	}
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 	paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")

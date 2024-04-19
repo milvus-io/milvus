@@ -83,6 +83,11 @@ type Loader interface {
 		segment *LocalSegment,
 		loadInfo *querypb.SegmentLoadInfo,
 	) error
+
+	LoadLazySegment(ctx context.Context,
+		segment *LocalSegment,
+		loadInfo *querypb.SegmentLoadInfo,
+	) error
 }
 
 type LoadResource struct {
@@ -170,7 +175,7 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
 		newSegments.Range(func(_ int64, s Segment) bool {
-			s.Release()
+			s.Release(context.Background())
 			return true
 		})
 		debug.FreeOSMemory()
@@ -223,7 +228,7 @@ func (loader *segmentLoaderV2) Load(ctx context.Context,
 			)
 			return err
 		}
-		loader.manager.Segment.Put(segmentType, segment)
+		loader.manager.Segment.Put(ctx, segmentType, segment)
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		log.Info("load segment done", zap.Int64("segmentID", segmentID))
@@ -478,6 +483,13 @@ func (loader *segmentLoaderV2) LoadSegment(ctx context.Context,
 	return loader.LoadDelta(ctx, segment.Collection(), segment)
 }
 
+func (loader *segmentLoaderV2) LoadLazySegment(ctx context.Context,
+	segment *LocalSegment,
+	loadInfo *querypb.SegmentLoadInfo,
+) (err error) {
+	return merr.ErrOperationNotSupported
+}
+
 func (loader *segmentLoaderV2) loadSealedSegmentFields(ctx context.Context, segment *LocalSegment, fields *typeutil.ConcurrentMap[int64, *schemapb.FieldSchema], rowCount int64) error {
 	runningGroup, _ := errgroup.WithContext(ctx)
 	fields.Range(func(fieldID int64, field *schemapb.FieldSchema) bool {
@@ -611,7 +623,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 				zap.Int64("segmentID", segmentID),
 				zap.Error(err),
 			)
-			s.Release()
+			s.Release(context.Background())
 			return true
 		})
 		debug.FreeOSMemory()
@@ -680,7 +692,7 @@ func (loader *segmentLoader) Load(ctx context.Context,
 			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
 
-		loader.manager.Segment.Put(segmentType, segment)
+		loader.manager.Segment.Put(ctx, segmentType, segment)
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
 		loader.notifyLoadFinish(loadInfo)
@@ -1082,6 +1094,21 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		}
 	}
 	return nil
+}
+
+func (loader *segmentLoader) LoadLazySegment(ctx context.Context,
+	segment *LocalSegment,
+	loadInfo *querypb.SegmentLoadInfo,
+) (err error) {
+	infos := []*querypb.SegmentLoadInfo{loadInfo}
+	resource, _, err := loader.requestResource(ctx, infos...)
+	log := log.Ctx(ctx)
+	if err != nil {
+		log.Warn("request resource failed", zap.Error(err))
+		return merr.ErrServiceResourceInsufficient
+	}
+	defer loader.freeRequest(resource)
+	return loader.LoadSegment(ctx, segment, loadInfo)
 }
 
 func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) ([]string, storage.StatsLogType) {
@@ -1504,20 +1531,20 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
 			}
+			segmentMemorySize += neededMemSize
 			if mmapEnabled {
 				segmentDiskSize += neededMemSize + neededDiskSize
 			} else {
-				segmentMemorySize += neededMemSize
 				segmentDiskSize += neededDiskSize
 			}
 		} else {
 			mmapEnabled = common.IsFieldMmapEnabled(schema, fieldID) ||
 				(!common.FieldHasMmapKey(schema, fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
 			binlogSize := uint64(getBinlogDataSize(fieldBinlog))
+			segmentMemorySize += binlogSize
 			if mmapEnabled {
 				segmentDiskSize += binlogSize
 			} else {
-				segmentMemorySize += binlogSize
 				if multiplyFactor.enableTempSegmentIndex {
 					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
 				}

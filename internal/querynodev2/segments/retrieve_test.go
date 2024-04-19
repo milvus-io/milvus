@@ -133,13 +133,13 @@ func (suite *RetrieveSuite) SetupTest() {
 	err = suite.growing.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	suite.Require().NoError(err)
 
-	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
-	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)
+	suite.manager.Segment.Put(context.Background(), SegmentTypeSealed, suite.sealed)
+	suite.manager.Segment.Put(context.Background(), SegmentTypeGrowing, suite.growing)
 }
 
 func (suite *RetrieveSuite) TearDownTest() {
-	suite.sealed.Release()
-	suite.growing.Release()
+	suite.sealed.Release(context.Background())
+	suite.growing.Release(context.Background())
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
@@ -250,7 +250,7 @@ func (suite *RetrieveSuite) TestRetrieveNilSegment() {
 	plan, err := genSimpleRetrievePlan(suite.collection)
 	suite.NoError(err)
 
-	suite.sealed.Release()
+	suite.sealed.Release(context.Background())
 	req := &querypb.QueryRequest{
 		Req: &internalpb.RetrieveRequest{
 			CollectionID: suite.collectionID,
