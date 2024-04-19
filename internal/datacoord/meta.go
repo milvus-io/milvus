@@ -20,6 +20,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 	"path"
 	"strconv"
 	"strings"
@@ -47,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type meta struct {
@@ -1356,6 +1358,27 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
 			Set(float64(ts.Unix()))
 	}
+	return nil
+}
+
+// MarkChannelCheckpointDropped set channel checkpoint to MaxUint64 preventing future update
+// and remove the metrics for channel checkpoint lag.
+func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
+	m.channelCPs.Lock()
+	defer m.channelCPs.Unlock()
+
+	cp := m.channelCPs.checkpoints[channel]
+	cp = typeutil.Clone(cp)
+	cp.Timestamp = math.MaxUint64
+
+	err := m.catalog.SaveChannelCheckpoints(ctx, []*msgpb.MsgPosition{cp})
+	if err != nil {
+		return err
+	}
+
+	m.channelCPs.checkpoints[channel] = cp
+
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 	return nil
 }
 
