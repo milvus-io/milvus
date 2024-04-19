@@ -163,6 +163,7 @@ func (gc *garbageCollector) work() {
 			gc.recycleUnusedIndexes()
 			gc.recycleUnusedSegIndexes()
 			gc.recycleUnusedIndexFiles()
+			gc.recycleUnusedAnalyzeFiles()
 		case <-scanTicker.C:
 			log.Info("Garbage collector start to scan interrupted write residue")
 			gc.scan()
@@ -515,7 +516,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 			continue
 		}
 		log.Info("garbageCollector will recycle index files", zap.Int64("buildID", buildID))
-		canRecycle, segIdx := gc.meta.indexMeta.CleanSegmentIndex(buildID)
+		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
 			// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 			// and delete all index files about the buildID at one time.
@@ -563,5 +564,64 @@ func (gc *garbageCollector) recycleUnusedIndexFiles() {
 		}
 		log.Info("index files recycle success", zap.Int64("buildID", buildID),
 			zap.Int("delete index files num", deletedFilesNum))
+	}
+}
+
+// recycleUnusedAnalyzeFiles is used to delete those analyze stats files that no longer exist in the meta.
+func (gc *garbageCollector) recycleUnusedAnalyzeFiles() {
+	log.Info("start recycleUnusedAnalyzeFiles")
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startTs := time.Now()
+	prefix := path.Join(gc.option.cli.RootPath(), common.AnalyzeStatsPath) + "/"
+	// list dir first
+	keys, _, err := gc.option.cli.ListWithPrefix(ctx, prefix, false)
+	if err != nil {
+		log.Warn("garbageCollector recycleUnusedAnalyzeFiles list keys from chunk manager failed", zap.Error(err))
+		return
+	}
+	log.Info("recycleUnusedAnalyzeFiles, finish list object", zap.Duration("time spent", time.Since(startTs)), zap.Int("task ids", len(keys)))
+	for _, key := range keys {
+		log.Debug("analyze keys", zap.String("key", key))
+		taskID, err := parseBuildIDFromFilePath(key)
+		if err != nil {
+			log.Warn("garbageCollector recycleUnusedAnalyzeFiles parseAnalyzeResult failed", zap.String("key", key), zap.Error(err))
+			continue
+		}
+		log.Info("garbageCollector will recycle analyze stats files", zap.Int64("taskID", taskID))
+		canRecycle, task := gc.meta.analyzeMeta.CheckCleanAnalyzeTask(taskID)
+		if !canRecycle {
+			// Even if the analyze task is marked as deleted, the analyze stats file will not be recycled, wait for the next gc,
+			// and delete all index files about the taskID at one time.
+			log.Info("garbageCollector no need to recycle analyze stats files", zap.Int64("taskID", taskID))
+			continue
+		}
+		if task == nil {
+			// buildID no longer exists in meta, remove all index files
+			log.Info("garbageCollector recycleUnusedAnalyzeFiles find meta has not exist, remove index files",
+				zap.Int64("taskID", taskID))
+			err = gc.option.cli.RemoveWithPrefix(ctx, key)
+			if err != nil {
+				log.Warn("garbageCollector recycleUnusedAnalyzeFiles remove analyze stats files failed",
+					zap.Int64("taskID", taskID), zap.String("prefix", key), zap.Error(err))
+				continue
+			}
+			log.Info("garbageCollector recycleUnusedAnalyzeFiles remove analyze stats files success",
+				zap.Int64("taskID", taskID), zap.String("prefix", key))
+			continue
+		}
+
+		log.Info("remove analyze stats files which version is less than current task",
+			zap.Int64("taskID", taskID), zap.Int64("current version", task.Version))
+		var i int64 = 0
+		for i = 0; i < task.Version; i++ {
+			removePrefix := prefix + fmt.Sprintf("%d/", task.Version)
+			if err := gc.option.cli.RemoveWithPrefix(ctx, removePrefix); err != nil {
+				log.Warn("garbageCollector recycleUnusedAnalyzeFiles remove files with prefix failed",
+					zap.Int64("taskID", taskID), zap.String("removePrefix", removePrefix))
+				continue
+			}
+		}
+		log.Info("analyze stats files recycle success", zap.Int64("taskID", taskID))
 	}
 }

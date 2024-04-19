@@ -18,8 +18,6 @@ package indexnode
 
 import (
 	"context"
-	"fmt"
-	"strings"
 	"time"
 
 	"go.uber.org/zap"
@@ -144,35 +142,31 @@ func (at *analyzeTask) SaveResult(ctx context.Context) error {
 	}
 	defer gc()
 
-	centroidsFile, centroidsFileSize, offsetMappingFiles, offsetMappingFilesSize, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
+	centroidsFile, _, _, _, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
 	if err != nil {
 		log.Error("failed to upload index", zap.Error(err))
 		return err
 	}
-	log.Info("debug for analyze result", zap.String("centroidsFile", centroidsFile),
-		zap.Int64("centroidsFileSize", centroidsFileSize))
-	segmentsOffsetMappingFiles := make(map[int64]string)
-	segmentsOffsetMappingFilesSize := make(map[string]int64)
-	for i, file := range offsetMappingFiles {
-		for segID := range at.req.GetSegmentStats() {
-			if strings.Contains(file, fmt.Sprintf("%d", segID)) {
-				segmentsOffsetMappingFiles[segID] = file
-				segmentsOffsetMappingFilesSize[file] = offsetMappingFilesSize[i]
-				log.Info("debug for analyze result", zap.Int64("segID", segID),
-					zap.String("offsetMappingFile", file),
-					zap.Int64("offsetMappingFileSize", offsetMappingFilesSize[i]))
-				break
-			}
-		}
-	}
+	log.Info("debug for analyze result", zap.String("centroidsFile", centroidsFile))
+	//segmentsOffsetMappingFiles := make(map[int64]string)
+	//segmentsOffsetMappingFilesSize := make(map[string]int64)
+	//for i, file := range offsetMappingFiles {
+	//	for segID := range at.req.GetSegmentStats() {
+	//		if strings.Contains(file, fmt.Sprintf("%d", segID)) {
+	//			segmentsOffsetMappingFiles[segID] = file
+	//			segmentsOffsetMappingFilesSize[file] = offsetMappingFilesSize[i]
+	//			log.Info("debug for analyze result", zap.Int64("segID", segID),
+	//				zap.String("offsetMappingFile", file),
+	//				zap.Int64("offsetMappingFileSize", offsetMappingFilesSize[i]))
+	//			break
+	//		}
+	//	}
+	//}
 
 	at.endTime = time.Now().UnixMicro()
 	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(),
 		at.req.GetTaskID(),
-		centroidsFile,
-		segmentsOffsetMappingFiles,
-		centroidsFileSize,
-		segmentsOffsetMappingFilesSize)
+		centroidsFile)
 	at.tr.Elapse("index building all done")
 	log.Info("Successfully save analyze files")
 	return nil

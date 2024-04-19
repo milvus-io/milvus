@@ -141,7 +141,7 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		if info == nil {
 			log.Ctx(ctx).Warn("analyze stats task is processing, but segment is nil, delete the task",
 				zap.Int64("taskID", at.GetTaskID()), zap.Int64("segmentID", segID))
-			at.SetState(indexpb.JobState_JobStateNone, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
+			at.SetState(indexpb.JobState_JobStateFailed, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
 			return false, false
 		}
 

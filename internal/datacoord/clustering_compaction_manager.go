@@ -206,15 +206,49 @@ func (t *ClusteringCompactionManager) gc() error {
 		log.Debug("PartitionStats in channel", zap.String("channel", channel), zap.Int("len", len(infos)))
 		if len(infos) > 2 {
 			for i := 2; i < len(infos); i++ {
+				removePaths := make([]string, 0)
 				info := infos[i]
+				log := log.With(zap.Int64("collectionID", info.GetCollectionID()),
+					zap.Int64("partitionID", info.GetPartitionID()),
+					zap.String("vChannel", info.GetVChannel()),
+					zap.Int64("planID", info.GetVersion()))
+
 				partitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath, metautil.JoinIDPath(info.CollectionID, info.PartitionID), info.GetVChannel(), strconv.FormatInt(info.GetVersion(), 10))
-				err := t.meta.chunkManager.Remove(t.ctx, partitionStatsPath)
-				log.Debug("remove partition stats file", zap.String("path", partitionStatsPath))
+				removePaths = append(removePaths, partitionStatsPath)
+				analyzeT := t.meta.analyzeMeta.GetTask(info.GetAnalyzeTaskID())
+				if analyzeT != nil {
+					centroidsFilePath := path.Join(t.meta.chunkManager.RootPath(), common.AnalyzeStatsPath,
+						metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(), analyzeT.GetPartitionID(), analyzeT.GetFieldID()),
+						"centroids",
+					)
+					removePaths = append(removePaths, centroidsFilePath)
+					for _, segID := range info.GetSegmentIDs() {
+						segmentOffsetMappingFilePath := path.Join(t.meta.chunkManager.RootPath(), common.AnalyzeStatsPath,
+							metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(), analyzeT.GetPartitionID(), analyzeT.GetFieldID(), segID),
+							"offset_mapping",
+						)
+						removePaths = append(removePaths, segmentOffsetMappingFilePath)
+					}
+				}
+
+				//err := t.meta.chunkManager.Remove(t.ctx, partitionStatsPath)
+				//log.Debug("remove partition stats file", zap.String("path", partitionStatsPath))
+				log.Debug("remove clustering compaction stats files", zap.Strings("removePaths", removePaths))
+				err := t.meta.chunkManager.MultiRemove(t.ctx, removePaths)
 				if err != nil {
+					log.Warn("remove clustering compaction stats files failed", zap.Error(err))
 					return err
 				}
+
+				// first clean analyze task
+				if err = t.meta.analyzeMeta.DropAnalyzeTask(info.GetAnalyzeTaskID()); err != nil {
+					log.Warn("remove analyze task failed", zap.Int64("analyzeTaskID", info.GetAnalyzeTaskID()), zap.Error(err))
+					return err
+				}
+
+				// finally clean up the partition stats info, and make sure the analysis task is cleaned up
 				err = t.meta.DropPartitionStatsInfo(info)
-				log.Debug("drop partition stats meta", zap.Any("info", info))
+				log.Debug("drop partition stats meta")
 				if err != nil {
 					return err
 				}
@@ -284,14 +318,19 @@ func (t *ClusteringCompactionManager) checkJobState(job *ClusteringCompactionJob
 					}
 					return true
 				}()
-				log.Debug("check compaction result segments index states", zap.Bool("indexed", indexed), zap.Int64("planID", plan.GetPlanID()), zap.Int64s("segments", segmentIDs))
+				log.Debug("check compaction result segments index states",
+					zap.Bool("indexed", indexed),
+					zap.Int64("planID", plan.GetPlanID()),
+					zap.Int64("analyzeTaskID", job.analyzeTaskID),
+					zap.Int64s("segments", segmentIDs))
 				if indexed {
 					err := t.meta.SavePartitionStatsInfo(&datapb.PartitionStatsInfo{
-						CollectionID: job.collectionID,
-						PartitionID:  compactionTask.plan.SegmentBinlogs[0].PartitionID,
-						VChannel:     compactionTask.plan.GetChannel(),
-						Version:      compactionTask.plan.PlanID,
-						SegmentIDs:   segmentIDs,
+						CollectionID:  job.collectionID,
+						PartitionID:   compactionTask.plan.SegmentBinlogs[0].PartitionID,
+						VChannel:      compactionTask.plan.GetChannel(),
+						Version:       compactionTask.plan.PlanID,
+						SegmentIDs:    segmentIDs,
+						AnalyzeTaskID: job.analyzeTaskID,
 					})
 					if err != nil {
 						return err
@@ -379,12 +418,15 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 					State:  indexpb.JobState_JobStateInit,
 				},
 			})
-			log.Info("submit analyze task", zap.Int64("id", analyzeTaskID))
+			log.Info("submit analyze task", zap.Int64("id", analyzeTaskID),
+				zap.Int64("planID", plan.GetPlanID()))
 
 			var analyzeTask *indexpb.AnalyzeTask
 			analyzeFinished := func() bool {
 				analyzeTask = t.meta.analyzeMeta.GetTask(analyzeTaskID)
-				log.Debug("check analyze task state", zap.Int64("id", analyzeTaskID), zap.String("state", analyzeTask.State.String()))
+				log.Debug("check analyze task state", zap.Int64("id", analyzeTaskID),
+					zap.Int64("planID", plan.GetPlanID()),
+					zap.String("state", analyzeTask.State.String()))
 				if analyzeTask.State == indexpb.JobState_JobStateFinished ||
 					analyzeTask.State == indexpb.JobState_JobStateFailed {
 					return true
@@ -400,16 +442,20 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 				}
 				time.Sleep(1 * time.Second)
 			}
-			log.Info("get analyzeTask", zap.Any("analyzeTask", analyzeTask))
+			log.Info("get analyzeTask",
+				zap.Int64("planID", plan.GetPlanID()),
+				zap.Any("analyzeTask", analyzeTask))
 			if analyzeTask.State == indexpb.JobState_JobStateFinished {
 				//version := int64(0) // analyzeTask.Version
-				//plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analyzeTask.TaskID, analyzeTask.Version))
-				if analyzeTask.GetCentroidsFile() == "" && len(analyzeTask.GetOffsetMapping()) == 0 {
+				plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analyzeTask.TaskID, analyzeTask.Version))
+				if analyzeTask.GetCentroidsFile() == "" {
+					log.Info("can't analyze data really, pretend completed major compaction job",
+						zap.Int64("planID", plan.GetPlanID()))
 					job.state = completed
 					return t.saveJob(job)
 				}
-				plan.CentroidFilePath = analyzeTask.GetCentroidsFile()
-				plan.OffsetMappingFiles = analyzeTask.GetOffsetMapping()
+				//plan.CentroidFilePath = analyzeTask.GetCentroidsFile()
+				//plan.OffsetMappingFiles = analyzeTask.GetOffsetMapping()
 				offSetSegmentIDs := make([]int64, 0)
 				for _, segID := range analyzeTask.SegmentIDs {
 					offSetSegmentIDs = append(offSetSegmentIDs, segID)

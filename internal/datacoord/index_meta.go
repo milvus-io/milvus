@@ -826,7 +826,7 @@ func (m *indexMeta) RemoveIndex(collID, indexID UniqueID) error {
 	return nil
 }
 
-func (m *indexMeta) CleanSegmentIndex(buildID UniqueID) (bool, *model.SegmentIndex) {
+func (m *indexMeta) CheckCleanSegmentIndex(buildID UniqueID) (bool, *model.SegmentIndex) {
 	m.RLock()
 	defer m.RUnlock()
 
