@@ -305,9 +305,13 @@ func (dr *deleteRunner) Init(ctx context.Context) error {
 }
 
 func (dr *deleteRunner) Run(ctx context.Context) error {
-	plan, err := planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.Expr)
+	plan, err := planparserv2.CreateRetrievePlan(dr.schema.schemaHelper, dr.req.GetExpr())
 	if err != nil {
 		return merr.WrapErrParameterInvalidMsg("failed to create delete plan: %v", err)
+	}
+
+	if planparserv2.IsAlwaysTruePlan(plan) {
+		return merr.WrapErrParameterInvalidMsg("delete plan can't be empty or always true : %s", dr.req.GetExpr())
 	}
 
 	isSimple, pk, numRow := getPrimaryKeysFromPlan(dr.schema.CollectionSchema, plan)
