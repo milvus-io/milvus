@@ -170,6 +170,15 @@ func TestQueryTask_all(t *testing.T) {
 	assert.Equal(t, typeutil.ZeroTimestamp, task.TimeoutTimestamp)
 	task.ctx = ctx1
 	assert.NoError(t, task.PreExecute(ctx))
+
+	{
+		task.mustUsePartitionKey = true
+		err := task.PreExecute(ctx)
+		assert.Error(t, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+		task.mustUsePartitionKey = false
+	}
+
 	// after preExecute
 	assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
 

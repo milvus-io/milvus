@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/resource"
 )
 
@@ -1634,5 +1635,35 @@ func TestProxy_ImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+	})
+}
+
+func TestGetCollectionRateSubLabel(t *testing.T) {
+	d := "db1"
+	collectionName := "test1"
+
+	t.Run("normal", func(t *testing.T) {
+		subLabel := GetCollectionRateSubLabel(&milvuspb.QueryRequest{
+			DbName:         d,
+			CollectionName: collectionName,
+		})
+		assert.Equal(t, ratelimitutil.GetCollectionSubLabel(d, collectionName), subLabel)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		{
+			subLabel := GetCollectionRateSubLabel(&milvuspb.QueryRequest{
+				DbName:         "",
+				CollectionName: collectionName,
+			})
+			assert.Equal(t, "", subLabel)
+		}
+		{
+			subLabel := GetCollectionRateSubLabel(&milvuspb.QueryRequest{
+				DbName:         d,
+				CollectionName: "",
+			})
+			assert.Equal(t, "", subLabel)
+		}
 	})
 }

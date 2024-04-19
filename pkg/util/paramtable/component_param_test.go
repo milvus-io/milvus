@@ -170,6 +170,10 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("proxy.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+
+		assert.False(t, Params.MustUsePartitionKey.GetAsBool())
+		params.Save("proxy.mustUsePartitionKey", "true")
+		assert.True(t, Params.MustUsePartitionKey.GetAsBool())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {

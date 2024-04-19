@@ -681,6 +681,32 @@ func (q *QuotaCenter) calculateReadRates() error {
 		}
 	}
 
+	metricMap := make(map[string]float64)                                 // label metric
+	collectionMetricMap := make(map[string]map[string]map[string]float64) // sub label metric, label -> db -> collection -> value
+	for _, metric := range q.proxyMetrics {
+		for _, rm := range metric.Rms {
+			if !ratelimitutil.IsSubLabel(rm.Label) {
+				metricMap[rm.Label] += rm.Rate
+				continue
+			}
+			mainLabel, database, collection, ok := ratelimitutil.SplitCollectionSubLabel(rm.Label)
+			if !ok {
+				continue
+			}
+			labelMetric, ok := collectionMetricMap[mainLabel]
+			if !ok {
+				labelMetric = make(map[string]map[string]float64)
+				collectionMetricMap[mainLabel] = labelMetric
+			}
+			databaseMetric, ok := labelMetric[database]
+			if !ok {
+				databaseMetric = make(map[string]float64)
+				labelMetric[database] = databaseMetric
+			}
+			databaseMetric[collection] += rm.Rate
+		}
+	}
+
 	// read result
 	enableResultProtection := Params.QuotaConfig.ResultProtectionEnabled.GetAsBool()
 	if enableResultProtection {
@@ -688,24 +714,17 @@ func (q *QuotaCenter) calculateReadRates() error {
 		maxDBRate := Params.QuotaConfig.MaxReadResultRatePerDB.GetAsFloat()
 		maxCollectionRate := Params.QuotaConfig.MaxReadResultRatePerCollection.GetAsFloat()
 
-		rateCount := float64(0)
 		dbRateCount := make(map[string]float64)
 		collectionRateCount := make(map[string]float64)
-		for _, metric := range q.proxyMetrics {
-			for _, rm := range metric.Rms {
-				if rm.Label == metricsinfo.ReadResultThroughput {
-					rateCount += rm.Rate
-					continue
-				}
-				dbName, ok := ratelimitutil.GetDBFromSubLabel(metricsinfo.ReadResultThroughput, rm.Label)
-				if ok {
-					dbRateCount[dbName] += rm.Rate
-					continue
-				}
-				dbName, collectionName, ok := ratelimitutil.GetCollectionFromSubLabel(metricsinfo.ReadResultThroughput, rm.Label)
-				if ok {
-					collectionRateCount[formatCollctionRateKey(dbName, collectionName)] += rm.Rate
-					continue
+		rateCount := metricMap[metricsinfo.ReadResultThroughput]
+		for mainLabel, labelMetric := range collectionMetricMap {
+			if mainLabel != metricsinfo.ReadResultThroughput {
+				continue
+			}
+			for database, databaseMetric := range labelMetric {
+				for collection, metricValue := range databaseMetric {
+					dbRateCount[database] += metricValue
+					collectionRateCount[formatCollctionRateKey(database, collection)] = metricValue
 				}
 			}
 		}
@@ -737,74 +756,55 @@ func (q *QuotaCenter) calculateReadRates() error {
 	})
 
 	coolOffSpeed := Params.QuotaConfig.CoolOffSpeed.GetAsFloat()
-	coolOffCollectionID := func(collections ...int64) error {
-		for _, collection := range collections {
-			dbID, ok := q.collectionIDToDBID.Get(collection)
-			if !ok {
-				return fmt.Errorf("db ID not found of collection ID: %d", collection)
-			}
-			collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collection)
-			if collectionLimiter == nil {
-				return fmt.Errorf("collection limiter not found: %d", collection)
-			}
-			dbName, ok := dbIDs[dbID]
-			if !ok {
-				return fmt.Errorf("db name not found of db ID: %d", dbID)
-			}
-			collectionName, ok := collectionIDs[collection]
-			if !ok {
-				return fmt.Errorf("collection name not found of collection ID: %d", collection)
-			}
-
-			realTimeSearchRate := q.getRealTimeRate(
-				ratelimitutil.FormatSubLabel(internalpb.RateType_DQLSearch.String(),
-					ratelimitutil.GetCollectionSubLabel(dbName, collectionName)))
-			realTimeQueryRate := q.getRealTimeRate(
-				ratelimitutil.FormatSubLabel(internalpb.RateType_DQLQuery.String(),
-					ratelimitutil.GetCollectionSubLabel(dbName, collectionName)))
-			q.coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed, collectionLimiter, log)
-
-			collectionProps := q.getCollectionLimitProperties(collection)
-			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionSearchRateMinKey),
-				internalpb.RateType_DQLSearch, collectionLimiter)
-			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionQueryRateMinKey),
-				internalpb.RateType_DQLQuery, collectionLimiter)
-		}
-		return nil
-	}
 
 	if clusterLimit {
-		realTimeClusterSearchRate := q.getRealTimeRate(internalpb.RateType_DQLSearch.String())
-		realTimeClusterQueryRate := q.getRealTimeRate(internalpb.RateType_DQLQuery.String())
+		realTimeClusterSearchRate := metricMap[internalpb.RateType_DQLSearch.String()]
+		realTimeClusterQueryRate := metricMap[internalpb.RateType_DQLQuery.String()]
 		q.coolOffReading(realTimeClusterSearchRate, realTimeClusterQueryRate, coolOffSpeed, q.rateLimiter.GetRootLimiters(), log)
 	}
 
 	var updateLimitErr error
-	limitDBNameSet.Range(func(name string) bool {
-		dbID, ok := q.dbs.Get(name)
-		if !ok {
-			log.Warn("db not found", zap.String("dbName", name))
-			updateLimitErr = fmt.Errorf("db not found: %s", name)
-			return false
-		}
-		dbLimiter := q.rateLimiter.GetDatabaseLimiters(dbID)
-		if dbLimiter == nil {
-			log.Warn("database limiter not found", zap.Int64("dbID", dbID))
-			updateLimitErr = fmt.Errorf("database limiter not found")
-			return false
+	if limitDBNameSet.Len() > 0 {
+		databaseSearchRate := make(map[string]float64)
+		databaseQueryRate := make(map[string]float64)
+		for mainLabel, labelMetric := range collectionMetricMap {
+			var databaseRate map[string]float64
+			if mainLabel == internalpb.RateType_DQLSearch.String() {
+				databaseRate = databaseSearchRate
+			} else if mainLabel == internalpb.RateType_DQLQuery.String() {
+				databaseRate = databaseQueryRate
+			} else {
+				continue
+			}
+			for database, databaseMetric := range labelMetric {
+				for _, metricValue := range databaseMetric {
+					databaseRate[database] += metricValue
+				}
+			}
 		}
 
-		realTimeSearchRate := q.getRealTimeRate(
-			ratelimitutil.FormatSubLabel(internalpb.RateType_DQLSearch.String(),
-				ratelimitutil.GetDBSubLabel(name)))
-		realTimeQueryRate := q.getRealTimeRate(
-			ratelimitutil.FormatSubLabel(internalpb.RateType_DQLQuery.String(),
-				ratelimitutil.GetDBSubLabel(name)))
-		q.coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed, dbLimiter, log)
-		return true
-	})
-	if updateLimitErr != nil {
-		return updateLimitErr
+		limitDBNameSet.Range(func(name string) bool {
+			dbID, ok := q.dbs.Get(name)
+			if !ok {
+				log.Warn("db not found", zap.String("dbName", name))
+				updateLimitErr = fmt.Errorf("db not found: %s", name)
+				return false
+			}
+			dbLimiter := q.rateLimiter.GetDatabaseLimiters(dbID)
+			if dbLimiter == nil {
+				log.Warn("database limiter not found", zap.Int64("dbID", dbID))
+				updateLimitErr = fmt.Errorf("database limiter not found")
+				return false
+			}
+
+			realTimeSearchRate := databaseSearchRate[name]
+			realTimeQueryRate := databaseQueryRate[name]
+			q.coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed, dbLimiter, log)
+			return true
+		})
+		if updateLimitErr != nil {
+			return updateLimitErr
+		}
 	}
 
 	limitCollectionNameSet.Range(func(name string) bool {
@@ -826,6 +826,49 @@ func (q *QuotaCenter) calculateReadRates() error {
 	})
 	if updateLimitErr != nil {
 		return updateLimitErr
+	}
+
+	safeGetCollectionRate := func(label, dbName, collectionName string) float64 {
+		if labelMetric, ok := collectionMetricMap[label]; ok {
+			if dbMetric, ok := labelMetric[dbName]; ok {
+				if rate, ok := dbMetric[collectionName]; ok {
+					return rate
+				}
+			}
+		}
+		return 0
+	}
+
+	coolOffCollectionID := func(collections ...int64) error {
+		for _, collection := range collections {
+			dbID, ok := q.collectionIDToDBID.Get(collection)
+			if !ok {
+				return fmt.Errorf("db ID not found of collection ID: %d", collection)
+			}
+			collectionLimiter := q.rateLimiter.GetCollectionLimiters(dbID, collection)
+			if collectionLimiter == nil {
+				return fmt.Errorf("collection limiter not found: %d", collection)
+			}
+			dbName, ok := dbIDs[dbID]
+			if !ok {
+				return fmt.Errorf("db name not found of db ID: %d", dbID)
+			}
+			collectionName, ok := collectionIDs[collection]
+			if !ok {
+				return fmt.Errorf("collection name not found of collection ID: %d", collection)
+			}
+
+			realTimeSearchRate := safeGetCollectionRate(internalpb.RateType_DQLSearch.String(), dbName, collectionName)
+			realTimeQueryRate := safeGetCollectionRate(internalpb.RateType_DQLQuery.String(), dbName, collectionName)
+			q.coolOffReading(realTimeSearchRate, realTimeQueryRate, coolOffSpeed, collectionLimiter, log)
+
+			collectionProps := q.getCollectionLimitProperties(collection)
+			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionSearchRateMinKey),
+				internalpb.RateType_DQLSearch, collectionLimiter)
+			q.guaranteeMinRate(getCollectionRateLimitConfig(collectionProps, common.CollectionQueryRateMinKey),
+				internalpb.RateType_DQLQuery, collectionLimiter)
+		}
+		return nil
 	}
 
 	if updateLimitErr = coolOffCollectionID(limitCollectionSet.Collect()...); updateLimitErr != nil {

@@ -328,6 +328,14 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		assert.NoError(t, task.PreExecute(ctx))
 		assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
 
+		{
+			task.mustUsePartitionKey = true
+			err = task.PreExecute(ctx)
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			task.mustUsePartitionKey = false
+		}
+
 		// field not exist
 		task.ctx = context.TODO()
 		task.request.OutputFields = []string{testInt64Field + funcutil.GenRandomStr()}
