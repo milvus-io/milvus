@@ -93,6 +93,16 @@ func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	return segments
 }
 
+func (s *SegmentsInfo) GetSegmentsBySelector(selector SegmentInfoSelector) []*SegmentInfo {
+	var segments []*SegmentInfo
+	for _, segment := range s.segments {
+		if selector(segment) {
+			segments = append(segments, segment)
+		}
+	}
+	return segments
+}
+
 // GetCompactionTo returns the segment that the provided segment is compacted to.
 // Return (nil, false) if given segmentID can not found in the meta.
 // Return (nil, true) if given segmentID can be found not no compaction to.

@@ -551,10 +551,8 @@ func (c *ChannelManagerImpl) Match(nodeID int64, channel string) bool {
 		return false
 	}
 
-	for _, ch := range info.Channels {
-		if ch.GetName() == channel {
-			return true
-		}
+	if _, ok := info.Channels[channel]; ok {
+		return true
 	}
 	return false
 }
