@@ -2,6 +2,7 @@ package backend
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 
@@ -67,11 +68,11 @@ func (f *BackupFile) WriteEntry(k, v string) error {
 
 func (f *BackupFile) ReadHeader() (header *BackupHeader, headerLength uint64, err error) {
 	if len(*f) < 8 {
-		return nil, 0, fmt.Errorf("invalid backup file, cannot read header length")
+		return nil, 0, errors.New("invalid backup file, cannot read header length")
 	}
 	headerLength = binary.LittleEndian.Uint64((*f)[:8])
 	if uint64(len(*f)) < 8+headerLength {
-		return nil, 0, fmt.Errorf("invalid backup file, cannot read header")
+		return nil, 0, errors.New("invalid backup file, cannot read header")
 	}
 	header = &BackupHeader{}
 	if err := proto.Unmarshal((*f)[8:headerLength+8], header); err != nil {
@@ -85,11 +86,11 @@ func (f *BackupFile) ReadEntryFromPos(pos uint64) (entryLength uint64, entry *co
 		return 0, nil, io.EOF
 	}
 	if uint64(len(*f)) < pos+8 {
-		return 0, nil, fmt.Errorf("invalid backup file, cannot read entry length")
+		return 0, nil, errors.New("invalid backup file, cannot read entry length")
 	}
 	entryLength = binary.LittleEndian.Uint64((*f)[pos : pos+8])
 	if uint64(len(*f)) < pos+8+entryLength {
-		return 0, nil, fmt.Errorf("invalid backup file, cannot read entry")
+		return 0, nil, errors.New("invalid backup file, cannot read entry")
 	}
 	entry = &commonpb.KeyDataPair{}
 	if err := proto.Unmarshal((*f)[pos+8:pos+8+entryLength], entry); err != nil {
