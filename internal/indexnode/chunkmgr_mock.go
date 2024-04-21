@@ -2,6 +2,7 @@ package indexnode
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/rand"
 	"sync"
@@ -27,7 +28,7 @@ const (
 )
 
 var (
-	errNotImplErr = fmt.Errorf("not implemented error")
+	errNotImplErr = errors.New("not implemented error")
 
 	collschema = &schemapb.CollectionSchema{
 		Name:        "mock_collection",

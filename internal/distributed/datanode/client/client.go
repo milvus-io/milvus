@@ -18,6 +18,7 @@ package grpcdatanodeclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -54,7 +55,7 @@ func NewClient(ctx context.Context, addr string, serverID int64) (types.DataNode
 	}
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Debug("DataNodeClient New Etcd Session failed", zap.Error(err))
 		return nil, err
 	}

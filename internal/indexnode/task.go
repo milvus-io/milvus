@@ -19,7 +19,6 @@ package indexnode
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"runtime/debug"
 	"strconv"
 	"strings"
@@ -47,7 +46,7 @@ import (
 )
 
 var (
-	errCancel      = fmt.Errorf("canceled")
+	errCancel      = errors.New("canceled")
 	diskUsageRatio = 4.0
 )
 

@@ -18,6 +18,7 @@ package grpcproxyclient
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"go.uber.org/zap"
@@ -53,7 +54,7 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.ProxyClien
 	}
 	sess := sessionutil.NewSession(ctx)
 	if sess == nil {
-		err := fmt.Errorf("new session error, maybe can not connect to etcd")
+		err := errors.New("new session error, maybe can not connect to etcd")
 		log.Debug("Proxy client new session failed", zap.Error(err))
 		return nil, err
 	}
