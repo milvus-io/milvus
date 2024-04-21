@@ -427,7 +427,6 @@ func (t *StreamingSearchTask) Execute() error {
 	}
 	defer searchReq.Delete()
 
-	var pinnedSegments []segments.Segment
 	// 1. search&&reduce or streaming-search&&streaming-reduce
 	metricType := searchReq.Plan().GetMetricType()
 	if req.GetScope() == querypb.DataScope_Historical {
@@ -435,7 +434,7 @@ func (t *StreamingSearchTask) Execute() error {
 			reduceErr := t.streamReduce(t.ctx, searchReq.Plan(), result, t.originNqs, t.originTopks)
 			return reduceErr
 		}
-		pinnedSegments, err = segments.SearchHistoricalStreamly(
+		pinnedSegments, err := segments.SearchHistoricalStreamly(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
@@ -444,6 +443,7 @@ func (t *StreamingSearchTask) Execute() error {
 			req.GetSegmentIDs(),
 			streamReduceFunc)
 		defer segments.DeleteStreamReduceHelper(t.streamReducer)
+		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 		if err != nil {
 			log.Error("Failed to search sealed segments streamly", zap.Error(err))
 			return err
@@ -455,8 +455,7 @@ func (t *StreamingSearchTask) Execute() error {
 			return err
 		}
 	} else if req.GetScope() == querypb.DataScope_Streaming {
-		var results []*segments.SearchResult
-		results, pinnedSegments, err = segments.SearchStreaming(
+		results, pinnedSegments, err := segments.SearchStreaming(
 			t.ctx,
 			t.segmentManager,
 			searchReq,
@@ -465,6 +464,7 @@ func (t *StreamingSearchTask) Execute() error {
 			req.GetSegmentIDs(),
 		)
 		defer segments.DeleteSearchResults(results)
+		defer t.segmentManager.Segment.Unpin(pinnedSegments)
 		if err != nil {
 			return err
 		}
@@ -492,7 +492,6 @@ func (t *StreamingSearchTask) Execute() error {
 			metrics.BatchReduce).
 			Observe(float64(tr.RecordSpan().Milliseconds()))
 	}
-	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 
 	// 2. reorganize blobs to original search request
 	for i := range t.originNqs {
