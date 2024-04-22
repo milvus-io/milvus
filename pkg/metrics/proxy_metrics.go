@@ -519,3 +519,10 @@ func CleanupProxyCollectionMetrics(nodeID int64, collection string) {
 		msgTypeLabelName: UpsertLabel, collectionName: collection,
 	})
 }
+
+func CleanupProxyMetricsByCollectionID(nodeID int64, collectionID int64) {
+	ProxyLimiterRate.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:       strconv.FormatInt(nodeID, 10),
+		collectionIDLabelName: strconv.FormatInt(collectionID, 10),
+	})
+}
