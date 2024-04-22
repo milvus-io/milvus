@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -357,6 +358,7 @@ func (s *Server) Stop() (err error) {
 	}
 
 	s.cancel()
+	metrics.CleanupRootCoord()
 	return nil
 }
 

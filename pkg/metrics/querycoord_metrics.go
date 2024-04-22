@@ -145,3 +145,16 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordCurrentTargetCheckpointUnixSeconds)
 	registry.MustRegister(QueryCoordTaskLatency)
 }
+
+func CleanupQueryCoord() {
+	QueryCoordNumCollections.Reset()
+	QueryCoordNumPartitions.Reset()
+	QueryCoordLoadCount.Reset()
+	QueryCoordReleaseCount.Reset()
+	QueryCoordLoadLatency.Reset()
+	QueryCoordReleaseLatency.Reset()
+	QueryCoordTaskNum.Reset()
+	QueryCoordNumQueryNodes.Reset()
+	QueryCoordCurrentTargetCheckpointUnixSeconds.Reset()
+	QueryCoordTaskLatency.Reset()
+}

@@ -248,6 +248,29 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 	registry.MustRegister(RootCoordIndexedNumEntities)
 }
 
+func CleanupRootCoord() {
+	RootCoordProxyCounter.Reset()
+	RootCoordInsertChannelTimeTick.Reset()
+	// RootCoordSyncTimeTickLatency
+	RootCoordDDLReqCounter.Reset()
+	RootCoordDDLReqLatency.Reset()
+	// RootCoordIDAllocCounter
+	// RootCoordTimestamp
+	// RootCoordTimestampSaved
+	RootCoordNumOfCollections.Reset()
+	RootCoordNumOfPartitions.Reset()
+	// RootCoordNumOfDMLChannel
+	// RootCoordNumOfMsgStream
+	// RootCoordNumOfCredentials
+	// RootCoordNumOfRoles
+	RootCoordTtDelay.Reset()
+	RootCoordQuotaStates.Reset()
+	RootCoordRateLimitRatio.Reset()
+	RootCoordDDLReqLatencyInQueue.Reset()
+	RootCoordNumEntities.Reset()
+	RootCoordIndexedNumEntities.Reset()
+}
+
 func CleanupRootCoordDBMetrics(dbName string) {
 	RootCoordNumOfCollections.Delete(prometheus.Labels{
 		databaseLabelName: dbName,

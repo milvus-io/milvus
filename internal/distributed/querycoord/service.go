@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -298,6 +299,7 @@ func (s *Server) Stop() (err error) {
 		log.Error("failed to close queryCoord", zap.Error(err))
 	}
 	s.loopCancel()
+	metrics.CleanupQueryCoord()
 	return nil
 }
 

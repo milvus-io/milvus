@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	_ "github.com/milvus-io/milvus/internal/util/grpcclient"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -235,6 +236,7 @@ func (s *Server) Stop() (err error) {
 	s.grpcWG.Wait()
 
 	s.loopCancel()
+	metrics.CleanupIndexNode()
 	return nil
 }
 
