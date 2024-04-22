@@ -92,7 +92,6 @@ func (node *QueryNode) loadDeltaLogs(ctx context.Context, req *querypb.LoadSegme
 			continue
 		}
 		// try to update segment version after load delta logs
-		// try to update segment version after wait segment loaded
 		node.manager.Segment.UpdateSegmentBy(segments.IncreaseVersion(req.GetVersion()), segments.WithType(segments.SegmentTypeSealed), segments.WithID(info.GetSegmentID()))
 	}
 

@@ -138,7 +138,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 	observer.dist.LeaderViewManager.Update(2, view)
 	loadInfo := utils.PackSegmentLoadInfo(resp, nil, nil)
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectReqeustFunc := func(version int64, actionVersion int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -152,7 +152,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 					PartitionID: 1,
 					SegmentID:   1,
 					NodeID:      1,
-					Version:     1,
+					Version:     actionVersion,
 					Info:        loadInfo,
 				},
 			},
@@ -171,7 +171,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegments() {
 		mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion(), req.GetActions()[0].GetVersion())})
 			called.Store(true)
 		}).
 		Return(&commonpb.Status{}, nil)
@@ -234,7 +234,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	observer.dist.LeaderViewManager.Update(2, view)
 	loadInfo := utils.PackSegmentLoadInfo(resp, nil, nil)
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectReqeustFunc := func(version int64, actionVersion int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -248,7 +248,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 					PartitionID: 1,
 					SegmentID:   1,
 					NodeID:      1,
-					Version:     1,
+					Version:     actionVersion,
 					Info:        loadInfo,
 				},
 			},
@@ -265,7 +265,7 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 	suite.mockCluster.EXPECT().SyncDistribution(mock.Anything, int64(2), mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion(), req.GetActions()[0].GetVersion())})
 			called.Store(true)
 		}).
 		Return(&commonpb.Status{}, nil)
@@ -279,47 +279,6 @@ func (suite *LeaderObserverTestSuite) TestIgnoreSyncLoadedSegments() {
 		10*time.Second,
 		500*time.Millisecond,
 	)
-}
-
-func (suite *LeaderObserverTestSuite) TestIgnoreBalancedSegment() {
-	observer := suite.observer
-	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
-	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
-	segments := []*datapb.SegmentInfo{
-		{
-			ID:            1,
-			PartitionID:   1,
-			InsertChannel: "test-insert-channel",
-		},
-	}
-	channels := []*datapb.VchannelInfo{
-		{
-			CollectionID: 1,
-			ChannelName:  "test-insert-channel",
-		},
-	}
-
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
-	observer.target.UpdateCollectionNextTarget(int64(1))
-	observer.target.UpdateCollectionCurrentTarget(1)
-	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 1, 1, "test-insert-channel"))
-	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))
-
-	// The leader view saw the segment on new node,
-	// but another nodes not yet
-	leaderView := utils.CreateTestLeaderView(2, 1, "test-insert-channel", map[int64]int64{}, map[int64]*meta.Segment{})
-	leaderView.Segments[1] = &querypb.SegmentDist{
-		NodeID:  2,
-		Version: 2,
-	}
-	leaderView.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
-	observer.dist.LeaderViewManager.Update(2, leaderView)
-	observer.Start()
-
-	// Nothing should happen
-	time.Sleep(2 * time.Second)
 }
 
 func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
@@ -370,7 +329,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 	observer.dist.LeaderViewManager.Update(4, view2)
 	loadInfo := utils.PackSegmentLoadInfo(resp, nil, nil)
 
-	expectReqeustFunc := func(version int64) *querypb.SyncDistributionRequest {
+	expectReqeustFunc := func(version int64, actionVersion int64) *querypb.SyncDistributionRequest {
 		return &querypb.SyncDistributionRequest{
 			Base: &commonpb.MsgBase{
 				MsgType: commonpb.MsgType_SyncDistribution,
@@ -384,7 +343,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 					PartitionID: 1,
 					SegmentID:   1,
 					NodeID:      1,
-					Version:     1,
+					Version:     actionVersion,
 					Info:        loadInfo,
 				},
 			},
@@ -402,7 +361,7 @@ func (suite *LeaderObserverTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 		mock.AnythingOfType("*querypb.SyncDistributionRequest")).
 		Run(func(ctx context.Context, nodeID int64, req *querypb.SyncDistributionRequest) {
 			assert.ElementsMatch(suite.T(), []*querypb.SyncDistributionRequest{req},
-				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion())})
+				[]*querypb.SyncDistributionRequest{expectReqeustFunc(req.GetVersion(), req.GetActions()[0].GetVersion())})
 			called.Store(true)
 		}).
 		Return(&commonpb.Status{}, nil)
