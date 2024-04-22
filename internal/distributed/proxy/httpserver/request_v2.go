@@ -250,17 +250,17 @@ type CollectionSchema struct {
 }
 
 type CollectionReq struct {
-	DbName           string            `json:"dbName"`
-	CollectionName   string            `json:"collectionName" binding:"required"`
-	Dimension        int32             `json:"dimension"`
-	IDType           string            `json:"idType"`
-	AutoID           bool              `json:"autoID"`
-	MetricType       string            `json:"metricType"`
-	PrimaryFieldName string            `json:"primaryFieldName"`
-	VectorFieldName  string            `json:"vectorFieldName"`
-	Schema           CollectionSchema  `json:"schema"`
-	IndexParams      []IndexParam      `json:"indexParams"`
-	Params           map[string]string `json:"params"`
+	DbName           string                 `json:"dbName"`
+	CollectionName   string                 `json:"collectionName" binding:"required"`
+	Dimension        int32                  `json:"dimension"`
+	IDType           string                 `json:"idType"`
+	AutoID           bool                   `json:"autoID"`
+	MetricType       string                 `json:"metricType"`
+	PrimaryFieldName string                 `json:"primaryFieldName"`
+	VectorFieldName  string                 `json:"vectorFieldName"`
+	Schema           CollectionSchema       `json:"schema"`
+	IndexParams      []IndexParam           `json:"indexParams"`
+	Params           map[string]interface{} `json:"params"`
 }
 
 func (req *CollectionReq) GetDbName() string { return req.DbName }
