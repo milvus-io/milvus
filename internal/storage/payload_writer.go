@@ -54,7 +54,8 @@ type NativePayloadWriter struct {
 func NewPayloadWriter(colType schemapb.DataType, nullable bool, dim ...int) (PayloadWriterInterface, error) {
 	var arrowType arrow.DataType
 	var dimension int
-	if typeutil.IsVectorType(colType) {
+	// writer for sparse float vector doesn't require dim
+	if typeutil.IsVectorType(colType) && !typeutil.IsSparseFloatVectorType(colType) {
 		if len(dim) != 1 {
 			return nil, merr.WrapErrParameterInvalidMsg("incorrect input numbers")
 		}
@@ -463,7 +464,7 @@ func (w *NativePayloadWriter) AddOneStringToPayload(data string, isValid bool) e
 		return errors.New("failed to cast StringBuilder")
 	}
 
-	if w.nullable && !isValid {
+	if !isValid {
 		builder.AppendNull()
 	} else {
 		builder.Append(data)
@@ -491,7 +492,7 @@ func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField, i
 		return errors.New("failed to cast BinaryBuilder")
 	}
 
-	if w.nullable && !isValid {
+	if !isValid {
 		builder.AppendNull()
 	} else {
 		builder.Append(bytes)
@@ -514,7 +515,7 @@ func (w *NativePayloadWriter) AddOneJSONToPayload(data []byte, isValid bool) err
 		return errors.New("failed to cast JsonBuilder")
 	}
 
-	if w.nullable && !isValid {
+	if !isValid {
 		builder.AppendNull()
 	} else {
 		builder.Append(data)

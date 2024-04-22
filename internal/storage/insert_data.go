@@ -695,21 +695,27 @@ func (data *SparseFloatVectorFieldData) AppendRows(rows interface{}) error {
 func (data *BoolFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData)
 }
+
 func (data *Int8FieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData)
 }
+
 func (data *Int16FieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData)
 }
+
 func (data *Int32FieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData)
 }
+
 func (data *Int64FieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData)
 }
+
 func (data *FloatFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData)
 }
+
 func (data *DoubleFieldData) GetMemorySize() int {
 	return binary.Size(data.Data) + binary.Size(data.ValidData)
 }
