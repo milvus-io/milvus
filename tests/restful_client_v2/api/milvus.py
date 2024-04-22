@@ -264,7 +264,7 @@ class CollectionClient(Requests):
         self.api_key = token
         self.db_name = None
         self.header_db_name = None
-        self.time_out = "1"
+        self.time_out = "10"
         self.headers = self.update_headers()
 
     def update_headers(self, headers=None):

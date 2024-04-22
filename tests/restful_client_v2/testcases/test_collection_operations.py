@@ -66,7 +66,7 @@ class TestCreateCollection(TestBase):
             "idType": id_type,
         }
         if id_type == "VarChar":
-            collection_payload["params"] = {"max_length": "256"}
+            collection_payload["params"] = {"max_length": 256}
         rsp = self.collection_client.collection_create(collection_payload)
         assert rsp['code'] == 200
         rsp = self.collection_client.collection_describe(name)
@@ -157,7 +157,7 @@ class TestCreateCollection(TestBase):
             "enableDynamicField": True,
             "params": {
                 "shardsNum": f"{num_shards}",
-                "partitionsNum": f"{num_partitions}",
+                "partitionsNum": num_partitions,
                 "consistencyLevel": f"{consistency_level}",
                 "ttlSeconds": f"{ttl_seconds}",
             },

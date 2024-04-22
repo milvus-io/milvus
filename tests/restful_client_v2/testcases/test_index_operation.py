@@ -20,7 +20,7 @@ from pymilvus import (
 class TestCreateIndex(TestBase):
 
     @pytest.mark.parametrize("metric_type", ["L2"])
-    @pytest.mark.parametrize("index_type", ["AUTOINDEX", "HNSW"])
+    @pytest.mark.parametrize("index_type", ["SCANN", "IVF_PQ", "AUTOINDEX", "HNSW"])
     @pytest.mark.parametrize("dim", [128])
     def test_index_e2e(self, dim, metric_type, index_type):
         """
@@ -36,8 +36,8 @@ class TestCreateIndex(TestBase):
                 "fields": [
                     {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
                     {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
-                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
-                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}}
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": 256}},
+                    {"fieldName": "book_intro", "dataType": "FloatVector", "elementTypeParams": {"dim": dim}}
                 ]
             }
         }
@@ -72,9 +72,13 @@ class TestCreateIndex(TestBase):
                              "metricType": f"{metric_type}"}]
         }
         if index_type == "HNSW":
-            payload["indexParams"][0]["params"] = {"index_type": "HNSW", "M": "16", "efConstruction": "200"}
+            payload["indexParams"][0]["params"] = {"index_type": "HNSW", "M": 16, "efConstruction": 200}
+        if index_type == "IVF_PQ":
+            payload["indexParams"][0]["params"] = {"index_type": "IVF_PQ", "nlist": 128, "m": 16, "nbits": 8}
         if index_type == "AUTOINDEX":
             payload["indexParams"][0]["params"] = {"index_type": "AUTOINDEX"}
+        if index_type == "SCANN":
+            payload["indexParams"][0]["params"] = {"index_type": "SCANN", "nlist": 16384, "with_raw_data": True}
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 200
         time.sleep(10)
@@ -91,7 +95,34 @@ class TestCreateIndex(TestBase):
             assert expected_index[i]['indexName'] == actual_index[i]['indexName']
             assert expected_index[i]['metricType'] == actual_index[i]['metricType']
             assert expected_index[i]["params"]['index_type'] == actual_index[i]['indexType']
-
+        c.load()
+        # search
+        search_params = {
+            "radius": 0.1,
+            "range_filter": 0.8
+        }
+        if index_type == "HNSW":
+            search_params["ef"] = 64
+        if index_type == "IVF_PQ":
+            search_params["nprobe"] = 8
+            search_params["max_empty_result_buckets"] = 2
+        if index_type == "SCANN":
+            search_params["nprobe"] = 100
+            search_params["reorder_k"] = 2000
+        payload = {
+            "collectionName": name,
+            "data": [gen_vector(datatype="FloatVector", dim=dim) for i in range(1)],
+            "annsField": "book_intro",
+            "outputFields": ["*"],
+            "searchParams": {
+                "metricType": "COSINE",
+                "params": search_params
+            },
+            "limit": 10,
+        }
+        rsp = self.vector_client.vector_search(payload)
+        assert rsp['code'] == 200
+        c.release()
         # drop index
         for i in range(len(actual_index)):
             payload = {
@@ -224,7 +255,7 @@ class TestCreateIndex(TestBase):
                              "params": {"index_type": index_type}}]
         }
         if index_type == "BIN_IVF_FLAT":
-            payload["indexParams"][0]["params"]["nlist"] = "16384"
+            payload["indexParams"][0]["params"]["nlist"] = 16384
         rsp = self.index_client.index_create(payload)
         assert rsp['code'] == 200
         time.sleep(10)

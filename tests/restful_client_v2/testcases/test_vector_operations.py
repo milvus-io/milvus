@@ -724,8 +724,8 @@ class TestSearchVector(TestBase):
             "searchParams": {
                 "metricType": "COSINE",
                 "params": {
-                    "radius": "0.1",
-                    "range_filter": "0.8"
+                    "radius": 0.1,
+                    "range_filter": 0.8
                 }
             },
             "limit": 100,
