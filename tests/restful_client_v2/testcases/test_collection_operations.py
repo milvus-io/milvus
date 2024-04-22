@@ -83,6 +83,61 @@ class TestCreateCollection(TestBase):
         for index in rsp['data']['indexes']:
             assert index['metricType'] == metric_type
 
+    @pytest.mark.parametrize("enable_dynamic_field", [False, "False", "0"])
+    @pytest.mark.parametrize("request_shards_num", [2, "2"])
+    @pytest.mark.parametrize("request_ttl_seconds", [360, "360"])
+    def test_create_collections_without_params(self, enable_dynamic_field, request_shards_num, request_ttl_seconds):
+        """
+        target: test create collection
+        method: create a collection with a simple schema
+        expected: create collection success
+        """
+        name = gen_collection_name()
+        dim = 128
+        metric_type = "COSINE"
+        client = self.collection_client
+        num_shards = 2
+        consistency_level = "Strong"
+        ttl_seconds = 360
+        payload = {
+            "collectionName": name,
+            "dimension": dim,
+            "metricType": metric_type,
+            "params":{
+                "enableDynamicField": enable_dynamic_field,
+                "shardsNum": request_shards_num,
+                "consistencyLevel": f"{consistency_level}",
+                "ttlSeconds": request_ttl_seconds,
+            },
+        }
+
+        logging.info(f"create collection {name} with payload: {payload}")
+        rsp = client.collection_create(payload)
+        assert rsp['code'] == 200
+        rsp = client.collection_list()
+
+        all_collections = rsp['data']
+        assert name in all_collections
+        # describe collection by pymilvus
+        c = Collection(name)
+        res = c.describe()
+        logger.info(f"describe collection: {res}")
+        # describe collection
+        time.sleep(10)
+        rsp = client.collection_describe(name)
+        logger.info(f"describe collection: {rsp}")
+
+        ttl_seconds_actual = None
+        for d in rsp["data"]["properties"]:
+            if d["key"] == "collection.ttl.seconds":
+                ttl_seconds_actual = int(d["value"])
+        assert rsp['code'] == 200
+        assert rsp['data']['enableDynamicField'] == False
+        assert rsp['data']['collectionName'] == name
+        assert rsp['data']['shardsNum'] == num_shards
+        assert rsp['data']['consistencyLevel'] == consistency_level
+        assert ttl_seconds_actual == ttl_seconds
+
     def test_create_collections_with_all_params(self):
         """
         target: test create collection

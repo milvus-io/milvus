@@ -1014,7 +1014,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			idDataType = schemapb.DataType_VarChar
 			idParams = append(idParams, &commonpb.KeyValuePair{
 				Key:   common.MaxLengthKey,
-				Value: httpReq.Params["max_length"],
+				Value: fmt.Sprintf("%v", httpReq.Params["max_length"]),
 			})
 			httpReq.IDType = "VarChar"
 		case "", "Int64", "int64":
@@ -1036,8 +1036,10 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			httpReq.VectorFieldName = DefaultVectorFieldName
 		}
 		enableDynamic := EnableDynamic
-		if en, err := strconv.ParseBool(httpReq.Params["enableDynamicField"]); err == nil {
-			enableDynamic = en
+		if enStr, ok := httpReq.Params["enableDynamicField"]; ok {
+			if en, err := strconv.ParseBool(fmt.Sprintf("%v", enStr)); err == nil {
+				enableDynamic = en
+			}
 		}
 		schema, err = proto.Marshal(&schemapb.CollectionSchema{
 			Name: httpReq.CollectionName,
@@ -1107,8 +1109,10 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			}
 			if field.IsPartitionKey {
 				partitionsNum = int64(64)
-				if partitions, err := strconv.ParseInt(httpReq.Params["partitionsNum"], 10, 64); err == nil {
-					partitionsNum = partitions
+				if partitionsNumStr, ok := httpReq.Params["partitionsNum"]; ok {
+					if partitions, err := strconv.ParseInt(fmt.Sprintf("%v", partitionsNumStr), 10, 64); err == nil {
+						partitionsNum = partitions
+					}
 				}
 			}
 			for key, fieldParam := range field.ElementTypeParams {
@@ -1128,14 +1132,16 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		return nil, err
 	}
 	shardsNum := int32(ShardNumDefault)
-	if shards, err := strconv.ParseInt(httpReq.Params["shardsNum"], 10, 64); err == nil {
-		shardsNum = int32(shards)
+	if shardsNumStr, ok := httpReq.Params["shardsNum"]; ok {
+		if shards, err := strconv.ParseInt(fmt.Sprintf("%v", shardsNumStr), 10, 64); err == nil {
+			shardsNum = int32(shards)
+		}
 	}
 	consistencyLevel := commonpb.ConsistencyLevel_Bounded
-	if level, ok := commonpb.ConsistencyLevel_value[httpReq.Params["consistencyLevel"]]; ok {
-		consistencyLevel = commonpb.ConsistencyLevel(level)
-	} else {
-		if len(httpReq.Params["consistencyLevel"]) > 0 {
+	if _, ok := httpReq.Params["consistencyLevel"]; ok {
+		if level, ok := commonpb.ConsistencyLevel_value[fmt.Sprintf("%s", httpReq.Params["consistencyLevel"])]; ok {
+			consistencyLevel = commonpb.ConsistencyLevel(level)
+		} else {
 			err := merr.WrapErrParameterInvalid("Strong, Session, Bounded, Eventually, Customized", httpReq.Params["consistencyLevel"],
 				"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
 			log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
@@ -1160,7 +1166,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	if _, ok := httpReq.Params["ttlSeconds"]; ok {
 		req.Properties = append(req.Properties, &commonpb.KeyValuePair{
 			Key:   common.CollectionTTLConfigKey,
-			Value: httpReq.Params["ttlSeconds"],
+			Value: fmt.Sprintf("%v", httpReq.Params["ttlSeconds"]),
 		})
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
