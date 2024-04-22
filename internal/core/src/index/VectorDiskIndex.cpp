@@ -503,6 +503,11 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
         }
     }
 
+    if (config.contains(kMmapFilepath)) {
+        load_config.erase(kMmapFilepath);
+        load_config[kEnableMmap] = true;
+    }
+
     return load_config;
 }
 
