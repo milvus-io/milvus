@@ -308,7 +308,7 @@ class SegmentInternalInterface : public SegmentInterface {
         const int64_t* offsets,
         int64_t size,
         bool ignore_non_pk,
-        bool pk_in_ids) const;
+        bool fill_ids) const;
 
  protected:
     // internal API: return chunk_data in span

@@ -595,6 +595,10 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 
+	if len(offsets) == 0 {
+		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
+	}
+
 	fields := []zap.Field{
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),

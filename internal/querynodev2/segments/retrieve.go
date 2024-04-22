@@ -34,11 +34,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan) ([]*segcorepb.RetrieveResults, []Segment, error) {
+func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]*segcorepb.RetrieveResults, []Segment, error) {
 	type segmentResult struct {
 		result  *segcorepb.RetrieveResults
 		segment Segment
@@ -49,7 +50,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		wg       sync.WaitGroup
 	)
 
-	plan.ignoreNonPk = len(segments) > 1 && plan.ShouldIgnoreNonPk()
+	plan.ignoreNonPk = len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
@@ -183,7 +184,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 		return retrieveResults, retrieveSegments, err
 	}
 
-	return retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan)
+	return retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
 }
 
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream

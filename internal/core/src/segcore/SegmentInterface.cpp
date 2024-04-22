@@ -135,7 +135,7 @@ SegmentInternalInterface::FillTargetEntry(
     const int64_t* offsets,
     int64_t size,
     bool ignore_non_pk,
-    bool pk_in_ids) const {
+    bool fill_ids) const {
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
     auto pk_field_id = plan->schema_.get_primary_field_id();
@@ -175,8 +175,8 @@ SegmentInternalInterface::FillTargetEntry(
             col->mutable_scalars()->mutable_array_data()->set_element_type(
                 proto::schema::DataType(field_meta.get_element_type()));
         }
-        if (pk_in_ids && is_pk_field(field_id)) {
-            // pk_in_ids should be true when the first Retrieve was called. The reduce phase depends on the ids to do
+        if (fill_ids && is_pk_field(field_id)) {
+            // fill_ids should be true when the first Retrieve was called. The reduce phase depends on the ids to do
             // merge-sort.
             auto col_data = col.get();
             switch (field_meta.get_data_type()) {
@@ -204,8 +204,10 @@ SegmentInternalInterface::FillTargetEntry(
         }
         if (!ignore_non_pk) {
             // when ignore_non_pk is false, it indicates two situations:
-            //  1. there is only one segment, no need to do the two-phase Retrieval, the target entries should be
-            //     returned as the first Retrieval is done;
+            //  1. No need to do the two-phase Retrieval, the target entries should be returned as the first Retrieval
+            //      is done, below two cases are included:
+            //       a. There is only one segment;
+            //       b. No pagination is used;
             //  2. The FillTargetEntry was called by the second Retrieval (by offsets).
             fields_data->AddAllocated(col.release());
         }
