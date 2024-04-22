@@ -119,9 +119,10 @@ type shardDelegator struct {
 	tsCond      *sync.Cond
 	latestTsafe *atomic.Uint64
 	// queryHook
-	queryHook      optimizers.QueryHook
-	partitionStats map[UniqueID]*storage.PartitionStatsSnapshot
-	chunkManager   storage.ChunkManager
+	queryHook         optimizers.QueryHook
+	partitionStatsMut sync.RWMutex
+	partitionStats    map[UniqueID]*storage.PartitionStatsSnapshot
+	chunkManager      storage.ChunkManager
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -210,8 +211,12 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		return nil, err
 	}
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
-			PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
+				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		}()
 	}
 
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
@@ -505,7 +510,11 @@ func (sd *shardDelegator) Query(ctx context.Context, req *querypb.QueryRequest) 
 	}
 
 	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			PruneSegments(ctx, sd.partitionStats, nil, req.GetReq(), sd.collection.Schema(), sealed, PruneInfo{paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		}()
 	}
 
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
@@ -832,7 +841,14 @@ func (sd *shardDelegator) maybeReloadPartitionStats(ctx context.Context, partIDs
 			log.Info("failed to find valid partition stats file for partition", zap.Int64("partitionID", partID))
 			continue
 		}
-		partStats, exists := sd.partitionStats[partID]
+
+		var partStats *storage.PartitionStatsSnapshot
+		var exists bool
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			partStats, exists = sd.partitionStats[partID]
+		}()
 		if !exists || (exists && partStats.GetVersion() < maxVersion) {
 			statsBytes, err := sd.chunkManager.Read(ctx, maxVersionFilePath)
 			if err != nil {
@@ -844,8 +860,13 @@ func (sd *shardDelegator) maybeReloadPartitionStats(ctx context.Context, partIDs
 				log.Error("failed to parse partition stats from bytes", zap.Int("bytes_length", len(statsBytes)))
 				continue
 			}
-			sd.partitionStats[partID] = partStats
 			partStats.SetVersion(maxVersion)
+
+			func() {
+				sd.partitionStatsMut.Lock()
+				defer sd.partitionStatsMut.Unlock()
+				sd.partitionStats[partID] = partStats
+			}()
 			log.Info("Updated partitionStats for partition", zap.Int64("partitionID", partID))
 		}
 	}
