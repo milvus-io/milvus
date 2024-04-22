@@ -375,6 +375,42 @@ func RegisterProxy(registry *prometheus.Registry) {
 	registry.MustRegister(ProxySlowQueryCount)
 }
 
+func CleanupProxy() {
+	ProxyReceivedNQ.Reset()
+	ProxySearchVectors.Reset()
+	ProxyInsertVectors.Reset()
+	ProxyUpsertVectors.Reset()
+	ProxyDeleteVectors.Reset()
+	ProxySQLatency.Reset()
+	ProxyCollectionSQLatency.Reset()
+	ProxyMutationLatency.Reset()
+	ProxyCollectionMutationLatency.Reset()
+	ProxyWaitForSearchResultLatency.Reset()
+	ProxyReduceResultLatency.Reset()
+	ProxyDecodeResultLatency.Reset()
+	ProxyMsgStreamObjectsForPChan.Reset()
+	ProxySendMutationReqLatency.Reset()
+	ProxyAssignSegmentIDLatency.Reset()
+	ProxySyncSegmentRequestLength.Reset()
+	ProxyCacheStatsCounter.Reset()
+	ProxyUpdateCacheLatency.Reset()
+	ProxySyncTimeTickLag.Reset()
+	ProxyApplyPrimaryKeyLatency.Reset()
+	ProxyApplyTimestampLatency.Reset()
+	ProxyFunctionCall.Reset()
+	ProxyReqLatency.Reset()
+	ProxyReceiveBytes.Reset()
+	ProxyReadReqSendBytes.Reset()
+	ProxyLimiterRate.Reset()
+	ProxyHookFunc.Reset()
+	UserRPCCounter.Reset()
+	ProxyWorkLoadScore.Reset()
+	ProxyExecutingTotalNq.Reset()
+	ProxyRateLimitReqCount.Reset()
+	ProxySlowQueryCount.Reset()
+	ProxyReportValue.Reset()
+}
+
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 	ProxySearchVectors.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
@@ -471,5 +507,12 @@ func CleanupProxyCollectionMetrics(nodeID int64, collection string) {
 	ProxyReceiveBytes.Delete(prometheus.Labels{
 		nodeIDLabelName:  strconv.FormatInt(nodeID, 10),
 		msgTypeLabelName: UpsertLabel, collectionName: collection,
+	})
+}
+
+func CleanupProxyMetricsByCollectionID(nodeID int64, collectionID int64) {
+	ProxyLimiterRate.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:       strconv.FormatInt(nodeID, 10),
+		collectionIDLabelName: strconv.FormatInt(collectionID, 10),
 	})
 }

@@ -255,6 +255,27 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeProduceTimeTickLag)
 }
 
+func CleanupDataNode() {
+	DataNodeNumFlowGraphs.Reset()
+	DataNodeConsumeMsgRowsCount.Reset()
+	DataNodeConsumeTimeTickLag.Reset()
+	DataNodeMsgDispatcherTtLag.Reset()
+	DataNodeConsumeMsgCount.Reset()
+	DataNodeConsumeBytesCount.Reset()
+	DataNodeFlowGraphBufferDataSize.Reset()
+	DataNodeAutoFlushBufferCount.Reset()
+	DataNodeEncodeBufferLatency.Reset()
+	DataNodeSave2StorageLatency.Reset()
+	DataNodeFlushBufferCount.Reset()
+	DataNodeFlushReqCounter.Reset()
+	DataNodeFlushedSize.Reset()
+	DataNodeCompactionLatency.Reset()
+	DataNodeCompactionLatencyInQueue.Reset()
+	DataNodeForwardDeleteMsgTimeTaken.Reset()
+	DataNodeNumProducers.Reset()
+	DataNodeProduceTimeTickLag.Reset()
+}
+
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {
 	DataNodeConsumeTimeTickLag.
 		Delete(

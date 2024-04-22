@@ -159,6 +159,7 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		for _, alias := range aliasName {
 			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), alias)
 		}
+		metrics.CleanupProxyMetricsByCollectionID(paramtable.GetNodeID(), collectionID)
 	} else if msgType == commonpb.MsgType_DropDatabase {
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
 	}

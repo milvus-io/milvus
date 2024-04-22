@@ -307,6 +307,28 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(ImportTasks)
 }
 
+func CleanupDataCoord() {
+	DataCoordNumDataNodes.Reset()
+	DataCoordNumSegments.Reset()
+	DataCoordNumCollections.Reset()
+	DataCoordNumStoredRows.Reset()
+	DataCoordBulkVectors.Reset()
+	DataCoordConsumeDataNodeTimeTickLag.Reset()
+	DataCoordCheckpointUnixSeconds.Reset()
+	DataCoordStoredBinlogSize.Reset()
+	DataCoordSegmentBinLogFileCount.Reset()
+	DataCoordDmlChannelNum.Reset()
+	DataCoordCompactedSegmentSize.Reset()
+	DataCoordCompactionTaskNum.Reset()
+	DataCoordSizeStoredL0Segment.Reset()
+	DataCoordRateStoredL0Segment.Reset()
+	FlushedSegmentFileNum.Reset()
+	IndexRequestCounter.Reset()
+	IndexTaskNum.Reset()
+	IndexNodeNum.Reset()
+	ImportTasks.Reset()
+}
+
 func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {
 	DataCoordSegmentBinLogFileCount.
 		Delete(
