@@ -28,9 +28,9 @@
 namespace milvus::clustering {
 
 template <typename T>
-class KmeansClustering : public Clustering {
+class MemClustering : public Clustering {
  public:
-    explicit KmeansClustering(
+    explicit MemClustering(
         const storage::FileManagerContext& file_manager_context =
             storage::FileManagerContext());
 
@@ -102,7 +102,7 @@ class KmeansClustering : public Clustering {
                std::to_string(segment_id);
     }
 
-    std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
+    std::unique_ptr<storage::MemFileManagerImpl> file_manager_;
     uint32_t num_clusters_;
     int64_t dim_;
 
@@ -120,5 +120,5 @@ class KmeansClustering : public Clustering {
 };
 
 template <typename T>
-using KmeansClusteringPtr = std::unique_ptr<KmeansClustering<T>>;
+using MemClusteringPtr = std::unique_ptr<MemClustering<T>>;
 }  // namespace milvus::clustering

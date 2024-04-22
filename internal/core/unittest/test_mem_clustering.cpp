@@ -20,7 +20,7 @@
 #include "index/InvertedIndexTantivy.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
-#include "clustering/KmeansClustering.h"
+#include "clustering/MemClustering.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -80,7 +80,7 @@ GetRemoteCentroidIdMappingObjectPrefix(
 template <typename T>
 void
 CheckResultCorrectness(
-    const milvus::clustering::KmeansClusteringPtr<T>& clusteringJob,
+    const milvus::clustering::MemClusteringPtr<T>& clusteringJob,
     const std::string& centroids_path_prefix,
     const std::string& id_mapping_prefix,
     int64_t segment_id,
@@ -207,7 +207,7 @@ test_run() {
         config["dim"] = dim;
         config["num_rows"] = num_rows;
         auto clusteringJob =
-            std::make_unique<clustering::KmeansClustering<float>>(ctx);
+            std::make_unique<clustering::MemClustering<float>>(ctx);
         clusteringJob->Run(config);
         CheckResultCorrectness<T>(clusteringJob,
                                   centroids_path_prefix,
@@ -227,7 +227,7 @@ test_run() {
         config["dim"] = dim;
         config["num_rows"] = num_rows;
         auto clusteringJob =
-            std::make_unique<clustering::KmeansClustering<float>>(ctx);
+            std::make_unique<clustering::MemClustering<float>>(ctx);
 
         clusteringJob->Run(config);
         CheckResultCorrectness<T>(clusteringJob,
@@ -248,7 +248,7 @@ test_run() {
         config["dim"] = dim;
         config["num_rows"] = num_rows;
         auto clusteringJob =
-            std::make_unique<clustering::KmeansClustering<float>>(ctx);
+            std::make_unique<clustering::MemClustering<float>>(ctx);
 
         clusteringJob->Run(config);
         CheckResultCorrectness<T>(clusteringJob,

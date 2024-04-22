@@ -12,7 +12,7 @@
 
 set(CLUSTERING_FILES
         analyze_c.cpp
-        KmeansClustering.cpp
+        MemClustering.cpp
         )
 
 milvus_add_pkg_config("milvus_clustering")

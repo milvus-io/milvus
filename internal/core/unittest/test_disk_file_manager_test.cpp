@@ -261,29 +261,6 @@ PrepareInsertData() -> std::string {
 }
 
 auto
-PrepareVectorInsertData(int64_t segment_id) -> std::string {
-    std::vector<float> data = {1, 2, 3, 4, 5, 6, 7, 8};
-    int DIM = 2;
-    auto field_data =
-        milvus::storage::CreateFieldData(storage::DataType::VECTOR_FLOAT, DIM);
-    field_data->FillFieldData(data.data(), data.size() / DIM);
-
-    storage::InsertData insert_data(field_data);
-    storage::FieldDataMeta field_data_meta{100, 101, segment_id, 103};
-    insert_data.SetFieldDataMeta(field_data_meta);
-    insert_data.SetTimestamps(0, 100);
-
-    auto serialized_data = insert_data.Serialize(storage::StorageType::Remote);
-    auto chunk_manager =
-        storage::CreateChunkManager(get_default_local_storage_config());
-
-    std::string path = compactionRawDataPath + std::to_string(segment_id);
-    boost::filesystem::remove_all(path);
-    chunk_manager->Write(path, serialized_data.data(), serialized_data.size());
-    return path;
-}
-
-auto
 PrepareInsertDataSpace()
     -> std::pair<std::string, std::shared_ptr<milvus_storage::Space>> {
     std::string path = kOptFieldPath + "1";

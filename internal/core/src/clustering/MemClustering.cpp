@@ -22,7 +22,7 @@
 #include "index/Meta.h"
 #include "index/Utils.h"
 #include "knowhere/kmeans.h"
-#include "clustering/KmeansClustering.h"
+#include "clustering/MemClustering.h"
 #include "segcore/SegcoreConfig.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
@@ -35,10 +35,10 @@
 namespace milvus::clustering {
 
 template <typename T>
-KmeansClustering<T>::KmeansClustering(
+MemClustering<T>::MemClustering(
     const storage::FileManagerContext& file_manager_context) {
     file_manager_ =
-        std::make_shared<storage::MemFileManagerImpl>(file_manager_context);
+        std::make_unique<storage::MemFileManagerImpl>(file_manager_context);
     AssertInfo(file_manager_ != nullptr, "create file manager failed!");
     auto cluster_node_obj =
         knowhere::ClusterFactory::Instance().Create<T>(KMEANS_CLUSTER);
@@ -55,11 +55,11 @@ KmeansClustering<T>::KmeansClustering(
 
 template <typename T>
 bool
-KmeansClustering<T>::FetchSegmentData(uint8_t* buf,
-                                      int64_t expected_train_size,
-                                      const std::vector<std::string>& files,
-                                      const int64_t num_rows,
-                                      int64_t& offset) {
+MemClustering<T>::FetchSegmentData(uint8_t* buf,
+                                   int64_t expected_train_size,
+                                   const std::vector<std::string>& files,
+                                   const int64_t num_rows,
+                                   int64_t& offset) {
     auto field_datas = file_manager_->CacheRawDataToMemory(files);
     int64_t segment_size = 0;
     for (auto& data : field_datas) {
@@ -86,7 +86,7 @@ KmeansClustering<T>::FetchSegmentData(uint8_t* buf,
 
 template <typename T>
 std::unique_ptr<uint8_t[]>
-KmeansClustering<T>::SampleTrainData(
+MemClustering<T>::SampleTrainData(
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
     const std::map<int64_t, int64_t>& segment_num_rows,
@@ -121,7 +121,7 @@ KmeansClustering<T>::SampleTrainData(
 
 template <typename T>
 milvus::proto::segcore::ClusteringCentroidsStats
-KmeansClustering<T>::CentroidsToPB(const T* centroids) {
+MemClustering<T>::CentroidsToPB(const T* centroids) {
     milvus::proto::segcore::ClusteringCentroidsStats stats;
     for (int i = 0; i < num_clusters_; i++) {
         milvus::proto::schema::VectorField* vector_field =
@@ -138,7 +138,7 @@ KmeansClustering<T>::CentroidsToPB(const T* centroids) {
 
 template <typename T>
 std::vector<milvus::proto::segcore::ClusteringCentroidIdMappingStats>
-KmeansClustering<T>::CentroidIdMappingToPB(
+MemClustering<T>::CentroidIdMappingToPB(
     const uint32_t* centroid_id_mapping,
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, int64_t>& num_row_map) {
@@ -173,23 +173,22 @@ KmeansClustering<T>::CentroidIdMappingToPB(
 
 template <typename T>
 void
-KmeansClustering<T>::StreamingAssignandUpload(
+MemClustering<T>::StreamingAssignandUpload(
     const T* centroids,
     const std::map<int64_t, std::vector<std::string>>& insert_files,
     const std::map<int64_t, int64_t>& num_rows) {
     LOG_INFO("start upload");
-    int byte_size = centroid_stats_.ByteSizeLong();
-    std::shared_ptr<uint8_t[]> data =
-        std::shared_ptr<uint8_t[]>(new uint8_t[byte_size]);
+    auto byte_size = centroid_stats_.ByteSizeLong();
+    std::unique_ptr<uint8_t[]> data = std::make_unique<uint8_t[]>(byte_size);
     centroid_stats_.SerializeToArray(data.get(), byte_size);
-    BinarySet ret;
-    ret.Append(std::string(CENTROIDS_NAME), data, byte_size);
     std::unordered_map<std::string, int64_t> remote_paths_to_size;
     LOG_INFO("start upload cluster centroids file");
-    AddClusteringResultFiles(file_manager_->GetChunkManager().get(),
-                             ret,
-                             GetRemoteCentroidsObjectPrefix(),
-                             remote_paths_to_size);
+    AddClusteringResultFiles(
+        file_manager_->GetChunkManager().get(),
+        data.get(),
+        byte_size,
+        GetRemoteCentroidsObjectPrefix() + "/" + std::string(CENTROIDS_NAME),
+        remote_paths_to_size);
     cluster_result_.centroid_path =
         GetRemoteCentroidsObjectPrefix() + "/" + std::string(CENTROIDS_NAME);
     cluster_result_.centroid_file_size =
@@ -201,16 +200,16 @@ KmeansClustering<T>::StreamingAssignandUpload(
         [&](const int64_t segment_id,
             milvus::proto::segcore::ClusteringCentroidIdMappingStats&
                 id_mapping_pb) {
-            BinarySet ret;
             auto byte_size = id_mapping_pb.ByteSizeLong();
-            std::shared_ptr<uint8_t[]> data =
-                std::shared_ptr<uint8_t[]>(new uint8_t[byte_size]);
+            std::unique_ptr<uint8_t[]> data =
+                std::make_unique<uint8_t[]>(byte_size);
             id_mapping_pb.SerializeToArray(data.get(), byte_size);
-            ret.Append(std::string(OFFSET_MAPPING_NAME), data, byte_size);
             AddClusteringResultFiles(
                 file_manager_->GetChunkManager().get(),
-                ret,
-                GetRemoteCentroidIdMappingObjectPrefix(segment_id),
+                data.get(),
+                byte_size,
+                GetRemoteCentroidIdMappingObjectPrefix(segment_id) + "/" +
+                    std::string(OFFSET_MAPPING_NAME),
                 remote_paths_to_size);
         };
 
@@ -255,7 +254,7 @@ KmeansClustering<T>::StreamingAssignandUpload(
 
 template <typename T>
 void
-KmeansClustering<T>::Run(const Config& config) {
+MemClustering<T>::Run(const Config& config) {
     auto insert_files = milvus::index::GetValueFromConfig<
         std::map<int64_t, std::vector<std::string>>>(config, "insert_files");
     AssertInfo(insert_files.has_value(),
@@ -356,6 +355,6 @@ KmeansClustering<T>::Run(const Config& config) {
     StreamingAssignandUpload(centroids, insert_files.value(), num_rows.value());
 }
 
-template class KmeansClustering<float>;
+template class MemClustering<float>;
 
 }  // namespace milvus::clustering

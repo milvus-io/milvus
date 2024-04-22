@@ -29,81 +29,14 @@
 
 namespace milvus::clustering {
 
-// put clustering result data to remote
-// similar with PutIndexData, but do not need to encode, directly use PB format
-// leave the ownership to golang side
-void
-PutClusteringResultData(milvus::storage::ChunkManager* remote_chunk_manager,
-                        const std::vector<const uint8_t*>& data_slices,
-                        const std::vector<int64_t>& slice_sizes,
-                        const std::vector<std::string>& slice_names,
-                        std::unordered_map<std::string, int64_t>& map) {
-    auto& pool = ThreadPools::GetThreadPool(milvus::ThreadPoolPriority::MIDDLE);
-    std::vector<std::future<std::pair<std::string, int64_t>>> futures;
-    AssertInfo(data_slices.size() == slice_sizes.size(),
-               "inconsistent data slices size {} with slice sizes {}",
-               data_slices.size(),
-               slice_sizes.size());
-    AssertInfo(data_slices.size() == slice_names.size(),
-               "inconsistent data slices size {} with slice names size {}",
-               data_slices.size(),
-               slice_names.size());
-
-    for (int64_t i = 0; i < data_slices.size(); ++i) {
-        futures.push_back(pool.Submit(
-            [&](milvus::storage::ChunkManager* chunk_manager,
-                uint8_t* buf,
-                int64_t batch_size,
-                std::string object_key) -> std::pair<std::string, int64_t> {
-                chunk_manager->Write(object_key, buf, batch_size);
-                return std::make_pair(object_key, batch_size);
-            },
-            remote_chunk_manager,
-            const_cast<uint8_t*>(data_slices[i]),
-            slice_sizes[i],
-            slice_names[i]));
-    }
-
-    for (auto& future : futures) {
-        auto res = future.get();
-        map[res.first] = res.second;
-    }
-}
-
 void
 AddClusteringResultFiles(milvus::storage::ChunkManager* remote_chunk_manager,
-                         const BinarySet& binary_set,
+                         const uint8_t* data,
+                         const int64_t data_size,
                          const std::string& remote_prefix,
                          std::unordered_map<std::string, int64_t>& map) {
-    std::vector<const uint8_t*> data_slices;
-    std::vector<int64_t> slice_sizes;
-    std::vector<std::string> slice_names;
-
-    auto AddBatchClusteringFiles = [&]() {
-        PutClusteringResultData(
-            remote_chunk_manager, data_slices, slice_sizes, slice_names, map);
-    };
-
-    int64_t batch_size = 0;
-    for (auto iter = binary_set.binary_map_.begin();
-         iter != binary_set.binary_map_.end();
-         iter++) {
-        if (batch_size >= DEFAULT_FIELD_MAX_MEMORY_LIMIT) {
-            AddBatchClusteringFiles();
-            data_slices.clear();
-            slice_sizes.clear();
-            slice_names.clear();
-            batch_size = 0;
-        }
-
-        data_slices.emplace_back(iter->second->data.get());
-        slice_sizes.emplace_back(iter->second->size);
-        slice_names.emplace_back(remote_prefix + "/" + iter->first);
-        batch_size += iter->second->size;
-    }
-
-    if (data_slices.size() > 0) {
-        AddBatchClusteringFiles();
-    }
+    remote_chunk_manager->Write(
+        remote_prefix, const_cast<uint8_t*>(data), data_size);
+    map[remote_prefix] = data_size;
 }
 }  // namespace milvus::clustering

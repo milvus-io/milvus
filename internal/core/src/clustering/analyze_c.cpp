@@ -22,7 +22,7 @@
 #include "index/Utils.h"
 #include "index/Meta.h"
 #include "storage/Util.h"
-#include "clustering/KmeansClustering.h"
+#include "clustering/MemClustering.h"
 
 using namespace milvus;
 CStatus
@@ -64,7 +64,7 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
                             std::to_string(int(analyze_info->field_type))));
         }
         auto clusteringJob =
-            std::make_unique<milvus::clustering::KmeansClustering<float>>(
+            std::make_unique<milvus::clustering::MemClustering<float>>(
                 fileManagerContext);
 
         clusteringJob->Run(config);
