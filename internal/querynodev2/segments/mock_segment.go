@@ -847,61 +847,29 @@ func (_m *MockSegment) PinIfNotReleased() error {
 	return r0
 }
 
-// MockSegment_RLock_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RLock'
-type MockSegment_RLock_Call struct {
+// MockSegment_PinIfNotReleased_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PinIfNotReleased'
+type MockSegment_PinIfNotReleased_Call struct {
 	*mock.Call
 }
 
-// RLock is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) RLock() *MockSegment_RLock_Call {
-	return &MockSegment_RLock_Call{Call: _e.mock.On("RLock")}
+// PinIfNotReleased is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) PinIfNotReleased() *MockSegment_PinIfNotReleased_Call {
+	return &MockSegment_PinIfNotReleased_Call{Call: _e.mock.On("PinIfNotReleased")}
 }
 
-func (_c *MockSegment_RLock_Call) Run(run func()) *MockSegment_RLock_Call {
+func (_c *MockSegment_PinIfNotReleased_Call) Run(run func()) *MockSegment_PinIfNotReleased_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockSegment_RLock_Call) Return(_a0 error) *MockSegment_RLock_Call {
+func (_c *MockSegment_PinIfNotReleased_Call) Return(_a0 error) *MockSegment_PinIfNotReleased_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_RLock_Call) RunAndReturn(run func() error) *MockSegment_RLock_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// Unpin provides a mock function with given fields:
-func (_m *MockSegment) Unpin() {
-	_m.Called()
-}
-
-// MockSegment_RUnlock_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RUnlock'
-type MockSegment_RUnlock_Call struct {
-	*mock.Call
-}
-
-// RUnlock is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) RUnlock() *MockSegment_RUnlock_Call {
-	return &MockSegment_RUnlock_Call{Call: _e.mock.On("RUnlock")}
-}
-
-func (_c *MockSegment_RUnlock_Call) Run(run func()) *MockSegment_RUnlock_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSegment_RUnlock_Call) Return() *MockSegment_RUnlock_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSegment_RUnlock_Call) RunAndReturn(run func()) *MockSegment_RUnlock_Call {
+func (_c *MockSegment_PinIfNotReleased_Call) RunAndReturn(run func() error) *MockSegment_PinIfNotReleased_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -948,39 +916,6 @@ func (_c *MockSegment_Release_Call) Return() *MockSegment_Release_Call {
 }
 
 func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *MockSegment_Release_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ResetIndexesLazyLoad provides a mock function with given fields: lazyState
-func (_m *MockSegment) ResetIndexesLazyLoad(lazyState bool) {
-	_m.Called(lazyState)
-}
-
-// MockSegment_ResetIndexesLazyLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResetIndexesLazyLoad'
-type MockSegment_ResetIndexesLazyLoad_Call struct {
-	*mock.Call
-}
-
-// ResetIndexesLazyLoad is a helper method to define mock.On call
-//   - lazyState bool
-func (_e *MockSegment_Expecter) ResetIndexesLazyLoad(lazyState interface{}) *MockSegment_ResetIndexesLazyLoad_Call {
-	return &MockSegment_ResetIndexesLazyLoad_Call{Call: _e.mock.On("ResetIndexesLazyLoad", lazyState)}
-}
-
-func (_c *MockSegment_ResetIndexesLazyLoad_Call) Run(run func(lazyState bool)) *MockSegment_ResetIndexesLazyLoad_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(bool))
-	})
-	return _c
-}
-
-func (_c *MockSegment_ResetIndexesLazyLoad_Call) Return() *MockSegment_ResetIndexesLazyLoad_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSegment_ResetIndexesLazyLoad_Call) RunAndReturn(run func(bool)) *MockSegment_ResetIndexesLazyLoad_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1339,6 +1274,38 @@ func (_c *MockSegment_Type_Call) Return(_a0 commonpb.SegmentState) *MockSegment_
 }
 
 func (_c *MockSegment_Type_Call) RunAndReturn(run func() commonpb.SegmentState) *MockSegment_Type_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Unpin provides a mock function with given fields:
+func (_m *MockSegment) Unpin() {
+	_m.Called()
+}
+
+// MockSegment_Unpin_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Unpin'
+type MockSegment_Unpin_Call struct {
+	*mock.Call
+}
+
+// Unpin is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) Unpin() *MockSegment_Unpin_Call {
+	return &MockSegment_Unpin_Call{Call: _e.mock.On("Unpin")}
+}
+
+func (_c *MockSegment_Unpin_Call) Run(run func()) *MockSegment_Unpin_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_Unpin_Call) Return() *MockSegment_Unpin_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockSegment_Unpin_Call) RunAndReturn(run func()) *MockSegment_Unpin_Call {
 	_c.Call.Return(run)
 	return _c
 }
