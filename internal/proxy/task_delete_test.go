@@ -522,6 +522,38 @@ func TestDeleteRunner_Run(t *testing.T) {
 		assert.Equal(t, int64(0), dr.result.DeleteCnt)
 	})
 
+	t.Run("delete with always true expression failed", func(t *testing.T) {
+		mockMgr := NewMockChannelsMgr(t)
+		lb := NewMockLBPolicy(t)
+
+		dr := deleteRunner{
+			chMgr:           mockMgr,
+			schema:          schema,
+			collectionID:    collectionID,
+			partitionID:     partitionID,
+			vChannels:       channels,
+			tsoAllocatorIns: tsoAllocator,
+			idAllocator:     idAllocator,
+			queue:           queue.dmQueue,
+			lb:              lb,
+			result: &milvuspb.MutationResult{
+				Status: merr.Success(),
+				IDs: &schemapb.IDs{
+					IdField: nil,
+				},
+			},
+			req: &milvuspb.DeleteRequest{
+				CollectionName: collectionName,
+				PartitionName:  partitionName,
+				DbName:         dbName,
+				Expr:           " ",
+			},
+		}
+
+		assert.Error(t, dr.Run(context.Background()))
+		assert.Equal(t, int64(0), dr.result.DeleteCnt)
+	})
+
 	t.Run("complex delete query rpc failed", func(t *testing.T) {
 		mockMgr := NewMockChannelsMgr(t)
 		qn := mocks.NewMockQueryNodeClient(t)
