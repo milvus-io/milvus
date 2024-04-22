@@ -75,7 +75,7 @@ var ErrSegmentUnhealthy = errors.New("segment unhealthy")
 type IndexedFieldInfo struct {
 	FieldBinlog *datapb.FieldBinlog
 	IndexInfo   *querypb.FieldIndexInfo
-	LazyLoad    bool
+	IsLoaded    bool
 }
 
 type baseSegment struct {
@@ -393,7 +393,7 @@ func (s *LocalSegment) initializeSegment() error {
 				FieldID: indexInfo.GetFieldID(),
 			},
 			IndexInfo: indexInfo,
-			LazyLoad:  s.isLazyLoad,
+			IsLoaded:  false,
 		})
 		if !typeutil.IsVectorType(field.GetDataType()) && !s.HasRawData(fieldID) {
 			s.fields.Insert(fieldID, &FieldInfo{
@@ -517,12 +517,6 @@ func (s *LocalSegment) Indexes() []*IndexedFieldInfo {
 		return true
 	})
 	return result
-}
-
-func (s *LocalSegment) ResetIndexesLazyLoad(lazyState bool) {
-	for _, indexInfo := range s.Indexes() {
-		indexInfo.LazyLoad = lazyState
-	}
 }
 
 func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error) {
@@ -1173,7 +1167,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 
 	old := s.GetIndex(indexInfo.GetFieldID())
 	// the index loaded
-	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && !old.LazyLoad {
+	if old != nil && old.IndexInfo.GetIndexID() == indexInfo.GetIndexID() && old.IsLoaded {
 		log.Warn("index already loaded")
 		return nil
 	}
@@ -1252,7 +1246,7 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 			FieldID: indexInfo.GetFieldID(),
 		},
 		IndexInfo: indexInfo,
-		LazyLoad:  false,
+		IsLoaded:  true,
 	})
 	log.Info("updateSegmentIndex done")
 	return nil
@@ -1402,7 +1396,9 @@ func (s *LocalSegment) Release(ctx context.Context, opts ...releaseOption) {
 // ReleaseSegmentData releases the segment data.
 func (s *LocalSegment) ReleaseSegmentData() {
 	C.ClearSegmentData(s.ptr)
-	s.ResetIndexesLazyLoad(true)
+	for _, indexInfo := range s.Indexes() {
+		indexInfo.IsLoaded = false
+	}
 }
 
 // StartLoadData starts the loading process of the segment.
