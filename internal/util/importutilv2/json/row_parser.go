@@ -265,7 +265,7 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
-		if len(arr)*8 != r.dim {
+		if len(arr) != r.dim/8 {
 			return nil, r.wrapDimError(len(arr)*8, fieldID)
 		}
 		vec := make([]byte, len(arr))
@@ -302,12 +302,12 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			vec[i] = float32(num)
 		}
 		return vec, nil
-	case schemapb.DataType_Float16Vector:
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		arr, ok := obj.([]interface{})
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
-		if len(arr)/2 != r.dim {
+		if len(arr) != r.dim*2 {
 			return nil, r.wrapDimError(len(arr)/2, fieldID)
 		}
 		vec := make([]byte, len(arr))

@@ -122,7 +122,7 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		return byteArr, nil
 	case schemapb.DataType_BinaryVector:
-		return ReadBinaryData(c, count)
+		return ReadBinaryData(c, schemapb.DataType_BinaryVector, count)
 	case schemapb.DataType_FloatVector:
 		arrayData, err := ReadIntegerOrFloatArrayData[float32](c, count)
 		if err != nil {
@@ -133,6 +133,10 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		vectors := lo.Flatten(arrayData.([][]float32))
 		return vectors, nil
+	case schemapb.DataType_Float16Vector:
+		return ReadBinaryData(c, schemapb.DataType_Float16Vector, count)
+	case schemapb.DataType_BFloat16Vector:
+		return ReadBinaryData(c, schemapb.DataType_BFloat16Vector, count)
 	case schemapb.DataType_Array:
 		data := make([]*schemapb.ScalarField, 0, count)
 		elementType := c.field.GetElementType()
@@ -154,7 +158,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 					},
 				})
 			}
-
 		case schemapb.DataType_Int8:
 			int8Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
 			if err != nil {
@@ -172,7 +175,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 					},
 				})
 			}
-
 		case schemapb.DataType_Int16:
 			int16Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
 			if err != nil {
@@ -190,7 +192,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 					},
 				})
 			}
-
 		case schemapb.DataType_Int32:
 			int32Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
 			if err != nil {
@@ -208,7 +209,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 					},
 				})
 			}
-
 		case schemapb.DataType_Int64:
 			int64Array, err := ReadIntegerOrFloatArrayData[int64](c, count)
 			if err != nil {
@@ -226,7 +226,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 					},
 				})
 			}
-
 		case schemapb.DataType_Float:
 			float32Array, err := ReadIntegerOrFloatArrayData[float32](c, count)
 			if err != nil {
@@ -244,7 +243,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 					},
 				})
 			}
-
 		case schemapb.DataType_Double:
 			float64Array, err := ReadIntegerOrFloatArrayData[float64](c, count)
 			if err != nil {
@@ -262,7 +260,6 @@ func (c *FieldReader) Next(count int64) (any, error) {
 					},
 				})
 			}
-
 		case schemapb.DataType_VarChar, schemapb.DataType_String:
 			stringArray, err := ReadStringArrayData(c, count)
 			if err != nil {
@@ -392,7 +389,7 @@ func ReadStringData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
-func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
+func ReadBinaryData(pcr *FieldReader, dataType schemapb.DataType, count int64) (any, error) {
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
@@ -408,8 +405,8 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 			}
 		case arrow.LIST:
 			listReader := chunk.(*array.List)
-			if !isRegularVector(listReader.Offsets(), pcr.dim, true) {
-				return nil, merr.WrapErrImportFailed("binary vector is irregular")
+			if !isVectorAligned(listReader.Offsets(), pcr.dim, dataType) {
+				return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
@@ -428,15 +425,21 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
-func isRegularVector(offsets []int32, dim int, isBinary bool) bool {
+func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool {
 	if len(offsets) < 1 {
 		return false
 	}
-	if isBinary {
-		dim = dim / 8
+	var elemCount int = 0
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		elemCount = dim / 8
+	case schemapb.DataType_FloatVector:
+		elemCount = dim
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		elemCount = dim * 2
 	}
 	for i := 1; i < len(offsets); i++ {
-		if offsets[i]-offsets[i-1] != int32(dim) {
+		if offsets[i]-offsets[i-1] != int32(elemCount) {
 			return false
 		}
 	}
@@ -497,9 +500,9 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 			return nil, WrapTypeErr("list", chunk.DataType().Name(), pcr.field)
 		}
 		offsets := listReader.Offsets()
-		if typeutil.IsVectorType(pcr.field.GetDataType()) &&
-			!isRegularVector(offsets, pcr.dim, pcr.field.GetDataType() == schemapb.DataType_BinaryVector) {
-			return nil, merr.WrapErrImportFailed("float vector is irregular")
+		dataType := pcr.field.GetDataType()
+		if typeutil.IsVectorType(dataType) && !isVectorAligned(offsets, pcr.dim, dataType) {
+			return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
 		}
 		valueReader := listReader.ListValues()
 		switch valueReader.DataType().ID() {

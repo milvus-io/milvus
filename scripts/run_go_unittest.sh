@@ -164,6 +164,11 @@ function test_metastore()
 go test -race -cover -tags dynamic "${MILVUS_DIR}/metastore/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
+function test_cmd()
+{
+go test -race -cover -tags dynamic "${ROOT_DIR}/cmd/tools/..." -failfast -count=1 -ldflags="-r ${RPATH}"
+}
+
 function test_all()
 {
 test_proxy
@@ -183,6 +188,7 @@ test_config
 test_util
 test_pkg
 test_metastore
+test_cmd
 }
 
 
@@ -238,6 +244,9 @@ case "${TEST_TAG}" in
         ;;
     metastore)
 	test_metastore
+        ;;
+    cmd)
+	test_cmd
         ;;
     *)   echo "Test All";
 	test_all

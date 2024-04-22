@@ -137,18 +137,7 @@ func estimateSizeBy(schema *schemapb.CollectionSchema, policy getVariableFieldLe
 					break
 				}
 			}
-		case schemapb.DataType_Float16Vector:
-			for _, kv := range fs.TypeParams {
-				if kv.Key == common.DimKey {
-					v, err := strconv.Atoi(kv.Value)
-					if err != nil {
-						return -1, err
-					}
-					res += v * 2
-					break
-				}
-			}
-		case schemapb.DataType_BFloat16Vector:
+		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 			for _, kv := range fs.TypeParams {
 				if kv.Key == common.DimKey {
 					v, err := strconv.Atoi(kv.Value)
@@ -1136,6 +1125,10 @@ func IsPrimaryFieldDataExist(datas []*schemapb.FieldData, primaryFieldSchema *sc
 	}
 
 	return primaryFieldData != nil
+}
+
+func IsAutoPKField(field *schemapb.FieldSchema) bool {
+	return field.GetIsPrimaryKey() && field.GetAutoID()
 }
 
 func AppendSystemFields(schema *schemapb.CollectionSchema) *schemapb.CollectionSchema {

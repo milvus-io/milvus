@@ -166,9 +166,9 @@ func (s *InsertDataSuite) TestGetRowSize() {
 	s.Equal(s.iDataOneRow.Data[JSONField].GetRowSize(0), len([]byte(`{"batch":1}`))+16)
 	s.Equal(s.iDataOneRow.Data[ArrayField].GetRowSize(0), 3*4)
 	s.Equal(s.iDataOneRow.Data[BinaryVectorField].GetRowSize(0), 1)
-	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetRowSize(0), 4)
-	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetRowSize(0), 2)
-	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetRowSize(0), 2)
+	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetRowSize(0), 16)
+	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetRowSize(0), 8)
+	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetRowSize(0), 8)
 }
 
 func (s *InsertDataSuite) TestGetDataType() {

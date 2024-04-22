@@ -17,6 +17,7 @@
 package observers
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -441,6 +442,8 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 
 	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
 	suite.targetMgr.UpdateCollectionNextTarget(collection)
+
+	suite.ob.LoadCollection(context.Background(), collection)
 }
 
 func TestCollectionObserver(t *testing.T) {

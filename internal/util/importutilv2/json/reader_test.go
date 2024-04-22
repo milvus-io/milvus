@@ -135,6 +135,14 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 			_, err = rand2.Read(float16VecData)
 			assert.NoError(t, err)
 			insertData.Data[field.GetFieldID()] = &storage.Float16VectorFieldData{Data: float16VecData, Dim: int(dim)}
+		case schemapb.DataType_BFloat16Vector:
+			dim, err := typeutil.GetDim(field)
+			assert.NoError(t, err)
+			total := int64(rowCount) * dim * 2
+			bfloat16VecData := make([]byte, total)
+			_, err = rand2.Read(bfloat16VecData)
+			assert.NoError(t, err)
+			insertData.Data[field.GetFieldID()] = &storage.BFloat16VectorFieldData{Data: bfloat16VecData, Dim: int(dim)}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			varcharData := make([]string, 0)
 			for i := 0; i < rowCount; i++ {
@@ -231,7 +239,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
 			} else if dataType == schemapb.DataType_JSON {
 				data[fieldID] = string(v.GetRow(i).([]byte))
-			} else if dataType == schemapb.DataType_BinaryVector || dataType == schemapb.DataType_Float16Vector {
+			} else if dataType == schemapb.DataType_BinaryVector || dataType == schemapb.DataType_Float16Vector || dataType == schemapb.DataType_BFloat16Vector {
 				bytes := v.GetRow(i).([]byte)
 				ints := make([]int, 0, len(bytes))
 				for _, b := range bytes {
@@ -304,10 +312,14 @@ func (suite *ReaderSuite) TestStringPK() {
 	suite.run(schemapb.DataType_Int32)
 }
 
-func (suite *ReaderSuite) TestBinaryAndFloat16Vector() {
+func (suite *ReaderSuite) TestVector() {
 	suite.vecDataType = schemapb.DataType_BinaryVector
 	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_FloatVector
+	suite.run(schemapb.DataType_Int32)
 	suite.vecDataType = schemapb.DataType_Float16Vector
+	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_BFloat16Vector
 	suite.run(schemapb.DataType_Int32)
 }
 
