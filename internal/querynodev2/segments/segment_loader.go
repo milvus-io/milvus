@@ -984,6 +984,24 @@ func separateIndexAndBinlog(loadInfo *querypb.SegmentLoadInfo) (map[int64]*Index
 }
 
 func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *querypb.SegmentLoadInfo, segment *LocalSegment) error {
+	// TODO: we should create a transaction-like api to load segment for segment interface,
+	// but not do many things in segment loader.
+	stateLockGuard, err := segment.StartLoadData()
+	// segment can not do load now.
+	if err != nil {
+		return err
+	}
+	if stateLockGuard == nil {
+		return nil
+	}
+	defer func() {
+		if err != nil {
+			// Release partial loaded segment data if load failed.
+			segment.ReleaseSegmentData()
+		}
+		stateLockGuard.Done(err)
+	}()
+
 	collection := segment.GetCollection()
 
 	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
@@ -1034,24 +1052,6 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
-	// TODO: we should create a transaction-like api to load segment for segment interface,
-	// but not do many things in segment loader.
-	stateLockGuard, err := segment.StartLoadData()
-	// segment can not do load now.
-	if err != nil {
-		return err
-	}
-	if stateLockGuard == nil {
-		return nil
-	}
-	defer func() {
-		if err != nil {
-			// Release partial loaded segment data if load failed.
-			segment.ReleaseSegmentData()
-		}
-		stateLockGuard.Done(err)
-	}()
-
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
 		zap.Int64("partitionID", segment.Partition()),
