@@ -205,6 +205,17 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 		if shape[1] != dim {
 			return wrapDimError(shape[1], dim, field)
 		}
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		// TODO: need a better way to check the element type for float16/bfloat16
+		if elementType != schemapb.DataType_BinaryVector {
+			return wrapElementTypeError(elementType, field)
+		}
+		if len(shape) != 2 {
+			return wrapShapeError(len(shape), 2, field)
+		}
+		if shape[1] != dim*2 {
+			return wrapDimError(shape[1], dim, field)
+		}
 	case schemapb.DataType_BinaryVector:
 		if elementType != schemapb.DataType_BinaryVector {
 			return wrapElementTypeError(elementType, field)
@@ -219,8 +230,7 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 		if len(shape) != 1 {
 			return wrapShapeError(len(shape), 1, field)
 		}
-	case schemapb.DataType_None, schemapb.DataType_Array,
-		schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+	case schemapb.DataType_None, schemapb.DataType_Array:
 		return merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type: %s", field.GetDataType().String()))
 
 	default:

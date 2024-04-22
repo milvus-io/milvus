@@ -52,6 +52,11 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("get parquet schema failed, err=%v", err))
 	}
 
+	err = isSchemaEqual(schema, pqSchema)
+	if err != nil {
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("schema not equal, err=%v", err))
+	}
+
 	crs := make(map[int64]*FieldReader)
 	for i, pqField := range pqSchema.Fields() {
 		field, ok := nameToField[pqField.Name]
@@ -60,26 +65,9 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 			return nil, merr.WrapErrImportFailed(fmt.Sprintf("the field: %s is not in schema, "+
 				"if it's a dynamic field, please reformat data by bulk_writer", pqField.Name))
 		}
-		if field.GetIsPrimaryKey() && field.GetAutoID() {
+		if typeutil.IsAutoPKField(field) {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
-		}
-
-		arrowType, isList := convertArrowSchemaToDataType(pqField, false)
-		dataType := field.GetDataType()
-		if isList {
-			if !typeutil.IsVectorType(dataType) && dataType != schemapb.DataType_Array {
-				return nil, WrapTypeErr(dataType.String(), pqField.Type.Name(), field)
-			}
-			if dataType == schemapb.DataType_Array {
-				dataType = field.GetElementType()
-			}
-		}
-		if !isConvertible(arrowType, dataType, isList) {
-			if isList {
-				return nil, WrapTypeErr(dataType.String(), pqField.Type.(*arrow.ListType).ElemField().Type.Name(), field)
-			}
-			return nil, WrapTypeErr(dataType.String(), pqField.Type.Name(), field)
 		}
 
 		cr, err := NewFieldReader(ctx, fileReader, i, field)
@@ -94,7 +82,7 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	}
 
 	for _, field := range nameToField {
-		if (field.GetIsPrimaryKey() && field.GetAutoID()) || field.GetIsDynamic() {
+		if typeutil.IsAutoPKField(field) || field.GetIsDynamic() {
 			continue
 		}
 		if _, ok := crs[field.GetFieldID()]; !ok {
@@ -105,77 +93,164 @@ func CreateFieldReaders(ctx context.Context, fileReader *pqarrow.FileReader, sch
 	return crs, nil
 }
 
-func convertArrowSchemaToDataType(field arrow.Field, isList bool) (schemapb.DataType, bool) {
-	switch field.Type.ID() {
-	case arrow.BOOL:
-		return schemapb.DataType_Bool, false
-	case arrow.UINT8:
-		if isList {
-			return schemapb.DataType_BinaryVector, false
-		}
-		return schemapb.DataType_None, false
-	case arrow.INT8:
-		return schemapb.DataType_Int8, false
-	case arrow.INT16:
-		return schemapb.DataType_Int16, false
-	case arrow.INT32:
-		return schemapb.DataType_Int32, false
-	case arrow.INT64:
-		return schemapb.DataType_Int64, false
-	case arrow.FLOAT16:
-		if isList {
-			return schemapb.DataType_Float16Vector, false
-		}
-		return schemapb.DataType_None, false
-	case arrow.FLOAT32:
-		return schemapb.DataType_Float, false
-	case arrow.FLOAT64:
-		return schemapb.DataType_Double, false
-	case arrow.STRING:
-		return schemapb.DataType_VarChar, false
-	case arrow.BINARY:
-		return schemapb.DataType_BinaryVector, false
-	case arrow.LIST:
-		elementType, _ := convertArrowSchemaToDataType(field.Type.(*arrow.ListType).ElemField(), true)
-		return elementType, true
-	default:
-		return schemapb.DataType_None, false
-	}
-}
-
-func isConvertible(src, dst schemapb.DataType, isList bool) bool {
-	switch src {
-	case schemapb.DataType_Bool:
-		return typeutil.IsBoolType(dst)
-	case schemapb.DataType_Int8:
-		return typeutil.IsArithmetic(dst)
-	case schemapb.DataType_Int16:
-		return typeutil.IsArithmetic(dst) && dst != schemapb.DataType_Int8
-	case schemapb.DataType_Int32:
-		return typeutil.IsArithmetic(dst) && dst != schemapb.DataType_Int8 && dst != schemapb.DataType_Int16
-	case schemapb.DataType_Int64:
-		return typeutil.IsFloatingType(dst) || dst == schemapb.DataType_Int64
-	case schemapb.DataType_Float:
-		if isList && dst == schemapb.DataType_FloatVector {
-			return true
-		}
-		return typeutil.IsFloatingType(dst)
-	case schemapb.DataType_Double:
-		if isList && dst == schemapb.DataType_FloatVector {
-			return true
-		}
-		return dst == schemapb.DataType_Double
-	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		return typeutil.IsStringType(dst) || typeutil.IsJSONType(dst)
-	case schemapb.DataType_JSON:
-		return typeutil.IsJSONType(dst)
-	case schemapb.DataType_BinaryVector:
-		return dst == schemapb.DataType_BinaryVector
-	case schemapb.DataType_Float16Vector:
-		return dst == schemapb.DataType_Float16Vector
+func isArrowIntegerType(dataType arrow.Type) bool {
+	switch dataType {
+	case arrow.INT8, arrow.INT16, arrow.INT32, arrow.INT64:
+		return true
 	default:
 		return false
 	}
+}
+
+func isArrowFloatingType(dataType arrow.Type) bool {
+	switch dataType {
+	case arrow.FLOAT32, arrow.FLOAT64:
+		return true
+	default:
+		return false
+	}
+}
+
+func isArrowArithmeticType(dataType arrow.Type) bool {
+	return isArrowIntegerType(dataType) || isArrowFloatingType(dataType)
+}
+
+func isArrowDataTypeConvertible(src arrow.DataType, dst arrow.DataType) bool {
+	srcType := src.ID()
+	dstType := dst.ID()
+	switch srcType {
+	case arrow.BOOL:
+		return dstType == arrow.BOOL
+	case arrow.UINT8:
+		return dstType == arrow.UINT8
+	case arrow.INT8:
+		return isArrowArithmeticType(dstType)
+	case arrow.INT16:
+		return isArrowArithmeticType(dstType) && dstType != arrow.INT8
+	case arrow.INT32:
+		return isArrowArithmeticType(dstType) && dstType != arrow.INT8 && dstType != arrow.INT16
+	case arrow.INT64:
+		return isArrowFloatingType(dstType) || dstType == arrow.INT64
+	case arrow.FLOAT32:
+		return isArrowFloatingType(dstType)
+	case arrow.FLOAT64:
+		// TODO caiyd: need do strict type check
+		// return dstType == arrow.FLOAT64
+		return isArrowFloatingType(dstType)
+	case arrow.STRING:
+		return dstType == arrow.STRING
+	case arrow.BINARY:
+		return dstType == arrow.LIST && dst.(*arrow.ListType).Elem().ID() == arrow.UINT8
+	case arrow.LIST:
+		return dstType == arrow.LIST && isArrowDataTypeConvertible(src.(*arrow.ListType).Elem(), dst.(*arrow.ListType).Elem())
+	default:
+		return false
+	}
+}
+
+func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.DataType, error) {
+	dataType := field.GetDataType()
+	if isArray {
+		dataType = field.GetElementType()
+	}
+	switch dataType {
+	case schemapb.DataType_Bool:
+		return &arrow.BooleanType{}, nil
+	case schemapb.DataType_Int8:
+		return &arrow.Int8Type{}, nil
+	case schemapb.DataType_Int16:
+		return &arrow.Int16Type{}, nil
+	case schemapb.DataType_Int32:
+		return &arrow.Int32Type{}, nil
+	case schemapb.DataType_Int64:
+		return &arrow.Int64Type{}, nil
+	case schemapb.DataType_Float:
+		return &arrow.Float32Type{}, nil
+	case schemapb.DataType_Double:
+		return &arrow.Float64Type{}, nil
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		return &arrow.StringType{}, nil
+	case schemapb.DataType_JSON:
+		return &arrow.StringType{}, nil
+	case schemapb.DataType_Array:
+		elemType, err := convertToArrowDataType(field, true)
+		if err != nil {
+			return nil, err
+		}
+		return arrow.ListOfField(arrow.Field{
+			Name:     "item",
+			Type:     elemType,
+			Nullable: true,
+			Metadata: arrow.Metadata{},
+		}), nil
+	case schemapb.DataType_BinaryVector:
+		return arrow.ListOfField(arrow.Field{
+			Name:     "item",
+			Type:     &arrow.Uint8Type{},
+			Nullable: true,
+			Metadata: arrow.Metadata{},
+		}), nil
+	case schemapb.DataType_FloatVector:
+		return arrow.ListOfField(arrow.Field{
+			Name:     "item",
+			Type:     &arrow.Float32Type{},
+			Nullable: true,
+			Metadata: arrow.Metadata{},
+		}), nil
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return arrow.ListOfField(arrow.Field{
+			Name:     "item",
+			Type:     &arrow.Uint8Type{},
+			Nullable: true,
+			Metadata: arrow.Metadata{},
+		}), nil
+	default:
+		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %v", dataType.String())
+	}
+}
+
+func ConvertToArrowSchema(schema *schemapb.CollectionSchema) (*arrow.Schema, error) {
+	arrFields := make([]arrow.Field, 0)
+	for _, field := range schema.GetFields() {
+		if typeutil.IsAutoPKField(field) {
+			continue
+		}
+		arrDataType, err := convertToArrowDataType(field, false)
+		if err != nil {
+			return nil, err
+		}
+		arrFields = append(arrFields, arrow.Field{
+			Name:     field.GetName(),
+			Type:     arrDataType,
+			Nullable: true,
+			Metadata: arrow.Metadata{},
+		})
+	}
+	return arrow.NewSchema(arrFields, nil), nil
+}
+
+func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) error {
+	arrNameToField := lo.KeyBy(arrSchema.Fields(), func(field arrow.Field) string {
+		return field.Name
+	})
+	for _, field := range schema.GetFields() {
+		if typeutil.IsAutoPKField(field) {
+			continue
+		}
+		arrField, ok := arrNameToField[field.GetName()]
+		if !ok {
+			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' not in arrow schema", field.GetName()))
+		}
+		toArrDataType, err := convertToArrowDataType(field, false)
+		if err != nil {
+			return err
+		}
+		if !isArrowDataTypeConvertible(arrField.Type, toArrDataType) {
+			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' type mis-match, milvus data type '%s', arrow data type get '%s'",
+				field.Name, field.DataType.String(), arrField.Type.String()))
+		}
+	}
+	return nil
 }
 
 func estimateReadCountPerBatch(bufferSize int, schema *schemapb.CollectionSchema) (int64, error) {
