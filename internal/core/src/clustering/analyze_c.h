@@ -42,7 +42,7 @@ AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
                   const char* field_name,
                   enum CDataType field_type,
                   int64_t dim,
-                  int64_t segment_size,
+                  int64_t num_clusters,
                   int64_t train_size);
 
 CStatus

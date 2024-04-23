@@ -20,7 +20,7 @@
 #include "index/InvertedIndexTantivy.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
-#include "clustering/MemClustering.h"
+#include "clustering/KmeansClustering.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/storage_test_utils.h"
@@ -51,43 +51,17 @@ ReadPBFile(std::string& file_path, google::protobuf::Message& message) {
     infile.close();
 }
 
-std::string
-GetRemoteCentroidsObjectPrefix(
-    const std::string& root_path,
-    const milvus::storage::IndexMeta& index_meta,
-    const milvus::storage::FieldDataMeta& field_meta) {
-    return root_path + "/" + std::string(ANALYZE_ROOT_PATH) + "/" +
-           std::to_string(index_meta.build_id) + "/" +
-           std::to_string(index_meta.index_version) + "/" +
-           std::to_string(field_meta.collection_id) + "/" +
-           std::to_string(field_meta.partition_id) + "/" +
-           std::to_string(field_meta.field_id);
-}
-
-std::string
-GetRemoteCentroidIdMappingObjectPrefix(
-    const std::string& root_path,
-    const milvus::storage::IndexMeta& index_meta,
-    const milvus::storage::FieldDataMeta& field_meta) {
-    return root_path + "/" + std::string(ANALYZE_ROOT_PATH) + "/" +
-           std::to_string(index_meta.build_id) + "/" +
-           std::to_string(index_meta.index_version) + "/" +
-           std::to_string(field_meta.collection_id) + "/" +
-           std::to_string(field_meta.partition_id) + "/" +
-           std::to_string(field_meta.field_id);
-}
-
 template <typename T>
 void
 CheckResultCorrectness(
-    const milvus::clustering::MemClusteringPtr<T>& clusteringJob,
-    const std::string& centroids_path_prefix,
-    const std::string& id_mapping_prefix,
+    const milvus::clustering::KmeansClusteringPtr& clusteringJob,
     int64_t segment_id,
     int64_t segment_id2,
     int64_t dim,
     int64_t nb,
     bool check_centroids) {
+    std::string centroids_path_prefix =
+        clusteringJob->GetRemoteCentroidsObjectPrefix();
     std::string centroids_name = std::string(CENTROIDS_NAME);
     std::string centroid_path = centroids_path_prefix + "/" + centroids_name;
     milvus::proto::segcore::ClusteringCentroidsStats stats;
@@ -102,13 +76,13 @@ CheckResultCorrectness(
     int expected_num_clusters = 8;
     ASSERT_EQ(centroids.size(), 8 * dim);
     std::string offset_mapping_name = std::string(OFFSET_MAPPING_NAME);
-    std::string centroid_id_mapping_path = id_mapping_prefix + "/" +
-                                           std::to_string(segment_id) + "/" +
-                                           offset_mapping_name;
+    std::string centroid_id_mapping_path =
+        clusteringJob->GetRemoteCentroidIdMappingObjectPrefix(segment_id) +
+        "/" + offset_mapping_name;
     milvus::proto::segcore::ClusteringCentroidIdMappingStats mapping_stats;
-    std::string centroid_id_mapping_path2 = id_mapping_prefix + "/" +
-                                            std::to_string(segment_id2) + "/" +
-                                            offset_mapping_name;
+    std::string centroid_id_mapping_path2 =
+        clusteringJob->GetRemoteCentroidIdMappingObjectPrefix(segment_id2) +
+        "/" + offset_mapping_name;
     milvus::proto::segcore::ClusteringCentroidIdMappingStats mapping_stats2;
     ReadPBFile(centroid_id_mapping_path, mapping_stats);
     ReadPBFile(centroid_id_mapping_path2, mapping_stats2);
@@ -160,11 +134,6 @@ test_run() {
     auto storage_config = gen_local_storage_config(root_path);
     auto cm = storage::CreateChunkManager(storage_config);
 
-    std::string centroids_path_prefix =
-        GetRemoteCentroidsObjectPrefix(root_path, index_meta, field_meta);
-    std::string id_mapping_prefix = GetRemoteCentroidIdMappingObjectPrefix(
-        root_path, index_meta, field_meta);
-
     std::vector<T> data_gen(nb * dim);
     for (int64_t i = 0; i < nb * dim; ++i) {
         data_gen[i] = rand();
@@ -202,63 +171,45 @@ test_run() {
     {
         Config config;
         config["insert_files"] = remote_files;
-        config["segment_size"] = 1024L * 1024;            // 1MB
+        config["num_clusters"] = 80;
         config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
         config["dim"] = dim;
         config["num_rows"] = num_rows;
         auto clusteringJob =
-            std::make_unique<clustering::MemClustering<float>>(ctx);
-        clusteringJob->Run(config);
-        CheckResultCorrectness<T>(clusteringJob,
-                                  centroids_path_prefix,
-                                  id_mapping_prefix,
-                                  segment_id,
-                                  segment_id2,
-                                  dim,
-                                  nb,
-                                  true);
+            std::make_unique<clustering::KmeansClustering>(ctx);
+        clusteringJob->Run<T>(config);
+        CheckResultCorrectness<T>(
+            clusteringJob, segment_id, segment_id2, dim, nb, true);
     }
     // need to sample train data case1
     {
         Config config;
         config["insert_files"] = remote_files;
-        config["segment_size"] = 1024L * 1024;  // 1MB
-        config["train_size"] = 1536L * 1024;    // 1.5MB
+        config["num_clusters"] = 8;
+        config["train_size"] = 1536L * 1024;  // 1.5MB
         config["dim"] = dim;
         config["num_rows"] = num_rows;
         auto clusteringJob =
-            std::make_unique<clustering::MemClustering<float>>(ctx);
+            std::make_unique<clustering::KmeansClustering>(ctx);
 
-        clusteringJob->Run(config);
-        CheckResultCorrectness<T>(clusteringJob,
-                                  centroids_path_prefix,
-                                  id_mapping_prefix,
-                                  segment_id,
-                                  segment_id2,
-                                  dim,
-                                  nb,
-                                  true);
+        clusteringJob->Run<T>(config);
+        CheckResultCorrectness<T>(
+            clusteringJob, segment_id, segment_id2, dim, nb, true);
     }
     // need to sample train data case2
     {
         Config config;
         config["insert_files"] = remote_files;
-        config["segment_size"] = 1024L * 1024;    // 1MB
+        config["num_clusters"] = 8;               // 1MB
         config["train_size"] = 6L * 1024 * 1024;  // 6MB
         config["dim"] = dim;
         config["num_rows"] = num_rows;
         auto clusteringJob =
-            std::make_unique<clustering::MemClustering<float>>(ctx);
+            std::make_unique<clustering::KmeansClustering>(ctx);
 
-        clusteringJob->Run(config);
-        CheckResultCorrectness<T>(clusteringJob,
-                                  centroids_path_prefix,
-                                  id_mapping_prefix,
-                                  segment_id,
-                                  segment_id2,
-                                  dim,
-                                  nb,
-                                  false);
+        clusteringJob->Run<T>(config);
+        CheckResultCorrectness<T>(
+            clusteringJob, segment_id, segment_id2, dim, nb, false);
     }
 }
 

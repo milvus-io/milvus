@@ -22,7 +22,7 @@
 #include "index/Utils.h"
 #include "index/Meta.h"
 #include "storage/Util.h"
-#include "clustering/MemClustering.h"
+#include "clustering/KmeansClustering.h"
 
 using namespace milvus;
 CStatus
@@ -36,7 +36,7 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
 
         auto& config = analyze_info->config;
         config["insert_files"] = analyze_info->insert_files;
-        config["segment_size"] = analyze_info->segment_size;
+        config["num_clusters"] = analyze_info->num_clusters;
         config["train_size"] = analyze_info->train_size;
         config["num_rows"] = analyze_info->num_rows;
         config["dim"] = analyze_info->dim;
@@ -64,10 +64,10 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
                             std::to_string(int(analyze_info->field_type))));
         }
         auto clusteringJob =
-            std::make_unique<milvus::clustering::MemClustering<float>>(
+            std::make_unique<milvus::clustering::KmeansClustering>(
                 fileManagerContext);
 
-        clusteringJob->Run(config);
+        clusteringJob->Run<float>(config);
         *res_analyze = clusteringJob.release();
         auto status = CStatus();
         status.error_code = Success;
@@ -87,7 +87,7 @@ DeleteAnalyze(CAnalyze analyze) {
     try {
         AssertInfo(analyze, "failed to delete analyze, passed index was null");
         auto real_analyze =
-            reinterpret_cast<milvus::clustering::Clustering*>(analyze);
+            reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
         delete real_analyze;
         status.error_code = Success;
         status.error_msg = "";
@@ -153,7 +153,7 @@ AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
                   const char* field_name,
                   enum CDataType field_type,
                   int64_t dim,
-                  int64_t segment_size,
+                  int64_t num_clusters,
                   int64_t train_size) {
     try {
         auto analyze_info = (AnalyzeInfo*)c_analyze_info;
@@ -165,7 +165,7 @@ AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
         analyze_info->field_type = milvus::DataType(field_type);
         analyze_info->field_name = field_name;
         analyze_info->dim = dim;
-        analyze_info->segment_size = segment_size;
+        analyze_info->num_clusters = num_clusters;
         analyze_info->train_size = train_size;
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
@@ -220,7 +220,7 @@ GetAnalyzeResultMeta(CAnalyze analyze,
                    "failed to serialize analyze to binary set, passed index "
                    "was null");
         auto real_analyze =
-            reinterpret_cast<milvus::clustering::Clustering*>(analyze);
+            reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
         auto res = real_analyze->GetClusteringResultMeta();
         centroid_path = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;

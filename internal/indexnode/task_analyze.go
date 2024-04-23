@@ -18,12 +18,14 @@ package indexnode
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -83,25 +85,11 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		return err
 	}
 
-	err = analyzeInfo.AppendAnalyzeInfo(
-		at.req.GetCollectionID(),
-		at.req.GetPartitionID(),
-		at.req.GetFieldID(),
-		at.req.GetTaskID(),
-		at.req.GetVersion(),
-		at.req.GetFieldName(),
-		at.req.GetFieldType(),
-		at.req.GetDim(),
-		Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize(),
-		Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize(),
-	)
-	if err != nil {
-		log.Warn("append analyze info failed", zap.Error(err))
-		return err
-	}
-
+	totalSegmentsRows := int64(0)
 	for segID, stats := range at.req.GetSegmentStats() {
-		err = analyzeInfo.AppendNumRows(segID, stats.GetNumRows())
+		numRows := stats.GetNumRows()
+		totalSegmentsRows += numRows
+		err = analyzeInfo.AppendNumRows(segID, numRows)
 		if err != nil {
 			log.Warn("append segment num rows failed", zap.Error(err))
 			return err
@@ -115,6 +103,28 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+
+	// compute num clusters to train
+	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(at.req.GetDim()) * typeutil.VectorTypeSize(at.req.GetFieldType())   // Byte
+	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / float64(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())))
+	log.Info("plan to analyze with", zap.Float64("total segments raw data size(GB)", float64(totalSegmentsRawDataSize)/1024.0/1024.0/1024.0), zap.Int64("num_clusters", numClusters))
+
+	err = analyzeInfo.AppendAnalyzeInfo(
+		at.req.GetCollectionID(),
+		at.req.GetPartitionID(),
+		at.req.GetFieldID(),
+		at.req.GetTaskID(),
+		at.req.GetVersion(),
+		at.req.GetFieldName(),
+		at.req.GetFieldType(),
+		at.req.GetDim(),
+		numClusters,
+		Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize(),
+	)
+	if err != nil {
+		log.Warn("append analyze info failed", zap.Error(err))
+		return err
 	}
 
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)

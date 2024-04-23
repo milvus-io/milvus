@@ -31,7 +31,7 @@ struct AnalyzeInfo {
     std::string field_name;
     milvus::DataType field_type;
     int64_t dim;
-    int64_t segment_size;
+    int64_t num_clusters;
     int64_t train_size;
     std::map<int64_t, std::vector<std::string>>
         insert_files;  // segment_id->files

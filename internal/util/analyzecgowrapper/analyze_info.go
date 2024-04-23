@@ -90,9 +90,8 @@ func (ai *AnalyzeInfo) AppendAnalyzeInfo(collectionID int64,
 	fieldName string,
 	fieldType schemapb.DataType,
 	dim int64,
-	segmentSize int64,
-	trainSize int64,
-) error {
+	numClusters int64,
+	trainSize int64) error {
 	cColID := C.int64_t(collectionID)
 	cParID := C.int64_t(partitionID)
 	cFieldID := C.int64_t(fieldID)
@@ -101,11 +100,11 @@ func (ai *AnalyzeInfo) AppendAnalyzeInfo(collectionID int64,
 	cFieldName := C.CString(fieldName)
 	cFieldType := uint32(fieldType)
 	cDim := C.int64_t(dim)
-	cSegmentSize := C.int64_t(segmentSize)
+	cNumClusters := C.int64_t(numClusters)
 	cTrainSize := C.int64_t(trainSize)
 	defer C.free(unsafe.Pointer(cFieldName))
 
-	status := C.AppendAnalyzeInfo(ai.cAnalyzeInfo, cColID, cParID, cFieldID, cTaskID, cVersion, cFieldName, cFieldType, cDim, cSegmentSize, cTrainSize)
+	status := C.AppendAnalyzeInfo(ai.cAnalyzeInfo, cColID, cParID, cFieldID, cTaskID, cVersion, cFieldName, cFieldType, cDim, cNumClusters, cTrainSize)
 	return HandleCStatus(&status, "appendAnalyzeInfo failed")
 }
 

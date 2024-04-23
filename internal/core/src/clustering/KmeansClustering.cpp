@@ -21,8 +21,8 @@
 #include "config/ConfigKnowhere.h"
 #include "index/Meta.h"
 #include "index/Utils.h"
-#include "knowhere/kmeans.h"
-#include "clustering/MemClustering.h"
+#include "knowhere/cluster/cluster_factory.h"
+#include "clustering/KmeansClustering.h"
 #include "segcore/SegcoreConfig.h"
 #include "storage/LocalChunkManagerSingleton.h"
 #include "storage/Util.h"
@@ -34,118 +34,112 @@
 
 namespace milvus::clustering {
 
-template <typename T>
-MemClustering<T>::MemClustering(
+KmeansClustering::KmeansClustering(
     const storage::FileManagerContext& file_manager_context) {
     file_manager_ =
         std::make_unique<storage::MemFileManagerImpl>(file_manager_context);
     AssertInfo(file_manager_ != nullptr, "create file manager failed!");
-    auto cluster_node_obj =
-        knowhere::ClusterFactory::Instance().Create<T>(KMEANS_CLUSTER);
-    if (cluster_node_obj.has_value()) {
-        cluster_node_ = std::move(cluster_node_obj.value());
-    } else {
-        auto err = cluster_node_obj.error();
-        if (err == knowhere::Status::invalid_cluster_error) {
-            throw SegcoreError(ErrorCode::Unsupported, cluster_node_obj.what());
-        }
-        throw SegcoreError(ErrorCode::KnowhereError, cluster_node_obj.what());
-    }
 }
 
 template <typename T>
 bool
-MemClustering<T>::FetchSegmentData(uint8_t* buf,
-                                   int64_t expected_train_size,
+KmeansClustering::FetchSegmentData(uint8_t* buf,
+                                   const int64_t expected_train_size,
                                    const std::vector<std::string>& files,
                                    const int64_t num_rows,
+                                   const int64_t dim,
                                    int64_t& offset) {
     auto field_datas = file_manager_->CacheRawDataToMemory(files);
     int64_t segment_size = 0;
     for (auto& data : field_datas) {
         segment_size += data->Size();
     }
-    AssertInfo(segment_size == num_rows * sizeof(T) * dim_,
+    AssertInfo(segment_size == num_rows * sizeof(T) * dim,
                "file size consistent, expected: {}, actual: {}",
-               num_rows * sizeof(T) * dim_,
+               num_rows * sizeof(T) * dim,
                segment_size);
     int64_t fetch_size = expected_train_size - offset;
     bool use_all_segment = fetch_size >= segment_size;
     for (auto& data : field_datas) {
-        auto size = std::min(expected_train_size - offset, data->Size());
-        if (size <= 0) {
-            break;
+        size_t size = 0;
+        if (use_all_segment) {
+            size = data->Size();
+        } else {
+            size = std::min(expected_train_size - offset, data->Size());
+            if (size <= 0) {
+                break;
+            }
         }
         std::memcpy(buf + offset, data->Data(), size);
         offset += size;
         data.reset();
     }
-    std::vector<FieldDataPtr>().swap(field_datas);
+
     return use_all_segment;
 }
 
 template <typename T>
-std::unique_ptr<uint8_t[]>
-MemClustering<T>::SampleTrainData(
+int64_t
+KmeansClustering::SampleTrainData(
     const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
     const std::map<int64_t, int64_t>& segment_num_rows,
-    int64_t expected_train_size) {
-    // random sampling to get train data
-    std::vector<int32_t> idx(segment_ids.size());
-    std::iota(idx.begin(), idx.end(), 0);
-    std::shuffle(idx.begin(), idx.end(), std::mt19937());
-
-    int64_t sample_train_num = 0;
-    std::unique_ptr<uint8_t[]> buf =
-        std::make_unique<uint8_t[]>(expected_train_size);
+    const int64_t expected_train_size,
+    const int64_t dim,
+    uint8_t* buf) {
+    int64_t trained_segments_num = 0;
     int64_t offset = 0;
     for (auto i = 0; i < segment_ids.size(); i++) {
         if (offset == expected_train_size) {
             break;
         }
-        int64_t cur_segment_id = segment_ids[idx[i]];
-        bool all_segment_used =
-            FetchSegmentData(buf.get(),
-                             expected_train_size,
-                             segment_file_paths.at(cur_segment_id),
-                             segment_num_rows.at(cur_segment_id),
-                             offset);
-        if (all_segment_used) {
-            trained_segmentid_to_offset_[cur_segment_id] = i;
-            trained_segment_ids_.push_back(cur_segment_id);
+        int64_t cur_segment_id = segment_ids[i];
+        bool whole_segment_used =
+            FetchSegmentData<T>(buf,
+                                expected_train_size,
+                                segment_file_paths.at(cur_segment_id),
+                                segment_num_rows.at(cur_segment_id),
+                                dim,
+                                offset);
+        // if whole segment is used for training, we could directly get its vector -> centroid id mapping
+        // so we record the num of segments to avoid recomputing id mapping results
+        if (whole_segment_used) {
+            trained_segments_num++;
         }
     }
-    return buf;
+    return trained_segments_num;
 }
 
 template <typename T>
 milvus::proto::segcore::ClusteringCentroidsStats
-MemClustering<T>::CentroidsToPB(const T* centroids) {
+KmeansClustering::CentroidsToPB(const T* centroids,
+                                const int64_t num_clusters,
+                                const int64_t dim) {
     milvus::proto::segcore::ClusteringCentroidsStats stats;
-    for (int i = 0; i < num_clusters_; i++) {
+    for (auto i = 0; i < num_clusters; i++) {
         milvus::proto::schema::VectorField* vector_field =
             stats.add_centroids();
-        vector_field->set_dim(dim_);
+        vector_field->set_dim(dim);
         milvus::proto::schema::FloatArray* float_array =
             vector_field->mutable_float_vector();
-        for (int j = 0; j < dim_; j++) {
-            float_array->add_data(float(centroids[i * dim_ + j]));
+        for (auto j = 0; j < dim; j++) {
+            float_array->add_data(float(centroids[i * dim + j]));
         }
     }
     return stats;
 }
 
-template <typename T>
 std::vector<milvus::proto::segcore::ClusteringCentroidIdMappingStats>
-MemClustering<T>::CentroidIdMappingToPB(
+KmeansClustering::CentroidIdMappingToPB(
     const uint32_t* centroid_id_mapping,
     const std::vector<int64_t>& segment_ids,
-    const std::map<int64_t, int64_t>& num_row_map) {
+    const int64_t trained_segments_num,
+    const std::map<int64_t, int64_t>& num_row_map,
+    const int64_t num_clusters) {
     auto compute_num_in_centroid = [&](const uint32_t* centroid_id_mapping,
                                        uint64_t start,
                                        uint64_t end) -> std::vector<int64_t> {
-        std::vector<int64_t> num_vectors(num_clusters_, 0);
+        std::vector<int64_t> num_vectors(num_clusters, 0);
         for (uint64_t i = start; i < end; ++i) {
             num_vectors[centroid_id_mapping[i]]++;
         }
@@ -154,15 +148,15 @@ MemClustering<T>::CentroidIdMappingToPB(
     std::vector<milvus::proto::segcore::ClusteringCentroidIdMappingStats>
         stats_arr;
     int64_t cur_offset = 0;
-    for (auto segment_id : segment_ids) {
+    for (auto i = 0; i < trained_segments_num; i++) {
         milvus::proto::segcore::ClusteringCentroidIdMappingStats stats;
-        auto num_offset = num_row_map.at(segment_id);
+        auto num_offset = num_row_map.at(segment_ids[i]);
         for (auto j = 0; j < num_offset; j++) {
             stats.add_centroid_id_mapping(centroid_id_mapping[cur_offset + j]);
         }
         auto num_vectors = compute_num_in_centroid(
             centroid_id_mapping, cur_offset, cur_offset + num_offset);
-        for (uint64_t j = 0; j < num_clusters_; j++) {
+        for (uint64_t j = 0; j < num_clusters; j++) {
             stats.add_num_in_centroid(num_vectors[j]);
         }
         cur_offset += num_offset;
@@ -173,14 +167,21 @@ MemClustering<T>::CentroidIdMappingToPB(
 
 template <typename T>
 void
-MemClustering<T>::StreamingAssignandUpload(
-    const T* centroids,
+KmeansClustering::StreamingAssignandUpload(
+    knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
+    const milvus::proto::segcore::ClusteringCentroidsStats& centroid_stats,
+    const std::vector<milvus::proto::segcore::ClusteringCentroidIdMappingStats>&
+        id_mapping_stats,
+    const std::vector<int64_t>& segment_ids,
     const std::map<int64_t, std::vector<std::string>>& insert_files,
-    const std::map<int64_t, int64_t>& num_rows) {
+    const std::map<int64_t, int64_t>& num_rows,
+    const int64_t dim,
+    const int64_t trained_segments_num,
+    const int64_t num_cluster) {
     LOG_INFO("start upload");
-    auto byte_size = centroid_stats_.ByteSizeLong();
+    auto byte_size = centroid_stats.ByteSizeLong();
     std::unique_ptr<uint8_t[]> data = std::make_unique<uint8_t[]>(byte_size);
-    centroid_stats_.SerializeToArray(data.get(), byte_size);
+    centroid_stats.SerializeToArray(data.get(), byte_size);
     std::unordered_map<std::string, int64_t> remote_paths_to_size;
     LOG_INFO("start upload cluster centroids file");
     AddClusteringResultFiles(
@@ -198,7 +199,7 @@ MemClustering<T>::StreamingAssignandUpload(
 
     auto serializeIdMappingAndUpload =
         [&](const int64_t segment_id,
-            milvus::proto::segcore::ClusteringCentroidIdMappingStats&
+            const milvus::proto::segcore::ClusteringCentroidIdMappingStats&
                 id_mapping_pb) {
             auto byte_size = id_mapping_pb.ByteSizeLong();
             std::unique_ptr<uint8_t[]> data =
@@ -214,24 +215,23 @@ MemClustering<T>::StreamingAssignandUpload(
         };
 
     LOG_INFO("start upload cluster id mapping file");
-    for (auto& [segment_id, segment_files] : insert_files) {
+    for (size_t i = 0; i < segment_ids.size(); i++) {
+        int64_t segment_id = segment_ids[i];
         // id mapping has been computed, just upload to remote
-        if (trained_segmentid_to_offset_.find(segment_id) !=
-            trained_segmentid_to_offset_.end()) {
-            serializeIdMappingAndUpload(
-                segment_id,
-                id_mapping_stats_[trained_segmentid_to_offset_.at(segment_id)]);
+        if (i < trained_segments_num) {
+            serializeIdMappingAndUpload(segment_id, id_mapping_stats[i]);
         } else {  // streaming download raw data, assign id mapping, then upload
             int64_t num_row = num_rows.at(segment_id);
-            std::unique_ptr<T[]> buf = std::make_unique<T[]>(num_row * dim_);
+            std::unique_ptr<T[]> buf = std::make_unique<T[]>(num_row * dim);
             int64_t offset = 0;
-            FetchSegmentData(reinterpret_cast<uint8_t*>(buf.get()),
-                             INT64_MAX,
-                             segment_files,
-                             num_row,
-                             offset);
-            auto dataset = GenDataset(num_row, dim_, buf.release());
-            auto res = cluster_node_.Assign(*dataset);
+            FetchSegmentData<T>(reinterpret_cast<uint8_t*>(buf.get()),
+                                INT64_MAX,
+                                insert_files.at(segment_id),
+                                dim,
+                                num_row,
+                                offset);
+            auto dataset = GenDataset(num_row, dim, buf.release());
+            auto res = cluster_node.Assign(*dataset);
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
                           fmt::format("failed to kmeans assign: {}: {}",
@@ -242,42 +242,66 @@ MemClustering<T>::StreamingAssignandUpload(
             auto id_mapping =
                 reinterpret_cast<const uint32_t*>(res.value()->GetTensor());
 
-            auto id_mapping_pb =
-                CentroidIdMappingToPB(id_mapping, {segment_id}, num_rows)[0];
+            auto id_mapping_pb = CentroidIdMappingToPB(
+                id_mapping, segment_ids, 1, num_rows, num_cluster)[0];
             serializeIdMappingAndUpload(segment_id, id_mapping_pb);
         }
         LOG_INFO("upload segment {} cluster id mapping file done", segment_id);
     }
     LOG_INFO("upload cluster id mapping file done");
     cluster_result_.id_mappings = std::move(remote_paths_to_size);
+    is_runned_ = true;
 }
 
 template <typename T>
 void
-MemClustering<T>::Run(const Config& config) {
+KmeansClustering::Run(const Config& config) {
     auto insert_files = milvus::index::GetValueFromConfig<
         std::map<int64_t, std::vector<std::string>>>(config, "insert_files");
-    AssertInfo(insert_files.has_value(),
-               "insert file path is empty when kmeans clustering");
+    if (!insert_files.has_value()) {
+        throw SegcoreError(ErrorCode::ConfigInvalid,
+                           "insert file path is empty when kmeans clustering");
+    }
     auto num_rows =
         milvus::index::GetValueFromConfig<std::map<int64_t, int64_t>>(
             config, "num_rows");
-    AssertInfo(num_rows.has_value(), "num row is empty when kmeans clustering");
-    AssertInfo(num_rows.value().size() == insert_files.value().size(),
-               "insert files and segment rows not consistent");
-    auto segment_size =
-        milvus::index::GetValueFromConfig<int64_t>(config, "segment_size");
-    AssertInfo(segment_size.has_value(),
-               "segment size is empty when kmeans clustering");
+    if (!num_rows.has_value()) {
+        throw SegcoreError(ErrorCode::ConfigInvalid,
+                           "num row is empty when kmeans clustering");
+    }
+    auto num_clusters =
+        milvus::index::GetValueFromConfig<int64_t>(config, "num_clusters");
+    if (!num_clusters.has_value()) {
+        throw SegcoreError(ErrorCode::ConfigInvalid,
+                           "num clusters is empty when kmeans clustering");
+    }
     auto train_size =
         milvus::index::GetValueFromConfig<int64_t>(config, "train_size");
-    AssertInfo(train_size.has_value(),
-               "train size is empty when kmeans clustering");
-    auto dim = milvus::index::GetValueFromConfig<int64_t>(config, "dim");
-    AssertInfo(dim.has_value(), "dim is empty when kmeans clustering");
-    dim_ = dim.value();
+    if (!train_size.has_value()) {
+        throw SegcoreError(ErrorCode::ConfigInvalid,
+                           "train size is empty when kmeans clustering");
+    }
+    auto dim_config = milvus::index::GetValueFromConfig<int64_t>(config, "dim");
+    if (!dim_config.has_value()) {
+        throw SegcoreError(ErrorCode::ConfigInvalid,
+                           "dim is empty when kmeans clustering");
+    }
+    size_t dim = dim_config.value();
 
-    auto data_num = 0;
+    auto cluster_node_obj =
+        knowhere::ClusterFactory::Instance().Create<T>(KMEANS_CLUSTER);
+    knowhere::Cluster<knowhere::ClusterNode> cluster_node;
+    if (cluster_node_obj.has_value()) {
+        cluster_node = std::move(cluster_node_obj.value());
+    } else {
+        auto err = cluster_node_obj.error();
+        if (err == knowhere::Status::invalid_cluster_error) {
+            throw SegcoreError(ErrorCode::Unsupported, cluster_node_obj.what());
+        }
+        throw SegcoreError(ErrorCode::KnowhereError, cluster_node_obj.what());
+    }
+
+    size_t data_num = 0;
     std::vector<int64_t> segment_ids;
     for (auto& [segment_id, num_row_each_segment] : num_rows.value()) {
         data_num += num_row_each_segment;
@@ -287,41 +311,46 @@ MemClustering<T>::Run(const Config& config) {
             "segment id {} not exist in insert files",
             segment_id);
     }
+    // random shuffle for sampling
+    std::shuffle(segment_ids.begin(), segment_ids.end(), std::mt19937());
 
-    auto data_size = data_num * dim_ * sizeof(T);
+    size_t data_size = data_num * dim * sizeof(T);
     std::vector<std::string> data_files;
     std::vector<uint64_t> offsets;
 
-    auto train_num = train_size.value() / sizeof(T) / dim_;
+    size_t train_num = train_size.value() / sizeof(T) / dim;
 
     // make train num equal to data num
     if (train_num >= data_num) {
         train_num = data_num;
     }
-    auto train_size_final = train_num * dim_ * sizeof(T);
+    size_t train_size_final = train_num * dim * sizeof(T);
 
     // if data_num larger than max_train_size, we need to sample to make train data fits in memory
     // otherwise just load all the data for kmeans training
     LOG_INFO("pull and sample {}GB data out of {}GB data",
              train_size_final / 1024.0 / 1024.0 / 1024.0,
              data_size / 1024.0 / 1024.0 / 1024.0);
-    auto buf = SampleTrainData(
-        segment_ids, insert_files.value(), num_rows.value(), train_size_final);
+    auto buf = std::make_unique<uint8_t[]>(train_size_final);
+    int64_t trained_segments_num = SampleTrainData<T>(segment_ids,
+                                                      insert_files.value(),
+                                                      num_rows.value(),
+                                                      train_size_final,
+                                                      dim,
+                                                      buf.get());
     LOG_INFO("sample done");
 
-    auto dataset = GenDataset(train_num, dim_, buf.release());
+    auto dataset = GenDataset(train_num, dim, buf.release());
 
-    // get num of clusters by whole data size / segment size
-    num_clusters_ = DIV_ROUND_UP(data_size, segment_size.value());
     LOG_INFO("train data num: {}, dim: {}, num_clusters: {}",
              train_num,
-             dim_,
-             num_clusters_);
+             dim,
+             num_clusters.value());
     knowhere::Json train_conf;
-    train_conf[NUM_CLUSTERS] = num_clusters_;
+    train_conf[NUM_CLUSTERS] = num_clusters.value();
     // inside knowhere, we will record each kmeans iteration duration
     // return id mapping
-    auto res = cluster_node_.Train(*dataset, train_conf);
+    auto res = cluster_node.Train(*dataset, train_conf);
     if (!res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   fmt::format("failed to kmeans train: {}: {}",
@@ -335,26 +364,72 @@ MemClustering<T>::Run(const Config& config) {
     auto centroid_id_mapping =
         reinterpret_cast<const uint32_t*>(res.value()->GetTensor());
 
-    auto centroids_res = cluster_node_.GetCentroids();
+    auto centroids_res = cluster_node.GetCentroids();
     if (!centroids_res.has_value()) {
         PanicInfo(ErrorCode::UnexpectedError,
                   fmt::format("failed to get centroids: {}: {}",
                               KnowhereStatusString(res.error()),
                               res.what()));
     }
-    // centroids owned by cluster_node_
+    // centroids owned by cluster_node
     centroids_res.value()->SetIsOwner(false);
     auto centroids =
         reinterpret_cast<const T*>(centroids_res.value()->GetTensor());
 
-    centroid_stats_ = CentroidsToPB(centroids);
-    id_mapping_stats_ = CentroidIdMappingToPB(
-        centroid_id_mapping, trained_segment_ids_, num_rows.value());
+    auto centroid_stats =
+        CentroidsToPB<T>(centroids, num_clusters.value(), dim);
+    auto id_mapping_stats = CentroidIdMappingToPB(centroid_id_mapping,
+                                                  segment_ids,
+                                                  trained_segments_num,
+                                                  num_rows.value(),
+                                                  num_clusters.value());
 
-    // centroids will be used for knowhere assign
-    StreamingAssignandUpload(centroids, insert_files.value(), num_rows.value());
+    StreamingAssignandUpload<T>(cluster_node,
+                                centroid_stats,
+                                id_mapping_stats,
+                                segment_ids,
+                                insert_files.value(),
+                                num_rows.value(),
+                                dim,
+                                trained_segments_num,
+                                num_clusters.value());
 }
 
-template class MemClustering<float>;
+template void
+KmeansClustering::StreamingAssignandUpload<float>(
+    knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
+    const milvus::proto::segcore::ClusteringCentroidsStats& centroid_stats,
+    const std::vector<milvus::proto::segcore::ClusteringCentroidIdMappingStats>&
+        id_mapping_stats,
+    const std::vector<int64_t>& segment_ids,
+    const std::map<int64_t, std::vector<std::string>>& insert_files,
+    const std::map<int64_t, int64_t>& num_rows,
+    const int64_t dim,
+    const int64_t trained_segments_num,
+    const int64_t num_clusters);
+
+template bool
+KmeansClustering::FetchSegmentData<float>(uint8_t* buf,
+                                          const int64_t expected_train_size,
+                                          const std::vector<std::string>& files,
+                                          const int64_t num_rows,
+                                          const int64_t dim,
+                                          int64_t& offset);
+template int64_t
+KmeansClustering::SampleTrainData<float>(
+    const std::vector<int64_t>& segment_ids,
+    const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
+    const std::map<int64_t, int64_t>& segment_num_rows,
+    const int64_t expected_train_size,
+    const int64_t dim,
+    uint8_t* buf);
+    
+template void
+KmeansClustering::Run<float>(const Config& config);
+
+template milvus::proto::segcore::ClusteringCentroidsStats
+KmeansClustering::CentroidsToPB<float>(const float* centroids,
+                                       const int64_t num_clusters,
+                                       const int64_t dim);
 
 }  // namespace milvus::clustering
