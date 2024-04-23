@@ -915,13 +915,14 @@ func (_c *MockSegment_PinIfNotReleased_Call) RunAndReturn(run func() error) *Moc
 	return _c
 }
 
-// Release provides a mock function with given fields: opts
+// Release provides a mock function with given fields: ctx, opts
 func (_m *MockSegment) Release(ctx context.Context, opts ...releaseOption) {
 	_va := make([]interface{}, len(opts))
 	for _i := range opts {
 		_va[_i] = opts[_i]
 	}
 	var _ca []interface{}
+	_ca = append(_ca, ctx)
 	_ca = append(_ca, _va...)
 	_m.Called(_ca...)
 }
@@ -932,21 +933,22 @@ type MockSegment_Release_Call struct {
 }
 
 // Release is a helper method to define mock.On call
+//   - ctx context.Context
 //   - opts ...releaseOption
-func (_e *MockSegment_Expecter) Release(opts ...interface{}) *MockSegment_Release_Call {
+func (_e *MockSegment_Expecter) Release(ctx interface{}, opts ...interface{}) *MockSegment_Release_Call {
 	return &MockSegment_Release_Call{Call: _e.mock.On("Release",
-		append([]interface{}{}, opts...)...)}
+		append([]interface{}{ctx}, opts...)...)}
 }
 
-func (_c *MockSegment_Release_Call) Run(run func(opts ...releaseOption)) *MockSegment_Release_Call {
+func (_c *MockSegment_Release_Call) Run(run func(ctx context.Context, opts ...releaseOption)) *MockSegment_Release_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]releaseOption, len(args)-0)
-		for i, a := range args[0:] {
+		variadicArgs := make([]releaseOption, len(args)-1)
+		for i, a := range args[1:] {
 			if a != nil {
 				variadicArgs[i] = a.(releaseOption)
 			}
 		}
-		run(variadicArgs...)
+		run(args[0].(context.Context), variadicArgs...)
 	})
 	return _c
 }
@@ -956,7 +958,7 @@ func (_c *MockSegment_Release_Call) Return() *MockSegment_Release_Call {
 	return _c
 }
 
-func (_c *MockSegment_Release_Call) RunAndReturn(run func(...releaseOption)) *MockSegment_Release_Call {
+func (_c *MockSegment_Release_Call) RunAndReturn(run func(context.Context, ...releaseOption)) *MockSegment_Release_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -998,39 +1000,6 @@ func (_c *MockSegment_RemoveUnusedFieldFiles_Call) Return(_a0 error) *MockSegmen
 }
 
 func (_c *MockSegment_RemoveUnusedFieldFiles_Call) RunAndReturn(run func() error) *MockSegment_RemoveUnusedFieldFiles_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ResetIndexesLazyLoad provides a mock function with given fields: lazyState
-func (_m *MockSegment) ResetIndexesLazyLoad(lazyState bool) {
-	_m.Called(lazyState)
-}
-
-// MockSegment_ResetIndexesLazyLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResetIndexesLazyLoad'
-type MockSegment_ResetIndexesLazyLoad_Call struct {
-	*mock.Call
-}
-
-// ResetIndexesLazyLoad is a helper method to define mock.On call
-//   - lazyState bool
-func (_e *MockSegment_Expecter) ResetIndexesLazyLoad(lazyState interface{}) *MockSegment_ResetIndexesLazyLoad_Call {
-	return &MockSegment_ResetIndexesLazyLoad_Call{Call: _e.mock.On("ResetIndexesLazyLoad", lazyState)}
-}
-
-func (_c *MockSegment_ResetIndexesLazyLoad_Call) Run(run func(lazyState bool)) *MockSegment_ResetIndexesLazyLoad_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(bool))
-	})
-	return _c
-}
-
-func (_c *MockSegment_ResetIndexesLazyLoad_Call) Return() *MockSegment_ResetIndexesLazyLoad_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockSegment_ResetIndexesLazyLoad_Call) RunAndReturn(run func(bool)) *MockSegment_ResetIndexesLazyLoad_Call {
 	_c.Call.Return(run)
 	return _c
 }
