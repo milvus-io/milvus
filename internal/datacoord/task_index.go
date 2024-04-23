@@ -111,7 +111,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 			return false
 		}
 		it.SetState(indexpb.JobState_JobStateFinished, "fake finished index success")
-		return false
+		return true
 	}
 	// vector index build needs information of optional scalar fields data
 	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
