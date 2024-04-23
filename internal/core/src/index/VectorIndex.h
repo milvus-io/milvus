@@ -23,7 +23,7 @@
 #include <boost/dynamic_bitset.hpp>
 
 #include "Utils.h"
-#include "knowhere/factory.h"
+#include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"

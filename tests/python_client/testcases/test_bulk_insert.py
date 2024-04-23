@@ -848,9 +848,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
-            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
+            # cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
+            # cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
+            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim),
+            cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim)
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_new_json_files(
@@ -889,6 +891,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         for f in float_vec_fields:
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
+            )
+        for f in [df.bf16_vec_field, df.fp16_vec_field]:
+            self.collection_wrap.create_index(
+                field_name=f, index_params={"index_type": "FLAT", "metric_type": "COSINE"}
             )
         for f in binary_vec_fields:
             self.collection_wrap.create_index(
@@ -964,9 +970,11 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_string_field(name=df.string_field),
             cf.gen_json_field(name=df.json_field),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
-            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
+            # cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
+            # cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
+            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim),
+            cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim)
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_numpy_files(
@@ -1005,6 +1013,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         for f in float_vec_fields:
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
+            )
+        for f in [df.bf16_vec_field, df.fp16_vec_field]:
+            self.collection_wrap.create_index(
+                field_name=f, index_params={"index_type": "FLAT", "metric_type": "COSINE"}
             )
         for f in binary_vec_fields:
             self.collection_wrap.create_index(
@@ -1083,11 +1095,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
-            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
+            # cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
+            # cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
+            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim),
+            cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
+            cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim)
         ]
-        data_fields = [f.name for f in fields if    not f.to_dict().get("auto_id", False)]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_parquet_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -1124,6 +1138,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         for f in float_vec_fields:
             self.collection_wrap.create_index(
                 field_name=f, index_params=index_params
+            )
+        for f in [df.bf16_vec_field, df.fp16_vec_field]:
+            self.collection_wrap.create_index(
+                field_name=f, index_params={"index_type": "FLAT", "metric_type": "COSINE"}
             )
         for f in binary_vec_fields:
             self.collection_wrap.create_index(
