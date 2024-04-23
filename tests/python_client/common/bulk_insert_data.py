@@ -4,6 +4,7 @@ import os
 import time
 
 import numpy as np
+import jax.numpy as jnp
 import pandas as pd
 import random
 from faker import Faker
@@ -25,6 +26,8 @@ class DataField:
     image_float_vec_field = "image_float_vec_field"
     text_float_vec_field = "text_float_vec_field"
     binary_vec_field = "binary_vec_field"
+    bf16_vec_field = "bf16_vec_field"
+    fp16_vec_field = "fp16_vec_field"
     int_field = "int_scalar"
     string_field = "string_scalar"
     bool_field = "bool_scalar"
@@ -88,6 +91,42 @@ def gen_binary_vectors(nb, dim):
     # so if binary vector dimension is 16，use [x, y], which x and y could be any int between 0 and 255
     vectors = [[random.randint(0, 255) for _ in range(dim)] for _ in range(nb)]
     return vectors
+
+
+def gen_fp16_vectors(num, dim):
+    """
+    generate float16 vector data
+    raw_vectors : the vectors
+    fp16_vectors: the bytes used for insert
+    return: raw_vectors and fp16_vectors
+    """
+    raw_vectors = []
+    fp16_vectors = []
+    for _ in range(num):
+        raw_vector = [random.random() for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        fp16_vector = np.array(raw_vector, dtype=np.float16).view(np.uint8).tolist()
+        fp16_vectors.append(fp16_vector)
+
+    return raw_vectors, fp16_vectors
+
+
+def gen_bf16_vectors(num, dim):
+    """
+    generate brain float16 vector data
+    raw_vectors : the vectors
+    bf16_vectors: the bytes used for insert
+    return: raw_vectors and bf16_vectors
+    """
+    raw_vectors = []
+    bf16_vectors = []
+    for _ in range(num):
+        raw_vector = [random.random() for _ in range(dim)]
+        raw_vectors.append(raw_vector)
+        bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
+        bf16_vectors.append(bf16_vector)
+
+    return raw_vectors, bf16_vectors
 
 
 def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
@@ -311,7 +350,7 @@ def gen_column_base_json_file(col_file, str_pk, data_fields, float_vect,
         f.write("\n")
 
 
-def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, force=False):
+def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, vector_type="float32", force=False):
     file_name = f"{data_field}.npy"
     file = f'{dir}/{file_name}'
 
@@ -319,9 +358,18 @@ def gen_vectors_in_numpy_file(dir, data_field, float_vector, rows, dim, force=Fa
         # vector columns
         vectors = []
         if rows > 0:
-            if float_vector:
+            if vector_type == "float32":
                 vectors = gen_float_vectors(rows, dim)
                 arr = np.array(vectors)
+            elif vector_type == "fp16":
+                vectors = gen_fp16_vectors(rows, dim)[1]
+                arr = np.array(vectors, dtype=np.dtype("uint8"))
+            elif vector_type == "bf16":
+                vectors = gen_bf16_vectors(rows, dim)[1]
+                arr = np.array(vectors, dtype=np.dtype("uint8"))
+            elif vector_type == "binary":
+                vectors = gen_binary_vectors(rows, (dim // 8))
+                arr = np.array(vectors, dtype=np.dtype("uint8"))
             else:
                 vectors = gen_binary_vectors(rows, (dim // 8))
                 arr = np.array(vectors, dtype=np.dtype("uint8"))
@@ -429,6 +477,12 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
             if "float" in data_field:
                 data = gen_vectors(float_vector=True, rows=rows, dim=dim)
                 data = pd.Series([np.array(x, dtype=np.dtype("float32")) for x in data])
+            elif "fp16" in data_field:
+                data = gen_fp16_vectors(rows, dim)[1]
+                data = pd.Series([np.array(x, dtype=np.dtype("uint8")) for x in data])
+            elif "bf16" in data_field:
+                data = gen_bf16_vectors(rows, dim)[1]
+                data = pd.Series([np.array(x, dtype=np.dtype("uint8")) for x in data])
             elif "binary" in data_field:
                 data = gen_vectors(float_vector=False, rows=rows, dim=dim)
                 data = pd.Series([np.array(x, dtype=np.dtype("uint8")) for x in data])
@@ -544,9 +598,14 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
             if "vec" in data_field:
                 if "float" in data_field:
                     float_vector = True
+                    d[data_field] = gen_vectors(float_vector=float_vector, rows=1, dim=dim)[0]
                 if "binary" in data_field:
                     float_vector = False
-                d[data_field] = gen_vectors(float_vector=float_vector, rows=1, dim=dim)[0]
+                    d[data_field] = gen_vectors(float_vector=float_vector, rows=1, dim=dim)[0]
+                if "bf16" in data_field:
+                    d[data_field] = gen_bf16_vectors(1, dim)[1][0]
+                if "fp16" in data_field:
+                    d[data_field] = gen_fp16_vectors(1, dim)[1][0]
             elif data_field == DataField.float_field:
                 d[data_field] = random.random()
             elif data_field == DataField.double_field:
@@ -623,12 +682,21 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
         # gen the numpy file without subfolders if only one set of files
         for data_field in data_fields:
             if "vec" in data_field:
+                vector_type = "float32"
                 if "float" in data_field:
                     float_vector = True
+                    vector_type = "float32"
                 if "binary" in data_field:
                     float_vector = False
+                    vector_type = "binary"
+                if "bf16" in data_field:
+                    float_vector = True
+                    vector_type = "bf16"
+                if "fp16" in data_field:
+                    float_vector = True
+                    vector_type = "fp16"
                 file_name = gen_vectors_in_numpy_file(dir=data_source, data_field=data_field, float_vector=float_vector,
-                                                      rows=rows, dim=dim, force=force)
+                                                      vector_type=vector_type, rows=rows, dim=dim, force=force)
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
                 file_name = gen_string_in_numpy_file(dir=data_source, data_field=data_field, rows=rows, force=force)
             elif data_field == DataField.bool_field:
