@@ -383,8 +383,12 @@ func (c *StateChannelStore) GetBufferChannelInfo() *NodeChannelInfo {
 }
 
 func (c *StateChannelStore) GetNode(nodeID int64) *NodeChannelInfo {
+	chs, ok := c.assignments[nodeID]
+	if !ok {
+		return nil
+	}
 	channels := make(map[string]RWChannel)
-	for _, channelName := range c.assignments[nodeID] {
+	for _, channelName := range chs {
 		channels[channelName] = c.channels[channelName]
 	}
 	return &NodeChannelInfo{
