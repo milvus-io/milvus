@@ -22,7 +22,7 @@
 #include "common/Types.h"
 #include "knowhere/comp/brute_force.h"
 #include "knowhere/comp/index_param.h"
-#include "knowhere/index_node.h"
+#include "knowhere/index/index_node.h"
 #include "log/Log.h"
 
 namespace milvus::query {
