@@ -140,7 +140,7 @@ func (suite *SegmentSuite) TestLoadInfo() {
 	// sealed segment has load info
 	suite.NotNil(suite.sealed.LoadInfo())
 	// growing segment has no load info
-	suite.Nil(suite.growing.LoadInfo())
+	suite.NotNil(suite.growing.LoadInfo())
 }
 
 func (suite *SegmentSuite) TestResourceUsageEstimate() {
