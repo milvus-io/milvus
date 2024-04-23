@@ -175,7 +175,10 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			dbName = getter.GetDbName()
 		}
 		if dbName == "" {
-			dbName = DefaultDbName
+			dbName = c.Request.Header.Get(HTTPHeaderDBName)
+			if dbName == "" {
+				dbName = DefaultDbName
+			}
 		}
 		username, _ := c.Get(ContextUsername)
 		ctx, span := otel.Tracer(typeutil.ProxyRole).Start(context.Background(), c.Request.URL.Path)
@@ -885,7 +888,6 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartitionNames:     httpReq.PartitionNames,
 		SearchParams:       searchParams,
 		GuaranteeTimestamp: BoundedTimestamp,
-		Nq:                 int64(1),
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
@@ -954,7 +956,6 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			PartitionNames:     httpReq.PartitionNames,
 			SearchParams:       searchParams,
 			GuaranteeTimestamp: BoundedTimestamp,
-			Nq:                 int64(1),
 		}
 		req.Requests = append(req.Requests, searchReq)
 	}

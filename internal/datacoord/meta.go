@@ -311,8 +311,11 @@ func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 	m.RLock()
 	defer m.RUnlock()
 	ret := make(map[int64]int64, len(m.collections))
-	for collectionID := range m.collections {
-		ret[collectionID] = m.getNumRowsOfCollectionUnsafe(collectionID)
+	segments := m.segments.GetSegments()
+	for _, segment := range segments {
+		if isSegmentHealthy(segment) {
+			ret[segment.GetCollectionID()] += segment.GetNumOfRows()
+		}
 	}
 	return ret
 }
@@ -1043,14 +1046,7 @@ func (m *meta) GetFlushingSegments() []*SegmentInfo {
 func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
-	var ret []*SegmentInfo
-	segments := m.segments.GetSegments()
-	for _, info := range segments {
-		if selector(info) {
-			ret = append(ret, info)
-		}
-	}
-	return ret
+	return m.segments.GetSegmentsBySelector(selector)
 }
 
 // AddAllocation add allocation in segment
