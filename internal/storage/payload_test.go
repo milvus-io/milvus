@@ -1583,7 +1583,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		require.Nil(t, err)
 		require.NotNil(t, w)
 
-		err = w.AddOneStringToPayload("hello0", false)
+		err = w.AddOneStringToPayload("hello0", true)
 		assert.NoError(t, err)
 
 		err = w.FinishPayloadWriter()

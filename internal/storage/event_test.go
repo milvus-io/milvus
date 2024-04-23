@@ -89,17 +89,25 @@ func TestDescriptorEvent(t *testing.T) {
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID)))
 	assert.Equal(t, fieldID, int64(-1))
-	startTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
+	nullable := UnsafeReadBool(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
 		int(unsafe.Sizeof(fieldID)))
+	assert.Equal(t, nullable, false)
+	startTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
+		int(unsafe.Sizeof(collID))+
+		int(unsafe.Sizeof(partID))+
+		int(unsafe.Sizeof(segID))+
+		int(unsafe.Sizeof(fieldID))+
+		int(unsafe.Sizeof(nullable)))
 	assert.Equal(t, startTs, int64(0))
 	endTs := UnsafeReadInt64(buffer, binary.Size(eventHeader{})+
 		int(unsafe.Sizeof(collID))+
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
 		int(unsafe.Sizeof(fieldID))+
+		int(unsafe.Sizeof(nullable))+
 		int(unsafe.Sizeof(startTs)))
 	assert.Equal(t, endTs, int64(0))
 	colType := UnsafeReadInt32(buffer, binary.Size(eventHeader{})+
@@ -107,6 +115,7 @@ func TestDescriptorEvent(t *testing.T) {
 		int(unsafe.Sizeof(partID))+
 		int(unsafe.Sizeof(segID))+
 		int(unsafe.Sizeof(fieldID))+
+		int(unsafe.Sizeof(nullable))+
 		int(unsafe.Sizeof(startTs))+
 		int(unsafe.Sizeof(endTs)))
 	assert.Equal(t, colType, int32(-1))
@@ -116,6 +125,7 @@ func TestDescriptorEvent(t *testing.T) {
 		int(unsafe.Sizeof(partID)) +
 		int(unsafe.Sizeof(segID)) +
 		int(unsafe.Sizeof(fieldID)) +
+		int(unsafe.Sizeof(nullable)) +
 		int(unsafe.Sizeof(startTs)) +
 		int(unsafe.Sizeof(endTs)) +
 		int(unsafe.Sizeof(colType))
@@ -172,7 +182,6 @@ func TestInsertEvent(t *testing.T) {
 		assert.NoError(t, err)
 		payload, nulls, _, err := r.GetDataFromPayload()
 		assert.NoError(t, err)
-		// smellthemoon check nulls
 		assert.Nil(t, nulls)
 		assert.Equal(t, payload, ev)
 
@@ -351,7 +360,7 @@ func TestInsertEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, true)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, false)
 		assert.NoError(t, err)
 
 		s, _, err := pR.GetStringFromPayload()
@@ -405,7 +414,7 @@ func TestDeleteEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, true)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, false)
 		assert.NoError(t, err)
 
 		s, _, err := pR.GetStringFromPayload()
@@ -463,7 +472,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(createCollectionEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf, true)
+		pR, err := NewPayloadReader(schemapb.DataType_Int64, pBuf, false)
 		assert.NoError(t, err)
 		values, _, _, err := pR.GetDataFromPayload()
 		assert.NoError(t, err)
@@ -507,7 +516,7 @@ func TestCreateCollectionEvent(t *testing.T) {
 
 		payloadOffset := binary.Size(eventHeader{}) + binary.Size(insertEventData{})
 		pBuf := wBuf[payloadOffset:]
-		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, true)
+		pR, err := NewPayloadReader(schemapb.DataType_String, pBuf, false)
 		assert.NoError(t, err)
 
 		s, _, err := pR.GetStringFromPayload()

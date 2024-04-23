@@ -123,6 +123,11 @@ func TestInsertBinlog(t *testing.T) {
 	assert.Equal(t, fieldID, int64(40))
 	pos += int(unsafe.Sizeof(fieldID))
 
+	// descriptor data fix, nullable
+	nullable := UnsafeReadBool(buf, pos)
+	assert.Equal(t, nullable, false)
+	pos += int(unsafe.Sizeof(nullable))
+
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(1000))
@@ -203,9 +208,10 @@ func TestInsertBinlog(t *testing.T) {
 	e1Payload := buf[pos:e1NxtPos]
 	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, _, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
+	assert.Nil(t, valids)
 	e1r.Close()
 
 	// start of e2
@@ -245,9 +251,10 @@ func TestInsertBinlog(t *testing.T) {
 	e2Payload := buf[pos:]
 	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, _, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
+	assert.Nil(t, valids)
 	e2r.Close()
 
 	assert.Equal(t, int(e2NxtPos), len(buf))
@@ -258,8 +265,9 @@ func TestInsertBinlog(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, _, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, InsertEventType)
 	ed1, ok := (event1.eventData).(*insertEventData)
@@ -270,9 +278,10 @@ func TestInsertBinlog(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, _, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
+	assert.Nil(t, valids)
 	assert.Equal(t, event2.TypeCode, InsertEventType)
 	ed2, ok := (event2.eventData).(*insertEventData)
 	assert.True(t, ok)
@@ -370,6 +379,11 @@ func TestDeleteBinlog(t *testing.T) {
 	assert.Equal(t, fieldID, int64(-1))
 	pos += int(unsafe.Sizeof(fieldID))
 
+	// descriptor data fix, nullable
+	nullable := UnsafeReadBool(buf, pos)
+	assert.Equal(t, nullable, false)
+	pos += int(unsafe.Sizeof(nullable))
+
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(1000))
@@ -450,9 +464,10 @@ func TestDeleteBinlog(t *testing.T) {
 	e1Payload := buf[pos:e1NxtPos]
 	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, _, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
+	assert.Nil(t, valids)
 	e1r.Close()
 
 	// start of e2
@@ -492,8 +507,9 @@ func TestDeleteBinlog(t *testing.T) {
 	e2Payload := buf[pos:]
 	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, _, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
 	assert.NoError(t, err)
+	assert.Nil(t, valids)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
 	e2r.Close()
 
@@ -505,7 +521,8 @@ func TestDeleteBinlog(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, _, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, DeleteEventType)
@@ -517,7 +534,8 @@ func TestDeleteBinlog(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, _, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
 	assert.Equal(t, event2.TypeCode, DeleteEventType)
@@ -617,6 +635,11 @@ func TestDDLBinlog1(t *testing.T) {
 	assert.Equal(t, fieldID, int64(-1))
 	pos += int(unsafe.Sizeof(fieldID))
 
+	// descriptor data fix, nullable
+	nullable := UnsafeReadBool(buf, pos)
+	assert.Equal(t, nullable, false)
+	pos += int(unsafe.Sizeof(nullable))
+
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(1000))
@@ -697,7 +720,8 @@ func TestDDLBinlog1(t *testing.T) {
 	e1Payload := buf[pos:e1NxtPos]
 	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, _, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
 	e1r.Close()
@@ -739,7 +763,8 @@ func TestDDLBinlog1(t *testing.T) {
 	e2Payload := buf[pos:]
 	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, _, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
 	e2r.Close()
@@ -752,7 +777,8 @@ func TestDDLBinlog1(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, _, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, CreateCollectionEventType)
@@ -764,7 +790,8 @@ func TestDDLBinlog1(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, _, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
 	assert.Equal(t, event2.TypeCode, DropCollectionEventType)
@@ -863,6 +890,11 @@ func TestDDLBinlog2(t *testing.T) {
 	assert.Equal(t, fieldID, int64(-1))
 	pos += int(unsafe.Sizeof(fieldID))
 
+	// descriptor data fix, nullable
+	nullable := UnsafeReadBool(buf, pos)
+	assert.Equal(t, nullable, false)
+	pos += int(unsafe.Sizeof(nullable))
+
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, startts, int64(1000))
@@ -943,7 +975,8 @@ func TestDDLBinlog2(t *testing.T) {
 	e1Payload := buf[pos:e1NxtPos]
 	e1r, err := NewPayloadReader(schemapb.DataType_Int64, e1Payload, false)
 	assert.NoError(t, err)
-	e1a, _, err := e1r.GetInt64FromPayload()
+	e1a, valids, err := e1r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e1a, []int64{1, 2, 3, 4, 5, 6})
 	e1r.Close()
@@ -985,7 +1018,8 @@ func TestDDLBinlog2(t *testing.T) {
 	e2Payload := buf[pos:]
 	e2r, err := NewPayloadReader(schemapb.DataType_Int64, e2Payload, false)
 	assert.NoError(t, err)
-	e2a, _, err := e2r.GetInt64FromPayload()
+	e2a, valids, err := e2r.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, e2a, []int64{7, 8, 9, 10, 11, 12})
 	e2r.Close()
@@ -998,7 +1032,8 @@ func TestDDLBinlog2(t *testing.T) {
 	event1, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event1)
-	p1, _, err := event1.GetInt64FromPayload()
+	p1, valids, err := event1.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.Equal(t, p1, []int64{1, 2, 3, 4, 5, 6})
 	assert.NoError(t, err)
 	assert.Equal(t, event1.TypeCode, CreatePartitionEventType)
@@ -1010,7 +1045,8 @@ func TestDDLBinlog2(t *testing.T) {
 	event2, err := r.NextEventReader()
 	assert.NoError(t, err)
 	assert.NotNil(t, event2)
-	p2, _, err := event2.GetInt64FromPayload()
+	p2, valids, err := event2.GetInt64FromPayload()
+	assert.Nil(t, valids)
 	assert.NoError(t, err)
 	assert.Equal(t, p2, []int64{7, 8, 9, 10, 11, 12})
 	assert.Equal(t, event2.TypeCode, DropPartitionEventType)
@@ -1103,6 +1139,11 @@ func TestIndexFileBinlog(t *testing.T) {
 	fID := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, fieldID, fID)
 	pos += int(unsafe.Sizeof(fID))
+
+	// descriptor data fix, nullable
+	nullable := UnsafeReadBool(buf, pos)
+	assert.Equal(t, nullable, false)
+	pos += int(unsafe.Sizeof(nullable))
 
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)
@@ -1232,6 +1273,11 @@ func TestIndexFileBinlogV2(t *testing.T) {
 	fID := UnsafeReadInt64(buf, pos)
 	assert.Equal(t, fieldID, fID)
 	pos += int(unsafe.Sizeof(fID))
+
+	// descriptor data fix, nullable
+	nullable := UnsafeReadBool(buf, pos)
+	assert.Equal(t, nullable, false)
+	pos += int(unsafe.Sizeof(nullable))
 
 	// descriptor data fix, start time stamp
 	startts := UnsafeReadInt64(buf, pos)

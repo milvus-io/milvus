@@ -83,6 +83,9 @@ func (r *PayloadReader) GetDataFromPayload() (interface{}, []bool, int, error) {
 	case schemapb.DataType_Float16Vector:
 		val, dim, err := r.GetFloat16VectorFromPayload()
 		return val, nil, dim, err
+	case schemapb.DataType_BFloat16Vector:
+		val, dim, err := r.GetBFloat16VectorFromPayload()
+		return val, nil, dim, err
 	case schemapb.DataType_SparseFloatVector:
 		val, dim, err := r.GetSparseFloatVectorFromPayload()
 		return val, nil, dim, err
