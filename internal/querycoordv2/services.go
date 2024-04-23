@@ -930,7 +930,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 
 		var channelErr error
 		if len(leaders) == 0 {
-			channelErr = merr.WrapErrChannelLack("channel not subscribed")
+			channelErr = merr.WrapErrChannelLack(channel.GetChannelName(), "channel not subscribed")
 		}
 
 		for _, leader := range leaders {
