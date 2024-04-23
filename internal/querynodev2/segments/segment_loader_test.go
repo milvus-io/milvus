@@ -27,6 +27,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow/memory"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -459,7 +460,6 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 
 func (suite *SegmentLoaderSuite) TestLoadIndex() {
 	ctx := context.Background()
-	segment := &LocalSegment{}
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    1,
 		PartitionID:  suite.partitionID,
@@ -468,6 +468,11 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 			{
 				IndexFilePaths: []string{},
 			},
+		},
+	}
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
 		},
 	}
 
