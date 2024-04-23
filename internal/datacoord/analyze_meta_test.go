@@ -193,7 +193,6 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
 	s.Run("AddAnalyzeTask", func() {
 		t := &model.AnalyzeTask{
-			TenantID:     "",
 			CollectionID: s.collectionID,
 			PartitionID:  s.partitionID,
 			FieldID:      s.fieldID,
