@@ -18,7 +18,6 @@
 
 #include <unistd.h>
 #include <cmath>
-#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <memory>
@@ -33,10 +32,8 @@
 
 #include "index/Index.h"
 #include "index/IndexInfo.h"
-#include "index/Meta.h"
 #include "index/Utils.h"
 #include "common/EasyAssert.h"
-#include "config/ConfigKnowhere.h"
 #include "knowhere/factory.h"
 #include "knowhere/comp/time_recorder.h"
 #include "common/BitsetView.h"
@@ -44,16 +41,15 @@
 #include "common/FieldData.h"
 #include "common/File.h"
 #include "common/Slice.h"
-#include "common/Tracer.h"
 #include "common/RangeSearchHelper.h"
 #include "common/Utils.h"
 #include "log/Log.h"
-#include "mmap/Types.h"
 #include "storage/DataCodec.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/ThreadPools.h"
 #include "storage/space.h"
 #include "storage/Util.h"
+#include "storage/prometheus_client.h"
 
 namespace milvus::index {
 
@@ -700,7 +696,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto filepath = GetValueFromConfig<std::string>(config, kMmapFilepath);
     AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
 
@@ -734,7 +731,8 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     }
 
     LOG_INFO("load with slice meta: {}", !slice_meta_filepath.empty());
-
+    std::chrono::duration<double> load_duration_sum;
+    std::chrono::duration<double> write_disk_duration_sum;
     if (!slice_meta_filepath
              .empty()) {  // load with the slice meta info, then we can load batch by batch
         std::string index_file_prefix = slice_meta_filepath.substr(
@@ -752,15 +750,20 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             std::string prefix = item[NAME];
             int slice_num = item[SLICE_NUM];
             auto total_len = static_cast<size_t>(item[TOTAL_LEN]);
-
             auto HandleBatch = [&](int index) {
+                auto start_load2_mem = std::chrono::system_clock::now();
                 auto batch_data = file_manager_->LoadIndexToMemory(batch);
+                load_duration_sum +=
+                    (std::chrono::system_clock::now() - start_load2_mem);
                 for (int j = index - batch.size() + 1; j <= index; j++) {
                     std::string file_name = GenSlicedFileName(prefix, j);
                     AssertInfo(batch_data.find(file_name) != batch_data.end(),
                                "lost index slice data");
                     auto data = batch_data[file_name];
+                    auto start_write_file = std::chrono::system_clock::now();
                     auto written = file.Write(data->Data(), data->Size());
+                    write_disk_duration_sum +=
+                        (std::chrono::system_clock::now() - start_write_file);
                     AssertInfo(
                         written == data->Size(),
                         fmt::format("failed to write index data to disk {}: {}",
@@ -785,24 +788,45 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             }
         }
     } else {
+        //1. load files into memory
+        auto start_load_files2_mem = std::chrono::system_clock::now();
         auto result = file_manager_->LoadIndexToMemory(std::vector<std::string>(
             pending_index_files.begin(), pending_index_files.end()));
+        load_duration_sum +=
+            (std::chrono::system_clock::now() - start_load_files2_mem);
+        //2. write data into files
+        auto start_write_file = std::chrono::system_clock::now();
         for (auto& [_, index_data] : result) {
             file.Write(index_data->Data(), index_data->Size());
         }
+        write_disk_duration_sum +=
+            (std::chrono::system_clock::now() - start_write_file);
     }
+    milvus::storage::internal_storage_download_duration.Observe(
+        std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum)
+            .count());
+    milvus::storage::internal_storage_write_disk_duration.Observe(
+        std::chrono::duration_cast<std::chrono::milliseconds>(write_disk_duration_sum)
+            .count());
     file.Close();
 
     LOG_INFO("load index into Knowhere...");
     auto conf = config;
     conf.erase(kMmapFilepath);
     conf[kEnableMmap] = true;
+    auto start_deserialize = std::chrono::system_clock::now();
     auto stat = index_.DeserializeFromFile(filepath.value(), conf);
+    auto deserialize_duration =
+        std::chrono::system_clock::now() - start_deserialize;
     if (stat != knowhere::Status::success) {
         PanicInfo(ErrorCode::UnexpectedError,
                   "failed to Deserialize index: {}",
                   KnowhereStatusString(stat));
     }
+    milvus::storage::internal_storage_deserialize_duration.Observe(
+        std::chrono::duration_cast<std::chrono::milliseconds>(
+            deserialize_duration)
+            .count());
 
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
@@ -812,7 +836,11 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                "failed to unlink mmap index file {}: {}",
                filepath.value(),
                strerror(errno));
-    LOG_INFO("load vector index done");
+    LOG_INFO("load vector index done, mmap_file_path:{}, download_duration:{}, write_files_duration:{}, deserialize_duration:{}",
+             filepath.value(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(load_duration_sum).count(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(write_disk_duration_sum).count(),
+             std::chrono::duration_cast<std::chrono::milliseconds>(deserialize_duration).count());
 }
 
 template <typename T>

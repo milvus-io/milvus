@@ -1006,20 +1006,22 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 
 	indexedFieldInfos, fieldBinlogs := separateIndexAndBinlog(loadInfo)
 	schemaHelper, _ := typeutil.CreateSchemaHelper(collection.Schema())
-
 	if err := segment.AddFieldDataInfo(ctx, loadInfo.GetNumOfRows(), loadInfo.GetBinlogPaths()); err != nil {
 		return err
 	}
+
 	log := log.Ctx(ctx).With(zap.Int64("segmentID", segment.ID()))
-	tr := timerecord.NewTimeRecorder("segmentLoader.LoadIndex")
-	log.Info("load fields...",
+	tr := timerecord.NewTimeRecorder("segmentLoader.loadSealedSegment")
+	log.Info("Start loading fields...",
 		zap.Int64s("indexedFields", lo.Keys(indexedFieldInfos)),
 	)
 	if err := loader.loadFieldsIndex(ctx, schemaHelper, segment, loadInfo.GetNumOfRows(), indexedFieldInfos); err != nil {
 		return err
 	}
-	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	loadFieldsIndexSpan := tr.RecordSpan()
+	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(loadFieldsIndexSpan))
 
+	//2. complement raw data for the scalar fields without raw data
 	for fieldID, info := range indexedFieldInfos {
 		field, err := schemaHelper.GetFieldFromID(fieldID)
 		if err != nil {
@@ -1037,14 +1039,25 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 			}
 		}
 	}
+	complementScalarDataSpan := tr.RecordSpan()
 	if err := loadSealedSegmentFields(ctx, collection, segment, fieldBinlogs, loadInfo.GetNumOfRows()); err != nil {
 		return err
 	}
+	loadRawDataSpan := tr.RecordSpan()
+
+	//4. rectify entries number for binlog in very rare cases
 	// https://github.com/milvus-io/milvus/23654
 	// legacy entry num = 0
 	if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {
 		return err
 	}
+	patchEntryNumberSpan := tr.RecordSpan()
+	log.Info("Finish loading segment",
+		zap.Duration("loadFieldsIndexSpan", loadFieldsIndexSpan),
+		zap.Duration("complementScalarDataSpan", complementScalarDataSpan),
+		zap.Duration("loadRawDataSpan", loadRawDataSpan),
+		zap.Duration("patchEntryNumberSpan", patchEntryNumberSpan),
+	)
 	return nil
 }
 
@@ -1173,7 +1186,9 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 
 	for fieldID, fieldInfo := range indexedFieldInfos {
 		indexInfo := fieldInfo.IndexInfo
+		tr := timerecord.NewTimeRecorder("loadFieldIndex")
 		err := loader.loadFieldIndex(ctx, segment, indexInfo)
+		loadFieldIndexSpan := tr.RecordSpan()
 		if err != nil {
 			return err
 		}
@@ -1182,6 +1197,7 @@ func (loader *segmentLoader) loadFieldsIndex(ctx context.Context,
 			zap.Int64("fieldID", fieldID),
 			zap.Any("binlog", fieldInfo.FieldBinlog.Binlogs),
 			zap.Int32("current_index_version", fieldInfo.IndexInfo.GetCurrentIndexVersion()),
+			zap.Duration("load_duration", loadFieldIndexSpan),
 		)
 
 		// set average row data size of variable field

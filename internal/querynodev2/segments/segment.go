@@ -1175,20 +1175,23 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadIndex-%d-%d", s.ID(), indexInfo.GetFieldID()))
 	defer sp.End()
 
+	tr := timerecord.NewTimeRecorder("loadIndex")
+	//1.
 	loadIndexInfo, err := newLoadIndexInfo(ctx)
 	if err != nil {
 		return err
 	}
 	defer deleteLoadIndexInfo(loadIndexInfo)
-
 	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 		uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.ID())
 		if err != nil {
 			return err
 		}
-
 		loadIndexInfo.appendStorageInfo(uri, indexInfo.IndexStoreVersion)
 	}
+	newLoadIndexInfoSpan := tr.RecordSpan()
+
+	//2.
 	err = loadIndexInfo.appendLoadIndexInfo(ctx, indexInfo, s.Collection(), s.Partition(), s.ID(), fieldType)
 	if err != nil {
 		if loadIndexInfo.cleanLocalData(ctx) != nil {
@@ -1202,16 +1205,27 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		errMsg := fmt.Sprintln("updateSegmentIndex failed, illegal segment type ", s.segmentType, "segmentID = ", s.ID())
 		return errors.New(errMsg)
 	}
+	appendLoadIndexInfoSpan := tr.RecordSpan()
 
+	//3.
 	err = s.UpdateIndexInfo(ctx, indexInfo, loadIndexInfo)
 	if err != nil {
 		return err
 	}
-
+	updateIndexInfoSpan := tr.RecordSpan()
 	if !typeutil.IsVectorType(fieldType) || s.HasRawData(indexInfo.GetFieldID()) {
 		return nil
 	}
+
+	//4.
 	s.WarmupChunkCache(ctx, indexInfo.GetFieldID())
+	warmupChunkCacheSpan := tr.RecordSpan()
+	log.Info("Finish loading index",
+		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
+		zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
+		zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
+		zap.Duration("updateIndexInfoSpan", warmupChunkCacheSpan),
+	)
 	return nil
 }
 
