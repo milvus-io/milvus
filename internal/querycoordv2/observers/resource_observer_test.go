@@ -150,7 +150,13 @@ func (suite *ResourceObserverSuite) TestCheckNodesInReplica() {
 	suite.meta.ResourceManager.HandleNodeDown(100)
 	suite.meta.ResourceManager.HandleNodeDown(101)
 
-	suite.Error(suite.meta.ResourceManager.MeetRequirement("rg"))
+	rg := suite.meta.ResourceManager.GetResourceGroup("rg")
+	suite.NotNil(rg)
+
+	suite.False(rg.ContainNode(100))
+	suite.False(rg.ContainNode(101))
+	suite.True(rg.ContainNode(102))
+	suite.True(rg.ContainNode(103))
 }
 
 func (suite *ResourceObserverSuite) TestRecoverResourceGroupFailed() {

@@ -128,8 +128,8 @@ func (s *TestGetVectorSuite) run() {
 		vecFieldData = integration.NewFloatVectorFieldData(vecFieldName, NB, dim)
 	} else if s.vecType == schemapb.DataType_Float16Vector {
 		vecFieldData = integration.NewFloat16VectorFieldData(vecFieldName, NB, dim)
-		// } else if s.vecType == schemapb.DataType_BFloat16Vector {
-		// 	vecFieldData = integration.NewBFloat16VectorFieldData(vecFieldName, NB, dim)
+	} else if s.vecType == schemapb.DataType_BFloat16Vector {
+		vecFieldData = integration.NewBFloat16VectorFieldData(vecFieldName, NB, dim)
 	} else if typeutil.IsSparseFloatVectorType(s.vecType) {
 		vecFieldData = integration.NewSparseFloatVectorFieldData(vecFieldName, NB)
 	} else {
@@ -240,25 +240,45 @@ func (s *TestGetVectorSuite) run() {
 			}
 		}
 	} else if s.vecType == schemapb.DataType_Float16Vector {
-		// s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector(), nq*topk*dim*2)
-		// rawData := vecFieldData.GetVectors().GetFloat16Vector()
-		// resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector()
-		// if s.pkType == schemapb.DataType_Int64 {
-		// 	for i, id := range result.GetIds().GetIntId().GetData() {
-		// 		expect := rawData[int(id)*dim : (int(id)+1)*dim]
-		// 		actual := resData[i*dim : (i+1)*dim]
-		// 		s.Require().ElementsMatch(expect, actual)
-		// 	}
-		// } else {
-		// 	for i, idStr := range result.GetIds().GetStrId().GetData() {
-		// 		id, err := strconv.Atoi(idStr)
-		// 		s.Require().NoError(err)
-		// 		expect := rawData[id*dim : (id+1)*dim]
-		// 		actual := resData[i*dim : (i+1)*dim]
-		// 		s.Require().ElementsMatch(expect, actual)
-		// 	}
-		// }
+		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector(), nq*topk*dim*2)
+		rawData := vecFieldData.GetVectors().GetFloat16Vector()
+		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetFloat16Vector()
+		rowBytes := dim * 2
+		if s.pkType == schemapb.DataType_Int64 {
+			for i, id := range result.GetIds().GetIntId().GetData() {
+				expect := rawData[int(id)*rowBytes : (int(id)+1)*rowBytes]
+				actual := resData[i*rowBytes : (i+1)*rowBytes]
+				s.Require().ElementsMatch(expect, actual)
+			}
+		} else {
+			for i, idStr := range result.GetIds().GetStrId().GetData() {
+				id, err := strconv.Atoi(idStr)
+				s.Require().NoError(err)
+				expect := rawData[id*rowBytes : (id+1)*rowBytes]
+				actual := resData[i*rowBytes : (i+1)*rowBytes]
+				s.Require().ElementsMatch(expect, actual)
+			}
+		}
 	} else if s.vecType == schemapb.DataType_BFloat16Vector {
+		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBfloat16Vector(), nq*topk*dim*2)
+		rawData := vecFieldData.GetVectors().GetBfloat16Vector()
+		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetBfloat16Vector()
+		rowBytes := dim * 2
+		if s.pkType == schemapb.DataType_Int64 {
+			for i, id := range result.GetIds().GetIntId().GetData() {
+				expect := rawData[int(id)*rowBytes : (int(id)+1)*rowBytes]
+				actual := resData[i*rowBytes : (i+1)*rowBytes]
+				s.Require().ElementsMatch(expect, actual)
+			}
+		} else {
+			for i, idStr := range result.GetIds().GetStrId().GetData() {
+				id, err := strconv.Atoi(idStr)
+				s.Require().NoError(err)
+				expect := rawData[id*rowBytes : (id+1)*rowBytes]
+				actual := resData[i*rowBytes : (i+1)*rowBytes]
+				s.Require().ElementsMatch(expect, actual)
+			}
+		}
 	} else if s.vecType == schemapb.DataType_SparseFloatVector {
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetSparseFloatVector().GetContents(), nq*topk)
 		rawData := vecFieldData.GetVectors().GetSparseFloatVector().GetContents()
@@ -278,23 +298,22 @@ func (s *TestGetVectorSuite) run() {
 		s.Require().Len(result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector(), nq*topk*dim/8)
 		rawData := vecFieldData.GetVectors().GetBinaryVector()
 		resData := result.GetFieldsData()[vecFieldIndex].GetVectors().GetBinaryVector()
+		rowBytes := dim / 8
 		if s.pkType == schemapb.DataType_Int64 {
 			for i, id := range result.GetIds().GetIntId().GetData() {
-				dataBytes := dim / 8
-				for j := 0; j < dataBytes; j++ {
-					expect := rawData[int(id)*dataBytes+j]
-					actual := resData[i*dataBytes+j]
+				for j := 0; j < rowBytes; j++ {
+					expect := rawData[int(id)*rowBytes+j]
+					actual := resData[i*rowBytes+j]
 					s.Require().Equal(expect, actual)
 				}
 			}
 		} else {
 			for i, idStr := range result.GetIds().GetStrId().GetData() {
-				dataBytes := dim / 8
 				id, err := strconv.Atoi(idStr)
 				s.Require().NoError(err)
-				for j := 0; j < dataBytes; j++ {
-					expect := rawData[id*dataBytes+j]
-					actual := resData[i*dataBytes+j]
+				for j := 0; j < rowBytes; j++ {
+					expect := rawData[id*rowBytes+j]
+					actual := resData[i*rowBytes+j]
 					s.Require().Equal(expect, actual)
 				}
 			}
@@ -318,26 +337,6 @@ func (s *TestGetVectorSuite) TestGetVector_FLAT() {
 	s.vecType = schemapb.DataType_FloatVector
 	s.run()
 }
-
-func (s *TestGetVectorSuite) TestGetVector_Float16Vector() {
-	s.nq = 10
-	s.topK = 10
-	s.indexType = integration.IndexFaissIDMap
-	s.metricType = metric.L2
-	s.pkType = schemapb.DataType_Int64
-	s.vecType = schemapb.DataType_Float16Vector
-	s.run()
-}
-
-// func (s *TestGetVectorSuite) TestGetVector_BFloat16Vector() {
-// 	s.nq = 10
-// 	s.topK = 10
-// 	s.indexType = integration.IndexFaissIDMap
-// 	s.metricType = metric.L2
-// 	s.pkType = schemapb.DataType_Int64
-// 	s.vecType = schemapb.DataType_BFloat16Vector
-// 	s.run()
-// }
 
 func (s *TestGetVectorSuite) TestGetVector_IVF_FLAT() {
 	s.nq = 10
@@ -426,6 +425,26 @@ func (s *TestGetVectorSuite) TestGetVector_BinaryVector() {
 	s.metricType = metric.JACCARD
 	s.pkType = schemapb.DataType_Int64
 	s.vecType = schemapb.DataType_BinaryVector
+	s.run()
+}
+
+func (s *TestGetVectorSuite) TestGetVector_Float16Vector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexHNSW
+	s.metricType = metric.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_Float16Vector
+	s.run()
+}
+
+func (s *TestGetVectorSuite) TestGetVector_BFloat16Vector() {
+	s.nq = 10
+	s.topK = 10
+	s.indexType = integration.IndexHNSW
+	s.metricType = metric.L2
+	s.pkType = schemapb.DataType_Int64
+	s.vecType = schemapb.DataType_BFloat16Vector
 	s.run()
 }
 
