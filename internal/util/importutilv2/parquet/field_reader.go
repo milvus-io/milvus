@@ -28,6 +28,7 @@ import (
 	"golang.org/x/exp/constraints"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -47,7 +48,7 @@ func NewFieldReader(ctx context.Context, reader *pqarrow.FileReader, columnIndex
 	}
 
 	var dim int64 = 1
-	if typeutil.IsVectorType(field.GetDataType()) {
+	if typeutil.IsVectorType(field.GetDataType()) && !typeutil.IsSparseFloatVectorType(field.GetDataType()) {
 		dim, err = typeutil.GetDim(field)
 		if err != nil {
 			return nil, err
@@ -121,8 +122,8 @@ func (c *FieldReader) Next(count int64) (any, error) {
 			byteArr = append(byteArr, []byte(str))
 		}
 		return byteArr, nil
-	case schemapb.DataType_BinaryVector:
-		return ReadBinaryData(c, schemapb.DataType_BinaryVector, count)
+	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return ReadBinaryData(c, count)
 	case schemapb.DataType_FloatVector:
 		arrayData, err := ReadIntegerOrFloatArrayData[float32](c, count)
 		if err != nil {
@@ -133,10 +134,8 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		}
 		vectors := lo.Flatten(arrayData.([][]float32))
 		return vectors, nil
-	case schemapb.DataType_Float16Vector:
-		return ReadBinaryData(c, schemapb.DataType_Float16Vector, count)
-	case schemapb.DataType_BFloat16Vector:
-		return ReadBinaryData(c, schemapb.DataType_BFloat16Vector, count)
+	case schemapb.DataType_SparseFloatVector:
+		return ReadBinaryDataForSparseFloatVector(c, count)
 	case schemapb.DataType_Array:
 		data := make([]*schemapb.ScalarField, 0, count)
 		elementType := c.field.GetElementType()
@@ -389,18 +388,19 @@ func ReadStringData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
-func ReadBinaryData(pcr *FieldReader, dataType schemapb.DataType, count int64) (any, error) {
+func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
+	dataType := pcr.field.GetDataType()
 	chunked, err := pcr.columnReader.NextBatch(count)
 	if err != nil {
 		return nil, err
 	}
 	data := make([]byte, 0, count)
 	for _, chunk := range chunked.Chunks() {
-		dataNums := chunk.Data().Len()
+		rows := chunk.Data().Len()
 		switch chunk.DataType().ID() {
 		case arrow.BINARY:
 			binaryReader := chunk.(*array.Binary)
-			for i := 0; i < dataNums; i++ {
+			for i := 0; i < rows; i++ {
 				data = append(data, binaryReader.Value(i)...)
 			}
 		case arrow.LIST:
@@ -412,9 +412,7 @@ func ReadBinaryData(pcr *FieldReader, dataType schemapb.DataType, count int64) (
 			if !ok {
 				return nil, WrapTypeErr("binary", listReader.ListValues().DataType().Name(), pcr.field)
 			}
-			for i := 0; i < uint8Reader.Len(); i++ {
-				data = append(data, uint8Reader.Value(i))
-			}
+			data = append(data, uint8Reader.Uint8Values()...)
 		default:
 			return nil, WrapTypeErr("binary", chunk.DataType().Name(), pcr.field)
 		}
@@ -425,25 +423,78 @@ func ReadBinaryData(pcr *FieldReader, dataType schemapb.DataType, count int64) (
 	return data, nil
 }
 
-func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool {
-	if len(offsets) < 1 {
-		return false
+func ReadBinaryDataForSparseFloatVector(pcr *FieldReader, count int64) (any, error) {
+	chunked, err := pcr.columnReader.NextBatch(count)
+	if err != nil {
+		return nil, err
 	}
-	var elemCount int = 0
-	switch dataType {
-	case schemapb.DataType_BinaryVector:
-		elemCount = dim / 8
-	case schemapb.DataType_FloatVector:
-		elemCount = dim
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		elemCount = dim * 2
+	data := make([][]byte, 0, count)
+	maxDim := uint32(0)
+	for _, chunk := range chunked.Chunks() {
+		rows := chunk.Data().Len()
+		listReader := chunk.(*array.List)
+		offsets := listReader.Offsets()
+		if !isVectorAligned(offsets, pcr.dim, schemapb.DataType_SparseFloatVector) {
+			return nil, merr.WrapErrImportFailed("%s not aligned", schemapb.DataType_SparseFloatVector.String())
+		}
+		uint8Reader, ok := listReader.ListValues().(*array.Uint8)
+		if !ok {
+			return nil, WrapTypeErr("binary", listReader.ListValues().DataType().Name(), pcr.field)
+		}
+		vecData := uint8Reader.Uint8Values()
+		for i := 0; i < rows; i++ {
+			elemCount := int((offsets[i+1] - offsets[i]) / 8)
+			rowVec := vecData[offsets[i]:offsets[i+1]]
+			data = append(data, rowVec)
+			maxIdx := typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1)
+			if maxIdx+1 > maxDim {
+				maxDim = maxIdx + 1
+			}
+		}
 	}
+	return &storage.SparseFloatVectorFieldData{
+		SparseFloatArray: schemapb.SparseFloatArray{
+			Dim:      int64(maxDim),
+			Contents: data,
+		},
+	}, nil
+}
+
+func checkVectorAlignWithDim(offsets []int32, dim int32) bool {
 	for i := 1; i < len(offsets); i++ {
-		if offsets[i]-offsets[i-1] != int32(elemCount) {
+		if offsets[i]-offsets[i-1] != dim {
 			return false
 		}
 	}
 	return true
+}
+
+func checkSparseFloatVectorAlign(offsets []int32) bool {
+	// index: 4 bytes, value: 4 bytes
+	for i := 1; i < len(offsets); i++ {
+		if (offsets[i]-offsets[i-1])%8 != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool {
+	if len(offsets) < 1 {
+		return false
+	}
+	switch dataType {
+	case schemapb.DataType_BinaryVector:
+		return checkVectorAlignWithDim(offsets, int32(dim/8))
+	case schemapb.DataType_FloatVector:
+		return checkVectorAlignWithDim(offsets, int32(dim))
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return checkVectorAlignWithDim(offsets, int32(dim*2))
+	case schemapb.DataType_SparseFloatVector:
+		return checkSparseFloatVectorAlign(offsets)
+	default:
+		return false
+	}
 }
 
 func ReadBoolArrayData(pcr *FieldReader, count int64) (any, error) {

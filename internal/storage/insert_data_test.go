@@ -117,6 +117,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataEmpty.Data[FloatVectorField].GetMemorySize(), 4)
 	s.Equal(s.iDataEmpty.Data[Float16VectorField].GetMemorySize(), 4)
 	s.Equal(s.iDataEmpty.Data[BFloat16VectorField].GetMemorySize(), 4)
+	s.Equal(s.iDataEmpty.Data[SparseFloatVectorField].GetMemorySize(), 0)
 
 	s.Equal(s.iDataOneRow.Data[RowIDField].GetMemorySize(), 8)
 	s.Equal(s.iDataOneRow.Data[TimestampField].GetMemorySize(), 8)
@@ -134,6 +135,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetMemorySize(), 20)
 	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetMemorySize(), 12)
 	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetMemorySize(), 12)
+	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetMemorySize(), 28)
 
 	s.Equal(s.iDataTwoRows.Data[RowIDField].GetMemorySize(), 16)
 	s.Equal(s.iDataTwoRows.Data[TimestampField].GetMemorySize(), 16)
@@ -150,6 +152,7 @@ func (s *InsertDataSuite) TestMemorySize() {
 	s.Equal(s.iDataTwoRows.Data[FloatVectorField].GetMemorySize(), 36)
 	s.Equal(s.iDataTwoRows.Data[Float16VectorField].GetMemorySize(), 20)
 	s.Equal(s.iDataTwoRows.Data[BFloat16VectorField].GetMemorySize(), 20)
+	s.Equal(s.iDataTwoRows.Data[SparseFloatVectorField].GetMemorySize(), 54)
 }
 
 func (s *InsertDataSuite) TestGetRowSize() {
@@ -169,6 +172,7 @@ func (s *InsertDataSuite) TestGetRowSize() {
 	s.Equal(s.iDataOneRow.Data[FloatVectorField].GetRowSize(0), 16)
 	s.Equal(s.iDataOneRow.Data[Float16VectorField].GetRowSize(0), 8)
 	s.Equal(s.iDataOneRow.Data[BFloat16VectorField].GetRowSize(0), 8)
+	s.Equal(s.iDataOneRow.Data[SparseFloatVectorField].GetRowSize(0), 24)
 }
 
 func (s *InsertDataSuite) TestGetDataType() {
