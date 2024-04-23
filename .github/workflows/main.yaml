@@ -240,6 +240,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
+      - name: Checkout
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: 0
       - name: Download Cpp code coverage results
         uses: actions/download-artifact@v3.0.1
         with:
