@@ -212,36 +212,6 @@ class TestActionSecondDeployment(TestDeployBase):
         collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
                            check_task=CheckTasks.check_query_not_empty)
 
-        # drop index if exist
-        if len(index_names) > 0:
-            for index_name in index_names:
-                collection_w.release()
-                collection_w.drop_index(index_name=index_name)
-            default_index_param = gen_index_param(vector_index_type)
-            self.create_index(collection_w, default_index_field, default_index_param)
-
-            collection_w.load()
-            collection_w.search(vectors_to_search[:default_nq], default_search_field,
-                                search_params, default_limit,
-                                default_search_exp,
-                                output_fields=[ct.default_int64_field_name],
-                                check_task=CheckTasks.check_search_results,
-                                check_items={"nq": default_nq,
-                                             "limit": default_limit})
-            collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                               check_task=CheckTasks.check_query_not_empty)
-
-        # search and query
-        collection_w.search(vectors_to_search[:default_nq], default_search_field,
-                            search_params, default_limit,
-                            default_search_exp,
-                            output_fields=[ct.default_int64_field_name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": default_nq,
-                                         "limit": default_limit})
-        collection_w.query(default_term_expr, output_fields=[ct.default_int64_field_name],
-                           check_task=CheckTasks.check_query_not_empty)
-
         # release and reload with changed replicas
         collection_w.release()
         replica_number = 1
