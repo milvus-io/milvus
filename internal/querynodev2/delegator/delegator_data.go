@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sort"
 	"time"
 
@@ -44,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -280,16 +282,22 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
 	offlineSegments := typeutil.NewConcurrentSet[int64]()
 	log := sd.getLogger(ctx)
-	eg, ctx := errgroup.WithContext(ctx)
+
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	pool := conc.NewPool[struct{}](runtime.GOMAXPROCS(0) * 4)
+	defer pool.Release()
+
+	var futures []*conc.Future[struct{}]
 	for _, segmentEntry := range entries {
-		segmentEntry := segmentEntry
-		eg.Go(func() error {
-			log := log.With(
-				zap.Int64("segmentID", segmentEntry.SegmentID),
-				zap.Int64("workerID", nodeID),
-			)
-			delRecord, ok := delRecords[segmentEntry.SegmentID]
-			if ok {
+		log := log.With(
+			zap.Int64("segmentID", segmentEntry.SegmentID),
+			zap.Int64("workerID", nodeID),
+		)
+		delRecord, ok := delRecords[segmentEntry.SegmentID]
+		if ok {
+			future := pool.Submit(func() (struct{}, error) {
 				log.Debug("delegator plan to applyDelete via worker")
 				err := retry.Handle(ctx, func() (bool, error) {
 					if sd.Stopped() {
@@ -308,6 +316,8 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 					})
 					if errors.Is(err, merr.ErrNodeNotFound) {
 						log.Warn("try to delete data on non-exist node")
+						// cancel other request
+						cancel()
 						return false, err
 					} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 						log.Warn("try to delete data of released segment")
@@ -322,12 +332,12 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 					log.Warn("apply delete for segment failed, marking it offline")
 					offlineSegments.Insert(segmentEntry.SegmentID)
 				}
-			}
-			return nil
-		})
+				return struct{}{}, err
+			})
+			futures = append(futures, future)
+		}
 	}
-	// ignore error, error converted to offline done
-	_ = eg.Wait()
+	conc.AwaitAll(futures...)
 	return offlineSegments.Collect()
 }
 
