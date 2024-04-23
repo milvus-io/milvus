@@ -149,6 +149,12 @@ func (m *indexMeta) updateIndexTasksMetrics() {
 		}
 		taskMetrics[segIdx.CollectionID][segIdx.IndexState]++
 	}
+	log.Info("update index task metrics",
+		zap.Int("unissued", taskMetrics[segIdx.CollectionID][commonpb.IndexState_Unissued]),
+		zap.Int("unissued", taskMetrics[segIdx.CollectionID][commonpb.IndexState_InProgress]),
+		zap.Int("unissued", taskMetrics[segIdx.CollectionID][commonpb.IndexState_Finished]),
+		zap.Int("unissued", taskMetrics[segIdx.CollectionID][commonpb.IndexState_Failed]),
+	)
 	for collID, m := range taskMetrics {
 		for k, v := range m {
 			switch k {
