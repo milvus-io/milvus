@@ -649,11 +649,20 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     }
 
     std::map<std::string, int64_t> remote_paths_to_size;
+    std::exception_ptr first_exception = nullptr;
     for (auto& future : futures) {
-        auto res = future.get();
-        remote_paths_to_size[res.first] = res.second;
+        try {
+            auto res = future.get();
+            remote_paths_to_size[res.first] = res.second;
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
     }
-
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
     ReleaseArrowUnused();
     return remote_paths_to_size;
 }
