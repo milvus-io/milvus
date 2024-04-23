@@ -67,7 +67,7 @@ set(MILVUS_TEST_FILES
         test_group_by.cpp
         test_regex_query_util.cpp
         test_regex_query.cpp
-        test_mem_clustering.cpp
+        test_kmeans_clustering.cpp
         )
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
