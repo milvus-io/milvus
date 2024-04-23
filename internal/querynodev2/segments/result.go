@@ -25,7 +25,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -33,6 +32,7 @@ import (
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -564,6 +564,12 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		for _, sel := range selected {
 			// cannot use `cursors[sel]` directly, since some of them may be skipped.
 			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), selectedIndexes[sel][cursors[sel]])
+
+			// limit retrieve result to avoid oom
+			if retSize > maxOutputSize {
+				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			}
+
 			cursors[sel]++
 		}
 	} else {
@@ -571,23 +577,24 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		ctx, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-RetrieveByOffsets-AppendFieldData")
 		defer span2.End()
 		segmentResults := make([]*segcorepb.RetrieveResults, len(validRetrieveResults))
-		eg, ctx := errgroup.WithContext(ctx)
+		futures := make([]*conc.Future[any], 0, len(validRetrieveResults))
 		for i, offsets := range selectedOffsets {
 			if len(offsets) == 0 {
 				log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
 				continue
 			}
 			idx, theOffsets := i, offsets
-			eg.Go(func() error {
+			future := GetSQPool().Submit(func() (any, error) {
 				r, err := validSegments[idx].RetrieveByOffsets(ctx, plan, theOffsets)
 				if err != nil {
-					return err
+					return nil, err
 				}
 				segmentResults[idx] = r
-				return nil
+				return nil, nil
 			})
+			futures = append(futures, future)
 		}
-		if err := eg.Wait(); err != nil {
+		if err := conc.AwaitAll(futures...); err != nil {
 			return nil, err
 		}
 
@@ -603,13 +610,14 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		cursors = make([]int64, len(segmentResults))
 		for _, sel := range selected {
 			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[sel].GetFieldsData(), cursors[sel])
+
+			// limit retrieve result to avoid oom
+			if retSize > maxOutputSize {
+				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			}
+
 			cursors[sel]++
 		}
-	}
-
-	// limit retrieve result to avoid oom
-	if retSize > maxOutputSize {
-		return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 	}
 
 	return ret, nil

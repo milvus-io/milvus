@@ -78,7 +78,9 @@ struct AutoSpan {
     }
 
     ~AutoSpan() {
-        span_->End();
+        if (span_ != nullptr) {
+            span_->End();
+        }
     }
 
  private:

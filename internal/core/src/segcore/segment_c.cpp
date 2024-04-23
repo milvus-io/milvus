@@ -145,10 +145,10 @@ Retrieve(CTraceContext c_trace,
             segment->Retrieve(plan, timestamp, limit_size, ignore_non_pk);
 
         auto size = retrieve_result->ByteSizeLong();
-        void* buffer = malloc(size);
-        retrieve_result->SerializePartialToArray(buffer, size);
+        std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
+        retrieve_result->SerializePartialToArray(buffer.get(), size);
 
-        result->proto_blob = buffer;
+        result->proto_blob = buffer.release();
         result->proto_size = size;
 
         return milvus::SuccessCStatus();
@@ -177,10 +177,10 @@ RetrieveByOffsets(CTraceContext c_trace,
         auto retrieve_result = segment->Retrieve(plan, offsets, len);
 
         auto size = retrieve_result->ByteSizeLong();
-        void* buffer = malloc(size);
-        retrieve_result->SerializePartialToArray(buffer, size);
+        std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
+        retrieve_result->SerializePartialToArray(buffer.get(), size);
 
-        result->proto_blob = buffer;
+        result->proto_blob = buffer.release();
         result->proto_size = size;
 
         return milvus::SuccessCStatus();

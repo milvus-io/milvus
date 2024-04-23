@@ -615,20 +615,18 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 
 	var retrieveResult RetrieveResult
 	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
-		tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
-		status = C.RetrieveByOffsets(traceCtx,
-			s.ptr,
-			plan.cRetrievePlan,
-			&retrieveResult.cRetrieveResult,
-			(*C.int64_t)(unsafe.Pointer(&offsets[0])),
-			C.int64_t(len(offsets)))
 
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("cgo retrieve by offsets done", zap.Duration("timeTaken", tr.ElapseSpan()))
-		return nil, nil
-	}).Await()
+	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
+	status = C.RetrieveByOffsets(traceCtx,
+		s.ptr,
+		plan.cRetrievePlan,
+		&retrieveResult.cRetrieveResult,
+		(*C.int64_t)(unsafe.Pointer(&offsets[0])),
+		C.int64_t(len(offsets)))
+
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Debug("cgo retrieve by offsets done", zap.Duration("timeTaken", tr.ElapseSpan()))
 
 	if err := HandleCStatus(ctx, &status, "RetrieveByOffsets failed", fields...); err != nil {
 		return nil, err
