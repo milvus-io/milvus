@@ -660,7 +660,6 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 		catalog: catalog,
 		tasks: map[int64]*model.AnalyzeTask{
 			1: {
-				TenantID:     "",
 				CollectionID: s.collectionID,
 				PartitionID:  s.partitionID,
 				FieldID:      s.fieldID,
@@ -669,7 +668,6 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 				State:        indexpb.JobState_JobStateInit,
 			},
 			2: {
-				TenantID:     "",
 				CollectionID: s.collectionID,
 				PartitionID:  s.partitionID,
 				FieldID:      s.fieldID,
@@ -679,7 +677,6 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 				State:        indexpb.JobState_JobStateInProgress,
 			},
 			3: {
-				TenantID:     "",
 				CollectionID: s.collectionID,
 				PartitionID:  s.partitionID,
 				FieldID:      s.fieldID,
@@ -689,7 +686,6 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 				State:        indexpb.JobState_JobStateFinished,
 			},
 			4: {
-				TenantID:     "",
 				CollectionID: s.collectionID,
 				PartitionID:  s.partitionID,
 				FieldID:      s.fieldID,
@@ -699,7 +695,6 @@ func (s *taskSchedulerSuite) createAnalyzeMeta(catalog metastore.DataCoordCatalo
 				State:        indexpb.JobState_JobStateFailed,
 			},
 			5: {
-				TenantID:     "",
 				CollectionID: s.collectionID,
 				PartitionID:  s.partitionID,
 				FieldID:      s.fieldID,

@@ -1331,7 +1331,8 @@ func TestRemoveSegmentIndex(t *testing.T) {
 }
 
 func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
-	m := createMetaTable(&datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)})
+	catalog := &datacoord.Catalog{MetaKv: mockkv.NewMetaKv(t)}
+	m := createMeta(catalog, nil, createIndexMeta(catalog))
 
 	// normal case
 	segmentIDs := make([]int64, 0, 11)

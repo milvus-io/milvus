@@ -33,7 +33,7 @@ type Task interface {
 	GetFailReason() string
 	UpdateVersion(ctx context.Context, meta *meta) error
 	UpdateMetaBuildingState(nodeID int64, meta *meta) error
-	AssignTask(ctx context.Context, client types.IndexNodeClient, dependency *taskScheduler) bool
+	AssignTask(ctx context.Context, client types.IndexNodeClient, dependency *taskScheduler) (bool, bool)
 	QueryResult(ctx context.Context, client types.IndexNodeClient)
 	DropTaskOnWorker(ctx context.Context, client types.IndexNodeClient) bool
 	SetJobInfo(meta *meta) error
