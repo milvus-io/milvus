@@ -423,14 +423,52 @@ func TestDatabaseWrapper(t *testing.T) {
 			}
 		})
 	}
+
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		Status:  &StatusSuccess,
+		DbNames: []string{DefaultCollectionName, "default"},
+	}, nil).Once()
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+		Status:  &StatusSuccess,
+		DbNames: []string{DefaultCollectionName, "test"},
+	}, nil).Once()
+	mp.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(&milvuspb.ListDatabasesResponse{Status: commonErrorStatus}, nil).Once()
+	rawTestCases := []rawTestCase{
+		{
+			errMsg:  "database not found, database: test",
+			errCode: 800, // ErrDatabaseNotFound
+		},
+		{},
+		{
+			errMsg:  "",
+			errCode: 65535,
+		},
+	}
+	for _, testcase := range rawTestCases {
+		t.Run("post with db"+testcase.path, func(t *testing.T) {
+			req := httptest.NewRequest(http.MethodPost, path, bytes.NewReader([]byte(`{}`)))
+			req.Header.Set(HTTPHeaderDBName, "test")
+			w := httptest.NewRecorder()
+			ginHandler.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			fmt.Println(w.Body.String())
+			if testcase.errCode != 0 {
+				returnBody := &ReturnErrMsg{}
+				err := json.Unmarshal(w.Body.Bytes(), returnBody)
+				assert.Nil(t, err)
+				assert.Equal(t, testcase.errCode, returnBody.Code)
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
+			}
+		})
+	}
 }
 
 func TestCreateCollection(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(9)
-	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(4)
-	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(4)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(11)
+	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
+	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
 	testEngine := initHTTPServerV2(mp, false)
@@ -450,7 +488,17 @@ func TestCreateCollection(t *testing.T) {
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
-			`"params": {"max_length": "256", "enableDynamicField": "false", "shardsNum": "2", "consistencyLevel": "unknown", "ttlSeconds": "3600"}}`),
+			`"params": {"max_length": "256", "enableDynamicField": false, "shardsNum": "2", "consistencyLevel": "Strong", "ttlSeconds": "3600"}}`),
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": 256, "enableDynamicField": false, "shardsNum": 2, "consistencyLevel": "Strong", "ttlSeconds": 3600}}`),
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "idType": "Varchar",` +
+			`"params": {"max_length": 256, "enableDynamicField": false, "shardsNum": 2, "consistencyLevel": "unknown", "ttlSeconds": 3600}}`),
 		errMsg:  "consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded: invalid parameter[expected=Strong, Session, Bounded, Eventually, Customized][actual=unknown]",
 		errCode: 1100, // ErrParameterInvalid
 	})

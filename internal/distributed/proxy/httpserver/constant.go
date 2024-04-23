@@ -78,6 +78,7 @@ const (
 	DefaultAliasName         = "the_alias"
 	DefaultOutputFields      = "*"
 	HTTPHeaderAllowInt64     = "Accept-Type-Allow-Int64"
+	HTTPHeaderDBName         = "DB-Name"
 	HTTPHeaderRequestTimeout = "Request-Timeout"
 	HTTPDefaultTimeout       = 30 * time.Second
 	HTTPReturnCode           = "code"
