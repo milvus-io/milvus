@@ -63,6 +63,10 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	for _, segment := range segments {
 		seg := segment
 		errGroup.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			// record search time and cache miss
 			var err error
 			accessRecord := metricsutil.NewQuerySegmentAccessRecord(getSegmentMetricLabel(seg))
@@ -148,6 +152,10 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 
 // retrieve will retrieve all the validate target segments
 func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]*segcorepb.RetrieveResults, []Segment, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
 	var err error
 	var SegType commonpb.SegmentState
 	var retrieveResults []*segcorepb.RetrieveResults
@@ -166,7 +174,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	}
 
 	if err != nil {
-		return retrieveResults, retrieveSegments, err
+		return nil, nil, err
 	}
 
 	retrieveResults, err = retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan)

@@ -71,6 +71,10 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
 		}
 		errGroup.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			var err error
 			accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
 			defer func() {
@@ -156,6 +160,10 @@ func searchSegmentsStreamly(ctx context.Context,
 	for _, segment := range segments {
 		seg := segment
 		errGroup.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			var err error
 			accessRecord := metricsutil.NewSearchSegmentAccessRecord(getSegmentMetricLabel(seg))
 			defer func() {
@@ -214,6 +222,10 @@ func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
 // if segIDs is specified, it will only search on the segments specified by the segIDs.
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
 func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
@@ -225,6 +237,10 @@ func SearchHistorical(ctx context.Context, manager *Manager, searchReq *SearchRe
 // searchStreaming will search all the target segments in streaming
 // if partIDs is empty, it means all the partitions of the loaded collection or all the partitions loaded.
 func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchRequest, collID int64, partIDs []int64, segIDs []int64) ([]*SearchResult, []Segment, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
 	segments, err := validateOnStream(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return nil, nil, err
@@ -236,6 +252,10 @@ func SearchStreaming(ctx context.Context, manager *Manager, searchReq *SearchReq
 func SearchHistoricalStreamly(ctx context.Context, manager *Manager, searchReq *SearchRequest,
 	collID int64, partIDs []int64, segIDs []int64, streamReduce func(result *SearchResult) error,
 ) ([]Segment, error) {
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	segments, err := validateOnHistorical(ctx, manager, collID, partIDs, segIDs)
 	if err != nil {
 		return segments, err
