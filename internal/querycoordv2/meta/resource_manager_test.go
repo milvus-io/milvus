@@ -537,6 +537,23 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 }
 
 func (suite *ResourceManagerSuite) testTransferNode() {
+	// Test redundant nodes recover to default resource group.
+	suite.manager.UpdateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
+		DefaultResourceGroupName: newResourceGroupConfig(40, 40),
+		"rg3":                    newResourceGroupConfig(0, 0),
+		"rg2":                    newResourceGroupConfig(40, 40),
+		"rg1":                    newResourceGroupConfig(20, 20),
+	})
+	suite.manager.AutoRecoverResourceGroup("rg1")
+	suite.manager.AutoRecoverResourceGroup("rg2")
+	suite.manager.AutoRecoverResourceGroup(DefaultResourceGroupName)
+	suite.manager.AutoRecoverResourceGroup("rg3")
+
+	suite.Equal(20, suite.manager.GetResourceGroup("rg1").NodeNum())
+	suite.Equal(40, suite.manager.GetResourceGroup("rg2").NodeNum())
+	suite.Equal(0, suite.manager.GetResourceGroup("rg3").NodeNum())
+	suite.Equal(40, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
+
 	// Test TransferNode.
 	// param error.
 	err := suite.manager.TransferNode("rg1", "rg1", 1)
