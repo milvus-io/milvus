@@ -104,10 +104,6 @@ func (dsService *dataSyncService) GracefullyClose() {
 		log.Info("dataSyncService gracefully closing flowgraph")
 		dsService.fg.SetCloseMethod(flowgraph.CloseGracefully)
 		dsService.close()
-
-		// clean up metrics
-		pChan := funcutil.ToPhysicalChannel(dsService.vchannelName)
-		metrics.CleanupDataNodeCollectionMetrics(paramtable.GetNodeID(), dsService.collectionID, pChan)
 	}
 }
 
@@ -125,6 +121,10 @@ func (dsService *dataSyncService) close() {
 		}
 
 		dsService.cancelFn()
+
+		// clean up metrics
+		pChan := funcutil.ToPhysicalChannel(dsService.vchannelName)
+		metrics.CleanupDataNodeCollectionMetrics(paramtable.GetNodeID(), dsService.collectionID, pChan)
 
 		log.Info("dataSyncService closed")
 	})
