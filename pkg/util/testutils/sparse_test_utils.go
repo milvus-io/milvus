@@ -17,26 +17,12 @@
 package testutils
 
 import (
-	"encoding/binary"
-	"math"
 	"math/rand"
 	"sort"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-func SparseFloatRowSetAt(row []byte, pos int, idx uint32, value float32) {
-	binary.LittleEndian.PutUint32(row[pos*8:], idx)
-	binary.LittleEndian.PutUint32(row[pos*8+4:], math.Float32bits(value))
-}
-
-func CreateSparseFloatRow(indices []uint32, values []float32) []byte {
-	row := make([]byte, len(indices)*8)
-	for i := 0; i < len(indices); i++ {
-		SparseFloatRowSetAt(row, i, indices[i], values[i])
-	}
-	return row
-}
 
 func GenerateSparseFloatVectors(numRows int) *schemapb.SparseFloatArray {
 	dim := 700
@@ -73,7 +59,7 @@ func GenerateSparseFloatVectors(numRows int) *schemapb.SparseFloatArray {
 		if len(indices) > 0 && int(indices[len(indices)-1])+1 > maxDim {
 			maxDim = int(indices[len(indices)-1]) + 1
 		}
-		rowBytes := CreateSparseFloatRow(indices, values)
+		rowBytes := typeutil.CreateSparseFloatRow(indices, values)
 
 		contents = append(contents, rowBytes)
 	}

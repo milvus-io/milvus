@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestCheckTsField(t *testing.T) {
@@ -1284,8 +1285,8 @@ func TestMergeInsertData(t *testing.T) {
 				SparseFloatArray: schemapb.SparseFloatArray{
 					Dim: 600,
 					Contents: [][]byte{
-						testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
-						testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+						typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+						typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
 					},
 				},
 			},
@@ -1358,7 +1359,7 @@ func TestMergeInsertData(t *testing.T) {
 				SparseFloatArray: schemapb.SparseFloatArray{
 					Dim: 600,
 					Contents: [][]byte{
-						testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+						typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
 					},
 				},
 			},
@@ -1444,9 +1445,9 @@ func TestMergeInsertData(t *testing.T) {
 		SparseFloatArray: schemapb.SparseFloatArray{
 			Dim: 600,
 			Contents: [][]byte{
-				testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
-				testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
-				testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+				typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+				typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+				typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
 			},
 		},
 	}, f.(*SparseFloatVectorFieldData))

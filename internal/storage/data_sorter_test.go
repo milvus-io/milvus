@@ -24,7 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestDataSorter(t *testing.T) {
@@ -200,9 +200,9 @@ func TestDataSorter(t *testing.T) {
 				SparseFloatArray: schemapb.SparseFloatArray{
 					Dim: 600,
 					Contents: [][]byte{
-						testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
-						testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
-						testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+						typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+						typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+						typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
 					},
 				},
 			},
@@ -273,9 +273,9 @@ func TestDataSorter(t *testing.T) {
 	assert.Equal(t, schemapb.SparseFloatArray{
 		Dim: 600,
 		Contents: [][]byte{
-			testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
-			testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
-			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+			typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+			typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
 		},
 	}, dataSorter.InsertData.Data[112].(*SparseFloatVectorFieldData).SparseFloatArray)
 }

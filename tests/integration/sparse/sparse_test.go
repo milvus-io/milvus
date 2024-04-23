@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
@@ -213,8 +212,8 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 
 	// unsorted column index is not allowed
 	sparseVecs.Contents[0] = make([]byte, 16)
-	testutils.SparseFloatRowSetAt(sparseVecs.Contents[0], 0, 20, 0.1)
-	testutils.SparseFloatRowSetAt(sparseVecs.Contents[0], 1, 10, 0.2)
+	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 0, 20, 0.1)
+	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 1, 10, 0.2)
 	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
@@ -536,8 +535,8 @@ func (s *SparseTestSuite) TestSparse_invalid_search_request() {
 
 	// column index in the same row must be ordered
 	sparseVecs.Contents[0] = make([]byte, 16)
-	testutils.SparseFloatRowSetAt(sparseVecs.Contents[0], 0, 20, 0.1)
-	testutils.SparseFloatRowSetAt(sparseVecs.Contents[0], 1, 10, 0.2)
+	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 0, 20, 0.1)
+	typeutil.SparseFloatRowSetAt(sparseVecs.Contents[0], 1, 10, 0.2)
 	replaceQuery(sparseVecs)
 	searchResult, err = c.Proxy.Search(ctx, searchReq)
 	s.NoError(err)

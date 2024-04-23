@@ -26,7 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestPayload_ReaderAndWriter(t *testing.T) {
@@ -629,9 +629,9 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			SparseFloatArray: schemapb.SparseFloatArray{
 				Dim: 600,
 				Contents: [][]byte{
-					testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
-					testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
-					testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+					typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+					typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+					typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
 				},
 			},
 		})
@@ -640,9 +640,9 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			SparseFloatArray: schemapb.SparseFloatArray{
 				Dim: 600,
 				Contents: [][]byte{
-					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
-					testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
-					testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+					typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+					typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+					typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
 				},
 			},
 		})
@@ -672,12 +672,12 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			// merged dim should be max of all dims
 			Dim: 600,
 			Contents: [][]byte{
-				testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
-				testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
-				testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
-				testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
-				testutils.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
-				testutils.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
+				typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{1.1, 1.2, 1.3}),
+				typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+				typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+				typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+				typeutil.CreateSparseFloatRow([]uint32{60, 80, 230}, []float32{2.1, 2.2, 2.3}),
+				typeutil.CreateSparseFloatRow([]uint32{170, 300, 579}, []float32{3.1, 3.2, 3.3}),
 			},
 		}, floatVecs.SparseFloatArray)
 
@@ -735,14 +735,14 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 
 	t.Run("TestSparseFloatVector_emptyRow", func(t *testing.T) {
 		testSparseOneBatch(t, [][]byte{
-			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
-			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
-			testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
+			typeutil.CreateSparseFloatRow([]uint32{}, []float32{}),
+			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+			typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, 3.2, 3.3}),
 		}, 600)
 		testSparseOneBatch(t, [][]byte{
-			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
-			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
-			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
+			typeutil.CreateSparseFloatRow([]uint32{}, []float32{}),
+			typeutil.CreateSparseFloatRow([]uint32{}, []float32{}),
+			typeutil.CreateSparseFloatRow([]uint32{}, []float32{}),
 		}, 0)
 	})
 
@@ -757,17 +757,17 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 		}
 		dim := int(indices[nnz-1]) + 1
 		testSparseOneBatch(t, [][]byte{
-			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
-			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
-			testutils.CreateSparseFloatRow(indices, values),
+			typeutil.CreateSparseFloatRow([]uint32{}, []float32{}),
+			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{2.1, 2.2, 2.3}),
+			typeutil.CreateSparseFloatRow(indices, values),
 		}, dim)
 	})
 
 	t.Run("TestSparseFloatVector_negativeValues", func(t *testing.T) {
 		testSparseOneBatch(t, [][]byte{
-			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
-			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{-2.1, 2.2, -2.3}),
-			testutils.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, -3.2, 3.3}),
+			typeutil.CreateSparseFloatRow([]uint32{}, []float32{}),
+			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{-2.1, 2.2, -2.3}),
+			typeutil.CreateSparseFloatRow([]uint32{100, 200, 599}, []float32{3.1, -3.2, 3.3}),
 		}, 600)
 	})
 
@@ -778,9 +778,9 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 	t.Run("TestSparseFloatVector_largeIndex", func(t *testing.T) {
 		int32Max := uint32(math.MaxInt32)
 		testSparseOneBatch(t, [][]byte{
-			testutils.CreateSparseFloatRow([]uint32{}, []float32{}),
-			testutils.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{-2.1, 2.2, -2.3}),
-			testutils.CreateSparseFloatRow([]uint32{100, int32Max / 2, int32Max - 1}, []float32{3.1, -3.2, 3.3}),
+			typeutil.CreateSparseFloatRow([]uint32{}, []float32{}),
+			typeutil.CreateSparseFloatRow([]uint32{10, 20, 30}, []float32{-2.1, 2.2, -2.3}),
+			typeutil.CreateSparseFloatRow([]uint32{100, int32Max / 2, int32Max - 1}, []float32{3.1, -3.2, 3.3}),
 		}, int(int32Max))
 	})
 
@@ -1041,7 +1041,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			SparseFloatArray: schemapb.SparseFloatArray{
 				Dim: 53,
 				Contents: [][]byte{
-					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+					typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
 				},
 			},
 		})
@@ -1050,7 +1050,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			SparseFloatArray: schemapb.SparseFloatArray{
 				Dim: 600,
 				Contents: [][]byte{
-					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+					typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
 				},
 			},
 		})
@@ -1618,7 +1618,7 @@ func TestPayload_ReaderAndWriter(t *testing.T) {
 			SparseFloatArray: schemapb.SparseFloatArray{
 				Dim: 53,
 				Contents: [][]byte{
-					testutils.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
+					typeutil.CreateSparseFloatRow([]uint32{30, 41, 52}, []float32{1.1, 1.2, 1.3}),
 				},
 			},
 		})
