@@ -383,12 +383,14 @@ func (c *StateChannelStore) GetBufferChannelInfo() *NodeChannelInfo {
 }
 
 func (c *StateChannelStore) GetNode(nodeID int64) *NodeChannelInfo {
-	infos := c.GetNodeChannelsBy(WithNodeIDs(nodeID))
-	if len(infos) == 0 {
-		return nil
+	channels := make(map[string]RWChannel)
+	for _, channelName := range c.assignments[nodeID] {
+		channels[channelName] = c.channels[channelName]
 	}
-
-	return infos[0]
+	return &NodeChannelInfo{
+		NodeID:   nodeID,
+		Channels: channels,
+	}
 }
 
 func (c *StateChannelStore) GetNodeChannelCount(nodeID int64) int {
