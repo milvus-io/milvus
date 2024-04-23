@@ -85,14 +85,14 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 	if !exist || segIndex == nil {
 		log.Ctx(ctx).Info("index task has not exist in meta table, remove task", zap.Int64("buildID", it.buildID))
 		it.SetState(indexpb.JobState_JobStateNone, "index task has not exist in meta table")
-		return false, true
+		return false, false
 	}
 
 	segment := dependency.meta.GetSegment(segIndex.SegmentID)
 	if !isSegmentHealthy(segment) || !dependency.meta.indexMeta.IsIndexExist(segIndex.CollectionID, segIndex.IndexID) {
 		log.Ctx(ctx).Info("task is no need to build index, remove it", zap.Int64("buildID", it.buildID))
 		it.SetState(indexpb.JobState_JobStateNone, "task is no need to build index")
-		return false, true
+		return false, false
 	}
 	indexParams := dependency.meta.indexMeta.GetIndexParams(segIndex.CollectionID, segIndex.IndexID)
 	indexType := GetIndexType(indexParams)
@@ -108,10 +108,10 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		}); err != nil {
 			log.Ctx(ctx).Warn("fake finished index failed", zap.Int64("buildID", it.buildID), zap.Error(err))
 			it.SetState(indexpb.JobState_JobStateInit, "fake finished index failed")
-			return false, false
+			return false, true
 		}
 		it.SetState(indexpb.JobState_JobStateFinished, "fake finished index success")
-		return true, false
+		return true, true
 	}
 	// vector index build needs information of optional scalar fields data
 	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
@@ -168,7 +168,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		if err != nil {
 			log.Ctx(ctx).Warn("failed to append index build params", zap.Int64("buildID", it.buildID), zap.Error(err))
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return false, true
+			return false, false
 		}
 	}
 	var req *indexpb.CreateJobRequest
@@ -177,7 +177,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		if err != nil {
 			log.Ctx(ctx).Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return false, true
+			return false, false
 		}
 
 		schema := collectionInfo.Schema
@@ -193,20 +193,20 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		dim, err := storage.GetDimFromParams(field.TypeParams)
 		if err != nil {
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return false, true
+			return false, false
 		}
 
 		storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
 		if err != nil {
 			log.Ctx(ctx).Warn("failed to get storage uri", zap.Error(err))
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return false, true
+			return false, false
 		}
 		indexStorePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue()+"/index", segment.GetID())
 		if err != nil {
 			log.Ctx(ctx).Warn("failed to get storage uri", zap.Error(err))
 			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return false, true
+			return false, false
 		}
 
 		req = &indexpb.CreateJobRequest{
@@ -268,13 +268,13 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 	if err != nil {
 		log.Ctx(ctx).Warn("assign index task to indexNode failed", zap.Int64("buildID", it.buildID), zap.Error(err))
 		it.SetState(indexpb.JobState_JobStateRetry, err.Error())
-		return false, false
+		return false, true
 	}
 
 	log.Ctx(ctx).Info("index task assigned successfully", zap.Int64("buildID", it.buildID),
 		zap.Int64("segmentID", segIndex.SegmentID))
 	it.SetState(indexpb.JobState_JobStateInProgress, "")
-	return true, true
+	return true, false
 }
 
 func (it *indexBuildTask) setResult(info *indexpb.IndexTaskInfo) {

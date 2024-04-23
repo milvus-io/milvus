@@ -83,7 +83,7 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 	if t == nil {
 		log.Ctx(ctx).Info("task is nil, delete it", zap.Int64("taskID", at.GetTaskID()))
 		at.SetState(indexpb.JobState_JobStateNone, "analyze task is nil")
-		return false, true
+		return false, false
 	}
 
 	var storageConfig *indexpb.StorageConfig
@@ -136,7 +136,7 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 			log.Ctx(ctx).Warn("analyze stats task is processing, but segment is nil, delete the task",
 				zap.Int64("taskID", at.GetTaskID()), zap.Int64("segmentID", segID))
 			at.SetState(indexpb.JobState_JobStateNone, fmt.Sprintf("segmentInfo with ID: %d is nil", segID))
-			return false, true
+			return false, false
 		}
 
 		// get binlogIDs
@@ -165,12 +165,12 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 	if err != nil {
 		log.Ctx(ctx).Warn("assign analyze task to indexNode failed", zap.Int64("taskID", at.GetTaskID()), zap.Error(err))
 		at.SetState(indexpb.JobState_JobStateRetry, err.Error())
-		return false, false
+		return false, true
 	}
 
 	log.Ctx(ctx).Info("analyze task assigned successfully", zap.Int64("taskID", at.GetTaskID()))
 	at.SetState(indexpb.JobState_JobStateInProgress, "")
-	return true, true
+	return true, false
 }
 
 func (at *analyzeTask) setResult(result *indexpb.AnalyzeResult) {
