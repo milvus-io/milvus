@@ -106,6 +106,13 @@ func CreateIndex(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecInde
 		close:    false,
 	}
 
+	runtime.SetFinalizer(index, func(index *CgoIndex) {
+		log.Info("GC CgoIndex...")
+		if index != nil && !index.close {
+			log.Error("there is leakage in index object, please check.")
+		}
+	})
+
 	return index, nil
 }
 

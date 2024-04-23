@@ -111,7 +111,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 			return false
 		}
 		it.SetState(indexpb.JobState_JobStateFinished, "fake finished index success")
-		return false
+		return true
 	}
 	// vector index build needs information of optional scalar fields data
 	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
@@ -331,9 +331,9 @@ func (it *indexBuildTask) DropTaskOnWorker(ctx context.Context, client types.Ind
 	if err == nil {
 		err = merr.Error(resp)
 	}
-	if resp.ErrorCode != commonpb.ErrorCode_Success {
+	if err != nil {
 		log.Ctx(ctx).Warn("notify worker drop the index task fail", zap.Int64("taskID", it.GetTaskID()),
-			zap.Int64("nodeID", it.GetNodeID()), zap.String("fail reason", resp.GetReason()))
+			zap.Int64("nodeID", it.GetNodeID()), zap.Error(err))
 		return false
 	}
 	log.Ctx(ctx).Info("drop index task on worker success", zap.Int64("taskID", it.GetTaskID()),
