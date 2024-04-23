@@ -414,17 +414,19 @@ func (cluster *MiniClusterV2) StopAllQueryNodes() {
 	for _, node := range cluster.querynodes {
 		node.Stop()
 	}
-	log.Info(fmt.Sprintf("mini cluster stoped %d extra querynode", numExtraQN))
+	cluster.querynodes = nil
+	log.Info(fmt.Sprintf("mini cluster stopped %d extra querynode", numExtraQN))
 }
 
 func (cluster *MiniClusterV2) StopAllDataNodes() {
 	cluster.DataNode.Stop()
 	log.Info("mini cluster main dataNode stopped")
-	numExtraQN := len(cluster.datanodes)
+	numExtraDN := len(cluster.datanodes)
 	for _, node := range cluster.datanodes {
 		node.Stop()
 	}
-	log.Info(fmt.Sprintf("mini cluster stoped %d extra datanode", numExtraQN))
+	cluster.datanodes = nil
+	log.Info(fmt.Sprintf("mini cluster stopped %d extra datanode", numExtraDN))
 }
 
 func (cluster *MiniClusterV2) GetContext() context.Context {

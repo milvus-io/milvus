@@ -43,7 +43,7 @@ func genNodeChannelInfos(id int64, num int) *NodeChannelInfo {
 	return NewNodeChannelInfo(id, channels...)
 }
 
-func genChannelOperations(from, to int64, num int) *ChannelOpSet {
+func genChannelOperationsV1(from, to int64, num int) *ChannelOpSet {
 	channels := make([]RWChannel, 0, num)
 	for i := 0; i < num; i++ {
 		name := fmt.Sprintf("ch%d", i)
@@ -86,7 +86,7 @@ func TestChannelStore_Update(t *testing.T) {
 				},
 			},
 			args{
-				genChannelOperations(1, 2, 250),
+				genChannelOperationsV1(1, 2, 250),
 			},
 			false,
 		},
