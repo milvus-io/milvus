@@ -59,10 +59,10 @@ KmeansClustering::FetchSegmentData(uint8_t* buf,
                num_rows * sizeof(T) * dim,
                segment_size);
     int64_t fetch_size = expected_train_size - offset;
-    bool use_all_segment = fetch_size >= segment_size;
+    bool whole_segment_used = fetch_size >= segment_size;
     for (auto& data : field_datas) {
         size_t size = 0;
-        if (use_all_segment) {
+        if (whole_segment_used) {
             size = data->Size();
         } else {
             size = std::min(expected_train_size - offset, data->Size());
@@ -75,7 +75,7 @@ KmeansClustering::FetchSegmentData(uint8_t* buf,
         data.reset();
     }
 
-    return use_all_segment;
+    return whole_segment_used;
 }
 
 template <typename T>
@@ -89,6 +89,7 @@ KmeansClustering::SampleTrainData(
     uint8_t* buf) {
     int64_t trained_segments_num = 0;
     int64_t offset = 0;
+    // segment_ids already shuffled, so just pick data by sequence
     for (auto i = 0; i < segment_ids.size(); i++) {
         if (offset == expected_train_size) {
             break;
@@ -101,7 +102,7 @@ KmeansClustering::SampleTrainData(
                                 segment_num_rows.at(cur_segment_id),
                                 dim,
                                 offset);
-        // if whole segment is used for training, we could directly get its vector -> centroid id mapping
+        // if whole segment is used for training, we could directly get its vector -> centroid id mapping after kmeans training
         // so we record the num of segments to avoid recomputing id mapping results
         if (whole_segment_used) {
             trained_segments_num++;
@@ -383,7 +384,7 @@ KmeansClustering::Run(const Config& config) {
                                                   trained_segments_num,
                                                   num_rows.value(),
                                                   num_clusters.value());
-
+    // upload
     StreamingAssignandUpload<T>(cluster_node,
                                 centroid_stats,
                                 id_mapping_stats,
@@ -423,7 +424,7 @@ KmeansClustering::SampleTrainData<float>(
     const int64_t expected_train_size,
     const int64_t dim,
     uint8_t* buf);
-    
+
 template void
 KmeansClustering::Run<float>(const Config& config);
 
