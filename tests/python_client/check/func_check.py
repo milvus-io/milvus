@@ -315,7 +315,7 @@ class ResponseChecker:
         else:
             log.info("search_results_check: Numbers of query searched is correct")
         enable_milvus_client_api = check_items.get("enable_milvus_client_api", False)
-        log.debug(search_res)
+        # log.debug(search_res)
         for hits in search_res:
             searched_original_vectors = []
             ids = []
