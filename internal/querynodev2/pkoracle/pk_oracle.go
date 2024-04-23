@@ -21,6 +21,7 @@ import (
 	"fmt"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -34,6 +35,8 @@ type PkOracle interface {
 	Remove(filters ...CandidateFilter) error
 	// CheckCandidate checks whether candidate with provided key exists.
 	Exists(candidate Candidate, workerID int64) bool
+
+	Size() int
 }
 
 var _ PkOracle = (*pkOracle)(nil)
@@ -46,19 +49,33 @@ type pkOracle struct {
 // Get implements PkOracle.
 func (pko *pkOracle) Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]int64, error) {
 	var result []int64
+	var locations []uint64
 	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
 		for _, filter := range filters {
 			if !filter(candidate) {
 				return true
 			}
 		}
-		if candidate.MayPkExist(pk) {
+
+		if locations == nil {
+			locations = candidate.Locations(pk)
+			if len(locations) == 0 {
+				log.Warn("pkOracle: no location found for pk")
+				return true
+			}
+		}
+
+		if candidate.TestLocations(pk, locations) {
 			result = append(result, candidate.ID())
 		}
 		return true
 	})
 
 	return result, nil
+}
+
+func (pko *pkOracle) Size() int {
+	return pko.candidates.Len()
 }
 
 func (pko *pkOracle) candidateKey(candidate Candidate, workerID int64) string {

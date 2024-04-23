@@ -40,6 +40,8 @@ type BloomFilterSet struct {
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
+
+	kHashFunc uint
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
@@ -53,6 +55,36 @@ func (s *BloomFilterSet) MayPkExist(pk storage.PrimaryKey) bool {
 	// for sealed, if one of the stats shows it exist, then we have to check it
 	for _, historyStat := range s.historyStats {
 		if historyStat.PkExist(pk) {
+			return true
+		}
+	}
+	return false
+}
+
+// Locations returns a list of hash locations representing a data item.
+func (s *BloomFilterSet) Locations(pk storage.PrimaryKey) []uint64 {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	if s.kHashFunc == 0 {
+		_, s.kHashFunc = bloom.EstimateParameters(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat())
+	}
+
+	return storage.Locations(pk, s.kHashFunc)
+}
+
+func (s *BloomFilterSet) TestLocations(pk storage.PrimaryKey, locs []uint64) bool {
+	s.statsMutex.RLock()
+	defer s.statsMutex.RUnlock()
+
+	if s.currentStat != nil && s.currentStat.TestLocations(pk, locs) {
+		return true
+	}
+
+	// for sealed, if one of the stats shows it exist, then we have to check it
+	for _, historyStat := range s.historyStats {
+		if historyStat.TestLocations(pk, locs) {
 			return true
 		}
 	}

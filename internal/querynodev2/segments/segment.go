@@ -173,6 +173,14 @@ func (s *baseSegment) MayPkExist(pk storage.PrimaryKey) bool {
 	return s.bloomFilterSet.MayPkExist(pk)
 }
 
+func (s *baseSegment) Locations(pk storage.PrimaryKey) []uint64 {
+	return s.bloomFilterSet.Locations(pk)
+}
+
+func (s *baseSegment) TestLocations(pk storage.PrimaryKey, loc []uint64) bool {
+	return s.bloomFilterSet.TestLocations(pk, loc)
+}
+
 // ResourceUsageEstimate returns the estimated resource usage of the segment.
 func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
 	if s.segmentType == SegmentTypeGrowing {

@@ -709,6 +709,50 @@ func (_c *MockSegment_LoadStatus_Call) RunAndReturn(run func() LoadStatus) *Mock
 	return _c
 }
 
+// Locations provides a mock function with given fields: pk
+func (_m *MockSegment) Locations(pk storage.PrimaryKey) []uint64 {
+	ret := _m.Called(pk)
+
+	var r0 []uint64
+	if rf, ok := ret.Get(0).(func(storage.PrimaryKey) []uint64); ok {
+		r0 = rf(pk)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]uint64)
+		}
+	}
+
+	return r0
+}
+
+// MockSegment_Locations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Locations'
+type MockSegment_Locations_Call struct {
+	*mock.Call
+}
+
+// Locations is a helper method to define mock.On call
+//   - pk storage.PrimaryKey
+func (_e *MockSegment_Expecter) Locations(pk interface{}) *MockSegment_Locations_Call {
+	return &MockSegment_Locations_Call{Call: _e.mock.On("Locations", pk)}
+}
+
+func (_c *MockSegment_Locations_Call) Run(run func(pk storage.PrimaryKey)) *MockSegment_Locations_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.PrimaryKey))
+	})
+	return _c
+}
+
+func (_c *MockSegment_Locations_Call) Return(_a0 []uint64) *MockSegment_Locations_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_Locations_Call) RunAndReturn(run func(storage.PrimaryKey) []uint64) *MockSegment_Locations_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MayPkExist provides a mock function with given fields: pk
 func (_m *MockSegment) MayPkExist(pk storage.PrimaryKey) bool {
 	ret := _m.Called(pk)
@@ -1265,6 +1309,49 @@ func (_c *MockSegment_StartPosition_Call) Return(_a0 *msgpb.MsgPosition) *MockSe
 }
 
 func (_c *MockSegment_StartPosition_Call) RunAndReturn(run func() *msgpb.MsgPosition) *MockSegment_StartPosition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TestLocations provides a mock function with given fields: pk, loc
+func (_m *MockSegment) TestLocations(pk storage.PrimaryKey, loc []uint64) bool {
+	ret := _m.Called(pk, loc)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(storage.PrimaryKey, []uint64) bool); ok {
+		r0 = rf(pk, loc)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_TestLocations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TestLocations'
+type MockSegment_TestLocations_Call struct {
+	*mock.Call
+}
+
+// TestLocations is a helper method to define mock.On call
+//   - pk storage.PrimaryKey
+//   - loc []uint64
+func (_e *MockSegment_Expecter) TestLocations(pk interface{}, loc interface{}) *MockSegment_TestLocations_Call {
+	return &MockSegment_TestLocations_Call{Call: _e.mock.On("TestLocations", pk, loc)}
+}
+
+func (_c *MockSegment_TestLocations_Call) Run(run func(pk storage.PrimaryKey, loc []uint64)) *MockSegment_TestLocations_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.PrimaryKey), args[1].([]uint64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_TestLocations_Call) Return(_a0 bool) *MockSegment_TestLocations_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_TestLocations_Call) RunAndReturn(run func(storage.PrimaryKey, []uint64) bool) *MockSegment_TestLocations_Call {
 	_c.Call.Return(run)
 	return _c
 }

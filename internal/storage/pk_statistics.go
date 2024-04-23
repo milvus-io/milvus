@@ -31,6 +31,8 @@ type PkStatistics struct {
 	PkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
 	MinPK    PrimaryKey         //	minimal pk value, shortcut for checking whether a pk is inside this segment
 	MaxPK    PrimaryKey         //  maximal pk value, same above
+
+	kHashFunc uint
 }
 
 // update set pk min/max value if input value is beyond former range.
@@ -106,4 +108,35 @@ func (st *PkStatistics) PkExist(pk PrimaryKey) bool {
 	}
 	// no idea, just make it as false positive
 	return true
+}
+
+// Locations returns a list of hash locations representing a data item.
+func Locations(pk PrimaryKey, k uint) []uint64 {
+	switch pk.Type() {
+	case schemapb.DataType_Int64:
+		buf := make([]byte, 8)
+		int64Pk := pk.(*Int64PrimaryKey)
+		common.Endian.PutUint64(buf, uint64(int64Pk.Value))
+		return bloom.Locations(buf, k)
+	case schemapb.DataType_VarChar:
+		varCharPk := pk.(*VarCharPrimaryKey)
+		return bloom.Locations([]byte(varCharPk.Value), k)
+	default:
+		// TODO::
+
+	}
+	return nil
+}
+
+func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
+	// empty pkStatics
+	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
+		return false
+	}
+	// check pk range first, ugly but key it for now
+	if st.MinPK.GT(pk) || st.MaxPK.LT(pk) {
+		return false
+	}
+
+	return st.PkFilter.TestLocations(locs)
 }
