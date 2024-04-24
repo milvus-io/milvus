@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -156,9 +155,6 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				log.Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
 				ddn.compactionExecutor.discardByDroppedChannel(ddn.vChannelName)
 				fgMsg.dropCollection = true
-
-				pChan := funcutil.ToPhysicalChannel(ddn.vChannelName)
-				metrics.CleanupDataNodeCollectionMetrics(paramtable.GetNodeID(), ddn.collectionID, pChan)
 			}
 
 		case commonpb.MsgType_DropPartition:
