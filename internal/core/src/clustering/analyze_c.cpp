@@ -73,6 +73,11 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
         status.error_code = Success;
         status.error_msg = "";
         return status;
+    } catch (SegcoreError& e) {
+        auto status = CStatus();
+        status.error_code = e.get_error_code();
+        status.error_msg = strdup(e.what());
+        return status;
     } catch (std::exception& e) {
         auto status = CStatus();
         status.error_code = UnexpectedError;

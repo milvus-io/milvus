@@ -25,10 +25,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type analyzeTask struct {
@@ -90,6 +90,7 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		numRows := stats.GetNumRows()
 		totalSegmentsRows += numRows
 		err = analyzeInfo.AppendNumRows(segID, numRows)
+		log.Info("append segment rows", zap.Int64("segment id", segID), zap.Int64("rows", numRows))
 		if err != nil {
 			log.Warn("append segment num rows failed", zap.Error(err))
 			return err
@@ -104,7 +105,7 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 			}
 		}
 	}
-
+	
 	// compute num clusters to train
 	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(at.req.GetDim()) * typeutil.VectorTypeSize(at.req.GetFieldType())   // Byte
 	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / float64(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())))
