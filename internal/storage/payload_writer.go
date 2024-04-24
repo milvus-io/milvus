@@ -394,9 +394,7 @@ func (w *NativePayloadWriter) AddBinaryVectorToPayload(data []byte, dim int) err
 	byteLength := dim / 8
 	length := len(data) / byteLength
 	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data[i*byteLength : (i+1)*byteLength])
-	}
+	builder.Append(data)
 
 	return nil
 }
@@ -448,11 +446,8 @@ func (w *NativePayloadWriter) AddFloat16VectorToPayload(data []byte, dim int) er
 
 	byteLength := dim * 2
 	length := len(data) / byteLength
-
 	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data[i*byteLength : (i+1)*byteLength])
-	}
+	builder.Append(data)
 
 	return nil
 }
@@ -473,11 +468,8 @@ func (w *NativePayloadWriter) AddBFloat16VectorToPayload(data []byte, dim int) e
 
 	byteLength := dim * 2
 	length := len(data) / byteLength
-
 	builder.Reserve(length)
-	for i := 0; i < length; i++ {
-		builder.Append(data[i*byteLength : (i+1)*byteLength])
-	}
+	builder.Append(data)
 
 	return nil
 }
