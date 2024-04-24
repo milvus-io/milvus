@@ -896,6 +896,17 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
 }
 
+func AppendUserInfoForRPC(ctx context.Context) context.Context {
+	curUser, _ := GetCurUserFromContext(ctx)
+	if curUser != "" {
+		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeperator, curUser)
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authValue := crypto.Base64Encode(originValue)
+		ctx = metadata.AppendToOutgoingContext(ctx, authKey, authValue)
+	}
+	return ctx
+}
+
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
