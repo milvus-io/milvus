@@ -68,42 +68,50 @@ TEST(PatternMatchTranslatorTest, StringTypeTest) {
 
 TEST(RegexMatcherTest, DefaultBehaviorTest) {
     using namespace milvus;
-    RegexMatcher matcher;
-    std::regex pattern("Hello.*");
+    std::string pattern("Hello.*");
+    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
 
     int operand1 = 123;
     double operand2 = 3.14;
     bool operand3 = true;
 
-    EXPECT_FALSE(matcher(pattern, operand1));
-    EXPECT_FALSE(matcher(pattern, operand2));
-    EXPECT_FALSE(matcher(pattern, operand3));
+    EXPECT_FALSE(matcher(operand1));
+    EXPECT_FALSE(matcher(operand2));
+    EXPECT_FALSE(matcher(operand3));
 }
 
 TEST(RegexMatcherTest, StringMatchTest) {
     using namespace milvus;
-    RegexMatcher matcher;
-    std::regex pattern("Hello.*");
+    std::string pattern("Hello.*");
+    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
 
     std::string str1 = "Hello, World!";
     std::string str2 = "Hi there!";
     std::string str3 = "Hello, OpenAI!";
 
-    EXPECT_TRUE(matcher(pattern, str1));
-    EXPECT_FALSE(matcher(pattern, str2));
-    EXPECT_TRUE(matcher(pattern, str3));
+    EXPECT_TRUE(matcher(str1));
+    EXPECT_FALSE(matcher(str2));
+    EXPECT_TRUE(matcher(str3));
 }
 
 TEST(RegexMatcherTest, StringViewMatchTest) {
     using namespace milvus;
-    RegexMatcher matcher;
-    std::regex pattern("Hello.*");
+    std::string pattern("Hello.*");
+    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
 
     std::string_view str1 = "Hello, World!";
     std::string_view str2 = "Hi there!";
     std::string_view str3 = "Hello, OpenAI!";
 
-    EXPECT_TRUE(matcher(pattern, str1));
-    EXPECT_FALSE(matcher(pattern, str2));
-    EXPECT_TRUE(matcher(pattern, str3));
+    EXPECT_TRUE(matcher(str1));
+    EXPECT_FALSE(matcher(str2));
+    EXPECT_TRUE(matcher(str3));
+}
+
+TEST(RegexMatcherTest, NewLine) {
+    using namespace milvus;
+    std::string pattern("Hello.*");
+    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
+
+    EXPECT_TRUE(matcher(std::string("Hello\n")));
 }

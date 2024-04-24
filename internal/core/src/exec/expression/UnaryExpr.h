@@ -43,21 +43,11 @@ struct UnaryElementFuncForMatch {
                size_t size,
                IndexInnerType val,
                TargetBitmapView res) {
-        if constexpr (std::is_same_v<T, std::string_view>) {
-            // translate the pattern match in advance, which avoid computing it every loop.
-            std::regex reg(TranslatePatternMatchToRegex(val));
-            for (int i = 0; i < size; ++i) {
-                res[i] =
-                    std::regex_match(std::begin(src[i]), std::end(src[i]), reg);
-            }
-        } else if constexpr (std::is_same_v<T, std::string>) {
-            // translate the pattern match in advance, which avoid computing it every loop.
-            std::regex reg(TranslatePatternMatchToRegex(val));
-            for (int i = 0; i < size; ++i) {
-                res[i] = std::regex_match(src[i], reg);
-            }
-        } else {
-            PanicInfo(Unsupported, "regex query is only supported on string");
+        PatternMatchTranslator translator;
+        auto regex_pattern = translator(val);
+        RegexMatcherHelper matcher(CreateDefaultRegexMatcher(regex_pattern));
+        for (int i = 0; i < size; ++i) {
+            res[i] = matcher(src[i]);
         }
     }
 };
@@ -216,9 +206,13 @@ struct UnaryIndexFuncForMatch {
                       !std::is_same_v<T, std::string>) {
             PanicInfo(Unsupported, "regex query is only supported on string");
         } else {
-            auto reg = TranslatePatternMatchToRegex(val);
+            PatternMatchTranslator translator;
+            auto regex_pattern = translator(val);
+            RegexMatcherHelper matcher(
+                CreateDefaultRegexMatcher(regex_pattern));
+
             if (index->SupportRegexQuery()) {
-                return index->RegexQuery(reg);
+                return index->RegexQuery(regex_pattern);
             }
             if (!index->HasRawData()) {
                 PanicInfo(Unsupported,
@@ -228,11 +222,10 @@ struct UnaryIndexFuncForMatch {
 
             // retrieve raw data to do brute force query, may be very slow.
             auto cnt = index->Count();
-            std::regex r(reg);
             TargetBitmap res(cnt);
             for (int64_t i = 0; i < cnt; i++) {
                 auto raw = index->Reverse_Lookup(i);
-                res[i] = std::regex_match(raw, r);
+                res[i] = matcher(raw);
             }
             return res;
         }
