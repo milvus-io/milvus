@@ -35,27 +35,28 @@ type alterDatabaseTask struct {
 
 func (a *alterDatabaseTask) Prepare(ctx context.Context) error {
 	if a.Req.GetDbName() == "" {
-		return fmt.Errorf("alter collection failed, collection name does not exists")
+		return fmt.Errorf("alter database failed, database name does not exists")
 	}
 
 	return nil
 }
 
 func (a *alterDatabaseTask) Execute(ctx context.Context) error {
-	// Now we only support alter properties of collection
+	// Now we only support alter properties of database
 	if a.Req.GetProperties() == nil {
-		return errors.New("only support alter collection properties, but collection properties is empty")
+		return errors.New("only support alter database properties, but database properties is empty")
 	}
 
 	oldDB, err := a.core.meta.GetDatabaseByName(ctx, a.Req.GetDbName(), a.ts)
 	if err != nil {
-		log.Warn("get database failed during changing database props",
+		log.Ctx(ctx).Warn("get database failed during changing database props",
 			zap.String("databaseName", a.Req.GetDbName()), zap.Uint64("ts", a.ts))
 		return err
 	}
 
 	newDB := oldDB.Clone()
-	updateProperties(oldDB.Properties, a.Req.GetProperties())
+	ret := updateProperties(oldDB.Properties, a.Req.GetProperties())
+	newDB.Properties = ret
 
 	ts := a.GetTs()
 	redoTask := newBaseRedoTask(a.core.stepExecutor)

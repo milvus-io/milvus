@@ -1335,7 +1335,7 @@ func (c *Core) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseR
 	metrics.RootCoordDDLReqLatency.WithLabelValues(method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	metrics.RootCoordDDLReqLatencyInQueue.WithLabelValues(method).Observe(float64(t.queueDur.Milliseconds()))
 
-	log.Info("done to alter database",
+	log.Ctx(ctx).Info("done to alter database",
 		zap.String("role", typeutil.RootCoordRole),
 		zap.String("name", in.GetDbName()),
 		zap.Uint64("ts", t.GetTs()))
