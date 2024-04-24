@@ -17,8 +17,6 @@
 package pkoracle
 
 import (
-	"sync"
-
 	bloom "github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
 
@@ -28,35 +26,37 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 var _ Candidate = (*BloomFilterSet)(nil)
 
 // BloomFilterSet is one implementation of Candidate with bloom filter in statslog.
 type BloomFilterSet struct {
-	statsMutex   sync.RWMutex
 	segmentID    int64
 	paritionID   int64
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
-	historyStats []*storage.PkStatistics
+	historyStats typeutil.ConcurrentSet[*storage.PkStatistics]
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
 func (s *BloomFilterSet) MayPkExist(pk storage.PrimaryKey) bool {
-	s.statsMutex.RLock()
-	defer s.statsMutex.RUnlock()
 	if s.currentStat != nil && s.currentStat.PkExist(pk) {
 		return true
 	}
 
 	// for sealed, if one of the stats shows it exist, then we have to check it
-	for _, historyStat := range s.historyStats {
+	exist := false
+	s.historyStats.Range(func(historyStat *storage.PkStatistics) bool {
 		if historyStat.PkExist(pk) {
-			return true
+			exist = true
+			return false
 		}
-	}
-	return false
+		return true
+	})
+
+	return exist
 }
 
 // ID implement candidate.
@@ -76,9 +76,6 @@ func (s *BloomFilterSet) Type() commonpb.SegmentState {
 
 // UpdateBloomFilter updates currentStats with provided pks.
 func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
-	s.statsMutex.Lock()
-	defer s.statsMutex.Unlock()
-
 	if s.currentStat == nil {
 		s.currentStat = &storage.PkStatistics{
 			PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
@@ -86,11 +83,11 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 		}
 	}
 
-	buf := make([]byte, 8)
 	for _, pk := range pks {
 		s.currentStat.UpdateMinMax(pk)
 		switch pk.Type() {
 		case schemapb.DataType_Int64:
+			buf := make([]byte, 8)
 			int64Value := pk.(*storage.Int64PrimaryKey).Value
 			common.Endian.PutUint64(buf, uint64(int64Value))
 			s.currentStat.PkFilter.Add(buf)
@@ -106,21 +103,7 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 
 // AddHistoricalStats add loaded historical stats.
 func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
-	s.statsMutex.Lock()
-	defer s.statsMutex.Unlock()
-
-	s.historyStats = append(s.historyStats, stats)
-}
-
-// initCurrentStat initialize currentStats if nil.
-// Note: invoker shall acquire statsMutex lock first.
-func (s *BloomFilterSet) initCurrentStat() {
-	if s.currentStat == nil {
-		s.currentStat = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
-				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
-		}
-	}
+	s.historyStats.Insert(stats)
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.

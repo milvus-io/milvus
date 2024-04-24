@@ -111,6 +111,8 @@ func NewPipelineWithStream(dispatcher msgdispatcher.Client, nodeTtInterval time.
 			nodes:           []*nodeCtx{},
 			nodeTtInterval:  nodeTtInterval,
 			enableTtChecker: enableTtChecker,
+			closeCh:         make(chan struct{}),
+			closeWg:         sync.WaitGroup{},
 		},
 		dispatcher: dispatcher,
 		vChannel:   vChannel,

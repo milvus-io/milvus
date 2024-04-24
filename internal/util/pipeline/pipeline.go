@@ -17,6 +17,8 @@
 package pipeline
 
 import (
+	"fmt"
+	"sync"
 	"time"
 
 	"go.uber.org/zap"
@@ -36,6 +38,10 @@ type pipeline struct {
 	inputChannel    chan Msg
 	nodeTtInterval  time.Duration
 	enableTtChecker bool
+
+	closeCh   chan struct{} // notify work to exit
+	closeWg   sync.WaitGroup
+	closeOnce sync.Once
 }
 
 func (p *pipeline) Add(nodes ...Node) {
@@ -65,14 +71,51 @@ func (p *pipeline) Start() error {
 	if len(p.nodes) == 0 {
 		return ErrEmptyPipeline
 	}
-	for _, node := range p.nodes {
-		node.Start()
-	}
+
+	p.closeWg.Add(1)
+	go p.work()
 	return nil
 }
 
 func (p *pipeline) Close() {
-	for _, node := range p.nodes {
-		node.Close()
+	p.closeOnce.Do(func() {
+		close(p.closeCh)
+		p.closeWg.Wait()
+	})
+}
+
+func (p *pipeline) work() {
+	defer p.closeWg.Done()
+
+	for _, nodeCtx := range p.nodes {
+		name := fmt.Sprintf("nodeCtxTtChecker-%s", nodeCtx.node.Name())
+		if nodeCtx.checker != nil {
+			nodeCtx.checker.Check(name)
+			defer nodeCtx.checker.Remove(name)
+		}
+	}
+
+	for {
+		select {
+		// close
+		case <-p.closeCh:
+			log.Debug("node ctx manager closed")
+			return
+
+		default:
+			curNode := p.nodes[0]
+			for curNode != nil {
+				if len(curNode.inputChannel) == 0 {
+					break
+				}
+
+				input := <-curNode.inputChannel
+				output := curNode.node.Operate(input)
+				if curNode.next != nil && output != nil {
+					curNode.next.inputChannel <- output
+				}
+				curNode = curNode.next
+			}
+		}
 	}
 }
