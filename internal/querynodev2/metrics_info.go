@@ -106,6 +106,8 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 
 	collections := node.manager.Collection.List()
 
+	nodeID := fmt.Sprint(node.GetNodeID())
+
 	var totalGrowingSize int64
 	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
 	growingGroupByCollection := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
@@ -117,8 +119,25 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			return seg.MemSize()
 		})
 		totalGrowingSize += size
-		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
-			fmt.Sprint(collection), segments.SegmentTypeGrowing.String()).Set(float64(size))
+		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
+			segments.SegmentTypeGrowing.String()).Set(float64(size))
+	}
+	growingGroupByPartition := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
+		return seg.Partition()
+	})
+	for _, segs := range growingGroupByPartition {
+		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
+			return seg.RowNum()
+		})
+		segment := segs[0]
+		metrics.QueryNodeNumEntities.WithLabelValues(
+			segment.DatabaseName(),
+			nodeID,
+			fmt.Sprint(segment.Collection()),
+			fmt.Sprint(segment.Partition()),
+			segments.SegmentTypeGrowing.String(),
+			fmt.Sprint(len(segment.Indexes())),
+		).Set(float64(numEntities))
 	}
 
 	sealedSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeSealed))
@@ -132,6 +151,23 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 		})
 		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))
+	}
+	sealedGroupByPartition := lo.GroupBy(sealedSegments, func(seg segments.Segment) int64 {
+		return seg.Partition()
+	})
+	for _, segs := range sealedGroupByPartition {
+		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
+			return seg.RowNum()
+		})
+		segment := segs[0]
+		metrics.QueryNodeNumEntities.WithLabelValues(
+			segment.DatabaseName(),
+			nodeID,
+			fmt.Sprint(segment.Collection()),
+			fmt.Sprint(segment.Partition()),
+			segments.SegmentTypeSealed.String(),
+			fmt.Sprint(len(segment.Indexes())),
+		).Set(float64(numEntities))
 	}
 
 	return &metricsinfo.QueryNodeQuotaMetrics{
