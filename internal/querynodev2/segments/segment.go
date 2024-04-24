@@ -29,7 +29,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"sync"
 	"unsafe"
@@ -1367,15 +1366,6 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	}
 
 	C.DeleteSegment(ptr)
-
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		s.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(s.Collection()),
-		fmt.Sprint(s.Partition()),
-		s.Type().String(),
-		strconv.FormatInt(int64(len(s.Indexes())), 10),
-	).Sub(float64(s.InsertCount()))
 
 	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
 	// ignore error here, shall not block releasing
