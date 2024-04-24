@@ -816,6 +816,10 @@ func (scheduler *taskScheduler) checkSegmentTaskStale(task *SegmentTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+				log.Warn("task stale due to node offline", zap.Int64("segment", task.segmentID))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
 			taskType := GetTaskType(task)
 			var segment *datapb.SegmentInfo
 			if taskType == TaskTypeMove || taskType == TaskTypeUpdate {
@@ -860,6 +864,10 @@ func (scheduler *taskScheduler) checkChannelTaskStale(task *ChannelTask) error {
 	for _, action := range task.Actions() {
 		switch action.Type() {
 		case ActionTypeGrow:
+			if ok, _ := scheduler.nodeMgr.IsStoppingNode(action.Node()); ok {
+				log.Warn("task stale due to node offline", zap.String("channel", task.Channel()))
+				return merr.WrapErrNodeOffline(action.Node())
+			}
 			if scheduler.targetMgr.GetDmChannel(task.collectionID, task.Channel(), meta.NextTargetFirst) == nil {
 				log.Warn("the task is stale, the channel to subscribe not exists in targets",
 					zap.String("channel", task.Channel()))
