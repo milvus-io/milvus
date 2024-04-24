@@ -24,10 +24,16 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
+type lvCriterion struct {
+	nodeID         int64
+	channelName    string
+	collectionID   int64
+	hasOtherFilter bool
+}
+
 type LeaderViewFilter interface {
 	Match(*LeaderView) bool
-	Node() (int64, bool)
-	ChannelName() (string, bool)
+	AddFilter(*lvCriterion)
 }
 
 type lvFilterFunc func(view *LeaderView) bool
@@ -36,12 +42,8 @@ func (f lvFilterFunc) Match(view *LeaderView) bool {
 	return f(view)
 }
 
-func (f lvFilterFunc) Node() (int64, bool) {
-	return -1, false
-}
-
-func (f lvFilterFunc) ChannelName() (string, bool) {
-	return "", false
+func (f lvFilterFunc) AddFilter(c *lvCriterion) {
+	c.hasOtherFilter = true
 }
 
 type lvChannelNameFilter string
@@ -50,12 +52,8 @@ func (f lvChannelNameFilter) Match(v *LeaderView) bool {
 	return v.Channel == string(f)
 }
 
-func (f lvChannelNameFilter) Node() (int64, bool) {
-	return -1, false
-}
-
-func (f lvChannelNameFilter) ChannelName() (string, bool) {
-	return string(f), true
+func (f lvChannelNameFilter) AddFilter(c *lvCriterion) {
+	c.channelName = string(f)
 }
 
 type lvNodeFilter int64
@@ -64,12 +62,18 @@ func (f lvNodeFilter) Match(v *LeaderView) bool {
 	return v.ID == int64(f)
 }
 
-func (f lvNodeFilter) Node() (int64, bool) {
-	return int64(f), true
+func (f lvNodeFilter) AddFilter(c *lvCriterion) {
+	c.nodeID = int64(f)
 }
 
-func (f lvNodeFilter) ChannelName() (string, bool) {
-	return "", false
+type lvCollectionFilter int64
+
+func (f lvCollectionFilter) Match(v *LeaderView) bool {
+	return v.CollectionID == int64(f)
+}
+
+func (f lvCollectionFilter) AddFilter(c *lvCriterion) {
+	c.collectionID = int64(f)
 }
 
 func WithNodeID2LeaderView(nodeID int64) LeaderViewFilter {
@@ -81,9 +85,7 @@ func WithChannelName2LeaderView(channelName string) LeaderViewFilter {
 }
 
 func WithCollectionID2LeaderView(collectionID int64) LeaderViewFilter {
-	return lvFilterFunc(func(view *LeaderView) bool {
-		return view.CollectionID == collectionID
-	})
+	return lvCollectionFilter(collectionID)
 }
 
 func WithReplica2LeaderView(replica *Replica) LeaderViewFilter {
@@ -140,16 +142,64 @@ func (view *LeaderView) Clone() *LeaderView {
 	}
 }
 
-type channelViews map[string]*LeaderView
+type nodeViews struct {
+	views []*LeaderView
+	// channel name => LeaderView
+	channelView map[string]*LeaderView
+	// collection id  => leader views
+	collectionViews map[int64][]*LeaderView
+}
+
+func (v nodeViews) Filter(criterion *lvCriterion, filters ...LeaderViewFilter) []*LeaderView {
+	mergedFilter := func(view *LeaderView) bool {
+		for _, filter := range filters {
+			if !filter.Match(view) {
+				return false
+			}
+		}
+		return true
+	}
+
+	var views []*LeaderView
+	switch {
+	case criterion.channelName != "":
+		if view, ok := v.channelView[criterion.channelName]; ok {
+			views = append(views, view)
+		}
+	case criterion.collectionID != 0:
+		views = v.collectionViews[criterion.collectionID]
+	default:
+		views = v.views
+	}
+
+	if criterion.hasOtherFilter {
+		views = lo.Filter(views, func(view *LeaderView, _ int) bool {
+			return mergedFilter(view)
+		})
+	}
+	return views
+}
+
+func composeNodeViews(views ...*LeaderView) nodeViews {
+	return nodeViews{
+		views: views,
+		channelView: lo.SliceToMap(views, func(view *LeaderView) (string, *LeaderView) {
+			return view.Channel, view
+		}),
+		collectionViews: lo.GroupBy(views, func(view *LeaderView) int64 {
+			return view.CollectionID
+		}),
+	}
+}
 
 type LeaderViewManager struct {
 	rwmutex sync.RWMutex
-	views   map[int64]channelViews // LeaderID -> Views (one per shard)
+	views   map[int64]nodeViews // LeaderID -> Views (one per shard)
 }
 
 func NewLeaderViewManager() *LeaderViewManager {
 	return &LeaderViewManager{
-		views: make(map[int64]channelViews),
+		views: make(map[int64]nodeViews),
 	}
 }
 
@@ -157,17 +207,14 @@ func NewLeaderViewManager() *LeaderViewManager {
 func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 	mgr.rwmutex.Lock()
 	defer mgr.rwmutex.Unlock()
-	mgr.views[leaderID] = make(channelViews, len(views))
-	for _, view := range views {
-		mgr.views[leaderID][view.Channel] = view
-	}
+	mgr.views[leaderID] = composeNodeViews(views...)
 }
 
 func (mgr *LeaderViewManager) GetLeaderShardView(id int64, shard string) *LeaderView {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
 
-	return mgr.views[id][shard]
+	return mgr.views[id].channelView[shard]
 }
 
 func (mgr *LeaderViewManager) GetByFilter(filters ...LeaderViewFilter) []*LeaderView {
@@ -178,34 +225,15 @@ func (mgr *LeaderViewManager) GetByFilter(filters ...LeaderViewFilter) []*Leader
 }
 
 func (mgr *LeaderViewManager) getByFilter(filters ...LeaderViewFilter) []*LeaderView {
-	otherFilters := make([]LeaderViewFilter, 0, len(filters))
-	var nodeID int64
-	var channelName string
-	var hasNodeID, hasChannelName bool
 
+	criterion := &lvCriterion{}
 	for _, filter := range filters {
-		if node, ok := filter.Node(); ok {
-			nodeID, hasNodeID = node, true
-			continue
-		}
-		if channel, ok := filter.ChannelName(); ok {
-			channelName, hasChannelName = channel, true
-			continue
-		}
-		otherFilters = append(otherFilters, filter)
-	}
-	mergedFilter := func(view *LeaderView) bool {
-		for _, filter := range otherFilters {
-			if !filter.Match(view) {
-				return false
-			}
-		}
-		return true
+		filter.AddFilter(criterion)
 	}
 
-	var candidates []channelViews
-	if hasNodeID {
-		nodeView, ok := mgr.views[nodeID]
+	var candidates []nodeViews
+	if criterion.nodeID > 0 {
+		nodeView, ok := mgr.views[criterion.nodeID]
 		if ok {
 			candidates = append(candidates, nodeView)
 		}
@@ -215,17 +243,7 @@ func (mgr *LeaderViewManager) getByFilter(filters ...LeaderViewFilter) []*Leader
 
 	var result []*LeaderView
 	for _, candidate := range candidates {
-		if hasChannelName {
-			if view, ok := candidate[channelName]; ok && mergedFilter(view) {
-				result = append(result, view)
-			}
-		} else {
-			for _, view := range candidate {
-				if mergedFilter(view) {
-					result = append(result, view)
-				}
-			}
-		}
+		result = append(result, candidate.Filter(criterion, filters...)...)
 	}
 	return result
 }
