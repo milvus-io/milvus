@@ -1190,7 +1190,12 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 	var primaryFieldData *schemapb.FieldData
 	if inInsert {
 		// when checkPrimaryFieldData in insert
-		if !primaryFieldSchema.AutoID {
+
+		skipAutoIDCheck := Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() &&
+			primaryFieldSchema.AutoID &&
+			typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema)
+
+		if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 			primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 			if err != nil {
 				log.Info("get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
@@ -1239,7 +1244,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
-	if len(insertMsg.GetPartitionName()) > 0 {
+	if len(insertMsg.GetPartitionName()) > 0 && !Params.ProxyCfg.SkipPartitionKeyCheck.GetAsBool() {
 		return nil, errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 

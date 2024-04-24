@@ -174,6 +174,14 @@ func TestComponentParam(t *testing.T) {
 		assert.False(t, Params.MustUsePartitionKey.GetAsBool())
 		params.Save("proxy.mustUsePartitionKey", "true")
 		assert.True(t, Params.MustUsePartitionKey.GetAsBool())
+
+		assert.False(t, Params.SkipAutoIDCheck.GetAsBool())
+		params.Save("proxy.skipAutoIDCheck", "true")
+		assert.True(t, Params.SkipAutoIDCheck.GetAsBool())
+
+		assert.False(t, Params.SkipPartitionKeyCheck.GetAsBool())
+		params.Save("proxy.skipPartitionKeyCheck", "true")
+		assert.True(t, Params.SkipPartitionKeyCheck.GetAsBool())
 	})
 
 	// t.Run("test proxyConfig panic", func(t *testing.T) {
