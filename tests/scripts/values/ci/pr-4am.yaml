@@ -3,6 +3,15 @@ metrics:
     enabled: true
 log:
   level: debug
+
+nodeSelector: 
+ node-role.kubernetes.io/e2e: ""
+
+tolerations:
+- key: "node-role.kubernetes.io/e2e"
+  operator: "Exists"
+  effect: "NoSchedule"  
+
 proxy:
   resources:
     requests:
