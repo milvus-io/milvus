@@ -11653,14 +11653,14 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
-        hybrid_res = collection_w.hybrid_search(req_list, rerank, default_limit,
+        hybrid_res = collection_w.hybrid_search(req_list, rerank, default_limit-offset,
                                                 offset=offset,
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": 1,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit-offset})[0]
 
-        assert hybrid_res_inside[0].distances == hybrid_res[0].distances
+        assert hybrid_res_inside[0].distances[offset:] == hybrid_res[0].distances
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_hybrid_search_RRFRanker_empty_reqs(self):
