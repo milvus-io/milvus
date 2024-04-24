@@ -299,6 +299,8 @@ queryNode:
   segcore:
     cgoPoolSizeRatio: 2.0 # cgo pool size ratio to max read concurrency
     knowhereThreadPoolNumRatio: 4
+    # used for zilliz-cloud ; please ignore it for open source.
+    knowhereScoreConsistency: false
     # Use more threads to make better use of SSD throughput in disk index.
     # This parameter is only useful when enable-disk = true.
     # And this value should be a number greater than 1 and less than 32.

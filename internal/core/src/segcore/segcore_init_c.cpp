@@ -74,6 +74,11 @@ SegcoreSetSimdType(const char* value) {
 }
 
 extern "C" void
+SegcoreEnableKnowhereScoreConsistency() {
+    milvus::config::EnableKnowhereScoreConsistency();
+}
+
+extern "C" void
 SegcoreCloseGlog() {
     std::call_once(close_glog_once, [&]() {
         if (google::IsGoogleLoggingInitialized()) {
