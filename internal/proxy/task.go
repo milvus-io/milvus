@@ -722,6 +722,7 @@ func (t *showCollectionsTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *showCollectionsTask) Execute(ctx context.Context) error {
+	ctx = AppendUserInfoForRPC(ctx)
 	respFromRootCoord, err := t.rootCoord.ShowCollections(ctx, t.ShowCollectionsRequest)
 	if err != nil {
 		return err

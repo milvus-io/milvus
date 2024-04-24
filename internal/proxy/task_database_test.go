@@ -154,7 +154,8 @@ func TestListDatabaseTask(t *testing.T) {
 		assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 		assert.Equal(t, UniqueID(0), task.ID())
 
-		md, ok := metadata.FromOutgoingContext(task.ctx)
+		taskCtx := AppendUserInfoForRPC(ctx)
+		md, ok := metadata.FromOutgoingContext(taskCtx)
 		assert.True(t, ok)
 		authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 		assert.True(t, ok)
