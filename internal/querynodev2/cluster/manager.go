@@ -18,7 +18,6 @@ package cluster
 
 import (
 	context "context"
-	"fmt"
 	"strconv"
 
 	"go.uber.org/zap"
@@ -66,10 +65,6 @@ func (m *grpcWorkerManager) GetWorker(ctx context.Context, nodeID int64) (Worker
 		if err != nil {
 			return nil, err
 		}
-	}
-	if !worker.IsHealthy() {
-		// TODO wrap error
-		return nil, fmt.Errorf("node is not healthy: %d", nodeID)
 	}
 	return worker, nil
 }

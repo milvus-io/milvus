@@ -22,6 +22,7 @@ import (
 	"math/rand"
 	"runtime"
 	"sort"
+	"sync/atomic"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -273,6 +274,7 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 // applyDelete handles delete record and apply them to corresponding workers.
 func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
 	offlineSegments := typeutil.NewConcurrentSet[int64]()
+	var failedFlag atomic.Bool
 	log := sd.getLogger(ctx)
 
 	ctx, cancel := context.WithCancel(ctx)
@@ -315,6 +317,9 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 					} else if errors.IsAny(err, merr.ErrSegmentNotFound, merr.ErrSegmentNotLoaded) {
 						log.Warn("try to delete data of released segment")
 						return false, nil
+					} else if failedFlag.Load() {
+						log.Warn("try to delete data of unhealthy node", zap.Int64("nodeID", nodeID))
+						return false, nil
 					} else if err != nil {
 						log.Warn("worker failed to delete on segment", zap.Error(err))
 						return true, err
@@ -324,6 +329,10 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 				if err != nil {
 					log.Warn("apply delete for segment failed, marking it offline")
 					offlineSegments.Insert(segmentEntry.SegmentID)
+					if !failedFlag.Load() && !worker.IsHealthy(ctx) {
+						log.Warn("apply delete for segment on unhealthy node, marking all segments offline", zap.Int64("nodeID", nodeID))
+						failedFlag.Store(true)
+					}
 				}
 				return struct{}{}, err
 			})

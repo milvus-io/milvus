@@ -24,6 +24,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -42,19 +44,21 @@ type Worker interface {
 	QueryStreamSegments(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
 	GetStatistics(ctx context.Context, req *querypb.GetStatisticsRequest) (*internalpb.GetStatisticsResponse, error)
 
-	IsHealthy() bool
+	IsHealthy(ctx context.Context) bool
 	Stop()
 }
 
 // remoteWorker wraps grpc QueryNode client as Worker.
 type remoteWorker struct {
+	nodeID int64
 	client types.QueryNodeClient
 }
 
 // NewRemoteWorker creates a grpcWorker.
-func NewRemoteWorker(client types.QueryNodeClient) Worker {
+func NewRemoteWorker(client types.QueryNodeClient, nodeID int64) Worker {
 	return &remoteWorker{
 		client: client,
+		nodeID: nodeID,
 	}
 }
 
@@ -158,7 +162,12 @@ func (w *remoteWorker) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	return w.client.GetStatistics(ctx, req)
 }
 
-func (w *remoteWorker) IsHealthy() bool {
+func (w *remoteWorker) IsHealthy(ctx context.Context) bool {
+	resp, err := w.client.GetComponentStates(ctx, &milvuspb.GetComponentStatesRequest{})
+
+	if err != nil || resp.GetState().GetNodeID() != w.nodeID || resp.GetState().StateCode != commonpb.StateCode_Healthy {
+		return false
+	}
 	return true
 }
 
