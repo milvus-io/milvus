@@ -295,6 +295,7 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 			zap.Int64("segmentID", segmentEntry.SegmentID),
 			zap.Int64("workerID", nodeID),
 		)
+		segmentEntry := segmentEntry
 		delRecord, ok := delRecords[segmentEntry.SegmentID]
 		if ok {
 			future := pool.Submit(func() (struct{}, error) {
