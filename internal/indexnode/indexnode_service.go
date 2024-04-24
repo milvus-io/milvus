@@ -54,6 +54,7 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	}
 	defer i.lifetime.Done()
 	log.Info("IndexNode building index ...",
+		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.Int64("indexID", req.GetIndexID()),
 		zap.String("indexName", req.GetIndexName()),
 		zap.String("indexFilePrefix", req.GetIndexFilePrefix()),
