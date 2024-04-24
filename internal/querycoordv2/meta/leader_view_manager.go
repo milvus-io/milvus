@@ -225,7 +225,6 @@ func (mgr *LeaderViewManager) GetByFilter(filters ...LeaderViewFilter) []*Leader
 }
 
 func (mgr *LeaderViewManager) getByFilter(filters ...LeaderViewFilter) []*LeaderView {
-
 	criterion := &lvCriterion{}
 	for _, filter := range filters {
 		filter.AddFilter(criterion)
