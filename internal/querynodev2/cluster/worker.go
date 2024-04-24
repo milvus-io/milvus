@@ -24,6 +24,8 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -48,13 +50,15 @@ type Worker interface {
 
 // remoteWorker wraps grpc QueryNode client as Worker.
 type remoteWorker struct {
+	nodeID int64
 	client types.QueryNodeClient
 }
 
 // NewRemoteWorker creates a grpcWorker.
-func NewRemoteWorker(client types.QueryNodeClient) Worker {
+func NewRemoteWorker(client types.QueryNodeClient, nodeID int64) Worker {
 	return &remoteWorker{
 		client: client,
+		nodeID: nodeID,
 	}
 }
 
@@ -159,6 +163,11 @@ func (w *remoteWorker) GetStatistics(ctx context.Context, req *querypb.GetStatis
 }
 
 func (w *remoteWorker) IsHealthy() bool {
+	resp, err := w.client.GetComponentStates(context.Background(), &milvuspb.GetComponentStatesRequest{})
+
+	if err != nil || resp.GetState().GetNodeID() != w.nodeID || resp.GetState().StateCode != commonpb.StateCode_Healthy {
+		return false
+	}
 	return true
 }
 

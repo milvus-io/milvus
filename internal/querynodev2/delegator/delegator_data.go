@@ -279,12 +279,19 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 // applyDelete handles delete record and apply them to corresponding workers.
 func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker cluster.Worker, delRecords map[int64]DeleteData, entries []SegmentEntry, scope querypb.DataScope) []int64 {
 	var offlineSegments []int64
+	var unhealthyFlag bool
 	log := sd.getLogger(ctx)
 	for _, segmentEntry := range entries {
 		log := log.With(
 			zap.Int64("segmentID", segmentEntry.SegmentID),
 			zap.Int64("workerID", nodeID),
 		)
+		if unhealthyFlag {
+			log.Warn("apply delete for unhealthy node segment, marking it offline")
+			offlineSegments = append(offlineSegments, segmentEntry.SegmentID)
+			continue
+		}
+
 		delRecord, ok := delRecords[segmentEntry.SegmentID]
 		if ok {
 			log.Debug("delegator plan to applyDelete via worker")
@@ -318,6 +325,11 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 			if err != nil {
 				log.Warn("apply delete for segment failed, marking it offline")
 				offlineSegments = append(offlineSegments, segmentEntry.SegmentID)
+
+				if !worker.IsHealthy() {
+					log.Warn("apply delete for segment on unhealthy node, marking all offline")
+					unhealthyFlag = true
+				}
 			}
 		}
 	}

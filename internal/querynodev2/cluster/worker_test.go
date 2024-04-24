@@ -591,7 +591,7 @@ func TestRemoteWorker(t *testing.T) {
 
 func TestNewRemoteWorker(t *testing.T) {
 	client := mocks.NewMockQueryNodeClient(t)
-	w := NewRemoteWorker(client)
+	w := NewRemoteWorker(client, 1)
 
 	rw, ok := w.(*remoteWorker)
 	assert.True(t, ok)
