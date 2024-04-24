@@ -57,10 +57,10 @@ AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
 
 CStatus
 GetAnalyzeResultMeta(CAnalyze analysis,
-                     char* centroid_path,
+                     char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
-                     void* id_mapping_sizes);
+                     int64_t* id_mapping_sizes);
 
 #ifdef __cplusplus
 };

@@ -215,7 +215,7 @@ AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
 
 CStatus
 GetAnalyzeResultMeta(CAnalyze analyze,
-                     char* centroid_path,
+                     char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,
                      int64_t* id_mapping_sizes) {
@@ -227,7 +227,7 @@ GetAnalyzeResultMeta(CAnalyze analyze,
         auto real_analyze =
             reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
         auto res = real_analyze->GetClusteringResultMeta();
-        centroid_path = res.centroid_path.data();
+        centroid_path[0] = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;
 
         auto& map_ = res.id_mappings;

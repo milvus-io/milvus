@@ -24,7 +24,9 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -151,6 +153,29 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()
+	collInfo, err := dependency.handler.GetCollection(ctx, segments[0].GetCollectionID())
+	if err != nil {
+		log.Ctx(ctx).Info("analyze task get collection info failed", zap.Int64("collectionID",
+		   segments[0].GetCollectionID()), zap.Error(err))
+		at.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return false, false
+	}
+	
+	schema := collInfo.Schema
+	var field *schemapb.FieldSchema
+	
+	for _, f := range schema.Fields {
+		if f.FieldID == t.FieldID {
+		   field = f
+		   break
+		}
+	}
+	dim, err := storage.GetDimFromParams(field.TypeParams)
+	if err != nil {
+		at.SetState(indexpb.JobState_JobStateInit, err.Error())
+		return false, false
+	}
+	req.Dim = int64(dim)
 	resp, err := client.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
 		ClusterID: req.GetClusterID(),
 		TaskID:    req.GetTaskID(),
