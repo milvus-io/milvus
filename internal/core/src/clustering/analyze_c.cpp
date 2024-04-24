@@ -227,7 +227,7 @@ GetAnalyzeResultMeta(CAnalyze analyze,
         auto real_analyze =
             reinterpret_cast<milvus::clustering::KmeansClustering*>(analyze);
         auto res = real_analyze->GetClusteringResultMeta();
-        centroid_path[0] = res.centroid_path.data();
+        *centroid_path = res.centroid_path.data();
         *centroid_file_size = res.centroid_file_size;
 
         auto& map_ = res.id_mappings;
