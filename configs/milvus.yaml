@@ -446,7 +446,7 @@ dataCoord:
     removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
     scanInterval: 168 # gc residual file scan interval in hours
     fileCheckInterval: 86400 # gc of file on object storage check interval in seconds, 1 day by default.
-    missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
+    missingTolerance: 86400 # file meta missing tolerance duration in seconds, default to 24hr(1d)
     dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
   enableActiveStandby: false
   brokerTimeout: 5000 # 5000ms, dataCoord broker rpc timeout

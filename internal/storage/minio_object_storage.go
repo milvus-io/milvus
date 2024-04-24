@@ -217,5 +217,6 @@ func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Contex
 }
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
-	return minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
+	err := minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
+	return checkObjectStorageError(objectName, err)
 }

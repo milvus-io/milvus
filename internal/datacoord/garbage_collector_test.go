@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -128,7 +129,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
-		gc.recycleUnusedBinlogFiles()
+		gc.recycleUnusedBinlogFiles(context.TODO())
 
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
@@ -146,7 +147,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
-		gc.recycleUnusedBinlogFiles()
+		gc.recycleUnusedBinlogFiles(context.TODO())
 
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
@@ -173,7 +174,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			dropTolerance:    time.Hour * 24,
 		})
 		gc.start()
-		gc.recycleUnusedBinlogFiles()
+		gc.recycleUnusedBinlogFiles(context.TODO())
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
@@ -201,7 +202,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
 		})
-		gc.clearEtcd()
+		gc.recycleDroppedSegments(context.TODO())
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:])
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:])
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:])
@@ -219,8 +220,8 @@ func Test_garbageCollector_scan(t *testing.T) {
 			dropTolerance:    0,
 		})
 		gc.start()
-		gc.recycleUnusedBinlogFiles()
-		gc.clearEtcd()
+		gc.recycleUnusedBinlogFiles(context.TODO())
+		gc.recycleDroppedSegments(context.TODO())
 
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
@@ -241,7 +242,7 @@ func Test_garbageCollector_scan(t *testing.T) {
 			dropTolerance:    0,
 		})
 		gc.start()
-		gc.recycleUnusedBinlogFiles()
+		gc.recycleUnusedBinlogFiles(context.TODO())
 
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
 		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
@@ -428,7 +429,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedIndexes()
+		gc.recycleUnusedIndexes(context.TODO())
 	})
 
 	t.Run("fail", func(t *testing.T) {
@@ -439,7 +440,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 		).Return(errors.New("fail"))
 		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedIndexes()
+		gc.recycleUnusedIndexes(context.TODO())
 	})
 }
 
@@ -561,6 +562,9 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 
 func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
+		mockChunkManager := mocks.NewChunkManager(t)
+		mockChunkManager.EXPECT().RootPath().Return("root")
+		mockChunkManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.On("DropSegmentIndex",
 			mock.Anything,
@@ -569,12 +573,17 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedSegIndexes()
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
+			cli: mockChunkManager,
+		})
+		gc.recycleUnusedSegIndexes(context.TODO())
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
+		mockChunkManager := mocks.NewChunkManager(t)
+		mockChunkManager.EXPECT().RootPath().Return("root")
+		mockChunkManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		catalog.On("DropSegmentIndex",
 			mock.Anything,
 			mock.Anything,
@@ -582,8 +591,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedSegIndexes()
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
+			cli: mockChunkManager,
+		})
+		gc.recycleUnusedSegIndexes(context.TODO())
 	})
 }
 
@@ -746,7 +757,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				cli: cm,
 			})
 
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 
 	t.Run("list fail", func(t *testing.T) {
@@ -762,7 +773,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 			GcOption{
 				cli: cm,
 			})
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 
 	t.Run("remove fail", func(t *testing.T) {
@@ -783,7 +794,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 			GcOption{
 				cli: cm,
 			})
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 
 	t.Run("remove with prefix fail", func(t *testing.T) {
@@ -804,7 +815,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 			GcOption{
 				cli: cm,
 			})
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 }
 
@@ -1345,7 +1356,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
-	gc.clearEtcd()
+	gc.recycleDroppedSegments(context.TODO())
 
 	/*
 		A    B
@@ -1401,7 +1412,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	gc.clearEtcd()
+	gc.recycleDroppedSegments(context.TODO())
 	/*
 
 		A: processed prior to C, C is not GCed yet and C is not indexed, A is not GCed in this turn
@@ -1417,7 +1428,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segD = gc.meta.GetSegment(segID + 3)
 	assert.Nil(t, segD)
 
-	gc.clearEtcd()
+	gc.recycleDroppedSegments(context.TODO())
 	/*
 		A: compacted became false due to C is GCed already, A should be GCed since dropTolernace is meet
 		B: compacted became false due to C is GCed already, B should be GCed since dropTolerance is meet
@@ -1428,9 +1439,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segB)
 }
 
-func TestGarbageCollector_removelogs(t *testing.T) {
+func TestGarbageCollector_removeObjectPool(t *testing.T) {
 	paramtable.Init()
-	cm := &mocks.ChunkManager{}
+	cm := mocks.NewChunkManager(t)
 	gc := newGarbageCollector(
 		nil,
 		nil,
@@ -1438,43 +1449,37 @@ func TestGarbageCollector_removelogs(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
-	var logs []*datapb.Binlog
+	logs := make(map[string]struct{})
 	for i := 0; i < 50; i++ {
-		logs = append(logs, &datapb.Binlog{
-			LogPath: "log" + strconv.Itoa(i),
-		})
+		logs[fmt.Sprintf("log%d", i)] = struct{}{}
 	}
 
 	t.Run("success", func(t *testing.T) {
 		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.True(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.NoError(t, b)
 	})
 
-	t.Run("minio not found error", func(t *testing.T) {
-		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(minio.ErrorResponse{
-			Code: "NoSuchKey",
-		})
+	t.Run("oss not found error", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(merr.WrapErrIoKeyNotFound("not found"))
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.True(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.NoError(t, b)
 	})
 
-	t.Run("minio server error", func(t *testing.T) {
-		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(minio.ErrorResponse{
-			Code: "Server Error",
-		})
+	t.Run("oss server error", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(merr.WrapErrIoFailed("server error", errors.New("err")))
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.False(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.Error(t, b)
 	})
 
 	t.Run("other type error", func(t *testing.T) {
 		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("other error"))
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.False(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.Error(t, b)
 	})
 }
 

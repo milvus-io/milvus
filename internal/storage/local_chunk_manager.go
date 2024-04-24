@@ -141,6 +141,13 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 	if recursive {
 		dir := filepath.Dir(prefix)
 		return filepath.Walk(dir, func(filePath string, f os.FileInfo, err error) error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+			if err != nil {
+				return err
+			}
+
 			if strings.HasPrefix(filePath, prefix) && !f.IsDir() {
 				modTime, err := lcm.getModTime(filePath)
 				if err != nil {
@@ -159,6 +166,10 @@ func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string,
 		return err
 	}
 	for _, filePath := range globPaths {
+		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+
 		modTime, err := lcm.getModTime(filePath)
 		if err != nil {
 			return err
