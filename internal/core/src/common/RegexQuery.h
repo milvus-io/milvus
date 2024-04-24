@@ -20,12 +20,7 @@
 
 namespace milvus {
 std::string
-ReplaceUnescapedChars(const std::string& input,
-                      char src,
-                      const std::string& replacement);
-
-std::string
-TranslatePatternMatchToRegex(const std::string& pattern);
+translate_pattern_match_to_regex(const std::string& pattern);
 
 struct PatternMatchTranslator {
     template <typename T>
@@ -39,72 +34,34 @@ struct PatternMatchTranslator {
 template <>
 inline std::string
 PatternMatchTranslator::operator()<std::string>(const std::string& pattern) {
-    return TranslatePatternMatchToRegex(pattern);
+    return translate_pattern_match_to_regex(pattern);
 }
 
 struct RegexMatcher {
-    virtual bool
-    operator()(const std::string& operand) = 0;
-
-    virtual bool
-    operator()(const std::string_view& operand) = 0;
-};
-
-struct RegexMatcherHelper {
-    explicit RegexMatcherHelper(std::shared_ptr<RegexMatcher> matcher)
-        : matcher_(std::move(matcher)) {
-    }
-
     template <typename T>
     inline bool
     operator()(const T& operand) {
         return false;
     }
 
- private:
-    std::shared_ptr<RegexMatcher> matcher_;
-};
-
-template <>
-inline bool
-RegexMatcherHelper::operator()<std::string>(const std::string& operand) {
-    return matcher_->operator()(operand);
-}
-
-template <>
-inline bool
-RegexMatcherHelper::operator()<std::string_view>(
-    const std::string_view& operand) {
-    return matcher_->operator()(operand);
-}
-
-template <bool newline_included = true>
-struct BoostRegexMatcher : public RegexMatcher {
-    bool
-    operator()(const std::string& operand) override {
-        return boost::regex_match(operand, r_);
-    }
-
-    bool
-    operator()(const std::string_view& operand) override {
-        return boost::regex_match(operand.begin(), operand.end(), r_);
-    }
-
-    explicit BoostRegexMatcher(const std::string& pattern) {
-        if constexpr (newline_included) {
-            r_ = boost::regex(pattern, boost::regex::mod_s);
-        } else {
-            r_ = boost::regex(pattern);
-        }
+    explicit RegexMatcher(const std::string& pattern) {
+        r_ = std::regex(pattern);
     }
 
  private:
     // avoid to construct the regex everytime.
-    boost::regex r_;
+    std::regex r_;
 };
 
-inline std::shared_ptr<RegexMatcher>
-CreateDefaultRegexMatcher(const std::string& pattern) {
-    return std::make_shared<BoostRegexMatcher<true>>(pattern);
+template <>
+inline bool
+RegexMatcher::operator()(const std::string& operand) {
+    return std::regex_match(operand, r_);
+}
+
+template <>
+inline bool
+RegexMatcher::operator()(const std::string_view& operand) {
+    return std::regex_match(operand.begin(), operand.end(), r_);
 }
 }  // namespace milvus

@@ -15,21 +15,50 @@
 #include "common/RegexQuery.h"
 
 namespace milvus {
+
+bool
+is_special(char c) {
+    // initial special_bytes_bitmap only once.
+    static std::string special_bytes(R"(\.+*?()|[]{}^$)");
+    static char special_bytes_bitmap[16];
+    static bool _ = []() -> bool {
+        for (char b : special_bytes) {
+            special_bytes_bitmap[b % 16] |= 1 << (b / 16);
+        }
+        return true;
+    };
+    return special_bytes_bitmap[c % 16] & (1 << (c / 16)) != 0;
+}
+
 std::string
-ReplaceUnescapedChars(const std::string& input,
-                      char src,
-                      const std::string& replacement) {
+quote_meta(const std::string& s) {
+    size_t i;
+    size_t l = s.length();
+    std::string r;
+    for (i = 0; i < l; i++) {
+        if (is_special(s[i])) {
+            r += '\\';
+        }
+        r += s[i];
+    }
+    return r;
+}
+
+std::string
+replace_unescaped_chars(const std::string& input,
+                        char src,
+                        const std::string& replacement) {
     std::string result;
-    bool escapeMode = false;
+    bool escape_mode = false;
 
     for (char c : input) {
-        if (escapeMode) {
+        if (escape_mode) {
             result += '\\';
             result += c;
-            escapeMode = false;
+            escape_mode = false;
         } else {
             if (c == '\\') {
-                escapeMode = true;
+                escape_mode = true;
             } else if (c == src) {
                 result += replacement;
             } else {
@@ -42,17 +71,10 @@ ReplaceUnescapedChars(const std::string& input,
 }
 
 std::string
-TranslatePatternMatchToRegex(const std::string& pattern) {
-    std::string regex_pattern;
-#if 0
-        regex_pattern = R"([\.\*\+\?\|\(\)\[\]\{\}\\])";
-#else
-    regex_pattern = R"([\.\*\+\?\|\(\)\[\]\{\}])";
-#endif
-    std::string regex =
-        std::regex_replace(pattern, std::regex(regex_pattern), R"(\$&)");
-    regex = ReplaceUnescapedChars(regex, '%', ".*");
-    regex = ReplaceUnescapedChars(regex, '_', ".");
-    return regex;
+translate_pattern_match_to_regex(const std::string& pattern) {
+    auto r = quote_meta(pattern);
+    r = replace_unescaped_chars(r, '%', "[\\s\\S]*");
+    r = replace_unescaped_chars(r, '_', "[\\s\\S]");
+    return r;
 }
 }  // namespace milvus

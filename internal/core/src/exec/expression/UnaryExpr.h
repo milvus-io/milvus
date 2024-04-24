@@ -45,7 +45,7 @@ struct UnaryElementFuncForMatch {
                TargetBitmapView res) {
         PatternMatchTranslator translator;
         auto regex_pattern = translator(val);
-        RegexMatcherHelper matcher(CreateDefaultRegexMatcher(regex_pattern));
+        RegexMatcher matcher(regex_pattern);
         for (int i = 0; i < size; ++i) {
             res[i] = matcher(src[i]);
         }
@@ -208,8 +208,7 @@ struct UnaryIndexFuncForMatch {
         } else {
             PatternMatchTranslator translator;
             auto regex_pattern = translator(val);
-            RegexMatcherHelper matcher(
-                CreateDefaultRegexMatcher(regex_pattern));
+            RegexMatcher matcher(regex_pattern);
 
             if (index->SupportRegexQuery()) {
                 return index->RegexQuery(regex_pattern);

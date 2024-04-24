@@ -336,8 +336,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
             case proto::plan::Match: {
                 PatternMatchTranslator translator;
                 auto regex_pattern = translator(val);
-                RegexMatcherHelper matcher(
-                    CreateDefaultRegexMatcher(regex_pattern));
+                RegexMatcher matcher(regex_pattern);
                 for (size_t i = 0; i < size; ++i) {
                     if constexpr (std::is_same_v<GetType, proto::plan::Array>) {
                         res[i] = false;

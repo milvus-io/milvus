@@ -15,32 +15,32 @@
 
 TEST(TranslatePatternMatchToRegexTest, SimplePatternWithPercent) {
     std::string pattern = "abc%";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, "abc.*");
+    std::string result = milvus::translate_pattern_match_to_regex(pattern);
+    EXPECT_EQ(result, "abc[\\s\\S]*");
 }
 
 TEST(TranslatePatternMatchToRegexTest, PatternWithUnderscore) {
     std::string pattern = "a_c";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, "a.c");
+    std::string result = milvus::translate_pattern_match_to_regex(pattern);
+    EXPECT_EQ(result, "a[\\s\\S]c");
 }
 
 TEST(TranslatePatternMatchToRegexTest, PatternWithSpecialCharacters) {
     std::string pattern = "a\\%b\\_c";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
+    std::string result = milvus::translate_pattern_match_to_regex(pattern);
     EXPECT_EQ(result, "a\\%b\\_c");
 }
 
 TEST(TranslatePatternMatchToRegexTest,
      PatternWithMultiplePercentAndUnderscore) {
     std::string pattern = "%a_b%";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
-    EXPECT_EQ(result, ".*a.b.*");
+    std::string result = milvus::translate_pattern_match_to_regex(pattern);
+    EXPECT_EQ(result, "[\\s\\S]*a[\\s\\S]b[\\s\\S]*");
 }
 
 TEST(TranslatePatternMatchToRegexTest, PatternWithRegexChar) {
     std::string pattern = "abc*def.ghi+";
-    std::string result = milvus::TranslatePatternMatchToRegex(pattern);
+    std::string result = milvus::translate_pattern_match_to_regex(pattern);
     EXPECT_EQ(result, "abc\\*def\\.ghi\\+");
 }
 
@@ -63,13 +63,13 @@ TEST(PatternMatchTranslatorTest, StringTypeTest) {
 
     EXPECT_EQ(translator(pattern1), "abc");
     EXPECT_EQ(translator(pattern2), "xyz");
-    EXPECT_EQ(translator(pattern3), ".*a.b.*");
+    EXPECT_EQ(translator(pattern3), "[\\s\\S]*a[\\s\\S]b[\\s\\S]*");
 }
 
 TEST(RegexMatcherTest, DefaultBehaviorTest) {
     using namespace milvus;
     std::string pattern("Hello.*");
-    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
+    RegexMatcher matcher(pattern);
 
     int operand1 = 123;
     double operand2 = 3.14;
@@ -83,7 +83,7 @@ TEST(RegexMatcherTest, DefaultBehaviorTest) {
 TEST(RegexMatcherTest, StringMatchTest) {
     using namespace milvus;
     std::string pattern("Hello.*");
-    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
+    RegexMatcher matcher(pattern);
 
     std::string str1 = "Hello, World!";
     std::string str2 = "Hi there!";
@@ -97,7 +97,7 @@ TEST(RegexMatcherTest, StringMatchTest) {
 TEST(RegexMatcherTest, StringViewMatchTest) {
     using namespace milvus;
     std::string pattern("Hello.*");
-    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
+    RegexMatcher matcher(pattern);
 
     std::string_view str1 = "Hello, World!";
     std::string_view str2 = "Hi there!";
@@ -111,7 +111,17 @@ TEST(RegexMatcherTest, StringViewMatchTest) {
 TEST(RegexMatcherTest, NewLine) {
     using namespace milvus;
     std::string pattern("Hello.*");
-    RegexMatcherHelper matcher(CreateDefaultRegexMatcher(pattern));
+    RegexMatcher matcher(pattern);
+
+    EXPECT_FALSE(matcher(std::string("Hello\n")));
+}
+
+TEST(RegexMatcherTest, PatternMatchWithNewLine) {
+    using namespace milvus;
+    std::string pattern("Hello%");
+    PatternMatchTranslator translator;
+    auto rp = translator(pattern);
+    RegexMatcher matcher(rp);
 
     EXPECT_TRUE(matcher(std::string("Hello\n")));
 }
