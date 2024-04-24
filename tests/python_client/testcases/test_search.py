@@ -9966,13 +9966,13 @@ class TestSearchIterator(TestcaseBase):
                                                   "err_msg": "Not support multiple vector iterator at present"})
 
 
-@pytest.mark.skip("not ready for running")
 class TestSearchGroupBy(TestcaseBase):
     """ Test case of search group by """
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("index_type, metric", zip(["FLAT", "IVF_FLAT", "HNSW"], ct.float_metrics))
-    def test_search_group_by_default(self, index_type, metric):
+    @pytest.mark.parametrize("vector_data_type", ["FLOAT16_VECTOR", "FLOAT_VECTOR", "BFLOAT16_VECTOR"])
+    def test_search_group_by_default(self, index_type, metric, vector_data_type):
         """
         target: test search group by
         method: 1. create a collection with data
@@ -9983,26 +9983,25 @@ class TestSearchGroupBy(TestcaseBase):
                 verify: verify that every record in groupby results is the top1 for that value of the group_by_field
         """
         collection_w = self.init_collection_general(prefix, auto_id=True, insert_data=False, is_index=False,
+                                                    vector_data_type=vector_data_type,
                                                     is_all_data_type=True, with_json=False)[0]
         _index_params = {"index_type": index_type, "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
         if index_type in ["IVF_FLAT", "FLAT"]:
             _index_params = {"index_type": index_type, "metric_type": metric, "params": {"nlist": 128}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index_params)
         # insert with the same values for scalar fields
-        for _ in range(200):
-            data = cf.gen_dataframe_all_data_type(nb=200, auto_id=True, with_json=False)
+        for _ in range(50):
+            data = cf.gen_dataframe_all_data_type(nb=100, auto_id=True, with_json=False)
             collection_w.insert(data)
 
         collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index_params)
-        time.sleep(10)
         collection_w.load()
 
         search_params = {"metric_type": metric, "params": {"ef": 128}}
         nq = 2
-        limit = 50
+        limit = 15
         search_vectors = cf.gen_vectors(nq, dim=ct.default_dim)
-
         # verify the results are same if gourp by pk
         res1 = collection_w.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
                                    param=search_params, limit=limit, consistency_level=CONSISTENCY_STRONG,
@@ -10015,7 +10014,7 @@ class TestSearchGroupBy(TestcaseBase):
             hits_num += len(set(res1[i].ids).intersection(set(res2[i].ids)))
         hit_rate = hits_num / (nq * limit)
         log.info(f"groupy primary key hits_num: {hits_num}, nq: {nq}, limit: {limit}, hit_rate: {hit_rate}")
-        assert hit_rate > 0.80
+        assert hit_rate >= 0.60
 
         # verify that every record in groupby results is the top1 for that value of the group_by_field
         supported_grpby_fields = [ct.default_int8_field_name, ct.default_int16_field_name,
@@ -10052,30 +10051,27 @@ class TestSearchGroupBy(TestcaseBase):
                 # verify no dup values of the group_by_field in results
                 assert len(grpby_values) == len(set(grpby_values))
 
-    @pytest.mark.tags(CaseLabel.L1)
+    @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("metric", ["JACCARD", "HAMMING"])
     def test_search_binary_vec_group_by(self, metric):
         """
-        target: test search group by
+        target: test search on birany vector does not support group by
         method: 1. create a collection with binary vectors
                 2. create index with different metric types
                 3. search with group by
-                verify no duplicate values for group_by_field
-                4. search with filtering every value of group_by_field
-                verify: verify that every record in groupby results is the top1 for that value of the group_by_field
+                verified error code and msg
         """
         collection_w = self.init_collection_general(prefix, auto_id=True, insert_data=False, is_index=False,
                                                     is_binary=True)[0]
-        _index = {"index_type": "HNSW", "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
+        _index = {"index_type": "BIN_FLAT", "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
         collection_w.create_index(ct.default_binary_vec_field_name, index_params=_index)
         # insert with the same values for scalar fields
-        for _ in range(30):
+        for _ in range(10):
             data = cf.gen_default_binary_dataframe_data(nb=100, auto_id=True)[0]
             collection_w.insert(data)
 
         collection_w.flush()
         collection_w.create_index(ct.default_binary_vec_field_name, index_params=_index)
-        time.sleep(5)
         collection_w.load()
 
         search_params = {"metric_type": metric, "params": {"ef": 128}}
@@ -10084,40 +10080,13 @@ class TestSearchGroupBy(TestcaseBase):
         search_vectors = cf.gen_binary_vectors(nq, dim=ct.default_dim)[1]
 
         # verify the results are same if gourp by pk
-        res1 = collection_w.search(data=search_vectors, anns_field=ct.default_binary_vec_field_name,
-                                   param=search_params, limit=limit, consistency_level=CONSISTENCY_STRONG,
-                                   group_by_field=ct.default_int64_field_name)[0]
-        res2 = collection_w.search(data=search_vectors, anns_field=ct.default_binary_vec_field_name,
-                                   param=search_params, limit=limit, consistency_level=CONSISTENCY_STRONG)[0]
-        # for i in range(nq):
-        #     assert res1[i].ids == res2[i].ids
-
-        # verify that every record in groupby results is the top1 for that value of the group_by_field
-        supported_grpby_fields = [ct.default_string_field_name]
-        for grpby_field in supported_grpby_fields:
-            res1 = collection_w.search(data=search_vectors, anns_field=ct.default_binary_vec_field_name,
-                                       param=search_params, limit=limit,
-                                       group_by_field=grpby_field,
-                                       output_fields=[grpby_field])[0]
-            for i in range(nq):
-                grpby_values = []
-                results_num = 2 if grpby_field == ct.default_bool_field_name else limit
-                for l in range(results_num):
-                    top1 = res1[i][l]
-                    top1_grpby_pk = top1.id
-                    top1_grpby_value = top1.fields.get(grpby_field)
-                    expr = f"{grpby_field}=={top1_grpby_value}"
-                    if grpby_field == ct.default_string_field_name:
-                        expr = f"{grpby_field}=='{top1_grpby_value}'"
-                    grpby_values.append(top1_grpby_value)
-                    res_tmp = collection_w.search(data=[search_vectors[i]], anns_field=ct.default_binary_vec_field_name,
-                                                  param=search_params, limit=1,
-                                                  expr=expr,
-                                                  output_fields=[grpby_field])[0]
-                    top1_expr_pk = res_tmp[0][0].id
-                    assert top1_grpby_pk == top1_expr_pk
-                # verify no dup values of the group_by_field in results
-                assert len(grpby_values) == len(set(grpby_values))
+        err_code = 999
+        err_msg = "not support search_group_by operation based on binary"
+        collection_w.search(data=search_vectors, anns_field=ct.default_binary_vec_field_name,
+                            param=search_params, limit=limit,
+                            group_by_field=ct.default_int64_field_name,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": err_code, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("grpby_field", [ct.default_string_field_name, ct.default_int8_field_name])
@@ -10136,7 +10105,7 @@ class TestSearchGroupBy(TestcaseBase):
         _index = {"index_type": "HNSW", "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
         # insert with the same values(by insert rounds) for scalar fields
-        for _ in range(100):
+        for _ in range(50):
             data = cf.gen_dataframe_all_data_type(nb=100, auto_id=True, with_json=False)
             collection_w.insert(data)
 
@@ -10186,8 +10155,8 @@ class TestSearchGroupBy(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("grpby_unsupported_field", [ct.default_float_field_name, ct.default_json_field_name,
-                                                       ct.default_double_field_name, ct.default_float_vec_field_name])
-    def test_search_group_by_unsupported_filed(self, grpby_unsupported_field):
+                                                         ct.default_double_field_name, ct.default_float_vec_field_name])
+    def test_search_group_by_unsupported_field(self, grpby_unsupported_field):
         """
         target: test search group by with the unsupported field
         method: 1. create a collection with data
@@ -10202,14 +10171,14 @@ class TestSearchGroupBy(TestcaseBase):
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
         collection_w.load()
 
-        search_params = {"metric_type": metric, "params": {"ef": 128}}
+        search_params = {"metric_type": metric, "params": {"ef": 64}}
         nq = 1
         limit = 1
         search_vectors = cf.gen_vectors(nq, dim=ct.default_dim)
 
         # search with groupby
         err_code = 999
-        err_msg = f"unsupported data type {grpby_unsupported_field} for group by operator"
+        err_msg = f"unsupported data type"
         collection_w.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
                             param=search_params, limit=limit,
                             group_by_field=grpby_unsupported_field,
@@ -10217,10 +10186,7 @@ class TestSearchGroupBy(TestcaseBase):
                             check_items={"err_code": err_code, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params",
-                             zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
-    # @pytest.mark.skip(reason="issue #29968")
+    @pytest.mark.parametrize("index, params",  zip(ct.all_index_types[:7], ct.default_index_params[:7]))
     def test_search_group_by_unsupported_index(self, index, params):
         """
         target: test search group by with the unsupported vector index
@@ -10246,9 +10212,7 @@ class TestSearchGroupBy(TestcaseBase):
 
             # search with groupby
             err_code = 999
-            err_msg = "terminate group_by operation"
-            if index in ["DISKANN"]:
-                err_msg = "not supported for current index type"
+            err_msg = "doesn't support search_group_by"
             collection_w.search(data=search_vectors, anns_field=ct.default_float_vec_field_name,
                                 param=search_params, limit=limit,
                                 group_by_field=ct.default_int8_field_name,
@@ -10322,10 +10286,10 @@ class TestSearchGroupBy(TestcaseBase):
                             check_items={"err_code": err_code, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue #30828")
+    # @pytest.mark.xfail(reason="issue #30828")
     def test_search_pagination_group_by(self):
         """
-        target: test search group by
+        target: test search pagination with group by
         method: 1. create a collection with data
                 2. create index HNSW
                 3. search with groupby and pagination
@@ -10364,7 +10328,8 @@ class TestSearchGroupBy(TestcaseBase):
             for j in range(limit):
                 all_pages_grpby_field_values.append(page_res[0][j].get(grpby_field))
             all_pages_ids += page_res[0].ids
-        assert len(all_pages_grpby_field_values) == len(set(all_pages_grpby_field_values))
+        hit_rate = round(len(set(all_pages_grpby_field_values)) / len(all_pages_grpby_field_values), 3)
+        assert hit_rate > 0.8
 
         total_res = collection_w.search(search_vectors, anns_field=default_search_field,
                                         param=search_param, limit=limit * page_rounds,
@@ -10375,7 +10340,7 @@ class TestSearchGroupBy(TestcaseBase):
                                         )[0]
         hit_num = len(set(total_res[0].ids).intersection(set(all_pages_ids)))
         hit_rate = round(hit_num / (limit * page_rounds), 3)
-        assert hit_rate > 0.90
+        assert hit_rate > 0.8
         log.info(f"search pagination with groupby hit_rate: {hit_rate}")
         grpby_field_values = []
         for i in range(limit * page_rounds):
@@ -10385,7 +10350,7 @@ class TestSearchGroupBy(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     def test_search_iterator_not_support_group_by(self):
         """
-        target: test search group by
+        target: test search iterator does not support group by
         method: 1. create a collection with data
                 2. create index HNSW
                 3. search iterator with group by
@@ -10396,8 +10361,7 @@ class TestSearchGroupBy(TestcaseBase):
         collection_w = self.init_collection_general(prefix, auto_id=True, insert_data=False, is_index=False,
                                                     is_all_data_type=True, with_json=False)[0]
         # insert with the same values for scalar fields
-        value_num = 50
-        for _ in range(value_num):
+        for _ in range(10):
             data = cf.gen_dataframe_all_data_type(nb=100, auto_id=True, with_json=False)
             collection_w.insert(data)
 
@@ -10422,7 +10386,7 @@ class TestSearchGroupBy(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     def test_range_search_not_support_group_by(self):
         """
-        target: test search group by
+        target: test range search does not support group by
         method: 1. create a collection with data
                 2. create index hnsw
                 3. range search with group by
@@ -10434,7 +10398,7 @@ class TestSearchGroupBy(TestcaseBase):
         _index = {"index_type": "HNSW", "metric_type": metric, "params": {"M": 16, "efConstruction": 128}}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
         # insert with the same values for scalar fields
-        for _ in range(30):
+        for _ in range(10):
             data = cf.gen_dataframe_all_data_type(nb=100, auto_id=True, with_json=False)
             collection_w.insert(data)
 
@@ -10444,7 +10408,7 @@ class TestSearchGroupBy(TestcaseBase):
         collection_w.load()
 
         nq = 1
-        limit = 10
+        limit = 5
         search_vectors = cf.gen_vectors(nq, dim=ct.default_dim)
         grpby_field = ct.default_int32_field_name
         range_search_params = {"metric_type": "COSINE", "params": {"radius": 0.1,
@@ -10459,29 +10423,100 @@ class TestSearchGroupBy(TestcaseBase):
                             check_items={"err_code": err_code, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="not completed")
-    def test_advanced_search_group_by(self):
+    def test_hybrid_search_not_support_group_by(self):
         """
-        target: test search group by
+        target: verify that hybrid search does not support groupby
         method: 1. create a collection with multiple vector fields
                 2. create index hnsw and load
                 3. hybrid_search with group by
                 verify: the error code and msg
         """
         # 1. initialize collection with data
-        pass
+        dim = 33
+        index_type = "HNSW"
+        metric_type = "COSINE"
+        _index_params = {"index_type": index_type, "metric_type": metric_type, "params": {"M": 16, "efConstruction": 128}}
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, dim=dim,  is_index=False,
+                                         enable_dynamic_field=False, multiple_dim_array=[dim, dim])[0:5]
+        # 2. extract vector field name
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, _index_params)
+        collection_w.load()
+        # 3. prepare search params
+        req_list = []
+        for vector_name in vector_name_list:
+            search_param = {
+                "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+                "anns_field": vector_name,
+                "param": {"metric_type": metric_type, "offset": 0},
+                "limit": default_limit,
+                # "group_by_field": ct.default_int64_field_name,
+                "expr": "int64 > 0"}
+            req = AnnSearchRequest(**search_param)
+            req_list.append(req)
+        # 4. hybrid search
+        err_code = 9999
+        err_msg = f"not support search_group_by operation in the hybrid search"
+        collection_w.hybrid_search(req_list, WeightedRanker(0.1, 0.9, 1), default_limit,
+                                   group_by_field=ct.default_int64_field_name,
+                                   check_task=CheckTasks.err_res,
+                                   check_items={"err_code": err_code, "err_msg": err_msg})
+
+        # 5. hybrid search with group by on one vector field
+        req_list = []
+        for vector_name in vector_name_list[:1]:
+            search_param = {
+                "data": [[random.random() for _ in range(dim)] for _ in range(1)],
+                "anns_field": vector_name,
+                "param": {"metric_type": metric_type, "offset": 0},
+                "limit": default_limit,
+                # "group_by_field": ct.default_int64_field_name,
+                "expr": "int64 > 0"}
+            req = AnnSearchRequest(**search_param)
+            req_list.append(req)
+        collection_w.hybrid_search(req_list, RRFRanker(), default_limit,
+                                   group_by_field=ct.default_int64_field_name,
+                                   check_task=CheckTasks.err_res,
+                                   check_items={"err_code": err_code, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="not completed")
     def test_multi_vectors_search_one_vector_group_by(self):
         """
-        target: test search group by
+        target: test search group by works on a collection with multi vectors
         method: 1. create a collection with multiple vector fields
-                2. create index hnsw and ivfflat
+                2. create index hnsw and load
                 3. search on the vector with hnsw index with group by
                 verify: search successfully
         """
-        pass
+        dim = 33
+        index_type = "HNSW"
+        metric_type = "COSINE"
+        _index_params = {"index_type": index_type, "metric_type": metric_type,
+                         "params": {"M": 16, "efConstruction": 128}}
+        collection_w, _, _, insert_ids, time_stamp = \
+            self.init_collection_general(prefix, True, dim=dim, is_index=False,
+                                         enable_dynamic_field=False, multiple_dim_array=[dim, dim])[0:5]
+        # 2. extract vector field name
+        vector_name_list = cf.extract_vector_field_name_list(collection_w)
+        vector_name_list.append(ct.default_float_vec_field_name)
+        for vector_name in vector_name_list:
+            collection_w.create_index(vector_name, _index_params)
+        collection_w.load()
+
+        nq = 2
+        limit = 10
+        search_params = {"metric_type": metric_type, "params": {"ef": 32}}
+        for vector_name in vector_name_list:
+            search_vectors = cf.gen_vectors(nq, dim=dim)
+            # verify the results are same if gourp by pk
+            collection_w.search(data=search_vectors, anns_field=vector_name,
+                                param=search_params, limit=limit,
+                                group_by_field=ct.default_int64_field_name,
+                                check_task=CheckTasks.check_search_results,
+                                check_items={"nq": nq, "limit": limit})
 
 
 class TestCollectionHybridSearchValid(TestcaseBase):

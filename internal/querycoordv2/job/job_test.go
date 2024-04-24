@@ -59,16 +59,17 @@ type JobSuite struct {
 	loadTypes   map[int64]querypb.LoadType
 
 	// Dependencies
-	kv                kv.MetaKv
-	store             metastore.QueryCoordCatalog
-	dist              *meta.DistributionManager
-	meta              *meta.Meta
-	cluster           *session.MockCluster
-	targetMgr         *meta.TargetManager
-	targetObserver    *observers.TargetObserver
-	broker            *meta.MockBroker
-	nodeMgr           *session.NodeManager
-	checkerController *checkers.CheckerController
+	kv                 kv.MetaKv
+	store              metastore.QueryCoordCatalog
+	dist               *meta.DistributionManager
+	meta               *meta.Meta
+	cluster            *session.MockCluster
+	targetMgr          *meta.TargetManager
+	targetObserver     *observers.TargetObserver
+	collectionObserver *observers.CollectionObserver
+	broker             *meta.MockBroker
+	nodeMgr            *session.NodeManager
+	checkerController  *checkers.CheckerController
 
 	// Test objects
 	scheduler *Scheduler
@@ -193,6 +194,13 @@ func (suite *JobSuite) SetupTest() {
 	suite.NoError(err)
 
 	suite.checkerController = &checkers.CheckerController{}
+	suite.collectionObserver = observers.NewCollectionObserver(
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.targetObserver,
+		suite.checkerController,
+	)
 }
 
 func (suite *JobSuite) TearDownTest() {
@@ -232,6 +240,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -259,6 +268,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -284,6 +294,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -311,6 +322,7 @@ func (suite *JobSuite) TestLoadCollection() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -337,6 +349,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
+		suite.collectionObserver,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -358,6 +371,7 @@ func (suite *JobSuite) TestLoadCollection() {
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
+		suite.collectionObserver,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -387,6 +401,7 @@ func (suite *JobSuite) TestLoadCollectionWithReplicas() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -419,6 +434,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -449,6 +465,7 @@ func (suite *JobSuite) TestLoadCollectionWithDiffIndex() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -480,6 +497,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -510,6 +528,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -537,6 +556,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -564,6 +584,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -590,6 +611,7 @@ func (suite *JobSuite) TestLoadPartition() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -617,6 +639,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
+		suite.collectionObserver,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -639,6 +662,7 @@ func (suite *JobSuite) TestLoadPartition() {
 		suite.cluster,
 		suite.targetMgr,
 		suite.targetObserver,
+		suite.collectionObserver,
 		suite.nodeMgr,
 	)
 	suite.scheduler.Add(job)
@@ -666,6 +690,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		return job
@@ -684,6 +709,7 @@ func (suite *JobSuite) TestDynamicLoad() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		return job
@@ -783,6 +809,7 @@ func (suite *JobSuite) TestLoadPartitionWithReplicas() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -816,6 +843,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -848,6 +876,7 @@ func (suite *JobSuite) TestLoadPartitionWithDiffIndex() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -875,6 +904,7 @@ func (suite *JobSuite) TestReleaseCollection() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+
 			suite.checkerController,
 		)
 		suite.scheduler.Add(job)
@@ -1120,6 +1150,7 @@ func (suite *JobSuite) TestLoadCollectionStoreFailed() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -1164,6 +1195,7 @@ func (suite *JobSuite) TestLoadPartitionStoreFailed() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -1191,6 +1223,7 @@ func (suite *JobSuite) TestLoadCreateReplicaFailed() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(job)
@@ -1219,6 +1252,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(loadCollectionJob)
@@ -1239,6 +1273,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(loadPartitionJob)
@@ -1265,6 +1300,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(loadCollectionJob)
@@ -1284,6 +1320,7 @@ func (suite *JobSuite) TestCallLoadPartitionFailed() {
 			suite.cluster,
 			suite.targetMgr,
 			suite.targetObserver,
+			suite.collectionObserver,
 			suite.nodeMgr,
 		)
 		suite.scheduler.Add(loadPartitionJob)
@@ -1426,6 +1463,7 @@ func (suite *JobSuite) loadAll() {
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
+				suite.collectionObserver,
 				suite.nodeMgr,
 			)
 			suite.scheduler.Add(job)
@@ -1450,6 +1488,7 @@ func (suite *JobSuite) loadAll() {
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
+				suite.collectionObserver,
 				suite.nodeMgr,
 			)
 			suite.scheduler.Add(job)

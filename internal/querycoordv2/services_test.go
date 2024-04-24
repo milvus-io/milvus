@@ -69,18 +69,19 @@ type ServiceSuite struct {
 	nodes         []int64
 
 	// Dependencies
-	kv             kv.MetaKv
-	store          metastore.QueryCoordCatalog
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	targetMgr      *meta.TargetManager
-	broker         *meta.MockBroker
-	targetObserver *observers.TargetObserver
-	cluster        *session.MockCluster
-	nodeMgr        *session.NodeManager
-	jobScheduler   *job.Scheduler
-	taskScheduler  *task.MockScheduler
-	balancer       balance.Balance
+	kv                 kv.MetaKv
+	store              metastore.QueryCoordCatalog
+	dist               *meta.DistributionManager
+	meta               *meta.Meta
+	targetMgr          *meta.TargetManager
+	broker             *meta.MockBroker
+	targetObserver     *observers.TargetObserver
+	collectionObserver *observers.CollectionObserver
+	cluster            *session.MockCluster
+	nodeMgr            *session.NodeManager
+	jobScheduler       *job.Scheduler
+	taskScheduler      *task.MockScheduler
+	balancer           balance.Balance
 
 	distMgr        *meta.DistributionManager
 	distController *dist.MockController
@@ -177,6 +178,15 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.distMgr = meta.NewDistributionManager()
 	suite.distController = dist.NewMockController(suite.T())
 
+	suite.collectionObserver = observers.NewCollectionObserver(
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.targetObserver,
+		&checkers.CheckerController{},
+	)
+	suite.collectionObserver.Start()
+
 	suite.server = &Server{
 		kv:                  suite.kv,
 		store:               suite.store,
@@ -187,6 +197,7 @@ func (suite *ServiceSuite) SetupTest() {
 		targetMgr:           suite.targetMgr,
 		broker:              suite.broker,
 		targetObserver:      suite.targetObserver,
+		collectionObserver:  suite.collectionObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
@@ -195,13 +206,6 @@ func (suite *ServiceSuite) SetupTest() {
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 	}
-	suite.server.collectionObserver = observers.NewCollectionObserver(
-		suite.server.dist,
-		suite.server.meta,
-		suite.server.targetMgr,
-		suite.targetObserver,
-		&checkers.CheckerController{},
-	)
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 }
@@ -1734,6 +1738,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
+				suite.collectionObserver,
 				suite.nodeMgr,
 			)
 			suite.jobScheduler.Add(job)
@@ -1758,6 +1763,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
+				suite.collectionObserver,
 				suite.nodeMgr,
 			)
 			suite.jobScheduler.Add(job)
