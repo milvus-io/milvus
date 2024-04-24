@@ -26,7 +26,11 @@ set(COMMON_SRC
         RegexQuery.cpp
         )
 
-add_library(milvus_common SHARED ${COMMON_SRC})
+if(APPLE)
+    add_library(milvus_common STATIC ${COMMON_SRC})
+else()
+    add_library(milvus_common SHARED ${COMMON_SRC})
+endif()
 
 target_link_libraries(milvus_common
         milvus_bitset

@@ -63,7 +63,11 @@ if(USE_OPENDAL)
     list(APPEND STORAGE_FILES OpenDALChunkManager.cpp)
 endif()
 
-add_library(milvus_storage SHARED ${STORAGE_FILES})
+if(APPLE)
+    add_library(milvus_storage STATIC ${STORAGE_FILES})
+else()
+    add_library(milvus_storage SHARED ${STORAGE_FILES})
+endif()
 
 if (DEFINED AZURE_BUILD_DIR)
     target_link_libraries(milvus_storage PUBLIC

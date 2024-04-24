@@ -22,7 +22,12 @@ set(INDEX_FILES
         )
 
 milvus_add_pkg_config("milvus_index")
-add_library(milvus_index SHARED ${INDEX_FILES})
+
+if(APPLE)
+    add_library(milvus_index STATIC ${INDEX_FILES})
+else()
+    add_library(milvus_index SHARED ${INDEX_FILES})
+endif()
 
 target_link_libraries(milvus_index milvus_storage milvus-storage tantivy_binding)
 

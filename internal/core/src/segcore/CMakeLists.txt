@@ -37,7 +37,12 @@ set(SEGCORE_FILES
         TimestampIndex.cpp
         Utils.cpp
         ConcurrentVector.cpp)
-add_library(milvus_segcore SHARED ${SEGCORE_FILES})
+
+if(APPLE)
+    add_library(milvus_segcore STATIC ${SEGCORE_FILES})
+else()
+    add_library(milvus_segcore SHARED ${SEGCORE_FILES})
+endif()
 
 target_link_libraries(milvus_segcore milvus_query milvus_bitset milvus_exec ${OpenMP_CXX_FLAGS} milvus-storage)
 
