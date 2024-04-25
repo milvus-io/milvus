@@ -26,3 +26,27 @@ func TestJoin(t *testing.T) {
 	assert.Equal(t, "a/b", join("a", "b"))
 	assert.Equal(t, "a/b", join("a/", "b"))
 }
+
+func TestGetSdkTypeByUserAgent(t *testing.T) {
+	_, ok := getSdkTypeByUserAgent([]string{})
+	assert.False(t, ok)
+
+	sdk, ok := getSdkTypeByUserAgent([]string{"grpc-node-js.test"})
+	assert.True(t, ok)
+	assert.Equal(t, "nodejs", sdk)
+
+	sdk, ok = getSdkTypeByUserAgent([]string{"grpc-python.test"})
+	assert.True(t, ok)
+	assert.Equal(t, "Python", sdk)
+
+	sdk, ok = getSdkTypeByUserAgent([]string{"grpc-go.test"})
+	assert.True(t, ok)
+	assert.Equal(t, "Golang", sdk)
+
+	sdk, ok = getSdkTypeByUserAgent([]string{"grpc-java.test"})
+	assert.True(t, ok)
+	assert.Equal(t, "Java", sdk)
+
+	_, ok = getSdkTypeByUserAgent([]string{"invalid_type"})
+	assert.False(t, ok)
+}
