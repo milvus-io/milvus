@@ -434,6 +434,7 @@ dataCoord:
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
+    scanInterval: 168 #gc residual file scan interval in hours
     missingTolerance: 3600 # file meta missing tolerance duration in seconds, 3600
     dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 10800
   enableActiveStandby: false

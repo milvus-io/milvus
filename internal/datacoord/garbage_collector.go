@@ -50,6 +50,7 @@ type GcOption struct {
 	checkInterval    time.Duration        // each interval
 	missingTolerance time.Duration        // key missing in meta tolerance time
 	dropTolerance    time.Duration        // dropped segment related key tolerance time
+	scanInterval     time.Duration        // interval for scan residue for interupted log wrttien
 
 	removeLogPool *conc.Pool[struct{}]
 }
@@ -76,8 +77,12 @@ type gcCmd struct {
 
 // newGarbageCollector create garbage collector with meta and option
 func newGarbageCollector(meta *meta, handler Handler, opt GcOption) *garbageCollector {
-	log.Info("GC with option", zap.Bool("enabled", opt.enabled), zap.Duration("interval", opt.checkInterval),
-		zap.Duration("missingTolerance", opt.missingTolerance), zap.Duration("dropTolerance", opt.dropTolerance))
+	log.Info("GC with option",
+		zap.Bool("enabled", opt.enabled),
+		zap.Duration("interval", opt.checkInterval),
+		zap.Duration("scanInterval", opt.scanInterval),
+		zap.Duration("missingTolerance", opt.missingTolerance),
+		zap.Duration("dropTolerance", opt.dropTolerance))
 	opt.removeLogPool = conc.NewPool[struct{}](Params.DataCoordCfg.GCRemoveConcurrent.GetAsInt(), conc.WithExpiryDuration(time.Minute))
 	return &garbageCollector{
 		meta:    meta,
@@ -144,6 +149,8 @@ func (gc *garbageCollector) work() {
 	defer gc.wg.Done()
 	ticker := time.NewTicker(gc.option.checkInterval)
 	defer ticker.Stop()
+	scanTicker := time.NewTicker(gc.option.scanInterval)
+	defer ticker.Stop()
 	for {
 		select {
 		case <-ticker.C:
@@ -154,8 +161,10 @@ func (gc *garbageCollector) work() {
 			gc.clearEtcd()
 			gc.recycleUnusedIndexes()
 			gc.recycleUnusedSegIndexes()
-			gc.scan()
 			gc.recycleUnusedIndexFiles()
+		case <-scanTicker.C:
+			log.Info("Garbage collector start to scan interrupted write residue")
+			gc.scan()
 		case cmd := <-gc.cmdCh:
 			switch cmd.cmdType {
 			case datapb.GcCommand_Pause:

@@ -2344,6 +2344,7 @@ type dataCoordConfig struct {
 	GCMissingTolerance      ParamItem `refreshable:"false"`
 	GCDropTolerance         ParamItem `refreshable:"false"`
 	GCRemoveConcurrent      ParamItem `refreshable:"false"`
+	GCScanIntervalInHour    ParamItem `refreshable:"false"`
 	EnableActiveStandby     ParamItem `refreshable:"false"`
 
 	BindIndexNodeMode          ParamItem `refreshable:"false"`
@@ -2639,6 +2640,15 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.GCInterval.Init(base.mgr)
+
+	p.GCScanIntervalInHour = ParamItem{
+		Key:          "dataCoord.gc.scanInterval",
+		Version:      "2.4.0",
+		DefaultValue: "168", // hours, default 7 * 24 hours
+		Doc:          "garbage collection scan residue interval in hours",
+		Export:       true,
+	}
+	p.GCScanIntervalInHour.Init(base.mgr)
 
 	// Do not set this to incredible small value, make sure this to be more than 10 minutes at least
 	p.GCMissingTolerance = ParamItem{
