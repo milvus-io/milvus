@@ -144,7 +144,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 			continue
 		}
 
-		if !ok || version.GetVersion() < s.Version { // Leader misses this segment
+		if !ok || version.GetVersion() != s.Version { // Leader misses this segment
 			ctx := context.Background()
 			resp, err := o.broker.GetSegmentInfo(ctx, s.GetID())
 			if err != nil || len(resp.GetInfos()) == 0 {
@@ -166,7 +166,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 					PartitionID: s.GetPartitionID(),
 					SegmentID:   s.GetID(),
 					NodeID:      s.Node,
-					Version:     s.Version,
+					Version:     time.Now().Unix(),
 					Info:        loadInfo,
 				})
 			}
