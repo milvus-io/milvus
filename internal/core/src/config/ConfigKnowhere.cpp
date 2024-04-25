@@ -74,6 +74,11 @@ KnowhereSetSimdType(const char* value) {
 }
 
 void
+EnableKnowhereScoreConsistency() {
+    knowhere::KnowhereConfig::EnablePatchForComputeFP32AsBF16();
+}
+
+void
 KnowhereInitBuildThreadPool(const uint32_t num_threads) {
     knowhere::KnowhereConfig::SetBuildThreadPoolSize(num_threads);
 }

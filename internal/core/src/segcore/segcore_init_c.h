@@ -35,6 +35,9 @@ char*
 SegcoreSetSimdType(const char*);
 
 void
+SegcoreEnableKnowhereScoreConsistency();
+
+void
 SegcoreSetKnowhereBuildThreadPoolNum(const uint32_t num_threads);
 
 void

@@ -26,6 +26,9 @@ std::string
 KnowhereSetSimdType(const char*);
 
 void
+EnableKnowhereScoreConsistency();
+
+void
 KnowhereInitBuildThreadPool(const uint32_t);
 
 void
