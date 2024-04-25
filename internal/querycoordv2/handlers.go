@@ -18,7 +18,6 @@ package querycoordv2
 
 import (
 	"context"
-	"fmt"
 	"sync"
 	"time"
 
@@ -35,7 +34,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -373,7 +371,7 @@ func (s *Server) tryGetNodesMetrics(ctx context.Context, req *milvuspb.GetMetric
 	return ret
 }
 
-func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*milvuspb.ReplicaInfo, error) {
+func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) *milvuspb.ReplicaInfo {
 	info := &milvuspb.ReplicaInfo{
 		ReplicaID:         replica.GetID(),
 		CollectionID:      replica.GetCollectionID(),
@@ -384,10 +382,11 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 
 	channels := s.targetMgr.GetDmChannelsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
-		msg := "failed to get channels, collection not loaded"
-		log.Warn(msg)
-		return nil, merr.WrapErrCollectionNotFound(replica.GetCollectionID(), msg)
+		log.Warn("failed to get channels, collection may be not loaded or in recovering", zap.Int64("collectionID", replica.GetCollectionID()))
+		return info
 	}
+	shardReplicas := make([]*milvuspb.ShardReplica, 0, len(channels))
+
 	var segments []*meta.Segment
 	if withShardNodes {
 		segments = s.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()))
@@ -400,9 +399,11 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 			leaderInfo = s.nodeMgr.Get(leader)
 		}
 		if leaderInfo == nil {
-			msg := fmt.Sprintf("failed to get shard leader for shard %s", channel)
-			log.Warn(msg)
-			return nil, merr.WrapErrNodeNotFound(leader, msg)
+			log.Warn("failed to get shard leader for shard",
+				zap.Int64("collectionID", replica.GetCollectionID()),
+				zap.Int64("replica", replica.GetID()),
+				zap.String("shard", channel.GetChannelName()))
+			return info
 		}
 
 		shard := &milvuspb.ShardReplica{
@@ -420,9 +421,10 @@ func (s *Server) fillReplicaInfo(replica *meta.Replica, withShardNodes bool) (*m
 			})
 			shard.NodeIds = typeutil.NewUniqueSet(shardNodes...).Collect()
 		}
-		info.ShardReplicas = append(info.ShardReplicas, shard)
+		shardReplicas = append(shardReplicas, shard)
 	}
-	return info, nil
+	info.ShardReplicas = shardReplicas
+	return info
 }
 
 func filterDupLeaders(replicaManager *meta.ReplicaManager, leaders map[int64]*meta.LeaderView) map[int64]*meta.LeaderView {

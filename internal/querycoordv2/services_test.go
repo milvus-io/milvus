@@ -1569,7 +1569,7 @@ func (suite *ServiceSuite) TestGetReplicas() {
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
-func (suite *ServiceSuite) TestGetReplicasFailed() {
+func (suite *ServiceSuite) TestGetReplicasWhenNoAvailableNodes() {
 	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
@@ -1588,7 +1588,7 @@ func (suite *ServiceSuite) TestGetReplicasFailed() {
 	}
 	resp, err := server.GetReplicas(ctx, req)
 	suite.NoError(err)
-	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrReplicaNotAvailable)
+	suite.True(merr.Ok(resp.GetStatus()))
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {

@@ -258,15 +258,18 @@ func (rm *ResourceManager) TransferNode(sourceRGName string, targetRGName string
 	if sourceCfg.Requests.NodeNum < 0 {
 		sourceCfg.Requests.NodeNum = 0
 	}
+	// Special case for compatibility with old version.
+	if sourceRGName != DefaultResourceGroupName {
+		sourceCfg.Limits.NodeNum -= int32(nodeNum)
+		if sourceCfg.Limits.NodeNum < 0 {
+			sourceCfg.Limits.NodeNum = 0
+		}
+	}
+
 	targetCfg.Requests.NodeNum += int32(nodeNum)
 	if targetCfg.Requests.NodeNum > targetCfg.Limits.NodeNum {
 		targetCfg.Limits.NodeNum = targetCfg.Requests.NodeNum
 	}
-	// transfer node from source resource group to target resource group at high priority.
-	targetCfg.TransferFrom = append(targetCfg.TransferFrom, &rgpb.ResourceGroupTransfer{
-		ResourceGroup: sourceRGName,
-	})
-
 	return rm.updateResourceGroups(map[string]*rgpb.ResourceGroupConfig{
 		sourceRGName: sourceCfg,
 		targetRGName: targetCfg,
