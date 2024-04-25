@@ -67,6 +67,8 @@ type SegmentType = commonpb.SegmentState
 const (
 	SegmentTypeGrowing = commonpb.SegmentState_Growing
 	SegmentTypeSealed  = commonpb.SegmentState_Sealed
+	syncWarmup         = "sync"
+	asyncWarmup        = "async"
 )
 
 var ErrSegmentUnhealthy = errors.New("segment unhealthy")
@@ -1220,11 +1222,15 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	//4.
 	s.WarmupChunkCache(ctx, indexInfo.GetFieldID())
 	warmupChunkCacheSpan := tr.RecordSpan()
+	loadPoolRunningSize := loadPool.Load().Running()
+	loadPoolCapSize := loadPool.Load().Cap()
 	log.Info("Finish loading index",
 		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
 		zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
 		zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
-		zap.Duration("updateIndexInfoSpan", warmupChunkCacheSpan),
+		zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
+		zap.Int("loadingPoolRunningSize", loadPoolRunningSize),
+		zap.Int("loadPoolCapSize", loadPoolCapSize),
 	)
 	return nil
 }
@@ -1266,48 +1272,49 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 	return nil
 }
 
-func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
+func (s *LocalSegment) warmupCache(ctx context.Context, fieldID int64, method string) (any, error) {
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("partitionID", s.Partition()),
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", fieldID),
+		zap.String("method", method),
 	)
+	if method == asyncWarmup {
+		if !s.ptrLock.RLockIf(state.IsNotReleased) {
+			return nil, nil
+		}
+		defer s.ptrLock.RUnlock()
+	}
+	var status C.CStatus
+
+	cFieldID := C.int64_t(fieldID)
+	tr := timerecord.NewTimeRecorder("warmUpChunkCache")
+	status = C.WarmupChunkCache(s.ptr, cFieldID)
+	if err := HandleCStatus(ctx, &status, ""); err != nil {
+		log.Warn("warming up chunk cache failed", zap.Error(err))
+		return nil, err
+	}
+	warmUpDuration := tr.RecordSpan()
+	log.Info("warming up chunk cache done", zap.Duration("warmup_duration", warmUpDuration))
+	return nil, nil
+}
+
+func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return
 	}
 	defer s.ptrLock.RUnlock()
 
-	var status C.CStatus
-
 	warmingUp := strings.ToLower(paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue())
 	switch warmingUp {
-	case "sync":
+	case syncWarmup:
 		GetLoadPool().Submit(func() (any, error) {
-			cFieldID := C.int64_t(fieldID)
-			status = C.WarmupChunkCache(s.ptr, cFieldID)
-			if err := HandleCStatus(ctx, &status, "warming up chunk cache failed"); err != nil {
-				log.Warn("warming up chunk cache synchronously failed", zap.Error(err))
-				return nil, err
-			}
-			log.Info("warming up chunk cache synchronously done")
-			return nil, nil
+			return s.warmupCache(ctx, fieldID, warmingUp)
 		}).Await()
-	case "async":
+	case asyncWarmup:
 		GetLoadPool().Submit(func() (any, error) {
-			if !s.ptrLock.RLockIf(state.IsNotReleased) {
-				return nil, nil
-			}
-			defer s.ptrLock.RUnlock()
-
-			cFieldID := C.int64_t(fieldID)
-			status = C.WarmupChunkCache(s.ptr, cFieldID)
-			if err := HandleCStatus(ctx, &status, ""); err != nil {
-				log.Warn("warming up chunk cache asynchronously failed", zap.Error(err))
-				return nil, err
-			}
-			log.Info("warming up chunk cache asynchronously done")
-			return nil, nil
+			return s.warmupCache(ctx, fieldID, warmingUp)
 		})
 	default:
 		// no warming up
