@@ -49,6 +49,12 @@ func Analyze(ctx context.Context, analyzeInfo *AnalyzeInfo) (CodecAnalyze, error
 		close:      false,
 	}
 
+	runtime.SetFinalizer(analyze, func(ca *CgoAnalyze) {
+		if ca != nil && !ca.close {
+			log.Error("there is leakage in analyze object, please check.")
+		}
+	})
+
 	return analyze, nil
 }
 
@@ -94,12 +100,6 @@ func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, err
 		offsetMappingFilesPath[i] = C.GoString((*C.char)(cOffsetMappingFilesPath[i]))
 		offsetMappingFilesSize[i] = int64(C.int64_t(cOffsetMappingFilesSize[i]))
 	}
-
-	runtime.SetFinalizer(ca, func(ca *CgoAnalyze) {
-		if ca != nil && !ca.close {
-			log.Error("there is leakage in analyze object, please check.")
-		}
-	})
 
 	return centroidsFilePath, centroidsFileSize, offsetMappingFilesPath, offsetMappingFilesSize, nil
 }
