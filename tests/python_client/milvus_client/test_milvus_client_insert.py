@@ -19,6 +19,7 @@ from utils.util_pymilvus import *
 from common.constants import *
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from base.high_level_api_wrapper import HighLevelApiWrapper
+
 client_w = HighLevelApiWrapper()
 
 prefix = "milvus_client_api_insert"
@@ -65,13 +66,13 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1883")
-    def test_milvus_client_insert_column_data(self):
+    def test_milvus_client_insert_column_data(self, enable_milvus_local_api):
         """
         target: test insert column data
         method: create connection, collection, insert and search
         expected: raise error
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
@@ -84,13 +85,13 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_empty_collection_name(self):
+    def test_milvus_client_insert_empty_collection_name(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = ""
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -101,13 +102,13 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_milvus_client_insert_invalid_collection_name(self, collection_name):
+    def test_milvus_client_insert_invalid_collection_name(self, enable_milvus_local_api, collection_name):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
@@ -117,13 +118,13 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_collection_name_over_max_length(self):
+    def test_milvus_client_insert_collection_name_over_max_length(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = "a".join("a" for i in range(256))
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -135,13 +136,13 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_not_exist_collection_name(self):
+    def test_milvus_client_insert_not_exist_collection_name(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str("insert_not_exist")
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
@@ -154,13 +155,13 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1894")
     @pytest.mark.parametrize("data", ["12-s", "12 s", "(mn)", "中文", "%$#", " "])
-    def test_milvus_client_insert_data_invalid_type(self, data):
+    def test_milvus_client_insert_data_invalid_type(self, enable_milvus_local_api, data):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -171,28 +172,28 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1895")
-    def test_milvus_client_insert_data_empty(self):
+    def test_milvus_client_insert_data_empty(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
         # 2. insert
         error = {ct.err_code: 1, ct.err_msg: f"None rows, please provide valid row data."}
-        client_w.insert(client, collection_name, data= "")
+        client_w.insert(client, collection_name, data="")
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_data_vector_field_missing(self):
+    def test_milvus_client_insert_data_vector_field_missing(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -201,17 +202,17 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rows = [{default_primary_key_field_name: i,
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 1, ct.err_msg: f"Field vector don't match in entities[0]"}
-        client_w.insert(client, collection_name, data= rows,
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_data_id_field_missing(self):
+    def test_milvus_client_insert_data_id_field_missing(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -220,17 +221,17 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 1, ct.err_msg: f"Field id don't match in entities[0]"}
-        client_w.insert(client, collection_name, data= rows,
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_data_extra_field(self):
+    def test_milvus_client_insert_data_extra_field(self, enable_milvus_local_api):
         """
         target: test milvus client: insert extra field than schema
         method: insert extra field than schema when enable_dynamic_field is False
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, enable_dynamic_field=False)
@@ -240,57 +241,59 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 1, ct.err_msg: f"Attempt to insert an unexpected field "
                                              f"to collection without enabling dynamic field"}
-        client_w.insert(client, collection_name, data= rows,
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_data_dim_not_match(self):
+    def test_milvus_client_insert_data_dim_not_match(self, enable_milvus_local_api):
         """
         target: test milvus client: insert extra field than schema
         method: insert extra field than schema when enable_dynamic_field is False
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim+1))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
+             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 65536, ct.err_msg: f"of float data should divide the dim({default_dim})"}
-        client_w.insert(client, collection_name, data= rows,
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_not_matched_data(self):
+    def test_milvus_client_insert_not_matched_data(self, enable_milvus_local_api):
         """
         target: test milvus client: insert not matched data then defined
         method: insert string to int primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 1, ct.err_msg: f"The Input data type is inconsistent with defined schema, "
                                              f"please check it."}
-        client_w.insert(client, collection_name, data= rows,
+        client_w.insert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("partition_name", ["12-s", "12 s", "(mn)", "中文", "%$#", " "])
-    def test_milvus_client_insert_invalid_partition_name(self, partition_name):
+    def test_milvus_client_insert_invalid_partition_name(self, enable_milvus_local_api, partition_name):
         """
         target: test milvus client: insert extra field than schema
         method: insert extra field than schema when enable_dynamic_field is False
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
@@ -300,17 +303,17 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of "
                                                  f"a partition name must be an underscore or letter."}
-        client_w.insert(client, collection_name, data= rows, partition_name=partition_name,
+        client_w.insert(client, collection_name, data=rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_not_exist_partition_name(self):
+    def test_milvus_client_insert_not_exist_partition_name(self, enable_milvus_local_api):
         """
         target: test milvus client: insert extra field than schema
         method: insert extra field than schema when enable_dynamic_field is False
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim)
@@ -320,17 +323,17 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         partition_name = cf.gen_unique_str("partition_not_exist")
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        client_w.insert(client, collection_name, data= rows, partition_name=partition_name,
+        client_w.insert(client, collection_name, data=rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_insert_collection_partition_not_match(self):
+    def test_milvus_client_insert_collection_partition_not_match(self, enable_milvus_local_api):
         """
         target: test milvus client: insert extra field than schema
         method: insert extra field than schema when enable_dynamic_field is False
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         another_collection_name = cf.gen_unique_str(prefix + "another")
         partition_name = cf.gen_unique_str("partition")
@@ -343,7 +346,7 @@ class TestMilvusClientInsertInvalid(TestcaseBase):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        client_w.insert(client, collection_name, data= rows, partition_name=partition_name,
+        client_w.insert(client, collection_name, data=rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -365,13 +368,13 @@ class TestMilvusClientInsertValid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L0)
-    def test_milvus_client_insert_default(self):
+    def test_milvus_client_insert_default(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -407,13 +410,13 @@ class TestMilvusClientInsertValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_insert_different_fields(self):
+    def test_milvus_client_insert_different_fields(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -447,13 +450,13 @@ class TestMilvusClientInsertValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_insert_empty_data(self):
+    def test_milvus_client_insert_empty_data(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -473,13 +476,13 @@ class TestMilvusClientInsertValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_insert_partition(self):
+    def test_milvus_client_insert_partition(self, enable_milvus_local_api):
         """
         target: test fast create collection normal case
         method: create collection
         expected: create collection with default schema, index, and load successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         partition_name = cf.gen_unique_str(prefix)
         # 1. create collection
@@ -495,7 +498,7 @@ class TestMilvusClientInsertValid(TestcaseBase):
         rng = np.random.default_rng(seed=19530)
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
-        results  = client_w.insert(client, collection_name, rows, partition_name=partition_name)[0]
+        results = client_w.insert(client, collection_name, rows, partition_name=partition_name)[0]
         assert results['insert_count'] == default_nb
         # 3. search
         vectors_to_search = rng.random((1, default_dim))
@@ -691,7 +694,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rows = [{default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 1, ct.err_msg: f"Field id don't match in entities[0]"}
-        client_w.upsert(client, collection_name, data= rows,
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -711,7 +714,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 1, ct.err_msg: f"Attempt to insert an unexpected field "
                                              f"to collection without enabling dynamic field"}
-        client_w.upsert(client, collection_name, data= rows,
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -727,10 +730,11 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         client_w.create_collection(client, collection_name, default_dim)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim+1))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim + 1))[0]),
+             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 65536, ct.err_msg: f"of float data should divide the dim({default_dim})"}
-        client_w.upsert(client, collection_name, data= rows,
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -746,11 +750,12 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         client_w.create_collection(client, collection_name, default_dim)
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 1, ct.err_msg: f"The Input data type is inconsistent with defined schema, "
                                              f"please check it."}
-        client_w.upsert(client, collection_name, data= rows,
+        client_w.upsert(client, collection_name, data=rows,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -771,7 +776,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. The first character of "
                                                  f"a partition name must be an underscore or letter."}
-        client_w.upsert(client, collection_name, data= rows, partition_name=partition_name,
+        client_w.upsert(client, collection_name, data=rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -791,7 +796,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         partition_name = cf.gen_unique_str("partition_not_exist")
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        client_w.upsert(client, collection_name, data= rows, partition_name=partition_name,
+        client_w.upsert(client, collection_name, data=rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -814,7 +819,7 @@ class TestMilvusClientUpsertInvalid(TestcaseBase):
         rows = [{default_primary_key_field_name: i, default_vector_field_name: list(rng.random((1, default_dim))[0]),
                  default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         error = {ct.err_code: 200, ct.err_msg: f"partition not found[partition={partition_name}]"}
-        client_w.upsert(client, collection_name, data= rows, partition_name=partition_name,
+        client_w.upsert(client, collection_name, data=rows, partition_name=partition_name,
                         check_task=CheckTasks.err_res, check_items=error)
 
 
@@ -929,7 +934,7 @@ class TestMilvusClientUpsertValid(TestcaseBase):
         results = client_w.upsert(client, collection_name, rows, partition_name=partitions[0])[0]
         assert results['upsert_count'] == default_nb
         # 4. upsert to non-default partition
-        results  = client_w.upsert(client, collection_name, rows, partition_name=partition_name)[0]
+        results = client_w.upsert(client, collection_name, rows, partition_name=partition_name)[0]
         assert results['upsert_count'] == default_nb
         # 5. search
         vectors_to_search = rng.random((1, default_dim))

@@ -64,13 +64,13 @@ class TestMilvusClientQueryInvalid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_not_all_required_params(self):
+    def test_milvus_client_query_not_all_required_params(self, enable_milvus_local_api):
         """
         target: test query (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -110,13 +110,13 @@ class TestMilvusClientQueryValid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_default(self):
+    def test_milvus_client_query_default(self, enable_milvus_local_api):
         """
         target: test query (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -140,13 +140,13 @@ class TestMilvusClientQueryValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_output_fields(self):
+    def test_milvus_client_query_output_fields(self, enable_milvus_local_api):
         """
         target: test query (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -174,13 +174,13 @@ class TestMilvusClientQueryValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_output_fields_all(self):
+    def test_milvus_client_query_output_fields_all(self, enable_milvus_local_api):
         """
         target: test query (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -207,13 +207,13 @@ class TestMilvusClientQueryValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_query_limit(self):
+    def test_milvus_client_query_limit(self, enable_milvus_local_api):
         """
         target: test query (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")

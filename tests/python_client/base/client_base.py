@@ -2,6 +2,7 @@ from numpy.core.fromnumeric import _partition_dispatcher
 import pytest
 import sys
 from pymilvus import DefaultConfig
+from milvus_local.server_manager import server_manager_instance
 
 from base.database_wrapper import ApiDatabaseWrapper
 
@@ -126,15 +127,19 @@ class TestcaseBase(Base):
     Public methods that can be used for test cases.
     """
 
-    def _connect(self, enable_milvus_client_api=False):
+    def _connect(self, enable_milvus_client_api=False, enable_milvus_local_api=False):
         """ Add a connection and create the connect """
-        if enable_milvus_client_api:
+        if enable_milvus_client_api and not enable_milvus_local_api:
             if cf.param_info.param_uri:
                 uri = cf.param_info.param_uri
             else:
                 uri = "http://" + cf.param_info.param_host + ":" + str(cf.param_info.param_port)
             res, is_succ = self.connection_wrap.MilvusClient(uri=uri,
                                                              token=cf.param_info.param_token)
+        elif enable_milvus_client_api and enable_milvus_local_api:
+            path = ct.default_milvus_local_path if enable_milvus_local_api == "True" else enable_milvus_local_api
+            uri = server_manager_instance.start_and_get_uri(path)
+            res, is_succ = self.connection_wrap.MilvusClient(uri=uri)
         else:
             if cf.param_info.param_user and cf.param_info.param_password:
                 res, is_succ = self.connection_wrap.connect(alias=DefaultConfig.DEFAULT_USING,

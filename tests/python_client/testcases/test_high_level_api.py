@@ -19,6 +19,7 @@ from utils.util_pymilvus import *
 from common.constants import *
 from pymilvus.orm.types import CONSISTENCY_STRONG, CONSISTENCY_BOUNDED, CONSISTENCY_SESSION, CONSISTENCY_EVENTUALLY
 from base.high_level_api_wrapper import HighLevelApiWrapper
+
 client_w = HighLevelApiWrapper()
 
 prefix = "high_level_api"
@@ -65,13 +66,13 @@ class TestHighLevelApi(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.xfail(reason="pymilvus issue 1554")
-    def test_high_level_collection_invalid_primary_field(self):
+    def test_high_level_collection_invalid_primary_field(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with invalid primary field
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         error = {ct.err_code: 1, ct.err_msg: f"Param id_type must be int or string"}
@@ -79,13 +80,13 @@ class TestHighLevelApi(TestcaseBase):
                                    id_type="invalid", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_high_level_collection_string_auto_id(self):
+    def test_high_level_collection_string_auto_id(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with auto id on string primary key
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         error = {ct.err_code: 65535, ct.err_msg: f"type param(max_length) should be specified for varChar "
@@ -94,14 +95,14 @@ class TestHighLevelApi(TestcaseBase):
                                    check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_high_level_create_same_collection_different_params(self):
+    def test_high_level_create_same_collection_different_params(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create
         expected: 1. Successfully to create collection with same params
                   2. Report errors for creating collection with same name and different params
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -110,18 +111,18 @@ class TestHighLevelApi(TestcaseBase):
         # 3. create collection with same name and different params
         error = {ct.err_code: 1, ct.err_msg: f"create duplicate collection with different parameters, "
                                              f"collection: {collection_name}"}
-        client_w.create_collection(client, collection_name, default_dim+1, consistency_level="Strong",
+        client_w.create_collection(client, collection_name, default_dim + 1, consistency_level="Strong",
                                    check_task=CheckTasks.err_res, check_items=error)
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_high_level_collection_invalid_metric_type(self):
+    def test_high_level_collection_invalid_metric_type(self, enable_milvus_local_api):
         """
         target: test high level api: client.create_collection
         method: create collection with auto id on string primary key
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         error = {ct.err_code: 65535,
@@ -131,13 +132,13 @@ class TestHighLevelApi(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/29880")
-    def test_high_level_search_not_consistent_metric_type(self, metric_type):
+    def test_high_level_search_not_consistent_metric_type(self, enable_milvus_local_api, metric_type):
         """
         target: test search with inconsistent metric type (default is IP) with that of index
         method: create connection, collection, insert and search with not consistent metric type
         expected: Raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -159,13 +160,13 @@ class TestHighLevelApi(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_high_level_search_query_default(self):
+    def test_high_level_search_query_default(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -200,13 +201,13 @@ class TestHighLevelApi(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_high_level_array_insert_search(self):
+    def test_high_level_array_insert_search(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -218,7 +219,7 @@ class TestHighLevelApi(TestcaseBase):
             default_primary_key_field_name: i,
             default_vector_field_name: list(rng.random((1, default_dim))[0]),
             default_float_field_name: i * 1.0,
-            default_int32_array_field_name: [i, i+1, i+2],
+            default_int32_array_field_name: [i, i + 1, i + 2],
             default_string_array_field_name: [str(i), str(i + 1), str(i + 2)]
         } for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
@@ -235,13 +236,13 @@ class TestHighLevelApi(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue 25110")
-    def test_high_level_search_query_string(self):
+    def test_high_level_search_query_string(self, enable_milvus_local_api):
         """
         target: test search (high level api) for string primary key
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, id_type="string",
@@ -253,8 +254,9 @@ class TestHighLevelApi(TestcaseBase):
                                                   "auto_id": auto_id})
         # 2. insert
         rng = np.random.default_rng(seed=19530)
-        rows = [{default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
-                 default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
+        rows = [
+            {default_primary_key_field_name: str(i), default_vector_field_name: list(rng.random((1, default_dim))[0]),
+             default_float_field_name: i * 1.0, default_string_field_name: str(i)} for i in range(default_nb)]
         client_w.insert(client, collection_name, rows)
 
         # 3. search
@@ -273,13 +275,13 @@ class TestHighLevelApi(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_high_level_search_different_metric_types(self, metric_type, auto_id):
+    def test_high_level_search_different_metric_types(self, enable_milvus_local_api, metric_type, auto_id):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search successfully with limit(topK)
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, metric_type=metric_type,
@@ -306,13 +308,13 @@ class TestHighLevelApi(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_high_level_delete(self):
+    def test_high_level_delete(self, enable_milvus_local_api):
         """
         target: test delete (high level api)
         method: create connection, collection, insert delete, and search
         expected: search/query successfully without deleted data
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")

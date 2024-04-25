@@ -66,13 +66,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_milvus_client_index_invalid_collection_name(self, name):
+    def test_milvus_client_index_invalid_collection_name(self, name, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -90,13 +90,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("name", ["a".join("a" for i in range(256))])
-    def test_milvus_client_index_collection_name_over_max_length(self, name):
+    def test_milvus_client_index_collection_name_over_max_length(self, enable_milvus_local_api, name):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -113,13 +113,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_index_not_exist_collection_name(self):
+    def test_milvus_client_index_not_exist_collection_name(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         not_existed_collection_name = cf.gen_unique_str("not_existed_collection")
         # 1. create collection
@@ -139,13 +139,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="pymilvus issue 1885")
     @pytest.mark.parametrize("index", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
-    def test_milvus_client_index_invalid_index_type(self, index):
+    def test_milvus_client_index_invalid_index_type(self, enable_milvus_local_api, index):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -164,13 +164,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="pymilvus issue 1885")
     @pytest.mark.parametrize("metric", ["12-s", "12 s", "(mn)", "中文", "%$#", "a".join("a" for i in range(256))])
-    def test_milvus_client_index_invalid_metric_type(self, metric):
+    def test_milvus_client_index_invalid_metric_type(self, enable_milvus_local_api, metric):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -187,13 +187,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_index_drop_index_before_release(self):
+    def test_milvus_client_index_drop_index_before_release(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -205,13 +205,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="pymilvus issue 1886")
-    def test_milvus_client_index_multiple_indexes_one_field(self):
+    def test_milvus_client_index_multiple_indexes_one_field(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -231,13 +231,13 @@ class TestMilvusClientIndexInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="pymilvus issue 1886")
-    def test_milvus_client_create_diff_index_without_release(self):
+    def test_milvus_client_create_diff_index_without_release(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -275,13 +275,13 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
-    def test_milvus_client_index_default(self, index, params, metric_type):
+    def test_milvus_client_index_default(self, enable_milvus_local_api, index, params, metric_type):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -325,13 +325,13 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
-    def test_milvus_client_index_with_params(self, index, params, metric_type):
+    def test_milvus_client_index_with_params(self, enable_milvus_local_api, index, params, metric_type):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -373,13 +373,13 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
-    def test_milvus_client_index_after_insert(self, index, params, metric_type):
+    def test_milvus_client_index_after_insert(self, enable_milvus_local_api, index, params, metric_type):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -416,13 +416,13 @@ class TestMilvusClientIndexValid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip("wait for modification")
-    def test_milvus_client_index_auto_index(self, scalar_index, metric_type):
+    def test_milvus_client_index_auto_index(self, enable_milvus_local_api, scalar_index, metric_type):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -468,13 +468,13 @@ class TestMilvusClientIndexValid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip("wait for modification")
-    def test_milvus_client_index_multiple_vectors(self, scalar_index, metric_type):
+    def test_milvus_client_index_multiple_vectors(self, enable_milvus_local_api, scalar_index, metric_type):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -519,13 +519,13 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
-    def test_milvus_client_index_drop_create_same_index(self, index, params, metric_type):
+    def test_milvus_client_index_drop_create_same_index(self, enable_milvus_local_api, index, params, metric_type):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -571,13 +571,13 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
                                  ct.default_index_params[:7]))
-    def test_milvus_client_index_drop_create_different_index(self, index, params, metric_type):
+    def test_milvus_client_index_drop_create_different_index(self, enable_milvus_local_api, index, params, metric_type):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")

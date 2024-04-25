@@ -63,13 +63,13 @@ class TestMilvusClientDeleteInvalid(TestcaseBase):
     ******************************************************************
     """
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_delete_with_filters_and_ids(self):
+    def test_milvus_client_delete_with_filters_and_ids(self, enable_milvus_local_api):
         """
         target: test delete (high level api) with ids and filters
         method: create connection, collection, insert, delete, and search
         expected: raise exception
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -90,13 +90,13 @@ class TestMilvusClientDeleteInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1869")
-    def test_milvus_client_delete_with_invalid_id_type(self):
+    def test_milvus_client_delete_with_invalid_id_type(self, enable_milvus_local_api):
         """
         target: test delete (high level api)
         method: create connection, collection, insert delete, and search
         expected: search/query successfully without deleted data
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -108,13 +108,13 @@ class TestMilvusClientDeleteInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1870")
-    def test_milvus_client_delete_with_not_all_required_params(self):
+    def test_milvus_client_delete_with_not_all_required_params(self, enable_milvus_local_api):
         """
         target: test delete (high level api)
         method: create connection, collection, insert delete, and search
         expected: search/query successfully without deleted data
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -143,13 +143,13 @@ class TestMilvusClientDeleteValid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_delete_with_ids(self):
+    def test_milvus_client_delete_with_ids(self, enable_milvus_local_api):
         """
         target: test delete (high level api)
         method: create connection, collection, insert delete, and search
         expected: search/query successfully without deleted data
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -184,13 +184,13 @@ class TestMilvusClientDeleteValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_delete_with_filters(self):
+    def test_milvus_client_delete_with_filters(self, enable_milvus_local_api):
         """
         target: test delete (high level api)
         method: create connection, collection, insert delete, and search
         expected: search/query successfully without deleted data
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -225,13 +225,13 @@ class TestMilvusClientDeleteValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_delete_with_filters_partition(self):
+    def test_milvus_client_delete_with_filters_partition(self, enable_milvus_local_api):
         """
         target: test delete (high level api)
         method: create connection, collection, insert delete, and search
         expected: search/query successfully without deleted data
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")

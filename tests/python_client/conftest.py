@@ -50,6 +50,7 @@ def pytest_addoption(parser):
     parser.addoption('--uri', action='store', default="", help="uri for high level api")
     parser.addoption('--token', action='store', default="", help="token for high level api")
     parser.addoption("--request_duration", action="store", default="10m", help="request_duration")
+    parser.addoption("--enable_milvus_local_api", action="store", default=False, help="use milvus local")
 
 
 @pytest.fixture
@@ -198,9 +199,15 @@ def uri(request):
 def token(request):
     return request.config.getoption("--token")
 
+
 @pytest.fixture
 def request_duration(request):
     return request.config.getoption("--request_duration")
+
+
+@pytest.fixture
+def enable_milvus_local_api(request):
+    return request.config.getoption("--enable_milvus_local_api")
 
 
 """ fixture func """

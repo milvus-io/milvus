@@ -260,6 +260,7 @@ float_metrics = ["L2", "IP", "COSINE"]
 binary_metrics = ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
+default_milvus_local_path = "./local-test.db"
 
 
 class CheckTasks:

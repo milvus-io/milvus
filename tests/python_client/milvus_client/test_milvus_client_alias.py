@@ -65,14 +65,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_milvus_client_create_alias_invalid_collection_name(self, collection_name):
+    def test_milvus_client_create_alias_invalid_collection_name(self, collection_name, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = cf.gen_unique_str("collection_alias")
         # 2. create alias
         error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
@@ -81,14 +81,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_alias_collection_name_over_max_length(self):
+    def test_milvus_client_create_alias_collection_name_over_max_length(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "a".join("a" for i in range(256))
         # 2. create alias
@@ -99,14 +99,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
                               check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_alias_not_exist_collection(self):
+    def test_milvus_client_create_alias_not_exist_collection(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "not_exist_collection_alias"
         error = {ct.err_code: 100, ct.err_msg: f"can't find collection collection not "
@@ -116,14 +116,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("alias", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_milvus_client_create_alias_invalid_alias_name(self, alias):
+    def test_milvus_client_create_alias_invalid_alias_name(self, alias, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -135,14 +135,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_alias_name_over_max_length(self):
+    def test_milvus_client_create_alias_name_over_max_length(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         alias = "a".join("a" for i in range(256))
         # 1. create collection
@@ -156,14 +156,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_alias_same_collection_name(self):
+    def test_milvus_client_create_alias_same_collection_name(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -175,14 +175,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_create_same_alias_diff_collections(self):
+    def test_milvus_client_create_same_alias_diff_collections(self, enable_milvus_local_api):
         """
         target: test create same alias to different collections
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         collection_name_1 = cf.gen_unique_str(prefix)
         alias = cf.gen_unique_str("collection_alias")
@@ -199,41 +199,41 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_drop_alias_not_existed(self):
+    def test_milvus_client_drop_alias_not_existed(self, enable_milvus_local_api):
         """
         target: test create same alias to different collections
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = cf.gen_unique_str("not_existed_alias")
         client_w.drop_alias(client, alias)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("alias_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_milvus_client_drop_alias_invalid_alias_name(self, alias_name):
+    def test_milvus_client_drop_alias_invalid_alias_name(self, alias_name, enable_milvus_local_api):
         """
         target: test create same alias to different collections
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {alias_name}. the first character of a "
                                                 f"collection name must be an underscore or letter: invalid parameter"}
         client_w.drop_alias(client, alias_name,
                             check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_drop_alias_over_max_length(self):
+    def test_milvus_client_drop_alias_over_max_length(self, enable_milvus_local_api):
         """
         target: test create same alias to different collections
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = "a".join("a" for i in range(256))
         error = {ct.err_code: 1100, ct.err_msg: f"invalid dimension: {alias}. "
                                                 f"the length of a collection name must be less than 255 characters: "
@@ -243,14 +243,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("collection_name", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_milvus_client_alter_alias_invalid_collection_name(self, collection_name):
+    def test_milvus_client_alter_alias_invalid_collection_name(self, collection_name, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = cf.gen_unique_str("collection_alias")
         error = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {collection_name}. the first character of a "
                                                 f"collection name must be an underscore or letter: invalid parameter"}
@@ -258,14 +258,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_alter_alias_collection_name_over_max_length(self):
+    def test_milvus_client_alter_alias_collection_name_over_max_length(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = cf.gen_unique_str("collection_alias")
         collection_name = "a".join("a" for i in range(256))
         # 2. create alias
@@ -276,14 +276,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
                              check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_alter_alias_not_exist_collection(self):
+    def test_milvus_client_alter_alias_not_exist_collection(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         alias = cf.gen_unique_str("collection_alias")
         collection_name = cf.gen_unique_str("not_exist_collection_alias")
         # 2. create alias
@@ -295,14 +295,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("alias", ["12-s", "12 s", "(mn)", "中文", "%$#"])
-    def test_milvus_client_alter_alias_invalid_alias_name(self, alias):
+    def test_milvus_client_alter_alias_invalid_alias_name(self, alias, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -314,14 +314,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_alter_alias_name_over_max_length(self):
+    def test_milvus_client_alter_alias_name_over_max_length(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         alias = "a".join("a" for i in range(256))
         # 1. create collection
@@ -335,14 +335,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_alter_alias_same_collection_name(self):
+    def test_milvus_client_alter_alias_same_collection_name(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         # 1. create collection
         client_w.create_collection(client, collection_name, default_dim, consistency_level="Strong")
@@ -354,14 +354,14 @@ class TestMilvusClientAliasInvalid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_alter_non_exists_alias(self):
+    def test_milvus_client_alter_non_exists_alias(self, enable_milvus_local_api):
         """
         target: test alter alias (high level api)
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: alter alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         alias = cf.gen_unique_str("collection_alias")
         another_alias = cf.gen_unique_str("collection_alias_another")
@@ -394,13 +394,13 @@ class TestMilvusClientAliasValid(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_milvus_client_alias_search_query(self):
+    def test_milvus_client_alias_search_query(self, enable_milvus_local_api):
         """
         target: test search (high level api) normal case
         method: create connection, collection, insert and search
         expected: search/query successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         alias = "collection_alias"
         # 1. create collection
@@ -439,14 +439,14 @@ class TestMilvusClientAliasValid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.xfail(reason="pymilvus issue 1891, 1892")
-    def test_milvus_client_alias_default(self):
+    def test_milvus_client_alias_default(self, enable_milvus_local_api):
         """
         target: test alias (high level api) normal case
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: create alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         partition_name = cf.gen_unique_str("partition")
         alias = cf.gen_unique_str("collection_alias")
@@ -470,14 +470,14 @@ class TestMilvusClientAliasValid(TestcaseBase):
         client_w.drop_collection(client, collection_name)
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_milvus_client_alter_alias_default(self):
+    def test_milvus_client_alter_alias_default(self, enable_milvus_local_api):
         """
         target: test alter alias (high level api)
         method: create connection, collection, partition, alias, and assert collection
                 is equal to alias according to partitions
         expected: alter alias successfully
         """
-        client = self._connect(enable_milvus_client_api=True)
+        client = self._connect(enable_milvus_client_api=True, enable_milvus_local_api=enable_milvus_local_api)
         collection_name = cf.gen_unique_str(prefix)
         another_collectinon_name = cf.gen_unique_str(prefix)
         partition_name = cf.gen_unique_str("partition")
