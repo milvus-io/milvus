@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -100,7 +101,8 @@ func Test_garbageCollector_basic(t *testing.T) {
 	})
 }
 
-func validateMinioPrefixElements(t *testing.T, cli *minio.Client, bucketName string, prefix string, elements []string) {
+func validateMinioPrefixElements(t *testing.T, manager *storage.RemoteChunkManager, bucketName string, prefix string, elements []string) {
+	cli := manager.UnderlyingObjectStorage().(*storage.MinioObjectStorage).Client
 	var current []string
 	for info := range cli.ListObjects(context.TODO(), bucketName, minio.ListObjectsOptions{Prefix: prefix, Recursive: true}) {
 		current = append(current, info.Key)
@@ -127,12 +129,12 @@ func Test_garbageCollector_scan(t *testing.T) {
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
-		gc.scan()
+		gc.recycleUnusedBinlogFiles(context.TODO())
 
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 		gc.close()
 	})
 
@@ -145,12 +147,12 @@ func Test_garbageCollector_scan(t *testing.T) {
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    time.Hour * 24,
 		})
-		gc.scan()
+		gc.recycleUnusedBinlogFiles(context.TODO())
 
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
@@ -172,11 +174,11 @@ func Test_garbageCollector_scan(t *testing.T) {
 			dropTolerance:    time.Hour * 24,
 		})
 		gc.start()
-		gc.scan()
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
+		gc.recycleUnusedBinlogFiles(context.TODO())
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
@@ -200,11 +202,11 @@ func Test_garbageCollector_scan(t *testing.T) {
 			missingTolerance: time.Hour * 24,
 			dropTolerance:    0,
 		})
-		gc.clearEtcd()
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
+		gc.recycleDroppedSegments(context.TODO())
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
@@ -218,14 +220,14 @@ func Test_garbageCollector_scan(t *testing.T) {
 			dropTolerance:    0,
 		})
 		gc.start()
-		gc.scan()
-		gc.clearEtcd()
+		gc.recycleUnusedBinlogFiles(context.TODO())
+		gc.recycleDroppedSegments(context.TODO())
 
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
@@ -240,22 +242,22 @@ func Test_garbageCollector_scan(t *testing.T) {
 			dropTolerance:    0,
 		})
 		gc.start()
-		gc.scan()
+		gc.recycleUnusedBinlogFiles(context.TODO())
 
 		// bad path shall remains since datacoord cannot determine file is garbage or not if path is not valid
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:2])
-		validateMinioPrefixElements(t, cli.Client, bucketName, path.Join(rootPath, `indexes`), others)
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentInsertLogPath), inserts[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentStatslogPath), stats[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, common.SegmentDeltaLogPath), delta[1:2])
+		validateMinioPrefixElements(t, cli, bucketName, path.Join(rootPath, `indexes`), others)
 
 		gc.close()
 	})
 
-	cleanupOSS(cli.Client, bucketName, rootPath)
+	cleanupOSS(cli, bucketName, rootPath)
 }
 
 // initialize unit test sso env
-func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
+func initUtOSSEnv(bucket, root string, n int) (mcm *storage.RemoteChunkManager, inserts []string, stats []string, delta []string, other []string, err error) {
 	paramtable.Init()
 
 	if Params.MinioCfg.UseSSL.GetAsBool() && len(Params.MinioCfg.SslCACert.GetValue()) > 0 {
@@ -335,14 +337,16 @@ func initUtOSSEnv(bucket, root string, n int) (mcm *storage.MinioChunkManager, i
 		}
 		other = append(other, info.Key)
 	}
-	mcm = &storage.MinioChunkManager{
-		Client: cli,
-	}
-	mcm.SetVar(bucket, root)
+	mcm = storage.NewRemoteChunkManagerForTesting(
+		cli,
+		bucket,
+		root,
+	)
 	return mcm, inserts, stats, delta, other, nil
 }
 
-func cleanupOSS(cli *minio.Client, bucket, root string) {
+func cleanupOSS(chunkManager *storage.RemoteChunkManager, bucket, root string) {
+	cli := chunkManager.UnderlyingObjectStorage().(*storage.MinioObjectStorage).Client
 	ch := cli.ListObjects(context.TODO(), bucket, minio.ListObjectsOptions{Prefix: root, Recursive: true})
 	cli.RemoveObjects(context.TODO(), bucket, ch, minio.RemoveObjectsOptions{})
 	cli.RemoveBucket(context.TODO(), bucket)
@@ -425,7 +429,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 		).Return(nil)
 		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedIndexes()
+		gc.recycleUnusedIndexes(context.TODO())
 	})
 
 	t.Run("fail", func(t *testing.T) {
@@ -436,7 +440,7 @@ func TestGarbageCollector_recycleUnusedIndexes(t *testing.T) {
 			mock.Anything,
 		).Return(errors.New("fail"))
 		gc := newGarbageCollector(createMetaForRecycleUnusedIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedIndexes()
+		gc.recycleUnusedIndexes(context.TODO())
 	})
 }
 
@@ -558,6 +562,9 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 
 func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
+		mockChunkManager := mocks.NewChunkManager(t)
+		mockChunkManager.EXPECT().RootPath().Return("root")
+		mockChunkManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		catalog := catalogmocks.NewDataCoordCatalog(t)
 		catalog.On("DropSegmentIndex",
 			mock.Anything,
@@ -566,12 +573,17 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(nil)
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedSegIndexes()
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
+			cli: mockChunkManager,
+		})
+		gc.recycleUnusedSegIndexes(context.TODO())
 	})
 
 	t.Run("fail", func(t *testing.T) {
 		catalog := catalogmocks.NewDataCoordCatalog(t)
+		mockChunkManager := mocks.NewChunkManager(t)
+		mockChunkManager.EXPECT().RootPath().Return("root")
+		mockChunkManager.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		catalog.On("DropSegmentIndex",
 			mock.Anything,
 			mock.Anything,
@@ -579,8 +591,10 @@ func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
 			mock.Anything,
 			mock.Anything,
 		).Return(errors.New("fail"))
-		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{})
-		gc.recycleUnusedSegIndexes()
+		gc := newGarbageCollector(createMetaForRecycleUnusedSegIndexes(catalog), nil, GcOption{
+			cli: mockChunkManager,
+		})
+		gc.recycleUnusedSegIndexes(context.TODO())
 	})
 }
 
@@ -726,7 +740,14 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
+		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+				for _, file := range []string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"} {
+					cowf(&storage.ChunkObjectInfo{FilePath: file})
+				}
+				return nil
+			})
+
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		gc := newGarbageCollector(
@@ -736,27 +757,36 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 				cli: cm,
 			})
 
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 
 	t.Run("list fail", func(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, errors.New("error"))
+		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+				return errors.New("error")
+			})
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
 			nil,
 			GcOption{
 				cli: cm,
 			})
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 
 	t.Run("remove fail", func(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
+		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+				for _, file := range []string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"} {
+					cowf(&storage.ChunkObjectInfo{FilePath: file})
+				}
+				return nil
+			})
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(nil)
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
@@ -764,14 +794,20 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 			GcOption{
 				cli: cm,
 			})
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 
 	t.Run("remove with prefix fail", func(t *testing.T) {
 		cm := &mocks.ChunkManager{}
 		cm.EXPECT().RootPath().Return("root")
 		cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("error"))
-		cm.EXPECT().ListWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return([]string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"}, nil, nil)
+		cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+				for _, file := range []string{"a/b/c/", "a/b/600/", "a/b/601/", "a/b/602/"} {
+					cowf(&storage.ChunkObjectInfo{FilePath: file})
+				}
+				return nil
+			})
 		cm.EXPECT().RemoveWithPrefix(mock.Anything, mock.Anything).Return(errors.New("error"))
 		gc := newGarbageCollector(
 			createMetaTableForRecycleUnusedIndexFiles(&datacoord.Catalog{MetaKv: kvmocks.NewMetaKv(t)}),
@@ -779,7 +815,7 @@ func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
 			GcOption{
 				cli: cm,
 			})
-		gc.recycleUnusedIndexFiles()
+		gc.recycleUnusedIndexFiles(context.TODO())
 	})
 }
 
@@ -1320,7 +1356,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
-	gc.clearEtcd()
+	gc.recycleDroppedSegments(context.TODO())
 
 	/*
 		A    B
@@ -1376,7 +1412,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	})
 	assert.NoError(t, err)
 
-	gc.clearEtcd()
+	gc.recycleDroppedSegments(context.TODO())
 	/*
 
 		A: processed prior to C, C is not GCed yet and C is not indexed, A is not GCed in this turn
@@ -1392,7 +1428,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segD = gc.meta.GetSegment(segID + 3)
 	assert.Nil(t, segD)
 
-	gc.clearEtcd()
+	gc.recycleDroppedSegments(context.TODO())
 	/*
 		A: compacted became false due to C is GCed already, A should be GCed since dropTolernace is meet
 		B: compacted became false due to C is GCed already, B should be GCed since dropTolerance is meet
@@ -1403,9 +1439,9 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	assert.Nil(t, segB)
 }
 
-func TestGarbageCollector_removelogs(t *testing.T) {
+func TestGarbageCollector_removeObjectPool(t *testing.T) {
 	paramtable.Init()
-	cm := &mocks.ChunkManager{}
+	cm := mocks.NewChunkManager(t)
 	gc := newGarbageCollector(
 		nil,
 		nil,
@@ -1413,43 +1449,37 @@ func TestGarbageCollector_removelogs(t *testing.T) {
 			cli:           cm,
 			dropTolerance: 1,
 		})
-	var logs []*datapb.Binlog
+	logs := make(map[string]struct{})
 	for i := 0; i < 50; i++ {
-		logs = append(logs, &datapb.Binlog{
-			LogPath: "log" + strconv.Itoa(i),
-		})
+		logs[fmt.Sprintf("log%d", i)] = struct{}{}
 	}
 
 	t.Run("success", func(t *testing.T) {
 		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(nil)
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.True(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.NoError(t, b)
 	})
 
-	t.Run("minio not found error", func(t *testing.T) {
-		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(minio.ErrorResponse{
-			Code: "NoSuchKey",
-		})
+	t.Run("oss not found error", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(merr.WrapErrIoKeyNotFound("not found"))
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.True(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.NoError(t, b)
 	})
 
-	t.Run("minio server error", func(t *testing.T) {
-		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(minio.ErrorResponse{
-			Code: "Server Error",
-		})
+	t.Run("oss server error", func(t *testing.T) {
+		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(merr.WrapErrIoFailed("server error", errors.New("err")))
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.False(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.Error(t, b)
 	})
 
 	t.Run("other type error", func(t *testing.T) {
 		call := cm.EXPECT().Remove(mock.Anything, mock.Anything).Return(errors.New("other error"))
 		defer call.Unset()
-		b := gc.removeLogs(logs)
-		assert.False(t, b)
+		b := gc.removeObjectFiles(context.TODO(), logs)
+		assert.Error(t, b)
 	})
 }
 
@@ -1459,7 +1489,7 @@ type GarbageCollectorSuite struct {
 	bucketName string
 	rootPath   string
 
-	cli     *storage.MinioChunkManager
+	cli     *storage.RemoteChunkManager
 	inserts []string
 	stats   []string
 	delta   []string
@@ -1481,7 +1511,7 @@ func (s *GarbageCollectorSuite) SetupTest() {
 }
 
 func (s *GarbageCollectorSuite) TearDownTest() {
-	cleanupOSS(s.cli.Client, s.bucketName, s.rootPath)
+	cleanupOSS(s.cli, s.bucketName, s.rootPath)
 }
 
 func (s *GarbageCollectorSuite) TestPauseResume() {

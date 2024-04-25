@@ -102,6 +102,7 @@ minio:
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
+  listObjectsMaxKeys: 0 # The maximum number of objects requested per batch in minio ListObjects rpc, 0 means using oss client by default, decrease these configration if ListObjects timeout
 
 # Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
 # You can change your mq by setting mq.type field.
@@ -443,7 +444,7 @@ dataCoord:
   enableGarbageCollection: true
   gc:
     interval: 3600 # gc interval in seconds
-    missingTolerance: 3600 # file meta missing tolerance duration in seconds, default to 1hr
+    missingTolerance: 86400 # file meta missing tolerance duration in seconds, default to 24hr(1d)
     dropTolerance: 10800 # file belongs to dropped entity tolerance duration in seconds. 3600
     removeConcurrent: 32 # number of concurrent goroutines to remove dropped s3 objects
     scanInterval: 168 # garbage collection scan residue interval in hours
