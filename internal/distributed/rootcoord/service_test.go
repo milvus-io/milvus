@@ -149,7 +149,7 @@ func TestRun(t *testing.T) {
 			return mockQueryCoord
 		}
 
-		paramtable.Get().Save(rcServerConfig.Port.Key, fmt.Sprintf("%d", rand.Int()%100+10000))
+		paramtable.Get().Save(rcServerConfig.Port.Key, fmt.Sprintf("%d", rand.Int()%100+10010))
 		etcdConfig := &paramtable.Get().EtcdCfg
 
 		rand.Seed(time.Now().UnixNano())
