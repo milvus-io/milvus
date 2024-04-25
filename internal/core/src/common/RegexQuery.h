@@ -23,9 +23,6 @@ bool
 is_special(char c);
 
 std::string
-quote_meta(const std::string& s);
-
-std::string
 translate_pattern_match_to_regex(const std::string& pattern);
 
 struct PatternMatchTranslator {
@@ -62,6 +59,12 @@ struct RegexMatcher {
 template <>
 inline bool
 RegexMatcher::operator()(const std::string& operand) {
+    // corner case:
+    // . don't match \n, but .* match \n.
+    // For example,
+    // boost::regex_match("Hello\n", boost::regex("Hello.")) returns false
+    // but
+    // boost::regex_match("Hello\n", boost::regex("Hello.*")) returns true
     return boost::regex_match(operand, r_);
 }
 

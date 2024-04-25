@@ -30,13 +30,6 @@ TEST(IsSpecial, Demo) {
     }
 }
 
-TEST(QuoteMeta, Demo) {
-    using namespace milvus;
-    std::string special_bytes(R"(\.+*?()|[]{}^$)");
-    EXPECT_EQ(quote_meta(special_bytes),
-              std::string(R"(\\\.\+\*\?\(\)\|\[\]\{\}\^\$)"));
-}
-
 TEST(TranslatePatternMatchToRegexTest, SimplePatternWithPercent) {
     std::string pattern = "abc%";
     std::string result = milvus::translate_pattern_match_to_regex(pattern);
@@ -66,6 +59,12 @@ TEST(TranslatePatternMatchToRegexTest, PatternWithRegexChar) {
     std::string pattern = "abc*def.ghi+";
     std::string result = milvus::translate_pattern_match_to_regex(pattern);
     EXPECT_EQ(result, "abc\\*def\\.ghi\\+");
+}
+
+TEST(TranslatePatternMatchToRegexTest, MixPattern) {
+    std::string pattern = R"(abc\+\def%ghi_[\\)";
+    std::string result = milvus::translate_pattern_match_to_regex(pattern);
+    EXPECT_EQ(result, R"(abc\+def[\s\S]*ghi[\s\S]\[\\)");
 }
 
 TEST(PatternMatchTranslatorTest, InvalidTypeTest) {

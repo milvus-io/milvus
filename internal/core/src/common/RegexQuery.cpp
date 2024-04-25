@@ -31,64 +31,32 @@ is_special(char c) {
     return special_bytes_bitmap[c + 128];
 }
 
-// reference: https://cs.opensource.google/go/go/+/refs/tags/go1.22.2:src/regexp/regexp.go;l=726.
-std::string
-quote_meta(const std::string& s) {
-    size_t i;
-    size_t l = s.length();
-    for (i = 0; i < l; i++) {
-        if (is_special(s[i])) {
-            break;
-        }
-    }
-
-    // no special.
-    if (i >= l) {
-        return s;
-    }
-
-    std::string b;
-    b.resize(2 * l - i);
-    std::copy_n(s.begin(), i, b.begin());
-    auto j = i;
-    for (; i < l; i++) {
-        if (is_special(s[i])) {
-            b[j] = '\\';
-            j++;
-        }
-        b[j] = s[i];
-        j++;
-    }
-
-    return b.substr(0, j);
-}
-
 std::string
 translate_pattern_match_to_regex(const std::string& pattern) {
-    std::string r;
+    std::stringstream r;
     bool escape_mode = false;
     for (char c : pattern) {
         if (escape_mode) {
             if (is_special(c)) {
-                r += '\\';
+                r << '\\';
             }
-            r += c;
+            r << c;
             escape_mode = false;
         } else {
             if (c == '\\') {
                 escape_mode = true;
             } else if (c == '%') {
-                r += "[\\s\\S]*";
+                r << "[\\s\\S]*";
             } else if (c == '_') {
-                r += "[\\s\\S]";
+                r << "[\\s\\S]";
             } else {
                 if (is_special(c)) {
-                    r += '\\';
+                    r << '\\';
                 }
-                r += c;
+                r << c;
             }
         }
     }
-    return r;
+    return r.str();
 }
 }  // namespace milvus
