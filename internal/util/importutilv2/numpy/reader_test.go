@@ -486,3 +486,42 @@ func (suite *ReaderSuite) TestVector() {
 func TestUtil(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
 }
+
+func TestCreateReaders(t *testing.T) {
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(nil, nil)
+
+	// normal
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "json", DataType: schemapb.DataType_JSON},
+		},
+	}
+	_, err := CreateReaders(ctx, cm, schema, []string{"pk", "vec", "json"})
+	assert.NoError(t, err)
+
+	// auto id
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "json", DataType: schemapb.DataType_JSON},
+		},
+	}
+	_, err = CreateReaders(ctx, cm, schema, []string{"pk", "vec", "json"})
+	assert.Error(t, err)
+
+	// $meta
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, AutoID: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+	_, err = CreateReaders(ctx, cm, schema, []string{"pk", "vec"})
+	assert.NoError(t, err)
+}
