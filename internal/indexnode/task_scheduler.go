@@ -228,7 +228,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
 	log.Ctx(t.Ctx()).Debug("process task", zap.String("task", t.Name()))
-	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveIndexFiles}
+	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveResult}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
 			log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))

@@ -141,7 +141,7 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 	return nil
 }
 
-func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
+func (at *analyzeTask) SaveResult(ctx context.Context) error {
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
@@ -151,10 +151,11 @@ func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
 		}
 	}
 
-	centroidsFile, centroidsFileSize, offsetMappingFiles, offsetMappingFilesSize, err := at.analyze.UpLoad(len(at.req.GetSegmentStats()))
+	defer gc()
+
+	centroidsFile, centroidsFileSize, offsetMappingFiles, offsetMappingFilesSize, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
 	if err != nil {
 		log.Error("failed to upload index", zap.Error(err))
-		gc()
 		return err
 	}
 	log.Info("debug for analyze result", zap.String("centroidsFile", centroidsFile),
@@ -173,9 +174,6 @@ func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
 			}
 		}
 	}
-
-	// early release analyze for gc, and we can ensure that Delete is idempotent.
-	gc()
 
 	at.endTime = time.Now().UnixMicro()
 	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(),

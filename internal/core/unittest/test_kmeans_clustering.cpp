@@ -33,6 +33,7 @@ ReadPBFile(std::string& file_path, google::protobuf::Message& message) {
     std::ifstream infile;
     infile.open(file_path.data(), std::ios_base::binary);
     if (infile.fail()) {
+        infile.close();
         std::stringstream err_msg;
         err_msg << "Error: open local file '" << file_path << " failed, "
                 << strerror(errno);
@@ -41,6 +42,7 @@ ReadPBFile(std::string& file_path, google::protobuf::Message& message) {
 
     infile.seekg(0, std::ios::beg);
     if (!message.ParseFromIstream(&infile)) {
+        infile.close();
         std::stringstream err_msg;
         err_msg << "Error: parse pb file '" << file_path << " failed, "
                 << strerror(errno);

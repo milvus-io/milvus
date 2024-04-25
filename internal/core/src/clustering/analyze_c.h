@@ -56,7 +56,7 @@ AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
                      int64_t num_rows);
 
 CStatus
-GetAnalyzeResultMeta(CAnalyze analysis,
+GetAnalyzeResultMeta(CAnalyze analyze,
                      char** centroid_path,
                      int64_t* centroid_file_size,
                      void* id_mapping_paths,

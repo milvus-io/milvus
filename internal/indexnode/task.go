@@ -37,7 +37,7 @@ type task interface {
 	Prepare(context.Context) error
 	LoadData(context.Context) error
 	BuildIndex(context.Context) error
-	SaveIndexFiles(context.Context) error
+	SaveResult(context.Context) error
 	OnEnqueue(context.Context) error
 	SetState(state indexpb.JobState, failReason string)
 	GetState() indexpb.JobState
