@@ -33,30 +33,31 @@ is_special(char c) {
 
 std::string
 translate_pattern_match_to_regex(const std::string& pattern) {
-    std::stringstream r;
+    std::string r;
+    r.reserve(2 * pattern.size());
     bool escape_mode = false;
     for (char c : pattern) {
         if (escape_mode) {
             if (is_special(c)) {
-                r << '\\';
+                r += '\\';
             }
-            r << c;
+            r += c;
             escape_mode = false;
         } else {
             if (c == '\\') {
                 escape_mode = true;
             } else if (c == '%') {
-                r << "[\\s\\S]*";
+                r += "[\\s\\S]*";
             } else if (c == '_') {
-                r << "[\\s\\S]";
+                r += "[\\s\\S]";
             } else {
                 if (is_special(c)) {
-                    r << '\\';
+                    r += '\\';
                 }
-                r << c;
+                r += c;
             }
         }
     }
-    return r.str();
+    return r;
 }
 }  // namespace milvus
