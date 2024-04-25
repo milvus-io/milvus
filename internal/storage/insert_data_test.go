@@ -9,7 +9,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestInsertDataSuite(t *testing.T) {
@@ -202,7 +202,7 @@ func (s *InsertDataSuite) SetupTest() {
 		FloatVectorField:       []float32{4, 5, 6, 7},
 		Float16VectorField:     []byte{0, 0, 0, 0, 255, 255, 255, 255},
 		BFloat16VectorField:    []byte{0, 0, 0, 0, 255, 255, 255, 255},
-		SparseFloatVectorField: testutils.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{4, 5, 6}),
+		SparseFloatVectorField: typeutil.CreateSparseFloatRow([]uint32{0, 1, 2}, []float32{4, 5, 6}),
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
@@ -235,7 +235,7 @@ func (s *InsertDataSuite) SetupTest() {
 		FloatVectorField:       []float32{4, 5, 6, 7},
 		Float16VectorField:     []byte{1, 2, 3, 4, 5, 6, 7, 8},
 		BFloat16VectorField:    []byte{1, 2, 3, 4, 5, 6, 7, 8},
-		SparseFloatVectorField: testutils.CreateSparseFloatRow([]uint32{2, 3, 4}, []float32{4, 5, 6}),
+		SparseFloatVectorField: typeutil.CreateSparseFloatRow([]uint32{2, 3, 4}, []float32{4, 5, 6}),
 		ArrayField: &schemapb.ScalarField{
 			Data: &schemapb.ScalarField_IntData{
 				IntData: &schemapb.IntArray{Data: []int32{1, 2, 3}},
