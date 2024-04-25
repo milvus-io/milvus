@@ -289,6 +289,51 @@ func (_c *IMetaTable_AlterCredential_Call) RunAndReturn(run func(*internalpb.Cre
 	return _c
 }
 
+// AlterDatabase provides a mock function with given fields: ctx, oldDB, newDB, ts
+func (_m *IMetaTable) AlterDatabase(ctx context.Context, oldDB *model.Database, newDB *model.Database, ts uint64) error {
+	ret := _m.Called(ctx, oldDB, newDB, ts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *model.Database, *model.Database, uint64) error); ok {
+		r0 = rf(ctx, oldDB, newDB, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// IMetaTable_AlterDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterDatabase'
+type IMetaTable_AlterDatabase_Call struct {
+	*mock.Call
+}
+
+// AlterDatabase is a helper method to define mock.On call
+//   - ctx context.Context
+//   - oldDB *model.Database
+//   - newDB *model.Database
+//   - ts uint64
+func (_e *IMetaTable_Expecter) AlterDatabase(ctx interface{}, oldDB interface{}, newDB interface{}, ts interface{}) *IMetaTable_AlterDatabase_Call {
+	return &IMetaTable_AlterDatabase_Call{Call: _e.mock.On("AlterDatabase", ctx, oldDB, newDB, ts)}
+}
+
+func (_c *IMetaTable_AlterDatabase_Call) Run(run func(ctx context.Context, oldDB *model.Database, newDB *model.Database, ts uint64)) *IMetaTable_AlterDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Database), args[2].(*model.Database), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_AlterDatabase_Call) Return(_a0 error) *IMetaTable_AlterDatabase_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *IMetaTable_AlterDatabase_Call) RunAndReturn(run func(context.Context, *model.Database, *model.Database, uint64) error) *IMetaTable_AlterDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ChangeCollectionState provides a mock function with given fields: ctx, collectionID, state, ts
 func (_m *IMetaTable) ChangeCollectionState(ctx context.Context, collectionID int64, state etcdpb.CollectionState, ts uint64) error {
 	ret := _m.Called(ctx, collectionID, state, ts)

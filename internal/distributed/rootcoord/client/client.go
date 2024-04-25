@@ -659,3 +659,14 @@ func (c *Client) DescribeDatabase(ctx context.Context, req *rootcoordpb.Describe
 		return client.DescribeDatabase(ctx, req)
 	})
 }
+
+func (c *Client) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	request = typeutil.Clone(request)
+	commonpbutil.UpdateMsgBase(
+		request.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
+		return client.AlterDatabase(ctx, request)
+	})
+}
