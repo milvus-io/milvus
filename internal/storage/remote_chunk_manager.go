@@ -289,12 +289,12 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
 	// removeObject in parallel.
-	runningGroup, groupCtx := errgroup.WithContext(ctx)
+	runningGroup, _ := errgroup.WithContext(ctx)
 	runningGroup.SetLimit(10)
 	err := mcm.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) bool {
 		key := object.FilePath
 		runningGroup.Go(func() error {
-			err := mcm.removeObject(groupCtx, mcm.bucketName, key)
+			err := mcm.removeObject(ctx, mcm.bucketName, key)
 			if err != nil {
 				log.Warn("failed to remove object", zap.String("path", key), zap.Error(err))
 			}

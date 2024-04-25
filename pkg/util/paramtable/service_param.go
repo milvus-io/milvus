@@ -1218,11 +1218,10 @@ Leave it empty if you want to use AWS default endpoint`,
 
 	p.ListObjectsMaxKeys = ParamItem{
 		Key:          "minio.listObjectsMaxKeys",
-		Version:      "2.3.5",
+		Version:      "2.4.1",
 		DefaultValue: "0",
 		Doc: `The maximum number of objects requested per batch in minio ListObjects rpc, 
-0 means using minio client by default, which is 1000,
-decrease these configration if ListObjects timeout`,
+0 means using oss client by default, decrease these configration if ListObjects timeout`,
 		Export: true,
 	}
 	p.ListObjectsMaxKeys.Init(base.mgr)
