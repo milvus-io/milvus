@@ -1170,7 +1170,7 @@ func TestInjectDone(t *testing.T) {
 	task.injectDone()
 }
 
-func BenchmarkDeserializeReader(b *testing.B) {
+func BenchmarkCompaction(b *testing.B) {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
