@@ -92,7 +92,7 @@ class MilvusConan(ConanFile):
     def requirements(self):
         if self.settings.os != "Macos":
             # MacOS does not need openblas
-            # self.requires("openblas/0.3.23@milvus/dev")
+            self.requires("openblas/0.3.23@milvus/dev")
             self.requires("libunwind/1.7.2")
 
     def imports(self):

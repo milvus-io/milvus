@@ -31,18 +31,19 @@ FROM rockylinux/rockylinux:8
 
 ARG TARGETARCH
 
-RUN dnf install -y make automake gcc gcc-c++ curl zip unzip tar git which \
+RUN dnf install -y make cmake automake gcc gcc-c++ curl zip unzip tar git which \
         libaio libuuid-devel wget python3 python3-pip \
-        pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool 
+        pkg-config perl-IPC-Cmd perl-Digest-SHA libatomic libtool
 
-# install openblas-devel and texinfo
-RUN dnf -y install dnf-plugins-core && \
+# install openblas-devel texinfo ninja
+RUN dnf -y update && \
+    dnf -y install dnf-plugins-core && \
     dnf config-manager --set-enabled powertools && \
-    dnf -y install texinfo openblas-devel
+    dnf -y install texinfo openblas-devel ninja-build
+
 
 RUN pip3 install conan==1.61.0
 RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.20.7.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go 
-RUN wget -qO- "https://cmake.org/files/v3.27/cmake-3.27.5-linux-`uname -m`.tar.gz" | tar --strip-components=1 -xz -C /usr/local
 RUN curl https://sh.rustup.rs -sSf | \
     sh -s -- --default-toolchain=1.73 -y
 
@@ -50,9 +51,12 @@ ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
 
 ENV VCPKG_FORCE_SYSTEM_BINARIES 1
 
+# install vcpkg
+RUN mkdir /opt/vcpkg &&  \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    rm -rf vcpkg.tar.gz
 # Copy the vcpkg installed libraries
-COPY --from=vcpkg-installer /opt/vcpkg \
-                            /opt/vcpkg
+COPY --from=vcpkg-installer /root/.cache/vcpkg /root/.cache/vcpkg
 
 
 COPY --chown=0:0 build/docker/builder/entrypoint.sh /
