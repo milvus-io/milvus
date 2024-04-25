@@ -1642,3 +1642,14 @@ func SetReportValue(status *commonpb.Status, value int) {
 	}
 	status.ExtraInfo["report_value"] = strconv.Itoa(value)
 }
+
+func GetCostValue(status *commonpb.Status) int {
+	if status == nil || status.ExtraInfo == nil {
+		return 0
+	}
+	value, err := strconv.Atoi(status.ExtraInfo["report_value"])
+	if err != nil {
+		return 0
+	}
+	return value
+}

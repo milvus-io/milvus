@@ -379,3 +379,7 @@ func wrapperReturnRowCount(pairs []*commonpb.KeyValuePair) gin.H {
 func wrapperReturnDefault() gin.H {
 	return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}}
 }
+
+func wrapperReturnDefaultWithCost(cost int) gin.H {
+	return gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}, HTTPReturnCost: cost}
+}
