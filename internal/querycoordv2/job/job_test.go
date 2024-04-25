@@ -188,6 +188,7 @@ func (suite *JobSuite) SetupTest() {
 		suite.meta,
 		suite.targetMgr,
 		suite.targetObserver,
+		nil,
 		suite.checkerController,
 	)
 }
