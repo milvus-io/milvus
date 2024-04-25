@@ -51,6 +51,7 @@ var (
 	ErrCollectionNotFullyLoaded   = newMilvusError("collection not fully loaded", 103, true)
 	ErrCollectionLoaded           = newMilvusError("collection already loaded", 104, false)
 	ErrCollectionIllegalSchema    = newMilvusError("illegal collection schema", 105, false)
+	ErrCollectionOnRecovering     = newMilvusError("collection on recovering", 106, true)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
