@@ -314,14 +314,14 @@ func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
 	logger := log.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
 
-	logger.Info("start list objects")
+	logger.Info("start walk through objects")
 	if err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, recursive, walkFunc); err != nil {
 		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.FailLabel).Inc()
-		logger.Warn("failed to list objects", zap.Error(err))
+		logger.Warn("failed to walk through objects", zap.Error(err))
 		return err
 	}
 	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.SuccessLabel).Inc()
-	logger.Info("start list objects", zap.Error(err))
+	logger.Info("finish walk through objects")
 	return nil
 }
 

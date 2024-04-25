@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/atomic"
 )
 
 type FutureSuite struct {
@@ -44,6 +45,54 @@ func (s *FutureSuite) TestFuture() {
 	s.True(resultFuture.OK())
 	s.Error(errFuture.Err())
 	s.Equal(10, resultFuture.Value())
+}
+
+func (s *FutureSuite) TestBlockOnAll() {
+	cnt := atomic.NewInt32(0)
+	futures := make([]*Future[struct{}], 10)
+	for i := 0; i < 10; i++ {
+		sleepTime := time.Duration(i) * 100 * time.Millisecond
+		futures[i] = Go(func() (struct{}, error) {
+			time.Sleep(sleepTime)
+			cnt.Add(1)
+			return struct{}{}, errors.New("errFuture")
+		})
+	}
+
+	err := BlockOnAll(futures...)
+	s.Error(err)
+	s.Equal(int32(10), cnt.Load())
+
+	cnt.Store(0)
+	for i := 0; i < 10; i++ {
+		sleepTime := time.Duration(i) * 100 * time.Millisecond
+		futures[i] = Go(func() (struct{}, error) {
+			time.Sleep(sleepTime)
+			cnt.Add(1)
+			return struct{}{}, nil
+		})
+	}
+
+	err = BlockOnAll(futures...)
+	s.NoError(err)
+	s.Equal(int32(10), cnt.Load())
+}
+
+func (s *FutureSuite) TestAwaitAll() {
+	cnt := atomic.NewInt32(0)
+	futures := make([]*Future[struct{}], 10)
+	for i := 0; i < 10; i++ {
+		sleepTime := time.Duration(i) * 100 * time.Millisecond
+		futures[i] = Go(func() (struct{}, error) {
+			time.Sleep(sleepTime)
+			cnt.Add(1)
+			return struct{}{}, errors.New("errFuture")
+		})
+	}
+
+	err := AwaitAll(futures...)
+	s.Error(err)
+	s.Equal(int32(1), cnt.Load())
 }
 
 func TestFuture(t *testing.T) {

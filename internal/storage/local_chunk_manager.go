@@ -135,8 +135,14 @@ func (lcm *LocalChunkManager) MultiRead(ctx context.Context, filePaths []string)
 
 func (lcm *LocalChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
 	logger := log.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
-	defer logger.Info("finish list objects", zap.Error(err))
-	logger.Info("start list objects")
+	logger.Info("start walk through objects")
+	defer func() {
+		if err != nil {
+			logger.Warn("failed to walk through objects", zap.Error(err))
+			return
+		}
+		logger.Info("finish walk through objects")
+	}()
 
 	if recursive {
 		dir := filepath.Dir(prefix)

@@ -344,8 +344,10 @@ func (gc *garbageCollector) recycleUnusedBinLogWithChecker(ctx context.Context, 
 		return true
 	})
 	// Wait for all remove tasks done.
-	// error is logged, and can be ignored here.
-	_ = conc.BlockOnAll(futures...)
+	if err := conc.BlockOnAll(futures...); err != nil {
+		// error is logged, and can be ignored here.
+		logger.Warn("some task failure in remove object pool", zap.Error(err))
+	}
 
 	cost := time.Since(start)
 	logger.Info("garbageCollector recycleUnusedBinlogFiles done",
@@ -664,8 +666,11 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 			}
 			return true
 		})
-		// error is logged, and can be ignored here.
-		_ = conc.BlockOnAll(futures...)
+		// Wait for all remove tasks done.
+		if err := conc.BlockOnAll(futures...); err != nil {
+			// error is logged, and can be ignored here.
+			logger.Warn("some task failure in remove object pool", zap.Error(err))
+		}
 
 		logger = logger.With(zap.Int("deleteIndexFilesNum", int(deletedFilesNum.Load())), zap.Int("walkFileNum", fileNum))
 		if err != nil {
