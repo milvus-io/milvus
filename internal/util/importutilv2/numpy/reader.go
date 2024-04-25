@@ -43,7 +43,7 @@ type reader struct {
 	frs   map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, paths []string, cm storage.ChunkManager, bufferSize int) (*reader, error) {
+func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
@@ -129,7 +129,7 @@ func CreateReaders(ctx context.Context, paths []string, cm storage.ChunkManager,
 		if field.GetIsPrimaryKey() && field.GetAutoID() {
 			continue
 		}
-		if _, ok := nameToPath[field.GetName()]; !ok {
+		if _, ok := nameToPath[field.GetName()]; !ok && !field.GetIsDynamic() {
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
 		}
