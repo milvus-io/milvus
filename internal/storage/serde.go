@@ -750,6 +750,7 @@ type singleFieldRecordWriter struct {
 	fw      *pqarrow.FileWriter
 	fieldId FieldID
 
+	numRows int
 	grouped bool
 }
 
@@ -758,6 +759,8 @@ func (sfw *singleFieldRecordWriter) Write(r Record) error {
 		sfw.grouped = true
 		sfw.fw.NewRowGroup()
 	}
+
+	sfw.numRows++
 	// TODO: adding row group support by calling fw.NewRowGroup()
 	a := r.Column(sfw.fieldId)
 	return sfw.fw.WriteColumnData(a)
@@ -790,6 +793,9 @@ type SerializeWriter[T any] struct {
 }
 
 func (sw *SerializeWriter[T]) Flush() error {
+	if sw.pos == 0 {
+		return nil
+	}
 	buf := sw.buffer[:sw.pos]
 	r, size, err := sw.serializer(buf)
 	if err != nil {
@@ -881,7 +887,7 @@ type BinlogStreamWriter struct {
 	memorySize int // To be updated on the fly
 
 	buf bytes.Buffer
-	rw  RecordWriter
+	rw  *singleFieldRecordWriter
 }
 
 func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
@@ -916,8 +922,9 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		return nil, err
 	}
 	return &Blob{
-		Key:   strconv.Itoa(int(bsw.fieldSchema.FieldID)),
-		Value: b.Bytes(),
+		Key:    strconv.Itoa(int(bsw.fieldSchema.FieldID)),
+		Value:  b.Bytes(),
+		RowNum: int64(bsw.rw.numRows),
 	}, nil
 }
 

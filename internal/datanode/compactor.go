@@ -55,8 +55,6 @@ var (
 	errContext               = errors.New("context done or timeout")
 )
 
-type iterator = storage.Iterator
-
 type compactor interface {
 	complete()
 	compact() (*datapb.CompactionPlanResult, error)
@@ -174,48 +172,15 @@ func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interf
 	return pk2ts, nil
 }
 
-func (t *compactionTask) uploadRemainLog(
-	ctxTimeout context.Context,
-	targetSegID UniqueID,
-	partID UniqueID,
-	meta *etcdpb.CollectionMeta,
-	stats *storage.PrimaryKeyStats,
-	totRows int64,
-	writeBuffer *storage.InsertData,
-) (map[UniqueID]*datapb.FieldBinlog, map[UniqueID]*datapb.FieldBinlog, error) {
-	iCodec := storage.NewInsertCodecWithSchema(meta)
-	inPaths := make(map[int64]*datapb.FieldBinlog, 0)
-	var err error
-	if !writeBuffer.IsEmpty() {
-		inPaths, err = uploadInsertLog(ctxTimeout, t.binlogIO, t.Allocator, meta.GetID(), partID, targetSegID, writeBuffer, iCodec)
-		if err != nil {
-			return nil, nil, err
-		}
+func newBinlogWriter(collectionId, partitionId, segmentId UniqueID, schema *schemapb.CollectionSchema,
+) (writer *storage.SerializeWriter[*storage.Value], closers []func() (*Blob, error), err error) {
+	fieldWriters := storage.NewBinlogStreamWriters(collectionId, partitionId, segmentId, schema.Fields)
+	closers = make([]func() (*Blob, error), 0, len(fieldWriters))
+	for _, w := range fieldWriters {
+		closers = append(closers, w.Finalize)
 	}
-
-	statPaths, err := uploadStatsLog(ctxTimeout, t.binlogIO, t.Allocator, meta.GetID(), partID, targetSegID, stats, totRows, iCodec)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return inPaths, statPaths, nil
-}
-
-func (t *compactionTask) uploadSingleInsertLog(
-	ctxTimeout context.Context,
-	targetSegID UniqueID,
-	partID UniqueID,
-	meta *etcdpb.CollectionMeta,
-	writeBuffer *storage.InsertData,
-) (map[UniqueID]*datapb.FieldBinlog, error) {
-	iCodec := storage.NewInsertCodecWithSchema(meta)
-
-	inPaths, err := uploadInsertLog(ctxTimeout, t.binlogIO, t.Allocator, meta.GetID(), partID, targetSegID, writeBuffer, iCodec)
-	if err != nil {
-		return nil, err
-	}
-
-	return inPaths, nil
+	writer, err = storage.NewBinlogSerializeWriter(schema, partitionId, segmentId, fieldWriters, 1024)
+	return
 }
 
 func (t *compactionTask) merge(
@@ -231,10 +196,15 @@ func (t *compactionTask) merge(
 	log := log.With(zap.Int64("planID", t.getPlanID()))
 	mergeStart := time.Now()
 
+	writer, finalizers, err := newBinlogWriter(meta.GetID(), partID, targetSegID, meta.GetSchema())
+	if err != nil {
+		return nil, nil, 0, err
+	}
+
 	var (
-		numBinlogs int   // binlog number
-		numRows    int64 // the number of rows uploaded
-		expired    int64 // the number of expired entity
+		numBinlogs int    // binlog number
+		numRows    uint64 // the number of rows uploaded
+		expired    int64  // the number of expired entity
 
 		insertField2Path = make(map[UniqueID]*datapb.FieldBinlog)
 		insertPaths      = make([]*datapb.FieldBinlog, 0)
@@ -242,10 +212,6 @@ func (t *compactionTask) merge(
 		statField2Path = make(map[UniqueID]*datapb.FieldBinlog)
 		statPaths      = make([]*datapb.FieldBinlog, 0)
 	)
-	writeBuffer, err := storage.NewInsertData(meta.GetSchema())
-	if err != nil {
-		return nil, nil, -1, err
-	}
 
 	isDeletedValue := func(v *storage.Value) bool {
 		ts, ok := delta[v.PK.GetValue()]
@@ -306,7 +272,7 @@ func (t *compactionTask) merge(
 	numRows = 0
 	numBinlogs = 0
 	currentTs := t.GetCurrentTime()
-	currentRows := 0
+	unflushedRows := 0
 	downloadTimeCost := time.Duration(0)
 	uploadInsertTimeCost := time.Duration(0)
 
@@ -324,6 +290,30 @@ func (t *compactionTask) merge(
 		timestampTo   int64 = -1
 		timestampFrom int64 = -1
 	)
+
+	flush := func() error {
+		uploadInsertStart := time.Now()
+		writer.Close()
+		fieldData := make([]*Blob, len(finalizers))
+
+		for i, f := range finalizers {
+			blob, err := f()
+			if err != nil {
+				return err
+			}
+			fieldData[i] = blob
+		}
+		inPaths, err := uploadInsertLog(ctx, t.binlogIO, t.Allocator, meta.ID, partID, targetSegID, fieldData)
+		if err != nil {
+			log.Warn("failed to upload single insert log", zap.Error(err))
+			return err
+		}
+		numBinlogs += len(inPaths)
+		uploadInsertTimeCost += time.Since(uploadInsertStart)
+		addInsertFieldPath(inPaths, timestampFrom, timestampTo)
+		unflushedRows = 0
+		return nil
+	}
 
 	for _, path := range unMergedInsertlogs {
 		downloadStart := time.Now()
@@ -370,55 +360,50 @@ func (t *compactionTask) merge(
 				timestampTo = v.Timestamp
 			}
 
-			row, ok := v.Value.(map[UniqueID]interface{})
-			if !ok {
-				log.Warn("transfer interface to map wrong", zap.Strings("path", path))
-				return nil, nil, 0, errors.New("unexpected error")
-			}
-
-			err = writeBuffer.Append(row)
+			err = writer.Write(v)
+			numRows++
+			unflushedRows++
 			if err != nil {
 				return nil, nil, 0, err
 			}
 
-			currentRows++
 			stats.Update(v.PK)
 
 			// check size every 100 rows in case of too many `GetMemorySize` call
-			if (currentRows+1)%100 == 0 && writeBuffer.GetMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsInt() {
-				numRows += int64(writeBuffer.GetRowNum())
-				uploadInsertStart := time.Now()
-				inPaths, err := t.uploadSingleInsertLog(ctx, targetSegID, partID, meta, writeBuffer)
-				if err != nil {
-					log.Warn("failed to upload single insert log", zap.Error(err))
-					return nil, nil, 0, err
-				}
-				uploadInsertTimeCost += time.Since(uploadInsertStart)
-				addInsertFieldPath(inPaths, timestampFrom, timestampTo)
-				timestampFrom = -1
-				timestampTo = -1
+			if (unflushedRows+1)%100 == 0 {
+				writer.Flush() // Flush to update memory size
 
-				writeBuffer, _ = storage.NewInsertData(meta.GetSchema())
-				currentRows = 0
-				numBinlogs++
+				if writer.WrittenMemorySize() > paramtable.Get().DataNodeCfg.BinLogMaxSize.GetAsUint64() {
+					if err := flush(); err != nil {
+						return nil, nil, 0, err
+					}
+					timestampFrom = -1
+					timestampTo = -1
+
+					writer, finalizers, err = newBinlogWriter(meta.ID, targetSegID, partID, meta.Schema)
+					if err != nil {
+						return nil, nil, 0, err
+					}
+				}
 			}
 		}
 	}
 
-	// upload stats log and remain insert rows
-	if writeBuffer.GetRowNum() > 0 || numRows > 0 {
-		numRows += int64(writeBuffer.GetRowNum())
-		uploadStart := time.Now()
-		inPaths, statsPaths, err := t.uploadRemainLog(ctx, targetSegID, partID, meta,
-			stats, numRows+int64(currentRows), writeBuffer)
+	// final flush if there is unflushed rows
+	if unflushedRows > 0 {
+		if err := flush(); err != nil {
+			return nil, nil, 0, err
+		}
+	}
+
+	// upload stats log
+	if numRows > 0 {
+		iCodec := storage.NewInsertCodecWithSchema(meta)
+		statsPaths, err := uploadStatsLog(ctx, t.binlogIO, t.Allocator, meta.GetID(), partID, targetSegID, stats, int64(numRows), iCodec)
 		if err != nil {
 			return nil, nil, 0, err
 		}
-
-		uploadInsertTimeCost += time.Since(uploadStart)
-		addInsertFieldPath(inPaths, timestampFrom, timestampTo)
 		addStatFieldPath(statsPaths)
-		numBinlogs += len(inPaths)
 	}
 
 	for _, path := range insertField2Path {
@@ -430,14 +415,14 @@ func (t *compactionTask) merge(
 	}
 
 	log.Info("compact merge end",
-		zap.Int64("remaining insert numRows", numRows),
+		zap.Uint64("remaining insert numRows", numRows),
 		zap.Int64("expired entities", expired),
 		zap.Int("binlog file number", numBinlogs),
 		zap.Duration("download insert log elapse", downloadTimeCost),
 		zap.Duration("upload insert log elapse", uploadInsertTimeCost),
 		zap.Duration("merge elapse", time.Since(mergeStart)))
 
-	return insertPaths, statPaths, numRows, nil
+	return insertPaths, statPaths, int64(numRows), nil
 }
 
 func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {

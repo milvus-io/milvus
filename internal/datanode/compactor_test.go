@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"math"
 	"testing"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -296,8 +295,12 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
 			iCodec := storage.NewInsertCodecWithSchema(meta)
+			var partId int64 = 0
+			var segmentId int64 = 1
+			blobs, err := iCodec.Serialize(partId, 0, iData)
+			assert.NoError(t, err)
 			var allPaths [][]string
-			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
+			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -336,18 +339,22 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		})
 		t.Run("Merge without expiration2", func(t *testing.T) {
 			mockbIO := io.NewBinlogIO(cm, getOrCreateIOPool())
+			iData := genInsertDataWithExpiredTS()
 			iCodec := storage.NewInsertCodecWithSchema(meta)
+			var partId int64 = 0
+			var segmentId int64 = 1
+			blobs, err := iCodec.Serialize(partId, 0, iData)
+			assert.NoError(t, err)
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			BinLogMaxSize := Params.DataNodeCfg.BinLogMaxSize.GetValue()
 			defer func() {
 				Params.Save(Params.DataNodeCfg.BinLogMaxSize.Key, BinLogMaxSize)
 			}()
 			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "64")
-			iData := genInsertDataWithExpiredTS()
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
+			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -394,9 +401,13 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}()
 			paramtable.Get().Save(Params.DataNodeCfg.BinLogMaxSize.Key, "1")
 			iData := genInsertData(101)
+			var partId int64 = 0
+			var segmentId int64 = 1
+			blobs, err := iCodec.Serialize(partId, segmentId, iData)
+			assert.NoError(t, err)
 
 			var allPaths [][]string
-			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
+			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -440,10 +451,14 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			mockbIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 			iData := genInsertDataWithExpiredTS()
+			var partId int64 = 0
+			var segmentId int64 = 1
+			blobs, err := iCodec.Serialize(partId, 0, iData)
+			assert.NoError(t, err)
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
+			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -485,6 +500,10 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			mockbIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 			iData := genInsertDataWithExpiredTS()
 			iCodec := storage.NewInsertCodecWithSchema(meta)
+			var partId int64 = 0
+			var segmentId int64 = 1
+			blobs, err := iCodec.Serialize(partId, 0, iData)
+			assert.NoError(t, err)
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 			metaCache := metacache.NewMockMetaCache(t)
 			metaCache.EXPECT().Schema().Return(meta.GetSchema()).Maybe()
@@ -499,7 +518,7 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			})
 
 			var allPaths [][]string
-			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
+			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -539,10 +558,14 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
+			var partId int64 = 0
+			var segmentId int64 = 1
+			blobs, err := iCodec.Serialize(partId, 0, iData)
+			assert.NoError(t, err)
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
+			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -586,10 +609,14 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 			paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
 			iData := genInsertDataWithExpiredTS()
+			var partId int64 = 0
+			var segmentId int64 = 1
+			blobs, err := iCodec.Serialize(partId, 0, iData)
+			assert.NoError(t, err)
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
 
 			var allPaths [][]string
-			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
+			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
 			assert.NoError(t, err)
 			assert.Equal(t, 12, len(inpath))
 			binlogNum := len(inpath[0].GetBinlogs())
@@ -713,32 +740,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 		_, err := ct.getNumRows()
 		assert.Error(t, err, "segment not found")
-	})
-
-	t.Run("Test uploadRemainLog error", func(t *testing.T) {
-		f := &MetaFactory{}
-
-		t.Run("upload failed", func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
-
-			meta := f.GetCollectionMeta(UniqueID(10001), "test_upload_remain_log", schemapb.DataType_Int64)
-			stats, err := storage.NewPrimaryKeyStats(106, int64(schemapb.DataType_Int64), 10)
-
-			require.NoError(t, err)
-
-			ct := &compactionTask{
-				binlogIO:  io.NewBinlogIO(&mockCm{errSave: true}, getOrCreateIOPool()),
-				Allocator: alloc,
-				done:      make(chan struct{}, 1),
-			}
-
-			_, _, err = ct.uploadRemainLog(ctx, 1, 2, meta, stats, 10, nil)
-			assert.Error(t, err)
-		})
 	})
 }
 
@@ -924,12 +925,16 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			metaCache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false)
 
 			iData1 := genInsertDataWithPKs(c.pks1, c.pkType)
+			iblobs1, err := iCodec.Serialize(c.parID, 0, iData1)
+			assert.NoError(t, err)
 			dData1 := &DeleteData{
 				Pks:      []storage.PrimaryKey{c.pks1[0]},
 				Tss:      []Timestamp{20000},
 				RowCount: 1,
 			}
 			iData2 := genInsertDataWithPKs(c.pks2, c.pkType)
+			iblobs2, err := iCodec.Serialize(c.parID, 3, iData2)
+			assert.NoError(t, err)
 			dData2 := &DeleteData{
 				Pks:      []storage.PrimaryKey{c.pks2[0]},
 				Tss:      []Timestamp{30000},
@@ -938,7 +943,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			stats1, err := storage.NewPrimaryKeyStats(1, int64(c.pkType), 1)
 			require.NoError(t, err)
-			iPaths1, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), c.parID, c.segID1, iData1, iCodec)
+			iPaths1, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), c.parID, c.segID1, iblobs1)
 			require.NoError(t, err)
 			sPaths1, err := uploadStatsLog(context.Background(), mockbIO, alloc, meta.GetID(), c.parID, c.segID1, stats1, 2, iCodec)
 			require.NoError(t, err)
@@ -948,7 +953,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 			stats2, err := storage.NewPrimaryKeyStats(1, int64(c.pkType), 1)
 			require.NoError(t, err)
-			iPaths2, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), c.parID, c.segID2, iData2, iCodec)
+			iPaths2, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), c.parID, c.segID2, iblobs2)
 			require.NoError(t, err)
 			sPaths2, err := uploadStatsLog(context.Background(), mockbIO, alloc, meta.GetID(), c.parID, c.segID2, stats2, 2, iCodec)
 			require.NoError(t, err)
@@ -1067,7 +1072,11 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		// the same pk for segmentI and segmentII
 		pks := [2]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)}
 		iData1 := genInsertDataWithPKs(pks, schemapb.DataType_Int64)
+		iblobs1, err := iCodec.Serialize(partID, 0, iData1)
+		assert.NoError(t, err)
 		iData2 := genInsertDataWithPKs(pks, schemapb.DataType_Int64)
+		iblobs2, err := iCodec.Serialize(partID, 1, iData2)
+		assert.NoError(t, err)
 
 		pk1 := storage.NewInt64PrimaryKey(1)
 		dData1 := &DeleteData{
@@ -1084,7 +1093,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		stats1, err := storage.NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 1)
 		require.NoError(t, err)
-		iPaths1, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partID, segID1, iData1, iCodec)
+		iPaths1, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partID, segID1, iblobs1)
 		require.NoError(t, err)
 		sPaths1, err := uploadStatsLog(context.Background(), mockbIO, alloc, meta.GetID(), partID, segID1, stats1, 1, iCodec)
 		require.NoError(t, err)
@@ -1094,7 +1103,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		stats2, err := storage.NewPrimaryKeyStats(1, int64(schemapb.DataType_Int64), 1)
 		require.NoError(t, err)
-		iPaths2, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partID, segID2, iData2, iCodec)
+		iPaths2, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partID, segID2, iblobs2)
 		require.NoError(t, err)
 		sPaths2, err := uploadStatsLog(context.Background(), mockbIO, alloc, meta.GetID(), partID, segID2, stats2, 1, iCodec)
 		require.NoError(t, err)
@@ -1159,4 +1168,79 @@ func TestInjectDone(t *testing.T) {
 
 	task.injectDone()
 	task.injectDone()
+}
+
+func BenchmarkDeserializeReader(b *testing.B) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	cm := storage.NewLocalChunkManager(storage.RootPath(compactTestDir))
+	defer cm.RemoveWithPrefix(ctx, cm.RootPath())
+
+	collectionID := int64(1)
+	meta := NewMetaFactory().GetCollectionMeta(collectionID, "test", schemapb.DataType_Int64)
+	mockbIO := io.NewBinlogIO(cm, getOrCreateIOPool())
+	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0")
+	iData := genInsertDataWithExpiredTS()
+	iCodec := storage.NewInsertCodecWithSchema(meta)
+	var partId int64 = 0
+	var segmentId int64 = 1
+	blobs, err := iCodec.Serialize(partId, 0, iData)
+	assert.NoError(b, err)
+	var allPaths [][]string
+	alloc := allocator.NewMockAllocator(b)
+	alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
+	alloc.EXPECT().AllocOne().Call.Return(int64(19530), nil)
+	inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), partId, segmentId, blobs)
+	assert.NoError(b, err)
+	assert.Equal(b, 12, len(inpath))
+	binlogNum := len(inpath[0].GetBinlogs())
+	assert.Equal(b, 1, binlogNum)
+
+	for idx := 0; idx < binlogNum; idx++ {
+		var ps []string
+		for _, path := range inpath {
+			ps = append(ps, path.GetBinlogs()[idx].GetLogPath())
+		}
+		allPaths = append(allPaths, ps)
+	}
+
+	dm := map[interface{}]Timestamp{
+		1: 10000,
+	}
+
+	metaCache := metacache.NewMockMetaCache(b)
+	metaCache.EXPECT().Schema().Return(meta.GetSchema()).Maybe()
+	metaCache.EXPECT().GetSegmentByID(mock.Anything).RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
+		segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+			CollectionID: 1,
+			PartitionID:  0,
+			ID:           id,
+			NumOfRows:    10,
+		}, nil)
+		return segment, true
+	})
+
+	ct := &compactionTask{
+		metaCache: metaCache,
+		binlogIO:  mockbIO,
+		Allocator: alloc,
+		done:      make(chan struct{}, 1),
+		plan: &datapb.CompactionPlan{
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 1},
+			},
+		},
+	}
+
+	b.ResetTimer()
+
+	for i := 0; i < b.N; i++ {
+		inPaths, statsPaths, numOfRow, err := ct.merge(context.Background(), allPaths, 2, 0, meta, dm)
+		assert.NoError(b, err)
+		assert.Equal(b, int64(2), numOfRow)
+		assert.Equal(b, 1, len(inPaths[0].GetBinlogs()))
+		assert.Equal(b, 1, len(statsPaths))
+		assert.NotEqual(b, -1, inPaths[0].GetBinlogs()[0].GetTimestampFrom())
+		assert.NotEqual(b, -1, inPaths[0].GetBinlogs()[0].GetTimestampTo())
+	}
 }
