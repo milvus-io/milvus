@@ -49,11 +49,17 @@ func waitCollectionReleased(dist *meta.DistributionManager, checkerController *c
 				return partitionSet.Contain(segment.GetPartitionID())
 			})
 		} else {
-			channels = dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(collection))
+			channels = dist.ChannelDistManager.GetByCollectionAndFilter(collection)
 		}
 
 		if len(channels)+len(segments) == 0 {
 			break
+		} else {
+			log.Info("wait for release done", zap.Int64("collection", collection),
+				zap.Int64s("partitions", partitions),
+				zap.Int("channel", len(channels)),
+				zap.Int("segments", len(segments)),
+			)
 		}
 
 		// trigger check more frequently

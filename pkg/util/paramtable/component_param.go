@@ -1688,7 +1688,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.SegmentCheckInterval = ParamItem{
 		Key:          "queryCoord.checkSegmentInterval",
 		Version:      "2.3.0",
-		DefaultValue: "1000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
@@ -1697,7 +1697,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval = ParamItem{
 		Key:          "queryCoord.checkChannelInterval",
 		Version:      "2.3.0",
-		DefaultValue: "1000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}

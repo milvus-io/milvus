@@ -360,7 +360,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		dstNodeSet.Remove(srcNode)
 
 		// check sealed segment list
-		channels := s.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(srcNode))
+		channels := s.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(srcNode))
 		toBalance := typeutil.NewSet[*meta.DmChannel]()
 		if req.GetTransferAll() {
 			toBalance.Insert(channels...)

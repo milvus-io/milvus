@@ -316,7 +316,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
 	for _, nodeID := range offlineNodes {
-		dmChannels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(nodeID))
+		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))
 		plans := b.AssignChannel(dmChannels, onlineNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
@@ -341,7 +341,7 @@ func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNode
 		nodeWithLessChannel := make([]int64, 0)
 		channelsToMove := make([]*meta.DmChannel, 0)
 		for _, node := range onlineNodes {
-			channels := b.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
+			channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
 
 			if len(channels) <= average {
 				nodeWithLessChannel = append(nodeWithLessChannel, node)

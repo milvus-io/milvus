@@ -45,12 +45,6 @@ func WithReplica2Channel(replica *Replica) ChannelDistFilter {
 	}
 }
 
-func WithChannelName2Channel(channelName string) ChannelDistFilter {
-	return func(ch *DmChannel) bool {
-		return ch.GetChannelName() == channelName
-	}
-}
-
 type DmChannel struct {
 	*datapb.VchannelInfo
 	Node    int64
@@ -76,11 +70,15 @@ type ChannelDistManager struct {
 
 	// NodeID -> Channels
 	channels map[UniqueID][]*DmChannel
+
+	// CollectionID -> Channels
+	collectionIndex map[int64][]*DmChannel
 }
 
 func NewChannelDistManager() *ChannelDistManager {
 	return &ChannelDistManager{
-		channels: make(map[UniqueID][]*DmChannel),
+		channels:        make(map[UniqueID][]*DmChannel),
+		collectionIndex: make(map[int64][]*DmChannel),
 	}
 }
 
@@ -146,6 +144,31 @@ func (m *ChannelDistManager) GetByFilter(filters ...ChannelDistFilter) []*DmChan
 	return ret
 }
 
+func (m *ChannelDistManager) GetByCollectionAndFilter(collectionID int64, filters ...ChannelDistFilter) []*DmChannel {
+	m.rwmutex.RLock()
+	defer m.rwmutex.RUnlock()
+
+	mergedFilters := func(ch *DmChannel) bool {
+		for _, fn := range filters {
+			if fn != nil && !fn(ch) {
+				return false
+			}
+		}
+
+		return true
+	}
+
+	ret := make([]*DmChannel, 0)
+
+	// If a collection ID is provided, use the collection index
+	for _, channel := range m.collectionIndex[collectionID] {
+		if mergedFilters(channel) {
+			ret = append(ret, channel)
+		}
+	}
+	return ret
+}
+
 func (m *ChannelDistManager) Update(nodeID UniqueID, channels ...*DmChannel) {
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
@@ -155,4 +178,21 @@ func (m *ChannelDistManager) Update(nodeID UniqueID, channels ...*DmChannel) {
 	}
 
 	m.channels[nodeID] = channels
+
+	m.updateCollectionIndex()
+}
+
+// update secondary index for channel distribution
+func (m *ChannelDistManager) updateCollectionIndex() {
+	m.collectionIndex = make(map[int64][]*DmChannel)
+	for _, nodeChannels := range m.channels {
+		for _, channel := range nodeChannels {
+			collectionID := channel.GetCollectionID()
+			if channels, ok := m.collectionIndex[collectionID]; !ok {
+				m.collectionIndex[collectionID] = []*DmChannel{channel}
+			} else {
+				m.collectionIndex[collectionID] = append(channels, channel)
+			}
+		}
+	}
 }
