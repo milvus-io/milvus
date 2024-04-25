@@ -381,6 +381,20 @@ func IsVectorType(dataType schemapb.DataType) bool {
 	}
 }
 
+// return VectorTypeSize for each dim (byte)
+func VectorTypeSize(dataType schemapb.DataType) float64 {
+	switch dataType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_SparseFloatVector:
+		return 4.0
+	case schemapb.DataType_BinaryVector:
+		return 0.25
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return 2.0
+	default:
+		return 0.0
+	}
+}
+
 func IsSparseVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_SparseFloatVector
 }

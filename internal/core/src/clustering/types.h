@@ -14,26 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
-
-#include <memory>
+#include <map>
+#include <stdint.h>
+#include <string>
 #include <vector>
+#include "common/Types.h"
+#include "index/Index.h"
+#include "storage/Types.h"
 
-#include "storage/DiskFileManagerImpl.h"
-#include "storage/space.h"
-
-namespace milvus::indexbuilder {
-
-class MajorCompaction {
- public:
-    virtual ~MajorCompaction() = default;
-
-    virtual void
-    Train() = 0;
-
-    virtual BinarySet
-    Upload() = 0;
+struct AnalyzeInfo {
+    int64_t collection_id;
+    int64_t partition_id;
+    int64_t field_id;
+    int64_t task_id;
+    int64_t version;
+    std::string field_name;
+    milvus::DataType field_type;
+    int64_t dim;
+    int64_t num_clusters;
+    int64_t train_size;
+    std::map<int64_t, std::vector<std::string>>
+        insert_files;  // segment_id->files
+    std::map<int64_t, int64_t> num_rows;
+    milvus::storage::StorageConfig storage_config;
+    milvus::Config config;
 };
-
-using MajorCompactionBasePtr = std::unique_ptr<MajorCompaction>;
-}  // namespace milvus::indexbuilder

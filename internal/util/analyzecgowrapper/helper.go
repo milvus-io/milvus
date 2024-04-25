@@ -17,11 +17,10 @@
 package analyzecgowrapper
 
 /*
-#cgo pkg-config: milvus_indexbuilder
+#cgo pkg-config: milvus_clustering
 
 #include <stdlib.h>	// free
-#include "common/binary_set_c.h"
-#include "indexbuilder/analyze_c.h"
+#include "clustering/analyze_c.h"
 */
 import "C"
 

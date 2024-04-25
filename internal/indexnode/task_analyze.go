@@ -18,8 +18,7 @@ package indexnode
 
 import (
 	"context"
-	"fmt"
-	"strings"
+	"math"
 	"time"
 
 	"go.uber.org/zap"
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type analyzeTask struct {
@@ -49,6 +49,7 @@ type analyzeTask struct {
 func (at *analyzeTask) Ctx() context.Context {
 	return at.ctx
 }
+
 func (at *analyzeTask) Name() string {
 	return at.ident
 }
@@ -68,6 +69,7 @@ func (at *analyzeTask) LoadData(ctx context.Context) error {
 	// Load data in segcore
 	return nil
 }
+
 func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 	var err error
 	var analyzeInfo *analyzecgowrapper.AnalyzeInfo
@@ -83,25 +85,12 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		return err
 	}
 
-	err = analyzeInfo.AppendAnalyzeInfo(
-		at.req.GetCollectionID(),
-		at.req.GetPartitionID(),
-		at.req.GetFieldID(),
-		at.req.GetTaskID(),
-		at.req.GetVersion(),
-		at.req.GetFieldName(),
-		at.req.GetFieldType(),
-		at.req.GetDim(),
-		Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize(),
-		Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize(),
-	)
-	if err != nil {
-		log.Warn("append analyze info failed", zap.Error(err))
-		return err
-	}
-
+	totalSegmentsRows := int64(0)
 	for segID, stats := range at.req.GetSegmentStats() {
-		err = analyzeInfo.AppendNumRows(segID, stats.GetNumRows())
+		numRows := stats.GetNumRows()
+		totalSegmentsRows += numRows
+		err = analyzeInfo.AppendNumRows(segID, numRows)
+		log.Info("append segment rows", zap.Int64("segment id", segID), zap.Int64("rows", numRows))
 		if err != nil {
 			log.Warn("append segment num rows failed", zap.Error(err))
 			return err
@@ -115,6 +104,28 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 				return err
 			}
 		}
+	}
+	
+	// compute num clusters to train
+	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(at.req.GetDim()) * typeutil.VectorTypeSize(at.req.GetFieldType())   // Byte
+	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / float64(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())))
+	log.Info("plan to analyze with", zap.Float64("total segments raw data size(GB)", float64(totalSegmentsRawDataSize)/1024.0/1024.0/1024.0), zap.Int64("num_clusters", numClusters))
+
+	err = analyzeInfo.AppendAnalyzeInfo(
+		at.req.GetCollectionID(),
+		at.req.GetPartitionID(),
+		at.req.GetFieldID(),
+		at.req.GetTaskID(),
+		at.req.GetVersion(),
+		at.req.GetFieldName(),
+		at.req.GetFieldType(),
+		at.req.GetDim(),
+		numClusters,
+		Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize(),
+	)
+	if err != nil {
+		log.Warn("append analyze info failed", zap.Error(err))
+		return err
 	}
 
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
@@ -137,38 +148,39 @@ func (at *analyzeTask) SaveIndexFiles(ctx context.Context) error {
 			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-	files, err := at.analyze.UpLoad()
-	if err != nil {
-		log.Error("failed to upload index", zap.Error(err))
-		gc()
-		return err
-	}
-	centroidsFile := ""
-	segmentOffsetMapping := make(map[int64]string)
-	for file := range files {
-		if strings.Contains(file, "centroid") {
-			centroidsFile = file
-			continue
-		}
-		for segID := range at.req.GetSegmentStats() {
-			if strings.Contains(file, fmt.Sprintf("%d", segID)) {
-				segmentOffsetMapping[segID] = file
-				break
-			}
-		}
-	}
-	//encodeIndexFileDur := at.tr.Record("index serialize and upload done")
-	//metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
+	// No upload interface. TODO(xiaocai): help refine this
+	// files, err := at.analyze.UpLoad()
+	// if err != nil {
+	// 	log.Error("failed to upload index", zap.Error(err))
+	// 	gc()
+	// 	return err
+	// }
+	// centroidsFile := ""
+	// segmentOffsetMapping := make(map[int64]string)
+	// for file := range files {
+	// 	if strings.Contains(file, "centroid") {
+	// 		centroidsFile = file
+	// 		continue
+	// 	}
+	// 	for segID := range at.req.GetSegmentStats() {
+	// 		if strings.Contains(file, fmt.Sprintf("%d", segID)) {
+	// 			segmentOffsetMapping[segID] = file
+	// 			break
+	// 		}
+	// 	}
+	// }
+	// encodeIndexFileDur := at.tr.Record("index serialize and upload done")
+	// metrics.IndexNodeEncodeIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(encodeIndexFileDur.Seconds())
 
 	// early release analyze for gc, and we can ensure that Delete is idempotent.
 	gc()
 
 	at.endTime = time.Now().UnixMicro()
-	//saveIndexFileDur := at.tr.RecordSpan()
-	//metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
-	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(), at.req.GetTaskID(), centroidsFile, segmentOffsetMapping)
-	at.tr.Elapse("index building all done")
-	log.Info("Successfully save analyze files")
+	// saveIndexFileDur := at.tr.RecordSpan()
+	// metrics.IndexNodeSaveIndexFileLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Observe(saveIndexFileDur.Seconds())
+	// at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(), at.req.GetTaskID(), centroidsFile, segmentOffsetMapping)
+	// at.tr.Elapse("index building all done")
+	// log.Info("Successfully save analyze files")
 	return nil
 }
 

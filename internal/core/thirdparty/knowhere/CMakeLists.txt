@@ -12,7 +12,7 @@
 #-------------------------------------------------------------------------------
 
 # Update KNOWHERE_VERSION for the first occurrence
-set( KNOWHERE_VERSION de817a784f24b5a8 )
+set( KNOWHERE_VERSION 98e081f4c892bf7c )
 set( GIT_REPOSITORY  "https://github.com/chasingegg/Knowhere.git")
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")

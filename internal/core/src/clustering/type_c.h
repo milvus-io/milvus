@@ -13,6 +13,5 @@
 
 #include "common/type_c.h"
 
-typedef void* CIndex;
-typedef void* CIndexQueryResult;
-typedef void* CBuildIndexInfo;
+typedef void* CAnalyze;
+typedef void* CAnalyzeInfo;

@@ -18,7 +18,7 @@ extern "C" {
 #include <stdint.h>
 #include "common/type_c.h"
 #include "common/binary_set_c.h"
-#include "indexbuilder/type_c.h"
+#include "clustering/type_c.h"
 
 CStatus
 Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info);
@@ -42,7 +42,7 @@ AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
                   const char* field_name,
                   enum CDataType field_type,
                   int64_t dim,
-                  int64_t segment_size,
+                  int64_t num_clusters,
                   int64_t train_size);
 
 CStatus
@@ -56,7 +56,11 @@ AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
                      int64_t num_rows);
 
 CStatus
-SerializeAnalyzeAndUpLoad(CAnalyze analyze, CBinarySet* c_binary_set);
+GetAnalyzeResultMeta(CAnalyze analysis,
+                     char** centroid_path,
+                     int64_t* centroid_file_size,
+                     void* id_mapping_paths,
+                     int64_t* id_mapping_sizes);
 
 #ifdef __cplusplus
 };

@@ -22,7 +22,7 @@
 #include <vector>
 #include <boost/dynamic_bitset.hpp>
 #include "common/Types.h"
-#include "knowhere/factory.h"
+#include "knowhere/index/index_factory.h"
 #include "index/VectorIndex.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/space.h"

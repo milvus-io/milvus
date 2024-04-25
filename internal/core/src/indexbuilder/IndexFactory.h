@@ -18,8 +18,6 @@
 
 #include "common/EasyAssert.h"
 #include "indexbuilder/IndexCreatorBase.h"
-#include "indexbuilder/MajorCompaction.h"
-#include "indexbuilder/KmeansMajorCompaction.h"
 #include "indexbuilder/ScalarIndexCreator.h"
 #include "indexbuilder/VecIndexCreator.h"
 #include "indexbuilder/type_c.h"
@@ -109,37 +107,6 @@ class IndexFactory {
                     type, field_name, dim, config, file_manager_context, space);
             default:
                 throw std::invalid_argument(invalid_dtype_msg);
-        }
-    }
-
-    MajorCompactionBasePtr
-    CreateCompactionJob(DataType type,
-                        Config& config,
-                        const storage::FileManagerContext& context) {
-        auto invalid_dtype_msg =
-            std::string("invalid data type: ") + std::to_string(int(type));
-
-        switch (type) {
-            // currently only support float vector
-            case DataType::VECTOR_FLOAT:
-                return std::make_unique<KmeansMajorCompaction<float>>(config,
-                                                                      context);
-            case DataType::BOOL:
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32:
-            case DataType::INT64:
-            case DataType::FLOAT:
-            case DataType::DOUBLE:
-            case DataType::VARCHAR:
-            case DataType::STRING:
-            case DataType::VECTOR_FLOAT16:
-            case DataType::VECTOR_BFLOAT16:
-            case DataType::VECTOR_BINARY:
-            default:
-                throw SegcoreError(
-                    DataTypeInvalid,
-                    fmt::format("invalid type is {}", invalid_dtype_msg));
         }
     }
 };
