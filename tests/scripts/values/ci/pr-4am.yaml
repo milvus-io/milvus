@@ -73,6 +73,13 @@ pulsar:
   components:
     autorecovery: false
   proxy:
+    nodeSelector:
+      node-role.kubernetes.io/e2e: ""
+
+    tolerations:
+    - key: "node-role.kubernetes.io/e2e"
+      operator: "Exists"
+      effect: "NoSchedule"
     configData:
       PULSAR_MEM: >
         -Xms1024m -Xmx1024m
@@ -89,6 +96,13 @@ pulsar:
         memory: "100Mi"
         cpu: "0.1"
   broker:
+    nodeSelector:
+      node-role.kubernetes.io/e2e: ""
+
+    tolerations:
+    - key: "node-role.kubernetes.io/e2e"
+      operator: "Exists"
+      effect: "NoSchedule"
     resources:
       requests:
         cpu: "0.5"
@@ -117,6 +131,13 @@ pulsar:
       backlogQuotaDefaultRetentionPolicy: producer_exception
 
   bookkeeper:
+    nodeSelector:
+      node-role.kubernetes.io/e2e: ""
+
+    tolerations:
+    - key: "node-role.kubernetes.io/e2e"
+      operator: "Exists"
+      effect: "NoSchedule"
     configData:
       PULSAR_MEM: >
         -Xms4096m
@@ -144,6 +165,13 @@ pulsar:
         memory: "4Gi"
 
   zookeeper:
+    nodeSelector:
+      node-role.kubernetes.io/e2e: ""
+
+    tolerations:
+    - key: "node-role.kubernetes.io/e2e"
+      operator: "Exists"
+      effect: "NoSchedule"
     replicaCount: 1
     configData:
       PULSAR_MEM: >
@@ -168,6 +196,14 @@ kafka:
       cpu: "0.5"
       memory: "1Gi"
   zookeeper:
+    nodeSelector:
+      node-role.kubernetes.io/e2e: ""
+
+    tolerations:
+    - key: "node-role.kubernetes.io/e2e"
+      operator: "Exists"
+      effect: "NoSchedule"
+
     replicaCount: 1
     resources:
       requests:
@@ -175,13 +211,29 @@ kafka:
         memory: "512Mi"
 etcd:
   nodeSelector:
-    nvme: "true"
+    node-role/nvme: "true"
+    node-role.kubernetes.io/e2e: ""
+
+  tolerations:
+  - key: "node-role.kubernetes.io/e2e"
+    operator: "Exists"
+    effect: "NoSchedule"
+
+
   replicaCount: 1
   resources:
     requests:
       cpu: "0.3"
       memory: "100Mi"
 minio:
+  nodeSelector:
+    node-role.kubernetes.io/e2e: ""
+
+  tolerations:
+  - key: "node-role.kubernetes.io/e2e"
+    operator: "Exists"
+    effect: "NoSchedule"
+
   resources:
     requests:
       cpu: "0.3"
