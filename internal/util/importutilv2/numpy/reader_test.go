@@ -290,7 +290,7 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		}
 	}
 
-	reader, err := NewReader(context.Background(), schema, lo.Values(files), cm, math.MaxInt)
+	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
 	suite.NoError(err)
 
 	checkFn := func(actualInsertData *storage.InsertData, offsetBegin, expectRows int) {
@@ -417,7 +417,7 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 		}
 	}
 
-	reader, err := NewReader(context.Background(), schema, lo.Values(files), cm, math.MaxInt)
+	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
 	suite.NoError(err)
 
 	_, err = reader.Read()
@@ -449,4 +449,43 @@ func (suite *ReaderSuite) TestBinaryVector() {
 
 func TestUtil(t *testing.T) {
 	suite.Run(t, new(ReaderSuite))
+}
+
+func TestCreateReaders(t *testing.T) {
+	ctx := context.Background()
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(nil, nil)
+
+	// normal
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "json", DataType: schemapb.DataType_JSON},
+		},
+	}
+	_, err := CreateReaders(ctx, cm, schema, []string{"pk", "vec", "json"})
+	assert.NoError(t, err)
+
+	// auto id
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true, AutoID: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "json", DataType: schemapb.DataType_JSON},
+		},
+	}
+	_, err = CreateReaders(ctx, cm, schema, []string{"pk", "vec", "json"})
+	assert.Error(t, err)
+
+	// $meta
+	schema = &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{Name: "pk", DataType: schemapb.DataType_Int64, AutoID: true},
+			{Name: "vec", DataType: schemapb.DataType_FloatVector},
+			{Name: "$meta", DataType: schemapb.DataType_JSON, IsDynamic: true},
+		},
+	}
+	_, err = CreateReaders(ctx, cm, schema, []string{"pk", "vec"})
+	assert.NoError(t, err)
 }
