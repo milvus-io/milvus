@@ -395,6 +395,8 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 			zap.String("dataType", analyzeRequest.GetFieldType().String()),
 			zap.Int64("version", analyzeRequest.GetVersion()),
 			zap.Int64("dim", analyzeRequest.GetDim()),
+			zap.Int64("trainSize", analyzeRequest.GetMaxTrainSize()),
+			zap.Int64("numClusters", analyzeRequest.GetNumClusters()),
 		)
 		taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 		if oldInfo := i.loadOrStoreAnalyzeTask(analyzeRequest.GetClusterID(), analyzeRequest.GetTaskID(), &analyzeTaskInfo{

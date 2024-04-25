@@ -2603,6 +2603,8 @@ type dataCoordConfig struct {
 	ClusteringCompactionMaxSegmentSize        ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxTrainSize          ParamItem `refreshable:"true"`
 	ClusteringCompactionTimeoutInSeconds      ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxCentroidsNum       ParamItem `refreshable:"true"`
+	ClusteringCompactionMinCentroidsNum       ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -3078,6 +3080,24 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.ClusteringCompactionMaxTrainSize.Init(base.mgr)
+
+	p.ClusteringCompactionMaxCentroidsNum = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxCentroidsNum",
+		Version:      "2.4.0",
+		DefaultValue: "10240",
+		Doc:          "maximum centroids number in Kmeans train",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxCentroidsNum.Init(base.mgr)
+
+	p.ClusteringCompactionMinCentroidsNum = ParamItem{
+		Key:          "dataCoord.compaction.clustering.minCentroidsNum",
+		Version:      "2.4.0",
+		DefaultValue: "128",
+		Doc:          "minimum centroids number in Kmeans train",
+		Export:       true,
+	}
+	p.ClusteringCompactionMinCentroidsNum.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",

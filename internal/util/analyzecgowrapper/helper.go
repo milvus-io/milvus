@@ -47,5 +47,9 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 	if errorCode == 2003 {
 		return merr.WrapErrSegcoreUnsupported(int32(errorCode), logMsg)
 	}
+	if errorCode == 2033 {
+		log.Info("fake finished the task")
+		return merr.ErrSegcoreFakeFinished
+	}
 	return merr.WrapErrSegcore(int32(errorCode), logMsg)
 }

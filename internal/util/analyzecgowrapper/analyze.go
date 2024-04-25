@@ -61,7 +61,10 @@ func (ca *CgoAnalyze) Delete() error {
 	if ca.close {
 		return nil
 	}
-	status := C.DeleteAnalyze(ca.analyzePtr)
+	var status C.CStatus
+	if ca.analyzePtr != nil {
+		status = C.DeleteAnalyze(ca.analyzePtr)
+	}
 	ca.close = true
 	return HandleCStatus(&status, "failed to delete analyze")
 }

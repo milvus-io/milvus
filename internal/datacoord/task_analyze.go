@@ -19,15 +19,17 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -133,6 +135,8 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 	segmentsMap := lo.SliceToMap(segments, func(t *SegmentInfo) (int64, *SegmentInfo) {
 		return t.ID, t
 	})
+
+	totalSegmentsRows := int64(0)
 	for _, segID := range t.SegmentIDs {
 		info := segmentsMap[segID]
 		if info == nil {
@@ -142,9 +146,9 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 			return false, false
 		}
 
+		totalSegmentsRows += info.GetNumOfRows()
 		// get binlogIDs
 		binlogIDs := getBinLogIDs(info, t.FieldID)
-
 		req.SegmentStats[segID] = &indexpb.SegmentStats{
 			ID:      segID,
 			NumRows: info.GetNumOfRows(),
@@ -175,6 +179,17 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		return false, false
 	}
 	req.Dim = int64(dim)
+
+	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(t.FieldType) // Byte
+	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / float64(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())))
+	if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
+		numClusters = Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()
+	}
+	if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
+		numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
+	}
+	req.NumClusters = numClusters
+	req.MaxTrainSize = Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize()
 
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()

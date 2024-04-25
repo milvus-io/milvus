@@ -403,7 +403,13 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 			log.Info("get analyzeTask", zap.Any("analyzeTask", analyzeTask))
 			if analyzeTask.State == indexpb.JobState_JobStateFinished {
 				//version := int64(0) // analyzeTask.Version
-				plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analyzeTask.TaskID, analyzeTask.Version))
+				//plan.AnalyzeResultPath = path.Join(metautil.JoinIDPath(analyzeTask.TaskID, analyzeTask.Version))
+				if analyzeTask.GetCentroidsFile() == "" && len(analyzeTask.GetOffsetMapping()) == 0 {
+					job.state = completed
+					return t.saveJob(job)
+				}
+				plan.CentroidFilePath = analyzeTask.GetCentroidsFile()
+				plan.OffsetMappingFiles = analyzeTask.GetOffsetMapping()
 				offSetSegmentIDs := make([]int64, 0)
 				for _, segID := range analyzeTask.SegmentIDs {
 					offSetSegmentIDs = append(offSetSegmentIDs, segID)

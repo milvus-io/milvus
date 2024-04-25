@@ -207,6 +207,8 @@ func getStateFromError(err error) indexpb.JobState {
 	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) {
 		// NoSuchKey or unsupported error
 		return indexpb.JobState_JobStateFailed
+	} else if errors.Is(err, merr.ErrSegcoreFakeFinished) {
+		return indexpb.JobState_JobStateFinished
 	}
 	return indexpb.JobState_JobStateRetry
 }

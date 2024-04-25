@@ -19,7 +19,6 @@ package indexnode
 import (
 	"context"
 	"fmt"
-	"math"
 	"strings"
 	"time"
 
@@ -30,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type analyzeTask struct {
@@ -87,10 +85,8 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		return err
 	}
 
-	totalSegmentsRows := int64(0)
 	for segID, stats := range at.req.GetSegmentStats() {
 		numRows := stats.GetNumRows()
-		totalSegmentsRows += numRows
 		err = analyzeInfo.AppendNumRows(segID, numRows)
 		log.Info("append segment rows", zap.Int64("segment id", segID), zap.Int64("rows", numRows))
 		if err != nil {
@@ -108,11 +104,6 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	// compute num clusters to train
-	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(at.req.GetDim()) * typeutil.VectorTypeSize(at.req.GetFieldType()) // Byte
-	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / float64(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())))
-	log.Info("plan to analyze with", zap.Float64("total segments raw data size(GB)", float64(totalSegmentsRawDataSize)/1024.0/1024.0/1024.0), zap.Int64("num_clusters", numClusters))
-
 	err = analyzeInfo.AppendAnalyzeInfo(
 		at.req.GetCollectionID(),
 		at.req.GetPartitionID(),
@@ -122,8 +113,8 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		at.req.GetFieldName(),
 		at.req.GetFieldType(),
 		at.req.GetDim(),
-		numClusters,
-		Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize(),
+		at.req.GetNumClusters(),
+		at.req.GetMaxTrainSize(),
 	)
 	if err != nil {
 		log.Warn("append analyze info failed", zap.Error(err))
@@ -150,7 +141,6 @@ func (at *analyzeTask) SaveResult(ctx context.Context) error {
 			log.Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
 		}
 	}
-
 	defer gc()
 
 	centroidsFile, centroidsFileSize, offsetMappingFiles, offsetMappingFilesSize, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))

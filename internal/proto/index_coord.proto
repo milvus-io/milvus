@@ -390,6 +390,8 @@ message AnalyzeRequest {
     int64 version = 9;
     StorageConfig storage_config = 10;
     int64 dim = 11;
+    int64 max_train_size = 12;
+    int64 num_clusters = 13;
 }
 
 message AnalyzeResult {
