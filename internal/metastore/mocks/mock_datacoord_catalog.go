@@ -5,8 +5,10 @@ package mocks
 import (
 	context "context"
 
-	metastore "github.com/milvus-io/milvus/internal/metastore"
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
+
+	metastore "github.com/milvus-io/milvus/internal/metastore"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -863,19 +865,19 @@ func (_c *DataCoordCatalog_GcConfirm_Call) RunAndReturn(run func(context.Context
 }
 
 // ListAnalyzeTasks provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListAnalyzeTasks(ctx context.Context) ([]*model.AnalyzeTask, error) {
+func (_m *DataCoordCatalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
 	ret := _m.Called(ctx)
 
-	var r0 []*model.AnalyzeTask
+	var r0 []*indexpb.AnalyzeTask
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) ([]*model.AnalyzeTask, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*indexpb.AnalyzeTask, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) []*model.AnalyzeTask); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) []*indexpb.AnalyzeTask); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*model.AnalyzeTask)
+			r0 = ret.Get(0).([]*indexpb.AnalyzeTask)
 		}
 	}
 
@@ -906,12 +908,12 @@ func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) Run(run func(ctx context.Conte
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) Return(_a0 []*model.AnalyzeTask, _a1 error) *DataCoordCatalog_ListAnalyzeTasks_Call {
+func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) Return(_a0 []*indexpb.AnalyzeTask, _a1 error) *DataCoordCatalog_ListAnalyzeTasks_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) RunAndReturn(run func(context.Context) ([]*model.AnalyzeTask, error)) *DataCoordCatalog_ListAnalyzeTasks_Call {
+func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) RunAndReturn(run func(context.Context) ([]*indexpb.AnalyzeTask, error)) *DataCoordCatalog_ListAnalyzeTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1486,11 +1488,11 @@ func (_c *DataCoordCatalog_MarkChannelDeleted_Call) RunAndReturn(run func(contex
 }
 
 // SaveAnalyzeTask provides a mock function with given fields: ctx, task
-func (_m *DataCoordCatalog) SaveAnalyzeTask(ctx context.Context, task *model.AnalyzeTask) error {
+func (_m *DataCoordCatalog) SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error {
 	ret := _m.Called(ctx, task)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *model.AnalyzeTask) error); ok {
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalyzeTask) error); ok {
 		r0 = rf(ctx, task)
 	} else {
 		r0 = ret.Error(0)
@@ -1506,14 +1508,14 @@ type DataCoordCatalog_SaveAnalyzeTask_Call struct {
 
 // SaveAnalyzeTask is a helper method to define mock.On call
 //   - ctx context.Context
-//   - task *model.AnalyzeTask
+//   - task *indexpb.AnalyzeTask
 func (_e *DataCoordCatalog_Expecter) SaveAnalyzeTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveAnalyzeTask_Call {
 	return &DataCoordCatalog_SaveAnalyzeTask_Call{Call: _e.mock.On("SaveAnalyzeTask", ctx, task)}
 }
 
-func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) Run(run func(ctx context.Context, task *model.AnalyzeTask)) *DataCoordCatalog_SaveAnalyzeTask_Call {
+func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) Run(run func(ctx context.Context, task *indexpb.AnalyzeTask)) *DataCoordCatalog_SaveAnalyzeTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*model.AnalyzeTask))
+		run(args[0].(context.Context), args[1].(*indexpb.AnalyzeTask))
 	})
 	return _c
 }
@@ -1523,7 +1525,7 @@ func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) Return(_a0 error) *DataCoordCat
 	return _c
 }
 
-func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) RunAndReturn(run func(context.Context, *model.AnalyzeTask) error) *DataCoordCatalog_SaveAnalyzeTask_Call {
+func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) RunAndReturn(run func(context.Context, *indexpb.AnalyzeTask) error) *DataCoordCatalog_SaveAnalyzeTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

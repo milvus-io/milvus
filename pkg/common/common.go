@@ -93,7 +93,7 @@ const (
 	PartitionStatsPath = `part_stats`
 
 	// AnalyzeStatsPath storage path const for analyze.
-	AnalyzeStatsPath = `filesanalyze_stats`
+	AnalyzeStatsPath = `analyze_stats`
 )
 
 // Search, Index parameter keys

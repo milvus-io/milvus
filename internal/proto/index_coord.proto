@@ -368,6 +368,8 @@ message AnalyzeTask {
     string centroids_file = 13;
     map<int64, string> offset_mapping = 14;
     bool deleted = 15;
+    int64 centroids_file_size = 16;
+    map<string, int64> offset_mapping_files_size=17;
 }
 
 message SegmentStats {
@@ -388,6 +390,8 @@ message AnalyzeRequest {
     int64 version = 9;
     StorageConfig storage_config = 10;
     int64 dim = 11;
+    int64 max_train_size = 12;
+    int64 num_clusters = 13;
 }
 
 message AnalyzeResult {
@@ -396,6 +400,8 @@ message AnalyzeResult {
     string fail_reason = 3;
     string centroids_file = 4;
     map<int64, string> offset_mapping = 5;
+    int64 centroids_file_size = 6;
+    map<string, int64> offset_mapping_files_size=7;
 }
 
 enum JobType {

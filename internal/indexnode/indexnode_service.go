@@ -388,7 +388,16 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 		return ret, nil
 	case indexpb.JobType_JobTypeAnalyzeJob:
 		analyzeRequest := req.GetAnalyzeRequest()
-
+		log.Info("receive analyze job", zap.Int64("collectionID", analyzeRequest.GetCollectionID()),
+			zap.Int64("partitionID", analyzeRequest.GetPartitionID()),
+			zap.Int64("fieldID", analyzeRequest.GetFieldID()),
+			zap.String("fieldName", analyzeRequest.GetFieldName()),
+			zap.String("dataType", analyzeRequest.GetFieldType().String()),
+			zap.Int64("version", analyzeRequest.GetVersion()),
+			zap.Int64("dim", analyzeRequest.GetDim()),
+			zap.Int64("trainSize", analyzeRequest.GetMaxTrainSize()),
+			zap.Int64("numClusters", analyzeRequest.GetNumClusters()),
+		)
 		taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 		if oldInfo := i.loadOrStoreAnalyzeTask(analyzeRequest.GetClusterID(), analyzeRequest.GetTaskID(), &analyzeTaskInfo{
 			cancel: taskCancel,
@@ -396,7 +405,6 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 		}); oldInfo != nil {
 			err := merr.WrapErrIndexDuplicate("", "analyze task already existed")
 			log.Warn("duplicated analyze task", zap.Error(err))
-			//metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.FailLabel).Inc()
 			return merr.Status(err), nil
 		}
 		t := &analyzeTask{
@@ -411,10 +419,8 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 		if err := i.sched.TaskQueue.Enqueue(t); err != nil {
 			log.Warn("IndexNode failed to schedule", zap.Error(err))
 			ret = merr.Status(err)
-			//metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), metrics.FailLabel).Inc()
 			return ret, nil
 		}
-		//metrics.IndexNodeBuildIndexTaskCounter.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SuccessLabel).Inc()
 		log.Info("IndexNode analyze job enqueued successfully")
 		return ret, nil
 	default:
@@ -489,9 +495,13 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *indexpb.QueryJobsV2Req
 			info := i.getAnalyzeTaskInfo(req.GetClusterID(), taskID)
 			if info != nil {
 				results = append(results, &indexpb.AnalyzeResult{
-					TaskID:     taskID,
-					State:      info.state,
-					FailReason: info.failReason,
+					TaskID:                 taskID,
+					State:                  info.state,
+					FailReason:             info.failReason,
+					CentroidsFile:          info.centroidsFile,
+					OffsetMapping:          info.segmentsOffsetMapping,
+					CentroidsFileSize:      info.centroidsFileSize,
+					OffsetMappingFilesSize: info.segmentsOffsetMappingSize,
 				})
 			}
 		}

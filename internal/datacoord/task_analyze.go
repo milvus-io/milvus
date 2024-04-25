@@ -19,6 +19,9 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"math"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -132,6 +135,8 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 	segmentsMap := lo.SliceToMap(segments, func(t *SegmentInfo) (int64, *SegmentInfo) {
 		return t.ID, t
 	})
+
+	totalSegmentsRows := int64(0)
 	for _, segID := range t.SegmentIDs {
 		info := segmentsMap[segID]
 		if info == nil {
@@ -141,9 +146,9 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 			return false, false
 		}
 
+		totalSegmentsRows += info.GetNumOfRows()
 		// get binlogIDs
 		binlogIDs := getBinLogIDs(info, t.FieldID)
-
 		req.SegmentStats[segID] = &indexpb.SegmentStats{
 			ID:      segID,
 			NumRows: info.GetNumOfRows(),
@@ -151,23 +156,21 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		}
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
-	defer cancel()
 	collInfo, err := dependency.handler.GetCollection(ctx, segments[0].GetCollectionID())
 	if err != nil {
 		log.Ctx(ctx).Info("analyze task get collection info failed", zap.Int64("collectionID",
-		   segments[0].GetCollectionID()), zap.Error(err))
+			segments[0].GetCollectionID()), zap.Error(err))
 		at.SetState(indexpb.JobState_JobStateInit, err.Error())
 		return false, false
 	}
-	
+
 	schema := collInfo.Schema
 	var field *schemapb.FieldSchema
-	
+
 	for _, f := range schema.Fields {
 		if f.FieldID == t.FieldID {
-		   field = f
-		   break
+			field = f
+			break
 		}
 	}
 	dim, err := storage.GetDimFromParams(field.TypeParams)
@@ -176,6 +179,20 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		return false, false
 	}
 	req.Dim = int64(dim)
+
+	totalSegmentsRawDataSize := float64(totalSegmentsRows) * float64(dim) * typeutil.VectorTypeSize(t.FieldType) // Byte
+	numClusters := int64(math.Ceil(totalSegmentsRawDataSize / float64(Params.DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize())))
+	if numClusters < Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64() {
+		numClusters = Params.DataCoordCfg.ClusteringCompactionMinCentroidsNum.GetAsInt64()
+	}
+	if numClusters > Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64() {
+		numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
+	}
+	req.NumClusters = numClusters
+	req.MaxTrainSize = Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize()
+
+	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
+	defer cancel()
 	resp, err := client.CreateJobV2(ctx, &indexpb.CreateJobV2Request{
 		ClusterID: req.GetClusterID(),
 		TaskID:    req.GetTaskID(),
@@ -199,11 +216,7 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 }
 
 func (at *analyzeTask) setResult(result *indexpb.AnalyzeResult) {
-	at.taskInfo.TaskID = at.GetTaskID()
-	at.taskInfo.State = result.GetState()
-	at.taskInfo.FailReason = result.GetFailReason()
-	at.taskInfo.CentroidsFile = result.GetCentroidsFile()
-	at.taskInfo.OffsetMapping = result.GetOffsetMapping()
+	at.taskInfo = result
 }
 
 func (at *analyzeTask) QueryResult(ctx context.Context, client types.IndexNodeClient) {

@@ -51,7 +51,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -276,8 +275,9 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 
 	// todo move analyze to indexnode Analyze method
 	if t.isVectorClusteringKey {
-		analyzeResultPath := t.plan.AnalyzeResultPath
-		centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), "centroids")
+		//analyzeResultPath := t.plan.AnalyzeResultPath
+		//centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), "centroids")
+		centroidFilePath := t.plan.GetCentroidFilePath()
 		centroidBytes, err := t.io.Download(ctx, []string{centroidFilePath})
 		if err != nil {
 			return nil, err
@@ -288,13 +288,13 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 			return nil, err
 		}
 		log.Debug("read clustering centroids stats", zap.String("path", centroidFilePath), zap.Int("centroidNum", len(centroids.GetCentroids())))
-		offsetMappingFiles := make(map[int64]string, 0)
-		for _, segmentID := range t.plan.AnalyzeSegmentIds {
-			path := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), "offsets_mapping")
-			offsetMappingFiles[segmentID] = path
-			log.Debug("read segment offset mapping file", zap.Int64("segmentID", segmentID), zap.String("path", path))
-		}
-		t.segmentIDOffsetMapping = offsetMappingFiles
+		//offsetMappingFiles := make(map[int64]string, 0)
+		//for _, segmentID := range t.plan.AnalyzeSegmentIds {
+		//	path := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), "offsets_mapping")
+		//	offsetMappingFiles[segmentID] = path
+		//	log.Debug("read segment offset mapping file", zap.Int64("segmentID", segmentID), zap.String("path", path))
+		//}
+		t.segmentIDOffsetMapping = t.plan.GetOffsetMappingFiles()
 
 		for id, centroid := range centroids.GetCentroids() {
 			fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)

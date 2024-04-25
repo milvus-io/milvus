@@ -184,7 +184,8 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 					ID:      suite.segmentID,
 					NumRows: 1024,
 					LogIDs:  []int64{1, 2, 3},
-				}},
+				},
+			},
 			Version:       1,
 			StorageConfig: nil,
 		}
@@ -224,7 +225,6 @@ func (suite *IndexNodeServiceSuite) Test_Method() {
 		err = merr.CheckRPCCall(resp, err)
 		suite.NoError(err)
 	})
-
 }
 
 func Test_IndexNodeServiceSuite(t *testing.T) {

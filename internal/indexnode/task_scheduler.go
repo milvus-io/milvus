@@ -23,11 +23,10 @@ import (
 	"runtime/debug"
 	"sync"
 
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
-
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -208,6 +207,8 @@ func getStateFromError(err error) indexpb.JobState {
 	} else if errors.Is(err, merr.ErrIoKeyNotFound) || errors.Is(err, merr.ErrSegcoreUnsupported) {
 		// NoSuchKey or unsupported error
 		return indexpb.JobState_JobStateFailed
+	} else if errors.Is(err, merr.ErrSegcoreFakeFinished) {
+		return indexpb.JobState_JobStateFinished
 	}
 	return indexpb.JobState_JobStateRetry
 }
@@ -229,7 +230,7 @@ func (sched *TaskScheduler) processTask(t task, q TaskQueue) {
 	sched.TaskQueue.AddActiveTask(t)
 	defer sched.TaskQueue.PopActiveTask(t.Name())
 	log.Ctx(t.Ctx()).Debug("process task", zap.String("task", t.Name()))
-	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveIndexFiles}
+	pipelines := []func(context.Context) error{t.Prepare, t.BuildIndex, t.SaveResult}
 	for _, fn := range pipelines {
 		if err := wrap(fn); err != nil {
 			log.Ctx(t.Ctx()).Warn("process task failed", zap.Error(err))

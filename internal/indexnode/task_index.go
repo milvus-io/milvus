@@ -176,7 +176,7 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 	return nil
 }
 
-func (it *indexBuildTaskV2) SaveIndexFiles(ctx context.Context) error {
+func (it *indexBuildTaskV2) SaveResult(ctx context.Context) error {
 	gcIndex := func() {
 		if err := it.index.Delete(); err != nil {
 			log.Ctx(ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))
@@ -528,7 +528,7 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	return nil
 }
 
-func (it *indexBuildTask) SaveIndexFiles(ctx context.Context) error {
+func (it *indexBuildTask) SaveResult(ctx context.Context) error {
 	gcIndex := func() {
 		if err := it.index.Delete(); err != nil {
 			log.Ctx(ctx).Error("IndexNode indexBuildTask Execute CIndexDelete failed", zap.Error(err))

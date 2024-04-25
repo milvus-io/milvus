@@ -17,11 +17,6 @@
 package analyzecgowrapper
 
 /*
-//libdir=/home/zc/work/milvus/internal/core/output/lib
-//includedir=/home/zc/work/milvus/internal/core/output/include
-//
-//Libs: -L${libdir} -lmilvus_clustering
-//Cflags: -I${includedir
 #cgo pkg-config: milvus_clustering
 
 #include <stdlib.h>	// free
@@ -31,10 +26,15 @@ import "C"
 
 import (
 	"context"
+	"runtime"
+	"unsafe"
+
+	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type CodecAnalyze interface {
 	Delete() error
+	GetResult(size int) (string, int64, []string, []int64, error)
 }
 
 func Analyze(ctx context.Context, analyzeInfo *AnalyzeInfo) (CodecAnalyze, error) {
@@ -49,6 +49,12 @@ func Analyze(ctx context.Context, analyzeInfo *AnalyzeInfo) (CodecAnalyze, error
 		close:      false,
 	}
 
+	runtime.SetFinalizer(analyze, func(ca *CgoAnalyze) {
+		if ca != nil && !ca.close {
+			log.Error("there is leakage in analyze object, please check.")
+		}
+	})
+
 	return analyze, nil
 }
 
@@ -61,8 +67,39 @@ func (ca *CgoAnalyze) Delete() error {
 	if ca.close {
 		return nil
 	}
-	status := C.DeleteAnalyze(ca.analyzePtr)
+	var status C.CStatus
+	if ca.analyzePtr != nil {
+		status = C.DeleteAnalyze(ca.analyzePtr)
+	}
 	ca.close = true
 	return HandleCStatus(&status, "failed to delete analyze")
-	// return nil
+}
+
+func (ca *CgoAnalyze) GetResult(size int) (string, int64, []string, []int64, error) {
+	cOffsetMappingFilesPath := make([]unsafe.Pointer, size)
+	cOffsetMappingFilesSize := make([]C.int64_t, size)
+	cCentroidsFilePath := C.CString("")
+	cCentroidsFileSize := C.int64_t(0)
+	defer C.free(unsafe.Pointer(cCentroidsFilePath))
+
+	status := C.GetAnalyzeResultMeta(ca.analyzePtr,
+		&cCentroidsFilePath,
+		&cCentroidsFileSize,
+		unsafe.Pointer(&cOffsetMappingFilesPath[0]),
+		&cOffsetMappingFilesSize[0],
+	)
+	if err := HandleCStatus(&status, "failed to delete analyze"); err != nil {
+		return "", 0, nil, nil, err
+	}
+	offsetMappingFilesPath := make([]string, size)
+	offsetMappingFilesSize := make([]int64, size)
+	centroidsFilePath := C.GoString(cCentroidsFilePath)
+	centroidsFileSize := int64(cCentroidsFileSize)
+
+	for i := 0; i < size; i++ {
+		offsetMappingFilesPath[i] = C.GoString((*C.char)(cOffsetMappingFilesPath[i]))
+		offsetMappingFilesSize[i] = int64(C.int64_t(cOffsetMappingFilesSize[i]))
+	}
+
+	return centroidsFilePath, centroidsFileSize, offsetMappingFilesPath, offsetMappingFilesSize, nil
 }

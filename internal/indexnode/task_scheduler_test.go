@@ -112,7 +112,7 @@ func (t *fakeTask) BuildIndex(ctx context.Context) error {
 	return t.reterr[t.state]
 }
 
-func (t *fakeTask) SaveIndexFiles(ctx context.Context) error {
+func (t *fakeTask) SaveResult(ctx context.Context) error {
 	t.state = fakeTaskSavedIndexes
 	t.ctx.(*stagectx).setState(t.state)
 	return t.reterr[t.state]

@@ -147,7 +147,7 @@ func (suite *IndexBuildTaskSuite) TestBuildMemoryIndex() {
 	suite.NoError(err)
 	err = t.BuildIndex(context.Background())
 	suite.NoError(err)
-	err = t.SaveIndexFiles(context.Background())
+	err = t.SaveResult(context.Background())
 	suite.NoError(err)
 }
 
@@ -215,7 +215,7 @@ func (suite *IndexBuildTaskSuite) Test_BuildDISKANNIndex() {
 	suite.NoError(err)
 	err = t.BuildIndex(context.Background())
 	suite.NoError(err)
-	err = t.SaveIndexFiles(context.Background())
+	err = t.SaveResult(context.Background())
 	suite.NoError(err)
 }
 
@@ -324,7 +324,7 @@ func (suite *IndexBuildTaskV2Suite) TestBuildIndex() {
 	suite.NoError(err)
 	err = task.BuildIndex(context.Background())
 	suite.NoError(err)
-	err = task.SaveIndexFiles(context.Background())
+	err = task.SaveResult(context.Background())
 	suite.NoError(err)
 }
 
@@ -429,10 +429,6 @@ func (suite *AnalyzeTaskSuite) TestAnalyze() {
 
 	err = t.Prepare(context.Background())
 	suite.NoError(err)
-	//err = t.BuildIndex(context.Background())
-	//suite.NoError(err)
-	//err = t.SaveIndexFiles(context.Background())
-	//suite.NoError(err)
 }
 
 func TestAnalyzeTaskSuite(t *testing.T) {

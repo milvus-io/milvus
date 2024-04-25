@@ -17,10 +17,11 @@
 package analyzecgowrapper
 
 /*
-#cgo pkg-config: milvus_clustering
+
+#cgo pkg-config: milvus_common
 
 #include <stdlib.h>	// free
-#include "clustering/analyze_c.h"
+#include "common/type_c.h"
 */
 import "C"
 
@@ -31,29 +32,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
-
-func GetBinarySetKeys(cBinarySet C.CBinarySet) ([]string, error) {
-	size := int(C.GetBinarySetSize(cBinarySet))
-	if size == 0 {
-		return nil, fmt.Errorf("BinarySet size is zero")
-	}
-	datas := make([]unsafe.Pointer, size)
-
-	C.GetBinarySetKeys(cBinarySet, unsafe.Pointer(&datas[0]))
-	ret := make([]string, size)
-	for i := 0; i < size; i++ {
-		ret[i] = C.GoString((*C.char)(datas[i]))
-	}
-
-	return ret, nil
-}
-
-func GetBinarySetSize(cBinarySet C.CBinarySet, key string) (int64, error) {
-	cKey := C.CString(key)
-	defer C.free(unsafe.Pointer(cKey))
-	ret := C.GetBinarySetValueSize(cBinarySet, cKey)
-	return int64(ret), nil
-}
 
 // HandleCStatus deal with the error returned from CGO
 func HandleCStatus(status *C.CStatus, extraInfo string) error {
@@ -66,5 +44,12 @@ func HandleCStatus(status *C.CStatus, extraInfo string) error {
 
 	logMsg := fmt.Sprintf("%s, C Runtime Exception: %s\n", extraInfo, errorMsg)
 	log.Warn(logMsg)
+	if errorCode == 2003 {
+		return merr.WrapErrSegcoreUnsupported(int32(errorCode), logMsg)
+	}
+	if errorCode == 2033 {
+		log.Info("fake finished the task")
+		return merr.ErrSegcoreFakeFinished
+	}
 	return merr.WrapErrSegcore(int32(errorCode), logMsg)
 }
