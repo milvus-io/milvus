@@ -83,6 +83,14 @@ std::unique_ptr<proto::segcore::RetrieveResults>
 SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
                                    Timestamp timestamp,
                                    int64_t limit_size) const {
+    return Retrieve(plan, timestamp, limit_size, false);
+}
+
+std::unique_ptr<proto::segcore::RetrieveResults>
+SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
+                                   Timestamp timestamp,
+                                   int64_t limit_size,
+                                   bool ignore_non_pk) const {
     std::shared_lock lck(mutex_);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
@@ -110,21 +118,39 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
 
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
+    FillTargetEntry(plan,
+                    results,
+                    retrieve_results.result_offsets_.data(),
+                    retrieve_results.result_offsets_.size(),
+                    ignore_non_pk,
+                    true);
 
+    return results;
+}
+
+void
+SegmentInternalInterface::FillTargetEntry(
+    const query::RetrievePlan* plan,
+    const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+    const int64_t* offsets,
+    int64_t size,
+    bool ignore_non_pk,
+    bool fill_ids) const {
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
     auto pk_field_id = plan->schema_.get_primary_field_id();
+
+    auto is_pk_field = [&, pk_field_id](const FieldId& field_id) -> bool {
+        return pk_field_id.has_value() && pk_field_id.value() == field_id;
+    };
+
     for (auto field_id : plan->field_ids_) {
         if (SystemProperty::Instance().IsSystem(field_id)) {
             auto system_type =
                 SystemProperty::Instance().GetSystemFieldType(field_id);
 
-            auto size = retrieve_results.result_offsets_.size();
             FixedVector<int64_t> output(size);
-            bulk_subscript(system_type,
-                           retrieve_results.result_offsets_.data(),
-                           size,
-                           output.data());
+            bulk_subscript(system_type, offsets, size, output.data());
 
             auto data_array = std::make_unique<DataArray>();
             data_array->set_field_id(field_id.get());
@@ -138,18 +164,21 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
             continue;
         }
 
+        if (ignore_non_pk && !is_pk_field(field_id)) {
+            continue;
+        }
+
         auto& field_meta = plan->schema_[field_id];
 
-        auto col = bulk_subscript(field_id,
-                                  retrieve_results.result_offsets_.data(),
-                                  retrieve_results.result_offsets_.size());
+        auto col = bulk_subscript(field_id, offsets, size);
         if (field_meta.get_data_type() == DataType::ARRAY) {
             col->mutable_scalars()->mutable_array_data()->set_element_type(
                 proto::schema::DataType(field_meta.get_element_type()));
         }
-        auto col_data = col.release();
-        fields_data->AddAllocated(col_data);
-        if (pk_field_id.has_value() && pk_field_id.value() == field_id) {
+        if (fill_ids && is_pk_field(field_id)) {
+            // fill_ids should be true when the first Retrieve was called. The reduce phase depends on the ids to do
+            // merge-sort.
+            auto col_data = col.get();
             switch (field_meta.get_data_type()) {
                 case DataType::INT64: {
                     auto int_ids = ids->mutable_int_id();
@@ -173,7 +202,25 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
                 }
             }
         }
+        if (!ignore_non_pk) {
+            // when ignore_non_pk is false, it indicates two situations:
+            //  1. No need to do the two-phase Retrieval, the target entries should be returned as the first Retrieval
+            //      is done, below two cases are included:
+            //       a. There is only one segment;
+            //       b. No pagination is used;
+            //  2. The FillTargetEntry was called by the second Retrieval (by offsets).
+            fields_data->AddAllocated(col.release());
+        }
     }
+}
+
+std::unique_ptr<proto::segcore::RetrieveResults>
+SegmentInternalInterface::Retrieve(const query::RetrievePlan* Plan,
+                                   const int64_t* offsets,
+                                   int64_t size) const {
+    std::shared_lock lck(mutex_);
+    auto results = std::make_unique<proto::segcore::RetrieveResults>();
+    FillTargetEntry(Plan, results, offsets, size, false, false);
     return results;
 }
 

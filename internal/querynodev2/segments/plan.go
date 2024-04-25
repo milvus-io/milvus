@@ -172,6 +172,7 @@ type RetrievePlan struct {
 	cRetrievePlan C.CRetrievePlan
 	Timestamp     Timestamp
 	msgID         UniqueID // only used to debug.
+	ignoreNonPk   bool
 }
 
 func NewRetrievePlan(ctx context.Context, col *Collection, expr []byte, timestamp Timestamp, msgID UniqueID) (*RetrievePlan, error) {
@@ -196,6 +197,10 @@ func NewRetrievePlan(ctx context.Context, col *Collection, expr []byte, timestam
 		msgID:         msgID,
 	}
 	return newPlan, nil
+}
+
+func (plan *RetrievePlan) ShouldIgnoreNonPk() bool {
+	return bool(C.ShouldIgnoreNonPk(plan.cRetrievePlan))
 }
 
 func (plan *RetrievePlan) Delete() {

@@ -130,7 +130,8 @@ Retrieve(CTraceContext c_trace,
          CRetrievePlan c_plan,
          uint64_t timestamp,
          CRetrieveResult* result,
-         int64_t limit_size) {
+         int64_t limit_size,
+         bool ignore_non_pk) {
     try {
         auto segment =
             static_cast<milvus::segcore::SegmentInterface*>(c_segment);
@@ -138,19 +139,50 @@ Retrieve(CTraceContext c_trace,
 
         auto trace_ctx = milvus::tracer::TraceContext{
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
-        auto span = milvus::tracer::StartSpan("SegCoreRetrieve", &trace_ctx);
-        milvus::tracer::SetRootSpan(span);
+        milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
-        auto retrieve_result = segment->Retrieve(plan, timestamp, limit_size);
+        auto retrieve_result =
+            segment->Retrieve(plan, timestamp, limit_size, ignore_non_pk);
 
         auto size = retrieve_result->ByteSizeLong();
-        void* buffer = malloc(size);
-        retrieve_result->SerializePartialToArray(buffer, size);
+        std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
+        retrieve_result->SerializePartialToArray(buffer.get(), size);
 
-        result->proto_blob = buffer;
+        result->proto_blob = buffer.release();
         result->proto_size = size;
 
-        span->End();
+        return milvus::SuccessCStatus();
+    } catch (std::exception& e) {
+        return milvus::FailureCStatus(&e);
+    }
+}
+
+CStatus
+RetrieveByOffsets(CTraceContext c_trace,
+                  CSegmentInterface c_segment,
+                  CRetrievePlan c_plan,
+                  CRetrieveResult* result,
+                  int64_t* offsets,
+                  int64_t len) {
+    try {
+        auto segment =
+            static_cast<milvus::segcore::SegmentInterface*>(c_segment);
+        auto plan = static_cast<const milvus::query::RetrievePlan*>(c_plan);
+
+        auto trace_ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        milvus::tracer::AutoSpan span(
+            "SegCoreRetrieveByOffsets", &trace_ctx, true);
+
+        auto retrieve_result = segment->Retrieve(plan, offsets, len);
+
+        auto size = retrieve_result->ByteSizeLong();
+        std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
+        retrieve_result->SerializePartialToArray(buffer.get(), size);
+
+        result->proto_blob = buffer.release();
+        result->proto_size = size;
+
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
         return milvus::FailureCStatus(&e);

@@ -74,8 +74,13 @@ CRetrieve(CSegmentInterface c_segment,
           CRetrievePlan c_plan,
           uint64_t timestamp,
           CRetrieveResult* result) {
-    return Retrieve(
-        {}, c_segment, c_plan, timestamp, result, DEFAULT_MAX_OUTPUT_SIZE);
+    return Retrieve({},
+                    c_segment,
+                    c_plan,
+                    timestamp,
+                    result,
+                    DEFAULT_MAX_OUTPUT_SIZE,
+                    false);
 }
 
 const char*
