@@ -80,9 +80,6 @@ func initLoadPool() {
 	loadOnce.Do(func() {
 		pt := paramtable.Get()
 		poolSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
-		if poolSize > 16 {
-			poolSize = 16
-		}
 		pool := conc.NewPool[any](
 			poolSize,
 			conc.WithPreAlloc(false),

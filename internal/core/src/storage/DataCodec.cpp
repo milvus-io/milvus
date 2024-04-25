@@ -119,8 +119,6 @@ DeserializeFileData(const std::shared_ptr<uint8_t[]> input_data,
                       fmt::format("unsupported medium type {}", medium_type));
     }
     auto deserialize_duration = std::chrono::system_clock::now() - start_deserialize;
-    LOG_INFO("DeserializeFileData_deserialize_duration_ms:{}",
-             std::chrono::duration_cast<std::chrono::milliseconds>(deserialize_duration).count());
     return res;
 }
 
