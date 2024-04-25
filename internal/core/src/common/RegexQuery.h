@@ -19,6 +19,12 @@
 #include "common/EasyAssert.h"
 
 namespace milvus {
+bool
+is_special(char c);
+
+std::string
+quote_meta(const std::string& s);
+
 std::string
 translate_pattern_match_to_regex(const std::string& pattern);
 
@@ -45,23 +51,23 @@ struct RegexMatcher {
     }
 
     explicit RegexMatcher(const std::string& pattern) {
-        r_ = std::regex(pattern);
+        r_ = boost::regex(pattern);
     }
 
  private:
     // avoid to construct the regex everytime.
-    std::regex r_;
+    boost::regex r_;
 };
 
 template <>
 inline bool
 RegexMatcher::operator()(const std::string& operand) {
-    return std::regex_match(operand, r_);
+    return boost::regex_match(operand, r_);
 }
 
 template <>
 inline bool
 RegexMatcher::operator()(const std::string_view& operand) {
-    return std::regex_match(operand.begin(), operand.end(), r_);
+    return boost::regex_match(operand.begin(), operand.end(), r_);
 }
 }  // namespace milvus

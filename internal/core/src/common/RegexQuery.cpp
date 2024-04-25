@@ -10,7 +10,6 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <re2/re2.h>
-#include <regex>
 
 #include "common/RegexQuery.h"
 
@@ -19,62 +18,77 @@ namespace milvus {
 bool
 is_special(char c) {
     // initial special_bytes_bitmap only once.
+    static std::once_flag _initialized;
     static std::string special_bytes(R"(\.+*?()|[]{}^$)");
-    static char special_bytes_bitmap[16];
-    static bool _ = []() -> bool {
+    static std::vector<bool> special_bytes_bitmap;
+    std::call_once(_initialized, []() -> void {
+        special_bytes_bitmap.resize(256);
         for (char b : special_bytes) {
-            special_bytes_bitmap[b % 16] |= 1 << (b / 16);
+            special_bytes_bitmap[b + 128] = true;
         }
-        return true;
-    };
-    return special_bytes_bitmap[c % 16] & (1 << (c / 16)) != 0;
+    });
+
+    return special_bytes_bitmap[c + 128];
 }
 
+// reference: https://cs.opensource.google/go/go/+/refs/tags/go1.22.2:src/regexp/regexp.go;l=726.
 std::string
 quote_meta(const std::string& s) {
     size_t i;
     size_t l = s.length();
-    std::string r;
     for (i = 0; i < l; i++) {
         if (is_special(s[i])) {
-            r += '\\';
-        }
-        r += s[i];
-    }
-    return r;
-}
-
-std::string
-replace_unescaped_chars(const std::string& input,
-                        char src,
-                        const std::string& replacement) {
-    std::string result;
-    bool escape_mode = false;
-
-    for (char c : input) {
-        if (escape_mode) {
-            result += '\\';
-            result += c;
-            escape_mode = false;
-        } else {
-            if (c == '\\') {
-                escape_mode = true;
-            } else if (c == src) {
-                result += replacement;
-            } else {
-                result += c;
-            }
+            break;
         }
     }
 
-    return result;
+    // no special.
+    if (i >= l) {
+        return s;
+    }
+
+    std::string b;
+    b.resize(2 * l - i);
+    std::copy_n(s.begin(), i, b.begin());
+    auto j = i;
+    for (; i < l; i++) {
+        if (is_special(s[i])) {
+            b[j] = '\\';
+            j++;
+        }
+        b[j] = s[i];
+        j++;
+    }
+
+    return b.substr(0, j);
 }
 
 std::string
 translate_pattern_match_to_regex(const std::string& pattern) {
-    auto r = quote_meta(pattern);
-    r = replace_unescaped_chars(r, '%', "[\\s\\S]*");
-    r = replace_unescaped_chars(r, '_', "[\\s\\S]");
+    std::string r;
+    bool escape_mode = false;
+    for (char c : pattern) {
+        if (escape_mode) {
+            if (is_special(c)) {
+                r += '\\';
+            }
+            r += c;
+            escape_mode = false;
+        } else {
+            if (c == '\\') {
+                escape_mode = true;
+            } else if (c == '%') {
+                r += "[\\s\\S]*";
+            } else if (c == '_') {
+                r += "[\\s\\S]";
+            } else {
+                if (is_special(c)) {
+                    r += '\\';
+                }
+                r += c;
+            }
+        }
+    }
     return r;
 }
 }  // namespace milvus
