@@ -646,10 +646,10 @@ type taskSchedulerSuite struct {
 }
 
 func (s *taskSchedulerSuite) initParams() {
-	s.collectionID = 10000
-	s.partitionID = 10001
-	s.fieldID = 10002
-	s.nodeID = 10003
+	s.collectionID = collID
+	s.partitionID = partID
+	s.fieldID = fieldID
+	s.nodeID = nodeID
 	s.segmentIDs = []int64{1000, 1001, 1002}
 	s.duration = time.Millisecond * 100
 }
@@ -842,23 +842,23 @@ func (s *taskSchedulerSuite) scheduler(handler Handler) {
 }
 
 func (s *taskSchedulerSuite) Test_scheduler() {
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: s.fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
+			},
+		},
+	}, nil)
+
 	s.Run("test scheduler with indexBuilderV1", func() {
-		s.scheduler(nil)
+		s.scheduler(handler)
 	})
 
 	s.Run("test scheduler with indexBuilderV2", func() {
 		paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("true")
 		defer paramtable.Get().CommonCfg.EnableStorageV2.SwapTempValue("false")
-
-		handler := NewNMockHandler(s.T())
-		handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
-			ID: collID,
-			Schema: &schemapb.CollectionSchema{
-				Fields: []*schemapb.FieldSchema{
-					{FieldID: fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
-				},
-			},
-		}, nil)
 
 		s.scheduler(handler)
 	})
@@ -880,7 +880,17 @@ func (s *taskSchedulerSuite) Test_analyzeTaskFailCase() {
 		catalog: catalog,
 	})
 
-	scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, nil)
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{FieldID: s.fieldID, Name: "vec", TypeParams: []*commonpb.KeyValuePair{{Key: "dim", Value: "10"}}},
+			},
+		},
+	}, nil)
+
+	scheduler := newTaskScheduler(ctx, mt, workerManager, nil, nil, handler)
 
 	// remove task in meta
 	err := scheduler.meta.analyzeMeta.DropAnalyzeTask(2)
