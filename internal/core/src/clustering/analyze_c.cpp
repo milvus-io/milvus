@@ -60,7 +60,7 @@ Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info) {
         if (analyze_info->field_type != DataType::VECTOR_FLOAT) {
             throw SegcoreError(
                 DataTypeInvalid,
-                fmt::format("invalid type is {}",
+                fmt::format("invalid data type for clustering is {}",
                             std::to_string(int(analyze_info->field_type))));
         }
         auto clusteringJob =

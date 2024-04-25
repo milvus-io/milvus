@@ -297,7 +297,7 @@ KmeansClustering::Run(const Config& config) {
     } else {
         auto err = cluster_node_obj.error();
         if (err == knowhere::Status::invalid_cluster_error) {
-            throw SegcoreError(ErrorCode::ClusterUnsupported,
+            throw SegcoreError(ErrorCode::ClusterSkip,
                                cluster_node_obj.what());
         }
         throw SegcoreError(ErrorCode::KnowhereError, cluster_node_obj.what());
