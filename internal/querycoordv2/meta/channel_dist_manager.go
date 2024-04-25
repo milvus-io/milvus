@@ -139,7 +139,6 @@ type nodeChannels struct {
 }
 
 func (c nodeChannels) Filter(critertion *channelDistCriterion) []*DmChannel {
-
 	var channels []*DmChannel
 	switch {
 	case critertion.channelName != "":
@@ -152,7 +151,7 @@ func (c nodeChannels) Filter(critertion *channelDistCriterion) []*DmChannel {
 		channels = c.channels
 	}
 
-	return channels //lo.Filter(channels, func(ch *DmChannel, _ int) bool { return mergedFilters(ch) })
+	return channels // lo.Filter(channels, func(ch *DmChannel, _ int) bool { return mergedFilters(ch) })
 }
 
 func composeNodeChannels(channels ...*DmChannel) nodeChannels {
