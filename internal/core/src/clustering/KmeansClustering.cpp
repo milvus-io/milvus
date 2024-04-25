@@ -276,6 +276,7 @@ KmeansClustering::Run(const Config& config) {
         throw SegcoreError(ErrorCode::ConfigInvalid,
                            "num clusters is empty when kmeans clustering");
     }
+    AssertInfo(num_clusters.value() > 0, "num clusters must larger than 0");
     auto train_size =
         milvus::index::GetValueFromConfig<int64_t>(config, "train_size");
     if (!train_size.has_value()) {
@@ -297,8 +298,7 @@ KmeansClustering::Run(const Config& config) {
     } else {
         auto err = cluster_node_obj.error();
         if (err == knowhere::Status::invalid_cluster_error) {
-            throw SegcoreError(ErrorCode::ClusterSkip,
-                               cluster_node_obj.what());
+            throw SegcoreError(ErrorCode::ClusterSkip, cluster_node_obj.what());
         }
         throw SegcoreError(ErrorCode::KnowhereError, cluster_node_obj.what());
     }
