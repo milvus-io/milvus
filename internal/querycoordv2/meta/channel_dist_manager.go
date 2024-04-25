@@ -192,7 +192,6 @@ func (m *ChannelDistManager) GetShardLeader(replica *Replica, shard string) (int
 		if ok {
 			return node, true
 		}
-
 	}
 
 	return 0, false
