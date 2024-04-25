@@ -103,6 +103,7 @@ var (
 			Name:      "bulk_insert_vectors_count",
 			Help:      "counter of vectors successfully bulk inserted",
 		}, []string{
+			databaseLabelName,
 			collectionIDLabelName,
 		})
 
@@ -330,7 +331,7 @@ func CleanupDataCoordNumStoredRows(collectionID int64) {
 }
 
 func CleanupDataCoordBulkInsertVectors(collectionID int64) {
-	DataCoordBulkVectors.Delete(prometheus.Labels{
+	DataCoordBulkVectors.DeletePartialMatch(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }
