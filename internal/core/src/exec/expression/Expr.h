@@ -191,7 +191,6 @@ class SegmentExpr : public Expr {
         TargetBitmapView res,
         ValTypes... values) {
         int64_t processed_size = 0;
-
         for (size_t i = current_data_chunk_; i < num_data_chunk_; i++) {
             auto data_pos =
                 (i == current_data_chunk_) ? current_data_chunk_pos_ : 0;

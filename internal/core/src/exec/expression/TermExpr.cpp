@@ -55,7 +55,10 @@ PhyTermFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
             break;
         }
         case DataType::VARCHAR: {
-            if (segment_->type() == SegmentType::Growing) {
+            if (segment_->type() == SegmentType::Growing &&
+                !storage::MmapManager::GetInstance()
+                     .GetMmapConfig()
+                     .growing_enable_mmap) {
                 result = ExecVisitorImpl<std::string>();
             } else {
                 result = ExecVisitorImpl<std::string_view>();

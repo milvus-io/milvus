@@ -93,6 +93,14 @@ typedef struct CStorageConfig {
     int64_t requestTimeoutMs;
 } CStorageConfig;
 
+typedef struct CMmapConfig {
+    const char* cache_read_ahead_policy;
+    const char* mmap_path;
+    uint64_t disk_limit;
+    uint64_t fix_file_size;
+    bool growing_enable_mmap;
+} CMmapConfig;
+
 typedef struct CTraceConfig {
     const char* exporter;
     float sampleFraction;
