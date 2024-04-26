@@ -10,49 +10,54 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include <re2/re2.h>
-#include <regex>
 
 #include "common/RegexQuery.h"
 
 namespace milvus {
-std::string
-ReplaceUnescapedChars(const std::string& input,
-                      char src,
-                      const std::string& replacement) {
-    std::string result;
-    bool escapeMode = false;
 
-    for (char c : input) {
-        if (escapeMode) {
-            result += '\\';
-            result += c;
-            escapeMode = false;
-        } else {
-            if (c == '\\') {
-                escapeMode = true;
-            } else if (c == src) {
-                result += replacement;
-            } else {
-                result += c;
-            }
+bool
+is_special(char c) {
+    // initial special_bytes_bitmap only once.
+    static std::once_flag _initialized;
+    static std::string special_bytes(R"(\.+*?()|[]{}^$)");
+    static std::vector<bool> special_bytes_bitmap;
+    std::call_once(_initialized, []() -> void {
+        special_bytes_bitmap.resize(256);
+        for (char b : special_bytes) {
+            special_bytes_bitmap[b + 128] = true;
         }
-    }
+    });
 
-    return result;
+    return special_bytes_bitmap[c + 128];
 }
 
 std::string
-TranslatePatternMatchToRegex(const std::string& pattern) {
-    std::string regex_pattern;
-#if 0
-        regex_pattern = R"([\.\*\+\?\|\(\)\[\]\{\}\\])";
-#else
-    regex_pattern = R"([\.\*\+\?\|\(\)\[\]\{\}])";
-#endif
-    std::string regex =
-        std::regex_replace(pattern, std::regex(regex_pattern), R"(\$&)");
-    regex = ReplaceUnescapedChars(regex, '%', ".*");
-    regex = ReplaceUnescapedChars(regex, '_', ".");
-    return regex;
+translate_pattern_match_to_regex(const std::string& pattern) {
+    std::string r;
+    r.reserve(2 * pattern.size());
+    bool escape_mode = false;
+    for (char c : pattern) {
+        if (escape_mode) {
+            if (is_special(c)) {
+                r += '\\';
+            }
+            r += c;
+            escape_mode = false;
+        } else {
+            if (c == '\\') {
+                escape_mode = true;
+            } else if (c == '%') {
+                r += "[\\s\\S]*";
+            } else if (c == '_') {
+                r += "[\\s\\S]";
+            } else {
+                if (is_special(c)) {
+                    r += '\\';
+                }
+                r += c;
+            }
+        }
+    }
+    return r;
 }
 }  // namespace milvus
