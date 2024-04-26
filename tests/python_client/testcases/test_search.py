@@ -3191,12 +3191,17 @@ class TestCollectionSearch(TestcaseBase):
             bool_type_cmp = True
         if bool_type == "false":
             bool_type_cmp = False
-        for i, _id in enumerate(insert_ids):
-            if enable_dynamic_field:
-                if _vectors[0][i][f"{default_bool_field_name}"] == bool_type_cmp:
+        if enable_dynamic_field:
+            for i, _id in enumerate(insert_ids):
+                if _vectors[0][i][f"{ct.default_bool_field_name}"] == bool_type_cmp:
                     filter_ids.append(_id)
-            else:
-                if _vectors[0][f"{default_bool_field_name}"][i] == bool_type_cmp:
+        else:
+            for i in range(len(_vectors[0])):
+                if _vectors[0][i].dtypes == bool:
+                    num = i
+                    break
+            for i, _id in enumerate(insert_ids):
+                if _vectors[0][num][i] == bool_type_cmp:
                     filter_ids.append(_id)
 
         # 4. search with different expressions
@@ -7472,6 +7477,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         method: test range search with different metric type
         expected: searched successfully
         """
+        if index == "SCANN":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/32648")
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
@@ -11442,6 +11449,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("k", [1, 60, 1000, 16383])
     @pytest.mark.parametrize("offset", [0, 1, 5])
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/32650")
     def test_hybrid_search_RRFRanker_different_k(self, dim, auto_id, is_flush, enable_dynamic_field, k, offset):
         """
         target: test hybrid search normal case
