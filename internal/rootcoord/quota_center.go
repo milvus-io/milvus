@@ -150,7 +150,7 @@ func (q *QuotaCenter) Start() {
 func (q *QuotaCenter) run() {
 	defer q.wg.Done()
 
-	interval := time.Duration(Params.QuotaConfig.QuotaCenterCollectInterval.GetAsFloat() * float64(time.Second))
+	interval := Params.QuotaConfig.QuotaCenterCollectInterval.GetAsDuration(time.Second)
 	log.Info("Start QuotaCenter", zap.Duration("collectInterval", interval))
 	ticker := time.NewTicker(interval)
 	defer ticker.Stop()
@@ -208,11 +208,6 @@ func (q *QuotaCenter) reportNumEntitiesLoaded(numEntitiesLoaded map[int64]int64)
 	for collectionID, num := range numEntitiesLoaded {
 		info, err := q.meta.GetCollectionByID(context.Background(), "", collectionID, typeutil.MaxTimestamp, false)
 		if err != nil {
-			log.Warn("failed to get collection info by its id, ignore to report loaded num entities",
-				zap.Int64("collection", collectionID),
-				zap.Int64("num_entities_loaded", num),
-				zap.Error(err),
-			)
 			continue
 		}
 		metrics.RootCoordNumEntities.WithLabelValues(info.Name, metrics.LoadedLabel).Set(float64(num))
@@ -223,22 +218,12 @@ func (q *QuotaCenter) reportDataCoordCollectionMetrics(dc *metricsinfo.DataCoord
 	for collectionID, collection := range dc.Collections {
 		info, err := q.meta.GetCollectionByID(context.Background(), "", collectionID, typeutil.MaxTimestamp, false)
 		if err != nil {
-			log.Warn("failed to get collection info by its id, ignore to report total_num_entities/indexed_entities",
-				zap.Int64("collection", collectionID),
-				zap.Int64("num_entities_total", collection.NumEntitiesTotal),
-				zap.Int("lenOfIndexedInfo", len(collection.IndexInfo)),
-				zap.Error(err),
-			)
 			continue
 		}
 		metrics.RootCoordNumEntities.WithLabelValues(info.Name, metrics.TotalLabel).Set(float64(collection.NumEntitiesTotal))
 		fields := lo.KeyBy(info.Fields, func(v *model.Field) int64 { return v.FieldID })
 		for _, indexInfo := range collection.IndexInfo {
 			if _, ok := fields[indexInfo.FieldID]; !ok {
-				log.Warn("field id not found, ignore to report indexed num entities",
-					zap.Int64("collection", collectionID),
-					zap.Int64("field", indexInfo.FieldID),
-				)
 				continue
 			}
 			field := fields[indexInfo.FieldID]
@@ -934,18 +919,10 @@ func (q *QuotaCenter) recordMetrics() {
 		for collectionID, states := range q.quotaStates {
 			info, err := q.meta.GetCollectionByID(context.Background(), "", collectionID, typeutil.MaxTimestamp, false)
 			if err != nil {
-				log.Warn("failed to get collection info by its id, ignore to report quota states",
-					zap.Int64("collection", collectionID),
-					zap.Error(err),
-				)
 				continue
 			}
 			dbm, err := q.meta.GetDatabaseByID(context.Background(), info.DBID, typeutil.MaxTimestamp)
 			if err != nil {
-				log.Warn("failed to get database name info by its id, ignore to report quota states",
-					zap.Int64("collection", collectionID),
-					zap.Error(err),
-				)
 				continue
 			}
 

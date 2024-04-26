@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -472,6 +473,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 					NodeID:   c.nodes[i],
 					Address:  "127.0.0.1:0",
 					Hostname: "localhost",
+					Version:  common.Version,
 				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
@@ -683,6 +685,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 					NodeID:   c.nodes[i],
 					Address:  "127.0.0.1:0",
 					Hostname: "localhost",
+					Version:  common.Version,
 				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
@@ -824,6 +827,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 					NodeID:   c.nodes[i],
 					Address:  "127.0.0.1:0",
 					Hostname: "localhost",
+					Version:  common.Version,
 				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
@@ -1057,6 +1061,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 					NodeID:   c.nodes[i],
 					Address:  "127.0.0.1:0",
 					Hostname: "localhost",
+					Version:  common.Version,
 				})
 				nodeInfo.UpdateStats(session.WithSegmentCnt(c.segmentCnts[i]))
 				nodeInfo.UpdateStats(session.WithChannelCnt(len(c.distributionChannels[c.nodes[i]])))
@@ -1187,6 +1192,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 					nodeInfo := session.NewNodeInfo(session.ImmutableNodeInfo{
 						NodeID:  nodes[i],
 						Address: "127.0.0.1:0",
+						Version: common.Version,
 					})
 					nodeInfo.UpdateStats(session.WithChannelCnt(len(c.channelDist[nodes[i]])))
 					nodeInfo.SetState(c.states[i])

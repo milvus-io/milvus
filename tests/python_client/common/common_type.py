@@ -50,6 +50,10 @@ default_bfloat16_vec_field_name = "bfloat16_vector"
 another_float_vec_field_name = "float_vector1"
 default_binary_vec_field_name = "binary_vector"
 default_sparse_vec_field_name = "sparse_vector"
+float_type = "FLOAT_VECTOR"
+float16_type = "FLOAT16_VECTOR"
+bfloat16_type = "BFLOAT16_VECTOR"
+vector_data_type_all = [float_type, float16_type, bfloat16_type]
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
 default_resource_group_capacity = 1000000
@@ -110,6 +114,8 @@ default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type":
 default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
                                  "params": {"drop_ratio_build": 0.2}}
 default_count_output = "count(*)"
+
+rows_all_data_type_file_path = "/tmp/rows_all_data_type"
 
 """" List of parameters used to pass """
 get_invalid_strs = [

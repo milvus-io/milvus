@@ -21,6 +21,7 @@ import (
 	"sort"
 	"time"
 
+	"github.com/blang/semver/v4"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
@@ -212,38 +213,58 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		distMap[s.GetID()] = s.Node
 	}
 
+	versionRangeFilter := semver.MustParseRange(">2.3.x")
+	checkLeaderVersion := func(leader *meta.LeaderView, segmentID int64) bool {
+		// if current shard leader's node version < 2.4, skip load L0 segment
+		info := c.nodeMgr.Get(leader.ID)
+		if info != nil && !versionRangeFilter(info.Version()) {
+			log.Warn("l0 segment is not supported in current node version, skip it",
+				zap.Int64("collection", replica.GetCollectionID()),
+				zap.Int64("segmentID", segmentID),
+				zap.String("channel", leader.Channel),
+				zap.Int64("leaderID", leader.ID),
+				zap.String("nodeVersion", info.Version().String()))
+			return false
+		}
+		return true
+	}
+
+	isSegmentLack := func(segment *datapb.SegmentInfo) bool {
+		node, existInDist := distMap[segment.ID]
+
+		if segment.GetLevel() == datapb.SegmentLevel_L0 {
+			// the L0 segments have to been in the same node as the channel watched
+			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
+
+			// if the leader node's version doesn't match load l0 segment's requirement, skip it
+			if leader != nil && checkLeaderVersion(leader, segment.ID) {
+				l0WithWrongLocation := node != leader.ID
+				return !existInDist || l0WithWrongLocation
+			}
+			return false
+		}
+
+		return !existInDist
+	}
+
 	nextTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.NextTarget)
 	currentTargetMap := c.targetMgr.GetSealedSegmentsByCollection(collectionID, meta.CurrentTarget)
 
 	// Segment which exist on next target, but not on dist
-	for segmentID, segment := range nextTargetMap {
-		node, existInDist := distMap[segmentID]
-		l0WithWrongLocation := false
-		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
-			// the L0 segments have to been in the same node as the channel watched
-			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
-			l0WithWrongLocation = leader != nil && node != leader.ID
-		}
-		if !existInDist || l0WithWrongLocation {
+	for _, segment := range nextTargetMap {
+		if isSegmentLack(segment) {
 			toLoad = append(toLoad, segment)
 		}
 	}
 
 	// l0 Segment which exist on current target, but not on dist
-	for segmentID, segment := range currentTargetMap {
+	for _, segment := range currentTargetMap {
 		// to avoid generate duplicate segment task
-		if nextTargetMap[segmentID] != nil {
+		if nextTargetMap[segment.ID] != nil {
 			continue
 		}
 
-		node, existInDist := distMap[segmentID]
-		l0WithWrongLocation := false
-		if existInDist && segment.GetLevel() == datapb.SegmentLevel_L0 {
-			// the L0 segments have to been in the same node as the channel watched
-			leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(segment.GetInsertChannel()))
-			l0WithWrongLocation = leader != nil && node != leader.ID
-		}
-		if !existInDist || l0WithWrongLocation {
+		if isSegmentLack(segment) {
 			toLoad = append(toLoad, segment)
 		}
 	}

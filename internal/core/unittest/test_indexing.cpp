@@ -466,7 +466,8 @@ TEST(Indexing, Iterator) {
 
     knowhere::expected<
         std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
-        kw_iterators = vec_index->VectorIterators(query_ds, searchInfo, view);
+        kw_iterators = vec_index->VectorIterators(
+            query_ds, searchInfo.search_params_, view);
     ASSERT_TRUE(kw_iterators.has_value());
     ASSERT_EQ(kw_iterators.value().size(), 1);
     auto iterator = kw_iterators.value()[0];

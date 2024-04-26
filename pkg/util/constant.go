@@ -49,6 +49,7 @@ const (
 	CredentialSeperator = ":"
 	UserRoot            = "root"
 	DefaultRootPassword = "Milvus"
+	PasswordHolder      = "___"
 	DefaultTenant       = ""
 	RoleAdmin           = "admin"
 	RolePublic          = "public"

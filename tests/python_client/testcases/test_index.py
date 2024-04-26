@@ -2146,7 +2146,7 @@ class TestIndexDiskann(TestcaseBase):
         """
         target: test drop diskann index normal
         method: 1.create collection and insert data
-                2.create  diskann index and uses collection.drop_index () drop index
+                2.create diskann index and uses collection.drop_index () drop index
         expected: drop index successfully
         """
         c_name = cf.gen_unique_str(prefix)

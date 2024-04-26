@@ -132,10 +132,15 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
                                 const index::VectorIndex& index) {
     if (search_info.group_by_field_id_.has_value()) {
         try {
+            auto search_conf = search_info.search_params_;
+            if (search_conf.contains(knowhere::indexparam::EF)) {
+                search_conf[knowhere::indexparam::SEED_EF] =
+                    search_conf[knowhere::indexparam::EF];
+            }
             knowhere::expected<
                 std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
                 iterators_val =
-                    index.VectorIterators(dataset, search_info, bitset);
+                    index.VectorIterators(dataset, search_conf, bitset);
             if (iterators_val.has_value()) {
                 search_result.AssembleChunkVectorIterators(
                     nq, 1, -1, iterators_val.value());

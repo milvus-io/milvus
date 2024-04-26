@@ -478,6 +478,7 @@ init_dynamic_hook() {
 #endif
 
 #if defined(__aarch64__)
+#if defined(__ARM_FEATURE_SVE)
     // sve
     if (arm::InstructionSet::GetInstance().supports_sve()) {
 #define SET_OP_COMPARE_COLUMN_SVE(TTYPE, UTYPE, OP)              \
@@ -542,7 +543,7 @@ init_dynamic_hook() {
 
         return;
     }
-
+#endif
     // neon ?
     {
 #define SET_OP_COMPARE_COLUMN_NEON(TTYPE, UTYPE, OP)              \
