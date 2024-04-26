@@ -29,6 +29,7 @@ import "C"
 
 import (
 	"fmt"
+	"path"
 	"unsafe"
 
 	"github.com/cockroachdb/errors"
@@ -129,13 +130,31 @@ func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	return HandleCStatus(&status, "InitRemoteChunkManagerSingleton failed")
 }
 
-func InitChunkCache(mmapDirPath string, readAheadPolicy string) error {
-	cMmapDirPath := C.CString(mmapDirPath)
-	defer C.free(unsafe.Pointer(cMmapDirPath))
-	cReadAheadPolicy := C.CString(readAheadPolicy)
-	defer C.free(unsafe.Pointer(cReadAheadPolicy))
-	status := C.InitChunkCacheSingleton(cMmapDirPath, cReadAheadPolicy)
-	return HandleCStatus(&status, "InitChunkCacheSingleton failed")
+func InitMmapManager(params *paramtable.ComponentParam) error {
+	mmapDirPath := params.QueryNodeCfg.MmapDirPath.GetValue()
+	if len(mmapDirPath) == 0 {
+		paramtable.Get().Save(
+			paramtable.Get().QueryNodeCfg.MmapDirPath.Key,
+			path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "mmap"),
+		)
+		mmapDirPath = paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
+	}
+	cMmapChunkManagerDir := C.CString(path.Join(mmapDirPath, "/mmap_chunk_manager/"))
+	cCacheReadAheadPolicy := C.CString(params.QueryNodeCfg.ReadAheadPolicy.GetValue())
+	defer C.free(unsafe.Pointer(cMmapChunkManagerDir))
+	defer C.free(unsafe.Pointer(cCacheReadAheadPolicy))
+	diskCapacity := params.QueryNodeCfg.DiskCapacityLimit.GetAsUint64()
+	diskLimit := uint64(float64(params.QueryNodeCfg.MaxMmapDiskPercentageForMmapManager.GetAsUint64()*diskCapacity) * 0.01)
+	mmapFileSize := params.QueryNodeCfg.FixedFileSizeForMmapManager.GetAsUint64() * 1024 * 1024
+	mmapConfig := C.CMmapConfig{
+		cache_read_ahead_policy: cCacheReadAheadPolicy,
+		mmap_path:               cMmapChunkManagerDir,
+		disk_limit:              C.uint64_t(diskLimit),
+		fix_file_size:           C.uint64_t(mmapFileSize),
+		growing_enable_mmap:     C.bool(params.QueryNodeCfg.GrowingMmapEnabled.GetAsBool()),
+	}
+	status := C.InitMmapManager(mmapConfig)
+	return HandleCStatus(&status, "InitMmapManager failed")
 }
 
 func CleanRemoteChunkManager() {

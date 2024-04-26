@@ -247,21 +247,10 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
-	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	if len(mmapDirPath) == 0 {
-		paramtable.Get().Save(
-			paramtable.Get().QueryNodeCfg.MmapDirPath.Key,
-			path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "mmap"),
-		)
-		mmapDirPath = paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	}
-	chunkCachePath := path.Join(mmapDirPath, "chunk_cache")
-	policy := paramtable.Get().QueryNodeCfg.ReadAheadPolicy.GetValue()
-	err = initcore.InitChunkCache(chunkCachePath, policy)
+	err = initcore.InitMmapManager(paramtable.Get())
 	if err != nil {
 		return err
 	}
-	log.Info("InitChunkCache done", zap.String("dir", chunkCachePath), zap.String("policy", policy))
 
 	initcore.InitTraceConfig(paramtable.Get())
 	return nil
@@ -403,6 +392,7 @@ func (node *QueryNode) Start() error {
 		paramtable.SetCreateTime(time.Now())
 		paramtable.SetUpdateTime(time.Now())
 		mmapEnabled := paramtable.Get().QueryNodeCfg.MmapEnabled.GetAsBool()
+		growingmmapEnable := paramtable.Get().QueryNodeCfg.GrowingMmapEnabled.GetAsBool()
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 		registry.GetInMemoryResolver().RegisterQueryNode(node.GetNodeID(), node)
@@ -410,6 +400,7 @@ func (node *QueryNode) Start() error {
 			zap.Int64("queryNodeID", node.GetNodeID()),
 			zap.String("Address", node.address),
 			zap.Bool("mmapEnabled", mmapEnabled),
+			zap.Bool("growingmmapEnable", growingmmapEnable),
 		)
 	})
 

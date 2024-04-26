@@ -15,7 +15,7 @@
 // limitations under the License.
 
 #pragma once
-
+#include "storage/MmapChunkManager.h"
 #include "mmap/Column.h"
 
 namespace milvus::storage {
@@ -24,10 +24,10 @@ extern std::map<std::string, int> ReadAheadPolicy_Map;
 
 class ChunkCache {
  public:
-    explicit ChunkCache(std::string path,
-                        const std::string& read_ahead_policy,
-                        ChunkManagerPtr cm)
-        : path_prefix_(std::move(path)), cm_(cm) {
+    explicit ChunkCache(const std::string& read_ahead_policy,
+                        ChunkManagerPtr cm,
+                        MmapChunkManagerPtr mcm)
+        : cm_(cm), mcm_(mcm) {
         auto iter = ReadAheadPolicy_Map.find(read_ahead_policy);
         AssertInfo(iter != ReadAheadPolicy_Map.end(),
                    "unrecognized read ahead policy: {}, "
@@ -35,8 +35,7 @@ class ChunkCache {
                    "willneed, dontneed`",
                    read_ahead_policy);
         read_ahead_policy_ = iter->second;
-        LOG_INFO("Init ChunkCache with prefix: {}, read_ahead_policy: {}",
-                 path_prefix_,
+        LOG_INFO("Init ChunkCache with read_ahead_policy: {}",
                  read_ahead_policy);
     }
 
@@ -44,7 +43,7 @@ class ChunkCache {
 
  public:
     std::shared_ptr<ColumnBase>
-    Read(const std::string& filepath);
+    Read(const std::string& filepath, const MmapChunkDescriptorPtr& descriptor);
 
     void
     Remove(const std::string& filepath);
@@ -54,7 +53,8 @@ class ChunkCache {
 
  private:
     std::shared_ptr<ColumnBase>
-    Mmap(const std::filesystem::path& path, const FieldDataPtr& field_data);
+    Mmap(const FieldDataPtr& field_data,
+         const MmapChunkDescriptorPtr& descriptor);
 
     std::string
     CachePath(const std::string& filepath);
@@ -66,8 +66,8 @@ class ChunkCache {
  private:
     mutable std::shared_mutex mutex_;
     int read_ahead_policy_;
-    const std::string path_prefix_;
     ChunkManagerPtr cm_;
+    MmapChunkManagerPtr mcm_;
     ColumnTable columns_;
 };
 

@@ -68,6 +68,24 @@ template <typename T>
 constexpr bool IsSparse = std::is_same_v<T, SparseFloatVector> ||
                           std::is_same_v<T, knowhere::sparse::SparseRow<float>>;
 
+template <typename T>
+constexpr bool IsVariableType =
+    std::is_same_v<T, std::string> || std::is_same_v<T, std::string_view> ||
+    std::is_same_v<T, Array> || std::is_same_v<T, ArrayView> ||
+    std::is_same_v<T, proto::plan::Array> || std::is_same_v<T, Json> ||
+    IsSparse<T>;
+
+template <typename T>
+constexpr bool IsVariableTypeSupportInChunk =
+    std::is_same_v<T, std::string> || std::is_same_v<T, Array> ||
+    std::is_same_v<T, Json>;
+
+template <typename T>
+using ChunkViewType = std::conditional_t<
+    std::is_same_v<T, std::string>,
+    std::string_view,
+    std::conditional_t<std::is_same_v<T, Array>, ArrayView, T>>;
+
 struct FundamentalTag {};
 struct StringTag {};
 
