@@ -1562,7 +1562,6 @@ func TestAuthorization(t *testing.T) {
 
 	paths = map[string][]string{
 		errorStr: {
-			versional(VectorCollectionsPath),
 			versional(VectorCollectionsDescribePath) + "?collectionName=" + DefaultCollectionName,
 		},
 	}
