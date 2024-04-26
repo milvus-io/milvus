@@ -2,6 +2,14 @@ metrics:
   serviceMonitor:
     enabled: true
 
+nodeSelector: 
+ node-role.kubernetes.io/e2e: ""
+
+tolerations:
+- key: "node-role.kubernetes.io/e2e"
+  operator: "Exists"
+  effect: "NoSchedule"  
+
 cluster:
   enabled: false
 etcd:
