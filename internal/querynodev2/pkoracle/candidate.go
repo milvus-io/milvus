@@ -27,6 +27,8 @@ import (
 type Candidate interface {
 	// MayPkExist checks whether primary key could exists in this candidate.
 	MayPkExist(pk storage.PrimaryKey) bool
+	TestLocations(pk storage.PrimaryKey, locs []uint64) bool
+	GetHashFuncNum() uint
 
 	ID() int64
 	Partition() int64

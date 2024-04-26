@@ -19,8 +19,10 @@ package pkoracle
 
 import (
 	"fmt"
+	"sync"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -41,18 +43,46 @@ var _ PkOracle = (*pkOracle)(nil)
 // pkOracle implementation.
 type pkOracle struct {
 	candidates *typeutil.ConcurrentMap[string, candidateWithWorker]
+
+	hashFuncNumMutex sync.RWMutex
+	maxHashFuncNum   uint
+}
+
+func (pko *pkOracle) GetMaxHashFuncNum() uint {
+	pko.hashFuncNumMutex.RLock()
+	defer pko.hashFuncNumMutex.RUnlock()
+	return pko.maxHashFuncNum
+}
+
+func (pko *pkOracle) TryUpdateHashFuncNum(newValue uint) {
+	pko.hashFuncNumMutex.Lock()
+	defer pko.hashFuncNumMutex.Unlock()
+	if newValue > pko.maxHashFuncNum {
+		pko.maxHashFuncNum = newValue
+	}
 }
 
 // Get implements PkOracle.
 func (pko *pkOracle) Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]int64, error) {
 	var result []int64
+	var locations []uint64
+
 	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
 		for _, filter := range filters {
 			if !filter(candidate) {
 				return true
 			}
 		}
-		if candidate.MayPkExist(pk) {
+
+		if locations == nil {
+			locations = storage.Locations(pk, pko.GetMaxHashFuncNum())
+			if len(locations) == 0 {
+				log.Warn("pkOracle: no location found for pk")
+				return true
+			}
+		}
+
+		if candidate.TestLocations(pk, locations) {
 			result = append(result, candidate.ID())
 		}
 		return true
@@ -72,11 +102,13 @@ func (pko *pkOracle) Register(candidate Candidate, workerID int64) error {
 		workerID:  workerID,
 	})
 
+	pko.TryUpdateHashFuncNum(candidate.GetHashFuncNum())
 	return nil
 }
 
 // Remove removes candidate from pko.
 func (pko *pkOracle) Remove(filters ...CandidateFilter) error {
+	max := uint(0)
 	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
 		for _, filter := range filters {
 			if !filter(candidate) {
@@ -84,9 +116,14 @@ func (pko *pkOracle) Remove(filters ...CandidateFilter) error {
 			}
 		}
 		pko.candidates.GetAndRemove(pko.candidateKey(candidate, candidate.workerID))
+		if candidate.GetHashFuncNum() > max {
+			max = candidate.GetHashFuncNum()
+		}
 
 		return true
 	})
+
+	pko.TryUpdateHashFuncNum(max)
 	return nil
 }
 

@@ -33,6 +33,15 @@ func (k candidateKey) MayPkExist(pk storage.PrimaryKey) bool {
 	return true
 }
 
+func (k candidateKey) TestLocations(pk storage.PrimaryKey, locs []uint64) bool {
+	// always return true to prevent miuse
+	return true
+}
+
+func (k candidateKey) GetHashFuncNum() uint {
+	return 0
+}
+
 // ID implements Candidate.
 func (k candidateKey) ID() int64 {
 	return k.segmentID
