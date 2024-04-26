@@ -110,7 +110,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 			)
 			removeNodes := make([]int64, 0, len(roNodes))
 			for _, node := range roNodes {
-				channels := ob.distMgr.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(node))
+				channels := ob.distMgr.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
 				segments := ob.distMgr.SegmentDistManager.GetByFilter(meta.WithCollectionID(collectionID), meta.WithNodeID(node))
 				if len(channels) == 0 && len(segments) == 0 {
 					removeNodes = append(removeNodes, node)
