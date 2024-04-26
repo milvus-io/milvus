@@ -551,7 +551,7 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [16])
-    @pytest.mark.parametrize("nq", [2])
+    @pytest.mark.parametrize("nq", [1, 2])
     def test_search_vector_with_all_vector_datatype(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, nq):
         """
@@ -1230,7 +1230,7 @@ class TestAdvancedSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.parametrize("nq", [2])
+    @pytest.mark.parametrize("nq", [1, 2])
     def test_advanced_search_vector_with_multi_float32_vector_datatype(self, nb, dim, insert_round, auto_id,
                                                       is_partition_key, enable_dynamic_schema, nq):
         """

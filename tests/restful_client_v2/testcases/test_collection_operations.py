@@ -86,7 +86,7 @@ class TestCreateCollection(TestBase):
     @pytest.mark.parametrize("enable_dynamic_field", [False, "False", "0"])
     @pytest.mark.parametrize("request_shards_num", [2, "2"])
     @pytest.mark.parametrize("request_ttl_seconds", [360, "360"])
-    def test_create_collections_without_params(self, enable_dynamic_field, request_shards_num, request_ttl_seconds):
+    def test_create_collections_with_different_datatype_params(self, enable_dynamic_field, request_shards_num, request_ttl_seconds):
         """
         target: test create collection
         method: create a collection with a simple schema
