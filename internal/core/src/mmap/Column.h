@@ -96,7 +96,7 @@ class ColumnBase {
         cap_size_ = size;
         size_t mapped_size = cap_size_ + padding_;
         data_ = static_cast<char*>(mmap(
-            nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
+            nullptr, mapped_size, PROT_READ, MAP_SHARED | MAP_POPULATE, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
                    "failed to create file-backed map, err: {}",
                    strerror(errno));
@@ -119,7 +119,7 @@ class ColumnBase {
 
         size_t mapped_size = cap_size_ + padding_;
         data_ = static_cast<char*>(mmap(
-            nullptr, mapped_size, PROT_READ, MAP_SHARED, file.Descriptor(), 0));
+            nullptr, mapped_size, PROT_READ, MAP_SHARED | MAP_POPULATE, file.Descriptor(), 0));
         AssertInfo(data_ != MAP_FAILED,
                    "failed to create file-backed map, err: {}",
                    strerror(errno));
