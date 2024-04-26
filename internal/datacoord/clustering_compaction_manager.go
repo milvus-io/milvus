@@ -462,14 +462,14 @@ func (t *ClusteringCompactionManager) runCompactionJob(job *ClusteringCompaction
 //	return true, nil
 //}
 
-// IsClusteringCompacting get clustering compaction info by collection id
-func (t *ClusteringCompactionManager) IsClusteringCompacting(collectionID UniqueID) bool {
+// getClusteringCompactingInfo get clustering compaction info by collection id
+func (t *ClusteringCompactionManager) getClusteringCompactingInfo(collectionID UniqueID) []*datapb.ClusteringCompactionInfo {
 	infos := t.meta.GetClusteringCompactionInfosByID(collectionID)
-	executingInfos := lo.Filter(infos, func(info *datapb.ClusteringCompactionInfo, _ int) bool {
+	executingJobs := lo.Filter(infos, func(info *datapb.ClusteringCompactionInfo, _ int) bool {
 		state := compactionTaskState(info.State)
 		return state == pipelining || state == executing
 	})
-	return len(executingInfos) > 0
+	return executingJobs
 }
 
 func (t *ClusteringCompactionManager) setSegmentsCompacting(plan *datapb.CompactionPlan, compacting bool) {
