@@ -616,7 +616,7 @@ func (data *BinaryVectorFieldData) AppendRows(rows interface{}) error {
 // AppendRows appends FLATTEN vectors to field data.
 func (data *FloatVectorFieldData) AppendRows(rows interface{}) error {
 	v, ok := rows.([]float32)
-	if !ok || len(v)%(data.Dim) != 0 {
+	if !ok {
 		return merr.WrapErrParameterInvalid("[]float32", rows, "Wrong rows type")
 	}
 	if len(v)%(data.Dim) != 0 {
@@ -629,7 +629,7 @@ func (data *FloatVectorFieldData) AppendRows(rows interface{}) error {
 // AppendRows appends FLATTEN vectors to field data.
 func (data *Float16VectorFieldData) AppendRows(rows interface{}) error {
 	v, ok := rows.([]byte)
-	if !ok || len(v)%(data.Dim*2) != 0 {
+	if !ok {
 		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
 	}
 	if len(v)%(data.Dim*2) != 0 {
@@ -642,7 +642,7 @@ func (data *Float16VectorFieldData) AppendRows(rows interface{}) error {
 // AppendRows appends FLATTEN vectors to field data.
 func (data *BFloat16VectorFieldData) AppendRows(rows interface{}) error {
 	v, ok := rows.([]byte)
-	if !ok || len(v)%(data.Dim*2) != 0 {
+	if !ok {
 		return merr.WrapErrParameterInvalid("[]byte", rows, "Wrong rows type")
 	}
 	if len(v)%(data.Dim*2) != 0 {
@@ -665,19 +665,17 @@ func (data *SparseFloatVectorFieldData) AppendRows(rows interface{}) error {
 }
 
 // GetMemorySize implements FieldData.GetMemorySize
-func (data *BoolFieldData) GetMemorySize() int          { return binary.Size(data.Data) }
-func (data *Int8FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
-func (data *Int16FieldData) GetMemorySize() int         { return binary.Size(data.Data) }
-func (data *Int32FieldData) GetMemorySize() int         { return binary.Size(data.Data) }
-func (data *Int64FieldData) GetMemorySize() int         { return binary.Size(data.Data) }
-func (data *FloatFieldData) GetMemorySize() int         { return binary.Size(data.Data) }
-func (data *DoubleFieldData) GetMemorySize() int        { return binary.Size(data.Data) }
-func (data *BinaryVectorFieldData) GetMemorySize() int  { return binary.Size(data.Data) + 4 }
-func (data *FloatVectorFieldData) GetMemorySize() int   { return binary.Size(data.Data) + 4 }
-func (data *Float16VectorFieldData) GetMemorySize() int { return binary.Size(data.Data) + 4 }
-func (data *BFloat16VectorFieldData) GetMemorySize() int {
-	return binary.Size(data.Data) + 4
-}
+func (data *BoolFieldData) GetMemorySize() int           { return binary.Size(data.Data) }
+func (data *Int8FieldData) GetMemorySize() int           { return binary.Size(data.Data) }
+func (data *Int16FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
+func (data *Int32FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
+func (data *Int64FieldData) GetMemorySize() int          { return binary.Size(data.Data) }
+func (data *FloatFieldData) GetMemorySize() int          { return binary.Size(data.Data) }
+func (data *DoubleFieldData) GetMemorySize() int         { return binary.Size(data.Data) }
+func (data *BinaryVectorFieldData) GetMemorySize() int   { return binary.Size(data.Data) + 4 }
+func (data *FloatVectorFieldData) GetMemorySize() int    { return binary.Size(data.Data) + 4 }
+func (data *Float16VectorFieldData) GetMemorySize() int  { return binary.Size(data.Data) + 4 }
+func (data *BFloat16VectorFieldData) GetMemorySize() int { return binary.Size(data.Data) + 4 }
 
 func (data *SparseFloatVectorFieldData) GetMemorySize() int {
 	// TODO(SPARSE): should this be the memory size of serialzied size?
@@ -768,9 +766,9 @@ func (data *Int64FieldData) GetRowSize(i int) int          { return 8 }
 func (data *FloatFieldData) GetRowSize(i int) int          { return 4 }
 func (data *DoubleFieldData) GetRowSize(i int) int         { return 8 }
 func (data *BinaryVectorFieldData) GetRowSize(i int) int   { return data.Dim / 8 }
-func (data *FloatVectorFieldData) GetRowSize(i int) int    { return data.Dim }
-func (data *Float16VectorFieldData) GetRowSize(i int) int  { return data.Dim / 2 }
-func (data *BFloat16VectorFieldData) GetRowSize(i int) int { return data.Dim / 2 }
+func (data *FloatVectorFieldData) GetRowSize(i int) int    { return data.Dim * 4 }
+func (data *Float16VectorFieldData) GetRowSize(i int) int  { return data.Dim * 2 }
+func (data *BFloat16VectorFieldData) GetRowSize(i int) int { return data.Dim * 2 }
 func (data *StringFieldData) GetRowSize(i int) int         { return len(data.Data[i]) + 16 }
 func (data *JSONFieldData) GetRowSize(i int) int           { return len(data.Data[i]) + 16 }
 func (data *ArrayFieldData) GetRowSize(i int) int {

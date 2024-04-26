@@ -51,6 +51,7 @@ var (
 	ErrCollectionNotFullyLoaded   = newMilvusError("collection not fully loaded", 103, true)
 	ErrCollectionLoaded           = newMilvusError("collection already loaded", 104, false)
 	ErrCollectionIllegalSchema    = newMilvusError("illegal collection schema", 105, false)
+	ErrCollectionOnRecovering     = newMilvusError("collection on recovering", 106, true)
 
 	// Partition related
 	ErrPartitionNotFound       = newMilvusError("partition not found", 200, false)
@@ -61,7 +62,13 @@ var (
 	ErrGeneralCapacityExceeded = newMilvusError("general capacity exceeded", 250, false)
 
 	// ResourceGroup related
-	ErrResourceGroupNotFound = newMilvusError("resource group not found", 300, false)
+	ErrResourceGroupNotFound      = newMilvusError("resource group not found", 300, false)
+	ErrResourceGroupAlreadyExist  = newMilvusError("resource group already exist, but create with different config", 301, false)
+	ErrResourceGroupReachLimit    = newMilvusError("resource group num reach limit", 302, false)
+	ErrResourceGroupIllegalConfig = newMilvusError("resource group illegal config", 303, false)
+	// go:deprecated
+	ErrResourceGroupNodeNotEnough    = newMilvusError("resource group node not enough", 304, false)
+	ErrResourceGroupServiceAvailable = newMilvusError("resource group service available", 305, true)
 
 	// Replica related
 	ErrReplicaNotFound     = newMilvusError("replica not found", 400, false)
@@ -103,8 +110,9 @@ var (
 	ErrIoUnexpectEOF = newMilvusError("unexpected EOF", 1002, true)
 
 	// Parameter related
-	ErrParameterInvalid = newMilvusError("invalid parameter", 1100, false)
-	ErrParameterMissing = newMilvusError("missing parameter", 1101, false)
+	ErrParameterInvalid  = newMilvusError("invalid parameter", 1100, false)
+	ErrParameterMissing  = newMilvusError("missing parameter", 1101, false)
+	ErrParameterTooLarge = newMilvusError("parameter too large", 1102, false)
 
 	// Metrics related
 	ErrMetricNotFound = newMilvusError("metric not found", 1200, false)

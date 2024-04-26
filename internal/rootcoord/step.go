@@ -459,6 +459,22 @@ func (b *BroadcastAlteredCollectionStep) Desc() string {
 	return fmt.Sprintf("broadcast altered collection, collectionID: %d", b.req.CollectionID)
 }
 
+type AlterDatabaseStep struct {
+	baseStep
+	oldDB *model.Database
+	newDB *model.Database
+	ts    Timestamp
+}
+
+func (a *AlterDatabaseStep) Execute(ctx context.Context) ([]nestedStep, error) {
+	err := a.core.meta.AlterDatabase(ctx, a.oldDB, a.newDB, a.ts)
+	return nil, err
+}
+
+func (a *AlterDatabaseStep) Desc() string {
+	return fmt.Sprintf("alter database, databaseID: %d, databaseName: %s, ts: %d", a.oldDB.ID, a.oldDB.Name, a.ts)
+}
+
 var (
 	confirmGCInterval          = time.Minute * 20
 	allPartition      UniqueID = -1

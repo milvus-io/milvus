@@ -654,35 +654,39 @@ func (loader *segmentLoader) Load(ctx context.Context,
 		newSegments.Insert(loadInfo.GetSegmentID(), segment)
 	}
 
-	loadSegmentFunc := func(idx int) error {
+	loadSegmentFunc := func(idx int) (err error) {
 		loadInfo := infos[idx]
 		partitionID := loadInfo.PartitionID
 		segmentID := loadInfo.SegmentID
 		segment, _ := newSegments.Get(segmentID)
 
+		logger := log.With(zap.Int64("partitionID", partitionID),
+			zap.Int64("segmentID", segmentID),
+			zap.String("segmentType", loadInfo.GetLevel().String()))
 		metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadSegment").Inc()
-		defer metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadSegment").Dec()
-
+		defer func() {
+			metrics.QueryNodeLoadSegmentConcurrency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), "LoadSegment").Dec()
+			if err != nil {
+				logger.Warn("load segment failed when load data into memory", zap.Error(err))
+			}
+			logger.Info("load segment done")
+		}()
 		tr := timerecord.NewTimeRecorder("loadDurationPerSegment")
+		logger.Info("load segment...")
 
-		var err error
-		if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
-			err = loader.LoadDeltaLogs(ctx, segment, loadInfo.GetDeltalogs())
-		} else {
-			err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo, loadStatus)
+		// L0 segment has no index or data to be load
+		if loadInfo.GetLevel() != datapb.SegmentLevel_L0 {
+			if err = loader.LoadSegment(ctx, segment.(*LocalSegment), loadInfo, loadStatus); err != nil {
+				return errors.Wrap(err, "At LoadSegment")
+			}
 		}
-		if err != nil {
-			log.Warn("load segment failed when load data into memory",
-				zap.Int64("partitionID", partitionID),
-				zap.Int64("segmentID", segmentID),
-				zap.Error(err),
-			)
-			return err
+		if err = loader.LoadDeltaLogs(ctx, segment, loadInfo.GetDeltalogs()); err != nil {
+			return errors.Wrap(err, "At LoadDeltaLogs")
 		}
+
 		loader.manager.Segment.Put(segmentType, segment)
 		newSegments.GetAndRemove(segmentID)
 		loaded.Insert(segmentID, segment)
-		log.Info("load segment done", zap.Int64("segmentID", segmentID))
 		loader.notifyLoadFinish(loadInfo)
 
 		metrics.QueryNodeLoadSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -1087,17 +1091,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 		}
 	}
 
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		segment.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(segment.Collection()),
-		fmt.Sprint(segment.Partition()),
-		segment.Type().String(),
-		strconv.FormatInt(int64(len(segment.Indexes())), 10),
-	).Add(float64(loadInfo.GetNumOfRows()))
-
-	log.Info("loading delta...")
-	return loader.LoadDeltaLogs(ctx, segment, loadInfo.Deltalogs)
+	return nil
 }
 
 func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) ([]string, storage.StatsLogType) {
@@ -1279,7 +1273,10 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 	defer sp.End()
 	log := log.Ctx(ctx).With(
 		zap.Int64("segmentID", segment.ID()),
+		zap.Int("deltaNum", len(deltaLogs)),
 	)
+	log.Info("loading delta...")
+
 	dCodec := storage.DeleteCodec{}
 	var blobs []*storage.Blob
 	var futures []*conc.Future[any]
@@ -1326,14 +1323,6 @@ func (loader *segmentLoader) LoadDeltaLogs(ctx context.Context, segment Segment,
 		return err
 	}
 
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		segment.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(segment.Collection()),
-		fmt.Sprint(segment.Partition()),
-		segment.Type().String(),
-		strconv.FormatInt(int64(len(segment.Indexes())), 10),
-	).Sub(float64(deltaData.RowCount))
 	log.Info("load delta logs done", zap.Int64("deleteCount", deltaData.RowCount))
 	return nil
 }

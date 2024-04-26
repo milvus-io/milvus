@@ -357,8 +357,13 @@ class Checker:
         self.scalar_field_names = cf.get_scalar_field_name_list(schema=schema)
         self.float_vector_field_names = cf.get_float_vec_field_name_list(schema=schema)
         self.binary_vector_field_names = cf.get_binary_vec_field_name_list(schema=schema)
+        # get index of collection
+        indexes = [index.to_dict() for index in self.c_wrap.indexes]
+        indexed_fields = [index['field'] for index in indexes]
         # create index for scalar fields
         for f in self.scalar_field_names:
+            if f in indexed_fields:
+                continue
             self.c_wrap.create_index(f,
                                      {"index_type": "INVERTED"},
                                      timeout=timeout,
@@ -366,6 +371,8 @@ class Checker:
                                      check_task=CheckTasks.check_nothing)
         # create index for float vector fields
         for f in self.float_vector_field_names:
+            if f in indexed_fields:
+                continue
             self.c_wrap.create_index(f,
                                      constants.DEFAULT_INDEX_PARAM,
                                      timeout=timeout,
@@ -373,6 +380,8 @@ class Checker:
                                      check_task=CheckTasks.check_nothing)
         # create index for binary vector fields
         for f in self.binary_vector_field_names:
+            if f in indexed_fields:
+                continue
             self.c_wrap.create_index(f,
                                      constants.DEFAULT_BINARY_INDEX_PARAM,
                                      timeout=timeout,
@@ -1353,7 +1362,7 @@ class DeleteChecker(Checker):
                                        output_fields=[self.int64_field_name],
                                        partition_name=self.p_name)
             all_ids = [r[self.int64_field_name] for r in res]
-        delete_ids = all_ids[:len(all_ids) // 2]  # delete half of ids
+        delete_ids = all_ids[:3000]  # delete 3000 ids
         self.delete_expr = f'{self.int64_field_name} in {delete_ids}'
 
     @trace()

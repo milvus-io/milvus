@@ -44,13 +44,14 @@ type LoadCollectionJob struct {
 	req  *querypb.LoadCollectionRequest
 	undo *UndoList
 
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	broker         meta.Broker
-	cluster        session.Cluster
-	targetMgr      *meta.TargetManager
-	targetObserver *observers.TargetObserver
-	nodeMgr        *session.NodeManager
+	dist               *meta.DistributionManager
+	meta               *meta.Meta
+	broker             meta.Broker
+	cluster            session.Cluster
+	targetMgr          *meta.TargetManager
+	targetObserver     *observers.TargetObserver
+	collectionObserver *observers.CollectionObserver
+	nodeMgr            *session.NodeManager
 }
 
 func NewLoadCollectionJob(
@@ -62,19 +63,21 @@ func NewLoadCollectionJob(
 	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
+	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
 ) *LoadCollectionJob {
 	return &LoadCollectionJob{
-		BaseJob:        NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:            req,
-		undo:           NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
-		dist:           dist,
-		meta:           meta,
-		broker:         broker,
-		cluster:        cluster,
-		targetMgr:      targetMgr,
-		targetObserver: targetObserver,
-		nodeMgr:        nodeMgr,
+		BaseJob:            NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:                req,
+		undo:               NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
+		dist:               dist,
+		meta:               meta,
+		broker:             broker,
+		cluster:            cluster,
+		targetMgr:          targetMgr,
+		targetObserver:     targetObserver,
+		collectionObserver: collectionObserver,
+		nodeMgr:            nodeMgr,
 	}
 }
 
@@ -184,7 +187,7 @@ func (job *LoadCollectionJob) Execute() error {
 		}
 	})
 
-	_, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
+	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadCollection", trace.WithNewRoot())
 	collection := &meta.Collection{
 		CollectionLoadInfo: &querypb.CollectionLoadInfo{
 			CollectionID:  req.GetCollectionID(),
@@ -214,6 +217,9 @@ func (job *LoadCollectionJob) Execute() error {
 	}
 	job.undo.IsTargetUpdated = true
 
+	// 6. register load task into collection observer
+	job.collectionObserver.LoadCollection(ctx, req.GetCollectionID())
+
 	return nil
 }
 
@@ -228,13 +234,14 @@ type LoadPartitionJob struct {
 	req  *querypb.LoadPartitionsRequest
 	undo *UndoList
 
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	broker         meta.Broker
-	cluster        session.Cluster
-	targetMgr      *meta.TargetManager
-	targetObserver *observers.TargetObserver
-	nodeMgr        *session.NodeManager
+	dist               *meta.DistributionManager
+	meta               *meta.Meta
+	broker             meta.Broker
+	cluster            session.Cluster
+	targetMgr          *meta.TargetManager
+	targetObserver     *observers.TargetObserver
+	collectionObserver *observers.CollectionObserver
+	nodeMgr            *session.NodeManager
 }
 
 func NewLoadPartitionJob(
@@ -246,19 +253,21 @@ func NewLoadPartitionJob(
 	cluster session.Cluster,
 	targetMgr *meta.TargetManager,
 	targetObserver *observers.TargetObserver,
+	collectionObserver *observers.CollectionObserver,
 	nodeMgr *session.NodeManager,
 ) *LoadPartitionJob {
 	return &LoadPartitionJob{
-		BaseJob:        NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
-		req:            req,
-		undo:           NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
-		dist:           dist,
-		meta:           meta,
-		broker:         broker,
-		cluster:        cluster,
-		targetMgr:      targetMgr,
-		targetObserver: targetObserver,
-		nodeMgr:        nodeMgr,
+		BaseJob:            NewBaseJob(ctx, req.Base.GetMsgID(), req.GetCollectionID()),
+		req:                req,
+		undo:               NewUndoList(ctx, meta, cluster, targetMgr, targetObserver),
+		dist:               dist,
+		meta:               meta,
+		broker:             broker,
+		cluster:            cluster,
+		targetMgr:          targetMgr,
+		targetObserver:     targetObserver,
+		collectionObserver: collectionObserver,
+		nodeMgr:            nodeMgr,
 	}
 }
 
@@ -360,10 +369,10 @@ func (job *LoadPartitionJob) Execute() error {
 			CreatedAt: time.Now(),
 		}
 	})
+	ctx, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadPartition", trace.WithNewRoot())
 	if !job.meta.CollectionManager.Exist(req.GetCollectionID()) {
 		job.undo.IsNewCollection = true
 
-		_, sp := otel.Tracer(typeutil.QueryCoordRole).Start(job.ctx, "LoadPartition", trace.WithNewRoot())
 		collection := &meta.Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
 				CollectionID:  req.GetCollectionID(),
@@ -398,6 +407,8 @@ func (job *LoadPartitionJob) Execute() error {
 		log.Warn(msg, zap.Error(err))
 	}
 	job.undo.IsTargetUpdated = true
+
+	job.collectionObserver.LoadPartitions(ctx, req.GetCollectionID(), lackPartitionIDs)
 
 	return nil
 }

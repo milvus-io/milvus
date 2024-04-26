@@ -77,6 +77,10 @@ type Server struct {
 	newQueryCoordClient func() types.QueryCoordClient
 }
 
+func (s *Server) DescribeDatabase(ctx context.Context, request *rootcoordpb.DescribeDatabaseRequest) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	return s.rootCoord.DescribeDatabase(ctx, request)
+}
+
 func (s *Server) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
 	return s.rootCoord.CreateDatabase(ctx, request)
 }
@@ -87,6 +91,10 @@ func (s *Server) DropDatabase(ctx context.Context, request *milvuspb.DropDatabas
 
 func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDatabasesRequest) (*milvuspb.ListDatabasesResponse, error) {
 	return s.rootCoord.ListDatabases(ctx, request)
+}
+
+func (s *Server) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterDatabase(ctx, request)
 }
 
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {

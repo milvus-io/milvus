@@ -31,11 +31,13 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/rootcoord"
 	"github.com/milvus-io/milvus/internal/types"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
@@ -56,6 +58,10 @@ func (m *mockCore) ListDatabases(ctx context.Context, request *milvuspb.ListData
 	return &milvuspb.ListDatabasesResponse{
 		Status: &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success},
 	}, nil
+}
+
+func (m *mockCore) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
 func (m *mockCore) RenameCollection(ctx context.Context, request *milvuspb.RenameCollectionRequest) (*commonpb.Status, error) {
@@ -197,6 +203,13 @@ func TestRun(t *testing.T) {
 			assert.Nil(t, err)
 			assert.Equal(t, commonpb.ErrorCode_Success, ret.GetStatus().GetErrorCode())
 		})
+
+		t.Run("AlterDatabase", func(t *testing.T) {
+			ret, err := svr.AlterDatabase(ctx, nil)
+			assert.Nil(t, err)
+			assert.True(t, merr.Ok(ret))
+		})
+
 		err = svr.Stop()
 		assert.NoError(t, err)
 	}

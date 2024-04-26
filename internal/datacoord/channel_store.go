@@ -33,7 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -220,7 +219,31 @@ type ChannelStore struct {
 // NodeChannelInfo stores the nodeID and its channels.
 type NodeChannelInfo struct {
 	NodeID   int64
-	Channels []RWChannel
+	Channels map[string]RWChannel
+	// ChannelsSet typeutil.Set[string] // map for fast channel check
+}
+
+// AddChannel appends channel info node channel list.
+func (info *NodeChannelInfo) AddChannel(ch RWChannel) {
+	info.Channels[ch.GetName()] = ch
+}
+
+// RemoveChannel removes channel from Channels.
+func (info *NodeChannelInfo) RemoveChannel(channelName string) {
+	delete(info.Channels, channelName)
+}
+
+func NewNodeChannelInfo(nodeID int64, channels ...RWChannel) *NodeChannelInfo {
+	info := &NodeChannelInfo{
+		NodeID:   nodeID,
+		Channels: make(map[string]RWChannel),
+	}
+
+	for _, channel := range channels {
+		info.Channels[channel.GetName()] = channel
+	}
+
+	return info
 }
 
 // NewChannelStore creates and returns a new ChannelStore.
@@ -231,7 +254,7 @@ func NewChannelStore(kv kv.TxnKV) *ChannelStore {
 	}
 	c.channelsInfo[bufferID] = &NodeChannelInfo{
 		NodeID:   bufferID,
-		Channels: make([]RWChannel, 0),
+		Channels: make(map[string]RWChannel),
 	}
 	return c
 }
@@ -264,7 +287,8 @@ func (c *ChannelStore) Reload() error {
 			Schema:       cw.GetSchema(),
 			WatchInfo:    cw,
 		}
-		c.channelsInfo[nodeID].Channels = append(c.channelsInfo[nodeID].Channels, channel)
+		c.channelsInfo[nodeID].AddChannel(channel)
+
 		log.Info("channel store reload channel",
 			zap.Int64("nodeID", nodeID), zap.String("channel", channel.Name))
 		metrics.DataCoordDmlChannelNum.WithLabelValues(strconv.FormatInt(nodeID, 10)).Set(float64(len(c.channelsInfo[nodeID].Channels)))
@@ -280,10 +304,7 @@ func (c *ChannelStore) Add(nodeID int64) {
 		return
 	}
 
-	c.channelsInfo[nodeID] = &NodeChannelInfo{
-		NodeID:   nodeID,
-		Channels: make([]RWChannel, 0),
-	}
+	c.channelsInfo[nodeID] = NewNodeChannelInfo(nodeID)
 }
 
 // Update applies the channel operations in opSet.
@@ -317,11 +338,9 @@ func (c *ChannelStore) Update(opSet *ChannelOpSet) error {
 }
 
 func (c *ChannelStore) checkIfExist(nodeID int64, channel RWChannel) bool {
-	if _, ok := c.channelsInfo[nodeID]; ok {
-		for _, ch := range c.channelsInfo[nodeID].Channels {
-			if channel.GetName() == ch.GetName() && channel.GetCollectionID() == ch.GetCollectionID() {
-				return true
-			}
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		if ch, ok := info.Channels[channel.GetName()]; ok {
+			return ch.GetCollectionID() == channel.GetCollectionID()
 		}
 	}
 	return false
@@ -343,19 +362,13 @@ func (c *ChannelStore) update(opSet *ChannelOpSet) error {
 					continue // prevent adding duplicated channel info
 				}
 				// Append target channels to channel store.
-				c.channelsInfo[op.NodeID].Channels = append(c.channelsInfo[op.NodeID].Channels, ch)
+				c.channelsInfo[op.NodeID].AddChannel(ch)
 			}
 		case Delete:
-			del := typeutil.NewSet(op.GetChannelNames()...)
-
-			prev := c.channelsInfo[op.NodeID].Channels
-			curr := make([]RWChannel, 0, len(prev))
-			for _, ch := range prev {
-				if !del.Contain(ch.GetName()) {
-					curr = append(curr, ch)
-				}
+			info := c.channelsInfo[op.NodeID]
+			for _, channelName := range op.GetChannelNames() {
+				info.RemoveChannel(channelName)
 			}
-			c.channelsInfo[op.NodeID].Channels = curr
 		default:
 			return errUnknownOpType
 		}
@@ -386,43 +399,35 @@ func (c *ChannelStore) GetNodesChannels() []*NodeChannelInfo {
 
 // GetBufferChannelInfo returns all unassigned channels.
 func (c *ChannelStore) GetBufferChannelInfo() *NodeChannelInfo {
-	for id, info := range c.channelsInfo {
-		if id == bufferID {
-			return info
-		}
+	if info, ok := c.channelsInfo[bufferID]; ok {
+		return info
 	}
 	return nil
 }
 
 // GetNode returns the channel info of a given node.
 func (c *ChannelStore) GetNode(nodeID int64) *NodeChannelInfo {
-	for id, info := range c.channelsInfo {
-		if id == nodeID {
-			return info
-		}
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		return info
 	}
 	return nil
 }
 
 func (c *ChannelStore) GetNodeChannelCount(nodeID int64) int {
-	for id, info := range c.channelsInfo {
-		if id == nodeID {
-			return len(info.Channels)
-		}
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		return len(info.Channels)
 	}
 	return 0
 }
 
 // Delete removes the given node from the channel store and returns its channels.
 func (c *ChannelStore) Delete(nodeID int64) ([]RWChannel, error) {
-	for id, info := range c.channelsInfo {
-		if id == nodeID {
-			if err := c.remove(nodeID); err != nil {
-				return nil, err
-			}
-			delete(c.channelsInfo, id)
-			return info.Channels, nil
+	if info, ok := c.channelsInfo[nodeID]; ok {
+		if err := c.remove(nodeID); err != nil {
+			return nil, err
 		}
+		delete(c.channelsInfo, nodeID)
+		return lo.Values(info.Channels), nil
 	}
 	return nil, nil
 }

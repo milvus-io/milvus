@@ -19,6 +19,7 @@
 #include "bitset/common.h"
 
 #ifndef BITSET_HEADER_ONLY
+#ifdef __ARM_NEON
 
 #include "neon-decl.h"
 #include "neon-impl.h"
@@ -196,4 +197,5 @@ ALL_ARITH_CMP_OPS(INSTANTIATE_ARITH_COMPARE_NEON, double)
 }  // namespace bitset
 }  // namespace milvus
 
+#endif
 #endif

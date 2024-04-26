@@ -175,8 +175,16 @@ func TestQuotaParam(t *testing.T) {
 	})
 
 	t.Run("test limits", func(t *testing.T) {
+		params.Init(NewBaseTable(SkipRemote(true)))
 		assert.Equal(t, 65536, qc.MaxCollectionNum.GetAsInt())
 		assert.Equal(t, 65536, qc.MaxCollectionNumPerDB.GetAsInt())
+		assert.Equal(t, 1024, params.QuotaConfig.MaxResourceGroupNumOfQueryNode.GetAsInt())
+		params.Save(params.QuotaConfig.MaxResourceGroupNumOfQueryNode.Key, "512")
+		assert.Equal(t, 512, params.QuotaConfig.MaxResourceGroupNumOfQueryNode.GetAsInt())
+
+		assert.Equal(t, -1, qc.MaxInsertSize.GetAsInt())
+		baseParams.Save(params.QuotaConfig.MaxInsertSize.Key, "1024")
+		assert.Equal(t, 1024, qc.MaxInsertSize.GetAsInt())
 	})
 
 	t.Run("test limit writing", func(t *testing.T) {

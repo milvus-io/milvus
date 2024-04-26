@@ -292,3 +292,27 @@ func Test_getCollectionRateLimitConfig(t *testing.T) {
 		})
 	}
 }
+
+func TestGetRateLimitConfigErr(t *testing.T) {
+	key := common.CollectionQueryRateMaxKey
+	t.Run("negative value", func(t *testing.T) {
+		v := getRateLimitConfig(map[string]string{
+			key: "-1",
+		}, key, 1)
+		assert.EqualValues(t, 1, v)
+	})
+
+	t.Run("valid value", func(t *testing.T) {
+		v := getRateLimitConfig(map[string]string{
+			key: "1",
+		}, key, 100)
+		assert.EqualValues(t, 1, v)
+	})
+
+	t.Run("not exist value", func(t *testing.T) {
+		v := getRateLimitConfig(map[string]string{
+			key: "1",
+		}, "b", 100)
+		assert.EqualValues(t, 100, v)
+	})
+}

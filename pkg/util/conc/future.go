@@ -112,3 +112,15 @@ func AwaitAll[T future](futures ...T) error {
 
 	return nil
 }
+
+// BlockOnAll blocks until all futures complete.
+// Return the first error in these futures.
+func BlockOnAll[T future](futures ...T) error {
+	var err error
+	for i := range futures {
+		if e := futures[i].Err(); e != nil && err == nil {
+			err = e
+		}
+	}
+	return err
+}

@@ -132,56 +132,6 @@ func getBaseSearchParams() []*commonpb.KeyValuePair {
 	}
 }
 
-func getBaseParamsForRangeSearchL2() []*commonpb.KeyValuePair {
-	return []*commonpb.KeyValuePair{
-		{
-			Key:   AnnsFieldKey,
-			Value: testFloatVecField,
-		},
-		{
-			Key:   TopKKey,
-			Value: "10",
-		},
-		{
-			Key:   common.MetricTypeKey,
-			Value: metric.L2,
-		},
-		{
-			Key:   RoundDecimalKey,
-			Value: "-1",
-		},
-		{
-			Key:   IgnoreGrowingKey,
-			Value: "false",
-		},
-	}
-}
-
-func getBaseParamsForRangeSearchIP() []*commonpb.KeyValuePair {
-	return []*commonpb.KeyValuePair{
-		{
-			Key:   AnnsFieldKey,
-			Value: testFloatVecField,
-		},
-		{
-			Key:   TopKKey,
-			Value: "10",
-		},
-		{
-			Key:   common.MetricTypeKey,
-			Value: metric.IP,
-		},
-		{
-			Key:   RoundDecimalKey,
-			Value: "-1",
-		},
-		{
-			Key:   IgnoreGrowingKey,
-			Value: "false",
-		},
-	}
-}
-
 func getValidSearchParams() []*commonpb.KeyValuePair {
 	return []*commonpb.KeyValuePair{
 		{
@@ -327,6 +277,14 @@ func TestSearchTask_PreExecute(t *testing.T) {
 		task.ctx = ctxTimeout
 		assert.NoError(t, task.PreExecute(ctx))
 		assert.Greater(t, task.TimeoutTimestamp, typeutil.ZeroTimestamp)
+
+		{
+			task.mustUsePartitionKey = true
+			err = task.PreExecute(ctx)
+			assert.Error(t, err)
+			assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+			task.mustUsePartitionKey = false
+		}
 
 		// field not exist
 		task.ctx = context.TODO()
@@ -2105,115 +2063,6 @@ func TestTaskSearch_parseQueryInfo(t *testing.T) {
 			})
 		}
 	})
-	t.Run("check range search params", func(t *testing.T) {
-		normalParam := getValidSearchParams()
-
-		invalidTypeRadius := getBaseParamsForRangeSearchL2()
-		invalidTypeRadius = append(invalidTypeRadius, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": null}`,
-		})
-
-		invalidTypeFilter := getBaseParamsForRangeSearchL2()
-		invalidTypeFilter = append(invalidTypeFilter, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": 10, "range_filter": null}`,
-		})
-
-		normalParamWithNoFilter := getBaseParamsForRangeSearchL2()
-		normalParamWithNoFilter = append(normalParamWithNoFilter, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": 10}`,
-		})
-
-		normalParamForIP := getBaseParamsForRangeSearchIP()
-		normalParamForIP = append(normalParamForIP, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": 10, "range_filter": 20}`,
-		})
-
-		normalParamForL2 := getBaseParamsForRangeSearchL2()
-		normalParamForL2 = append(normalParamForL2, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": 20, "range_filter": 10}`,
-		})
-
-		abnormalParamForIP := getBaseParamsForRangeSearchIP()
-		abnormalParamForIP = append(abnormalParamForIP, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": 20, "range_filter": 10}`,
-		})
-
-		abnormalParamForL2 := getBaseParamsForRangeSearchL2()
-		abnormalParamForL2 = append(abnormalParamForL2, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": 10, "range_filter": 20}`,
-		})
-
-		wrongTypeRadius := getBaseParamsForRangeSearchIP()
-		wrongTypeRadius = append(wrongTypeRadius, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": "ab"}`,
-		})
-
-		wrongTypeFilter := getBaseParamsForRangeSearchIP()
-		wrongTypeFilter = append(wrongTypeFilter, &commonpb.KeyValuePair{
-			Key:   SearchParamsKey,
-			Value: `{"nprobe": 10, "radius": 10, "range_filter": "20"}`,
-		})
-
-		tests := []struct {
-			description string
-			validParams []*commonpb.KeyValuePair
-		}{
-			{"normalParam", normalParam},
-			{"normalParamWithNoFilter", normalParamWithNoFilter},
-			{"normalParamForIP", normalParamForIP},
-			{"normalParamForL2", normalParamForL2},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil, false)
-				assert.NoError(t, err)
-				assert.NotNil(t, info)
-			})
-		}
-
-		tests = []struct {
-			description string
-			validParams []*commonpb.KeyValuePair
-		}{
-			{"abnormalParamForIP", abnormalParamForIP},
-			{"abnormalParamForL2", abnormalParamForL2},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil, false)
-				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-				assert.Nil(t, info)
-			})
-		}
-
-		tests = []struct {
-			description string
-			validParams []*commonpb.KeyValuePair
-		}{
-			{"invalidTypeRadius", invalidTypeRadius},
-			{"invalidTypeFilter", invalidTypeFilter},
-			{"wrongTypeRadius", wrongTypeRadius},
-			{"wrongTypeFilter", wrongTypeFilter},
-		}
-
-		for _, test := range tests {
-			t.Run(test.description, func(t *testing.T) {
-				info, _, err := parseSearchInfo(test.validParams, nil, false)
-				assert.ErrorIs(t, err, merr.ErrParameterInvalid)
-				assert.Nil(t, info)
-			})
-		}
-	})
 	t.Run("check iterator and groupBy", func(t *testing.T) {
 		normalParam := getValidSearchParams()
 		normalParam = append(normalParam, &commonpb.KeyValuePair{
@@ -2727,4 +2576,141 @@ func TestSearchTask_CanSkipAllocTimestamp(t *testing.T) {
 		skip = st2.CanSkipAllocTimestamp()
 		assert.True(t, skip)
 	})
+}
+
+type MaterializedViewTestSuite struct {
+	suite.Suite
+	mockMetaCache *MockCache
+
+	ctx             context.Context
+	cancelFunc      context.CancelFunc
+	dbName          string
+	colName         string
+	colID           UniqueID
+	fieldName2Types map[string]schemapb.DataType
+}
+
+func (s *MaterializedViewTestSuite) SetupSuite() {
+	s.ctx, s.cancelFunc = context.WithCancel(context.Background())
+	s.dbName = "TestMvDbName"
+	s.colName = "TestMvColName"
+	s.colID = UniqueID(123)
+	s.fieldName2Types = map[string]schemapb.DataType{
+		testInt64Field:    schemapb.DataType_Int64,
+		testVarCharField:  schemapb.DataType_VarChar,
+		testFloatVecField: schemapb.DataType_FloatVector,
+	}
+}
+
+func (s *MaterializedViewTestSuite) TearDownSuite() {
+	s.cancelFunc()
+}
+
+func (s *MaterializedViewTestSuite) SetupTest() {
+	s.mockMetaCache = NewMockCache(s.T())
+	s.mockMetaCache.EXPECT().GetCollectionID(mock.Anything, mock.Anything, mock.Anything).Return(s.colID, nil).Maybe()
+	s.mockMetaCache.EXPECT().GetCollectionInfo(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(
+		&collectionBasicInfo{
+			collID: s.colID,
+		}, nil).Maybe()
+	globalMetaCache = s.mockMetaCache
+}
+
+func (s *MaterializedViewTestSuite) TearDownTest() {
+	globalMetaCache = nil
+}
+
+func (s *MaterializedViewTestSuite) getSearchTask() *searchTask {
+	task := &searchTask{
+		ctx:            s.ctx,
+		collectionName: s.colName,
+		SearchRequest:  &internalpb.SearchRequest{},
+		request: &milvuspb.SearchRequest{
+			DbName:         dbName,
+			CollectionName: s.colName,
+			Nq:             1,
+			SearchParams:   getBaseSearchParams(),
+		},
+	}
+	s.NoError(task.OnEnqueue())
+	return task
+}
+
+func (s *MaterializedViewTestSuite) TestMvNotEnabledWithNoPartitionKey() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = false
+
+	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+
+	err := task.PreExecute(s.ctx)
+	s.NoError(err)
+	s.NotZero(len(task.queryInfos))
+	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func (s *MaterializedViewTestSuite) TestMvNotEnabledWithPartitionKey() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = false
+	task.request.Dsl = testInt64Field + " == 1"
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+
+	err := task.PreExecute(s.ctx)
+	s.NoError(err)
+	s.NotZero(len(task.queryInfos))
+	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledNoPartitionKey() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = true
+	schema := constructCollectionSchemaByDataType(s.colName, s.fieldName2Types, testInt64Field, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+
+	err := task.PreExecute(s.ctx)
+	s.NoError(err)
+	s.NotZero(len(task.queryInfos))
+	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = true
+	task.request.Dsl = testInt64Field + " == 1"
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testInt64Field, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+
+	err := task.PreExecute(s.ctx)
+	s.NoError(err)
+	s.NotZero(len(task.queryInfos))
+	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
+	task := s.getSearchTask()
+	task.enableMaterializedView = true
+	task.request.Dsl = testVarCharField + " == \"a\""
+	schema := ConstructCollectionSchemaWithPartitionKey(s.colName, s.fieldName2Types, testInt64Field, testVarCharField, false)
+	schemaInfo := newSchemaInfo(schema)
+	s.mockMetaCache.EXPECT().GetCollectionSchema(mock.Anything, mock.Anything, mock.Anything).Return(schemaInfo, nil)
+	s.mockMetaCache.EXPECT().GetPartitionsIndex(mock.Anything, mock.Anything, mock.Anything).Return([]string{"partition_1", "partition_2"}, nil)
+	s.mockMetaCache.EXPECT().GetPartitions(mock.Anything, mock.Anything, mock.Anything).Return(map[string]int64{"partition_1": 1, "partition_2": 2}, nil)
+
+	err := task.PreExecute(s.ctx)
+	s.NoError(err)
+	s.NotZero(len(task.queryInfos))
+	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
+}
+
+func TestMaterializedView(t *testing.T) {
+	suite.Run(t, new(MaterializedViewTestSuite))
 }

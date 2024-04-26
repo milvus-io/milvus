@@ -120,7 +120,7 @@ func (t *QueryTask) Execute() error {
 		t.collection.Schema(),
 	)
 	beforeReduce := time.Now()
-	reducedResult, err := reducer.Reduce(t.ctx, results)
+	reducedResult, err := reducer.Reduce(t.ctx, results, querySegments, retrievePlan)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),

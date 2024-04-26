@@ -24,44 +24,88 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 )
 
-type LeaderViewFilter = func(view *LeaderView) bool
-
-func WithChannelName2LeaderView(channelName string) LeaderViewFilter {
-	return func(view *LeaderView) bool {
-		return view.Channel == channelName
-	}
+type lvCriterion struct {
+	nodeID         int64
+	channelName    string
+	collectionID   int64
+	hasOtherFilter bool
 }
 
-func WithCollectionID2LeaderView(collectionID int64) LeaderViewFilter {
-	return func(view *LeaderView) bool {
-		return view.CollectionID == collectionID
-	}
+type LeaderViewFilter interface {
+	Match(*LeaderView) bool
+	AddFilter(*lvCriterion)
+}
+
+type lvFilterFunc func(view *LeaderView) bool
+
+func (f lvFilterFunc) Match(view *LeaderView) bool {
+	return f(view)
+}
+
+func (f lvFilterFunc) AddFilter(c *lvCriterion) {
+	c.hasOtherFilter = true
+}
+
+type lvChannelNameFilter string
+
+func (f lvChannelNameFilter) Match(v *LeaderView) bool {
+	return v.Channel == string(f)
+}
+
+func (f lvChannelNameFilter) AddFilter(c *lvCriterion) {
+	c.channelName = string(f)
+}
+
+type lvNodeFilter int64
+
+func (f lvNodeFilter) Match(v *LeaderView) bool {
+	return v.ID == int64(f)
+}
+
+func (f lvNodeFilter) AddFilter(c *lvCriterion) {
+	c.nodeID = int64(f)
+}
+
+type lvCollectionFilter int64
+
+func (f lvCollectionFilter) Match(v *LeaderView) bool {
+	return v.CollectionID == int64(f)
+}
+
+func (f lvCollectionFilter) AddFilter(c *lvCriterion) {
+	c.collectionID = int64(f)
 }
 
 func WithNodeID2LeaderView(nodeID int64) LeaderViewFilter {
-	return func(view *LeaderView) bool {
-		return view.ID == nodeID
-	}
+	return lvNodeFilter(nodeID)
+}
+
+func WithChannelName2LeaderView(channelName string) LeaderViewFilter {
+	return lvChannelNameFilter(channelName)
+}
+
+func WithCollectionID2LeaderView(collectionID int64) LeaderViewFilter {
+	return lvCollectionFilter(collectionID)
 }
 
 func WithReplica2LeaderView(replica *Replica) LeaderViewFilter {
-	return func(view *LeaderView) bool {
+	return lvFilterFunc(func(view *LeaderView) bool {
 		if replica == nil {
 			return false
 		}
 		return replica.GetCollectionID() == view.CollectionID && replica.Contains(view.ID)
-	}
+	})
 }
 
 func WithSegment2LeaderView(segmentID int64, isGrowing bool) LeaderViewFilter {
-	return func(view *LeaderView) bool {
+	return lvFilterFunc(func(view *LeaderView) bool {
 		if isGrowing {
 			_, ok := view.GrowingSegments[segmentID]
 			return ok
 		}
 		_, ok := view.Segments[segmentID]
 		return ok
-	}
+	})
 }
 
 type LeaderView struct {
@@ -98,16 +142,64 @@ func (view *LeaderView) Clone() *LeaderView {
 	}
 }
 
-type channelViews map[string]*LeaderView
+type nodeViews struct {
+	views []*LeaderView
+	// channel name => LeaderView
+	channelView map[string]*LeaderView
+	// collection id  => leader views
+	collectionViews map[int64][]*LeaderView
+}
+
+func (v nodeViews) Filter(criterion *lvCriterion, filters ...LeaderViewFilter) []*LeaderView {
+	mergedFilter := func(view *LeaderView) bool {
+		for _, filter := range filters {
+			if !filter.Match(view) {
+				return false
+			}
+		}
+		return true
+	}
+
+	var views []*LeaderView
+	switch {
+	case criterion.channelName != "":
+		if view, ok := v.channelView[criterion.channelName]; ok {
+			views = append(views, view)
+		}
+	case criterion.collectionID != 0:
+		views = v.collectionViews[criterion.collectionID]
+	default:
+		views = v.views
+	}
+
+	if criterion.hasOtherFilter {
+		views = lo.Filter(views, func(view *LeaderView, _ int) bool {
+			return mergedFilter(view)
+		})
+	}
+	return views
+}
+
+func composeNodeViews(views ...*LeaderView) nodeViews {
+	return nodeViews{
+		views: views,
+		channelView: lo.SliceToMap(views, func(view *LeaderView) (string, *LeaderView) {
+			return view.Channel, view
+		}),
+		collectionViews: lo.GroupBy(views, func(view *LeaderView) int64 {
+			return view.CollectionID
+		}),
+	}
+}
 
 type LeaderViewManager struct {
 	rwmutex sync.RWMutex
-	views   map[int64]channelViews // LeaderID -> Views (one per shard)
+	views   map[int64]nodeViews // LeaderID -> Views (one per shard)
 }
 
 func NewLeaderViewManager() *LeaderViewManager {
 	return &LeaderViewManager{
-		views: make(map[int64]channelViews),
+		views: make(map[int64]nodeViews),
 	}
 }
 
@@ -115,17 +207,14 @@ func NewLeaderViewManager() *LeaderViewManager {
 func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 	mgr.rwmutex.Lock()
 	defer mgr.rwmutex.Unlock()
-	mgr.views[leaderID] = make(channelViews, len(views))
-	for _, view := range views {
-		mgr.views[leaderID][view.Channel] = view
-	}
+	mgr.views[leaderID] = composeNodeViews(views...)
 }
 
 func (mgr *LeaderViewManager) GetLeaderShardView(id int64, shard string) *LeaderView {
 	mgr.rwmutex.RLock()
 	defer mgr.rwmutex.RUnlock()
 
-	return mgr.views[id][shard]
+	return mgr.views[id].channelView[shard]
 }
 
 func (mgr *LeaderViewManager) GetByFilter(filters ...LeaderViewFilter) []*LeaderView {
@@ -136,23 +225,26 @@ func (mgr *LeaderViewManager) GetByFilter(filters ...LeaderViewFilter) []*Leader
 }
 
 func (mgr *LeaderViewManager) getByFilter(filters ...LeaderViewFilter) []*LeaderView {
-	ret := make([]*LeaderView, 0)
-	for _, viewsOnNode := range mgr.views {
-		for _, view := range viewsOnNode {
-			allMatch := true
-			for _, fn := range filters {
-				if fn != nil && !fn(view) {
-					allMatch = false
-				}
-			}
-
-			if allMatch {
-				ret = append(ret, view)
-			}
-		}
+	criterion := &lvCriterion{}
+	for _, filter := range filters {
+		filter.AddFilter(criterion)
 	}
 
-	return ret
+	var candidates []nodeViews
+	if criterion.nodeID > 0 {
+		nodeView, ok := mgr.views[criterion.nodeID]
+		if ok {
+			candidates = append(candidates, nodeView)
+		}
+	} else {
+		candidates = lo.Values(mgr.views)
+	}
+
+	var result []*LeaderView
+	for _, candidate := range candidates {
+		result = append(result, candidate.Filter(criterion, filters...)...)
+	}
+	return result
 }
 
 func (mgr *LeaderViewManager) GetLatestShardLeaderByFilter(filters ...LeaderViewFilter) *LeaderView {

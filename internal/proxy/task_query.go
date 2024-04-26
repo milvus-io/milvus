@@ -68,6 +68,7 @@ type queryTask struct {
 	reQuery              bool
 	allQueryCnt          int64
 	totalRelatedDataSize int64
+	mustUsePartitionKey  bool
 }
 
 type queryParams struct {
@@ -302,6 +303,10 @@ func (t *queryTask) PreExecute(ctx context.Context) error {
 	}
 	if t.partitionKeyMode && len(t.request.GetPartitionNames()) != 0 {
 		return errors.New("not support manually specifying the partition names if partition key mode is used")
+	}
+	if t.mustUsePartitionKey && !t.partitionKeyMode {
+		return merr.WrapErrParameterInvalidMsg("must use partition key in the query request " +
+			"because the mustUsePartitionKey config is true")
 	}
 
 	for _, tag := range t.request.PartitionNames {

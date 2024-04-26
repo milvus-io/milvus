@@ -41,16 +41,23 @@ type FlowgraphManager interface {
 	HasFlowgraphWithOpID(channel string, opID UniqueID) bool
 	GetFlowgraphCount() int
 	GetCollectionIDs() []int64
+
+	Close()
 }
 
 var _ FlowgraphManager = (*fgManagerImpl)(nil)
 
 type fgManagerImpl struct {
+	ctx        context.Context
+	cancelFunc context.CancelFunc
 	flowgraphs *typeutil.ConcurrentMap[string, *dataSyncService]
 }
 
 func newFlowgraphManager() *fgManagerImpl {
+	ctx, cancelFunc := context.WithCancel(context.TODO())
 	return &fgManagerImpl{
+		ctx:        ctx,
+		cancelFunc: cancelFunc,
 		flowgraphs: typeutil.NewConcurrentMap[string, *dataSyncService](),
 	}
 }
@@ -67,7 +74,7 @@ func (fm *fgManagerImpl) AddandStartWithEtcdTickler(dn *DataNode, vchan *datapb.
 		return nil
 	}
 
-	dataSyncService, err := newServiceWithEtcdTickler(context.TODO(), dn, &datapb.ChannelWatchInfo{
+	dataSyncService, err := newServiceWithEtcdTickler(fm.ctx, dn, &datapb.ChannelWatchInfo{
 		Schema: schema,
 		Vchan:  vchan,
 	}, tickler)
@@ -130,4 +137,8 @@ func (fm *fgManagerImpl) GetCollectionIDs() []int64 {
 	})
 
 	return collectionSet.Collect()
+}
+
+func (fm *fgManagerImpl) Close() {
+	fm.cancelFunc()
 }

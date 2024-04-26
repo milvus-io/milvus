@@ -61,6 +61,12 @@ type quotaConfig struct {
 	CompactionLimitEnabled ParamItem `refreshable:"true"`
 	MaxCompactionRate      ParamItem `refreshable:"true"`
 
+	DDLCollectionRatePerDB ParamItem `refreshable:"true"`
+	DDLPartitionRatePerDB  ParamItem `refreshable:"true"`
+	MaxIndexRatePerDB      ParamItem `refreshable:"true"`
+	MaxFlushRatePerDB      ParamItem `refreshable:"true"`
+	MaxCompactionRatePerDB ParamItem `refreshable:"true"`
+
 	// dml
 	DMLLimitEnabled                 ParamItem `refreshable:"true"`
 	DMLMaxInsertRate                ParamItem `refreshable:"true"`
@@ -71,6 +77,14 @@ type quotaConfig struct {
 	DMLMinDeleteRate                ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRate              ParamItem `refreshable:"true"`
 	DMLMinBulkLoadRate              ParamItem `refreshable:"true"`
+	DMLMaxInsertRatePerDB           ParamItem `refreshable:"true"`
+	DMLMinInsertRatePerDB           ParamItem `refreshable:"true"`
+	DMLMaxUpsertRatePerDB           ParamItem `refreshable:"true"`
+	DMLMinUpsertRatePerDB           ParamItem `refreshable:"true"`
+	DMLMaxDeleteRatePerDB           ParamItem `refreshable:"true"`
+	DMLMinDeleteRatePerDB           ParamItem `refreshable:"true"`
+	DMLMaxBulkLoadRatePerDB         ParamItem `refreshable:"true"`
+	DMLMinBulkLoadRatePerDB         ParamItem `refreshable:"true"`
 	DMLMaxInsertRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMinInsertRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMaxUpsertRatePerCollection   ParamItem `refreshable:"true"`
@@ -79,6 +93,14 @@ type quotaConfig struct {
 	DMLMinDeleteRatePerCollection   ParamItem `refreshable:"true"`
 	DMLMaxBulkLoadRatePerCollection ParamItem `refreshable:"true"`
 	DMLMinBulkLoadRatePerCollection ParamItem `refreshable:"true"`
+	DMLMaxInsertRatePerPartition    ParamItem `refreshable:"true"`
+	DMLMinInsertRatePerPartition    ParamItem `refreshable:"true"`
+	DMLMaxUpsertRatePerPartition    ParamItem `refreshable:"true"`
+	DMLMinUpsertRatePerPartition    ParamItem `refreshable:"true"`
+	DMLMaxDeleteRatePerPartition    ParamItem `refreshable:"true"`
+	DMLMinDeleteRatePerPartition    ParamItem `refreshable:"true"`
+	DMLMaxBulkLoadRatePerPartition  ParamItem `refreshable:"true"`
+	DMLMinBulkLoadRatePerPartition  ParamItem `refreshable:"true"`
 
 	// dql
 	DQLLimitEnabled               ParamItem `refreshable:"true"`
@@ -86,18 +108,28 @@ type quotaConfig struct {
 	DQLMinSearchRate              ParamItem `refreshable:"true"`
 	DQLMaxQueryRate               ParamItem `refreshable:"true"`
 	DQLMinQueryRate               ParamItem `refreshable:"true"`
+	DQLMaxSearchRatePerDB         ParamItem `refreshable:"true"`
+	DQLMinSearchRatePerDB         ParamItem `refreshable:"true"`
+	DQLMaxQueryRatePerDB          ParamItem `refreshable:"true"`
+	DQLMinQueryRatePerDB          ParamItem `refreshable:"true"`
 	DQLMaxSearchRatePerCollection ParamItem `refreshable:"true"`
 	DQLMinSearchRatePerCollection ParamItem `refreshable:"true"`
 	DQLMaxQueryRatePerCollection  ParamItem `refreshable:"true"`
 	DQLMinQueryRatePerCollection  ParamItem `refreshable:"true"`
+	DQLMaxSearchRatePerPartition  ParamItem `refreshable:"true"`
+	DQLMinSearchRatePerPartition  ParamItem `refreshable:"true"`
+	DQLMaxQueryRatePerPartition   ParamItem `refreshable:"true"`
+	DQLMinQueryRatePerPartition   ParamItem `refreshable:"true"`
 
 	// limits
-	MaxCollectionNum      ParamItem `refreshable:"true"`
-	MaxCollectionNumPerDB ParamItem `refreshable:"true"`
-	TopKLimit             ParamItem `refreshable:"true"`
-	NQLimit               ParamItem `refreshable:"true"`
-	MaxQueryResultWindow  ParamItem `refreshable:"true"`
-	MaxOutputSize         ParamItem `refreshable:"true"`
+	MaxCollectionNum               ParamItem `refreshable:"true"`
+	MaxCollectionNumPerDB          ParamItem `refreshable:"true"`
+	TopKLimit                      ParamItem `refreshable:"true"`
+	NQLimit                        ParamItem `refreshable:"true"`
+	MaxQueryResultWindow           ParamItem `refreshable:"true"`
+	MaxOutputSize                  ParamItem `refreshable:"true"`
+	MaxInsertSize                  ParamItem `refreshable:"true"`
+	MaxResourceGroupNumOfQueryNode ParamItem `refreshable:"true"`
 
 	// limit writing
 	ForceDenyWriting                     ParamItem `refreshable:"true"`
@@ -114,16 +146,20 @@ type quotaConfig struct {
 	GrowingSegmentsSizeHighWaterLevel    ParamItem `refreshable:"true"`
 	DiskProtectionEnabled                ParamItem `refreshable:"true"`
 	DiskQuota                            ParamItem `refreshable:"true"`
+	DiskQuotaPerDB                       ParamItem `refreshable:"true"`
 	DiskQuotaPerCollection               ParamItem `refreshable:"true"`
+	DiskQuotaPerPartition                ParamItem `refreshable:"true"`
 
 	// limit reading
-	ForceDenyReading        ParamItem `refreshable:"true"`
-	QueueProtectionEnabled  ParamItem `refreshable:"true"`
-	NQInQueueThreshold      ParamItem `refreshable:"true"`
-	QueueLatencyThreshold   ParamItem `refreshable:"true"`
-	ResultProtectionEnabled ParamItem `refreshable:"true"`
-	MaxReadResultRate       ParamItem `refreshable:"true"`
-	CoolOffSpeed            ParamItem `refreshable:"true"`
+	ForceDenyReading               ParamItem `refreshable:"true"`
+	QueueProtectionEnabled         ParamItem `refreshable:"true"`
+	NQInQueueThreshold             ParamItem `refreshable:"true"`
+	QueueLatencyThreshold          ParamItem `refreshable:"true"`
+	ResultProtectionEnabled        ParamItem `refreshable:"true"`
+	MaxReadResultRate              ParamItem `refreshable:"true"`
+	MaxReadResultRatePerDB         ParamItem `refreshable:"true"`
+	MaxReadResultRatePerCollection ParamItem `refreshable:"true"`
+	CoolOffSpeed                   ParamItem `refreshable:"true"`
 }
 
 func (p *quotaConfig) init(base *BaseTable) {
@@ -185,6 +221,25 @@ seconds, (0 ~ 65536)`,
 	}
 	p.DDLCollectionRate.Init(base.mgr)
 
+	p.DDLCollectionRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.ddl.db.collectionRate",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DDLLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0 ~ Inf)
+			if getAsInt(v) < 0 {
+				return max
+			}
+			return v
+		},
+		Doc:    "qps of db level , default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection",
+		Export: true,
+	}
+	p.DDLCollectionRatePerDB.Init(base.mgr)
+
 	p.DDLPartitionRate = ParamItem{
 		Key:          "quotaAndLimits.ddl.partitionRate",
 		Version:      "2.2.0",
@@ -203,6 +258,25 @@ seconds, (0 ~ 65536)`,
 		Export: true,
 	}
 	p.DDLPartitionRate.Init(base.mgr)
+
+	p.DDLPartitionRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.ddl.db.partitionRate",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DDLLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0 ~ Inf)
+			if getAsInt(v) < 0 {
+				return max
+			}
+			return v
+		},
+		Doc:    "qps of db level, default no limit, rate for CreatePartition, DropPartition, LoadPartition, ReleasePartition",
+		Export: true,
+	}
+	p.DDLPartitionRatePerDB.Init(base.mgr)
 
 	p.IndexLimitEnabled = ParamItem{
 		Key:          "quotaAndLimits.indexRate.enabled",
@@ -231,6 +305,25 @@ seconds, (0 ~ 65536)`,
 	}
 	p.MaxIndexRate.Init(base.mgr)
 
+	p.MaxIndexRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.indexRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.IndexLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0 ~ Inf)
+			if getAsFloat(v) < 0 {
+				return max
+			}
+			return v
+		},
+		Doc:    "qps of db level, default no limit, rate for CreateIndex, DropIndex",
+		Export: true,
+	}
+	p.MaxIndexRatePerDB.Init(base.mgr)
+
 	p.FlushLimitEnabled = ParamItem{
 		Key:          "quotaAndLimits.flushRate.enabled",
 		Version:      "2.2.0",
@@ -257,6 +350,25 @@ seconds, (0 ~ 65536)`,
 		Export: true,
 	}
 	p.MaxFlushRate.Init(base.mgr)
+
+	p.MaxFlushRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.flushRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.FlushLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0 ~ Inf)
+			if getAsInt(v) < 0 {
+				return max
+			}
+			return v
+		},
+		Doc:    "qps of db level, default no limit, rate for flush",
+		Export: true,
+	}
+	p.MaxFlushRatePerDB.Init(base.mgr)
 
 	p.MaxFlushRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.flushRate.collection.max",
@@ -303,6 +415,25 @@ seconds, (0 ~ 65536)`,
 		Export: true,
 	}
 	p.MaxCompactionRate.Init(base.mgr)
+
+	p.MaxCompactionRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.compactionRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.CompactionLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0 ~ Inf)
+			if getAsInt(v) < 0 {
+				return max
+			}
+			return v
+		},
+		Doc:    "qps of db level, default no limit, rate for manualCompaction",
+		Export: true,
+	}
+	p.MaxCompactionRatePerDB.Init(base.mgr)
 
 	// dml
 	p.DMLLimitEnabled = ParamItem{
@@ -359,6 +490,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	}
 	p.DMLMinInsertRate.Init(base.mgr)
 
+	p.DMLMaxInsertRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.insertRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxInsertRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxInsertRatePerDB.Init(base.mgr)
+
+	p.DMLMinInsertRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.insertRate.db.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxInsertRatePerDB.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinInsertRatePerDB.Init(base.mgr)
+
 	p.DMLMaxInsertRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.dml.insertRate.collection.max",
 		Version:      "2.2.9",
@@ -402,6 +577,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		},
 	}
 	p.DMLMinInsertRatePerCollection.Init(base.mgr)
+
+	p.DMLMaxInsertRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.insertRate.partition.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxInsertRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxInsertRatePerPartition.Init(base.mgr)
+
+	p.DMLMinInsertRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.insertRate.partition.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxInsertRatePerPartition.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinInsertRatePerPartition.Init(base.mgr)
 
 	p.DMLMaxUpsertRate = ParamItem{
 		Key:          "quotaAndLimits.dml.upsertRate.max",
@@ -447,6 +666,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	}
 	p.DMLMinUpsertRate.Init(base.mgr)
 
+	p.DMLMaxUpsertRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.upsertRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxUpsertRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxUpsertRatePerDB.Init(base.mgr)
+
+	p.DMLMinUpsertRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.upsertRate.db.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRatePerDB.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinUpsertRatePerDB.Init(base.mgr)
+
 	p.DMLMaxUpsertRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.dml.upsertRate.collection.max",
 		Version:      "2.3.0",
@@ -490,6 +753,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		},
 	}
 	p.DMLMinUpsertRatePerCollection.Init(base.mgr)
+
+	p.DMLMaxUpsertRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.upsertRate.partition.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxUpsertRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxUpsertRatePerPartition.Init(base.mgr)
+
+	p.DMLMinUpsertRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.upsertRate.partition.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxUpsertRatePerPartition.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinUpsertRatePerPartition.Init(base.mgr)
 
 	p.DMLMaxDeleteRate = ParamItem{
 		Key:          "quotaAndLimits.dml.deleteRate.max",
@@ -535,6 +842,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	}
 	p.DMLMinDeleteRate.Init(base.mgr)
 
+	p.DMLMaxDeleteRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.deleteRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxDeleteRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxDeleteRatePerDB.Init(base.mgr)
+
+	p.DMLMinDeleteRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.deleteRate.db.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxDeleteRatePerDB.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinDeleteRatePerDB.Init(base.mgr)
+
 	p.DMLMaxDeleteRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.dml.deleteRate.collection.max",
 		Version:      "2.2.9",
@@ -578,6 +929,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		},
 	}
 	p.DMLMinDeleteRatePerCollection.Init(base.mgr)
+
+	p.DMLMaxDeleteRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.deleteRate.partition.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxDeleteRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit",
+		Export: true,
+	}
+	p.DMLMaxDeleteRatePerPartition.Init(base.mgr)
+
+	p.DMLMinDeleteRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.deleteRate.partition.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxDeleteRatePerPartition.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinDeleteRatePerPartition.Init(base.mgr)
 
 	p.DMLMaxBulkLoadRate = ParamItem{
 		Key:          "quotaAndLimits.dml.bulkLoadRate.max",
@@ -623,6 +1018,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	}
 	p.DMLMinBulkLoadRate.Init(base.mgr)
 
+	p.DMLMaxBulkLoadRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.bulkLoadRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxBulkLoadRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit, not support yet. TODO: limit db bulkLoad rate",
+		Export: true,
+	}
+	p.DMLMaxBulkLoadRatePerDB.Init(base.mgr)
+
+	p.DMLMinBulkLoadRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dml.bulkLoadRate.db.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxBulkLoadRatePerDB.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinBulkLoadRatePerDB.Init(base.mgr)
+
 	p.DMLMaxBulkLoadRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.dml.bulkLoadRate.collection.max",
 		Version:      "2.2.9",
@@ -666,6 +1105,50 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		},
 	}
 	p.DMLMinBulkLoadRatePerCollection.Init(base.mgr)
+
+	p.DMLMaxBulkLoadRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.bulkLoadRate.partition.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				rate = megaBytes2Bytes(rate)
+			}
+			// [0, inf)
+			if rate < 0 {
+				return p.DMLMaxBulkLoadRate.GetValue()
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+		Doc:    "MB/s, default no limit, not support yet. TODO: limit partition bulkLoad rate",
+		Export: true,
+	}
+	p.DMLMaxBulkLoadRatePerPartition.Init(base.mgr)
+
+	p.DMLMinBulkLoadRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dml.bulkLoadRate.partition.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DMLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := megaBytes2Bytes(getAsFloat(v))
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DMLMaxBulkLoadRatePerPartition.GetAsFloat()) {
+				return min
+			}
+			return fmt.Sprintf("%f", rate)
+		},
+	}
+	p.DMLMinBulkLoadRatePerPartition.Init(base.mgr)
 
 	// dql
 	p.DQLLimitEnabled = ParamItem{
@@ -718,6 +1201,46 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	}
 	p.DQLMinSearchRate.Init(base.mgr)
 
+	p.DQLMaxSearchRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dql.searchRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0, inf)
+			if getAsFloat(v) < 0 {
+				return p.DQLMaxSearchRate.GetValue()
+			}
+			return v
+		},
+		Doc:    "vps (vectors per second), default no limit",
+		Export: true,
+	}
+	p.DQLMaxSearchRatePerDB.Init(base.mgr)
+
+	p.DQLMinSearchRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dql.searchRate.db.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := getAsFloat(v)
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DQLMaxSearchRatePerDB.GetAsFloat()) {
+				return min
+			}
+			return v
+		},
+	}
+	p.DQLMinSearchRatePerDB.Init(base.mgr)
+
 	p.DQLMaxSearchRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.dql.searchRate.collection.max",
 		Version:      "2.2.9",
@@ -757,6 +1280,46 @@ The maximum rate will not be greater than ` + "max" + `.`,
 		},
 	}
 	p.DQLMinSearchRatePerCollection.Init(base.mgr)
+
+	p.DQLMaxSearchRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dql.searchRate.partition.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0, inf)
+			if getAsFloat(v) < 0 {
+				return p.DQLMaxSearchRate.GetValue()
+			}
+			return v
+		},
+		Doc:    "vps (vectors per second), default no limit",
+		Export: true,
+	}
+	p.DQLMaxSearchRatePerPartition.Init(base.mgr)
+
+	p.DQLMinSearchRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dql.searchRate.partition.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := getAsFloat(v)
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DQLMaxSearchRatePerPartition.GetAsFloat()) {
+				return min
+			}
+			return v
+		},
+	}
+	p.DQLMinSearchRatePerPartition.Init(base.mgr)
 
 	p.DQLMaxQueryRate = ParamItem{
 		Key:          "quotaAndLimits.dql.queryRate.max",
@@ -798,6 +1361,46 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	}
 	p.DQLMinQueryRate.Init(base.mgr)
 
+	p.DQLMaxQueryRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dql.queryRate.db.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0, inf)
+			if getAsFloat(v) < 0 {
+				return p.DQLMaxQueryRate.GetValue()
+			}
+			return v
+		},
+		Doc:    "qps, default no limit",
+		Export: true,
+	}
+	p.DQLMaxQueryRatePerDB.Init(base.mgr)
+
+	p.DQLMinQueryRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.dql.queryRate.db.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := getAsFloat(v)
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DQLMaxQueryRatePerDB.GetAsFloat()) {
+				return min
+			}
+			return v
+		},
+	}
+	p.DQLMinQueryRatePerDB.Init(base.mgr)
+
 	p.DQLMaxQueryRatePerCollection = ParamItem{
 		Key:          "quotaAndLimits.dql.queryRate.collection.max",
 		Version:      "2.2.9",
@@ -838,18 +1441,60 @@ The maximum rate will not be greater than ` + "max" + `.`,
 	}
 	p.DQLMinQueryRatePerCollection.Init(base.mgr)
 
+	p.DQLMaxQueryRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dql.queryRate.partition.max",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return max
+			}
+			// [0, inf)
+			if getAsFloat(v) < 0 {
+				return p.DQLMaxQueryRate.GetValue()
+			}
+			return v
+		},
+		Doc:    "qps, default no limit",
+		Export: true,
+	}
+	p.DQLMaxQueryRatePerPartition.Init(base.mgr)
+
+	p.DQLMinQueryRatePerPartition = ParamItem{
+		Key:          "quotaAndLimits.dql.queryRate.partition.min",
+		Version:      "2.4.1",
+		DefaultValue: min,
+		Formatter: func(v string) string {
+			if !p.DQLLimitEnabled.GetAsBool() {
+				return min
+			}
+			rate := getAsFloat(v)
+			// [0, inf)
+			if rate < 0 {
+				return min
+			}
+			if !p.checkMinMaxLegal(rate, p.DQLMaxQueryRatePerPartition.GetAsFloat()) {
+				return min
+			}
+			return v
+		},
+	}
+	p.DQLMinQueryRatePerPartition.Init(base.mgr)
+
 	// limits
 	p.MaxCollectionNum = ParamItem{
 		Key:          "quotaAndLimits.limits.maxCollectionNum",
 		Version:      "2.2.0",
 		DefaultValue: "65536",
+		Export:       true,
 	}
 	p.MaxCollectionNum.Init(base.mgr)
 
 	p.MaxCollectionNumPerDB = ParamItem{
 		Key:          "quotaAndLimits.limits.maxCollectionNumPerDB",
 		Version:      "2.2.0",
-		DefaultValue: "64",
+		DefaultValue: "65536",
+		Export:       true,
 	}
 	p.MaxCollectionNumPerDB.Init(base.mgr)
 
@@ -892,6 +1537,24 @@ Check https://milvus.io/docs/limitations.md for more details.`,
 		DefaultValue: "104857600", // 100 MB, 100 * 1024 * 1024
 	}
 	p.MaxOutputSize.Init(base.mgr)
+
+	p.MaxInsertSize = ParamItem{
+		Key:          "quotaAndLimits.limits.maxInsertSize",
+		Version:      "2.4.1",
+		DefaultValue: "-1", // -1 means no limit, the unit is byte
+		Doc:          `maximum size of a single insert request, in bytes, -1 means no limit`,
+		Export:       true,
+	}
+	p.MaxInsertSize.Init(base.mgr)
+
+	p.MaxResourceGroupNumOfQueryNode = ParamItem{
+		Key:          "quotaAndLimits.limits.maxResourceGroupNumOfQueryNode",
+		Version:      "2.4.1",
+		Doc:          `maximum number of resource groups of query nodes`,
+		DefaultValue: "1024", // 1024
+		Export:       true,
+	}
+	p.MaxResourceGroupNumOfQueryNode.Init(base.mgr)
 
 	// limit writing
 	p.ForceDenyWriting = ParamItem{
@@ -1132,6 +1795,27 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 	}
 	p.DiskQuota.Init(base.mgr)
 
+	p.DiskQuotaPerDB = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.diskProtection.diskQuotaPerDB",
+		Version:      "2.4.1",
+		DefaultValue: quota,
+		Formatter: func(v string) string {
+			if !p.DiskProtectionEnabled.GetAsBool() {
+				return max
+			}
+			level := getAsFloat(v)
+			// (0, +inf)
+			if level <= 0 {
+				return p.DiskQuota.GetValue()
+			}
+			// megabytes to bytes
+			return fmt.Sprintf("%f", megaBytes2Bytes(level))
+		},
+		Doc:    "MB, (0, +inf), default no limit",
+		Export: true,
+	}
+	p.DiskQuotaPerDB.Init(base.mgr)
+
 	p.DiskQuotaPerCollection = ParamItem{
 		Key:          "quotaAndLimits.limitWriting.diskProtection.diskQuotaPerCollection",
 		Version:      "2.2.8",
@@ -1152,6 +1836,27 @@ but the rate will not be lower than minRateRatio * dmlRate.`,
 		Export: true,
 	}
 	p.DiskQuotaPerCollection.Init(base.mgr)
+
+	p.DiskQuotaPerPartition = ParamItem{
+		Key:          "quotaAndLimits.limitWriting.diskProtection.diskQuotaPerPartition",
+		Version:      "2.4.1",
+		DefaultValue: quota,
+		Formatter: func(v string) string {
+			if !p.DiskProtectionEnabled.GetAsBool() {
+				return max
+			}
+			level := getAsFloat(v)
+			// (0, +inf)
+			if level <= 0 {
+				return p.DiskQuota.GetValue()
+			}
+			// megabytes to bytes
+			return fmt.Sprintf("%f", megaBytes2Bytes(level))
+		},
+		Doc:    "MB, (0, +inf), default no limit",
+		Export: true,
+	}
+	p.DiskQuotaPerPartition.Init(base.mgr)
 
 	// limit reading
 	p.ForceDenyReading = ParamItem{
@@ -1252,6 +1957,50 @@ MB/s, default no limit`,
 		Export: true,
 	}
 	p.MaxReadResultRate.Init(base.mgr)
+
+	p.MaxReadResultRatePerDB = ParamItem{
+		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerDB",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.ResultProtectionEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
+			}
+			// [0, inf)
+			if rate < 0 {
+				return max
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MaxReadResultRatePerDB.Init(base.mgr)
+
+	p.MaxReadResultRatePerCollection = ParamItem{
+		Key:          "quotaAndLimits.limitReading.resultProtection.maxReadResultRatePerCollection",
+		Version:      "2.4.1",
+		DefaultValue: max,
+		Formatter: func(v string) string {
+			if !p.ResultProtectionEnabled.GetAsBool() {
+				return max
+			}
+			rate := getAsFloat(v)
+			if math.Abs(rate-defaultMax) > 0.001 { // maxRate != defaultMax
+				return fmt.Sprintf("%f", megaBytes2Bytes(rate))
+			}
+			// [0, inf)
+			if rate < 0 {
+				return max
+			}
+			return v
+		},
+		Export: true,
+	}
+	p.MaxReadResultRatePerCollection.Init(base.mgr)
 
 	const defaultSpeed = "0.9"
 	p.CoolOffSpeed = ParamItem{

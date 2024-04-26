@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -145,6 +146,10 @@ func createBinlogBuf(t *testing.T, field *schemapb.FieldSchema, data storage.Fie
 		vectors := data.(*storage.Float16VectorFieldData).Data
 		err = evt.AddFloat16VectorToPayload(vectors, int(dim))
 		assert.NoError(t, err)
+	case schemapb.DataType_BFloat16Vector:
+		vectors := data.(*storage.BFloat16VectorFieldData).Data
+		err = evt.AddBFloat16VectorToPayload(vectors, int(dim))
+		assert.NoError(t, err)
 	default:
 		assert.True(t, false)
 		return nil
@@ -242,6 +247,14 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 			_, err = rand2.Read(float16VecData)
 			assert.NoError(t, err)
 			insertData.Data[field.GetFieldID()] = &storage.Float16VectorFieldData{Data: float16VecData, Dim: int(dim)}
+		case schemapb.DataType_BFloat16Vector:
+			dim, err := typeutil.GetDim(field)
+			assert.NoError(t, err)
+			total := int64(rowCount) * dim * 2
+			bfloat16VecData := make([]byte, total)
+			_, err = rand2.Read(bfloat16VecData)
+			assert.NoError(t, err)
+			insertData.Data[field.GetFieldID()] = &storage.BFloat16VectorFieldData{Data: bfloat16VecData, Dim: int(dim)}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			varcharData := make([]string, 0)
 			for i := 0; i < rowCount; i++ {
@@ -333,8 +346,24 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	originalInsertData := createInsertData(suite.T(), schema, suite.numRows)
 	insertLogs := lo.Flatten(lo.Values(insertBinlogs))
 
-	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(insertLogs, nil, nil)
-	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(deltaLogs, nil, nil)
+	cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+			for _, filePath := range insertLogs {
+				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+					return nil
+				}
+			}
+			return nil
+		})
+	cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+			for _, filePath := range deltaLogs {
+				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+					return nil
+				}
+			}
+			return nil
+		})
 	for fieldID, paths := range insertBinlogs {
 		field := typeutil.GetField(schema, fieldID)
 		suite.NotNil(field)
@@ -441,10 +470,14 @@ func (suite *ReaderSuite) TestStringPK() {
 	suite.run(schemapb.DataType_Int32)
 }
 
-func (suite *ReaderSuite) TestBinaryAndFloat16Vector() {
+func (suite *ReaderSuite) TestVector() {
 	suite.vecDataType = schemapb.DataType_BinaryVector
 	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_FloatVector
+	suite.run(schemapb.DataType_Int32)
 	suite.vecDataType = schemapb.DataType_Float16Vector
+	suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_BFloat16Vector
 	suite.run(schemapb.DataType_Int32)
 }
 

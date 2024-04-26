@@ -17,13 +17,11 @@
 package storage
 
 import (
-	"container/list"
 	"context"
 	"fmt"
 	"io"
 	"os"
 	"strings"
-	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/minio/minio-go/v7/pkg/credentials"
@@ -33,8 +31,13 @@ import (
 	"github.com/milvus-io/milvus/internal/storage/gcp"
 	"github.com/milvus-io/milvus/internal/storage/tencent"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
+
+var CheckBucketRetryAttempts uint = 20
+
+var _ ObjectStorage = (*MinioObjectStorage)(nil)
 
 type MinioObjectStorage struct {
 	*minio.Client
@@ -191,45 +194,29 @@ func (minioObjectStorage *MinioObjectStorage) StatObject(ctx context.Context, bu
 	return info.Size, checkObjectStorageError(objectName, err)
 }
 
-func (minioObjectStorage *MinioObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
-	var objectsKeys []string
-	var modTimes []time.Time
-	tasks := list.New()
-	tasks.PushBack(prefix)
-	for tasks.Len() > 0 {
-		e := tasks.Front()
-		pre := e.Value.(string)
-		tasks.Remove(e)
+func (minioObjectStorage *MinioObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
+	// if minio has lots of objects under the provided path
+	// recursive = true may timeout during the recursive browsing the objects.
+	// See also: https://github.com/milvus-io/milvus/issues/19095
+	// So we can change the `ListObjectsMaxKeys` to limit the max keys by batch to avoid timeout.
+	in := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
+		Prefix:    prefix,
+		Recursive: recursive,
+		MaxKeys:   paramtable.Get().MinioCfg.ListObjectsMaxKeys.GetAsInt(),
+	})
 
-		res := minioObjectStorage.Client.ListObjects(ctx, bucketName, minio.ListObjectsOptions{
-			Prefix:    pre,
-			Recursive: false,
-		})
-
-		objects := map[string]time.Time{}
-		for object := range res {
-			if object.Err != nil {
-				log.Warn("failed to list with prefix", zap.String("bucket", bucketName), zap.String("prefix", prefix), zap.Error(object.Err))
-				return []string{}, []time.Time{}, object.Err
-			}
-			objects[object.Key] = object.LastModified
+	for object := range in {
+		if object.Err != nil {
+			return object.Err
 		}
-		for object, lastModified := range objects {
-			// with tailing "/", object is a "directory"
-			if strings.HasSuffix(object, "/") && recursive {
-				// enqueue when recursive is true
-				if object != pre {
-					tasks.PushBack(object)
-				}
-				continue
-			}
-			objectsKeys = append(objectsKeys, object)
-			modTimes = append(modTimes, lastModified)
+		if !walkFunc(&ChunkObjectInfo{FilePath: object.Key, ModifyTime: object.LastModified}) {
+			return nil
 		}
 	}
-	return objectsKeys, modTimes, nil
+	return nil
 }
 
 func (minioObjectStorage *MinioObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {
-	return minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
+	err := minioObjectStorage.Client.RemoveObject(ctx, bucketName, objectName, minio.RemoveObjectOptions{})
+	return checkObjectStorageError(objectName, err)
 }

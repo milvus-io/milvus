@@ -92,9 +92,12 @@ func FilterInIndexedSegments(handler Handler, mt *meta, segments ...*SegmentInfo
 				vecFieldIDs = append(vecFieldIDs, field.GetFieldID())
 			}
 		}
+		segmentIDs := lo.Map(segmentList, func(seg *SegmentInfo, _ int) UniqueID {
+			return seg.GetID()
+		})
 
 		// get indexed segments which finish build index on all vector field
-		indexed := mt.indexMeta.GetIndexedSegments(collection, vecFieldIDs)
+		indexed := mt.indexMeta.GetIndexedSegments(collection, segmentIDs, vecFieldIDs)
 		if len(indexed) > 0 {
 			indexedSet := typeutil.NewUniqueSet(indexed...)
 			for _, segment := range segmentList {
@@ -190,10 +193,6 @@ func GetIndexType(indexParams []*commonpb.KeyValuePair) string {
 
 func isFlatIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
-}
-
-func isOptionalScalarFieldSupported(indexType string) bool {
-	return indexType == indexparamcheck.IndexHNSW
 }
 
 func isDiskANNIndex(indexType string) bool {

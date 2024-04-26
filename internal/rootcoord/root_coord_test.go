@@ -179,6 +179,45 @@ func TestRootCoord_ListDatabases(t *testing.T) {
 	})
 }
 
+func TestRootCoord_AlterDatabase(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_NotReadyServe, resp.GetErrorCode())
+	})
+
+	t.Run("failed to add task", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("failed to execute", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler())
+
+		ctx := context.Background()
+		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+
+	t.Run("ok", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		ctx := context.Background()
+		resp, err := c.AlterDatabase(ctx, &rootcoordpb.AlterDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
 func TestRootCoord_CreateCollection(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		c := newTestCore(withAbnormalCode())
@@ -1440,6 +1479,43 @@ func TestRootCoord_CheckHealth(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, false, resp.IsHealthy)
 		assert.NotEmpty(t, resp.Reasons)
+	})
+}
+
+func TestRootCoord_DescribeDatabase(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withAbnormalCode())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("add task failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withInvalidScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("execute task failed", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withTaskFailScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Error(t, merr.CheckRPCCall(resp.GetStatus(), nil))
+	})
+
+	t.Run("run ok", func(t *testing.T) {
+		ctx := context.Background()
+		c := newTestCore(withHealthyCode(),
+			withValidScheduler())
+		resp, err := c.DescribeDatabase(ctx, &rootcoordpb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.NoError(t, merr.CheckRPCCall(resp.GetStatus(), nil))
 	})
 }
 

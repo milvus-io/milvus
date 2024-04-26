@@ -479,6 +479,16 @@ func WrapErrCollectionIllegalSchema(collection string, msgAndArgs ...any) error 
 	return err
 }
 
+// WrapErrCollectionOnRecovering wraps ErrCollectionOnRecovering with collection
+func WrapErrCollectionOnRecovering(collection any, msgAndArgs ...any) error {
+	err := wrapFields(ErrCollectionOnRecovering, value("collection", collection))
+	if len(msgAndArgs) > 0 {
+		msg := msgAndArgs[0].(string)
+		err = errors.Wrapf(err, msg, msgAndArgs[1:]...)
+	}
+	return err
+}
+
 func WrapErrAliasNotFound(db any, alias any, msg ...string) error {
 	err := wrapFields(ErrAliasNotFound,
 		value("database", db),
@@ -549,6 +559,52 @@ func WrapGeneralCapacityExceed(newGeneralSize any, generalCapacity any, msg ...s
 // ResourceGroup related
 func WrapErrResourceGroupNotFound(rg any, msg ...string) error {
 	err := wrapFields(ErrResourceGroupNotFound, value("rg", rg))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrResourceGroupAlreadyExist wraps ErrResourceGroupNotFound with resource group
+func WrapErrResourceGroupAlreadyExist(rg any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupAlreadyExist, value("rg", rg))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrResourceGroupReachLimit wraps ErrResourceGroupReachLimit with resource group and limit
+func WrapErrResourceGroupReachLimit(rg any, limit any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupReachLimit, value("rg", rg), value("limit", limit))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrResourceGroupIllegalConfig wraps ErrResourceGroupIllegalConfig with resource group
+func WrapErrResourceGroupIllegalConfig(rg any, cfg any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupIllegalConfig, value("rg", rg), value("config", cfg))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// go:deprecated
+// WrapErrResourceGroupNodeNotEnough wraps ErrResourceGroupNodeNotEnough with resource group
+func WrapErrResourceGroupNodeNotEnough(rg any, current any, expected any, msg ...string) error {
+	err := wrapFields(ErrResourceGroupNodeNotEnough, value("rg", rg), value("currentNodeNum", current), value("expectedNodeNum", expected))
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+// WrapErrResourceGroupServiceAvailable wraps ErrResourceGroupServiceAvailable with resource group
+func WrapErrResourceGroupServiceAvailable(msg ...string) error {
+	err := wrapFields(ErrResourceGroupServiceAvailable)
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}
@@ -811,6 +867,14 @@ func WrapErrParameterMissing[T any](param T, msg ...string) error {
 	err := wrapFields(ErrParameterMissing,
 		value("missing_param", param),
 	)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
+func WrapErrParameterTooLarge(name string, msg ...string) error {
+	err := wrapFields(ErrParameterTooLarge, value("message", name))
 	if len(msg) > 0 {
 		err = errors.Wrap(err, strings.Join(msg, "->"))
 	}

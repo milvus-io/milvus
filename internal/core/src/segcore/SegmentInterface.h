@@ -69,10 +69,19 @@ class SegmentInterface {
              Timestamp timestamp,
              int64_t limit_size) const = 0;
 
-    size_t
-    GetMemoryUsageInBytes() const {
-        return stats_.mem_size;
-    };
+    virtual std::unique_ptr<proto::segcore::RetrieveResults>
+    Retrieve(const query::RetrievePlan* Plan,
+             Timestamp timestamp,
+             int64_t limit_size,
+             bool ignore_non_pk) const = 0;
+
+    virtual std::unique_ptr<proto::segcore::RetrieveResults>
+    Retrieve(const query::RetrievePlan* Plan,
+             const int64_t* offsets,
+             int64_t size) const = 0;
+
+    virtual size_t
+    GetMemoryUsageInBytes() const = 0;
 
     virtual int64_t
     get_row_count() const = 0;
@@ -120,9 +129,6 @@ class SegmentInterface {
 
     virtual bool
     HasRawData(int64_t field_id) const = 0;
-
- protected:
-    SegmentStats stats_{};
 };
 
 // internal API for DSL calculation
@@ -163,6 +169,17 @@ class SegmentInternalInterface : public SegmentInterface {
     Retrieve(const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size) const override;
+
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    Retrieve(const query::RetrievePlan* Plan,
+             Timestamp timestamp,
+             int64_t limit_size,
+             bool ignore_non_pk) const override;
+
+    std::unique_ptr<proto::segcore::RetrieveResults>
+    Retrieve(const query::RetrievePlan* Plan,
+             const int64_t* offsets,
+             int64_t size) const override;
 
     virtual bool
     HasIndex(FieldId field_id) const = 0;
@@ -283,6 +300,15 @@ class SegmentInternalInterface : public SegmentInterface {
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const = 0;
+
+    void
+    FillTargetEntry(
+        const query::RetrievePlan* plan,
+        const std::unique_ptr<proto::segcore::RetrieveResults>& results,
+        const int64_t* offsets,
+        int64_t size,
+        bool ignore_non_pk,
+        bool fill_ids) const;
 
  protected:
     // internal API: return chunk_data in span

@@ -19,8 +19,11 @@ package ratelimitutil
 import (
 	"fmt"
 	"math"
+	"strings"
 	"sync"
 	"time"
+
+	"github.com/samber/lo"
 )
 
 const (
@@ -34,21 +37,22 @@ const (
 type RateCollector struct {
 	sync.Mutex
 
-	window      time.Duration
-	granularity time.Duration
-	position    int
-	values      map[string][]float64
+	window              time.Duration
+	granularity         time.Duration
+	position            int
+	values              map[string][]float64
+	deprecatedSubLabels []lo.Tuple2[string, string]
 
 	last time.Time
 }
 
 // NewRateCollector is shorthand for newRateCollector(window, granularity, time.Now()).
-func NewRateCollector(window time.Duration, granularity time.Duration) (*RateCollector, error) {
-	return newRateCollector(window, granularity, time.Now())
+func NewRateCollector(window time.Duration, granularity time.Duration, enableSubLabel bool) (*RateCollector, error) {
+	return newRateCollector(window, granularity, time.Now(), enableSubLabel)
 }
 
 // newRateCollector returns a new RateCollector with given window and granularity.
-func newRateCollector(window time.Duration, granularity time.Duration, now time.Time) (*RateCollector, error) {
+func newRateCollector(window time.Duration, granularity time.Duration, now time.Time, enableSubLabel bool) (*RateCollector, error) {
 	if window == 0 || granularity == 0 {
 		return nil, fmt.Errorf("create RateCollector failed, window or granularity cannot be 0, window = %d, granularity = %d", window, granularity)
 	}
@@ -62,7 +66,50 @@ func newRateCollector(window time.Duration, granularity time.Duration, now time.
 		values:      make(map[string][]float64),
 		last:        now,
 	}
+
+	if enableSubLabel {
+		go rc.cleanDeprecateSubLabels()
+	}
 	return rc, nil
+}
+
+func (r *RateCollector) cleanDeprecateSubLabels() {
+	tick := time.NewTicker(r.window * 2)
+	defer tick.Stop()
+	for range tick.C {
+		r.Lock()
+		for _, labelInfo := range r.deprecatedSubLabels {
+			r.removeSubLabel(labelInfo)
+		}
+		r.Unlock()
+	}
+}
+
+func (r *RateCollector) removeSubLabel(labelInfo lo.Tuple2[string, string]) {
+	label := labelInfo.A
+	subLabel := labelInfo.B
+	if subLabel == "" {
+		return
+	}
+	removeKeys := make([]string, 1)
+	removeKeys[0] = FormatSubLabel(label, subLabel)
+
+	deleteCollectionSubLabelWithPrefix := func(dbName string) {
+		for key := range r.values {
+			if strings.HasPrefix(key, FormatSubLabel(label, GetCollectionSubLabel(dbName, ""))) {
+				removeKeys = append(removeKeys, key)
+			}
+		}
+	}
+
+	parts := strings.Split(subLabel, ".")
+	if strings.HasPrefix(subLabel, GetDBSubLabel("")) {
+		dbName := parts[1]
+		deleteCollectionSubLabelWithPrefix(dbName)
+	}
+	for _, key := range removeKeys {
+		delete(r.values, key)
+	}
 }
 
 // Register init values of RateCollector for specified label.
@@ -81,19 +128,90 @@ func (r *RateCollector) Deregister(label string) {
 	delete(r.values, label)
 }
 
+func GetDBSubLabel(dbName string) string {
+	return fmt.Sprintf("db.%s", dbName)
+}
+
+func GetCollectionSubLabel(dbName, collectionName string) string {
+	return fmt.Sprintf("collection.%s.%s", dbName, collectionName)
+}
+
+func FormatSubLabel(label, subLabel string) string {
+	return fmt.Sprintf("%s-%s", label, subLabel)
+}
+
+func IsSubLabel(label string) bool {
+	return strings.Contains(label, "-")
+}
+
+func SplitCollectionSubLabel(label string) (mainLabel, database, collection string, ok bool) {
+	if !IsSubLabel(label) {
+		ok = false
+		return
+	}
+	subMark := strings.Index(label, "-")
+	mainLabel = label[:subMark]
+	database, collection, ok = GetCollectionFromSubLabel(mainLabel, label)
+	return
+}
+
+func GetDBFromSubLabel(label, fullLabel string) (string, bool) {
+	if !strings.HasPrefix(fullLabel, FormatSubLabel(label, GetDBSubLabel(""))) {
+		return "", false
+	}
+	return fullLabel[len(FormatSubLabel(label, GetDBSubLabel(""))):], true
+}
+
+func GetCollectionFromSubLabel(label, fullLabel string) (string, string, bool) {
+	if !strings.HasPrefix(fullLabel, FormatSubLabel(label, "")) {
+		return "", "", false
+	}
+	subLabels := strings.Split(fullLabel[len(FormatSubLabel(label, "")):], ".")
+	if len(subLabels) != 3 || subLabels[0] != "collection" {
+		return "", "", false
+	}
+
+	return subLabels[1], subLabels[2], true
+}
+
+func (r *RateCollector) DeregisterSubLabel(label, subLabel string) {
+	r.Lock()
+	defer r.Unlock()
+	r.deprecatedSubLabels = append(r.deprecatedSubLabels, lo.Tuple2[string, string]{
+		A: label,
+		B: subLabel,
+	})
+}
+
 // Add is shorthand for add(label, value, time.Now()).
-func (r *RateCollector) Add(label string, value float64) {
-	r.add(label, value, time.Now())
+func (r *RateCollector) Add(label string, value float64, subLabels ...string) {
+	r.add(label, value, time.Now(), subLabels...)
 }
 
 // add increases the current value of specified label.
-func (r *RateCollector) add(label string, value float64, now time.Time) {
+func (r *RateCollector) add(label string, value float64, now time.Time, subLabels ...string) {
 	r.Lock()
 	defer r.Unlock()
 	r.update(now)
 	if _, ok := r.values[label]; ok {
 		r.values[label][r.position] += value
+		for _, subLabel := range subLabels {
+			r.unsafeAddForSubLabels(label, subLabel, value)
+		}
 	}
+}
+
+func (r *RateCollector) unsafeAddForSubLabels(label, subLabel string, value float64) {
+	if subLabel == "" {
+		return
+	}
+	sub := FormatSubLabel(label, subLabel)
+	if _, ok := r.values[sub]; ok {
+		r.values[sub][r.position] += value
+		return
+	}
+	r.values[sub] = make([]float64, int(r.window/r.granularity))
+	r.values[sub][r.position] = value
 }
 
 // Max is shorthand for max(label, time.Now()).
@@ -143,6 +261,26 @@ func (r *RateCollector) min(label string, now time.Time) (float64, error) {
 // Rate is shorthand for rate(label, duration, time.Now()).
 func (r *RateCollector) Rate(label string, duration time.Duration) (float64, error) {
 	return r.rate(label, duration, time.Now())
+}
+
+func (r *RateCollector) RateSubLabel(label string, duration time.Duration) (map[string]float64, error) {
+	subLabelPrefix := FormatSubLabel(label, "")
+	subLabels := make(map[string]float64)
+	r.Lock()
+	for s := range r.values {
+		if strings.HasPrefix(s, subLabelPrefix) {
+			subLabels[s] = 0
+		}
+	}
+	r.Unlock()
+	for s := range subLabels {
+		v, err := r.rate(s, duration, time.Now())
+		if err != nil {
+			return nil, err
+		}
+		subLabels[s] = v
+	}
+	return subLabels, nil
 }
 
 // rate returns the latest mean value of the specified duration.

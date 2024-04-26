@@ -22,7 +22,7 @@
 #include <vector>
 #include <boost/dynamic_bitset.hpp>
 #include "common/Types.h"
-#include "knowhere/factory.h"
+#include "knowhere/index/index_factory.h"
 #include "index/VectorIndex.h"
 #include "storage/MemFileManagerImpl.h"
 #include "storage/space.h"
@@ -97,7 +97,7 @@ class VectorMemIndex : public VectorIndex {
     knowhere::expected<
         std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
     VectorIterators(const DatasetPtr dataset,
-                    const SearchInfo& search_info,
+                    const knowhere::Json& json,
                     const BitsetView& bitset) const override;
 
  protected:

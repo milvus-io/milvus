@@ -232,6 +232,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
+		s.collectionObserver,
 		s.nodeMgr,
 	)
 	s.jobScheduler.Add(loadJob)
@@ -332,6 +333,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
+		s.collectionObserver,
 		s.nodeMgr,
 	)
 	s.jobScheduler.Add(loadJob)
@@ -840,33 +842,13 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
-		err := merr.WrapErrReplicaNotFound(req.GetCollectionID(), "failed to get replicas by collection")
-		msg := "failed to get replicas, collection not loaded"
-		log.Warn(msg)
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return &milvuspb.GetReplicasResponse{
+			Replicas: make([]*milvuspb.ReplicaInfo, 0),
+		}, nil
 	}
 
 	for _, replica := range replicas {
-		msg := "failed to get replica info"
-		if len(replica.GetNodes()) == 0 {
-			err := merr.WrapErrReplicaNotAvailable(replica.GetID(), "no available nodes in replica")
-			log.Warn(msg,
-				zap.Int64("replica", replica.GetID()),
-				zap.Error(err))
-			resp.Status = merr.Status(err)
-			break
-		}
-
-		info, err := s.fillReplicaInfo(replica, req.GetWithShardNodes())
-		if err != nil {
-			log.Warn(msg,
-				zap.Int64("replica", replica.GetID()),
-				zap.Error(err))
-			resp.Status = merr.Status(err)
-			break
-		}
-		resp.Replicas = append(resp.Replicas, info)
+		resp.Replicas = append(resp.Replicas, s.fillReplicaInfo(replica, req.GetWithShardNodes()))
 	}
 	return resp, nil
 }
@@ -911,9 +893,9 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 
 	channels := s.targetMgr.GetDmChannelsByCollection(req.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
-		msg := "failed to get channels"
-		err := merr.WrapErrCollectionNotLoaded(req.GetCollectionID())
-		log.Warn(msg, zap.Error(err))
+		err := merr.WrapErrCollectionOnRecovering(req.GetCollectionID(),
+			"loaded collection do not found any channel in target, may be in recovery")
+		log.Warn("failed to get channels", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -928,7 +910,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 
 		var channelErr error
 		if len(leaders) == 0 {
-			channelErr = merr.WrapErrChannelLack("channel not subscribed")
+			channelErr = merr.WrapErrChannelLack(channel.GetChannelName(), "channel not subscribed")
 		}
 
 		for _, leader := range leaders {
@@ -1022,9 +1004,28 @@ func (s *Server) CreateResourceGroup(ctx context.Context, req *milvuspb.CreateRe
 		return merr.Status(err), nil
 	}
 
-	err := s.meta.ResourceManager.AddResourceGroup(req.GetResourceGroup())
+	err := s.meta.ResourceManager.AddResourceGroup(req.GetResourceGroup(), req.GetConfig())
 	if err != nil {
 		log.Warn("failed to create resource group", zap.Error(err))
+		return merr.Status(err), nil
+	}
+	return merr.Success(), nil
+}
+
+func (s *Server) UpdateResourceGroups(ctx context.Context, req *querypb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+	log := log.Ctx(ctx).With(
+		zap.Any("rgName", req.GetResourceGroups()),
+	)
+
+	log.Info("update resource group request received")
+	if err := merr.CheckHealthy(s.State()); err != nil {
+		log.Warn("failed to update resource group", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	err := s.meta.ResourceManager.UpdateResourceGroups(req.GetResourceGroups())
+	if err != nil {
+		log.Warn("failed to update resource group", zap.Error(err))
 		return merr.Status(err), nil
 	}
 	return merr.Success(), nil
@@ -1056,6 +1057,7 @@ func (s *Server) DropResourceGroup(ctx context.Context, req *milvuspb.DropResour
 	return merr.Success(), nil
 }
 
+// go:deprecated TransferNode transfer nodes between resource groups.
 func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeRequest) (*commonpb.Status, error) {
 	log := log.Ctx(ctx).With(
 		zap.String("source", req.GetSourceResourceGroup()),
@@ -1069,24 +1071,8 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		return merr.Status(err), nil
 	}
 
-	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetSourceResourceGroup()); !ok {
-		err := merr.WrapErrParameterInvalid("valid resource group", req.GetSourceResourceGroup(), "source resource group not found")
-		return merr.Status(err), nil
-	}
-
-	if ok := s.meta.ResourceManager.ContainResourceGroup(req.GetTargetResourceGroup()); !ok {
-		err := merr.WrapErrParameterInvalid("valid resource group", req.GetTargetResourceGroup(), "target resource group not found")
-		return merr.Status(err), nil
-	}
-
-	if req.GetNumNode() <= 0 {
-		err := merr.WrapErrParameterInvalid("NumNode > 0", fmt.Sprintf("invalid NumNode %d", req.GetNumNode()))
-		return merr.Status(err), nil
-	}
-
 	// Move node from source resource group to target resource group.
-	_, err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode()))
-	if err != nil {
+	if err := s.meta.ResourceManager.TransferNode(req.GetSourceResourceGroup(), req.GetTargetResourceGroup(), int(req.GetNumNode())); err != nil {
 		log.Warn("failed to transfer node", zap.Error(err))
 		return merr.Status(err), nil
 	}
@@ -1120,11 +1106,6 @@ func (s *Server) TransferReplica(ctx context.Context, req *querypb.TransferRepli
 		err := merr.WrapErrResourceGroupNotFound(req.GetTargetResourceGroup())
 		return merr.Status(errors.Wrap(err,
 			fmt.Sprintf("the target resource group[%s] doesn't exist", req.GetTargetResourceGroup()))), nil
-	}
-
-	if req.GetNumReplica() <= 0 {
-		err := merr.WrapErrParameterInvalid("NumReplica > 0", fmt.Sprintf("invalid NumReplica %d", req.GetNumReplica()))
-		return merr.Status(err), nil
 	}
 
 	// Apply change into replica manager.
@@ -1164,8 +1145,9 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 		return resp, nil
 	}
 
-	rg, err := s.meta.ResourceManager.GetResourceGroup(req.GetResourceGroup())
-	if err != nil {
+	rg := s.meta.ResourceManager.GetResourceGroup(req.GetResourceGroup())
+	if rg == nil {
+		err := merr.WrapErrResourceGroupNotFound(req.GetResourceGroup())
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -1198,13 +1180,28 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 		}
 	}
 
+	nodes := make([]*commonpb.NodeInfo, 0, len(rg.GetNodes()))
+	for _, nodeID := range rg.GetNodes() {
+		nodeSessionInfo := s.nodeMgr.Get(nodeID)
+		// Filter offline nodes and nodes in stopping state
+		if nodeSessionInfo != nil && !nodeSessionInfo.IsStoppingState() {
+			nodes = append(nodes, &commonpb.NodeInfo{
+				NodeId:   nodeSessionInfo.ID(),
+				Address:  nodeSessionInfo.Addr(),
+				Hostname: nodeSessionInfo.Hostname(),
+			})
+		}
+	}
+
 	resp.ResourceGroup = &querypb.ResourceGroupInfo{
 		Name:             req.GetResourceGroup(),
 		Capacity:         int32(rg.GetCapacity()),
-		NumAvailableNode: int32(len(rg.GetNodes())),
+		NumAvailableNode: int32(len(nodes)),
 		NumLoadedReplica: loadedReplicas,
 		NumOutgoingNode:  outgoingNodes,
 		NumIncomingNode:  incomingNodes,
+		Config:           rg.GetConfig(),
+		Nodes:            nodes,
 	}
 	return resp, nil
 }

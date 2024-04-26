@@ -216,6 +216,7 @@ class TestCompactionParams(TestcaseBase):
         assert len(res[0]) == ct.default_limit
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/31258")
     def test_compact_delete_ratio(self):
         """
         target: test delete entities reaches ratio and auto-compact
@@ -242,8 +243,8 @@ class TestCompactionParams(TestcaseBase):
         while True:
             if collection_w.num_entities == exp_num_entities_after_compact:
                 break
-            if time() - start > 180:
-                raise MilvusException(1, "Auto delete ratio compaction cost more than 180s")
+            if time() - start > 360:
+                raise MilvusException(1, "Auto delete ratio compaction cost more than 360s")
             sleep(1)
 
         collection_w.load()

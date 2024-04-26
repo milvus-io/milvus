@@ -599,6 +599,7 @@ func (mgr *TargetManager) SaveCurrentTarget(catalog metastore.QueryCoordCatalog)
 	if mgr.current != nil {
 		// use pool here to control maximal writer used by save target
 		pool := conc.NewPool[any](runtime.GOMAXPROCS(0) * 2)
+		defer pool.Release()
 		// use batch write in case of the number of collections is large
 		batchSize := 16
 		var wg sync.WaitGroup

@@ -47,8 +47,8 @@ func BufferChannelAssignPolicy(store ROChannelStore, nodeID int64) *ChannelOpSet
 	}
 
 	opSet := NewChannelOpSet(
-		NewDeleteOp(bufferID, info.Channels...),
-		NewAddOp(nodeID, info.Channels...))
+		NewDeleteOp(bufferID, lo.Values(info.Channels)...),
+		NewAddOp(nodeID, lo.Values(info.Channels)...))
 	return opSet
 }
 
@@ -89,7 +89,7 @@ func AvgAssignRegisterPolicy(store ROChannelStore, nodeID int64) (*ChannelOpSet,
 			// TODO: Consider re-picking in case assignment is extremely uneven?
 			continue
 		}
-		releases[toRelease.NodeID] = append(releases[toRelease.NodeID], toRelease.Channels[chIdx])
+		releases[toRelease.NodeID] = append(releases[toRelease.NodeID], lo.Values(toRelease.Channels)[chIdx])
 	}
 
 	// Channels in `releases` are reassigned eventually by channel manager.
@@ -197,8 +197,8 @@ func AvgAssignUnregisteredChannels(store ROChannelStore, nodeID int64) *ChannelO
 
 	for _, c := range allNodes {
 		if c.NodeID == nodeID {
-			opSet.Delete(nodeID, c.Channels...)
-			unregisteredChannels = append(unregisteredChannels, c.Channels...)
+			opSet.Delete(nodeID, lo.Values(c.Channels)...)
+			unregisteredChannels = append(unregisteredChannels, lo.Values(c.Channels)...)
 			continue
 		}
 		avaNodes = append(avaNodes, c)
@@ -236,7 +236,7 @@ func AvgBalanceChannelPolicy(store ROChannelStore, ts time.Time) *ChannelOpSet {
 		return opSet
 	}
 	for _, reAlloc := range reAllocates {
-		opSet.Add(reAlloc.NodeID, reAlloc.Channels...)
+		opSet.Add(reAlloc.NodeID, lo.Values(reAlloc.Channels)...)
 	}
 
 	return opSet
@@ -295,7 +295,7 @@ func AverageReassignPolicy(store ROChannelStore, reassigns []*NodeChannelInfo) *
 	// reassign channels to remaining nodes
 	addUpdates := make(map[int64]*ChannelOp)
 	for _, reassign := range reassigns {
-		opSet.Delete(reassign.NodeID, reassign.Channels...)
+		opSet.Delete(reassign.NodeID, lo.Values(reassign.Channels)...)
 		for _, ch := range reassign.Channels {
 			nodeIdx := 0
 			for {
@@ -381,13 +381,10 @@ func BgBalanceCheck(nodeChannels []*NodeChannelInfo, ts time.Time) ([]*NodeChann
 				zap.Int("channelCountPerNode", channelCountPerNode))
 			continue
 		}
-		reallocate := &NodeChannelInfo{
-			NodeID:   nChannels.NodeID,
-			Channels: make([]RWChannel, 0),
-		}
+		reallocate := NewNodeChannelInfo(nChannels.NodeID)
 		toReleaseCount := chCount - channelCountPerNode - 1
 		for _, ch := range nChannels.Channels {
-			reallocate.Channels = append(reallocate.Channels, ch)
+			reallocate.AddChannel(ch)
 			toReleaseCount--
 			if toReleaseCount <= 0 {
 				break

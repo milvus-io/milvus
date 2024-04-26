@@ -81,7 +81,7 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 					return nil, status.Error(codes.Unauthenticated, "auth check failure, please check api key is correct")
 				}
 				metrics.UserRPCCounter.WithLabelValues(user).Inc()
-				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, "___")
+				userToken := fmt.Sprintf("%s%s%s", user, util.CredentialSeperator, util.PasswordHolder)
 				md[strings.ToLower(util.HeaderAuthorize)] = []string{crypto.Base64Encode(userToken)}
 				ctx = metadata.NewIncomingContext(ctx, md)
 			} else {

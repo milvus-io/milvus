@@ -329,6 +329,15 @@ type mockRootCoordClient struct {
 	cnt   int64
 }
 
+func (m *mockRootCoordClient) DescribeDatabase(ctx context.Context, in *rootcoordpb.DescribeDatabaseRequest, opts ...grpc.CallOption) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	return &rootcoordpb.DescribeDatabaseResponse{
+		Status:           merr.Success(),
+		DbID:             1,
+		DbName:           "default",
+		CreatedTimestamp: 1,
+	}, nil
+}
+
 func (m *mockRootCoordClient) Close() error {
 	// TODO implement me
 	panic("implement me")
@@ -448,6 +457,10 @@ func (m *mockRootCoordClient) DropDatabase(ctx context.Context, in *milvuspb.Dro
 }
 
 func (m *mockRootCoordClient) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
+	panic("not implemented") // TODO: Implement
+}
+
+func (m *mockRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -718,7 +731,7 @@ func (h *mockHandler) CheckShouldDropChannel(channel string) bool {
 	return false
 }
 
-func (h *mockHandler) FinishDropChannel(channel string) error {
+func (h *mockHandler) FinishDropChannel(channel string, collectionID int64) error {
 	return nil
 }
 

@@ -29,7 +29,6 @@ import (
 	"context"
 	"fmt"
 	"io"
-	"strconv"
 	"strings"
 	"unsafe"
 
@@ -534,6 +533,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		zap.Int64("msgID", plan.msgID),
 		zap.String("segmentType", s.segmentType.String()),
 	)
+	log.Debug("begin to retrieve")
 
 	traceCtx := ParseCTraceContext(ctx)
 
@@ -548,7 +548,8 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 			plan.cRetrievePlan,
 			ts,
 			&retrieveResult.cRetrieveResult,
-			C.int64_t(maxLimitSize))
+			C.int64_t(maxLimitSize),
+			C.bool(plan.ignoreNonPk))
 
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -565,6 +566,9 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 		return nil, err
 	}
 
+	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "partial-segcore-results-deserialization")
+	defer span.End()
+
 	result := new(segcorepb.RetrieveResults)
 	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
 		return nil, err
@@ -576,6 +580,67 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 
 	// Sort was done by the segcore.
 	// sort.Sort(&byPK{result})
+	return result, nil
+}
+
+func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
+	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+	defer s.ptrLock.RUnlock()
+
+	if s.ptr == nil {
+		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
+	}
+
+	if len(offsets) == 0 {
+		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
+	}
+
+	fields := []zap.Field{
+		zap.Int64("collectionID", s.Collection()),
+		zap.Int64("partitionID", s.Partition()),
+		zap.Int64("segmentID", s.ID()),
+		zap.Int64("msgID", plan.msgID),
+		zap.String("segmentType", s.segmentType.String()),
+		zap.Int("resultNum", len(offsets)),
+	}
+
+	log := log.Ctx(ctx).With(fields...)
+	log.Debug("begin to retrieve by offsets")
+
+	traceCtx := ParseCTraceContext(ctx)
+
+	var retrieveResult RetrieveResult
+	var status C.CStatus
+
+	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
+	status = C.RetrieveByOffsets(traceCtx,
+		s.ptr,
+		plan.cRetrievePlan,
+		&retrieveResult.cRetrieveResult,
+		(*C.int64_t)(unsafe.Pointer(&offsets[0])),
+		C.int64_t(len(offsets)))
+
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Debug("cgo retrieve by offsets done", zap.Duration("timeTaken", tr.ElapseSpan()))
+
+	if err := HandleCStatus(ctx, &status, "RetrieveByOffsets failed", fields...); err != nil {
+		return nil, err
+	}
+
+	_, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "reduced-segcore-results-deserialization")
+	defer span.End()
+
+	result := new(segcorepb.RetrieveResults)
+	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+		return nil, err
+	}
+
+	log.Debug("retrieve by segment offsets done")
+
 	return result, nil
 }
 
@@ -1364,15 +1429,6 @@ func (s *LocalSegment) Release(opts ...releaseOption) {
 	}
 
 	C.DeleteSegment(ptr)
-
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		s.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(s.Collection()),
-		fmt.Sprint(s.Partition()),
-		s.Type().String(),
-		strconv.FormatInt(int64(len(s.Indexes())), 10),
-	).Sub(float64(s.InsertCount()))
 
 	localDiskUsage, err := GetLocalUsedSize(context.Background(), paramtable.Get().LocalStorageCfg.Path.GetValue())
 	// ignore error here, shall not block releasing

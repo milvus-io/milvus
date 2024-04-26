@@ -162,6 +162,13 @@ func (m *ReplicaManager) putReplicaInMemory(replicas ...*Replica) {
 
 // TransferReplica transfers N replicas from srcRGName to dstRGName.
 func (m *ReplicaManager) TransferReplica(collectionID typeutil.UniqueID, srcRGName string, dstRGName string, replicaNum int) error {
+	if srcRGName == dstRGName {
+		return merr.WrapErrParameterInvalidMsg("source resource group and target resource group should not be the same, resource group: %s", srcRGName)
+	}
+	if replicaNum <= 0 {
+		return merr.WrapErrParameterInvalid("NumReplica > 0", fmt.Sprintf("invalid NumReplica %d", replicaNum))
+	}
+
 	m.rwmutex.Lock()
 	defer m.rwmutex.Unlock()
 
@@ -241,9 +248,12 @@ func (m *ReplicaManager) GetByCollectionAndNode(collectionID, nodeID typeutil.Un
 	m.rwmutex.RLock()
 	defer m.rwmutex.RUnlock()
 
-	for _, replica := range m.replicas {
-		if replica.GetCollectionID() == collectionID && replica.Contains(nodeID) {
-			return replica
+	if m.collIDToReplicaIDs[collectionID] != nil {
+		for replicaID := range m.collIDToReplicaIDs[collectionID] {
+			replica := m.replicas[replicaID]
+			if replica.Contains(nodeID) {
+				return replica
+			}
 		}
 	}
 

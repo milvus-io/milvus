@@ -56,6 +56,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/util/requestutil"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -160,8 +162,10 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 		for _, alias := range aliasName {
 			metrics.CleanupProxyCollectionMetrics(paramtable.GetNodeID(), alias)
 		}
+		DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
 	} else if msgType == commonpb.MsgType_DropDatabase {
 		metrics.CleanupProxyDBMetrics(paramtable.GetNodeID(), request.GetDbName())
+		DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 	}
 	log.Info("complete to invalidate collection meta cache")
 
@@ -289,6 +293,7 @@ func (node *Proxy) DropDatabase(ctx context.Context, request *milvuspb.DropDatab
 	}
 
 	log.Info(rpcDone(method))
+	DeregisterSubLabel(ratelimitutil.GetDBSubLabel(request.GetDbName()))
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		method,
@@ -527,6 +532,7 @@ func (node *Proxy) DropCollection(ctx context.Context, request *milvuspb.DropCol
 		zap.Uint64("BeginTs", dct.BeginTs()),
 		zap.Uint64("EndTs", dct.EndTs()),
 	)
+	DeregisterSubLabel(ratelimitutil.GetCollectionSubLabel(request.GetDbName(), request.GetCollectionName()))
 
 	metrics.ProxyFunctionCall.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
@@ -2532,11 +2538,12 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
 
 	successCnt := dr.result.GetDeleteCnt()
-	metrics.ProxyDeleteVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(successCnt))
+
+	dbName := request.DbName
+	nodeID := paramtable.GetStringNodeID()
+	metrics.ProxyDeleteVectors.WithLabelValues(nodeID, dbName).Add(float64(successCnt))
 
 	username := GetCurUserFromContextOrDefault(ctx)
-	nodeID := paramtable.GetStringNodeID()
-	dbName := request.DbName
 	collectionName := request.CollectionName
 	v := Extension.Report(map[string]any{
 		hookutil.OpTypeKey:     hookutil.OpTypeDelete,
@@ -2680,11 +2687,11 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		hookutil.FailCntKey:         len(it.result.ErrIndex),
 	})
 	SetReportValue(it.result.GetStatus(), v)
-
-	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(it.upsertMsg.InsertMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
 	if merr.Ok(it.result.GetStatus()) {
 		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
 	}
+
+	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(it.upsertMsg.InsertMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
 	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method,
 		metrics.SuccessLabel, dbName, collectionName).Inc()
 	successCnt := it.result.UpsertCnt - int64(len(it.result.ErrIndex))
@@ -2698,6 +2705,18 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	log.Debug("Finish processing upsert request in Proxy")
 	return it.result, nil
+}
+
+func GetCollectionRateSubLabel(req any) string {
+	dbName, _ := requestutil.GetDbNameFromRequest(req)
+	if dbName == "" {
+		return ""
+	}
+	collectionName, _ := requestutil.GetCollectionNameFromRequest(req)
+	if collectionName == "" {
+		return ""
+	}
+	return ratelimitutil.GetCollectionSubLabel(dbName.(string), collectionName.(string))
 }
 
 // Search searches the most similar records of requests.
@@ -2734,7 +2753,8 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		request.GetCollectionName(),
 	).Add(float64(request.GetNq()))
 
-	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()))
+	subLabel := GetCollectionRateSubLabel(request)
+	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(request.GetNq()), subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
@@ -2782,6 +2802,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		node:                   node,
 		lb:                     node.lbPolicy,
 		enableMaterializedView: node.enableMaterializedView,
+		mustUsePartitionKey:    Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
 	guaranteeTs := request.GuaranteeTimestamp
@@ -2909,8 +2930,9 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeSearch, dbName, username).Add(float64(v))
 		}
+
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
+		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -2941,6 +2963,13 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		request.GetCollectionName(),
 	).Add(float64(receiveSize))
 
+	subLabel := GetCollectionRateSubLabel(request)
+	allNQ := int64(0)
+	for _, searchRequest := range request.Requests {
+		allNQ += searchRequest.GetNq()
+	}
+	rateCol.Add(internalpb.RateType_DQLSearch.String(), float64(allNQ), subLabel)
+
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.SearchResults{
 			Status: merr.Status(err),
@@ -2970,11 +2999,12 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: newSearchReq,
-		tr:      timerecord.NewTimeRecorder(method),
-		qc:      node.queryCoord,
-		node:    node,
-		lb:      node.lbPolicy,
+		request:             newSearchReq,
+		tr:                  timerecord.NewTimeRecorder(method),
+		qc:                  node.queryCoord,
+		node:                node,
+		lb:                  node.lbPolicy,
+		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 
 	guaranteeTs := request.GuaranteeTimestamp
@@ -3067,7 +3097,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 	metrics.ProxySearchVectors.
 		WithLabelValues(nodeID, dbName, collectionName).
-		Add(float64(len(request.GetRequests())))
+		Add(float64(len(request.GetRequests()) * int(qt.SearchRequest.GetNq())))
 
 	searchDur := tr.ElapseSpan().Milliseconds()
 	metrics.ProxySQLatency.WithLabelValues(
@@ -3098,8 +3128,9 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		if merr.Ok(qt.result.GetStatus()) {
 			metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeHybridSearch, dbName, username).Add(float64(v))
 		}
+
 		metrics.ProxyReadReqSendBytes.WithLabelValues(nodeID).Add(float64(sentSize))
-		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
+		rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	}
 	return qt.result, nil
 }
@@ -3246,7 +3277,8 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		request.GetCollectionName(),
 	).Add(float64(1))
 
-	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1)
+	subLabel := GetCollectionRateSubLabel(request)
+	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -3364,7 +3396,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 	).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
 	sentSize := proto.Size(qt.result)
-	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize))
+	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 
 	return qt.result, nil
@@ -3382,9 +3414,10 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 			),
 			ReqID: paramtable.GetNodeID(),
 		},
-		request: request,
-		qc:      node.queryCoord,
-		lb:      node.lbPolicy,
+		request:             request,
+		qc:                  node.queryCoord,
+		lb:                  node.lbPolicy,
+		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
 	res, err := node.query(ctx, qt)
 	if merr.Ok(res.Status) && err == nil {
@@ -5092,7 +5125,7 @@ func (node *Proxy) SetRates(ctx context.Context, request *proxypb.SetRatesReques
 		return resp, nil
 	}
 
-	err := node.multiRateLimiter.SetRates(request.GetRates())
+	err := node.simpleLimiter.SetRates(request.GetRootLimiter())
 	// TODO: set multiple rate limiter rates
 	if err != nil {
 		resp = merr.Status(err)
@@ -5162,12 +5195,9 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 		}, nil
 	}
 
-	states, reasons := node.multiRateLimiter.GetQuotaStates()
 	return &milvuspb.CheckHealthResponse{
-		Status:      merr.Success(),
-		QuotaStates: states,
-		Reasons:     reasons,
-		IsHealthy:   true,
+		Status:    merr.Success(),
+		IsHealthy: true,
 	}, nil
 }
 
@@ -5260,6 +5290,65 @@ func (node *Proxy) CreateResourceGroup(ctx context.Context, request *milvuspb.Cr
 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.SuccessLabel, "", "").Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return t.result, nil
+}
+
+func (node *Proxy) UpdateResourceGroups(ctx context.Context, request *milvuspb.UpdateResourceGroupsRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	method := "UpdateResourceGroups"
+	for name := range request.GetResourceGroups() {
+		if err := ValidateResourceGroupName(name); err != nil {
+			log.Warn("UpdateResourceGroups failed",
+				zap.Error(err),
+			)
+			return getErrResponse(err, method, "", ""), nil
+		}
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-UpdateResourceGroups")
+	defer sp.End()
+	tr := timerecord.NewTimeRecorder(method)
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, "", "").Inc()
+	t := &UpdateResourceGroupsTask{
+		ctx:                         ctx,
+		Condition:                   NewTaskCondition(ctx),
+		UpdateResourceGroupsRequest: request,
+		queryCoord:                  node.queryCoord,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
+
+	log.Info("UpdateResourceGroups received")
+
+	if err := node.sched.ddQueue.Enqueue(t); err != nil {
+		log.Warn("UpdateResourceGroups failed to enqueue",
+			zap.Error(err))
+		return getErrResponse(err, method, "", ""), nil
+	}
+
+	log.Debug("UpdateResourceGroups enqueued",
+		zap.Uint64("BeginTS", t.BeginTs()),
+		zap.Uint64("EndTS", t.EndTs()))
+
+	if err := t.WaitToFinish(); err != nil {
+		log.Warn("UpdateResourceGroups failed to WaitToFinish",
+			zap.Error(err),
+			zap.Uint64("BeginTS", t.BeginTs()),
+			zap.Uint64("EndTS", t.EndTs()))
+		return getErrResponse(err, method, "", ""), nil
+	}
+
+	log.Info("UpdateResourceGroups done",
+		zap.Uint64("BeginTS", t.BeginTs()),
+		zap.Uint64("EndTS", t.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, "", "").Inc()
 	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return t.result, nil
 }
@@ -5977,4 +6066,11 @@ func (node *Proxy) ListImports(ctx context.Context, req *internalpb.ListImportsR
 	}
 	metrics.ProxyReqLatency.WithLabelValues(nodeID, method).Observe(float64(tr.ElapseSpan().Milliseconds()))
 	return resp, nil
+}
+
+// DeregisterSubLabel must add the sub-labels here if using other labels for the sub-labels
+func DeregisterSubLabel(subLabel string) {
+	rateCol.DeregisterSubLabel(internalpb.RateType_DQLQuery.String(), subLabel)
+	rateCol.DeregisterSubLabel(internalpb.RateType_DQLSearch.String(), subLabel)
+	rateCol.DeregisterSubLabel(metricsinfo.ReadResultThroughput, subLabel)
 }

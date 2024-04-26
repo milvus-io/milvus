@@ -51,7 +51,15 @@ func (s *BalanceTestSuit) SetupSuite() {
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
 
+	// disable compaction
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+
 	s.Require().NoError(s.SetupEmbedEtcd())
+}
+
+func (s *BalanceTestSuit) TearDownSuite() {
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
+	s.MiniClusterSuite.TearDownSuite()
 }
 
 func (s *BalanceTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int, segmentDeleteNum int) {
@@ -101,10 +109,11 @@ func (s *BalanceTestSuit) initCollection(collectionName string, replica int, cha
 			}
 
 			pks := insertResult.GetIDs().GetIntId().GetData()
-			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
 			log.Info("========================delete expr==================",
-				zap.String("expr", expr),
+				zap.Int("length of pk", len(pks)),
 			)
+
+			expr := fmt.Sprintf("%s in [%s]", integration.Int64Field, strings.Join(lo.Map(pks, func(pk int64, _ int) string { return strconv.FormatInt(pk, 10) }), ","))
 
 			deleteResp, err := s.Cluster.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
 				CollectionName: collectionName,

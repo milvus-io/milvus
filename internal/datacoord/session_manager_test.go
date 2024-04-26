@@ -25,7 +25,7 @@ type SessionManagerSuite struct {
 
 	dn *mocks.MockDataNodeClient
 
-	m SessionManager
+	m *SessionManagerImpl
 }
 
 func (s *SessionManagerSuite) SetupTest() {
@@ -37,6 +37,35 @@ func (s *SessionManagerSuite) SetupTest() {
 
 	s.m.AddSession(&NodeInfo{1000, "addr-1"})
 	s.MetricsEqual(metrics.DataCoordNumDataNodes, 1)
+}
+
+func (s *SessionManagerSuite) SetupSubTest() {
+	s.SetupTest()
+}
+
+func (s *SessionManagerSuite) TestExecFlush() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	req := &datapb.FlushSegmentsRequest{
+		CollectionID: 1,
+		SegmentIDs:   []int64{100, 200},
+		ChannelName:  "ch-1",
+	}
+
+	s.Run("no node", func() {
+		s.m.execFlush(ctx, 100, req)
+	})
+
+	s.Run("fail", func() {
+		s.dn.EXPECT().FlushSegments(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
+		s.m.execFlush(ctx, 1000, req)
+	})
+
+	s.Run("normal", func() {
+		s.dn.EXPECT().FlushSegments(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Once()
+		s.m.execFlush(ctx, 1000, req)
+	})
 }
 
 func (s *SessionManagerSuite) TestNotifyChannelOperation() {
@@ -58,16 +87,14 @@ func (s *SessionManagerSuite) TestNotifyChannelOperation() {
 	})
 
 	s.Run("fail", func() {
-		s.SetupTest()
-		s.dn.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
+		s.dn.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
 
 		err := s.m.NotifyChannelOperation(ctx, 1000, req)
 		s.Error(err)
 	})
 
 	s.Run("normal", func() {
-		s.SetupTest()
-		s.dn.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything).Return(merr.Status(nil), nil)
+		s.dn.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything).Return(merr.Status(nil), nil).Once()
 
 		err := s.m.NotifyChannelOperation(ctx, 1000, req)
 		s.NoError(err)
@@ -91,8 +118,7 @@ func (s *SessionManagerSuite) TestCheckCHannelOperationProgress() {
 	})
 
 	s.Run("fail", func() {
-		s.SetupTest()
-		s.dn.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
+		s.dn.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock")).Once()
 
 		resp, err := s.m.CheckChannelOperationProgress(ctx, 1000, info)
 		s.Error(err)
@@ -100,16 +126,13 @@ func (s *SessionManagerSuite) TestCheckCHannelOperationProgress() {
 	})
 
 	s.Run("normal", func() {
-		s.SetupTest()
 		s.dn.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
-			Return(
-				&datapb.ChannelOperationProgressResponse{
-					Status:   merr.Status(nil),
-					OpID:     info.OpID,
-					State:    info.State,
-					Progress: 100,
-				},
-				nil)
+			Return(&datapb.ChannelOperationProgressResponse{
+				Status:   merr.Status(nil),
+				OpID:     info.OpID,
+				State:    info.State,
+				Progress: 100,
+			}, nil).Once()
 
 		resp, err := s.m.CheckChannelOperationProgress(ctx, 1000, info)
 		s.NoError(err)

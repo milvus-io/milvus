@@ -246,7 +246,14 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 	ctx := task.Context()
 
 	dstNode := action.Node()
+
 	req := packReleaseSegmentRequest(task, action)
+	channel := ex.targetMgr.GetDmChannel(task.CollectionID(), task.Shard(), meta.CurrentTarget)
+	if channel != nil {
+		// if channel exists in current target, set cp to ReleaseSegmentRequest, need to use it as growing segment's exclude ts
+		req.Checkpoint = channel.GetSeekPosition()
+	}
+
 	if action.Scope() == querypb.DataScope_Streaming {
 		// Any modification to the segment distribution have to set NeedTransfer true,
 		// to protect the version, which serves search/query
@@ -270,6 +277,7 @@ func (ex *Executor) releaseSegment(task *SegmentTask, step int) {
 				log.Warn(msg, zap.Error(err))
 				return
 			}
+
 			dstNode = view.ID
 			log = log.With(zap.Int64("shardLeader", view.ID))
 			req.NeedTransfer = true

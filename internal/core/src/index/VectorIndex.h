@@ -23,7 +23,7 @@
 #include <boost/dynamic_bitset.hpp>
 
 #include "Utils.h"
-#include "knowhere/factory.h"
+#include "knowhere/index/index_factory.h"
 #include "index/Index.h"
 #include "common/Types.h"
 #include "common/BitsetView.h"
@@ -63,7 +63,7 @@ class VectorIndex : public IndexBase {
     virtual knowhere::expected<
         std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
     VectorIterators(const DatasetPtr dataset,
-                    const SearchInfo& search_info,
+                    const knowhere::Json& json,
                     const BitsetView& bitset) const {
         throw std::runtime_error("VectorIndex:" + this->GetIndexType() +
                                  " didn't implement VectorIterator interface, "

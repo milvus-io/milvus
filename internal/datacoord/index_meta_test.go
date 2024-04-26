@@ -614,17 +614,17 @@ func TestMeta_GetIndexedSegment(t *testing.T) {
 	}
 
 	t.Run("success", func(t *testing.T) {
-		segments := m.GetIndexedSegments(collID, []int64{fieldID})
+		segments := m.GetIndexedSegments(collID, []int64{segID}, []int64{fieldID})
 		assert.Len(t, segments, 1)
 	})
 
 	t.Run("no index on field", func(t *testing.T) {
-		segments := m.GetIndexedSegments(collID, []int64{fieldID + 1})
+		segments := m.GetIndexedSegments(collID, []int64{segID}, []int64{fieldID + 1})
 		assert.Len(t, segments, 0)
 	})
 
 	t.Run("no index", func(t *testing.T) {
-		segments := m.GetIndexedSegments(collID+1, []int64{fieldID})
+		segments := m.GetIndexedSegments(collID+1, []int64{segID}, []int64{fieldID})
 		assert.Len(t, segments, 0)
 	})
 }

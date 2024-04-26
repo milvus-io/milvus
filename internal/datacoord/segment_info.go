@@ -93,6 +93,16 @@ func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
 	return segments
 }
 
+func (s *SegmentsInfo) GetSegmentsBySelector(selector SegmentInfoSelector) []*SegmentInfo {
+	var segments []*SegmentInfo
+	for _, segment := range s.segments {
+		if selector(segment) {
+			segments = append(segments, segment)
+		}
+	}
+	return segments
+}
+
 // GetCompactionTo returns the segment that the provided segment is compacted to.
 // Return (nil, false) if given segmentID can not found in the meta.
 // Return (nil, true) if given segmentID can be found not no compaction to.
@@ -204,6 +214,28 @@ func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.segments[segmentID] = segment.ShadowClone(SetIsCompacting(isCompacting))
 	}
+}
+
+func (s *SegmentInfo) IsDeltaLogExists(logID int64) bool {
+	for _, deltaLogs := range s.GetDeltalogs() {
+		for _, l := range deltaLogs.GetBinlogs() {
+			if l.GetLogID() == logID {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (s *SegmentInfo) IsStatsLogExists(logID int64) bool {
+	for _, statsLogs := range s.GetStatslogs() {
+		for _, l := range statsLogs.GetBinlogs() {
+			if l.GetLogID() == logID {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // Clone deep clone the segment info and return a new instance

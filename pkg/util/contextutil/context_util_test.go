@@ -62,7 +62,14 @@ func TestGetCurUserFromContext(t *testing.T) {
 	password := "123456"
 	username, err := GetCurUserFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
 	assert.NoError(t, err)
-	assert.Equal(t, "root", username)
+	assert.Equal(t, root, username)
+
+	{
+		u, p, e := GetAuthInfoFromContext(GetContext(context.Background(), fmt.Sprintf("%s%s%s", root, util.CredentialSeperator, password)))
+		assert.NoError(t, e)
+		assert.Equal(t, "root", u)
+		assert.Equal(t, password, p)
+	}
 }
 
 func GetContext(ctx context.Context, originValue string) context.Context {

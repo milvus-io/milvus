@@ -263,7 +263,7 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 	}
 
 	err := merr.WrapErrServiceQuotaExceeded("disk quota exceeded, please allocate more resources")
-	totalUsage, collectionsUsage := meta.GetCollectionBinlogSize()
+	totalUsage, collectionsUsage, _ := meta.GetCollectionBinlogSize()
 
 	tasks := imeta.GetTaskBy(WithJob(job.GetJobID()), WithType(PreImportTaskType))
 	files := make([]*datapb.ImportFileStats, 0)
@@ -438,7 +438,7 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 	}
 
 	insertPrefix := importFile.GetPaths()[0]
-	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, false)
+	segmentInsertPaths, _, err := storage.ListAllChunkWithPrefix(ctx, cm, insertPrefix, false)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +450,7 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return segmentImportFiles, nil
 	}
 	deltaPrefix := importFile.GetPaths()[1]
-	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
+	segmentDeltaPaths, _, err := storage.ListAllChunkWithPrefix(ctx, cm, deltaPrefix, false)
 	if err != nil {
 		return nil, err
 	}

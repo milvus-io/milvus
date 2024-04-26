@@ -197,21 +197,20 @@ func (AzureObjectStorage *AzureObjectStorage) StatObject(ctx context.Context, bu
 	return *info.ContentLength, nil
 }
 
-func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
-	var objectsKeys []string
-	var modTimes []time.Time
+func (AzureObjectStorage *AzureObjectStorage) WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error {
 	if recursive {
 		pager := AzureObjectStorage.Client.NewContainerClient(bucketName).NewListBlobsFlatPager(&azblob.ListBlobsFlatOptions{
 			Prefix: &prefix,
 		})
 		if pager.More() {
-			pageResp, err := pager.NextPage(context.Background())
+			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
-				return []string{}, []time.Time{}, checkObjectStorageError(prefix, err)
+				return err
 			}
 			for _, blob := range pageResp.Segment.BlobItems {
-				objectsKeys = append(objectsKeys, *blob.Name)
-				modTimes = append(modTimes, *blob.Properties.LastModified)
+				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}) {
+					return nil
+				}
 			}
 		}
 	} else {
@@ -219,21 +218,24 @@ func (AzureObjectStorage *AzureObjectStorage) ListObjects(ctx context.Context, b
 			Prefix: &prefix,
 		})
 		if pager.More() {
-			pageResp, err := pager.NextPage(context.Background())
+			pageResp, err := pager.NextPage(ctx)
 			if err != nil {
-				return []string{}, []time.Time{}, checkObjectStorageError(prefix, err)
+				return err
 			}
+
 			for _, blob := range pageResp.Segment.BlobItems {
-				objectsKeys = append(objectsKeys, *blob.Name)
-				modTimes = append(modTimes, *blob.Properties.LastModified)
+				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: *blob.Properties.LastModified}) {
+					return nil
+				}
 			}
 			for _, blob := range pageResp.Segment.BlobPrefixes {
-				objectsKeys = append(objectsKeys, *blob.Name)
-				modTimes = append(modTimes, time.Now())
+				if !walkFunc(&ChunkObjectInfo{FilePath: *blob.Name, ModifyTime: time.Now()}) {
+					return nil
+				}
 			}
 		}
 	}
-	return objectsKeys, modTimes, nil
+	return nil
 }
 
 func (AzureObjectStorage *AzureObjectStorage) RemoveObject(ctx context.Context, bucketName, objectName string) error {

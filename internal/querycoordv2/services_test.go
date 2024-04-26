@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -69,18 +70,19 @@ type ServiceSuite struct {
 	nodes         []int64
 
 	// Dependencies
-	kv             kv.MetaKv
-	store          metastore.QueryCoordCatalog
-	dist           *meta.DistributionManager
-	meta           *meta.Meta
-	targetMgr      *meta.TargetManager
-	broker         *meta.MockBroker
-	targetObserver *observers.TargetObserver
-	cluster        *session.MockCluster
-	nodeMgr        *session.NodeManager
-	jobScheduler   *job.Scheduler
-	taskScheduler  *task.MockScheduler
-	balancer       balance.Balance
+	kv                 kv.MetaKv
+	store              metastore.QueryCoordCatalog
+	dist               *meta.DistributionManager
+	meta               *meta.Meta
+	targetMgr          *meta.TargetManager
+	broker             *meta.MockBroker
+	targetObserver     *observers.TargetObserver
+	collectionObserver *observers.CollectionObserver
+	cluster            *session.MockCluster
+	nodeMgr            *session.NodeManager
+	jobScheduler       *job.Scheduler
+	taskScheduler      *task.MockScheduler
+	balancer           balance.Balance
 
 	distMgr        *meta.DistributionManager
 	distController *dist.MockController
@@ -158,8 +160,7 @@ func (suite *ServiceSuite) SetupTest() {
 			Address:  "localhost",
 			Hostname: "localhost",
 		}))
-		err := suite.meta.ResourceManager.AssignNode(meta.DefaultResourceGroupName, node)
-		suite.NoError(err)
+		suite.meta.ResourceManager.HandleNodeUp(node)
 	}
 	suite.cluster = session.NewMockCluster(suite.T())
 	suite.cluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
@@ -177,6 +178,15 @@ func (suite *ServiceSuite) SetupTest() {
 	suite.distMgr = meta.NewDistributionManager()
 	suite.distController = dist.NewMockController(suite.T())
 
+	suite.collectionObserver = observers.NewCollectionObserver(
+		suite.dist,
+		suite.meta,
+		suite.targetMgr,
+		suite.targetObserver,
+		&checkers.CheckerController{},
+	)
+	suite.collectionObserver.Start()
+
 	suite.server = &Server{
 		kv:                  suite.kv,
 		store:               suite.store,
@@ -187,6 +197,7 @@ func (suite *ServiceSuite) SetupTest() {
 		targetMgr:           suite.targetMgr,
 		broker:              suite.broker,
 		targetObserver:      suite.targetObserver,
+		collectionObserver:  suite.collectionObserver,
 		nodeMgr:             suite.nodeMgr,
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
@@ -195,13 +206,6 @@ func (suite *ServiceSuite) SetupTest() {
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 	}
-	suite.server.collectionObserver = observers.NewCollectionObserver(
-		suite.server.dist,
-		suite.server.meta,
-		suite.server.targetMgr,
-		suite.targetObserver,
-		&checkers.CheckerController{},
-	)
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
 }
@@ -371,7 +375,18 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 
+	// duplicate create a same resource group with same config is ok.
 	resp, err = server.CreateResourceGroup(ctx, createRG)
+	suite.NoError(err)
+	suite.True(merr.Ok(resp))
+
+	resp, err = server.CreateResourceGroup(ctx, &milvuspb.CreateResourceGroupRequest{
+		ResourceGroup: "rg1",
+		Config: &rgpb.ResourceGroupConfig{
+			Requests: &rgpb.ResourceGroupLimit{NodeNum: 10000},
+			Limits:   &rgpb.ResourceGroupLimit{NodeNum: 10000},
+		},
+	})
 	suite.NoError(err)
 	suite.False(merr.Ok(resp))
 
@@ -401,12 +416,18 @@ func (suite *ServiceSuite) TestResourceGroup() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	server.meta.ResourceManager.AddResourceGroup("rg11")
-	server.meta.ResourceManager.AssignNode("rg11", 1011)
-	server.meta.ResourceManager.AssignNode("rg11", 1012)
-	server.meta.ResourceManager.AddResourceGroup("rg12")
-	server.meta.ResourceManager.AssignNode("rg12", 1013)
-	server.meta.ResourceManager.AssignNode("rg12", 1014)
+	server.meta.ResourceManager.AddResourceGroup("rg11", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
+	server.meta.ResourceManager.HandleNodeUp(1011)
+	server.meta.ResourceManager.HandleNodeUp(1012)
+	server.meta.ResourceManager.AddResourceGroup("rg12", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 2},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 2},
+	})
+	server.meta.ResourceManager.HandleNodeUp(1013)
+	server.meta.ResourceManager.HandleNodeUp(1014)
 	server.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	server.meta.CollectionManager.PutCollection(utils.CreateTestCollection(2, 1))
 	server.meta.ReplicaManager.Put(meta.NewReplica(&querypb.Replica{
@@ -504,9 +525,19 @@ func (suite *ServiceSuite) TestTransferNode() {
 	ctx := context.Background()
 	server := suite.server
 
-	err := server.meta.ResourceManager.AddResourceGroup("rg1")
+	server.resourceObserver = observers.NewResourceObserver(server.meta)
+	server.resourceObserver.Start()
+	defer server.resourceObserver.Stop()
+
+	err := server.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
 	suite.NoError(err)
-	err = server.meta.ResourceManager.AddResourceGroup("rg2")
+	err = server.meta.ResourceManager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
 	suite.NoError(err)
 	suite.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 2))
 	suite.meta.ReplicaManager.Put(meta.NewReplica(
@@ -526,6 +557,8 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	time.Sleep(100 * time.Millisecond)
+
 	nodes, err := server.meta.ResourceManager.GetNodes("rg1")
 	suite.NoError(err)
 	suite.Len(nodes, 1)
@@ -558,9 +591,15 @@ func (suite *ServiceSuite) TestTransferNode() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_IllegalArgument, resp.ErrorCode)
 
-	err = server.meta.ResourceManager.AddResourceGroup("rg3")
+	err = server.meta.ResourceManager.AddResourceGroup("rg3", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 4},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 4},
+	})
 	suite.NoError(err)
-	err = server.meta.ResourceManager.AddResourceGroup("rg4")
+	err = server.meta.ResourceManager.AddResourceGroup("rg4", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 0},
+	})
 	suite.NoError(err)
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   11,
@@ -582,10 +621,10 @@ func (suite *ServiceSuite) TestTransferNode() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.meta.ResourceManager.AssignNode("rg3", 11)
-	suite.meta.ResourceManager.AssignNode("rg3", 12)
-	suite.meta.ResourceManager.AssignNode("rg3", 13)
-	suite.meta.ResourceManager.AssignNode("rg3", 14)
+	suite.meta.ResourceManager.HandleNodeUp(11)
+	suite.meta.ResourceManager.HandleNodeUp(12)
+	suite.meta.ResourceManager.HandleNodeUp(13)
+	suite.meta.ResourceManager.HandleNodeUp(14)
 
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 		SourceResourceGroup: "rg3",
@@ -594,6 +633,8 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
+	time.Sleep(100 * time.Millisecond)
+
 	nodes, err = server.meta.ResourceManager.GetNodes("rg3")
 	suite.NoError(err)
 	suite.Len(nodes, 1)
@@ -631,11 +672,20 @@ func (suite *ServiceSuite) TestTransferReplica() {
 	ctx := context.Background()
 	server := suite.server
 
-	err := server.meta.ResourceManager.AddResourceGroup("rg1")
+	err := server.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
+	})
 	suite.NoError(err)
-	err = server.meta.ResourceManager.AddResourceGroup("rg2")
+	err = server.meta.ResourceManager.AddResourceGroup("rg2", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
+	})
 	suite.NoError(err)
-	err = server.meta.ResourceManager.AddResourceGroup("rg3")
+	err = server.meta.ResourceManager.AddResourceGroup("rg3", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 3},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 3},
+	})
 	suite.NoError(err)
 
 	resp, err := suite.server.TransferReplica(ctx, &querypb.TransferReplicaRequest{
@@ -715,11 +765,11 @@ func (suite *ServiceSuite) TestTransferReplica() {
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
-	suite.server.meta.AssignNode("rg1", 1001)
-	suite.server.meta.AssignNode("rg2", 1002)
-	suite.server.meta.AssignNode("rg3", 1003)
-	suite.server.meta.AssignNode("rg3", 1004)
-	suite.server.meta.AssignNode("rg3", 1005)
+	suite.server.meta.HandleNodeUp(1001)
+	suite.server.meta.HandleNodeUp(1002)
+	suite.server.meta.HandleNodeUp(1003)
+	suite.server.meta.HandleNodeUp(1004)
+	suite.server.meta.HandleNodeUp(1005)
 
 	suite.server.meta.Put(meta.NewReplica(&querypb.Replica{
 		CollectionID:  2,
@@ -1519,7 +1569,7 @@ func (suite *ServiceSuite) TestGetReplicas() {
 	suite.Equal(resp.GetStatus().GetCode(), merr.Code(merr.ErrServiceNotReady))
 }
 
-func (suite *ServiceSuite) TestGetReplicasFailed() {
+func (suite *ServiceSuite) TestGetReplicasWhenNoAvailableNodes() {
 	suite.loadAll()
 	ctx := context.Background()
 	server := suite.server
@@ -1538,7 +1588,7 @@ func (suite *ServiceSuite) TestGetReplicasFailed() {
 	}
 	resp, err := server.GetReplicas(ctx, req)
 	suite.NoError(err)
-	suite.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrReplicaNotAvailable)
+	suite.True(merr.Ok(resp.GetStatus()))
 }
 
 func (suite *ServiceSuite) TestCheckHealth() {
@@ -1679,6 +1729,18 @@ func (suite *ServiceSuite) TestGetShardLeadersFailed() {
 }
 
 func (suite *ServiceSuite) TestHandleNodeUp() {
+	suite.server.replicaObserver = observers.NewReplicaObserver(
+		suite.server.meta,
+		suite.server.dist,
+	)
+	suite.server.resourceObserver = observers.NewResourceObserver(
+		suite.server.meta,
+	)
+	suite.server.replicaObserver.Start()
+	defer suite.server.replicaObserver.Stop()
+	suite.server.resourceObserver.Start()
+	defer suite.server.resourceObserver.Stop()
+
 	server := suite.server
 	suite.server.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	suite.server.meta.ReplicaManager.Put(meta.NewReplica(
@@ -1700,19 +1762,26 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 		Hostname: "localhost",
 	}))
 	server.handleNodeUp(111)
+	// wait for async update by observer
+	time.Sleep(100 * time.Millisecond)
 	nodes := suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	nodesInRG, _ := suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
 	suite.ElementsMatch(nodes, nodesInRG)
 	log.Info("handleNodeUp")
 
 	// when more rg exist, new node shouldn't be assign to replica in default rg in handleNodeUp
-	suite.server.meta.ResourceManager.AddResourceGroup("rg")
+	suite.server.meta.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
+		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
+		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
+	})
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   222,
 		Address:  "localhost",
 		Hostname: "localhost",
 	}))
 	server.handleNodeUp(222)
+	// wait for async update by observer
+	time.Sleep(100 * time.Millisecond)
 	nodes = suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	nodesInRG, _ = suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
 	suite.ElementsMatch(nodes, nodesInRG)
@@ -1737,6 +1806,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
+				suite.collectionObserver,
 				suite.nodeMgr,
 			)
 			suite.jobScheduler.Add(job)
@@ -1761,6 +1831,7 @@ func (suite *ServiceSuite) loadAll() {
 				suite.cluster,
 				suite.targetMgr,
 				suite.targetObserver,
+				suite.collectionObserver,
 				suite.nodeMgr,
 			)
 			suite.jobScheduler.Add(job)

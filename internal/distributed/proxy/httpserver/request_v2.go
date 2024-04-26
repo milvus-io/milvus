@@ -264,10 +264,10 @@ type GrantReq struct {
 }
 
 type IndexParam struct {
-	FieldName   string            `json:"fieldName" binding:"required"`
-	IndexName   string            `json:"indexName" binding:"required"`
-	MetricType  string            `json:"metricType" binding:"required"`
-	IndexConfig map[string]string `json:"indexConfig"`
+	FieldName  string                 `json:"fieldName" binding:"required"`
+	IndexName  string                 `json:"indexName" binding:"required"`
+	MetricType string                 `json:"metricType" binding:"required"`
+	Params     map[string]interface{} `json:"params"`
 }
 
 type IndexParamReq struct {
@@ -294,12 +294,12 @@ func (req *IndexReq) GetIndexName() string {
 }
 
 type FieldSchema struct {
-	FieldName         string            `json:"fieldName" binding:"required"`
-	DataType          string            `json:"dataType" binding:"required"`
-	ElementDataType   string            `json:"elementDataType"`
-	IsPrimary         bool              `json:"isPrimary"`
-	IsPartitionKey    bool              `json:"isPartitionKey"`
-	ElementTypeParams map[string]string `json:"elementTypeParams" binding:"required"`
+	FieldName         string                 `json:"fieldName" binding:"required"`
+	DataType          string                 `json:"dataType" binding:"required"`
+	ElementDataType   string                 `json:"elementDataType"`
+	IsPrimary         bool                   `json:"isPrimary"`
+	IsPartitionKey    bool                   `json:"isPartitionKey"`
+	ElementTypeParams map[string]interface{} `json:"elementTypeParams" binding:"required"`
 }
 
 type CollectionSchema struct {
@@ -309,17 +309,17 @@ type CollectionSchema struct {
 }
 
 type CollectionReq struct {
-	DbName           string            `json:"dbName"`
-	CollectionName   string            `json:"collectionName" binding:"required"`
-	Dimension        int32             `json:"dimension"`
-	IDType           string            `json:"idType"`
-	AutoID           bool              `json:"autoID"`
-	MetricType       string            `json:"metricType"`
-	PrimaryFieldName string            `json:"primaryFieldName"`
-	VectorFieldName  string            `json:"vectorFieldName"`
-	Schema           CollectionSchema  `json:"schema"`
-	IndexParams      []IndexParam      `json:"indexParams"`
-	Params           map[string]string `json:"params"`
+	DbName           string                 `json:"dbName"`
+	CollectionName   string                 `json:"collectionName" binding:"required"`
+	Dimension        int32                  `json:"dimension"`
+	IDType           string                 `json:"idType"`
+	AutoID           bool                   `json:"autoID"`
+	MetricType       string                 `json:"metricType"`
+	PrimaryFieldName string                 `json:"primaryFieldName"`
+	VectorFieldName  string                 `json:"vectorFieldName"`
+	Schema           CollectionSchema       `json:"schema"`
+	IndexParams      []IndexParam           `json:"indexParams"`
+	Params           map[string]interface{} `json:"params"`
 }
 
 func (req *CollectionReq) GetDbName() string { return req.DbName }
@@ -328,6 +328,8 @@ type AliasReq struct {
 	DbName    string `json:"dbName"`
 	AliasName string `json:"aliasName" binding:"required"`
 }
+
+func (req *AliasReq) GetDbName() string { return req.DbName }
 
 func (req *AliasReq) GetAliasName() string {
 	return req.AliasName

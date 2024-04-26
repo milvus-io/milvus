@@ -325,8 +325,9 @@ func (p *TiKVConfig) Init(base *BaseTable) {
 	p.Endpoints = ParamItem{
 		Key:          "tikv.endpoints",
 		Version:      "2.3.0",
-		DefaultValue: "localhost:2379",
+		DefaultValue: "localhost:2389",
 		PanicIfEmpty: true,
+		Doc:          "Note that the default pd port of tikv is 2379, which conflicts with etcd.",
 		Export:       true,
 	}
 	p.Endpoints.Init(base.mgr)
@@ -590,7 +591,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.webport",
 		Version:      "2.0.0",
 		DefaultValue: "80",
-		Doc:          "Web port of pulsar, if you connect direcly without proxy, should use 8080",
+		Doc:          "Web port of pulsar, if you connect directly without proxy, should use 8080",
 		Export:       true,
 	}
 	p.WebPort.Init(base.mgr)
@@ -664,6 +665,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.requestTimeout",
 		Version:      "2.3.0",
 		DefaultValue: "60",
+		Doc:          "pulsar client global request timeout in seconds",
 		Export:       true,
 	}
 	p.RequestTimeout.Init(base.mgr)
@@ -672,6 +674,7 @@ func (p *PulsarConfig) Init(base *BaseTable) {
 		Key:          "pulsar.enableClientMetrics",
 		Version:      "2.3.0",
 		DefaultValue: "false",
+		Doc:          "Whether to register pulsar client metrics into milvus metrics path.",
 		Export:       true,
 	}
 	p.EnableClientMetrics.Init(base.mgr)
@@ -885,6 +888,8 @@ please adjust in embedded Milvus: /tmp/milvus/rdb_data`,
 		Key:          "rocksmq.compressionTypes",
 		DefaultValue: "0,0,7,7,7",
 		Version:      "2.2.12",
+		Doc:          "compaction compression type, only support use 0,7. 0 means not compress, 7 will use zstd. Length of types means num of rocksdb level.",
+		Export:       true,
 	}
 	r.CompressionTypes.Init(base.mgr)
 }
@@ -1027,21 +1032,22 @@ func (r *NatsmqConfig) Init(base *BaseTable) {
 // /////////////////////////////////////////////////////////////////////////////
 // --- minio ---
 type MinioConfig struct {
-	Address          ParamItem `refreshable:"false"`
-	Port             ParamItem `refreshable:"false"`
-	AccessKeyID      ParamItem `refreshable:"false"`
-	SecretAccessKey  ParamItem `refreshable:"false"`
-	UseSSL           ParamItem `refreshable:"false"`
-	SslCACert        ParamItem `refreshable:"false"`
-	BucketName       ParamItem `refreshable:"false"`
-	RootPath         ParamItem `refreshable:"false"`
-	UseIAM           ParamItem `refreshable:"false"`
-	CloudProvider    ParamItem `refreshable:"false"`
-	IAMEndpoint      ParamItem `refreshable:"false"`
-	LogLevel         ParamItem `refreshable:"false"`
-	Region           ParamItem `refreshable:"false"`
-	UseVirtualHost   ParamItem `refreshable:"false"`
-	RequestTimeoutMs ParamItem `refreshable:"false"`
+	Address            ParamItem `refreshable:"false"`
+	Port               ParamItem `refreshable:"false"`
+	AccessKeyID        ParamItem `refreshable:"false"`
+	SecretAccessKey    ParamItem `refreshable:"false"`
+	UseSSL             ParamItem `refreshable:"false"`
+	SslCACert          ParamItem `refreshable:"false"`
+	BucketName         ParamItem `refreshable:"false"`
+	RootPath           ParamItem `refreshable:"false"`
+	UseIAM             ParamItem `refreshable:"false"`
+	CloudProvider      ParamItem `refreshable:"false"`
+	IAMEndpoint        ParamItem `refreshable:"false"`
+	LogLevel           ParamItem `refreshable:"false"`
+	Region             ParamItem `refreshable:"false"`
+	UseVirtualHost     ParamItem `refreshable:"false"`
+	RequestTimeoutMs   ParamItem `refreshable:"false"`
+	ListObjectsMaxKeys ParamItem `refreshable:"true"`
 }
 
 func (p *MinioConfig) Init(base *BaseTable) {
@@ -1209,4 +1215,14 @@ Leave it empty if you want to use AWS default endpoint`,
 		Export:       true,
 	}
 	p.RequestTimeoutMs.Init(base.mgr)
+
+	p.ListObjectsMaxKeys = ParamItem{
+		Key:          "minio.listObjectsMaxKeys",
+		Version:      "2.4.1",
+		DefaultValue: "0",
+		Doc: `The maximum number of objects requested per batch in minio ListObjects rpc, 
+0 means using oss client by default, decrease these configration if ListObjects timeout`,
+		Export: true,
+	}
+	p.ListObjectsMaxKeys.Init(base.mgr)
 }

@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/resource"
 )
 
@@ -63,6 +64,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 	chMgr.EXPECT().removeDMLStream(mock.Anything).Return()
 
 	node := &Proxy{chMgr: chMgr}
+	_ = node.initRateCollector()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	ctx := context.Background()
@@ -78,7 +80,7 @@ func TestProxy_InvalidateCollectionMetaCache_remove_stream(t *testing.T) {
 func TestProxy_CheckHealth(t *testing.T) {
 	t.Run("not healthy", func(t *testing.T) {
 		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
-		node.multiRateLimiter = NewMultiRateLimiter()
+		node.simpleLimiter = NewSimpleLimiter()
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -96,7 +98,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			dataCoord:  NewDataCoordMock(),
 			session:    &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}},
 		}
-		node.multiRateLimiter = NewMultiRateLimiter()
+		node.simpleLimiter = NewSimpleLimiter()
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -129,7 +131,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			queryCoord: qc,
 			dataCoord:  dataCoordMock,
 		}
-		node.multiRateLimiter = NewMultiRateLimiter()
+		node.simpleLimiter = NewSimpleLimiter()
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		ctx := context.Background()
 		resp, err := node.CheckHealth(ctx, &milvuspb.CheckHealthRequest{})
@@ -146,7 +148,7 @@ func TestProxy_CheckHealth(t *testing.T) {
 			dataCoord:  NewDataCoordMock(),
 			queryCoord: qc,
 		}
-		node.multiRateLimiter = NewMultiRateLimiter()
+		node.simpleLimiter = NewSimpleLimiter()
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 		resp, err := node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
@@ -156,18 +158,30 @@ func TestProxy_CheckHealth(t *testing.T) {
 
 		states := []milvuspb.QuotaState{milvuspb.QuotaState_DenyToWrite, milvuspb.QuotaState_DenyToRead}
 		codes := []commonpb.ErrorCode{commonpb.ErrorCode_MemoryQuotaExhausted, commonpb.ErrorCode_ForceDeny}
-		node.multiRateLimiter.SetRates([]*proxypb.CollectionRate{
-			{
-				Collection: 1,
-				States:     states,
-				Codes:      codes,
+		err = node.simpleLimiter.SetRates(&proxypb.LimiterNode{
+			Limiter: &proxypb.Limiter{},
+			// db level
+			Children: map[int64]*proxypb.LimiterNode{
+				1: {
+					Limiter: &proxypb.Limiter{},
+					// collection level
+					Children: map[int64]*proxypb.LimiterNode{
+						100: {
+							Limiter: &proxypb.Limiter{
+								States: states,
+								Codes:  codes,
+							},
+							Children: make(map[int64]*proxypb.LimiterNode),
+						},
+					},
+				},
 			},
 		})
+		assert.NoError(t, err)
+
 		resp, err = node.CheckHealth(context.Background(), &milvuspb.CheckHealthRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, true, resp.IsHealthy)
-		assert.Equal(t, 2, len(resp.GetQuotaStates()))
-		assert.Equal(t, 2, len(resp.GetReasons()))
 	})
 }
 
@@ -229,7 +243,7 @@ func TestProxy_ResourceGroup(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.multiRateLimiter = NewMultiRateLimiter()
+	node.simpleLimiter = NewSimpleLimiter()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
@@ -321,7 +335,7 @@ func TestProxy_InvalidResourceGroupName(t *testing.T) {
 
 	node, err := NewProxy(ctx, factory)
 	assert.NoError(t, err)
-	node.multiRateLimiter = NewMultiRateLimiter()
+	node.simpleLimiter = NewSimpleLimiter()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 
 	qc := mocks.NewMockQueryCoordClient(t)
@@ -922,7 +936,7 @@ func TestProxyCreateDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.multiRateLimiter = NewMultiRateLimiter()
+	node.simpleLimiter = NewSimpleLimiter()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -977,11 +991,12 @@ func TestProxyDropDatabase(t *testing.T) {
 	ctx := context.Background()
 
 	node, err := NewProxy(ctx, factory)
+	node.initRateCollector()
 	assert.NoError(t, err)
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.multiRateLimiter = NewMultiRateLimiter()
+	node.simpleLimiter = NewSimpleLimiter()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1040,7 +1055,7 @@ func TestProxyListDatabase(t *testing.T) {
 	node.tsoAllocator = &timestampAllocator{
 		tso: newMockTimestampAllocatorInterface(),
 	}
-	node.multiRateLimiter = NewMultiRateLimiter()
+	node.simpleLimiter = NewSimpleLimiter()
 	node.UpdateStateCode(commonpb.StateCode_Healthy)
 	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
 	node.sched.ddQueue.setMaxTaskNum(10)
@@ -1620,5 +1635,35 @@ func TestProxy_ImportV2(t *testing.T) {
 		})
 		assert.NoError(t, err)
 		assert.Equal(t, int32(0), rsp.GetStatus().GetCode())
+	})
+}
+
+func TestGetCollectionRateSubLabel(t *testing.T) {
+	d := "db1"
+	collectionName := "test1"
+
+	t.Run("normal", func(t *testing.T) {
+		subLabel := GetCollectionRateSubLabel(&milvuspb.QueryRequest{
+			DbName:         d,
+			CollectionName: collectionName,
+		})
+		assert.Equal(t, ratelimitutil.GetCollectionSubLabel(d, collectionName), subLabel)
+	})
+
+	t.Run("fail", func(t *testing.T) {
+		{
+			subLabel := GetCollectionRateSubLabel(&milvuspb.QueryRequest{
+				DbName:         "",
+				CollectionName: collectionName,
+			})
+			assert.Equal(t, "", subLabel)
+		}
+		{
+			subLabel := GetCollectionRateSubLabel(&milvuspb.QueryRequest{
+				DbName:         d,
+				CollectionName: "",
+			})
+			assert.Equal(t, "", subLabel)
+		}
 	})
 }

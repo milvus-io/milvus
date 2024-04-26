@@ -89,6 +89,11 @@ class SegmentSealedImpl : public SegmentSealed {
     GetFieldDataType(FieldId fieldId) const override;
 
  public:
+    size_t
+    GetMemoryUsageInBytes() const override {
+        return stats_.mem_size.load() + deleted_record_.mem_size();
+    }
+
     int64_t
     get_row_count() const override;
 
@@ -302,6 +307,8 @@ class SegmentSealedImpl : public SegmentSealed {
     SegcoreConfig segcore_config_;
     std::unordered_map<FieldId, std::unique_ptr<VecIndexConfig>>
         vec_binlog_config_;
+
+    SegmentStats stats_{};
 };
 
 inline SegmentSealedUPtr
