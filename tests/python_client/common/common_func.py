@@ -219,7 +219,6 @@ def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.
             fields.append(gen_float_vec_field(gen_unique_str("multiple_vector"), dim=other_dim,
                                               vector_data_type=vector_data_type))
 
-
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
                                                                     enable_dynamic_field=enable_dynamic_field, **kwargs)
