@@ -194,7 +194,7 @@ sudo apt install -y clang-format clang-tidy ninja-build gcc g++ curl zip unzip t
 #### Install conan
 
 ```bash
-# Verify python3 version, need python3 version > 3.8
+# Verify python3 version, need python3 version > 3.8 and version <= 3.11
 python3 --version
 # pip install conan 1.61.0
 pip3 install conan==1.61.0
