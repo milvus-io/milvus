@@ -182,6 +182,13 @@ def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=Fals
     return float_vec_field
 
 
+def gen_sparse_vec_field(name=ct.default_sparse_vec_field_name, is_primary=False, description=ct.default_desc, **kwargs):
+    sparse_vec_field, _ = ApiFieldSchemaWrapper().init_field_schema(name=name, dtype=DataType.SPARSE_FLOAT_VECTOR,
+                                                                    description=description,
+                                                                    is_primary=is_primary, **kwargs)
+    return sparse_vec_field
+
+
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True,
                                   multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
@@ -378,6 +385,15 @@ def gen_default_binary_collection_schema(description=ct.default_desc, primary_fi
     return binary_schema
 
 
+def gen_default_sparse_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
+                                         auto_id=False, **kwargs):
+    fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_sparse_vec_field()]
+    sparse_schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
+                                                                           primary_field=primary_field,
+                                                                           auto_id=auto_id, **kwargs)
+    return sparse_schema
+
+
 def gen_schema_multi_vector_fields(vec_fields):
     fields = [gen_int64_field(), gen_float_field(), gen_string_field(), gen_float_vec_field()]
     fields.extend(vec_fields)
@@ -404,6 +420,8 @@ def gen_vectors(nb, dim, vector_data_type="FLOAT_VECTOR"):
         vectors = gen_fp16_vectors(nb, dim)[1]
     elif vector_data_type == "BFLOAT16_VECTOR":
         vectors = gen_bf16_vectors(nb, dim)[1]
+    elif vector_data_type == "SPARSE_VECTOR":
+        vectors = gen_sparse_vectors(nb, dim)
 
     if dim > 1:
         if vector_data_type == "FLOAT_VECTOR":
@@ -809,6 +827,20 @@ def gen_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_js
     return data
 
 
+def gen_default_list_sparse_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=False):
+    int_values = [i for i in range(start, start + nb)]
+    float_values = [np.float32(i) for i in range(start, start + nb)]
+    string_values = [str(i) for i in range(start, start + nb)]
+    json_values = [{"number": i, "string": str(i), "bool": bool(i), "list": [j for j in range(0, i)]}
+                   for i in range(start, start + nb)]
+    sparse_vec_values = gen_vectors(nb, dim, vector_data_type="SPARSE_VECTOR")
+    if with_json:
+        data = [int_values, float_values, string_values, json_values, sparse_vec_values]
+    else:
+        data = [int_values, float_values, string_values, sparse_vec_values]
+    return data
+
+
 def gen_default_list_data_for_bulk_insert(nb=ct.default_nb, varchar_len=2000, with_varchar_field=True):
     str_value = gen_str_by_length(length=varchar_len)
     int_values = [i for i in range(nb)]
@@ -1198,6 +1230,8 @@ def gen_simple_index():
     index_params = []
     for i in range(len(ct.all_index_types)):
         if ct.all_index_types[i] in ct.binary_support:
+            continue
+        elif ct.all_index_types[i] in ct.sparse_support:
             continue
         dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
         dic.update({"params": ct.default_index_params[i]})
@@ -2042,6 +2076,21 @@ def gen_fp16_vectors(num, dim):
         fp16_vectors.append(fp16_vector)
 
     return raw_vectors, fp16_vectors
+
+
+def gen_sparse_vectors(nb, dim):
+    """
+    generate sparse vector data
+    return sparse_vectors
+    """
+    rng = np.random.default_rng()
+    entities = [
+        {
+         d: rng.random() for d in random.sample(range(dim), random.randint(1, 1))
+        }
+        for _ in range(nb)
+    ]
+    return entities
 
 
 def gen_vectors_based_on_vector_type(num, dim, vector_data_type):
