@@ -361,11 +361,11 @@ func (t *compactionTask) merge(
 			}
 
 			err = writer.Write(v)
-			numRows++
-			unflushedRows++
 			if err != nil {
 				return nil, nil, 0, err
 			}
+			numRows++
+			unflushedRows++
 
 			stats.Update(v.PK)
 
