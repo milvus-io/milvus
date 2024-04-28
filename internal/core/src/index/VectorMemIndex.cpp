@@ -37,7 +37,7 @@
 #include "index/Utils.h"
 #include "common/EasyAssert.h"
 #include "config/ConfigKnowhere.h"
-#include "knowhere/factory.h"
+#include "knowhere/index/index_factory.h"
 #include "knowhere/comp/time_recorder.h"
 #include "common/BitsetView.h"
 #include "common/Consts.h"
