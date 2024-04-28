@@ -147,7 +147,9 @@ func TestMinioObjectStorage(t *testing.T) {
 	t.Run("test list", func(t *testing.T) {
 		testCM, err := newMinioObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.RemoveBucket(ctx, config.bucketName)
+		defer testCM.RemoveBucketWithOptions(ctx, config.bucketName, minio.RemoveBucketOptions{
+			ForceDelete: true,
+		})
 
 		prepareTests := []struct {
 			valid bool
