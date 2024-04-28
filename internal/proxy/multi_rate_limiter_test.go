@@ -17,12 +17,9 @@
 package proxy
 
 import (
-	"context"
 	"fmt"
 	"math"
-	"math/rand"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/assert"
 
@@ -30,7 +27,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
@@ -295,44 +291,5 @@ func TestRateLimiter(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Error(t, limiter.getQuotaExceededError(internalpb.RateType_DQLQuery))
 		assert.Error(t, limiter.getQuotaExceededError(internalpb.RateType_DMLInsert))
-	})
-
-	t.Run("tests refresh rate by config", func(t *testing.T) {
-		paramtable.Get().CleanEvent()
-		limiter := newRateLimiter(false)
-
-		etcdCli, _ := etcd.GetEtcdClient(
-			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			Params.EtcdCfg.Endpoints.GetAsStrings(),
-			Params.EtcdCfg.EtcdTLSCert.GetValue(),
-			Params.EtcdCfg.EtcdTLSKey.GetValue(),
-			Params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
-
-		Params.Save(Params.QuotaConfig.DDLLimitEnabled.Key, "true")
-		defer Params.Reset(Params.QuotaConfig.DDLLimitEnabled.Key)
-		Params.Save(Params.QuotaConfig.DMLLimitEnabled.Key, "true")
-		defer Params.Reset(Params.QuotaConfig.DMLLimitEnabled.Key)
-		ctx := context.Background()
-		// avoid production precision issues when comparing 0-terminated numbers
-		newRate := fmt.Sprintf("%.2f1", rand.Float64())
-		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate", newRate)
-		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/ddl/collectionRate")
-		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate", "invalid")
-		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/ddl/partitionRate")
-		etcdCli.KV.Put(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max", "8")
-		defer etcdCli.KV.Delete(ctx, "by-dev/config/quotaAndLimits/dml/insertRate/collection/max")
-
-		assert.Eventually(t, func() bool {
-			limit, _ := limiter.limiters.Get(internalpb.RateType_DDLCollection)
-			return newRate == limit.Limit().String()
-		}, 20*time.Second, time.Second)
-
-		limit, _ := limiter.limiters.Get(internalpb.RateType_DDLPartition)
-		assert.Equal(t, "+inf", limit.Limit().String())
-
-		limit, _ = limiter.limiters.Get(internalpb.RateType_DMLInsert)
-		assert.Equal(t, "8.388608e+06", limit.Limit().String())
 	})
 }

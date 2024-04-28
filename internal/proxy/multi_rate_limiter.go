@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
-	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -160,6 +159,10 @@ func (m *MultiRateLimiter) GetQuotaStates() ([]milvuspb.QuotaState, []string) {
 func (m *MultiRateLimiter) SetRates(rates []*proxypb.CollectionRate) error {
 	m.quotaStatesMu.Lock()
 	defer m.quotaStatesMu.Unlock()
+
+	// Reset the global limiter rates due to potential changes in configurations.
+	m.globalDDLLimiter = newRateLimiter(true)
+
 	collectionSet := typeutil.NewUniqueSet()
 	for _, collectionRates := range rates {
 		collectionSet.Insert(collectionRates.Collection)
@@ -348,25 +351,6 @@ func (rl *rateLimiter) registerLimiters(globalLevel bool) {
 		limit := ratelimitutil.Limit(r.GetAsFloat())
 		burst := r.GetAsFloat() // use rate as burst, because Limiter is with punishment mechanism, burst is insignificant.
 		rl.limiters.GetOrInsert(internalpb.RateType(rt), ratelimitutil.NewLimiter(limit, burst))
-		onEvent := func(rateType internalpb.RateType) func(*config.Event) {
-			return func(event *config.Event) {
-				f, err := strconv.ParseFloat(r.Formatter(event.Value), 64)
-				if err != nil {
-					log.Info("Error format for rateLimit",
-						zap.String("rateType", rateType.String()),
-						zap.String("key", event.Key),
-						zap.String("value", event.Value),
-						zap.Error(err))
-					return
-				}
-				limit, ok := rl.limiters.Get(rateType)
-				if !ok {
-					return
-				}
-				limit.SetLimit(ratelimitutil.Limit(f))
-			}
-		}(internalpb.RateType(rt))
-		paramtable.Get().Watch(r.Key, config.NewHandler(fmt.Sprintf("rateLimiter-%d", rt), onEvent))
 		log.RatedDebug(30, "RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[rt]),
 			zap.String("rateLimit", ratelimitutil.Limit(r.GetAsFloat()).String()),
