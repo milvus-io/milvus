@@ -231,6 +231,7 @@ func (s *Server) LoadCollection(ctx context.Context, req *querypb.LoadCollection
 		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
+		s.collectionObserver,
 		s.nodeMgr,
 	)
 	s.jobScheduler.Add(loadJob)
@@ -331,6 +332,7 @@ func (s *Server) LoadPartitions(ctx context.Context, req *querypb.LoadPartitions
 		s.cluster,
 		s.targetMgr,
 		s.targetObserver,
+		s.collectionObserver,
 		s.nodeMgr,
 	)
 	s.jobScheduler.Add(loadJob)
