@@ -236,6 +236,7 @@ KmeansClustering::StreamingAssignandUpload(
                                 num_row,
                                 offset);
             auto dataset = GenDataset(num_row, dim, buf.release());
+            dataset->SetIsOwner(true);
             auto res = cluster_node.Assign(*dataset);
             if (!res.has_value()) {
                 PanicInfo(ErrorCode::UnexpectedError,
@@ -346,6 +347,7 @@ KmeansClustering::Run(const Config& config) {
     LOG_INFO("sample done");
 
     auto dataset = GenDataset(train_num, dim, buf.release());
+    dataset->SetIsOwner(true);
 
     LOG_INFO("train data num: {}, dim: {}, num_clusters: {}",
              train_num,
