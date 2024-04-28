@@ -275,6 +275,13 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 		log.Warn("import failed", WrapTaskLog(task, zap.String("reason", resp.GetReason()))...)
 		return
 	}
+
+	collInfo := s.meta.GetCollection(task.GetCollectionID())
+	dbName := ""
+	if collInfo != nil {
+		dbName = collInfo.DatabaseName
+	}
+
 	for _, info := range resp.GetImportSegmentsInfo() {
 		segment := s.meta.GetSegment(info.GetSegmentID())
 		if info.GetImportedRows() <= segment.GetNumOfRows() {
@@ -287,7 +294,9 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 			log.Warn("update import segment rows failed", WrapTaskLog(task, zap.Error(err))...)
 			return
 		}
+
 		metrics.DataCoordBulkVectors.WithLabelValues(
+			dbName,
 			strconv.FormatInt(task.GetCollectionID(), 10),
 		).Add(float64(diff))
 	}

@@ -86,6 +86,9 @@ func getCollectionAndPartitionID(ctx context.Context, r reqPartName) (int64, map
 	if err != nil {
 		return 0, nil, err
 	}
+	if r.GetPartitionName() == "" {
+		return db.dbID, map[int64][]int64{collectionID: {}}, nil
+	}
 	part, err := globalMetaCache.GetPartitionInfo(ctx, r.GetDbName(), r.GetCollectionName(), r.GetPartitionName())
 	if err != nil {
 		return 0, nil, err

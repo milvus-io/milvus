@@ -3188,10 +3188,8 @@ class TestLoadCollection(TestcaseBase):
         insert_res, _ = collection_w.insert(df)
         assert collection_w.num_entities == ct.default_nb
 
-        collection_w.get_replicas(check_task=CheckTasks.err_res,
-                                  check_items={"err_code": 400,
-                                               "err_msg": "failed to get replicas by collection: "
-                                                          "replica not found"})
+        res, _ = collection_w.get_replicas()
+        assert len(res.groups) == 0
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_count_multi_replicas(self):
