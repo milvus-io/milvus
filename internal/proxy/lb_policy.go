@@ -204,11 +204,16 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 		return err
 	}
 
+	// let every request could retry at least twice, which could retry after update shard leader cache
+	retryTimes := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
 	wg, ctx := errgroup.WithContext(ctx)
 	for channel, nodes := range dml2leaders {
 		channel := channel
 		nodes := lo.Map(nodes, func(node nodeInfo, _ int) int64 { return node.nodeID })
-		retryOnReplica := Params.ProxyCfg.RetryTimesOnReplica.GetAsInt()
+		channelRetryTimes := retryTimes
+		if len(nodes) > 0 {
+			channelRetryTimes *= len(nodes)
+		}
 		wg.Go(func() error {
 			return lb.ExecuteWithRetry(ctx, ChannelWorkload{
 				db:             workload.db,
@@ -218,7 +223,7 @@ func (lb *LBPolicyImpl) Execute(ctx context.Context, workload CollectionWorkLoad
 				shardLeaders:   nodes,
 				nq:             workload.nq,
 				exec:           workload.exec,
-				retryTimes:     uint(len(nodes) * retryOnReplica),
+				retryTimes:     uint(channelRetryTimes),
 			})
 		})
 	}
