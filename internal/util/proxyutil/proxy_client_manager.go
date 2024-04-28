@@ -189,6 +189,11 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 					log.Warn("InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
 					return nil
 				}
+
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					return nil
+				}
+
 				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, err)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
