@@ -20,6 +20,14 @@ class MilvusSys:
         self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=60)
         log.debug(f"sys_info: {self.sys_info}")
 
+    def refresh(self):
+        req = milvus_types.GetMetricsRequest(request=sys_info_req)
+        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        req = milvus_types.GetMetricsRequest(request=sys_statistics_req)
+        self.sys_statistics = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        req = milvus_types.GetMetricsRequest(request=sys_logs_req)
+        self.sys_logs = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+
     @property
     def build_version(self):
         """get the first node's build version as milvus build version"""
@@ -84,6 +92,7 @@ class MilvusSys:
     @property
     def nodes(self):
         """get all the nodes in Milvus deployment"""
+        self.refresh()
         all_nodes = json.loads(self.sys_info.response).get('nodes_info')
         online_nodes = [node for node in all_nodes if node["infos"]["has_error"] is False]
         return online_nodes

@@ -1331,10 +1331,10 @@ class QueryChecker(Checker):
 class DeleteChecker(Checker):
     """check delete operations in a dependent thread"""
 
-    def __init__(self, collection_name=None, schema=None):
+    def __init__(self, collection_name=None, schema=None, shards_num=2):
         if collection_name is None:
             collection_name = cf.gen_unique_str("DeleteChecker_")
-        super().__init__(collection_name=collection_name, schema=schema)
+        super().__init__(collection_name=collection_name, schema=schema, shards_num=shards_num)
         res, result = self.c_wrap.create_index(self.float_vector_field_name,
                                                constants.DEFAULT_INDEX_PARAM,
                                                timeout=timeout,
