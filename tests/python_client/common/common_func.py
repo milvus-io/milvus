@@ -741,8 +741,8 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
             insert_list.append(gen_vectors(nb, multiple_dim_array[i], ct.vector_data_type_all[i%3]))
 
     if with_json is False:
-        index = insert_list.index(json_values)
-        del insert_list[index]
+        # index = insert_list.index(json_values)
+        del insert_list[8]
     if auto_id:
         if primary_field == ct.default_int64_field_name:
             index = insert_list.index(int64_values)
