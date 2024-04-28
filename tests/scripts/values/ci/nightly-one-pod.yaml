@@ -2,8 +2,14 @@ metrics:
   serviceMonitor:
     enabled: true
 
-nodeSelector: 
- node-role.kubernetes.io/e2e: ""
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 1
+      preference:
+        matchExpressions:
+        - key: "node-role.kubernetes.io/e2e"
+          operator: "Exists"
 
 tolerations:
 - key: "node-role.kubernetes.io/e2e"
