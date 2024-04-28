@@ -103,6 +103,24 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	if req.GetIsImport() {
 		return s.flushForImport(ctx, req)
 	}
+	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
+	coll, err := s.handler.GetCollection(ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("fail to get collection", zap.Error(err))
+		return &datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if coll == nil {
+		return &datapb.FlushResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID())),
+		}, nil
+	}
+	// channel checkpoints must be gotten before sealSegment, make sure checkpoints is earlier than segment's endts
+	for _, vchannel := range coll.VChannelNames {
+		cp := s.meta.GetChannelCheckpoint(vchannel)
+		channelCPs[vchannel] = cp
+	}
 
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
 	ts, err := s.allocator.allocTimestamp(ctx)
@@ -1610,6 +1628,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			Partitions:     req.GetPartitionIDs(),
 			StartPositions: req.GetStartPositions(),
 			Properties:     properties,
+			VChannelNames:  req.GetVChannels(),
 		}
 		s.meta.AddCollection(collInfo)
 		return merr.Success(), nil

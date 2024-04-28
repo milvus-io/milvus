@@ -87,6 +87,7 @@ type collectionInfo struct {
 	StartPositions []*commonpb.KeyDataPair
 	Properties     map[string]string
 	CreatedAt      Timestamp
+	VChannelNames  []string
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -205,6 +206,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		Partitions:     coll.Partitions,
 		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
 		Properties:     clonedProperties,
+		VChannelNames:  coll.VChannelNames,
 	}
 
 	return cloneColl
