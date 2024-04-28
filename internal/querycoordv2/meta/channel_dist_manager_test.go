@@ -66,7 +66,7 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 	dist := suite.dist
 
 	// Test GetAll
-	channels := dist.GetByFilter(nil)
+	channels := dist.GetByFilter()
 	suite.Len(channels, 4)
 
 	// Test GetByNode
