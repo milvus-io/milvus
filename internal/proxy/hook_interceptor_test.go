@@ -139,6 +139,32 @@ func TestHookInterceptor(t *testing.T) {
 	assert.NoError(t, err)
 }
 
+func TestHookInitPanicError(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	p.Save(p.ProxyCfg.SoPath.Key, "/a/b/hook.so")
+	defer p.Reset(p.ProxyCfg.SoPath.Key)
+	err := initHook()
+	assert.Error(t, err)
+	assert.Panics(t, func() {
+		UnaryServerHookInterceptor()
+	})
+}
+
+func TestHookInitLogError(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	p.Save(p.ProxyCfg.SoPath.Key, "/a/b/hook.so")
+	defer p.Reset(p.ProxyCfg.SoPath.Key)
+	p.Save(p.CommonCfg.PanicWhenPluginFail.Key, "false")
+	defer p.Reset(p.CommonCfg.PanicWhenPluginFail.Key)
+	err := initHook()
+	assert.Error(t, err)
+	assert.NotPanics(t, func() {
+		UnaryServerHookInterceptor()
+	})
+}
+
 func TestDefaultHook(t *testing.T) {
 	d := defaultHook{}
 	assert.NoError(t, d.Init(nil))

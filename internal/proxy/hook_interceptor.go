@@ -86,7 +86,11 @@ func initHook() error {
 
 func UnaryServerHookInterceptor() grpc.UnaryServerInterceptor {
 	if hookError := initHook(); hookError != nil {
-		logger.Error("hook error", zap.String("path", Params.ProxyCfg.SoPath.GetValue()), zap.Error(hookError))
+		logFunc := logger.Warn
+		if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
+			logFunc = logger.Panic
+		}
+		logFunc("hook error", zap.String("path", Params.ProxyCfg.SoPath.GetValue()), zap.Error(hookError))
 		hoo = defaultHook{}
 	}
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
