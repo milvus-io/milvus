@@ -20,18 +20,15 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -82,13 +79,11 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			}()
 
 			if seg.IsLazyLoad() {
-				var timeout time.Duration
-				timeout, err = lazyloadWaitTimeout(ctx)
-				if err != nil {
-					return err
-				}
+				ctx, cancel := withLazyLoadTimeoutContext(ctx)
+				defer cancel()
+
 				var missing bool
-				missing, err = mgr.DiskCache.DoWait(ctx, seg.ID(), timeout, searcher)
+				missing, err = mgr.DiskCache.Do(ctx, seg.ID(), searcher)
 				if missing {
 					accessRecord.CacheMissing()
 				}
@@ -171,13 +166,11 @@ func searchSegmentsStreamly(ctx context.Context,
 			}()
 			if seg.IsLazyLoad() {
 				log.Debug("before doing stream search in DiskCache", zap.Int64("segID", seg.ID()))
-				var timeout time.Duration
-				timeout, err = lazyloadWaitTimeout(ctx)
-				if err != nil {
-					return err
-				}
+				ctx, cancel := withLazyLoadTimeoutContext(ctx)
+				defer cancel()
+
 				var missing bool
-				missing, err = mgr.DiskCache.DoWait(ctx, seg.ID(), timeout, searcher)
+				missing, err = mgr.DiskCache.Do(ctx, seg.ID(), searcher)
 				if missing {
 					accessRecord.CacheMissing()
 				}
@@ -201,20 +194,6 @@ func searchSegmentsStreamly(ctx context.Context,
 		metrics.StreamReduce).Observe(float64(sumReduceDuration.Load().Milliseconds()))
 	log.Debug("stream reduce sum duration:", zap.Duration("duration", sumReduceDuration.Load()))
 	return nil
-}
-
-func lazyloadWaitTimeout(ctx context.Context) (time.Duration, error) {
-	timeout := params.Params.QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
-	deadline, ok := ctx.Deadline()
-	if ok {
-		remain := deadline.Sub(time.Now())
-		if remain <= 0 {
-			return -1, merr.WrapErrServiceInternal("search context deadline exceeded")
-		} else if remain < timeout {
-			timeout = remain
-		}
-	}
-	return timeout, nil
 }
 
 // search will search on the historical segments the target segments in historical.

@@ -25,15 +25,16 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
+	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 var (
 	ErrNoSuchItem     = merr.WrapErrServiceInternal("no such item")
 	ErrNotEnoughSpace = merr.WrapErrServiceInternal("not enough space")
-	ErrTimeOut        = merr.WrapErrServiceInternal("time out")
 )
 
 type cacheItem[K comparable, V any] struct {
@@ -145,13 +146,8 @@ type Cache[K comparable, V any] interface {
 	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
 	// completes.
 	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
-	// Throws `ErrNotEnoughSpace` if there is no room for the operation.
-	Do(ctx context.Context, key K, doer func(V) error) (missing bool, err error)
-	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
-	// completes. The function waits for `timeout` if there is not enough space for the given key.
-	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
-	// Throws `ErrTimeOut` if timed out.
-	DoWait(ctx context.Context, key K, timeout time.Duration, doer func(context.Context, V) error) (missing bool, err error)
+	Do(ctx context.Context, key K, doer func(context.Context, V) error) (missing bool, err error)
+
 	// Get stats
 	Stats() *Stats
 
@@ -163,18 +159,6 @@ type Cache[K comparable, V any] interface {
 	Expire(ctx context.Context, key K) (evicted bool)
 }
 
-type Waiter[K comparable] struct {
-	key K
-	c   *sync.Cond
-}
-
-func newWaiter[K comparable](key K) Waiter[K] {
-	return Waiter[K]{
-		key: key,
-		c:   sync.NewCond(&sync.Mutex{}),
-	}
-}
-
 // lruCache extends the ccache library to provide pinning and unpinning of items.
 type lruCache[K comparable, V any] struct {
 	rwlock sync.RWMutex
@@ -183,7 +167,7 @@ type lruCache[K comparable, V any] struct {
 	accessList     *list.List
 	loaderKeyLocks *lock.KeyLock[K]
 	stats          *Stats
-	waitQueue      *list.List
+	waitNotifier   *syncutil.VersionedNotifier
 
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
@@ -254,7 +238,7 @@ func newLRUCache[K comparable, V any](
 	return &lruCache[K, V]{
 		items:          make(map[K]*list.Element),
 		accessList:     list.New(),
-		waitQueue:      list.New(),
+		waitNotifier:   syncutil.NewVersionedNotifier(),
 		loaderKeyLocks: lock.NewKeyLock[K](),
 		stats:          new(Stats),
 		loader:         loader,
@@ -264,75 +248,27 @@ func newLRUCache[K comparable, V any](
 	}
 }
 
-// Do picks up an item from cache and executes doer. The entry of interest is garented in the cache when doer is executing.
-func (c *lruCache[K, V]) Do(ctx context.Context, key K, doer func(V) error) (bool, error) {
-	item, missing, err := c.getAndPin(ctx, key)
-	if err != nil {
-		return missing, err
-	}
-	defer c.Unpin(key)
-	return missing, doer(item.value)
-}
-
-func (c *lruCache[K, V]) DoWait(ctx context.Context, key K, timeout time.Duration, doer func(context.Context, V) error) (bool, error) {
-	timedWait := func(cond *sync.Cond, timeout time.Duration) error {
-		if timeout <= 0 {
-			return ErrTimeOut // timed out
-		}
-		c := make(chan struct{})
-		go func() {
-			cond.L.Lock()
-			defer cond.L.Unlock()
-			defer close(c)
-			cond.Wait()
-		}()
-		select {
-		case <-c:
-			return nil // completed normally
-		case <-time.After(timeout):
-			return ErrTimeOut // timed out
-		case <-ctx.Done():
-			return ctx.Err() // context timeout
-		}
-	}
-
-	var ele *list.Element
-	defer func() {
-		if ele != nil {
-			c.rwlock.Lock()
-			c.waitQueue.Remove(ele)
-			c.rwlock.Unlock()
-		}
-	}()
-	start := time.Now()
+func (c *lruCache[K, V]) Do(ctx context.Context, key K, doer func(context.Context, V) error) (bool, error) {
 	log := log.Ctx(ctx).With(zap.Any("key", key))
 	for {
+		// Get a listener before getAndPin to avoid missing the notification.
+		listener := c.waitNotifier.Listen(syncutil.VersionedListenAtLatest)
+
 		item, missing, err := c.getAndPin(ctx, key)
 		if err == nil {
 			defer c.Unpin(key)
 			return missing, doer(ctx, item.value)
-		} else if err == ErrNotEnoughSpace {
-			log.Warn("Failed to get disk cache for segment, wait and try again")
-		} else if err == merr.ErrServiceResourceInsufficient {
-			log.Warn("Failed to load segment for insufficient resource, wait and try later")
-		} else if err != nil {
+		} else if errors.Is(err, merr.ErrServiceResourceInsufficient) {
+			log.Warn("Failed to load segment for insufficient resource")
+			return true, err
+		} else if err != ErrNotEnoughSpace {
 			return true, err
 		}
-		if ele == nil {
-			// If no enough space, enqueue the key
-			c.rwlock.Lock()
-			waiter := newWaiter(key)
-			ele = c.waitQueue.PushBack(&waiter)
-			log.Info("push waiter into waiter queue", zap.Any("key", key))
-			c.rwlock.Unlock()
-		}
-		// Wait for the key to be available
-		timeLeft := time.Until(start.Add(timeout))
-		if err = timedWait(ele.Value.(*Waiter[K]).c, timeLeft); err != nil {
-			log.Warn("failed to get item for key",
-				zap.Any("key", key),
-				zap.Int("wait_len", c.waitQueue.Len()),
-				zap.Error(err))
+		log.Warn("Failed to get disk cache for segment, wait and try again", zap.Error(err))
+
+		// wait for the listener to be notified.
+		if err := listener.Wait(ctx); err != nil {
+			log.Warn("failed to get item for key with timeout", zap.Error(context.Cause(ctx)))
 			return true, err
 		}
 	}
@@ -353,20 +289,11 @@ func (c *lruCache[K, V]) Unpin(key K) {
 	item.pinCount.Dec()
 
 	log := log.With(zap.Any("UnPinedKey", key))
-	if item.pinCount.Load() == 0 && c.waitQueue.Len() > 0 {
+	if item.pinCount.Load() == 0 {
 		log.Debug("Unpin item to zero ref, trigger activating waiters")
-		// Notify waiters
-		// collector := c.scavenger.Spare(key)
-		for e := c.waitQueue.Front(); e != nil; e = e.Next() {
-			w := e.Value.(*Waiter[K])
-			log.Info("try to activate waiter", zap.Any("activated_waiter_key", w.key))
-			w.c.Broadcast()
-			// we try best to activate as many waiters as possible every time
-		}
+		c.waitNotifier.NotifyAll()
 	} else {
-		log.Debug("Miss to trigger activating waiters",
-			zap.Int32("PinCount", item.pinCount.Load()),
-			zap.Int("wait_len", c.waitQueue.Len()))
+		log.Debug("Miss to trigger activating waiters", zap.Int32("PinCount", item.pinCount.Load()))
 	}
 }
 
