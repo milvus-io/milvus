@@ -19,24 +19,29 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"math/rand"
+	"os"
+	"strings"
+	"time"
+
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
-	"strings"
-	"time"
 )
 
-func (s *BulkInsertSuite) TestImportDynamicField() {
+func (s *BulkInsertSuite) testImportDynamicField() {
 	const (
 		rowCount = 10000
 	)
@@ -90,12 +95,48 @@ func (s *BulkInsertSuite) TestImportDynamicField() {
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
 	// import
-	importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
+	var files []*internalpb.ImportFile
+	err = os.MkdirAll(c.ChunkManager.RootPath(), os.ModePerm)
 	s.NoError(err)
-	importFile.Paths = lo.Filter(importFile.Paths, func(path string, _ int) bool {
-		return !strings.Contains(path, "$meta")
-	})
-	files := []*internalpb.ImportFile{importFile}
+
+	switch s.fileType {
+	case importutilv2.Numpy:
+		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
+		s.NoError(err)
+		importFile.Paths = lo.Filter(importFile.Paths, func(path string, _ int) bool {
+			return !strings.Contains(path, "$meta")
+		})
+		files = []*internalpb.ImportFile{importFile}
+	case importutilv2.JSON:
+		rowBasedFile := c.ChunkManager.RootPath() + "/" + "test.json"
+		GenerateJSONFile(s.T(), rowBasedFile, schema, rowCount)
+		defer os.Remove(rowBasedFile)
+		files = []*internalpb.ImportFile{
+			{
+				Paths: []string{
+					rowBasedFile,
+				},
+			},
+		}
+	case importutilv2.Parquet:
+		filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
+		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
+			FieldID:  102,
+			Name:     "$meta",
+			DataType: schemapb.DataType_JSON,
+		})
+		err = GenerateParquetFile(filePath, schema, rowCount)
+		s.NoError(err)
+		defer os.Remove(filePath)
+		files = []*internalpb.ImportFile{
+			{
+				Paths: []string{
+					filePath,
+				},
+			},
+		}
+	}
+
 	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
 		Files:          files,
@@ -145,4 +186,19 @@ func (s *BulkInsertSuite) TestImportDynamicField() {
 	err = merr.CheckRPCCall(searchResult, err)
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
+}
+
+func (s *BulkInsertSuite) TestImportDynamicField_JSON() {
+	s.fileType = importutilv2.JSON
+	s.testImportDynamicField()
+}
+
+func (s *BulkInsertSuite) TestImportDynamicField_Numpy() {
+	s.fileType = importutilv2.Numpy
+	s.testImportDynamicField()
+}
+
+func (s *BulkInsertSuite) TestImportDynamicField_Parquet() {
+	s.fileType = importutilv2.Parquet
+	s.testImportDynamicField()
 }
