@@ -402,7 +402,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName))
 
-	log.Debug(rpcReceived(method))
+	log.Info(rpcReceived(method))
 
 	if err := node.sched.ddQueue.Enqueue(act); err != nil {
 		log.Warn(
@@ -413,15 +413,13 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		return merr.Status(err), nil
 	}
 
-	log.Debug(
-		rpcEnqueued(method),
+	log.Info(rpcEnqueued(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()),
 		zap.Uint64("timestamp", request.Base.Timestamp))
 
 	if err := act.WaitToFinish(); err != nil {
-		log.Warn(
-			rpcFailedToWaitToFinish(method),
+		log.Warn(rpcFailedToWaitToFinish(method),
 			zap.Error(err),
 			zap.Uint64("BeginTs", act.BeginTs()),
 			zap.Uint64("EndTs", act.EndTs()))
@@ -430,7 +428,7 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 		return merr.Status(err), nil
 	}
 
-	log.Debug(rpcDone(method),
+	log.Info(rpcDone(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()))
 
