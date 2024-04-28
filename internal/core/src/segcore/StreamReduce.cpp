@@ -179,6 +179,9 @@ void*
 StreamReducerHelper::SerializeMergedResult() {
     std::unique_ptr<SearchResultDataBlobs> search_result_blobs =
         std::make_unique<milvus::segcore::SearchResultDataBlobs>();
+    AssertInfo(num_slice_ > 0,
+               "Wrong state for num_slice in streamReducer, num_slice:{}",
+               num_slice_);
     search_result_blobs->blobs.resize(num_slice_);
     for (int i = 0; i < num_slice_; i++) {
         auto proto = GetSearchResultDataSlice(i);
