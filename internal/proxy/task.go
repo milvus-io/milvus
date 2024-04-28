@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -89,6 +90,7 @@ const (
 	CreateDatabaseTaskName = "CreateCollectionTask"
 	DropDatabaseTaskName   = "DropDatabaseTaskName"
 	ListDatabaseTaskName   = "ListDatabaseTaskName"
+	AlterDatabaseTaskName  = "AlterDatabaseTaskName"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
@@ -2493,5 +2495,77 @@ func (t *ListResourceGroupsTask) Execute(ctx context.Context) error {
 }
 
 func (t *ListResourceGroupsTask) PostExecute(ctx context.Context) error {
+	return nil
+}
+
+type alterDatabaseTask struct {
+	baseTask
+	Condition
+	*milvuspb.AlterDatabaseRequest
+	ctx       context.Context
+	rootCoord types.RootCoordClient
+	result    *commonpb.Status
+}
+
+func (t *alterDatabaseTask) TraceCtx() context.Context {
+	return t.ctx
+}
+
+func (t *alterDatabaseTask) ID() UniqueID {
+	return t.Base.MsgID
+}
+
+func (t *alterDatabaseTask) SetID(uid UniqueID) {
+	t.Base.MsgID = uid
+}
+
+func (t *alterDatabaseTask) Name() string {
+	return AlterDatabaseTaskName
+}
+
+func (t *alterDatabaseTask) Type() commonpb.MsgType {
+	return t.Base.MsgType
+}
+
+func (t *alterDatabaseTask) BeginTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterDatabaseTask) EndTs() Timestamp {
+	return t.Base.Timestamp
+}
+
+func (t *alterDatabaseTask) SetTs(ts Timestamp) {
+	t.Base.Timestamp = ts
+}
+
+func (t *alterDatabaseTask) OnEnqueue() error {
+	if t.Base == nil {
+		t.Base = commonpbutil.NewMsgBase()
+	}
+	return nil
+}
+
+func (t *alterDatabaseTask) PreExecute(ctx context.Context) error {
+	t.Base.MsgType = commonpb.MsgType_AlterCollection
+	t.Base.SourceID = paramtable.GetNodeID()
+
+	return nil
+}
+
+func (t *alterDatabaseTask) Execute(ctx context.Context) error {
+	var err error
+
+	req := &rootcoordpb.AlterDatabaseRequest{
+		Base:       t.AlterDatabaseRequest.GetBase(),
+		DbName:     t.AlterDatabaseRequest.GetDbName(),
+		DbId:       t.AlterDatabaseRequest.GetDbId(),
+		Properties: t.AlterDatabaseRequest.GetProperties(),
+	}
+	t.result, err = t.rootCoord.AlterDatabase(ctx, req)
+	return err
+}
+
+func (t *alterDatabaseTask) PostExecute(ctx context.Context) error {
 	return nil
 }

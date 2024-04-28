@@ -1225,3 +1225,7 @@ func (s *Server) GetImportProgress(ctx context.Context, req *internalpb.GetImpor
 func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
 	return s.proxy.ListImports(ctx, req)
 }
+
+func (s *Server) AlterDatabase(ctx context.Context, req *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterDatabase(ctx, req)
+}
