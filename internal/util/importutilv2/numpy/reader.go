@@ -133,7 +133,10 @@ func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemap
 			}
 			continue
 		}
-		if _, ok := nameToPath[field.GetName()]; !ok && !field.GetIsDynamic() {
+		if _, ok := nameToPath[field.GetName()]; !ok {
+			if field.GetIsDynamic() {
+				continue
+			}
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
 		}
