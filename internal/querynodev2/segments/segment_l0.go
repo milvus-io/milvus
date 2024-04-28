@@ -136,6 +136,10 @@ func (s *L0Segment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorep
 	return nil, nil
 }
 
+func (s *L0Segment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
+	return nil, nil
+}
+
 func (s *L0Segment) Insert(ctx context.Context, rowIDs []int64, timestamps []typeutil.Timestamp, record *segcorepb.InsertRecord) error {
 	return merr.WrapErrIoFailedReason("insert not supported for L0 segment")
 }

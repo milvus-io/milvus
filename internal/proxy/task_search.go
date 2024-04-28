@@ -2,7 +2,6 @@ package proxy
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math"
 	"strconv"
@@ -27,7 +26,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -937,64 +935,6 @@ func selectHighestScoreIndex(subSearchResultData []*schemapb.SearchResultData, s
 		}
 	}
 	return subSearchIdx, resultDataIdx
-}
-
-type rangeSearchParams struct {
-	radius      float64
-	rangeFilter float64
-}
-
-func checkRangeSearchParams(str string, metricType string) error {
-	if len(str) == 0 {
-		// no search params, no need to check
-		return nil
-	}
-	var data map[string]*json.RawMessage
-	err := json.Unmarshal([]byte(str), &data)
-	if err != nil {
-		log.Info("json Unmarshal fail when checkRangeSearchParams")
-		return err
-	}
-	radius, ok := data[radiusKey]
-	// will not do range search, no need to check
-	if !ok {
-		return nil
-	}
-	if radius == nil {
-		return merr.WrapErrParameterInvalidMsg("pass invalid type for radius")
-	}
-	var params rangeSearchParams
-	err = json.Unmarshal(*radius, &params.radius)
-	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("must pass numpy type for radius")
-	}
-
-	rangeFilter, ok := data[rangeFilterKey]
-	// not pass range_filter, no need to check
-	if !ok {
-		return nil
-	}
-
-	if rangeFilter == nil {
-		return merr.WrapErrParameterInvalidMsg("pass invalid type for range_filter")
-	}
-	err = json.Unmarshal(*rangeFilter, &params.rangeFilter)
-	if err != nil {
-		return merr.WrapErrParameterInvalidMsg("must pass numpy type for range_filter")
-	}
-
-	if metric.PositivelyRelated(metricType) {
-		if params.radius >= params.rangeFilter {
-			msg := fmt.Sprintf("metric type '%s', range_filter(%f) must be greater than radius(%f)", metricType, params.rangeFilter, params.radius)
-			return merr.WrapErrParameterInvalidMsg(msg)
-		}
-	} else {
-		if params.radius <= params.rangeFilter {
-			msg := fmt.Sprintf("metric type '%s', range_filter(%f) must be less than radius(%f)", metricType, params.rangeFilter, params.radius)
-			return merr.WrapErrParameterInvalidMsg(msg)
-		}
-	}
-	return nil
 }
 
 func (t *searchTask) TraceCtx() context.Context {

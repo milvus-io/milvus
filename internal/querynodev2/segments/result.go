@@ -23,6 +23,7 @@ import (
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -31,6 +32,7 @@ import (
 	typeutil2 "github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -475,7 +477,10 @@ func getTS(i *internalpb.RetrieveResults, idx int64) uint64 {
 	return 0
 }
 
-func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam) (*segcorepb.RetrieveResults, error) {
+func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam, segments []Segment, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults")
+	defer span.End()
+
 	log.Ctx(ctx).Debug("mergeSegcoreRetrieveResults",
 		zap.Int64("limit", param.limit),
 		zap.Int("resultNum", len(retrieveResults)),
@@ -490,7 +495,10 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	)
 
 	validRetrieveResults := []*segcorepb.RetrieveResults{}
-	for _, r := range retrieveResults {
+	validSegments := make([]Segment, 0, len(segments))
+	selectedOffsets := make([][]int64, 0, len(retrieveResults))
+	selectedIndexes := make([][]int64, 0, len(retrieveResults))
+	for i, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
 		if r == nil || len(r.GetOffset()) == 0 || size == 0 {
@@ -498,6 +506,11 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			continue
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
+		if plan.ignoreNonPk {
+			validSegments = append(validSegments, segments[i])
+		}
+		selectedOffsets = append(selectedOffsets, make([]int64, 0, len(r.GetOffset())))
+		selectedIndexes = append(selectedIndexes, make([]int64, 0, len(r.GetOffset())))
 		loopEnd += size
 	}
 
@@ -505,11 +518,12 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		return ret, nil
 	}
 
+	selected := make([]int, 0, ret.GetAllRetrieveCount())
+
 	if param.limit != typeutil.Unlimited && !param.mergeStopForBest {
 		loopEnd = int(param.limit)
 	}
 
-	ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
@@ -524,16 +538,13 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		pk := typeutil.GetPK(validRetrieveResults[sel].GetIds(), cursors[sel])
 		if _, ok := idSet[pk]; !ok {
 			typeutil.AppendPKs(ret.Ids, pk)
-			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+			selected = append(selected, sel)
+			selectedOffsets[sel] = append(selectedOffsets[sel], validRetrieveResults[sel].GetOffset()[cursors[sel]])
+			selectedIndexes[sel] = append(selectedIndexes[sel], cursors[sel])
 			idSet[pk] = struct{}{}
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
-		}
-
-		// limit retrieve result to avoid oom
-		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
 		}
 
 		cursors[sel]++
@@ -541,6 +552,72 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 
 	if skipDupCnt > 0 {
 		log.Debug("skip duplicated query result while reducing segcore.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
+	}
+
+	if !plan.ignoreNonPk {
+		// target entry already retrieved, don't do this after AppendPKs for better performance. Save the cost everytime
+		// judge the `!plan.ignoreNonPk` condition.
+		_, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
+		defer span2.End()
+		ret.FieldsData = make([]*schemapb.FieldData, len(validRetrieveResults[0].GetFieldsData()))
+		cursors = make([]int64, len(validRetrieveResults))
+		for _, sel := range selected {
+			// cannot use `cursors[sel]` directly, since some of them may be skipped.
+			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), selectedIndexes[sel][cursors[sel]])
+
+			// limit retrieve result to avoid oom
+			if retSize > maxOutputSize {
+				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			}
+
+			cursors[sel]++
+		}
+	} else {
+		// target entry not retrieved.
+		ctx, span2 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-RetrieveByOffsets-AppendFieldData")
+		defer span2.End()
+		segmentResults := make([]*segcorepb.RetrieveResults, len(validRetrieveResults))
+		futures := make([]*conc.Future[any], 0, len(validRetrieveResults))
+		for i, offsets := range selectedOffsets {
+			if len(offsets) == 0 {
+				log.Ctx(ctx).Debug("skip empty retrieve results", zap.Int64("segment", validSegments[i].ID()))
+				continue
+			}
+			idx, theOffsets := i, offsets
+			future := GetSQPool().Submit(func() (any, error) {
+				r, err := validSegments[idx].RetrieveByOffsets(ctx, plan, theOffsets)
+				if err != nil {
+					return nil, err
+				}
+				segmentResults[idx] = r
+				return nil, nil
+			})
+			futures = append(futures, future)
+		}
+		if err := conc.AwaitAll(futures...); err != nil {
+			return nil, err
+		}
+
+		for _, r := range segmentResults {
+			if len(r.GetFieldsData()) != 0 {
+				ret.FieldsData = make([]*schemapb.FieldData, len(r.GetFieldsData()))
+				break
+			}
+		}
+
+		_, span3 := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults-AppendFieldData")
+		defer span3.End()
+		cursors = make([]int64, len(segmentResults))
+		for _, sel := range selected {
+			retSize += typeutil.AppendFieldData(ret.FieldsData, segmentResults[sel].GetFieldsData(), cursors[sel])
+
+			// limit retrieve result to avoid oom
+			if retSize > maxOutputSize {
+				return nil, fmt.Errorf("query results exceed the maxOutputSize Limit %d", maxOutputSize)
+			}
+
+			cursors[sel]++
+		}
 	}
 
 	return ret, nil
@@ -567,8 +644,10 @@ func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 	ctx context.Context,
 	retrieveResults []*segcorepb.RetrieveResults,
 	param *mergeParam,
+	segments []Segment,
+	plan *RetrievePlan,
 ) (*segcorepb.RetrieveResults, error) {
-	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, param)
+	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, param, segments, plan)
 	if err != nil {
 		return nil, err
 	}

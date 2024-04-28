@@ -68,6 +68,9 @@ CreateRetrievePlanByExpr(CCollection c_col,
 void
 DeleteRetrievePlan(CRetrievePlan plan);
 
+bool
+ShouldIgnoreNonPk(CRetrievePlan plan);
+
 #ifdef __cplusplus
 }
 #endif

@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"testing"
+	"time"
 
 	"github.com/minio/minio-go/v7"
 	"github.com/stretchr/testify/assert"
@@ -132,7 +133,7 @@ func TestMinioObjectStorage(t *testing.T) {
 
 		for _, test := range loadWithPrefixTests {
 			t.Run(test.description, func(t *testing.T) {
-				gotk, _, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, false)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, false)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
@@ -146,7 +147,9 @@ func TestMinioObjectStorage(t *testing.T) {
 	t.Run("test list", func(t *testing.T) {
 		testCM, err := newMinioObjectStorageWithConfig(ctx, &config)
 		assert.Equal(t, err, nil)
-		defer testCM.RemoveBucket(ctx, config.bucketName)
+		defer testCM.RemoveBucketWithOptions(ctx, config.bucketName, minio.RemoveBucketOptions{
+			ForceDelete: true,
+		})
 
 		prepareTests := []struct {
 			valid bool
@@ -166,7 +169,7 @@ func TestMinioObjectStorage(t *testing.T) {
 		for _, test := range prepareTests {
 			t.Run(test.key, func(t *testing.T) {
 				err := testCM.PutObject(ctx, config.bucketName, test.key, bytes.NewReader(test.value), int64(len(test.value)))
-				require.Equal(t, test.valid, err == nil)
+				require.Equal(t, test.valid, err == nil, err)
 			})
 		}
 
@@ -183,7 +186,7 @@ func TestMinioObjectStorage(t *testing.T) {
 
 		for _, test := range insertWithPrefixTests {
 			t.Run(fmt.Sprintf("prefix: %s, recursive: %t", test.prefix, test.recursive), func(t *testing.T) {
-				gotk, _, err := testCM.ListObjects(ctx, config.bucketName, test.prefix, test.recursive)
+				gotk, _, err := listAllObjectsWithPrefixAtBucket(ctx, testCM, config.bucketName, test.prefix, test.recursive)
 				assert.NoError(t, err)
 				assert.Equal(t, len(test.expectedValue), len(gotk))
 				for _, key := range gotk {
@@ -225,4 +228,18 @@ func TestMinioObjectStorage(t *testing.T) {
 		assert.NoError(t, err)
 		config.cloudProvider = cloudProvider
 	})
+}
+
+// listAllObjectsWithPrefixAtBucket is a helper function to list all objects with same @prefix at bucket by using `ListWithPrefix`.
+func listAllObjectsWithPrefixAtBucket(ctx context.Context, objectStorage ObjectStorage, bucket string, prefix string, recursive bool) ([]string, []time.Time, error) {
+	var dirs []string
+	var mods []time.Time
+	if err := objectStorage.WalkWithObjects(ctx, bucket, prefix, recursive, func(chunkObjectInfo *ChunkObjectInfo) bool {
+		dirs = append(dirs, chunkObjectInfo.FilePath)
+		mods = append(mods, chunkObjectInfo.ModifyTime)
+		return true
+	}); err != nil {
+		return nil, nil, err
+	}
+	return dirs, mods, nil
 }

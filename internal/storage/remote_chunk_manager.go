@@ -21,7 +21,6 @@ import (
 	"context"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/Azure/azure-sdk-for-go/sdk/azcore"
 	"github.com/Azure/azure-sdk-for-go/sdk/storage/azblob/bloberror"
@@ -46,11 +45,20 @@ const (
 	CloudProviderTencent = "tencent"
 )
 
+// ChunkObjectWalkFunc is the callback function for walking objects.
+// If return false, WalkWithObjects will stop.
+// Otherwise, WalkWithObjects will continue until reach the last object.
+type ChunkObjectWalkFunc func(chunkObjectInfo *ChunkObjectInfo) bool
+
 type ObjectStorage interface {
 	GetObject(ctx context.Context, bucketName, objectName string, offset int64, size int64) (FileReader, error)
 	PutObject(ctx context.Context, bucketName, objectName string, reader io.Reader, objectSize int64) error
 	StatObject(ctx context.Context, bucketName, objectName string) (int64, error)
-	ListObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error)
+	// WalkWithPrefix walks all objects with prefix @prefix, and call walker for each object.
+	// WalkWithPrefix will stop if following conditions met:
+	// 1. cb return false or reach the last object, WalkWithPrefix will stop and return nil.
+	// 2. underlying walking failed or context canceled, WalkWithPrefix will stop and return a error.
+	WalkWithObjects(ctx context.Context, bucketName string, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) error
 	RemoveObject(ctx context.Context, bucketName, objectName string) error
 }
 
@@ -85,9 +93,24 @@ func NewRemoteChunkManager(ctx context.Context, c *config) (*RemoteChunkManager,
 	return mcm, nil
 }
 
+// NewRemoteChunkManagerForTesting is used for testing.
+func NewRemoteChunkManagerForTesting(c *minio.Client, bucket string, rootPath string) *RemoteChunkManager {
+	mcm := &RemoteChunkManager{
+		client:     &MinioObjectStorage{c},
+		bucketName: bucket,
+		rootPath:   rootPath,
+	}
+	return mcm
+}
+
 // RootPath returns minio root path.
 func (mcm *RemoteChunkManager) RootPath() string {
 	return mcm.rootPath
+}
+
+// UnderlyingObjectStorage returns the underlying object storage.
+func (mcm *RemoteChunkManager) UnderlyingObjectStorage() ObjectStorage {
+	return mcm.client
 }
 
 // Path returns the path of minio data if exists.
@@ -184,7 +207,7 @@ func (mcm *RemoteChunkManager) Read(ctx context.Context, filePath string) ([]byt
 			log.Warn("failed to stat object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
 			return err
 		}
-		data, err = Read(object, size)
+		data, err = read(object, size)
 		err = checkObjectStorageError(filePath, err)
 		if err != nil {
 			log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
@@ -214,19 +237,6 @@ func (mcm *RemoteChunkManager) MultiRead(ctx context.Context, keys []string) ([]
 	return objectsValues, el
 }
 
-func (mcm *RemoteChunkManager) ReadWithPrefix(ctx context.Context, prefix string) ([]string, [][]byte, error) {
-	objectsKeys, _, err := mcm.ListWithPrefix(ctx, prefix, true)
-	if err != nil {
-		return nil, nil, err
-	}
-	objectsValues, err := mcm.MultiRead(ctx, objectsKeys)
-	if err != nil {
-		return nil, nil, err
-	}
-
-	return objectsKeys, objectsValues, nil
-}
-
 func (mcm *RemoteChunkManager) Mmap(ctx context.Context, filePath string) (*mmap.ReaderAt, error) {
 	return nil, errors.New("this method has not been implemented")
 }
@@ -244,7 +254,7 @@ func (mcm *RemoteChunkManager) ReadAt(ctx context.Context, filePath string, off 
 	}
 	defer object.Close()
 
-	data, err := Read(object, length)
+	data, err := read(object, length)
 	err = checkObjectStorageError(filePath, err)
 	if err != nil {
 		log.Warn("failed to read object", zap.String("bucket", mcm.bucketName), zap.String("path", filePath), zap.Error(err))
@@ -278,47 +288,41 @@ func (mcm *RemoteChunkManager) MultiRemove(ctx context.Context, keys []string) e
 
 // RemoveWithPrefix removes all objects with the same prefix @prefix from minio.
 func (mcm *RemoteChunkManager) RemoveWithPrefix(ctx context.Context, prefix string) error {
-	removeKeys, _, err := mcm.listObjects(ctx, mcm.bucketName, prefix, true)
-	if err != nil {
+	// removeObject in parallel.
+	runningGroup, _ := errgroup.WithContext(ctx)
+	runningGroup.SetLimit(10)
+	err := mcm.WalkWithPrefix(ctx, prefix, true, func(object *ChunkObjectInfo) bool {
+		key := object.FilePath
+		runningGroup.Go(func() error {
+			err := mcm.removeObject(ctx, mcm.bucketName, key)
+			if err != nil {
+				log.Warn("failed to remove object", zap.String("path", key), zap.Error(err))
+			}
+			return err
+		})
+		return true
+	})
+	// wait all goroutines done.
+	if err := runningGroup.Wait(); err != nil {
 		return err
 	}
-	i := 0
-	maxGoroutine := 10
-	for i < len(removeKeys) {
-		runningGroup, groupCtx := errgroup.WithContext(ctx)
-		for j := 0; j < maxGoroutine && i < len(removeKeys); j++ {
-			key := removeKeys[i]
-			runningGroup.Go(func() error {
-				err := mcm.removeObject(groupCtx, mcm.bucketName, key)
-				if err != nil {
-					log.Warn("failed to remove object", zap.String("path", key), zap.Error(err))
-					return err
-				}
-				return nil
-			})
-			i++
-		}
-		if err := runningGroup.Wait(); err != nil {
-			return err
-		}
-	}
-	return nil
+	// return the iteration error
+	return err
 }
 
-// ListWithPrefix returns objects with provided prefix.
-// by default, if `recursive`=false, list object with return object with path under save level
-// say minio has followinng objects: [a, ab, a/b, ab/c]
-// calling `ListWithPrefix` with `prefix` = a && `recursive` = false will only returns [a, ab]
-// If caller needs all objects without level limitation, `recursive` shall be true.
-func (mcm *RemoteChunkManager) ListWithPrefix(ctx context.Context, prefix string, recursive bool) ([]string, []time.Time, error) {
-	// cannot use ListObjects(ctx, bucketName, Opt{Prefix:prefix, Recursive:true})
-	// if minio has lots of objects under the provided path
-	// recursive = true may timeout during the recursive browsing the objects.
-	// See also: https://github.com/milvus-io/milvus/issues/19095
+func (mcm *RemoteChunkManager) WalkWithPrefix(ctx context.Context, prefix string, recursive bool, walkFunc ChunkObjectWalkFunc) (err error) {
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.TotalLabel).Inc()
+	logger := log.With(zap.String("prefix", prefix), zap.Bool("recursive", recursive))
 
-	// TODO add concurrent call if performance matters
-	// only return current level per call
-	return mcm.listObjects(ctx, mcm.bucketName, prefix, recursive)
+	logger.Info("start walk through objects")
+	if err := mcm.client.WalkWithObjects(ctx, mcm.bucketName, prefix, recursive, walkFunc); err != nil {
+		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.FailLabel).Inc()
+		logger.Warn("failed to walk through objects", zap.Error(err))
+		return err
+	}
+	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataWalkLabel, metrics.SuccessLabel).Inc()
+	logger.Info("finish walk through objects")
+	return nil
 }
 
 func (mcm *RemoteChunkManager) getObject(ctx context.Context, bucketName, objectName string,
@@ -367,22 +371,6 @@ func (mcm *RemoteChunkManager) getObjectSize(ctx context.Context, bucketName, ob
 	return info, err
 }
 
-func (mcm *RemoteChunkManager) listObjects(ctx context.Context, bucketName string, prefix string, recursive bool) ([]string, []time.Time, error) {
-	start := timerecord.NewTimeRecorder("listObjects")
-
-	blobNames, lastModifiedTime, err := mcm.client.ListObjects(ctx, bucketName, prefix, recursive)
-	metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.TotalLabel).Inc()
-	if err == nil {
-		metrics.PersistentDataRequestLatency.WithLabelValues(metrics.DataListLabel).
-			Observe(float64(start.ElapseSpan().Milliseconds()))
-		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.SuccessLabel).Inc()
-	} else {
-		log.Warn("failed to list with prefix", zap.String("bucket", mcm.bucketName), zap.String("prefix", prefix), zap.Error(err))
-		metrics.PersistentDataOpCounter.WithLabelValues(metrics.DataListLabel, metrics.FailLabel).Inc()
-	}
-	return blobNames, lastModifiedTime, err
-}
-
 func (mcm *RemoteChunkManager) removeObject(ctx context.Context, bucketName, objectName string) error {
 	start := timerecord.NewTimeRecorder("removeObject")
 
@@ -420,4 +408,22 @@ func checkObjectStorageError(fileName string, err error) error {
 		return merr.WrapErrIoUnexpectEOF(fileName, err)
 	}
 	return merr.WrapErrIoFailed(fileName, err)
+}
+
+// Learn from file.ReadFile
+func read(r io.Reader, size int64) ([]byte, error) {
+	data := make([]byte, 0, size)
+	for {
+		n, err := r.Read(data[len(data):cap(data)])
+		data = data[:len(data)+n]
+		if err != nil {
+			if err == io.EOF {
+				err = nil
+			}
+			return data, err
+		}
+		if len(data) == cap(data) {
+			return data, nil
+		}
+	}
 }

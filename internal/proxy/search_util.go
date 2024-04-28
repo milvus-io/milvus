@@ -90,11 +90,6 @@ func parseSearchInfo(searchParamsPair []*commonpb.KeyValuePair, schema *schemapb
 		searchParamStr = ""
 	}
 
-	err = checkRangeSearchParams(searchParamStr, metricType)
-	if err != nil {
-		return nil, 0, err
-	}
-
 	// 5. parse group by field
 	groupByFieldName, err := funcutil.GetAttrByKeyFromRepeatedKV(GroupByFieldKey, searchParamsPair)
 	if err != nil {

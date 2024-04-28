@@ -40,6 +40,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -119,6 +121,10 @@ func (dsService *dataSyncService) close() {
 		}
 
 		dsService.cancelFn()
+
+		// clean up metrics
+		pChan := funcutil.ToPhysicalChannel(dsService.vchannelName)
+		metrics.CleanupDataNodeCollectionMetrics(paramtable.GetNodeID(), dsService.collectionID, pChan)
 
 		log.Info("dataSyncService closed")
 	})

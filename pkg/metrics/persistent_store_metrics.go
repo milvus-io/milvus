@@ -22,7 +22,7 @@ const (
 	DataGetLabel    = "get"
 	DataPutLabel    = "put"
 	DataRemoveLabel = "remove"
-	DataListLabel   = "list"
+	DataWalkLabel   = "walk"
 	DataStatLabel   = "stat"
 
 	persistentDataOpType = "persistent_data_op_type"

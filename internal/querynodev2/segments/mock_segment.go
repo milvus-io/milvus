@@ -1163,6 +1163,62 @@ func (_c *MockSegment_Retrieve_Call) RunAndReturn(run func(context.Context, *Ret
 	return _c
 }
 
+// RetrieveByOffsets provides a mock function with given fields: ctx, plan, offsets
+func (_m *MockSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
+	ret := _m.Called(ctx, plan, offsets)
+
+	var r0 *segcorepb.RetrieveResults
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan, []int64) (*segcorepb.RetrieveResults, error)); ok {
+		return rf(ctx, plan, offsets)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *RetrievePlan, []int64) *segcorepb.RetrieveResults); ok {
+		r0 = rf(ctx, plan, offsets)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*segcorepb.RetrieveResults)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *RetrievePlan, []int64) error); ok {
+		r1 = rf(ctx, plan, offsets)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockSegment_RetrieveByOffsets_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RetrieveByOffsets'
+type MockSegment_RetrieveByOffsets_Call struct {
+	*mock.Call
+}
+
+// RetrieveByOffsets is a helper method to define mock.On call
+//   - ctx context.Context
+//   - plan *RetrievePlan
+//   - offsets []int64
+func (_e *MockSegment_Expecter) RetrieveByOffsets(ctx interface{}, plan interface{}, offsets interface{}) *MockSegment_RetrieveByOffsets_Call {
+	return &MockSegment_RetrieveByOffsets_Call{Call: _e.mock.On("RetrieveByOffsets", ctx, plan, offsets)}
+}
+
+func (_c *MockSegment_RetrieveByOffsets_Call) Run(run func(ctx context.Context, plan *RetrievePlan, offsets []int64)) *MockSegment_RetrieveByOffsets_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*RetrievePlan), args[2].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_RetrieveByOffsets_Call) Return(_a0 *segcorepb.RetrieveResults, _a1 error) *MockSegment_RetrieveByOffsets_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockSegment_RetrieveByOffsets_Call) RunAndReturn(run func(context.Context, *RetrievePlan, []int64) (*segcorepb.RetrieveResults, error)) *MockSegment_RetrieveByOffsets_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RowNum provides a mock function with given fields:
 func (_m *MockSegment) RowNum() int64 {
 	ret := _m.Called()

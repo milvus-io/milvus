@@ -438,7 +438,7 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 	}
 
 	insertPrefix := importFile.GetPaths()[0]
-	segmentInsertPaths, _, err := cm.ListWithPrefix(ctx, insertPrefix, false)
+	segmentInsertPaths, _, err := storage.ListAllChunkWithPrefix(ctx, cm, insertPrefix, false)
 	if err != nil {
 		return nil, err
 	}
@@ -450,7 +450,7 @@ func ListBinlogsAndGroupBySegment(ctx context.Context, cm storage.ChunkManager, 
 		return segmentImportFiles, nil
 	}
 	deltaPrefix := importFile.GetPaths()[1]
-	segmentDeltaPaths, _, err := cm.ListWithPrefix(context.Background(), deltaPrefix, false)
+	segmentDeltaPaths, _, err := storage.ListAllChunkWithPrefix(ctx, cm, deltaPrefix, false)
 	if err != nil {
 		return nil, err
 	}

@@ -842,33 +842,13 @@ func (s *Server) GetReplicas(ctx context.Context, req *milvuspb.GetReplicasReque
 
 	replicas := s.meta.ReplicaManager.GetByCollection(req.GetCollectionID())
 	if len(replicas) == 0 {
-		err := merr.WrapErrReplicaNotFound(req.GetCollectionID(), "failed to get replicas by collection")
-		msg := "failed to get replicas, collection not loaded"
-		log.Warn(msg)
-		resp.Status = merr.Status(err)
-		return resp, nil
+		return &milvuspb.GetReplicasResponse{
+			Replicas: make([]*milvuspb.ReplicaInfo, 0),
+		}, nil
 	}
 
 	for _, replica := range replicas {
-		msg := "failed to get replica info"
-		if len(replica.GetNodes()) == 0 {
-			err := merr.WrapErrReplicaNotAvailable(replica.GetID(), "no available nodes in replica")
-			log.Warn(msg,
-				zap.Int64("replica", replica.GetID()),
-				zap.Error(err))
-			resp.Status = merr.Status(err)
-			break
-		}
-
-		info, err := s.fillReplicaInfo(replica, req.GetWithShardNodes())
-		if err != nil {
-			log.Warn(msg,
-				zap.Int64("replica", replica.GetID()),
-				zap.Error(err))
-			resp.Status = merr.Status(err)
-			break
-		}
-		resp.Replicas = append(resp.Replicas, info)
+		resp.Replicas = append(resp.Replicas, s.fillReplicaInfo(replica, req.GetWithShardNodes()))
 	}
 	return resp, nil
 }
@@ -913,9 +893,9 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 
 	channels := s.targetMgr.GetDmChannelsByCollection(req.GetCollectionID(), meta.CurrentTarget)
 	if len(channels) == 0 {
-		msg := "failed to get channels"
-		err := merr.WrapErrCollectionNotLoaded(req.GetCollectionID())
-		log.Warn(msg, zap.Error(err))
+		err := merr.WrapErrCollectionOnRecovering(req.GetCollectionID(),
+			"loaded collection do not found any channel in target, may be in recovery")
+		log.Warn("failed to get channels", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
@@ -930,7 +910,7 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 
 		var channelErr error
 		if len(leaders) == 0 {
-			channelErr = merr.WrapErrChannelLack("channel not subscribed")
+			channelErr = merr.WrapErrChannelLack(channel.GetChannelName(), "channel not subscribed")
 		}
 
 		for _, leader := range leaders {

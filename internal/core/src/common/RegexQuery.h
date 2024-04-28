@@ -13,17 +13,17 @@
 
 #include <string>
 #include <regex>
+#include <boost/regex.hpp>
+#include <utility>
 
 #include "common/EasyAssert.h"
 
 namespace milvus {
-std::string
-ReplaceUnescapedChars(const std::string& input,
-                      char src,
-                      const std::string& replacement);
+bool
+is_special(char c);
 
 std::string
-TranslatePatternMatchToRegex(const std::string& pattern);
+translate_pattern_match_to_regex(const std::string& pattern);
 
 struct PatternMatchTranslator {
     template <typename T>
@@ -37,28 +37,40 @@ struct PatternMatchTranslator {
 template <>
 inline std::string
 PatternMatchTranslator::operator()<std::string>(const std::string& pattern) {
-    return TranslatePatternMatchToRegex(pattern);
+    return translate_pattern_match_to_regex(pattern);
 }
 
 struct RegexMatcher {
     template <typename T>
     inline bool
-    operator()(const std::regex& reg, const T& operand) {
+    operator()(const T& operand) {
         return false;
     }
+
+    explicit RegexMatcher(const std::string& pattern) {
+        r_ = boost::regex(pattern);
+    }
+
+ private:
+    // avoid to construct the regex everytime.
+    boost::regex r_;
 };
 
 template <>
 inline bool
-RegexMatcher::operator()<std::string>(const std::regex& reg,
-                                      const std::string& operand) {
-    return std::regex_match(operand, reg);
+RegexMatcher::operator()(const std::string& operand) {
+    // corner case:
+    // . don't match \n, but .* match \n.
+    // For example,
+    // boost::regex_match("Hello\n", boost::regex("Hello.")) returns false
+    // but
+    // boost::regex_match("Hello\n", boost::regex("Hello.*")) returns true
+    return boost::regex_match(operand, r_);
 }
 
 template <>
 inline bool
-RegexMatcher::operator()<std::string_view>(const std::regex& reg,
-                                           const std::string_view& operand) {
-    return std::regex_match(operand.begin(), operand.end(), reg);
+RegexMatcher::operator()(const std::string_view& operand) {
+    return boost::regex_match(operand.begin(), operand.end(), r_);
 }
 }  // namespace milvus

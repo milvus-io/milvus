@@ -141,6 +141,7 @@ service RootCoord {
     rpc DropDatabase(milvus.DropDatabaseRequest) returns (common.Status) {}
     rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
     rpc DescribeDatabase(DescribeDatabaseRequest) returns(DescribeDatabaseResponse){}
+    rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
 }
 
 message AllocTimestampRequest {
@@ -217,4 +218,11 @@ message DescribeDatabaseResponse {
   string db_name = 2;
   int64 dbID = 3;
   uint64 created_timestamp = 4;
+}
+
+message AlterDatabaseRequest {
+  common.MsgBase base = 1;
+  string db_name = 2;
+  string db_id = 3;
+  repeated common.KeyValuePair properties = 4;
 }

@@ -76,7 +76,7 @@ func (suite *SegCoreCntReducerSuite) TestInvalid() {
 		},
 	}
 
-	_, err := suite.r.Reduce(context.TODO(), results)
+	_, err := suite.r.Reduce(context.TODO(), results, nil, nil)
 	suite.Error(err)
 }
 
@@ -88,7 +88,7 @@ func (suite *SegCoreCntReducerSuite) TestNormalCase() {
 		funcutil.WrapCntToSegCoreResult(4),
 	}
 
-	res, err := suite.r.Reduce(context.TODO(), results)
+	res, err := suite.r.Reduce(context.TODO(), results, nil, nil)
 	suite.NoError(err)
 
 	total, err := funcutil.CntOfSegCoreResult(res)

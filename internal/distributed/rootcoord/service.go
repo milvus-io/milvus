@@ -94,6 +94,10 @@ func (s *Server) ListDatabases(ctx context.Context, request *milvuspb.ListDataba
 	return s.rootCoord.ListDatabases(ctx, request)
 }
 
+func (s *Server) AlterDatabase(ctx context.Context, request *rootcoordpb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	return s.rootCoord.AlterDatabase(ctx, request)
+}
+
 func (s *Server) CheckHealth(ctx context.Context, request *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return s.rootCoord.CheckHealth(ctx, request)
 }

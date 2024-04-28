@@ -26,7 +26,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/testutils"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func generateTestSchema() *schemapb.CollectionSchema {
@@ -128,7 +128,7 @@ func generateTestData(num int) ([]*Blob, error) {
 		field104 = append(field104, f104...)
 		field105 = append(field105, f104...)
 
-		field106 = append(field106, testutils.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4}))
+		field106 = append(field106, typeutil.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4}))
 	}
 
 	data := &InsertData{Data: map[FieldID]FieldData{
@@ -186,7 +186,7 @@ func assertTestData(t *testing.T, i int, value *Value) {
 		f104[j] = byte(i)
 	}
 
-	f106 := testutils.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4})
+	f106 := typeutil.CreateSparseFloatRow([]uint32{0, uint32(18 * i), uint32(284 * i)}, []float32{1.1, 0.3, 2.4})
 
 	assert.EqualValues(t, &Value{
 		int64(i),

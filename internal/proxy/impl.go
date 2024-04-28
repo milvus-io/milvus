@@ -2539,11 +2539,12 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
 
 	successCnt := dr.result.GetDeleteCnt()
-	metrics.ProxyDeleteVectors.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(successCnt))
+
+	dbName := request.DbName
+	nodeID := paramtable.GetStringNodeID()
+	metrics.ProxyDeleteVectors.WithLabelValues(nodeID, dbName).Add(float64(successCnt))
 
 	username := GetCurUserFromContextOrDefault(ctx)
-	nodeID := paramtable.GetStringNodeID()
-	dbName := request.DbName
 	collectionName := request.CollectionName
 	v := Extension.Report(map[string]any{
 		hookutil.OpTypeKey:     hookutil.OpTypeDelete,

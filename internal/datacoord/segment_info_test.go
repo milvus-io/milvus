@@ -96,3 +96,49 @@ func TestCompactionTo(t *testing.T) {
 	assert.True(t, ok)
 	assert.Nil(t, s)
 }
+
+func TestIsDeltaLogExists(t *testing.T) {
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Deltalogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 1,
+						},
+						{
+							LogID: 2,
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.True(t, segment.IsDeltaLogExists(1))
+	assert.True(t, segment.IsDeltaLogExists(2))
+	assert.False(t, segment.IsDeltaLogExists(3))
+	assert.False(t, segment.IsDeltaLogExists(0))
+}
+
+func TestIsStatsLogExists(t *testing.T) {
+	segment := &SegmentInfo{
+		SegmentInfo: &datapb.SegmentInfo{
+			Statslogs: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{
+							LogID: 1,
+						},
+						{
+							LogID: 2,
+						},
+					},
+				},
+			},
+		},
+	}
+	assert.True(t, segment.IsStatsLogExists(1))
+	assert.True(t, segment.IsStatsLogExists(2))
+	assert.False(t, segment.IsStatsLogExists(3))
+	assert.False(t, segment.IsStatsLogExists(0))
+}

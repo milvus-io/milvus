@@ -91,7 +91,7 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup() {
 	manager := ob.meta.ResourceManager
 	rgNames := manager.ListResourceGroups()
 	enableRGAutoRecover := params.Params.QueryCoordCfg.EnableRGAutoRecover.GetAsBool()
-	log.Info("start to check resource group", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
+	log.Debug("start to check resource group", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
 
 	// Check if there is any incoming node.
 	if manager.CheckIncomingNodeNum() > 0 {
@@ -100,10 +100,10 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup() {
 	}
 
 	// Remove all down nodes in resource group manager.
-	log.Info("remove all down nodes in resource group manager...")
+	log.Debug("remove all down nodes in resource group manager...")
 	ob.meta.RemoveAllDownNode()
 
-	log.Info("recover resource groups...")
+	log.Debug("recover resource groups...")
 	// Recover all resource group into expected configuration.
 	for _, rgName := range rgNames {
 		if err := manager.MeetRequirement(rgName); err != nil {
@@ -126,5 +126,5 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup() {
 	if enableRGAutoRecover {
 		utils.RecoverAllCollection(ob.meta)
 	}
-	log.Info("check resource group done", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
+	log.Debug("check resource group done", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
 }
