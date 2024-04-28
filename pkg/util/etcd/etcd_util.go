@@ -28,6 +28,7 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -64,6 +65,9 @@ func GetRemoteEtcdClient(endpoints []string) (*clientv3.Client, error) {
 	return clientv3.New(clientv3.Config{
 		Endpoints:   endpoints,
 		DialTimeout: 5 * time.Second,
+		DialOptions: []grpc.DialOption{
+			grpc.WithBlock(),
+		},
 	})
 }
 
@@ -73,6 +77,9 @@ func GetRemoteEtcdClientWithAuth(endpoints []string, userName, password string) 
 		DialTimeout: 5 * time.Second,
 		Username:    userName,
 		Password:    password,
+		DialOptions: []grpc.DialOption{
+			grpc.WithBlock(),
+		},
 	})
 }
 
@@ -118,6 +125,8 @@ func GetRemoteEtcdSSLClientWithCfg(endpoints []string, certFile string, keyFile 
 	if cfg.TLS.MinVersion == 0 {
 		return nil, errors.Errorf("unknown TLS version,%s", minVersion)
 	}
+
+	cfg.DialOptions = append(cfg.DialOptions, grpc.WithBlock())
 
 	return clientv3.New(cfg)
 }
