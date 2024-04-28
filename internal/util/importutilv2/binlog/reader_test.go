@@ -24,6 +24,7 @@ import (
 	"math/rand"
 	"strconv"
 	"testing"
+	"time"
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
@@ -345,8 +346,24 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 	originalInsertData := createInsertData(suite.T(), schema, suite.numRows)
 	insertLogs := lo.Flatten(lo.Values(insertBinlogs))
 
-	cm.EXPECT().ListWithPrefix(mock.Anything, insertPrefix, mock.Anything).Return(insertLogs, nil, nil)
-	cm.EXPECT().ListWithPrefix(mock.Anything, deltaPrefix, mock.Anything).Return(deltaLogs, nil, nil)
+	cm.EXPECT().WalkWithPrefix(mock.Anything, insertPrefix, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+			for _, filePath := range insertLogs {
+				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+					return nil
+				}
+			}
+			return nil
+		})
+	cm.EXPECT().WalkWithPrefix(mock.Anything, deltaPrefix, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, cowf storage.ChunkObjectWalkFunc) error {
+			for _, filePath := range deltaLogs {
+				if !cowf(&storage.ChunkObjectInfo{FilePath: filePath, ModifyTime: time.Now()}) {
+					return nil
+				}
+			}
+			return nil
+		})
 	for fieldID, paths := range insertBinlogs {
 		field := typeutil.GetField(schema, fieldID)
 		suite.NotNil(field)

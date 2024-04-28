@@ -90,7 +90,7 @@ func (r *reader) init(paths []string, tsStart, tsEnd uint64) error {
 	if len(paths) < 2 {
 		return nil
 	}
-	deltaLogs, _, err := r.cm.ListWithPrefix(context.Background(), paths[1], true)
+	deltaLogs, _, err := storage.ListAllChunkWithPrefix(context.Background(), r.cm, paths[1], true)
 	if err != nil {
 		return err
 	}

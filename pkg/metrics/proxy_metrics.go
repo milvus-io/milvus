@@ -66,7 +66,7 @@ var (
 			Subsystem: typeutil.ProxyRole,
 			Name:      "delete_vectors_count",
 			Help:      "counter of vectors successfully deleted",
-		}, []string{nodeIDLabelName})
+		}, []string{nodeIDLabelName, databaseLabelName})
 
 	// ProxySQLatency record the latency of search successfully.
 	ProxySQLatency = prometheus.NewHistogramVec(
@@ -395,6 +395,10 @@ func CleanupProxyDBMetrics(nodeID int64, dbName string) {
 		databaseLabelName: dbName,
 	})
 	ProxyUpsertVectors.DeletePartialMatch(prometheus.Labels{
+		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
+		databaseLabelName: dbName,
+	})
+	ProxyDeleteVectors.DeletePartialMatch(prometheus.Labels{
 		nodeIDLabelName:   strconv.FormatInt(nodeID, 10),
 		databaseLabelName: dbName,
 	})

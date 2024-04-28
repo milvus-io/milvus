@@ -1688,7 +1688,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.SegmentCheckInterval = ParamItem{
 		Key:          "queryCoord.checkSegmentInterval",
 		Version:      "2.3.0",
-		DefaultValue: "1000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
@@ -1697,7 +1697,7 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval = ParamItem{
 		Key:          "queryCoord.checkChannelInterval",
 		Version:      "2.3.0",
-		DefaultValue: "1000",
+		DefaultValue: "3000",
 		PanicIfEmpty: true,
 		Export:       true,
 	}
@@ -2994,8 +2994,8 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.GCMissingTolerance = ParamItem{
 		Key:          "dataCoord.gc.missingTolerance",
 		Version:      "2.0.0",
-		DefaultValue: "3600",
-		Doc:          "file meta missing tolerance duration in seconds, default to 1hr",
+		DefaultValue: "86400",
+		Doc:          "file meta missing tolerance duration in seconds, default to 24hr(1d)",
 		Export:       true,
 	}
 	p.GCMissingTolerance.Init(base.mgr)

@@ -162,7 +162,7 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel {
 	dist := make([]*meta.DmChannel, 0)
 	for _, nodeID := range replica.GetNodes() {
-		dist = append(dist, c.dist.ChannelDistManager.GetByFilter(meta.WithCollectionID2Channel(replica.GetCollectionID()), meta.WithNodeID2Channel(nodeID))...)
+		dist = append(dist, c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))...)
 	}
 	return dist
 }
@@ -183,7 +183,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 	for _, ch := range dist {
 		leaderView := c.dist.LeaderViewManager.GetLeaderShardView(ch.Node, ch.GetChannelName())
 		if leaderView == nil {
-			log.Info("shard leadview is not ready, skip",
+			log.Info("shard leader view is not ready, skip",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replicaID),
 				zap.Int64("leaderID", ch.Node),

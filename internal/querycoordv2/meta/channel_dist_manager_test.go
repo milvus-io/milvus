@@ -76,26 +76,26 @@ func (suite *ChannelDistManagerSuite) TestGetBy() {
 	}
 
 	// Test GetByCollection
-	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection))
+	channels = dist.GetByCollectionAndFilter(suite.collection)
 	suite.Len(channels, 4)
 	suite.AssertCollection(channels, suite.collection)
-	channels = dist.GetByFilter(WithCollectionID2Channel(-1))
+	channels = dist.GetByCollectionAndFilter(-1)
 	suite.Len(channels, 0)
 
 	// Test GetByNodeAndCollection
 	// 1. Valid node and valid collection
 	for _, node := range suite.nodes {
-		channels := dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(node))
+		channels := dist.GetByCollectionAndFilter(suite.collection, WithNodeID2Channel(node))
 		suite.AssertNode(channels, node)
 		suite.AssertCollection(channels, suite.collection)
 	}
 
 	// 2. Valid node and invalid collection
-	channels = dist.GetByFilter(WithCollectionID2Channel(-1), WithNodeID2Channel(suite.nodes[1]))
+	channels = dist.GetByCollectionAndFilter(-1, WithNodeID2Channel(suite.nodes[1]))
 	suite.Len(channels, 0)
 
 	// 3. Invalid node and valid collection
-	channels = dist.GetByFilter(WithCollectionID2Channel(suite.collection), WithNodeID2Channel(-1))
+	channels = dist.GetByCollectionAndFilter(suite.collection, WithNodeID2Channel(-1))
 	suite.Len(channels, 0)
 }
 

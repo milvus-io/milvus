@@ -54,11 +54,11 @@ class GrowingSegmentRegexQueryTest : public ::testing::Test {
         schema = GenTestSchema();
         seg = CreateGrowingSegment(schema, empty_index_meta);
         raw_str = {
-            "b",
-            "a",
-            "aaa",
-            "abbb",
-            "abcabcabc",
+            "b\n",
+            "a\n",
+            "aaa\n",
+            "abbb\n",
+            "abcabcabc\n",
         };
         raw_json = {
             R"({"int":1})",
@@ -206,11 +206,11 @@ class SealedSegmentRegexQueryTest : public ::testing::Test {
         schema = GenTestSchema();
         seg = CreateSealedSegment(schema);
         raw_str = {
-            "b",
-            "a",
-            "aaa",
-            "abbb",
-            "abcabcabc",
+            "b\n",
+            "a\n",
+            "aaa\n",
+            "abbb\n",
+            "abcabcabc\n",
         };
         raw_json = {
             R"({"int":1})",

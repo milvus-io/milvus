@@ -51,7 +51,15 @@ func (s *BalanceTestSuit) SetupSuite() {
 	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.BalanceCheckInterval.Key, "1000")
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.GracefulStopTimeout.Key, "1")
 
+	// disable compaction
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableCompaction.Key, "false")
+
 	s.Require().NoError(s.SetupEmbedEtcd())
+}
+
+func (s *BalanceTestSuit) TearDownSuite() {
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableCompaction.Key)
+	s.MiniClusterSuite.TearDownSuite()
 }
 
 func (s *BalanceTestSuit) initCollection(collectionName string, replica int, channelNum int, segmentNum int, segmentRowNum int, segmentDeleteNum int) {
