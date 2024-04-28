@@ -297,16 +297,18 @@ func (c *lruCache[K, V]) DoWait(ctx context.Context, key K, timeout time.Duratio
 	}
 
 	var ele *list.Element
+	defer func() {
+		if ele != nil {
+			c.rwlock.Lock()
+			c.waitQueue.Remove(ele)
+			c.rwlock.Unlock()
+		}
+	}()
 	start := time.Now()
 	log := log.Ctx(ctx).With(zap.Any("key", key))
 	for {
 		item, missing, err := c.getAndPin(ctx, key)
 		if err == nil {
-			if ele != nil {
-				c.rwlock.Lock()
-				c.waitQueue.Remove(ele)
-				c.rwlock.Unlock()
-			}
 			defer c.Unpin(key)
 			return missing, doer(ctx, item.value)
 		} else if err == ErrNotEnoughSpace {
