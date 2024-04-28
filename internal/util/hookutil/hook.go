@@ -94,7 +94,11 @@ func InitOnceHook() {
 	initOnce.Do(func() {
 		err := initHook()
 		if err != nil {
-			log.Warn("fail to init hook",
+			logFunc := log.Warn
+			if paramtable.Get().CommonCfg.PanicWhenPluginFail.GetAsBool() {
+				logFunc = log.Panic
+			}
+			logFunc("fail to init hook",
 				zap.String("so_path", paramtable.Get().ProxyCfg.SoPath.GetValue()),
 				zap.Error(err))
 		}

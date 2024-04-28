@@ -244,6 +244,7 @@ type commonConfig struct {
 	TraceLogMode          ParamItem `refreshable:"true"`
 	BloomFilterSize       ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive ParamItem `refreshable:"true"`
+	PanicWhenPluginFail   ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -723,6 +724,14 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
+
+	p.PanicWhenPluginFail = ParamItem{
+		Key:          "common.panicWhenPluginFail",
+		Version:      "2.4.2",
+		DefaultValue: "true",
+		Doc:          "panic or not when plugin fail to init",
+	}
+	p.PanicWhenPluginFail.Init(base.mgr)
 }
 
 type gpuConfig struct {
