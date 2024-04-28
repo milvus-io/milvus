@@ -213,6 +213,10 @@ KmeansClustering::StreamingAssignandUpload(
                 GetRemoteCentroidIdMappingObjectPrefix(segment_id) + "/" +
                     std::string(OFFSET_MAPPING_NAME),
                 remote_paths_to_size);
+            LOG_INFO(
+                "upload segment {} cluster id mapping file with size {} B done",
+                segment_id,
+                byte_size);
         };
 
     LOG_INFO("start upload cluster id mapping file");
@@ -244,10 +248,9 @@ KmeansClustering::StreamingAssignandUpload(
                 reinterpret_cast<const uint32_t*>(res.value()->GetTensor());
 
             auto id_mapping_pb = CentroidIdMappingToPB(
-                id_mapping, segment_ids, 1, num_rows, num_cluster)[0];
+                id_mapping, {segment_id}, 1, num_rows, num_cluster)[0];
             serializeIdMappingAndUpload(segment_id, id_mapping_pb);
         }
-        LOG_INFO("upload segment {} cluster id mapping file done", segment_id);
     }
     LOG_INFO("upload cluster id mapping file done");
     cluster_result_.id_mappings = std::move(remote_paths_to_size);
