@@ -44,7 +44,7 @@ type SyncMeta struct {
 // it processes the sync tasks inside and changes the meta.
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
-	SyncData(ctx context.Context, task Task) *conc.Future[error]
+	SyncData(ctx context.Context, task Task) *conc.Future[struct{}]
 	// GetEarliestPosition returns the earliest position (normally start position) of the processing sync task of provided channel.
 	GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition)
 	// Block allows caller to block tasks of provided segment id.
@@ -104,7 +104,7 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 	}
 }
 
-func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[error] {
+func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[struct{}] {
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
@@ -118,16 +118,16 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[er
 // safeSubmitTask handles submitting task logic with optimistic target check logic
 // when task returns errTargetSegmentNotMatch error
 // perform refetch then retry logic
-func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[error] {
+func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
 
-	return conc.Go[error](func() (error, error) {
+	return conc.Go(func() (struct{}, error) {
 		defer mgr.tasks.Remove(taskKey)
 		for {
 			targetID, err := task.CalcTargetSegment()
 			if err != nil {
-				return err, err
+				return struct{}{}, err
 			}
 			log.Info("task calculated target segment id",
 				zap.Int64("targetID", targetID),
@@ -142,7 +142,7 @@ func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[error] {
 				log.Info("target updated during submitting", zap.Error(err))
 				continue
 			}
-			return err, err
+			return struct{}{}, err
 		}
 	})
 }

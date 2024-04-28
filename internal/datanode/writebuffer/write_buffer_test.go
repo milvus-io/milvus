@@ -357,8 +357,8 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(syncmgr.NewSyncTask(), nil)
-		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(conc.Go[error](func() (error, error) {
-			return nil, nil
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
+			return struct{}{}, nil
 		}))
 		defer func() {
 			s.wb.mut.Lock()
