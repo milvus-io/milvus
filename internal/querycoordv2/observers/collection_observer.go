@@ -259,7 +259,7 @@ func (ob *CollectionObserver) observeLoadStatus(ctx context.Context) {
 				ob.observePartitionLoadStatus(ctx, partition, replicaNum)
 			}
 			partition = ob.meta.GetPartition(partition.PartitionID)
-			if partition.LoadPercentage != 100 {
+			if partition != nil && partition.LoadPercentage != 100 {
 				loaded = false
 			}
 		}
