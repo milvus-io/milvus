@@ -452,6 +452,8 @@ def record_time_when_standby_activated(namespace, release_name, coord_type, time
         log.info(f"Standby {coord_type} pod does not switch standby mode")
 
 
+
+
 if __name__ == '__main__':
     label = "app.kubernetes.io/name=milvus, component=querynode"
     instance_name = get_milvus_instance_name("chaos-testing", "10.96.250.111")

@@ -80,12 +80,14 @@ class MilvusOperator(object):
         del_configs = {}
         if delete_depends:
             del_configs = {'spec.dependencies.etcd.inCluster.deletionPolicy': 'Delete',
-                           'spec.dependencies.pulsar.inCluster.deletionPolicy': 'Delete',
+                           # 'spec.dependencies.pulsar.inCluster.deletionPolicy': 'Delete',
+                           'spec.dependencies.kafka.inCluster.deletionPolicy': 'Delete',
                            'spec.dependencies.storage.inCluster.deletionPolicy': 'Delete'
                            }
         if delete_pvc:
             del_configs.update({'spec.dependencies.etcd.inCluster.pvcDeletion': True,
-                                'spec.dependencies.pulsar.inCluster.pvcDeletion': True,
+                                # 'spec.dependencies.pulsar.inCluster.pvcDeletion': True,
+                                'spec.dependencies.kafka.inCluster.pvcDeletion': True,
                                 'spec.dependencies.storage.inCluster.pvcDeletion': True
                                 })
         if delete_depends or delete_pvc:
@@ -113,6 +115,38 @@ class MilvusOperator(object):
                               version=self.version, namespace=namespace)
         log.debug(f"upgrade milvus with configs: {d_configs}")
         cus_res.patch(release_name, d_configs)
+
+    def rolling_update(self, release_name, new_image_name, namespace='default'):
+        """
+        Method: patch custom resource object to rolling update milvus
+        Params:
+            release_name: release name of milvus
+            namespace: namespace that the milvus is running in
+        """
+        cus_res = CusResource(kind=self.plural, group=self.group,
+                              version=self.version, namespace=namespace)
+        rolling_configs = {'spec.components.enableRollingUpdate': True,
+                           'spec.components.imageUpdateMode': "rollingUpgrade",
+                           'spec.components.image': new_image_name}
+        log.debug(f"rolling update milvus with configs: {rolling_configs}")
+        cus_res.patch(release_name, rolling_configs)
+
+    def scale(self, release_name, component, replicas, namespace='default'):
+        """
+        Method: scale milvus components by replicas
+        Params:
+            release_name: release name of milvus
+            replicas: the number of replicas to scale
+            component: the component to scale, e.g: dataNode, queryNode, indexNode, proxy
+            namespace: namespace that the milvus is running in
+        """
+        cus_res = CusResource(kind=self.plural, group=self.group,
+                              version=self.version, namespace=namespace)
+        component = component.replace('node', 'Node')
+        scale_configs = {f'spec.components.{component}.replicas': replicas}
+        log.info(f"scale milvus with configs: {scale_configs}")
+        self.upgrade(release_name, scale_configs, namespace=namespace)
+        self.wait_for_healthy(release_name, namespace=namespace)
 
     def wait_for_healthy(self, release_name, namespace='default', timeout=600):
         """
@@ -152,3 +186,4 @@ class MilvusOperator(object):
             endpoint = res_object['status']['endpoint']
 
         return endpoint
+
