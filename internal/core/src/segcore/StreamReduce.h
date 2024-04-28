@@ -207,8 +207,8 @@ class StreamReducerHelper {
     std::vector<int64_t> slice_nqs_;
     std::vector<int64_t> slice_topKs_;
     std::vector<SearchResult*> search_results_to_merge_;
-    int64_t num_segments_;
-    int64_t num_slice_;
+    int64_t num_segments_{0};
+    int64_t num_slice_{0};
     std::vector<int64_t> slice_nqs_prefix_sum_;
     std::priority_queue<std::shared_ptr<StreamSearchResultPair>,
                         std::vector<std::shared_ptr<StreamSearchResultPair>>,
@@ -217,6 +217,6 @@ class StreamReducerHelper {
     std::unordered_set<milvus::PkType> pk_set_;
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
-    int64_t total_nq_;
+    int64_t total_nq_{0};
 };
 }  // namespace milvus::segcore
