@@ -2964,6 +2964,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	rc := NewRootCoordMock()
+	paramtable.Init()
 
 	defer rc.Close()
 	ctx := context.Background()
@@ -3029,12 +3030,20 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	}
 
 	t.Run("PreExecute", func(t *testing.T) {
+		defer Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 		var err error
 
 		// test default num partitions
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, common.DefaultPartitionsWithPartitionKey, task.GetNumPartitions())
+
+		Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "16")
+		task.NumPartitions = 0
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(16), task.GetNumPartitions())
+		Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 
 		// test specify num partition without partition key field
 		partitionKeyField.IsPartitionKey = false
@@ -3082,6 +3091,15 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		primaryField.IsPartitionKey = false
+
+		// test partition num too large
+		Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "16")
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 
 		marshaledSchema, err = proto.Marshal(schema)
 		assert.NoError(t, err)
