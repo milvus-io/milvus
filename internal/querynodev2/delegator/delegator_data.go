@@ -129,14 +129,6 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			// panic here, insert failure
 			panic(err)
 		}
-		metrics.QueryNodeNumEntities.WithLabelValues(
-			growing.DatabaseName(),
-			fmt.Sprint(paramtable.GetNodeID()),
-			fmt.Sprint(growing.Collection()),
-			fmt.Sprint(growing.Partition()),
-			growing.Type().String(),
-			"0",
-		).Add(float64(len(insertData.RowIDs)))
 		growing.UpdateBloomFilter(insertData.PrimaryKeys)
 
 		if newGrowingSegment {
