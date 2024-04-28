@@ -607,14 +607,20 @@ func (loader *segmentLoader) Load(ctx context.Context,
 	// continue to wait other task done
 	log.Info("start loading...", zap.Int("segmentNum", len(segments)), zap.Int("afterFilter", len(infos)))
 
-	// Check memory & storage limit
-	resource, concurrencyLevel, err := loader.requestResource(ctx, infos...)
-	if err != nil {
-		log.Warn("request resource failed", zap.Error(err))
-		return nil, err
+	var err error
+	var resource LoadResource
+	var concurrencyLevel int
+	coll := loader.manager.Collection.Get(collectionID)
+	if !isLazyLoad(coll, segmentType) {
+		// Check memory & storage limit
+		// no need to check resource for lazy load here
+		resource, concurrencyLevel, err = loader.requestResource(ctx, infos...)
+		if err != nil {
+			log.Warn("request resource failed", zap.Error(err))
+			return nil, err
+		}
+		defer loader.freeRequest(resource)
 	}
-	defer loader.freeRequest(resource)
-
 	newSegments := typeutil.NewConcurrentMap[int64, Segment]()
 	loaded := typeutil.NewConcurrentMap[int64, Segment]()
 	defer func() {
