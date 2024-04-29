@@ -228,9 +228,6 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		return nil, err
 	}
 	cluster.DataCoord = grpcdatacoord.NewServer(ctx, cluster.factory)
-	if err != nil {
-		return nil, err
-	}
 	cluster.QueryCoord, err = grpcquerycoord.NewServer(ctx, cluster.factory)
 	if err != nil {
 		return nil, err
