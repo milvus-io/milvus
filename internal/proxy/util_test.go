@@ -2107,3 +2107,15 @@ func TestSendReplicateMessagePack(t *testing.T) {
 		SendReplicateMessagePack(ctx, mockStream, &milvuspb.ReleasePartitionsRequest{})
 	})
 }
+
+func TestAppendUserInfoForRPC(t *testing.T) {
+	ctx := GetContext(context.Background(), "root:123456")
+	ctx = AppendUserInfoForRPC(ctx)
+
+	md, ok := metadata.FromOutgoingContext(ctx)
+	assert.True(t, ok)
+	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
+	assert.True(t, ok)
+	expectAuth := crypto.Base64Encode("root:root")
+	assert.Equal(t, expectAuth, authorization[0])
+}

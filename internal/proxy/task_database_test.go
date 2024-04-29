@@ -2,13 +2,17 @@ package proxy
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
+	"google.golang.org/grpc/metadata"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -118,7 +122,7 @@ func TestListDatabaseTask(t *testing.T) {
 	rc := NewRootCoordMock()
 	defer rc.Close()
 
-	ctx := context.Background()
+	ctx := GetContext(context.Background(), "root:123456")
 	task := &listDatabaseTask{
 		Condition: NewTaskCondition(ctx),
 		ListDatabasesRequest: &milvuspb.ListDatabasesRequest{
@@ -149,5 +153,13 @@ func TestListDatabaseTask(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 		assert.Equal(t, UniqueID(0), task.ID())
+
+		taskCtx := AppendUserInfoForRPC(ctx)
+		md, ok := metadata.FromOutgoingContext(taskCtx)
+		assert.True(t, ok)
+		authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
+		assert.True(t, ok)
+		expectAuth := crypto.Base64Encode("root:root")
+		assert.Equal(t, expectAuth, authorization[0])
 	})
 }

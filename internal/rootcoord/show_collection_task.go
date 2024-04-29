@@ -20,9 +20,13 @@ import (
 	"context"
 
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -45,6 +49,79 @@ func (t *showCollectionTask) Prepare(ctx context.Context) error {
 // Execute task execution
 func (t *showCollectionTask) Execute(ctx context.Context) error {
 	t.Rsp.Status = merr.Success()
+
+	getVisibleCollections := func() (typeutil.Set[string], error) {
+		enableAuth := Params.CommonCfg.AuthorizationEnabled.GetAsBool()
+		privilegeColls := typeutil.NewSet[string]()
+		if !enableAuth {
+			privilegeColls.Insert(util.AnyWord)
+			return privilegeColls, nil
+		}
+		curUser, err := contextutil.GetCurUserFromContext(ctx)
+		if err != nil || curUser == util.UserRoot {
+			if err != nil {
+				log.Warn("get current user from context failed", zap.Error(err))
+			}
+			privilegeColls.Insert(util.AnyWord)
+			return privilegeColls, nil
+		}
+		userRoles, err := t.core.meta.SelectUser("", &milvuspb.UserEntity{
+			Name: curUser,
+		}, true)
+		if err != nil {
+			return nil, err
+		}
+		if len(userRoles) == 0 {
+			return privilegeColls, nil
+		}
+		for _, role := range userRoles[0].Roles {
+			if role.GetName() == util.RoleAdmin {
+				privilegeColls.Insert(util.AnyWord)
+				return privilegeColls, nil
+			}
+			entities, err := t.core.meta.SelectGrant("", &milvuspb.GrantEntity{
+				Role:   role,
+				DbName: t.Req.GetDbName(),
+			})
+			if err != nil {
+				return nil, err
+			}
+			for _, entity := range entities {
+				objectType := entity.GetObject().GetName()
+				if objectType == commonpb.ObjectType_Global.String() &&
+					entity.GetGrantor().GetPrivilege().GetName() == commonpb.ObjectPrivilege_PrivilegeAll.String() {
+					privilegeColls.Insert(util.AnyWord)
+					return privilegeColls, nil
+				}
+				if objectType != commonpb.ObjectType_Collection.String() {
+					continue
+				}
+				collectionName := entity.GetObjectName()
+				privilegeColls.Insert(collectionName)
+				if collectionName == util.AnyWord {
+					return privilegeColls, nil
+				}
+			}
+		}
+		return privilegeColls, nil
+	}
+
+	isVisibleCollectionForCurUser := func(collectionName string, visibleCollections typeutil.Set[string]) bool {
+		if visibleCollections.Contain(util.AnyWord) {
+			return true
+		}
+		return visibleCollections.Contain(collectionName)
+	}
+
+	visibleCollections, err := getVisibleCollections()
+	if err != nil {
+		t.Rsp.Status = merr.Status(err)
+		return err
+	}
+	if len(visibleCollections) == 0 {
+		return nil
+	}
+
 	ts := t.Req.GetTimeStamp()
 	if ts == 0 {
 		ts = typeutil.MaxTimestamp
@@ -56,6 +133,9 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 	}
 	for _, coll := range colls {
 		if len(t.Req.GetCollectionNames()) > 0 && !lo.Contains(t.Req.GetCollectionNames(), coll.Name) {
+			continue
+		}
+		if !isVisibleCollectionForCurUser(coll.Name, visibleCollections) {
 			continue
 		}
 
