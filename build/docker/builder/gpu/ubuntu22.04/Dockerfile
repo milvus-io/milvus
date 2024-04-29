@@ -22,7 +22,7 @@ RUN curl https://sh.rustup.rs -sSf | \
 ENV PATH=/root/.cargo/bin:/usr/local/bin:/usr/local/go/bin:$PATH
 
 RUN mkdir /opt/vcpkg &&  \
-    wget -qO- vcpkg.tar.gz https://github.com/milvus-io/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
+    wget -qO- vcpkg.tar.gz https://github.com/microsoft/vcpkg/archive/master.tar.gz | tar --strip-components=1 -xz -C /opt/vcpkg && \
     rm -rf vcpkg.tar.gz
 ENV VCPKG_FORCE_SYSTEM_BINARIES 1
 RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr/local/bin/vcpkg && vcpkg version
