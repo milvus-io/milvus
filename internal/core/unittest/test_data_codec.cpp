@@ -24,8 +24,8 @@
 #include "common/Consts.h"
 #include "common/Json.h"
 #include <cstddef>
-#include <iostream>
-#include <string>
+#include "test_utils/Constants.h"
+#include "test_utils/DataGen.h"
 
 using namespace milvus;
 

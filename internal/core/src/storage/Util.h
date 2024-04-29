@@ -156,7 +156,7 @@ CreateChunkManager(const StorageConfig& storage_config);
 
 FieldDataPtr
 CreateFieldData(const DataType& type,
-                bool nullable,
+                bool nullable = false,
                 int64_t dim = 1,
                 int64_t total_num_rows = 0);
 

@@ -39,7 +39,6 @@ Schema::ParseFrom(const milvus::proto::schema::CollectionSchema& schema_proto) {
         auto field_id = FieldId(child.fieldid());
         auto name = FieldName(child.name());
         auto nullable = child.nullable();
-
         if (field_id.get() < 100) {
             // system field id
             auto is_system =

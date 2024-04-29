@@ -170,7 +170,7 @@ InvertedIndexTantivy<T>::BuildV2(const Config& config) {
         auto total_num_rows = data->num_rows();
         auto col_data = data->GetColumnByName(field_name);
         auto field_data = storage::CreateFieldData(
-            DataType(GetDType<T>()), 0, total_num_rows);
+            DataType(GetDType<T>()), false, 0, total_num_rows);
         field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }

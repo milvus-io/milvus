@@ -400,7 +400,7 @@ inline GeneratedData DataGen(SchemaPtr schema,
                 auto res = GenerateRandomSparseFloatVector(
                     N, kTestSparseDim, kTestSparseVectorDensity, seed);
                 auto array = milvus::segcore::CreateDataArrayFrom(
-                    res.get(), N, field_meta);
+                    res.get(), nullptr, N, field_meta);
                 insert_data->mutable_fields_data()->AddAllocated(
                     array.release());
                 break;

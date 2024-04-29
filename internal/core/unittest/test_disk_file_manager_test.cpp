@@ -104,7 +104,8 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
         auto buf = std::unique_ptr<uint8_t[]>(new uint8_t[file_size]);
         lcm->Read(file, buf.get(), file_size);
 
-        auto index = milvus::storage::CreateFieldData(storage::DataType::INT8);
+        auto index =
+            milvus::storage::CreateFieldData(storage::DataType::INT8, false);
         index->FillFieldData(buf.get(), file_size);
         auto rows = index->get_num_rows();
         auto rawData = (uint8_t*)(index->Data());

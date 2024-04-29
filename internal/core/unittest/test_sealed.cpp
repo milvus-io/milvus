@@ -862,7 +862,7 @@ TEST(Sealed, LoadScalarIndex) {
 
     LoadFieldDataInfo row_id_info;
     FieldMeta row_id_field_meta(
-        FieldName("RowID"), RowFieldID, DataType::INT64);
+        FieldName("RowID"), RowFieldID, DataType::INT64, false);
     auto field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.row_ids_.data(), N);
@@ -872,7 +872,7 @@ TEST(Sealed, LoadScalarIndex) {
 
     LoadFieldDataInfo ts_info;
     FieldMeta ts_field_meta(
-        FieldName("Timestamp"), TimestampFieldID, DataType::INT64);
+        FieldName("Timestamp"), TimestampFieldID, DataType::INT64, false);
     field_data =
         std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(dataset.timestamps_.data(), N);
