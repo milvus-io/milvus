@@ -87,6 +87,9 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 				if missing {
 					accessRecord.CacheMissing()
 				}
+				if err != nil {
+					log.Warn("failed to do search for disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
+				}
 				return err
 			}
 			return searcher(ctx, seg)
@@ -175,7 +178,7 @@ func searchSegmentsStreamly(ctx context.Context,
 					accessRecord.CacheMissing()
 				}
 				if err != nil {
-					log.Error("failed to do search for disk cache", zap.Int64("seg_id", seg.ID()), zap.Error(err))
+					log.Warn("failed to do search for disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
 				}
 				log.Debug("after doing stream search in DiskCache", zap.Int64("segID", seg.ID()), zap.Error(err))
 				return err

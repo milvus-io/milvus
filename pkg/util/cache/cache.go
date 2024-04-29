@@ -25,7 +25,6 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
-	"github.com/cockroachdb/errors"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -258,9 +257,6 @@ func (c *lruCache[K, V]) Do(ctx context.Context, key K, doer func(context.Contex
 		if err == nil {
 			defer c.Unpin(key)
 			return missing, doer(ctx, item.value)
-		} else if errors.Is(err, merr.ErrServiceResourceInsufficient) {
-			log.Warn("Failed to load segment for insufficient resource")
-			return true, err
 		} else if err != ErrNotEnoughSpace {
 			return true, err
 		}

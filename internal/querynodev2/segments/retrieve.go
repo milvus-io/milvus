@@ -82,6 +82,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 				if missing {
 					accessRecord.CacheMissing()
 				}
+				if err != nil {
+					log.Warn("failed to do query disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
+				}
 				return err
 			}
 			return retriever(ctx, seg)
