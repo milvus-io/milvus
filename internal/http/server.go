@@ -91,7 +91,7 @@ func registerDefaults() {
 func RegisterStopComponent(triggerComponentStop func(role string) error) {
 	// register restful api to trigger stop
 	Register(&Handler{
-		Path: TriggerStopPath,
+		Path: RouteTriggerStopPath,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
 			role := req.URL.Query().Get("role")
 			log.Info("start to trigger component stop", zap.String("role", role))
@@ -111,7 +111,7 @@ func RegisterStopComponent(triggerComponentStop func(role string) error) {
 func RegisterCheckComponentReady(checkActive func(role string) error) {
 	// register restful api to check component ready
 	Register(&Handler{
-		Path: CheckComponentReady,
+		Path: RouteCheckComponentReady,
 		HandlerFunc: func(w http.ResponseWriter, req *http.Request) {
 			role := req.URL.Query().Get("role")
 			log.Info("start to check component ready", zap.String("role", role))

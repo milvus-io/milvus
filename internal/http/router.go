@@ -28,8 +28,33 @@ const EventLogRouterPath = "/eventlog"
 // ExprPath is path for expression.
 const ExprPath = "/expr"
 
-// TriggerStopPath is path for trigger component stop
-const TriggerStopPath = "/stop"
+const RootPath = "/"
 
-// TriggerStopPath is path for trigger component stop
-const CheckComponentReady = "/check/ready"
+// Prometheus restful api path
+const (
+	MetricsPath        = "/metrics"
+	MetricsDefaultPath = "/metrics_default"
+)
+
+// for every component, register it's own api to trigger stop and check ready
+const (
+	RouteTriggerStopPath     = "/management/stop"
+	RouteCheckComponentReady = "/management/check/ready"
+)
+
+// proxy management restful api root path
+const (
+	RouteGcPause  = "/management/datacoord/garbage_collection/pause"
+	RouteGcResume = "/management/datacoord/garbage_collection/resume"
+
+	RouteSuspendQueryCoordBalance = "/management/querycoord/balance/suspend"
+	RouteResumeQueryCoordBalance  = "/management/querycoord/balance/resume"
+	RouteTransferSegment          = "/management/querycoord/transfer/segment"
+	RouteTransferChannel          = "/management/querycoord/transfer/channel"
+
+	RouteSuspendQueryNode           = "/management/querycoord/node/suspend"
+	RouteResumeQueryNode            = "/management/querycoord/node/resume"
+	RouteListQueryNode              = "/management/querycoord/node/list"
+	RouteGetQueryNodeDistribution   = "/management/querycoord/distribution/get"
+	RouteCheckQueryNodeDistribution = "/management/querycoord/distribution/check"
+)

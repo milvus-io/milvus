@@ -253,11 +253,11 @@ func (mr *MilvusRoles) setupLogger() {
 func setupPrometheusHTTPServer(r *internalmetrics.MilvusRegistry) {
 	log.Info("setupPrometheusHTTPServer")
 	http.Register(&http.Handler{
-		Path:    "/metrics",
+		Path:    http.MetricsPath,
 		Handler: promhttp.HandlerFor(r, promhttp.HandlerOpts{}),
 	})
 	http.Register(&http.Handler{
-		Path:    "/metrics_default",
+		Path:    http.MetricsDefaultPath,
 		Handler: promhttp.Handler(),
 	})
 }
