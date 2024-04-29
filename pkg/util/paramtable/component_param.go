@@ -979,6 +979,9 @@ type proxyConfig struct {
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
 	PartitionNameRegexp          ParamItem `refreshable:"true"`
 
+	SkipAutoIDCheck       ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck ParamItem `refreshable:"true"`
+
 	AccessLog AccessLogConfig
 
 	// connection manager
@@ -1281,6 +1284,22 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall use partition name as regexp when searching",
 	}
 	p.PartitionNameRegexp.Init(base.mgr)
+
+	p.SkipAutoIDCheck = ParamItem{
+		Key:          "proxy.skipAutoIDCheck",
+		Version:      "2.4.1",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy shall skip auto id check when inserting data",
+	}
+	p.SkipAutoIDCheck.Init(base.mgr)
+
+	p.SkipPartitionKeyCheck = ParamItem{
+		Key:          "proxy.skipPartitionKeyCheck",
+		Version:      "2.4.1",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
+	}
+	p.SkipPartitionKeyCheck.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
