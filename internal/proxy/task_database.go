@@ -205,6 +205,7 @@ func (ldt *listDatabaseTask) PreExecute(ctx context.Context) error {
 
 func (ldt *listDatabaseTask) Execute(ctx context.Context) error {
 	var err error
+	ctx = AppendUserInfoForRPC(ctx)
 	ldt.result, err = ldt.rootCoord.ListDatabases(ctx, ldt.ListDatabasesRequest)
 	return err
 }

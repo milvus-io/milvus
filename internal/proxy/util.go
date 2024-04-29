@@ -870,25 +870,7 @@ func ValidatePrivilege(entity string) error {
 }
 
 func GetCurUserFromContext(ctx context.Context) (string, error) {
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return "", fmt.Errorf("fail to get md from the context")
-	}
-	authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
-	if !ok || len(authorization) < 1 {
-		return "", fmt.Errorf("fail to get authorization from the md, %s:[token]", strings.ToLower(util.HeaderAuthorize))
-	}
-	token := authorization[0]
-	rawToken, err := crypto.Base64Decode(token)
-	if err != nil {
-		return "", fmt.Errorf("fail to decode the token, token: %s", token)
-	}
-	secrets := strings.SplitN(rawToken, util.CredentialSeperator, 2)
-	if len(secrets) < 2 {
-		return "", fmt.Errorf("fail to get user info from the raw token, raw token: %s", rawToken)
-	}
-	username := secrets[0]
-	return username, nil
+	return contextutil.GetCurUserFromContext(ctx)
 }
 
 func GetCurDBNameFromContextOrDefault(ctx context.Context) string {
@@ -912,6 +894,17 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 	authKey := strings.ToLower(util.HeaderAuthorize)
 	authValue := crypto.Base64Encode(originValue)
 	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
+}
+
+func AppendUserInfoForRPC(ctx context.Context) context.Context {
+	curUser, _ := GetCurUserFromContext(ctx)
+	if curUser != "" {
+		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeperator, curUser)
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authValue := crypto.Base64Encode(originValue)
+		ctx = metadata.AppendToOutgoingContext(ctx, authKey, authValue)
+	}
+	return ctx
 }
 
 func GetRole(username string) ([]string, error) {
