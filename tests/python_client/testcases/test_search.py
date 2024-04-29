@@ -7743,7 +7743,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         expected: the return distance equals to the computed value
         """
         # 1. initialize with binary data
-        dim = 44
+        dim = 48
         auto_id = False
         collection_w, _, binary_raw_vector, insert_ids, time_stamp = self.init_collection_general(prefix, True, 2,
                                                                                                   is_binary=True,
@@ -7827,7 +7827,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         expected: the return distance equals to the computed value
         """
         # 1. initialize with binary data
-        dim = 77
+        dim = 80
         auto_id = True
         collection_w, _, binary_raw_vector, insert_ids = self.init_collection_general(prefix, True, 2,
                                                                                       is_binary=True,
