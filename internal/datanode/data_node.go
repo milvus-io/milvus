@@ -83,7 +83,6 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
 	ctx              context.Context
-	serverID         int64
 	cancel           context.CancelFunc
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
@@ -129,7 +128,7 @@ type DataNode struct {
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64) *DataNode {
+func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
@@ -140,7 +139,6 @@ func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64
 		rootCoord:          nil,
 		dataCoord:          nil,
 		factory:            factory,
-		serverID:           serverID,
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
@@ -228,10 +226,10 @@ func (node *DataNode) initRateCollector() error {
 }
 
 func (node *DataNode) GetNodeID() int64 {
-	if node.serverID == 0 && node.session != nil {
+	if node.session != nil {
 		return node.session.ServerID
 	}
-	return node.serverID
+	return paramtable.GetNodeID()
 }
 
 func (node *DataNode) Init() error {
@@ -246,7 +244,7 @@ func (node *DataNode) Init() error {
 			return
 		}
 
-		serverID := node.session.ServerID
+		serverID := node.GetNodeID()
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
 
 		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, serverID)

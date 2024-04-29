@@ -466,6 +466,13 @@ func (s *Server) startDataCoord() {
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
 }
 
+func (s *Server) GetServerID() int64 {
+	if s.session != nil {
+		return s.session.GetServerID()
+	}
+	return paramtable.GetNodeID()
+}
+
 func (s *Server) afterStart() {}
 
 func (s *Server) initCluster() error {
