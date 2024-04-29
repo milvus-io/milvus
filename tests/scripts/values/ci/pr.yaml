@@ -2,8 +2,14 @@ metrics:
   serviceMonitor:
     enabled: true
 
-nodeSelector: 
- node-role.kubernetes.io/e2e: ""
+affinity:
+  nodeAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+    - weight: 1
+      preference:
+        matchExpressions:
+        - key: "node-role.kubernetes.io/e2e"
+          operator: "Exists"
 
 tolerations:
 - key: "node-role.kubernetes.io/e2e"
@@ -73,8 +79,14 @@ pulsar:
   components:
     autorecovery: false
   proxy:
-    nodeSelector:
-      node-role.kubernetes.io/e2e: ""
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+            - key: "node-role.kubernetes.io/e2e"
+              operator: "Exists"
 
     tolerations:
     - key: "node-role.kubernetes.io/e2e"
@@ -96,8 +108,14 @@ pulsar:
         memory: "100Mi"
         cpu: "0.1"
   broker:
-    nodeSelector:
-      node-role.kubernetes.io/e2e: ""
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+            - key: "node-role.kubernetes.io/e2e"
+              operator: "Exists"
 
     tolerations:
     - key: "node-role.kubernetes.io/e2e"
@@ -131,8 +149,14 @@ pulsar:
       backlogQuotaDefaultRetentionPolicy: producer_exception
 
   bookkeeper:
-    nodeSelector:
-      node-role.kubernetes.io/e2e: ""
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+            - key: "node-role.kubernetes.io/e2e"
+              operator: "Exists"
 
     tolerations:
     - key: "node-role.kubernetes.io/e2e"
@@ -165,8 +189,14 @@ pulsar:
         memory: "4Gi"
 
   zookeeper:
-    nodeSelector:
-      node-role.kubernetes.io/e2e: ""
+    affinity:
+      nodeAffinity:
+        preferredDuringSchedulingIgnoredDuringExecution:
+        - weight: 1
+          preference:
+            matchExpressions:
+            - key: "node-role.kubernetes.io/e2e"
+              operator: "Exists"
 
     tolerations:
     - key: "node-role.kubernetes.io/e2e"
@@ -191,8 +221,14 @@ pulsar:
         cpu: "0.3"
         memory: "512Mi"
 kafka:
-  nodeSelector:
-    node-role.kubernetes.io/e2e: ""
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: "node-role.kubernetes.io/e2e"
+            operator: "Exists"
   tolerations:
   - key: "node-role.kubernetes.io/e2e"
     operator: "Exists"
@@ -203,16 +239,20 @@ kafka:
       cpu: "0.5"
       memory: "1Gi"
   zookeeper:
-
     replicaCount: 1
     resources:
       requests:
         cpu: "0.3"
         memory: "512Mi"
 etcd:
-  nodeSelector:
-    node-role/nvme: "true"
-    node-role.kubernetes.io/e2e: ""
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: "node-role.kubernetes.io/e2e"
+            operator: "Exists"
 
   tolerations:
   - key: "node-role.kubernetes.io/e2e"
@@ -226,8 +266,14 @@ etcd:
       cpu: "0.3"
       memory: "100Mi"
 minio:
-  nodeSelector:
-    node-role.kubernetes.io/e2e: ""
+  affinity:
+    nodeAffinity:
+      preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 1
+        preference:
+          matchExpressions:
+          - key: "node-role.kubernetes.io/e2e"
+            operator: "Exists"
 
   tolerations:
   - key: "node-role.kubernetes.io/e2e"
