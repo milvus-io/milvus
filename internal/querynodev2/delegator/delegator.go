@@ -873,6 +873,8 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		go sd.watchTSafe()
 	}
 	log.Info("finish build new shardDelegator")
-	sd.maybeReloadPartitionStats(ctx)
+	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
+		sd.maybeReloadPartitionStats(ctx)
+	}
 	return sd, nil
 }
