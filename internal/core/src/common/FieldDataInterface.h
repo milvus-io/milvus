@@ -244,8 +244,8 @@ class FieldDataImpl : public FieldDataBase {
 
     int64_t
     ValidDataSize() const override {
-        int byteSize = (length() + 7) / 8;
         if (nullable_) {
+            int byteSize = (length() + 7) / 8;
             return sizeof(uint8_t) * byteSize;
         }
         return 0;
@@ -318,7 +318,7 @@ class FieldDataImpl : public FieldDataBase {
         return null_count;
     }
 
-    virtual bool
+    bool
     is_null(ssize_t offset) const override {
         std::shared_lock lck(tell_mutex_);
         if (!nullable_) {

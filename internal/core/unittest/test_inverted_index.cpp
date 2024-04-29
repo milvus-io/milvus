@@ -330,7 +330,7 @@ test_string() {
         data.push_back(std::to_string(rand()));
     }
 
-    auto field_data = storage::CreateFieldData(dtype);
+    auto field_data = storage::CreateFieldData(dtype, false);
     field_data->FillFieldData(data.data(), data.size());
     storage::InsertData insert_data(field_data);
     insert_data.SetFieldDataMeta(field_meta);

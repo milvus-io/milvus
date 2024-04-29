@@ -32,7 +32,7 @@ prepareSegmentSystemFieldData(const std::unique_ptr<SegmentSealed>& segment,
                               size_t row_count,
                               GeneratedData& data_set) {
     auto field_data =
-        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(data_set.row_ids_.data(), row_count);
     auto field_data_info =
         FieldDataInfo{RowFieldID.get(),
@@ -40,7 +40,8 @@ prepareSegmentSystemFieldData(const std::unique_ptr<SegmentSealed>& segment,
                       std::vector<milvus::FieldDataPtr>{field_data}};
     segment->LoadFieldData(RowFieldID, field_data_info);
 
-    field_data = std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64);
+    field_data =
+        std::make_shared<milvus::FieldData<int64_t>>(DataType::INT64, false);
     field_data->FillFieldData(data_set.timestamps_.data(), row_count);
     field_data_info =
         FieldDataInfo{TimestampFieldID.get(),

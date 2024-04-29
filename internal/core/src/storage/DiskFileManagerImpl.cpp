@@ -741,7 +741,7 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
             }
             auto col_data = data->GetColumnByName(field_name);
             auto field_data =
-                storage::CreateFieldData(field_type, 1, total_num_rows);
+                storage::CreateFieldData(field_type, false, 1, total_num_rows);
             field_data->FillFieldData(col_data);
             field_datas.emplace_back(field_data);
         }
