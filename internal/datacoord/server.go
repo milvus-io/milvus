@@ -1154,6 +1154,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		Properties:     properties,
 		CreatedAt:      resp.GetCreatedTimestamp(),
 		DatabaseName:   resp.GetDbName(),
+		VChannelNames:  resp.GetVirtualChannelNames(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

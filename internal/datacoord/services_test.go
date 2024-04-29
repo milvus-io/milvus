@@ -789,6 +789,32 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 	s.EqualValues(segID, ids[0])
 }
 
+func (s *ServerSuite) TestFlush_CollectionNotExist() {
+	req := &datapb.FlushRequest{
+		Base: &commonpb.MsgBase{
+			MsgType:   commonpb.MsgType_Flush,
+			MsgID:     0,
+			Timestamp: 0,
+			SourceID:  0,
+		},
+		DbID:         0,
+		CollectionID: 0,
+	}
+
+	resp, err := s.testServer.Flush(context.TODO(), req)
+	s.NoError(err)
+	s.EqualValues(commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+
+	mockHandler := NewNMockHandler(s.T())
+	mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+		Return(nil, errors.New("mock error"))
+	s.testServer.handler = mockHandler
+
+	resp2, err2 := s.testServer.Flush(context.TODO(), req)
+	s.NoError(err2)
+	s.EqualValues(commonpb.ErrorCode_UnexpectedError, resp2.GetStatus().GetErrorCode())
+}
+
 func (s *ServerSuite) TestFlush_ClosedServer() {
 	s.TearDownTest()
 	req := &datapb.FlushRequest{
@@ -822,6 +848,7 @@ func (s *ServerSuite) TestFlush_RollingUpgrade() {
 		Return(merr.WrapErrServiceUnimplemented(grpcStatus.Error(codes.Unimplemented, "mock grpc unimplemented error")))
 	mockCluster.EXPECT().Close().Maybe()
 	s.testServer.cluster = mockCluster
+	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
 	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
 		1: {"channel-1"},
 	}).Once()

@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -1416,6 +1417,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	flushColl2Segments := make(map[string]*schemapb.LongArray)
 	coll2SealTimes := make(map[string]int64)
 	coll2FlushTs := make(map[string]Timestamp)
+	channelCps := make(map[string]*msgpb.MsgPosition)
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
 		if err != nil {
@@ -1439,6 +1441,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
 		coll2SealTimes[collName] = resp.GetTimeOfSeal()
 		coll2FlushTs[collName] = resp.GetFlushTs()
+		channelCps = resp.GetChannelCps()
 	}
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushRequest)
 	t.result = &milvuspb.FlushResponse{
@@ -1448,6 +1451,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		FlushCollSegIDs: flushColl2Segments,
 		CollSealTimes:   coll2SealTimes,
 		CollFlushTs:     coll2FlushTs,
+		ChannelCps:      channelCps,
 	}
 	return nil
 }

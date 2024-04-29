@@ -145,6 +145,7 @@ message FlushResponse {
   repeated int64 flushSegmentIDs = 5; // old flushed segment
   int64 timeOfSeal = 6;
   uint64 flush_ts = 7;
+  map<string, msg.MsgPosition> channel_cps = 8;
 }
 
 message FlushChannelsRequest {
@@ -634,6 +635,8 @@ message AlterCollectionRequest {
   repeated int64 partitionIDs = 3;
   repeated common.KeyDataPair start_positions = 4;
   repeated common.KeyValuePair properties = 5;
+  int64  dbID = 6;
+  repeated string vChannels = 7;
 }
 
 message GcConfirmRequest {
