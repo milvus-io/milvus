@@ -497,18 +497,17 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 
 	var searchResult SearchResult
 	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
-		tr := timerecord.NewTimeRecorder("cgoSearch")
-		status = C.Search(traceCtx,
-			s.ptr,
-			searchReq.plan.cSearchPlan,
-			searchReq.cPlaceholderGroup,
-			C.uint64_t(searchReq.mvccTimestamp),
-			&searchResult.cSearchResult,
-		)
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		return nil, nil
-	}).Await()
+
+	tr := timerecord.NewTimeRecorder("cgoSearch")
+	status = C.Search(traceCtx,
+		s.ptr,
+		searchReq.plan.cSearchPlan,
+		searchReq.cPlaceholderGroup,
+		C.uint64_t(searchReq.mvccTimestamp),
+		&searchResult.cSearchResult,
+	)
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+
 	if err := HandleCStatus(ctx, &status, "Search failed",
 		zap.Int64("collectionID", s.Collection()),
 		zap.Int64("segmentID", s.ID()),
@@ -540,22 +539,20 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	maxLimitSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	var retrieveResult RetrieveResult
 	var status C.CStatus
-	GetSQPool().Submit(func() (any, error) {
-		ts := C.uint64_t(plan.Timestamp)
-		tr := timerecord.NewTimeRecorder("cgoRetrieve")
-		status = C.Retrieve(traceCtx,
-			s.ptr,
-			plan.cRetrievePlan,
-			ts,
-			&retrieveResult.cRetrieveResult,
-			C.int64_t(maxLimitSize),
-			C.bool(plan.ignoreNonPk))
 
-		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
-			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		log.Debug("cgo retrieve done", zap.Duration("timeTaken", tr.ElapseSpan()))
-		return nil, nil
-	}).Await()
+	ts := C.uint64_t(plan.Timestamp)
+	tr := timerecord.NewTimeRecorder("cgoRetrieve")
+	status = C.Retrieve(traceCtx,
+		s.ptr,
+		plan.cRetrievePlan,
+		ts,
+		&retrieveResult.cRetrieveResult,
+		C.int64_t(maxLimitSize),
+		C.bool(plan.ignoreNonPk))
+
+	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	log.Debug("cgo retrieve done", zap.Duration("timeTaken", tr.ElapseSpan()))
 
 	if err := HandleCStatus(ctx, &status, "Retrieve failed",
 		zap.Int64("collectionID", s.Collection()),

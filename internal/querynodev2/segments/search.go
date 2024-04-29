@@ -19,6 +19,7 @@ package segments
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"sync"
 
 	"go.uber.org/zap"
@@ -36,9 +37,8 @@ import (
 func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, searchReq *SearchRequest) ([]*SearchResult, error) {
 	var (
 		// results variables
+		futures  = make([]*conc.Future[any], 0, len(segments))
 		resultCh = make(chan *SearchResult, len(segments))
-		errs     = make([]error, len(segments))
-		wg       sync.WaitGroup
 
 		// For log only
 		mu                   sync.Mutex
@@ -68,10 +68,9 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 	}
 
 	// calling segment search in goroutines
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(seg Segment, i int) {
-			defer wg.Done()
+	for _, segment := range segments {
+		seg := segment
+		future := GetSQPool().Submit(func() (any, error) {
 			if !seg.ExistIndex(searchReq.searchFieldID) {
 				mu.Lock()
 				segmentsWithoutIndex = append(segmentsWithoutIndex, seg.ID())
@@ -91,12 +90,11 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 			} else {
 				err = searcher(seg)
 			}
-			if err != nil {
-				errs[i] = err
-			}
-		}(segment, i)
+			return err, err
+		})
+		futures = append(futures, future)
 	}
-	wg.Wait()
+	err := conc.AwaitAll(futures...)
 	close(resultCh)
 
 	searchResults := make([]*SearchResult, 0, len(segments))
@@ -104,11 +102,9 @@ func searchSegments(ctx context.Context, mgr *Manager, segments []Segment, segTy
 		searchResults = append(searchResults, result)
 	}
 
-	for _, err := range errs {
-		if err != nil {
-			DeleteSearchResults(searchResults)
-			return nil, err
-		}
+	if err != nil {
+		DeleteSearchResults(searchResults)
+		return nil, err
 	}
 
 	if len(segmentsWithoutIndex) > 0 {

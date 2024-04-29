@@ -19,8 +19,7 @@ package segments
 import (
 	"context"
 	"fmt"
-	"sync"
-
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -45,9 +44,8 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		segment Segment
 	}
 	var (
+		futures  = make([]*conc.Future[any], 0, len(segments))
 		resultCh = make(chan segmentResult, len(segments))
-		errs     = make([]error, len(segments))
-		wg       sync.WaitGroup
 	)
 
 	plan.ignoreNonPk = len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
@@ -72,10 +70,9 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		return nil
 	}
 
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(seg Segment, i int) {
-			defer wg.Done()
+	for _, segment := range segments {
+		seg := segment
+		future := GetSQPool().Submit(func() (any, error) {
 			// record search time and cache miss
 			var err error
 			accessRecord := metricsutil.NewQuerySegmentAccessRecord(getSegmentMetricLabel(seg))
@@ -92,18 +89,15 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			} else {
 				err = retriever(seg)
 			}
-			if err != nil {
-				errs[i] = err
-			}
-		}(segment, i)
+			return err, err
+		})
+		futures = append(futures, future)
 	}
-	wg.Wait()
+	err := conc.AwaitAll(futures...)
 	close(resultCh)
 
-	for _, err := range errs {
-		if err != nil {
-			return nil, nil, err
-		}
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var retrieveSegments []Segment
@@ -118,8 +112,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 
 func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
 	var (
-		errs = make([]error, len(segments))
-		wg   sync.WaitGroup
+		futures = make([]*conc.Future[any], 0, len(segments))
 	)
 
 	label := metrics.SealedSegmentLabel
@@ -127,15 +120,13 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 		label = metrics.GrowingSegmentLabel
 	}
 
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(segment Segment, i int) {
-			defer wg.Done()
+	for _, segment := range segments {
+		segment := segment
+		future := GetSQPool().Submit(func() (any, error) {
 			tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithStream")
 			result, err := segment.Retrieve(ctx, plan)
 			if err != nil {
-				errs[i] = err
-				return
+				return err, err
 			}
 
 			if len(result.GetOffset()) != 0 {
@@ -148,17 +139,17 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 					},
 					AllRetrieveCount: result.GetAllRetrieveCount(),
 				}); err != nil {
-					errs[i] = err
+					return err, err
 				}
 			}
 
-			errs[i] = nil
 			metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 				metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
-		}(segment, i)
+			return nil, nil
+		})
+		futures = append(futures, future)
 	}
-	wg.Wait()
-	return merr.Combine(errs...)
+	return conc.AwaitAll(futures...)
 }
 
 // retrieve will retrieve all the validate target segments
