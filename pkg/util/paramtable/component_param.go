@@ -2601,7 +2601,7 @@ type dataCoordConfig struct {
 	ClusteringCompactionDropTolerance         ParamItem `refreshable:"true"`
 	ClusteringCompactionPreferSegmentSize     ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxSegmentSize        ParamItem `refreshable:"true"`
-	ClusteringCompactionMaxTrainSize          ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxTrainSizeRatio     ParamItem `refreshable:"true"`
 	ClusteringCompactionTimeoutInSeconds      ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxCentroidsNum       ParamItem `refreshable:"true"`
 	ClusteringCompactionMinCentroidsNum       ParamItem `refreshable:"true"`
@@ -3072,14 +3072,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	}
 	p.ClusteringCompactionMaxSegmentSize.Init(base.mgr)
 
-	p.ClusteringCompactionMaxTrainSize = ParamItem{
-		Key:          "dataCoord.compaction.clustering.maxTrainSize",
+	p.ClusteringCompactionMaxTrainSizeRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxTrainSizeRatio",
 		Version:      "2.4.0",
-		DefaultValue: "25g",
-		Doc:          "max data size in Kmeans train, if larger than it, will down sampling to meet this limit",
+		DefaultValue: "0.8",
+		Doc:          "max data size ratio in Kmeans train, if larger than it, will down sampling to meet this limit",
 		Export:       true,
 	}
-	p.ClusteringCompactionMaxTrainSize.Init(base.mgr)
+	p.ClusteringCompactionMaxTrainSizeRatio.Init(base.mgr)
 
 	p.ClusteringCompactionMaxCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.maxCentroidsNum",

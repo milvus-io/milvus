@@ -454,7 +454,7 @@ dataCoord:
       # buffer between (preferSegmentSize, maxSegmentSize) is left for new data in the same cluster(range), to avoid globally redistribute too often
       preferSegmentSize: 64m       
       maxSegmentSize: 128m
-      maxTrainSize: 25g # max data size in analyze, if data is larger than it, will down sampling to meet this limit
+      maxTrainSizeRatio: 0.8 # max data size ratio in analyze, if data is larger than it, will down sampling to meet this limit
       maxCentroidsNum: 10240
       minCentroidsNum: 128
 
