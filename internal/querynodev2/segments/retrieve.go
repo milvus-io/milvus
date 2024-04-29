@@ -112,9 +112,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
-	var (
-		futures = make([]*conc.Future[any], 0, len(segments))
-	)
+	futures := make([]*conc.Future[any], 0, len(segments))
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
