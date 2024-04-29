@@ -29,7 +29,7 @@
 
 #include "common/FieldMeta.h"
 #include "pb/schema.pb.h"
-#include "knowhere/index_node.h"
+#include "knowhere/index/index_node.h"
 
 namespace milvus {
 
