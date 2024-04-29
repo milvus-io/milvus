@@ -1967,8 +1967,10 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 	MmapEnabled      ParamItem `refreshable:"false"`
 
-	LazyLoadEnabled     ParamItem `refreshable:"false"`
-	LazyLoadWaitTimeout ParamItem `refreshable:"false"`
+	LazyLoadEnabled                      ParamItem `refreshable:"false"`
+	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceTimeout       ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceRetryInterval ParamItem `refreshable:"true"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -2205,18 +2207,36 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.LazyLoadEnabled = ParamItem{
 		Key:          "queryNode.lazyloadEnabled",
-		Version:      "2.4.0",
+		Version:      "2.4.2",
 		DefaultValue: "false",
 		Doc:          "Enable lazyload for loading data",
+		Export:       true,
 	}
 	p.LazyLoadEnabled.Init(base.mgr)
 	p.LazyLoadWaitTimeout = ParamItem{
 		Key:          "queryNode.lazyloadWaitTimeout",
-		Version:      "2.4.0",
+		Version:      "2.4.2",
 		DefaultValue: "30000",
 		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
+		Export:       true,
 	}
 	p.LazyLoadWaitTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceTimeout = ParamItem{
+		Key:          "queryNode.lazyLoadRequestResourceTimeout",
+		Version:      "2.4.2",
+		DefaultValue: "5000",
+		Doc:          "max timeout in milliseconds for waiting request resource for lazy load, 5s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceRetryInterval = ParamItem{
+		Key:          "queryNode.lazyLoadRequestResourceRetryInterval",
+		Version:      "2.4.2",
+		DefaultValue: "2000",
+		Doc:          "retry interval in milliseconds for waiting request resource for lazy load, 2s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceRetryInterval.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",

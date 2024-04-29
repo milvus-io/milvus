@@ -358,7 +358,10 @@ queryNode:
       maxPendingTaskPerUser: 1024 # 50 by default, max pending task in scheduler per user.
   mmap:
     mmapEnabled: false # enable mmap global, if set true, will use mmap to load segment data
-  lazyloadEnabled: false
+  lazyloadEnabled: false # Enable lazyload for loading data
+  lazyloadWaitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
+  lazyLoadRequestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
+  lazyLoadRequestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
   useStreamComputing: false
 
   # can specify ip for example

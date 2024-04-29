@@ -169,7 +169,7 @@ var (
 	ErrClusteringCompactionCollectionNotSupport   = newMilvusError("collection not support clustering compaction", 2302, false)
 	ErrClusteringCompactionCollectionIsCompacting = newMilvusError("collection is compacting", 2303, false)
 
-	//General
+	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
 )
 

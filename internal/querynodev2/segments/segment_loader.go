@@ -54,6 +54,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -1027,7 +1028,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	loadFieldsIndexSpan := tr.RecordSpan()
 	metrics.QueryNodeLoadIndexLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Observe(float64(loadFieldsIndexSpan))
 
-	//2. complement raw data for the scalar fields without raw data
+	// 2. complement raw data for the scalar fields without raw data
 	for fieldID, info := range indexedFieldInfos {
 		field, err := schemaHelper.GetFieldFromID(fieldID)
 		if err != nil {
@@ -1051,7 +1052,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 	}
 	loadRawDataSpan := tr.RecordSpan()
 
-	//4. rectify entries number for binlog in very rare cases
+	// 4. rectify entries number for binlog in very rare cases
 	// https://github.com/milvus-io/milvus/23654
 	// legacy entry num = 0
 	if err := loader.patchEntryNumber(ctx, segment, loadInfo); err != nil {
@@ -1119,15 +1120,35 @@ func (loader *segmentLoader) LoadLazySegment(ctx context.Context,
 	segment *LocalSegment,
 	loadInfo *querypb.SegmentLoadInfo,
 ) (err error) {
-	infos := []*querypb.SegmentLoadInfo{loadInfo}
-	resource, _, err := loader.requestResource(ctx, infos...)
-	log := log.Ctx(ctx)
+	resource, _, err := loader.requestResourceWithTimeout(ctx, loadInfo)
 	if err != nil {
-		log.Warn("request resource failed", zap.Error(err))
-		return merr.ErrServiceResourceInsufficient
+		log.Ctx(ctx).Warn("request resource failed", zap.Error(err))
+		return err
 	}
 	defer loader.freeRequest(resource)
+
 	return loader.LoadSegment(ctx, segment, loadInfo)
+}
+
+// requestResourceWithTimeout requests memory & storage to load segments with a timeout and retry.
+func (loader *segmentLoader) requestResourceWithTimeout(ctx context.Context, infos ...*querypb.SegmentLoadInfo) (LoadResource, int, error) {
+	timeout := paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond)
+	retryInterval := paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond)
+
+	// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
+	ctx, cancel := contextutil.WithTimeoutCause(ctx, timeout, merr.ErrServiceResourceInsufficient)
+	defer cancel()
+	for {
+		resource, concurrencyLevel, err := loader.requestResource(ctx, infos...)
+		if err == nil {
+			return resource, concurrencyLevel, nil
+		}
+		select {
+		case <-ctx.Done():
+			return LoadResource{}, -1, context.Cause(ctx)
+		case <-time.After(retryInterval):
+		}
+	}
 }
 
 func (loader *segmentLoader) filterPKStatsBinlogs(fieldBinlogs []*datapb.FieldBinlog, pkFieldID int64) ([]string, storage.StatsLogType) {
