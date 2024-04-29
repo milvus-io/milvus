@@ -733,6 +733,48 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		Deltalogs:           nil,
 	}}
 	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0") // Turn off auto expiration
+	t.Run("Test compact with all segment empty", func(t *testing.T) {
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+		ctx, cancel := context.WithCancel(context.TODO())
+		meta := NewMetaFactory().GetCollectionMeta(1, "chan-1", schemapb.DataType_Int64)
+		broker := broker.NewMockBroker(t)
+		broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
+			Return(&milvuspb.DescribeCollectionResponse{
+				Status:         merr.Status(nil),
+				Schema:         meta.GetSchema(),
+				CollectionID:   1,
+				CollectionName: "chan-1",
+				ShardsNum:      common.DefaultShardsNum,
+			}, nil)
+		channel := newChannel("a", 1, nil, broker, cm)
+
+		channel.addSegment(ctx, addSegmentReq{
+			datapb.SegmentType_Flushed,
+			100, 1, 10, 0,
+			nil, nil,
+			nil, nil, 0, false,
+		})
+		require.True(t, channel.hasSegment(100, true))
+		task := &compactionTask{
+			ctx:          ctx,
+			cancel:       cancel,
+			Allocator:    alloc,
+			done:         make(chan struct{}, 1),
+			Channel:      channel,
+			tr:           timerecord.NewTimeRecorder("test"),
+			flushManager: &mockFlushManager{},
+			plan: &datapb.CompactionPlan{
+				PlanID:           999,
+				SegmentBinlogs:   []*datapb.CompactionSegmentBinlogs{{SegmentID: 100}},
+				TimeoutInSeconds: 10,
+				Type:             datapb.CompactionType_MixCompaction,
+			},
+		}
+
+		_, err := task.compact()
+		assert.ErrorIs(t, errIllegalCompactionPlan, err)
+	})
 
 	t.Run("Test compact invalid", func(t *testing.T) {
 		alloc := allocator.NewMockAllocator(t)
@@ -826,6 +868,12 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			mockbIO := &binlogIO{cm, alloc}
 			channel := newChannel("a", c.colID, nil, broker, cm)
 
+			channel.addSegment(ctx, addSegmentReq{
+				datapb.SegmentType_Flushed,
+				99999, c.colID, c.parID, 0,
+				nil, nil,
+				nil, nil, 0, false,
+			})
 			channel.addFlushedSegmentWithPKs(c.segID1, c.colID, c.parID, 2, c.iData1)
 			channel.addFlushedSegmentWithPKs(c.segID2, c.colID, c.parID, 2, c.iData2)
 			require.True(t, channel.hasSegment(c.segID1, true))
@@ -872,6 +920,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 						FieldBinlogs:        lo.Values(iPaths2),
 						Field2StatslogPaths: lo.Values(sPaths2),
 						Deltalogs:           dPaths2,
+					},
+					{
+						SegmentID: 99999, // empty segment
 					},
 				},
 				StartTime:        0,

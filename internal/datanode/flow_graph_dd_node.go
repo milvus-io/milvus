@@ -92,6 +92,7 @@ func (ddn *ddNode) IsValidInMsg(in []Msg) bool {
 
 // Operate handles input messages, implementing flowgrpah.Node
 func (ddn *ddNode) Operate(in []Msg) []Msg {
+	log := log.With(zap.String("channel", ddn.vChannelName))
 	msMsg, ok := in[0].(*MsgStreamMsg)
 	if !ok {
 		log.Warn("type assertion failed for MsgStreamMsg", zap.String("name", reflect.TypeOf(in[0]).Name()))
@@ -110,14 +111,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			endPositions:   msMsg.EndPositions(),
 			dropCollection: false,
 		}
-		log.Warn("MsgStream closed", zap.Any("ddNode node", ddn.Name()), zap.Int64("collection", ddn.collectionID), zap.String("channel", ddn.vChannelName))
+		log.Warn("MsgStream closed", zap.Any("ddNode node", ddn.Name()), zap.Int64("collection", ddn.collectionID))
 		return []Msg{&fgMsg}
 	}
 
 	if load := ddn.dropMode.Load(); load != nil && load.(bool) {
-		log.RatedInfo(1.0, "ddNode in dropMode",
-			zap.String("vChannelName", ddn.vChannelName),
-			zap.Int64("collectionID", ddn.collectionID))
+		log.RatedInfo(1.0, "ddNode in dropMode")
 		return []Msg{}
 	}
 
@@ -148,12 +147,10 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		switch msg.Type() {
 		case commonpb.MsgType_DropCollection:
 			if msg.(*msgstream.DropCollectionMsg).GetCollectionID() == ddn.collectionID {
-				log.Info("Receiving DropCollection msg",
-					zap.Int64("collectionID", ddn.collectionID),
-					zap.String("vChannelName", ddn.vChannelName))
+				log.Info("Receiving DropCollection msg")
 				ddn.dropMode.Store(true)
 
-				log.Info("Stop compaction of vChannel", zap.String("vChannelName", ddn.vChannelName))
+				log.Info("Stop compaction for dropped channel")
 				ddn.compactionExecutor.discardByDroppedChannel(ddn.vChannelName)
 				fgMsg.dropCollection = true
 
@@ -164,10 +161,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_DropPartition:
 			dpMsg := msg.(*msgstream.DropPartitionMsg)
 			if dpMsg.GetCollectionID() == ddn.collectionID {
-				log.Info("drop partition msg received",
-					zap.Int64("collectionID", dpMsg.GetCollectionID()),
-					zap.Int64("partitionID", dpMsg.GetPartitionID()),
-					zap.String("vChanneName", ddn.vChannelName))
+				log.Info("drop partition msg received", zap.Int64("partitionID", dpMsg.GetPartitionID()))
 				fgMsg.dropPartitions = append(fgMsg.dropPartitions, dpMsg.PartitionID)
 			}
 
@@ -184,8 +178,7 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				log.Info("filter insert messages",
 					zap.Int64("filter segmentID", imsg.GetSegmentID()),
 					zap.Uint64("message timestamp", msg.EndTs()),
-					zap.String("segment's vChannel", imsg.GetShardName()),
-					zap.String("current vChannel", ddn.vChannelName))
+				)
 				continue
 			}
 
@@ -200,15 +193,12 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				Inc()
 
 			log.Debug("DDNode receive insert messages",
-				zap.Int("numRows", len(imsg.GetRowIDs())),
-				zap.String("vChannelName", ddn.vChannelName))
+				zap.Int64("segmentID", imsg.GetSegmentID()),
+				zap.Int("numRows", len(imsg.GetRowIDs())))
 			fgMsg.insertMessages = append(fgMsg.insertMessages, imsg)
 
 		case commonpb.MsgType_Delete:
 			dmsg := msg.(*msgstream.DeleteMsg)
-			log.Debug("DDNode receive delete messages",
-				zap.Int64("numRows", dmsg.NumRows),
-				zap.String("vChannelName", ddn.vChannelName))
 
 			if dmsg.CollectionID != ddn.collectionID {
 				log.Warn("filter invalid DeleteMsg, collection mis-match",
@@ -216,6 +206,8 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
+
+			log.Debug("DDNode receive delete messages", zap.Int64("numRows", dmsg.NumRows))
 			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
