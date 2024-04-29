@@ -102,7 +102,9 @@ minio:
   region:  # Specify minio storage system location region
   useVirtualHost: false # Whether use virtual host mode for bucket
   requestTimeoutMs: 10000 # minio timeout for request time in milliseconds
-  listObjectsMaxKeys: 0 # The maximum number of objects requested per batch in minio ListObjects rpc, 0 means using oss client by default, decrease these configration if ListObjects timeout
+  # The maximum number of objects requested per batch in minio ListObjects rpc, 
+  # 0 means using oss client by default, decrease these configration if ListObjects timeout
+  listObjectsMaxKeys: 0
 
 # Milvus supports four MQ: rocksmq(based on RockDB), natsmq(embedded nats-server), Pulsar and Kafka.
 # You can change your mq by setting mq.type field.
@@ -214,6 +216,7 @@ proxy:
   ginLogging: true
   ginLogSkipPaths: / # skip url path for gin log
   maxTaskNum: 1024 # max task number of proxy task queue
+  mustUsePartitionKey: false # switch for whether proxy must use partition key for the collection
   accessLog:
     enable: false # if use access log
     minioEnable: false # if upload sealed access log file to minio
@@ -335,6 +338,9 @@ queryNode:
     mmapEnabled: false # Enable mmap for loading data
   mmapEnabled: false # Enable mmap for loading data
   lazyloadEnabled: false # Enable lazyload for loading data
+  lazyloadWaitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
+  lazyLoadRequestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
+  lazyLoadRequestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
   grouping:
     enabled: true
     maxNQ: 1000
@@ -367,7 +373,6 @@ queryNode:
       maxQueueLength: 16 # Maximum length of task queue in flowgraph
       maxParallelism: 1024 # Maximum number of tasks executed in parallel in the flowgraph
   enableSegmentPrune: false # use partition prune function on shard delegator
-  useStreamComputing: false
   ip:  # if not specified, use the first unicastable address
   port: 21123
   grpc:
@@ -717,6 +722,7 @@ quotaAndLimits:
   limits:
     maxCollectionNum: 65536
     maxCollectionNumPerDB: 65536
+    maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
     maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
   limitWriting:
     # forceDeny false means dml requests are allowed (except for some
