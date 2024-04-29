@@ -175,6 +175,7 @@ func (s *BulkInsertSuite) run() {
 	searchResult, err := c.Proxy.Search(ctx, searchReq)
 	s.NoError(err)
 	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
+	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 }
 
 func (s *BulkInsertSuite) TestNumpy() {

@@ -556,7 +556,7 @@ func GenerateNumpyFile(filePath string, rowCount int, dType schemapb.DataType) e
 		for i := 0; i < rowCount; i++ {
 			vec := [dim]float32{}
 			for j := 0; j < dim; j++ {
-				vec[j] = 1.1
+				vec[j] = rand.Float32()
 			}
 			data = append(data, vec)
 		}

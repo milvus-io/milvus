@@ -21,11 +21,9 @@ import (
 	"fmt"
 	"math/rand"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -50,25 +48,27 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	ctx, cancel := context.WithTimeout(c.GetContext(), 60*time.Second)
 	defer cancel()
 
-	collectionName := "TestBulkInsert_B_" + funcutil.GenRandomStr()
+	collectionName := "TestBulkInsert_DynamicField_" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchema(collectionName, dim, true, &schemapb.FieldSchema{
-		FieldID:      100,
-		Name:         integration.Int64Field,
-		IsPrimaryKey: true,
-		DataType:     schemapb.DataType_Int64,
-		AutoID:       true,
-	}, &schemapb.FieldSchema{
-		FieldID:  101,
-		Name:     integration.FloatVecField,
-		DataType: schemapb.DataType_FloatVector,
-		TypeParams: []*commonpb.KeyValuePair{
-			{
-				Key:   common.DimKey,
-				Value: fmt.Sprintf("%d", dim),
+	schema := integration.ConstructSchema(collectionName, dim, true,
+		&schemapb.FieldSchema{
+			FieldID:      100,
+			Name:         integration.Int64Field,
+			IsPrimaryKey: true,
+			DataType:     schemapb.DataType_Int64,
+			AutoID:       true,
+		}, &schemapb.FieldSchema{
+			FieldID:  101,
+			Name:     integration.FloatVecField,
+			DataType: schemapb.DataType_FloatVector,
+			TypeParams: []*commonpb.KeyValuePair{
+				{
+					Key:   common.DimKey,
+					Value: fmt.Sprintf("%d", dim),
+				},
 			},
 		},
-	})
+	)
 	schema.EnableDynamicField = true
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
@@ -103,9 +103,6 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 	case importutilv2.Numpy:
 		importFile, err := GenerateNumpyFiles(c.ChunkManager, schema, rowCount)
 		s.NoError(err)
-		importFile.Paths = lo.Filter(importFile.Paths, func(path string, _ int) bool {
-			return !strings.Contains(path, "$meta")
-		})
 		files = []*internalpb.ImportFile{importFile}
 	case importutilv2.JSON:
 		rowBasedFile := c.ChunkManager.RootPath() + "/" + "test.json"
