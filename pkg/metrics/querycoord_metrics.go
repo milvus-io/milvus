@@ -140,5 +140,4 @@ func CleanupQueryCoord() {
 	QueryCoordTaskNum.Reset()
 	QueryCoordNumQueryNodes.Reset()
 	QueryCoordCurrentTargetCheckpointUnixSeconds.Reset()
-	QueryCoordTaskLatency.Reset()
 }

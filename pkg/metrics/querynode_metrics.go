@@ -595,20 +595,6 @@ func CleanupQueryNode() {
 	StoppingBalanceSegmentNum.Reset()
 	QueryNodeLoadSegmentConcurrency.Reset()
 	QueryNodeLoadIndexLatency.Reset()
-	QueryNodeSegmentAccessTotal.Reset()
-	QueryNodeSegmentAccessDuration.Reset()
-	QueryNodeSegmentAccessGlobalDuration.Reset()
-	QueryNodeSegmentAccessWaitCacheTotal.Reset()
-	QueryNodeSegmentAccessWaitCacheDuration.Reset()
-	QueryNodeSegmentAccessWaitCacheGlobalDuration.Reset()
-	QueryNodeDiskCacheLoadTotal.Reset()
-	QueryNodeDiskCacheLoadBytes.Reset()
-	QueryNodeDiskCacheLoadDuration.Reset()
-	QueryNodeDiskCacheLoadGlobalDuration.Reset()
-	QueryNodeDiskCacheEvictTotal.Reset()
-	QueryNodeDiskCacheEvictBytes.Reset()
-	QueryNodeDiskCacheEvictDuration.Reset()
-	QueryNodeDiskCacheEvictGlobalDuration.Reset()
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

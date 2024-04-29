@@ -408,7 +408,6 @@ func CleanupProxy() {
 	ProxyExecutingTotalNq.Reset()
 	ProxyRateLimitReqCount.Reset()
 	ProxySlowQueryCount.Reset()
-	ProxyReportValue.Reset()
 }
 
 func CleanupProxyDBMetrics(nodeID int64, dbName string) {
