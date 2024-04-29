@@ -357,9 +357,9 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
 	s.scheduler.cm = cm
 
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
-		future := conc.Go(func() (error, error) {
-			return nil, nil
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
+		future := conc.Go(func() (struct{}, error) {
+			return struct{}{}, nil
 		})
 		return future
 	})
@@ -418,9 +418,9 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
 	s.scheduler.cm = cm
 
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
-		future := conc.Go(func() (error, error) {
-			return errors.New("mock err"), errors.New("mock err")
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
+		future := conc.Go(func() (struct{}, error) {
+			return struct{}{}, errors.New("mock err")
 		})
 		return future
 	})
@@ -494,9 +494,9 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 }
 
 func (s *SchedulerSuite) TestScheduler_ImportFile() {
-	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[error] {
-		future := conc.Go(func() (error, error) {
-			return nil, nil
+	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
+		future := conc.Go(func() (struct{}, error) {
+			return struct{}{}, nil
 		})
 		return future
 	})

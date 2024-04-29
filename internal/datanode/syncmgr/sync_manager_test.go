@@ -171,9 +171,8 @@ func (s *SyncManagerSuite) TestSubmit() {
 	f := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
-	r, err := f.Await()
+	_, err = f.Await()
 	s.NoError(err)
-	s.NoError(r)
 }
 
 func (s *SyncManagerSuite) TestCompacted() {
@@ -203,9 +202,8 @@ func (s *SyncManagerSuite) TestCompacted() {
 	f := manager.SyncData(context.Background(), task)
 	s.NotNil(f)
 
-	r, err := f.Await()
+	_, err = f.Await()
 	s.NoError(err)
-	s.NoError(r)
 	s.EqualValues(1001, segmentID.Load())
 }
 
@@ -321,7 +319,7 @@ func (s *SyncManagerSuite) TestTargetUpdated() {
 	task.EXPECT().Run().Return(nil).Once()
 
 	f := manager.SyncData(context.Background(), task)
-	err, _ = f.Await()
+	_, err = f.Await()
 	s.NoError(err)
 }
 

@@ -281,7 +281,7 @@ func (s *scheduler) Import(task Task) []*conc.Future[any] {
 
 func (s *scheduler) importFile(reader importutilv2.Reader, task Task) error {
 	iTask := task.(*ImportTask)
-	syncFutures := make([]*conc.Future[error], 0)
+	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
 		data, err := reader.Read()
@@ -321,9 +321,9 @@ func (s *scheduler) importFile(reader importutilv2.Reader, task Task) error {
 	return nil
 }
 
-func (s *scheduler) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future[error], []syncmgr.Task, error) {
+func (s *scheduler) Sync(task *ImportTask, hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
 	log.Info("start to sync import data", WrapLogFields(task)...)
-	futures := make([]*conc.Future[error], 0)
+	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	segmentImportedSizes := make(map[int64]int)
 	for channelIdx, datas := range hashedData {
