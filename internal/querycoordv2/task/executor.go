@@ -437,12 +437,68 @@ func (ex *Executor) unsubscribeChannel(task *ChannelTask, step int) error {
 
 func (ex *Executor) executeLeaderAction(task *LeaderTask, step int) {
 	switch task.Actions()[step].Type() {
-	case ActionTypeGrow, ActionTypeUpdate:
+	case ActionTypeGrow:
 		ex.setDistribution(task, step)
 
 	case ActionTypeReduce:
 		ex.removeDistribution(task, step)
+
+	case ActionTypeUpdate:
+		ex.updatePartStatsVersions(task, step)
 	}
+}
+
+func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {
+	action := task.Actions()[step].(*LeaderAction)
+	defer action.rpcReturned.Store(true)
+	ctx := task.Context()
+	log := log.Ctx(ctx).With(
+		zap.Int64("taskID", task.ID()),
+		zap.Int64("collectionID", task.CollectionID()),
+		zap.Int64("replicaID", task.ReplicaID()),
+		zap.Int64("leader", action.leaderID),
+		zap.Int64("node", action.Node()),
+		zap.String("source", task.Source().String()),
+	)
+	var err error
+	defer func() {
+		if err != nil {
+			task.Fail(err)
+		}
+		ex.removeTask(task, step)
+	}()
+
+	req := &querypb.SyncDistributionRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+			commonpbutil.WithMsgID(task.ID()),
+		),
+		CollectionID: task.collectionID,
+		Channel:      task.Shard(),
+		ReplicaID:    task.ReplicaID(),
+		Actions: []*querypb.SyncAction{
+			{
+				Type:                   querypb.SyncType_UpdatePartitionStats,
+				SegmentID:              action.SegmentID(),
+				NodeID:                 action.Node(),
+				Version:                action.Version(),
+				PartitionStatsVersions: action.partStatsVersions,
+			},
+		},
+	}
+	startTs := time.Now()
+	log.Info("Update partition stats versions...")
+	status, err := ex.cluster.SyncDistribution(task.Context(), task.leaderID, req)
+	err = merr.CheckRPCCall(status, err)
+	if err != nil {
+		log.Warn("failed to update partition stats versions", zap.Error(err))
+		return err
+	}
+
+	elapsed := time.Since(startTs)
+	log.Info("update partition stats done", zap.Duration("elapsed", elapsed))
+
+	return nil
 }
 
 func (ex *Executor) setDistribution(task *LeaderTask, step int) error {

@@ -476,6 +476,59 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 	suite.Equal(tasks[0].Priority(), task.TaskPriorityLow)
 }
 
+func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
+	testChannel := "test-insert-channel"
+	leaderID := int64(2)
+	observer := suite.checker
+	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
+	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
+	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	segments := []*datapb.SegmentInfo{
+		{
+			ID:            1,
+			PartitionID:   1,
+			InsertChannel: testChannel,
+		},
+	}
+	//latest partition stats is 101
+	newPartitionStatsMap := make(map[int64]int64)
+	newPartitionStatsMap[1] = 101
+	channels := []*datapb.VchannelInfo{
+		{
+			CollectionID:           1,
+			ChannelName:            testChannel,
+			PartitionStatsVersions: newPartitionStatsMap,
+		},
+	}
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
+		channels, segments, nil)
+
+	// before target ready, should skip check collection
+	tasks := suite.checker.Check(context.TODO())
+	suite.Len(tasks, 0)
+
+	//try to update cur/next target
+	observer.target.UpdateCollectionNextTarget(int64(1))
+	observer.target.UpdateCollectionCurrentTarget(1)
+	loadVersion := time.Now().UnixMilli()
+	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 2, 1, loadVersion, testChannel))
+	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, testChannel))
+	view := utils.CreateTestLeaderView(2, 1, testChannel, map[int64]int64{2: 1}, map[int64]*meta.Segment{})
+	view.PartitionStatsVersions = map[int64]int64{
+		1: 100,
+	}
+	//current partition stat version in leader view is version100 for partition1
+	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
+	observer.dist.LeaderViewManager.Update(leaderID, view)
+
+	tasks = suite.checker.Check(context.TODO())
+	suite.Len(tasks, 1)
+	suite.Equal(tasks[0].Source(), utils.LeaderChecker)
+	suite.Len(tasks[0].Actions(), 1)
+	suite.Equal(tasks[0].Actions()[0].Type(), task.ActionTypeUpdate)
+	suite.Equal(tasks[0].Actions()[0].Node(), int64(2))
+}
+
 func TestLeaderCheckerSuite(t *testing.T) {
 	suite.Run(t, new(LeaderCheckerTestSuite))
 }

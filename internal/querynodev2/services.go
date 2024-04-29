@@ -1343,12 +1343,13 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 		}
 
 		leaderViews = append(leaderViews, &querypb.LeaderView{
-			Collection:       delegator.Collection(),
-			Channel:          key,
-			SegmentDist:      sealedSegments,
-			GrowingSegments:  growingSegments,
-			TargetVersion:    delegator.GetTargetVersion(),
-			NumOfGrowingRows: numOfGrowingRows,
+			Collection:             delegator.Collection(),
+			Channel:                key,
+			SegmentDist:            sealedSegments,
+			GrowingSegments:        growingSegments,
+			TargetVersion:          delegator.GetTargetVersion(),
+			NumOfGrowingRows:       numOfGrowingRows,
+			PartitionStatsVersions: delegator.GetPartitionStatsVersions(ctx),
 		})
 		return true
 	})
@@ -1428,6 +1429,9 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			}
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
 				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
+		case querypb.SyncType_UpdatePartitionStats:
+			log.Info("sync update partition stats versions")
+			shardDelegator.SyncPartitionStats(ctx, action.PartitionStatsVersions)
 		default:
 			return merr.Status(merr.WrapErrServiceInternal("unknown action type", action.GetType().String())), nil
 		}

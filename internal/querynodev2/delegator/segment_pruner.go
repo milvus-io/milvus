@@ -26,8 +26,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-const defaultFilterRatio float64 = 0.5
-
 type PruneInfo struct {
 	filterRatio float64
 }

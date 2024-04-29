@@ -101,6 +101,50 @@ func (_c *MockShardDelegator_Collection_Call) RunAndReturn(run func() int64) *Mo
 	return _c
 }
 
+// GetPartitionStatsVersions provides a mock function with given fields: ctx
+func (_m *MockShardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int64]int64 {
+	ret := _m.Called(ctx)
+
+	var r0 map[int64]int64
+	if rf, ok := ret.Get(0).(func(context.Context) map[int64]int64); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(map[int64]int64)
+		}
+	}
+
+	return r0
+}
+
+// MockShardDelegator_GetPartitionStatsVersions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetPartitionStatsVersions'
+type MockShardDelegator_GetPartitionStatsVersions_Call struct {
+	*mock.Call
+}
+
+// GetPartitionStatsVersions is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *MockShardDelegator_Expecter) GetPartitionStatsVersions(ctx interface{}) *MockShardDelegator_GetPartitionStatsVersions_Call {
+	return &MockShardDelegator_GetPartitionStatsVersions_Call{Call: _e.mock.On("GetPartitionStatsVersions", ctx)}
+}
+
+func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) Run(run func(ctx context.Context)) *MockShardDelegator_GetPartitionStatsVersions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) Return(_a0 map[int64]int64) *MockShardDelegator_GetPartitionStatsVersions_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockShardDelegator_GetPartitionStatsVersions_Call) RunAndReturn(run func(context.Context) map[int64]int64) *MockShardDelegator_GetPartitionStatsVersions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetSegmentInfo provides a mock function with given fields: readable
 func (_m *MockShardDelegator) GetSegmentInfo(readable bool) ([]SnapshotItem, []SegmentEntry) {
 	ret := _m.Called(readable)
@@ -777,6 +821,40 @@ func (_c *MockShardDelegator_SyncDistribution_Call) Return() *MockShardDelegator
 }
 
 func (_c *MockShardDelegator_SyncDistribution_Call) RunAndReturn(run func(context.Context, ...SegmentEntry)) *MockShardDelegator_SyncDistribution_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SyncPartitionStats provides a mock function with given fields: ctx, partVersions
+func (_m *MockShardDelegator) SyncPartitionStats(ctx context.Context, partVersions map[int64]int64) {
+	_m.Called(ctx, partVersions)
+}
+
+// MockShardDelegator_SyncPartitionStats_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SyncPartitionStats'
+type MockShardDelegator_SyncPartitionStats_Call struct {
+	*mock.Call
+}
+
+// SyncPartitionStats is a helper method to define mock.On call
+//   - ctx context.Context
+//   - partVersions map[int64]int64
+func (_e *MockShardDelegator_Expecter) SyncPartitionStats(ctx interface{}, partVersions interface{}) *MockShardDelegator_SyncPartitionStats_Call {
+	return &MockShardDelegator_SyncPartitionStats_Call{Call: _e.mock.On("SyncPartitionStats", ctx, partVersions)}
+}
+
+func (_c *MockShardDelegator_SyncPartitionStats_Call) Run(run func(ctx context.Context, partVersions map[int64]int64)) *MockShardDelegator_SyncPartitionStats_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(map[int64]int64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_SyncPartitionStats_Call) Return() *MockShardDelegator_SyncPartitionStats_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_SyncPartitionStats_Call) RunAndReturn(run func(context.Context, map[int64]int64)) *MockShardDelegator_SyncPartitionStats_Call {
 	_c.Call.Return(run)
 	return _c
 }
