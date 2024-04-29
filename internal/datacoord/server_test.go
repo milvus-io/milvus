@@ -2424,7 +2424,7 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManagerImpl()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2479,7 +2479,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	defer cancel()
 
 	sessionManager := NewSessionManagerImpl()
-	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
+	channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator(), withFactoryV2(&mockPolicyFactory{}))
 	assert.NoError(t, err)
 
 	cluster := NewClusterImpl(sessionManager, channelManager)
