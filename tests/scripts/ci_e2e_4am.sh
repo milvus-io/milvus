@@ -72,7 +72,7 @@ cd ${ROOT}/tests/restful_client
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout  "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
+  timeout  "${TEST_TIMEOUT}" pytest --reruns 3 --reruns-delay 1 testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
                                      --html=${CI_LOG_PATH}/report_restful.html  --self-contained-html
 else
   pytest --reruns 3 --reruns-delay 1 testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} -v -x -m L0 -n 6 --timeout 180\
@@ -84,7 +84,7 @@ cd ${ROOT}/tests/restful_client_v2
 
 if [[ -n "${TEST_TIMEOUT:-}" ]]; then
 
-  timeout  "${TEST_TIMEOUT}" pytest testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 180\
+  timeout  "${TEST_TIMEOUT}" pytest --reruns 3 --reruns-delay 1 testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 180\
                                      --html=${CI_LOG_PATH}/report_restful.html  --self-contained-html
 else
   pytest --reruns 3 --reruns-delay 1 testcases --endpoint http://${MILVUS_SERVICE_NAME}:${MILVUS_SERVICE_PORT} --minio_host ${MINIO_SERVICE_NAME} -v -x -m L0 -n 6 --timeout 180\
