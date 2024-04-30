@@ -8378,7 +8378,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # delete data
         delete_ids = [i for i in range(50, 150)]
         collection_w.delete(f"int64 in {delete_ids}")
@@ -8415,7 +8415,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # delete data
         delete_ids = [i for i in range(50, 150)]
         collection_w.delete(f"int64 in {delete_ids}")
@@ -8452,7 +8452,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # delete data
         delete_ids = [i for i in range(50, 150)]
         collection_w.delete(f"int64 in {delete_ids}")
@@ -8489,7 +8489,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # delete data
         delete_ids = [i for i in range(50, 150)]
         collection_w.delete(f"int64 in {delete_ids}")
@@ -8563,7 +8563,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load
         collection_w.load()
         # delete data
@@ -8602,7 +8602,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, ct.default_flat_index)
+        collection_w.create_index(default_search_field, default_index_params)
         # load
         partition_w1.load()
         # delete data
@@ -8612,13 +8612,12 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w.release()
         partition_w1.load()
         # search on collection, partition1, partition2
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
-        collection_w.search(vectors[:1], field_name, default_search_params, 200,
-                            partition_names=[partition_w1.name],
-                            check_task=CheckTasks.check_search_results,
-                            check_items={"nq": 1, "limit": 50})
+        collection_w.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
+        partition_w1.query(expr='', output_fields=[ct.default_count_output],
+                           check_task=CheckTasks.check_query_results,
+                           check_items={"exp_res": [{ct.default_count_output: 50}]})
         collection_w.search(vectors[:1], field_name, default_search_params, 200,
                             partition_names=[partition_w2.name],
                             check_task=CheckTasks.err_res,
@@ -8640,7 +8639,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load
         partition_w1.load()
         # delete data
@@ -8713,7 +8712,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load && release
         partition_w1.load()
         collection_w.release()
@@ -9027,7 +9026,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # flush
         collection_w.flush()
         # load && release
@@ -9063,7 +9062,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # flush
         collection_w.flush()
         # load && release
@@ -9099,7 +9098,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # flush
         collection_w.flush()
         # load && release
@@ -9172,7 +9171,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # flush
         collection_w.flush()
         # load && release
@@ -9209,7 +9208,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load
         collection_w.load()
         # flush
@@ -9286,7 +9285,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load
         partition_w1.load()
         # flush
@@ -9322,7 +9321,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load && release
         collection_w.load()
         partition_w2.release()
@@ -9358,7 +9357,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load && release
         collection_w.load()
         collection_w.release()
@@ -9464,7 +9463,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load and release
         for i in range(5):
             collection_w.release()
@@ -9519,7 +9518,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load and release
         collection_w.load()
         partition_w3 = collection_w.create_partition("_default3")[0]
@@ -9541,7 +9540,7 @@ class TestCollectionLoadOperation(TestcaseBase):
         collection_w = self.init_collection_general(
             prefix, True, 200, partition_num=1, is_index=False)[0]
         partition_w1, partition_w2 = collection_w.partitions
-        collection_w.create_index(default_search_field, default_index_params)
+        collection_w.create_index(default_search_field, ct.default_flat_index)
         # load and release
         partition_w1.load()
         partition_w3 = collection_w.create_partition("_default3")[0]
