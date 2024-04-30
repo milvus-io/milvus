@@ -174,7 +174,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 }
 
 // startControlLoop start a control loop for garbageCollector.
-func (gc *garbageCollector) startControlLoop(ctx context.Context) {
+func (gc *garbageCollector) startControlLoop(_ context.Context) {
 	for {
 		select {
 		case cmd := <-gc.cmdCh:
@@ -203,7 +203,7 @@ func (gc *garbageCollector) startControlLoop(ctx context.Context) {
 // runRecycleTaskWithPauser is a helper function to create a task with pauser
 func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name string, interval time.Duration, task func(ctx context.Context)) {
 	logger := log.With(zap.String("gcType", name)).With(zap.Duration("interval", interval))
-	timer := time.NewTimer(interval)
+	timer := time.NewTicker(interval)
 	defer timer.Stop()
 
 	for {
