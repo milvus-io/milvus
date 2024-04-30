@@ -19,7 +19,10 @@ package rootcoord
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -49,6 +52,9 @@ func (t *listDatabaseTask) Execute(ctx context.Context) error {
 		curUser, err := contextutil.GetCurUserFromContext(ctx)
 		// it will fail if the inner node server use the list database API
 		if err != nil || curUser == util.UserRoot {
+			if err != nil {
+				log.Warn("get current user from context failed", zap.Error(err))
+			}
 			privilegeDBs.Insert(util.AnyWord)
 			return privilegeDBs, nil
 		}

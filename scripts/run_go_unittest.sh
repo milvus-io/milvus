@@ -96,31 +96,28 @@ function test_tso()
 go test -race -cover -tags dynamic "${MILVUS_DIR}/tso/..." -failfast -count=1 -ldflags="-r ${RPATH}"
 }
 
-function test_config()
-{
-go test -race -cover -tags dynamic "${MILVUS_DIR}/config/..." -failfast -count=1 -ldflags="-r ${RPATH}"
-}
-
 function test_util()
 {
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/funcutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -race -cover -tags dynamic "${MILVUS_DIR}/util/paramtable/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+pushd pkg
 go test -race -cover -tags dynamic "${PKG_DIR}/util/retry/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+popd
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/sessionutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/typeutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
-go test -race -cover -tags dynamic "${MILVUS_DIR}/util/importutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/importutilv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/proxyutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_pkg()
 {
+pushd pkg
 go test -race -cover -tags dynamic "${PKG_DIR}/common/..." -failfast -count=1   -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${PKG_DIR}/config/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${PKG_DIR}/log/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${PKG_DIR}/mq/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${PKG_DIR}/tracer/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${PKG_DIR}/util/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+popd
 }
 
 function test_datanode
@@ -184,7 +181,6 @@ test_mq
 test_storage
 test_allocator
 test_tso
-test_config
 test_util
 test_pkg
 test_metastore
