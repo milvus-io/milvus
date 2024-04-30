@@ -218,6 +218,7 @@ message DescribeDatabaseResponse {
   string db_name = 2;
   int64 dbID = 3;
   uint64 created_timestamp = 4;
+  repeated common.KeyValuePair properties = 5;
 }
 
 message AlterDatabaseRequest {
