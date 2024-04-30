@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -114,7 +115,7 @@ func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 		at.req.GetFieldType(),
 		at.req.GetDim(),
 		at.req.GetNumClusters(),
-		at.req.GetMaxTrainSize(),
+		int64(float64(hardware.GetMemoryCount())*at.req.GetMaxTrainSizeRatio()),
 	)
 	if err != nil {
 		log.Warn("append analyze info failed", zap.Error(err))

@@ -21,8 +21,6 @@ import (
 	"fmt"
 	"math"
 
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
-
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/slices"
@@ -33,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type analyzeTask struct {
@@ -189,7 +188,7 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
 	}
 	req.NumClusters = numClusters
-	req.MaxTrainSize = Params.DataCoordCfg.ClusteringCompactionMaxTrainSize.GetAsSize()
+	req.MaxTrainSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat()
 
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()

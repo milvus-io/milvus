@@ -287,6 +287,7 @@ KmeansClustering::Run(const Config& config) {
         throw SegcoreError(ErrorCode::ConfigInvalid,
                            "train size is empty when kmeans clustering");
     }
+    AssertInfo(train_size.value() > 0, "train size must larger than 0");
     auto dim_config = milvus::index::GetValueFromConfig<int64_t>(config, "dim");
     if (!dim_config.has_value()) {
         throw SegcoreError(ErrorCode::ConfigInvalid,
