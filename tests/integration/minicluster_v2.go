@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
@@ -227,9 +228,6 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 		return nil, err
 	}
 	cluster.DataCoord = grpcdatacoord.NewServer(ctx, cluster.factory)
-	if err != nil {
-		return nil, err
-	}
 	cluster.QueryCoord, err = grpcquerycoord.NewServer(ctx, cluster.factory)
 	if err != nil {
 		return nil, err
@@ -397,6 +395,8 @@ func (cluster *MiniClusterV2) Stop() error {
 		}
 	}
 	cluster.ChunkManager.RemoveWithPrefix(cluster.ctx, cluster.ChunkManager.RootPath())
+
+	kvfactory.CloseEtcdClient()
 	return nil
 }
 

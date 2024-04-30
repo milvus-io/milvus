@@ -65,7 +65,7 @@ func (node *DataNode) getQuotaMetrics() (*metricsinfo.DataNodeQuotaMetrics, erro
 	}, nil
 }
 
-func (node *DataNode) getSystemInfoMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
+func (node *DataNode) getSystemInfoMetrics(_ context.Context, _ *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	// TODO(dragondriver): add more metrics
 	usedMem := hardware.GetUsedMemoryCount()
 	totalMem := hardware.GetMemoryCount()

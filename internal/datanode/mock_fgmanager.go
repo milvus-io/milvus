@@ -132,6 +132,38 @@ func (_c *MockFlowgraphManager_ClearFlowgraphs_Call) RunAndReturn(run func()) *M
 	return _c
 }
 
+// Close provides a mock function with given fields:
+func (_m *MockFlowgraphManager) Close() {
+	_m.Called()
+}
+
+// MockFlowgraphManager_Close_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Close'
+type MockFlowgraphManager_Close_Call struct {
+	*mock.Call
+}
+
+// Close is a helper method to define mock.On call
+func (_e *MockFlowgraphManager_Expecter) Close() *MockFlowgraphManager_Close_Call {
+	return &MockFlowgraphManager_Close_Call{Call: _e.mock.On("Close")}
+}
+
+func (_c *MockFlowgraphManager_Close_Call) Run(run func()) *MockFlowgraphManager_Close_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockFlowgraphManager_Close_Call) Return() *MockFlowgraphManager_Close_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockFlowgraphManager_Close_Call) RunAndReturn(run func()) *MockFlowgraphManager_Close_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCollectionIDs provides a mock function with given fields:
 func (_m *MockFlowgraphManager) GetCollectionIDs() []int64 {
 	ret := _m.Called()

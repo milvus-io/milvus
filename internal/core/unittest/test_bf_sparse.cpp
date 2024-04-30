@@ -26,11 +26,10 @@ using namespace milvus::query;
 namespace {
 
 std::vector<int>
-Ref(const knowhere::sparse::SparseRow<float>* base,
-    const knowhere::sparse::SparseRow<float>& query,
-    int nb,
-    int topk,
-    const knowhere::MetricType& metric) {
+SearchRef(const knowhere::sparse::SparseRow<float>* base,
+          const knowhere::sparse::SparseRow<float>& query,
+          int nb,
+          int topk) {
     std::vector<std::tuple<float, int>> res;
     for (int i = 0; i < nb; i++) {
         auto& row = base[i];
@@ -46,6 +45,31 @@ Ref(const knowhere::sparse::SparseRow<float>* base,
             offset = -1;
         }
         offsets.push_back(offset);
+    }
+    return offsets;
+}
+
+std::vector<int>
+RangeSearchRef(const knowhere::sparse::SparseRow<float>* base,
+               const knowhere::sparse::SparseRow<float>& query,
+               int nb,
+               float radius,
+               float range_filter,
+               int topk) {
+    std::vector<int> offsets;
+    for (int i = 0; i < nb; i++) {
+        auto& row = base[i];
+        auto distance = row.dot(query);
+        if (distance <= range_filter && distance > radius) {
+            offsets.push_back(i);
+        }
+    }
+    // select and sort top k on the range filter side
+    std::sort(offsets.begin(), offsets.end(), [&](int a, int b) {
+        return base[a].dot(query) > base[b].dot(query);
+    });
+    if (offsets.size() > topk) {
+        offsets.resize(topk);
     }
     return offsets;
 }
@@ -95,10 +119,44 @@ class TestSparseFloatSearchBruteForce : public ::testing::Test {
                                        bitset_view,
                                        DataType::VECTOR_SPARSE_FLOAT);
         for (int i = 0; i < nq; i++) {
-            auto ref =
-                Ref(base.get(), *(query.get() + i), nb, topk, metric_type);
+            auto ref = SearchRef(base.get(), *(query.get() + i), nb, topk);
             auto ans = result.get_seg_offsets() + i * topk;
             AssertMatch(ref, ans);
+        }
+
+        search_info.search_params_[RADIUS] = 0.1;
+        search_info.search_params_[RANGE_FILTER] = 0.5;
+        auto result2 = BruteForceSearch(dataset,
+                                        base.get(),
+                                        nb,
+                                        search_info,
+                                        bitset_view,
+                                        DataType::VECTOR_SPARSE_FLOAT);
+        for (int i = 0; i < nq; i++) {
+            auto ref = RangeSearchRef(
+                base.get(), *(query.get() + i), nb, 0.1, 0.5, topk);
+            auto ans = result2.get_seg_offsets() + i * topk;
+            AssertMatch(ref, ans);
+        }
+
+        auto result3 = BruteForceSearchIterators(dataset,
+                                                 base.get(),
+                                                 nb,
+                                                 search_info,
+                                                 bitset_view,
+                                                 DataType::VECTOR_SPARSE_FLOAT);
+        auto iterators = result3.chunk_iterators();
+        for (int i = 0; i < nq; i++) {
+            auto it = iterators[i];
+            auto q = *(query.get() + i);
+            auto last_dis = std::numeric_limits<float>::max();
+            // we should see strict decreasing distances for brute force iterator.
+            while (it->HasNext()) {
+                auto [offset, dis] = it->Next();
+                ASSERT_LE(dis, last_dis);
+                last_dis = dis;
+                ASSERT_FLOAT_EQ(dis, base[offset].dot(q));
+            }
         }
     }
 };

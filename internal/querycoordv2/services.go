@@ -942,6 +942,16 @@ func (s *Server) GetShardLeaders(ctx context.Context, req *querypb.GetShardLeade
 			}
 		}
 
+		// to avoid node down during GetShardLeaders
+		if len(ids) == 0 {
+			msg := fmt.Sprintf("channel %s is not available in any replica", channel.GetChannelName())
+			log.Warn(msg, zap.Error(channelErr))
+			resp.Status = merr.Status(
+				errors.Wrap(merr.WrapErrChannelNotAvailable(channel.GetChannelName()), channelErr.Error()))
+			resp.Shards = nil
+			return resp, nil
+		}
+
 		resp.Shards = append(resp.Shards, &querypb.ShardLeadersList{
 			ChannelName: channel.GetChannelName(),
 			NodeIds:     ids,

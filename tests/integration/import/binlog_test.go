@@ -19,7 +19,6 @@ package importv2
 import (
 	"context"
 	"fmt"
-	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
@@ -61,19 +60,16 @@ func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64, *schemapb.IDs) {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	s.NoError(err)
-	s.Equal(int32(0), createCollectionStatus.GetCode())
+	s.NoError(merr.CheckRPCCall(createCollectionStatus, err))
 
 	showCollectionsResp, err := c.Proxy.ShowCollections(ctx, &milvuspb.ShowCollectionsRequest{})
-	s.NoError(err)
-	s.Equal(int32(0), showCollectionsResp.GetStatus().GetCode())
+	s.NoError(merr.CheckRPCCall(showCollectionsResp, err))
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
 	showPartitionsResp, err := c.Proxy.ShowPartitions(ctx, &milvuspb.ShowPartitionsRequest{
 		CollectionName: collectionName,
 	})
-	s.NoError(err)
-	s.Equal(int32(0), showPartitionsResp.GetStatus().GetCode())
+	s.NoError(merr.CheckRPCCall(showPartitionsResp, err))
 	log.Info("ShowPartitions result", zap.Any("showPartitionsResp", showPartitionsResp))
 
 	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
@@ -85,8 +81,7 @@ func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64, *schemapb.IDs) {
 		HashKeys:       hashKeys,
 		NumRows:        uint32(rowNum),
 	})
-	s.NoError(err)
-	s.Equal(int32(0), insertResult.GetStatus().GetCode())
+	s.NoError(merr.CheckRPCCall(insertResult, err))
 	insertedIDs := insertResult.GetIDs()
 
 	// flush
@@ -94,7 +89,7 @@ func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64, *schemapb.IDs) {
 		DbName:          dbName,
 		CollectionNames: []string{collectionName},
 	})
-	s.NoError(err)
+	s.NoError(merr.CheckRPCCall(flushResp, err))
 	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
 	ids := segmentIDs.GetData()
 	s.Require().NotEmpty(segmentIDs)
@@ -117,8 +112,7 @@ func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64, *schemapb.IDs) {
 		IndexName:      "_default",
 		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
 	})
-	s.NoError(err)
-	s.Equal(int32(0), createIndexStatus.GetCode())
+	s.NoError(merr.CheckRPCCall(createIndexStatus, err))
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
@@ -127,8 +121,7 @@ func (s *BulkInsertSuite) PrepareCollectionA() (int64, int64, *schemapb.IDs) {
 		DbName:         dbName,
 		CollectionName: collectionName,
 	})
-	s.NoError(err)
-	s.Equal(int32(0), loadStatus.GetCode())
+	s.NoError(merr.CheckRPCCall(loadStatus, err))
 	s.WaitForLoad(ctx, collectionName)
 
 	// search
@@ -162,8 +155,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	collectionID, partitionID, insertedIDs := s.PrepareCollectionA()
 
 	c := s.Cluster
-	ctx, cancel := context.WithTimeout(c.GetContext(), 60*time.Second)
-	defer cancel()
+	ctx := c.GetContext()
 
 	collectionName := "TestBulkInsert_B_" + funcutil.GenRandomStr()
 
@@ -177,8 +169,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 		Schema:         marshaledSchema,
 		ShardsNum:      common.DefaultShardsNum,
 	})
-	s.NoError(err)
-	s.Equal(int32(0), createCollectionStatus.GetCode())
+	s.NoError(merr.CheckRPCCall(createCollectionStatus, err))
 
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -187,8 +178,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 		IndexName:      "_default",
 		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
 	})
-	s.NoError(err)
-	s.Equal(int32(0), createIndexStatus.GetCode())
+	s.NoError(merr.CheckRPCCall(createIndexStatus, err))
 
 	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
 
@@ -196,8 +186,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		CollectionName: collectionName,
 	})
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
+	s.NoError(merr.CheckRPCCall(loadStatus, err))
 	s.WaitForLoad(ctx, collectionName)
 
 	files := []*internalpb.ImportFile{
@@ -217,8 +206,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 			{Key: "backup", Value: "true"},
 		},
 	})
-	s.NoError(err)
-	s.Equal(int32(0), importResp.GetStatus().GetCode())
+	s.NoError(merr.CheckRPCCall(importResp, err))
 	log.Info("Import result", zap.Any("importResp", importResp))
 
 	jobID := importResp.GetJobID()
@@ -235,8 +223,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 		CollectionName: collectionName,
 		Refresh:        true,
 	})
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
+	s.NoError(merr.CheckRPCCall(loadStatus, err))
 	s.WaitForLoadRefresh(ctx, "", collectionName)
 
 	// search

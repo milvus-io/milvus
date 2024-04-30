@@ -289,7 +289,7 @@ func (wb *writeBufferBase) cleanupCompactedSegments() {
 	}
 }
 
-func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64) error {
+func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) error {
 	// mark segment flushing if segment was growing
 	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Sealed),
 		metacache.WithSegmentIDs(segmentIDs...),
@@ -297,9 +297,9 @@ func (wb *writeBufferBase) sealSegments(ctx context.Context, segmentIDs []int64)
 	return nil
 }
 
-func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[error] {
+func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[struct{}] {
 	log := log.Ctx(ctx)
-	result := make([]*conc.Future[error], 0, len(segmentIDs))
+	result := make([]*conc.Future[struct{}], 0, len(segmentIDs))
 	for _, segmentID := range segmentIDs {
 		syncTask, err := wb.getSyncTask(ctx, segmentID)
 		if err != nil {
@@ -563,7 +563,7 @@ func (wb *writeBufferBase) Close(drop bool) {
 		return
 	}
 
-	var futures []*conc.Future[error]
+	var futures []*conc.Future[struct{}]
 	for id := range wb.buffers {
 		syncTask, err := wb.getSyncTask(context.Background(), id)
 		if err != nil {

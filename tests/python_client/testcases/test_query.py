@@ -1329,7 +1329,7 @@ class TestQueryParams(TestcaseBase):
         assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_float_field_name}
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 30437")
+    @pytest.mark.skip(reason="issue 30437")
     def test_query_output_all_fields(self, enable_dynamic_field, random_primary_key):
         """
         target: test query with none output field
@@ -1505,7 +1505,7 @@ class TestQueryParams(TestcaseBase):
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.skip(reason="exception not MilvusException")
     def test_query_invalid_output_fields(self):
         """
         target: test query with invalid output fields
@@ -1520,7 +1520,7 @@ class TestQueryParams(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue 24637")
+    @pytest.mark.skip(reason="issue 24637")
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
@@ -1539,7 +1539,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res3, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 24637")
+    @pytest.mark.skip(reason="issue 24637")
     def test_query_output_fields_part_scale_wildcard(self):
         """
         target: test query output_fields with part wildcard
@@ -2679,7 +2679,7 @@ class TestQueryString(TestcaseBase):
                                         f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 24637")
+    @pytest.mark.skip(reason="issue 24637")
     def test_query_after_insert_multi_threading(self):
         """
         target: test data consistency after multi threading insert

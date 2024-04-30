@@ -657,6 +657,12 @@ func Test_NewServer(t *testing.T) {
 		assert.Nil(t, err)
 	})
 
+	t.Run("AlterDatabase", func(t *testing.T) {
+		mockProxy.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.AlterDatabase(ctx, nil)
+		assert.Nil(t, err)
+	})
+
 	t.Run("AllocTimestamp", func(t *testing.T) {
 		mockProxy.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.AllocTimestamp(ctx, nil)

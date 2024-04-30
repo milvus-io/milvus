@@ -901,6 +901,17 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
 }
 
+func AppendUserInfoForRPC(ctx context.Context) context.Context {
+	curUser, _ := GetCurUserFromContext(ctx)
+	if curUser != "" {
+		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeperator, curUser)
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authValue := crypto.Base64Encode(originValue)
+		ctx = metadata.AppendToOutgoingContext(ctx, authKey, authValue)
+	}
+	return ctx
+}
+
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
@@ -1190,7 +1201,12 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 	var primaryFieldData *schemapb.FieldData
 	if inInsert {
 		// when checkPrimaryFieldData in insert
-		if !primaryFieldSchema.AutoID {
+
+		skipAutoIDCheck := Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() &&
+			primaryFieldSchema.AutoID &&
+			typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema)
+
+		if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 			primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 			if err != nil {
 				log.Info("get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
@@ -1239,7 +1255,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
-	if len(insertMsg.GetPartitionName()) > 0 {
+	if len(insertMsg.GetPartitionName()) > 0 && !Params.ProxyCfg.SkipPartitionKeyCheck.GetAsBool() {
 		return nil, errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 

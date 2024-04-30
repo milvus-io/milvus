@@ -18,7 +18,7 @@ macro(az_vcpkg_integrate)
       message("AZURE_SDK_DISABLE_AUTO_VCPKG is not defined. Fetch a local copy of vcpkg.")
       # GET VCPKG FROM SOURCE
       #  User can set env var AZURE_SDK_VCPKG_COMMIT to pick the VCPKG commit to fetch
-      set(VCPKG_COMMIT_STRING 061fe134942a36905e12c11477c8eba761bffc5f) # default SDK tested commit
+      set(VCPKG_COMMIT_STRING 8150939b69720adc475461978e07c2d2bf5fb76e) # default SDK tested commit
       if(DEFINED ENV{AZURE_SDK_VCPKG_COMMIT})
         message("AZURE_SDK_VCPKG_COMMIT is defined. Using that instead of the default.")
         set(VCPKG_COMMIT_STRING "$ENV{AZURE_SDK_VCPKG_COMMIT}") # default SDK tested commit
@@ -27,7 +27,7 @@ macro(az_vcpkg_integrate)
       include(FetchContent)
       FetchContent_Declare(
           vcpkg
-          GIT_REPOSITORY      https://github.com/milvus-io/vcpkg.git
+          GIT_REPOSITORY      https://github.com/microsoft/vcpkg.git
           GIT_TAG             ${VCPKG_COMMIT_STRING}
           )
       FetchContent_GetProperties(vcpkg)

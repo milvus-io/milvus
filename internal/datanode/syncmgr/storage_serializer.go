@@ -158,6 +158,7 @@ func (s *storageV1Serializer) setTaskMeta(task *SyncTask, pack *SyncPack) {
 }
 
 func (s *storageV1Serializer) serializeBinlog(ctx context.Context, pack *SyncPack) (map[int64]*storage.Blob, error) {
+	log := log.Ctx(ctx)
 	blobs, err := s.inCodec.Serialize(pack.partitionID, pack.segmentID, pack.insertData)
 	if err != nil {
 		return nil, err

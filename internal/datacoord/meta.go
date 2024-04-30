@@ -86,6 +86,7 @@ type collectionInfo struct {
 	CreatedAt      Timestamp
 	DatabaseName   string
 	DatabaseID     int64
+	VChannelNames  []string
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -212,6 +213,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		Properties:     clonedProperties,
 		DatabaseName:   coll.DatabaseName,
 		DatabaseID:     coll.DatabaseID,
+		VChannelNames:  coll.VChannelNames,
 	}
 
 	return cloneColl

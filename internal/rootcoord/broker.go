@@ -255,6 +255,7 @@ func (b *ServerBroker) BroadcastAlteredCollection(ctx context.Context, req *milv
 		StartPositions: colMeta.StartPositions,
 		Properties:     req.GetProperties(),
 		DbID:           db.ID,
+		VChannels:      colMeta.VirtualChannelNames,
 	}
 
 	resp, err := b.s.dataCoord.BroadcastAlteredCollection(ctx, dcReq)

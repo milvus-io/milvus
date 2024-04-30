@@ -199,6 +199,61 @@ func (_c *MockProxy_AlterCollection_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+// AlterDatabase provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) AlterDatabase(_a0 context.Context, _a1 *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.AlterDatabaseRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.AlterDatabaseRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_AlterDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AlterDatabase'
+type MockProxy_AlterDatabase_Call struct {
+	*mock.Call
+}
+
+// AlterDatabase is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.AlterDatabaseRequest
+func (_e *MockProxy_Expecter) AlterDatabase(_a0 interface{}, _a1 interface{}) *MockProxy_AlterDatabase_Call {
+	return &MockProxy_AlterDatabase_Call{Call: _e.mock.On("AlterDatabase", _a0, _a1)}
+}
+
+func (_c *MockProxy_AlterDatabase_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.AlterDatabaseRequest)) *MockProxy_AlterDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.AlterDatabaseRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_AlterDatabase_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_AlterDatabase_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_AlterDatabase_Call) RunAndReturn(run func(context.Context, *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error)) *MockProxy_AlterDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AlterIndex provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) AlterIndex(_a0 context.Context, _a1 *milvuspb.AlterIndexRequest) (*commonpb.Status, error) {
 	ret := _m.Called(_a0, _a1)

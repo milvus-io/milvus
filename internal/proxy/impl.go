@@ -379,6 +379,64 @@ func (node *Proxy) ListDatabases(ctx context.Context, request *milvuspb.ListData
 	return dct.result, nil
 }
 
+func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-AlterDatabase")
+	defer sp.End()
+	method := "AlterDatabase"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), "").Inc()
+
+	act := &alterDatabaseTask{
+		ctx:                  ctx,
+		Condition:            NewTaskCondition(ctx),
+		AlterDatabaseRequest: request,
+		rootCoord:            node.rootCoord,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName))
+
+	log.Info(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+		log.Warn(
+			rpcFailedToEnqueue(method),
+			zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), "").Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Info(rpcEnqueued(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := act.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", act.BeginTs()),
+			zap.Uint64("EndTs", act.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, request.GetDbName(), "").Inc()
+		return merr.Status(err), nil
+	}
+
+	log.Info(rpcDone(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), "").Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return act.result, nil
+}
+
 // CreateCollection create a collection by the schema.
 // TODO(dragondriver): add more detailed ut for ConsistencyLevel, should we support multiple consistency level in Proxy?
 func (node *Proxy) CreateCollection(ctx context.Context, request *milvuspb.CreateCollectionRequest) (*commonpb.Status, error) {
