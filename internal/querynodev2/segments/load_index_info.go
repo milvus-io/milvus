@@ -223,7 +223,7 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 			status = C.AppendIndexV3(li.cLoadIndexInfo)
 		} else {
 			traceCtx := ParseCTraceContext(ctx)
-			status = C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
+			status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
 		}
 		return nil, nil
 	}).Await()
