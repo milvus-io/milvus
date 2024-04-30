@@ -130,10 +130,12 @@ func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
 	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
 		return false
 	}
-	// check pk range first, ugly but key it for now
-	if st.MinPK.GT(pk) || st.MaxPK.LT(pk) {
+
+	// check bf first, TestLocation just do some bitset compute, cost is cheaper
+	if !st.PkFilter.TestLocations(locs) {
 		return false
 	}
 
-	return st.PkFilter.TestLocations(locs)
+	// check pk range first, ugly but key it for now
+	return st.MinPK.LE(pk) && st.MaxPK.GE(pk)
 }

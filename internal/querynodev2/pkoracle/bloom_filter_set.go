@@ -17,6 +17,7 @@
 package pkoracle
 
 import (
+	"context"
 	"sync"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
@@ -62,13 +63,14 @@ func (s *BloomFilterSet) MayPkExist(pk storage.PrimaryKey) bool {
 }
 
 func (s *BloomFilterSet) TestLocations(pk storage.PrimaryKey, locs []uint64) bool {
+	log := log.Ctx(context.TODO()).WithRateGroup("BloomFilterSet.TestLocations", 1, 60)
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
 	if s.currentStat != nil {
 		k := s.currentStat.PkFilter.K()
 		if k > uint(len(locs)) {
-			log.Error("locations num is less than hash func num",
+			log.RatedWarn(30, "locations num is less than hash func num, return false positive result",
 				zap.Int("locationNum", len(locs)),
 				zap.Uint("hashFuncNum", k),
 				zap.Int64("segmentID", s.segmentID))
@@ -84,11 +86,10 @@ func (s *BloomFilterSet) TestLocations(pk storage.PrimaryKey, locs []uint64) boo
 	for _, historyStat := range s.historyStats {
 		k := historyStat.PkFilter.K()
 		if k > uint(len(locs)) {
-			log.Error("locations num is less than hash func num",
+			log.RatedWarn(30, "locations num is less than hash func num, return false positive result",
 				zap.Int("locationNum", len(locs)),
 				zap.Uint("hashFuncNum", k),
 				zap.Int64("segmentID", s.segmentID))
-			// make it false positive
 			return true
 		}
 		if historyStat.TestLocations(pk, locs[:k]) {

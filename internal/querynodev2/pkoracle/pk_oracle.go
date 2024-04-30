@@ -97,12 +97,12 @@ func (pko *pkOracle) candidateKey(candidate Candidate, workerID int64) string {
 
 // Register register candidate
 func (pko *pkOracle) Register(candidate Candidate, workerID int64) error {
+	pko.TryUpdateHashFuncNum(candidate.GetHashFuncNum())
 	pko.candidates.Insert(pko.candidateKey(candidate, workerID), candidateWithWorker{
 		Candidate: candidate,
 		workerID:  workerID,
 	})
 
-	pko.TryUpdateHashFuncNum(candidate.GetHashFuncNum())
 	return nil
 }
 
