@@ -1614,6 +1614,26 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 	})
 }
 
+func (s *GarbageCollectorSuite) TestRunRecycleTaskWithPauser() {
+	gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		cli:              s.cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*2500)
+	defer cancel()
+
+	cnt := 0
+	gc.runRecycleTaskWithPauser(ctx, "test", time.Second, func(ctx context.Context) {
+		cnt++
+	})
+	s.Equal(cnt, 2)
+}
+
 func TestGarbageCollector(t *testing.T) {
 	suite.Run(t, new(GarbageCollectorSuite))
 }
