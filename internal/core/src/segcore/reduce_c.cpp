@@ -20,7 +20,8 @@
 using SearchResult = milvus::SearchResult;
 
 CStatus
-ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
+ReduceSearchResultsAndFillData(CTraceContext c_trace,
+                               CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchPlan c_plan,
                                CSearchResult* c_search_results,
                                int64_t num_segments,
@@ -31,13 +32,21 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
         // get SearchResult and SearchPlan
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
         AssertInfo(num_segments > 0, "num_segments must be greater than 0");
+        auto trace_ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        milvus::tracer::AutoSpan span(
+            "ReduceSearchResultsAndFillData", &trace_ctx, true);
         std::vector<SearchResult*> search_results(num_segments);
         for (int i = 0; i < num_segments; ++i) {
             search_results[i] = static_cast<SearchResult*>(c_search_results[i]);
         }
 
-        auto reduce_helper = milvus::segcore::ReduceHelper(
-            search_results, plan, slice_nqs, slice_topKs, num_slices);
+        auto reduce_helper = milvus::segcore::ReduceHelper(search_results,
+                                                           plan,
+                                                           slice_nqs,
+                                                           slice_topKs,
+                                                           num_slices,
+                                                           &trace_ctx);
         reduce_helper.Reduce();
         reduce_helper.Marshal();
 

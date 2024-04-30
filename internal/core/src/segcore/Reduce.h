@@ -22,6 +22,7 @@
 #include "common/QueryResult.h"
 #include "query/PlanImpl.h"
 #include "ReduceStructure.h"
+#include "common/Tracer.h"
 
 namespace milvus::segcore {
 
@@ -36,11 +37,13 @@ class ReduceHelper {
                           milvus::query::Plan* plan,
                           int64_t* slice_nqs,
                           int64_t* slice_topKs,
-                          int64_t slice_num)
+                          int64_t slice_num,
+                          tracer::TraceContext* trace_ctx)
         : search_results_(search_results),
           plan_(plan),
           slice_nqs_(slice_nqs, slice_nqs + slice_num),
-          slice_topKs_(slice_topKs, slice_topKs + slice_num) {
+          slice_topKs_(slice_topKs, slice_topKs + slice_num),
+          trace_ctx_(trace_ctx) {
         Initialize();
     }
 
@@ -114,6 +117,8 @@ class ReduceHelper {
         heap_;
     std::unordered_set<milvus::PkType> pk_set_;
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
+
+    tracer::TraceContext* trace_ctx_;
 };
 
 }  // namespace milvus::segcore

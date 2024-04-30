@@ -51,6 +51,9 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		return results[0], nil
 	}
 
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResults")
+	defer sp.End()
+
 	channelsMvcc := make(map[string]uint64)
 	for _, r := range results {
 		for ch, ts := range r.GetChannelsMvcc() {
@@ -63,7 +66,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 	}
 	log := log.Ctx(ctx)
 
-	searchResultData, err := DecodeSearchResults(results)
+	searchResultData, err := DecodeSearchResults(ctx, results)
 	if err != nil {
 		log.Warn("shard leader decode search results errors", zap.Error(err))
 		return nil, err
@@ -82,7 +85,7 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 		log.Warn("shard leader reduce errors", zap.Error(err))
 		return nil, err
 	}
-	searchResults, err := EncodeSearchResultData(reducedResultData, nq, topk, metricType)
+	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, nq, topk, metricType)
 	if err != nil {
 		log.Warn("shard leader encode search result errors", zap.Error(err))
 		return nil, err
@@ -112,6 +115,9 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 }
 
 func ReduceAdvancedSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64) (*internalpb.SearchResults, error) {
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceAdvancedSearchResults")
+	defer sp.End()
+
 	if len(results) == 1 {
 		return results[0], nil
 	}
@@ -202,6 +208,8 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 }
 
 func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, nq int64, topk int64) (*schemapb.SearchResultData, error) {
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
+	defer sp.End()
 	log := log.Ctx(ctx)
 
 	if len(searchResultData) == 0 {
@@ -329,7 +337,10 @@ func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffset
 	return sel
 }
 
-func DecodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
+func DecodeSearchResults(ctx context.Context, searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "DecodeSearchResults")
+	defer sp.End()
+
 	results := make([]*schemapb.SearchResultData, 0)
 	for _, partialSearchResult := range searchResults {
 		if partialSearchResult.SlicedBlob == nil {
@@ -347,7 +358,10 @@ func DecodeSearchResults(searchResults []*internalpb.SearchResults) ([]*schemapb
 	return results, nil
 }
 
-func EncodeSearchResultData(searchResultData *schemapb.SearchResultData, nq int64, topk int64, metricType string) (searchResults *internalpb.SearchResults, err error) {
+func EncodeSearchResultData(ctx context.Context, searchResultData *schemapb.SearchResultData, nq int64, topk int64, metricType string) (searchResults *internalpb.SearchResults, err error) {
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "EncodeSearchResultData")
+	defer sp.End()
+
 	searchResults = &internalpb.SearchResults{
 		Status:     merr.Success(),
 		NumQueries: nq,
@@ -381,6 +395,9 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		skipDupCnt int64
 		loopEnd    int
 	)
+
+	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeInternalRetrieveResult")
+	defer sp.End()
 
 	validRetrieveResults := []*internalpb.RetrieveResults{}
 	relatedDataSize := int64(0)
