@@ -483,9 +483,11 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         // set pks to offset
         if (schema_->get_primary_field_id() == field_id) {
             AssertInfo(field_id.get() != -1, "Primary key is -1");
-            AssertInfo(insert_record_.empty_pks(), "already exists");
-            insert_record_.insert_pks(data_type, column);
-            insert_record_.seal_pks();
+            // AssertInfo(insert_record_.empty_pks(), "already exists");
+            if (insert_record_.empty_pks()) {
+                insert_record_.insert_pks(data_type, column);
+                insert_record_.seal_pks();
+            }
         }
 
         bool use_temp_index = false;
