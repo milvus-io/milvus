@@ -25,8 +25,7 @@ default_schema = cf.gen_default_collection_schema()
 default_binary_schema = cf.gen_default_binary_collection_schema()
 default_index_params = {"index_type": "IVF_SQ8",
                         "metric_type": "L2", "params": {"nlist": 64}}
-default_binary_index_params = {
-    "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
+default_binary_index_params = ct.default_binary_index
 default_search_exp = "int64 >= 0"
 
 

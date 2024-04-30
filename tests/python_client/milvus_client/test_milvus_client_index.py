@@ -274,7 +274,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/1886")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                                 ct.default_all_indexes_params[:7]))
     def test_milvus_client_index_default(self, index, params, metric_type):
         """
         target: test search (high level api) normal case
@@ -324,7 +324,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.skip(reason="pymilvus issue 1884")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                                 ct.default_all_indexes_params[:7]))
     def test_milvus_client_index_with_params(self, index, params, metric_type):
         """
         target: test search (high level api) normal case
@@ -372,7 +372,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.skip("wait for modification")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                                 ct.default_all_indexes_params[:7]))
     def test_milvus_client_index_after_insert(self, index, params, metric_type):
         """
         target: test search (high level api) normal case
@@ -518,7 +518,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.skip("wait for modification")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                                 ct.default_all_indexes_params[:7]))
     def test_milvus_client_index_drop_create_same_index(self, index, params, metric_type):
         """
         target: test search (high level api) normal case
@@ -570,7 +570,7 @@ class TestMilvusClientIndexValid(TestcaseBase):
     @pytest.mark.skip("wait for modification")
     @pytest.mark.parametrize("index, params",
                              zip(ct.all_index_types[:7],
-                                 ct.default_index_params[:7]))
+                                 ct.default_all_indexes_params[:7]))
     def test_milvus_client_index_drop_create_different_index(self, index, params, metric_type):
         """
         target: test search (high level api) normal case
