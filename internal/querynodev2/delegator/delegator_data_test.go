@@ -62,6 +62,8 @@ type DelegatorDataSuite struct {
 	tsafeManager  tsafe.Manager
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
+	channel       metautil.Channel
+	mapper        metautil.ChannelMapper
 
 	delegator    *shardDelegator
 	rootPath     string
@@ -72,6 +74,15 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
+
+	s.collectionID = 1000
+	s.replicaID = 65535
+	s.vchannelName = "rootcoord-dml_1000v0"
+	s.version = 2000
+	var err error
+	s.mapper = metautil.NewDynChannelMapper()
+	s.channel, err = metautil.ParseChannel(s.vchannelName, s.mapper)
+	s.Require().NoError(err)
 }
 
 func (s *DelegatorDataSuite) TearDownSuite() {
@@ -79,10 +90,7 @@ func (s *DelegatorDataSuite) TearDownSuite() {
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
-	s.collectionID = 1000
-	s.replicaID = 65535
-	s.vchannelName = "rootcoord-dml_1000v0"
-	s.version = 2000
+
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.tsafeManager = tsafe.NewTSafeReplica()
@@ -1081,7 +1089,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		ms.EXPECT().Partition().Return(1)
 		ms.EXPECT().InsertCount().Return(0)
 		ms.EXPECT().Indexes().Return(nil)
-		ms.EXPECT().Shard().Return(s.vchannelName)
+		ms.EXPECT().Shard().Return(s.channel)
 		ms.EXPECT().Level().Return(datapb.SegmentLevel_L1)
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
