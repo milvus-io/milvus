@@ -242,7 +242,8 @@ class TestcaseBase(Base):
         expected: return collection and raw data, insert ids
         """
         log.info("Test case of search interface: initialize before test case")
-        self._connect()
+        if not self.connection_wrap.has_connection(alias=DefaultConfig.DEFAULT_USING)[0]:
+            self._connect()
         collection_name = cf.gen_unique_str(prefix)
         if name is not None:
             collection_name = name

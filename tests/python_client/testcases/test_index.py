@@ -19,7 +19,7 @@ from pymilvus.exceptions import MilvusException
 prefix = "index"
 default_schema = cf.gen_default_collection_schema()
 default_field_name = ct.default_float_vec_field_name
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
+default_index_params = ct.default_index
 default_autoindex_params = {"index_type": "AUTOINDEX", "metric_type": "IP"}
 
 # copied from pymilvus
@@ -33,9 +33,9 @@ index_name2 = cf.gen_unique_str("varhar")
 index_name3 = cf.gen_unique_str("binary")
 default_string_index_params = {}
 default_binary_schema = cf.gen_default_binary_collection_schema()
-default_binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
+default_binary_index_params = ct.default_binary_index
 # query = gen_search_vectors_params(field_name, default_entities, default_top_k, 1)
-default_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
+default_ivf_flat_index = {"index_type": "IVF_FLAT", "params": {"nlist": 128}, "metric_type": "L2"}
 default_ip_index_params = {"index_type": "IVF_FLAT", "metric_type": "IP", "params": {"nlist": 64}}
 default_nq = ct.default_nq
 default_limit = ct.default_limit
@@ -215,7 +215,7 @@ class TestIndexOperation(TestcaseBase):
         self.index_wrap.init_index(collection_w.collection, default_field_name, default_index_params)
         error = {ct.err_code: 65535, ct.err_msg: "CreateIndex failed: at most one "
                                                  "distinct index is allowed per field"}
-        self.index_wrap.init_index(collection_w.collection, default_field_name, default_index,
+        self.index_wrap.init_index(collection_w.collection, default_field_name, default_ivf_flat_index,
                                    check_task=CheckTasks.err_res, check_items=error)
 
         assert len(collection_w.indexes) == 1
@@ -611,7 +611,7 @@ class TestNewIndexBase(TestcaseBase):
         self.connection_wrap.remove_connection(ct.default_alias)
         res_list, _ = self.connection_wrap.list_connections()
         assert ct.default_alias not in res_list
-        collection_w.create_index(ct.default_float_vec_field_name, ct.default_index_params,
+        collection_w.create_index(ct.default_float_vec_field_name, ct.default_all_indexes_params,
                                   check_task=CheckTasks.err_res,
                                   check_items={ct.err_code: 1, ct.err_msg: "should create connect first"})
 
@@ -716,7 +716,7 @@ class TestNewIndexBase(TestcaseBase):
         collection_w = self.init_collection_wrap(name=c_name)
         data = cf.gen_default_list_data()
         collection_w.insert(data=data)
-        index_prams = [default_index, {"metric_type": "L2", "index_type": "IVF_SQ8", "params": {"nlist": 1024}}]
+        index_prams = [default_ivf_flat_index, {"metric_type": "L2", "index_type": "IVF_SQ8", "params": {"nlist": 1024}}]
         for index in index_prams:
             index_name = cf.gen_unique_str("name")
             collection_w.create_index(default_float_vec_field_name, index, index_name=index_name)
@@ -1122,7 +1122,7 @@ class TestNewIndexBase(TestcaseBase):
                                          "limit": default_limit})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[:6], ct.default_index_params[:6]))
+    @pytest.mark.parametrize("index, params", zip(ct.all_index_types[:6], ct.default_all_indexes_params[:6]))
     def test_drop_mmap_index(self, index, params):
         """
         target: disabling and re-enabling mmap for index
@@ -1384,7 +1384,7 @@ class TestIndexInvalid(TestcaseBase):
         """
         collection_name = get_collection_name
         with pytest.raises(Exception) as e:
-            connect.create_index(collection_name, field_name, default_index)
+            connect.create_index(collection_name, field_name, default_ivf_flat_index)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_drop_index_with_invalid_collection_name(self, connect, get_collection_name):
