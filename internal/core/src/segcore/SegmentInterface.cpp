@@ -87,12 +87,11 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::Retrieve(
-    tracer::TraceContext* trace_ctx,
-    const query::RetrievePlan* plan,
-    Timestamp timestamp,
-    int64_t limit_size,
-    bool ignore_non_pk) const {
+SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
+                                   const query::RetrievePlan* plan,
+                                   Timestamp timestamp,
+                                   int64_t limit_size,
+                                   bool ignore_non_pk) const {
     std::shared_lock lck(mutex_);
     tracer::AutoSpan span("Retrieve", trace_ctx, false);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
