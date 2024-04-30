@@ -12372,13 +12372,13 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 vectors_search = vectors[k]
                 # 5. search to get the base line of hybrid_search
                 search_res = collection_w.search([vectors_search], vector_name_list[i],
-                                             single_search_param, default_limit,
-                                             default_search_exp,
-                                             _async=_async,
-                                             check_task=CheckTasks.check_search_results,
-                                             check_items={"nq": 1,
-                                                          "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                 single_search_param, default_limit,
+                                                 default_search_exp, _async=_async,
+                                                 check_task=CheckTasks.check_search_results,
+                                                 check_items={"nq": 1,
+                                                              "ids": insert_ids,
+                                                              "limit": default_limit,
+                                                              "_async": _async})[0]
                 if _async:
                     search_res.done()
                     search_res = search_res.result()
@@ -12396,12 +12396,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             score_answer_nq.append(score_answer)
         # 7. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit,
-                                                output_fields= output_fields,
-                                                _async=_async,
+                                                output_fields=output_fields, _async=_async,
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "_async": _async})[0]
         if _async:
             hybrid_res.done()
             hybrid_res = hybrid_res.result()
