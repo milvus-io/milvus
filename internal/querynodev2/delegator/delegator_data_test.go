@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
 	"testing"
@@ -80,7 +81,7 @@ func (s *DelegatorDataSuite) TearDownSuite() {
 func (s *DelegatorDataSuite) SetupTest() {
 	s.collectionID = 1000
 	s.replicaID = 65535
-	s.vchannelName = "rootcoord-dml_1000_v0"
+	s.vchannelName = "rootcoord-dml_1000v0"
 	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
@@ -290,9 +291,10 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	defer cancel()
 	err := s.delegator.LoadGrowing(ctx, []*querypb.SegmentLoadInfo{
 		{
-			SegmentID:    1001,
-			CollectionID: s.collectionID,
-			PartitionID:  500,
+			SegmentID:     1001,
+			CollectionID:  s.collectionID,
+			PartitionID:   500,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 		},
 	}, 0)
 	s.Require().NoError(err)
@@ -308,6 +310,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 	})
@@ -334,6 +337,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 5000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 	})
@@ -390,6 +394,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 		Version: 1,
@@ -424,6 +429,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 		Version: 2,
@@ -482,6 +488,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -563,6 +570,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					Deltalogs:     []*datapb.FieldBinlog{},
 					Level:         datapb.SegmentLevel_L0,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -578,6 +586,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -724,6 +733,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 2},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 2},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -750,6 +760,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -788,6 +799,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -832,6 +844,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -896,9 +909,10 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	defer cancel()
 	err := s.delegator.LoadGrowing(ctx, []*querypb.SegmentLoadInfo{
 		{
-			SegmentID:    1001,
-			CollectionID: s.collectionID,
-			PartitionID:  500,
+			SegmentID:     1001,
+			CollectionID:  s.collectionID,
+			PartitionID:   500,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 		},
 	}, 0)
 	s.Require().NoError(err)
@@ -914,6 +928,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 	})

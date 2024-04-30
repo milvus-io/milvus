@@ -101,7 +101,7 @@ func (suite *ServiceSuite) SetupSuite() {
 	suite.droppedSegmentIDs = []int64{7, 8, 9}
 
 	// channel data
-	suite.vchannel = "test-channel"
+	suite.vchannel = "by-dev-rootcoord-dml_0_111v0"
 	suite.pchannel = funcutil.ToPhysicalChannel(suite.vchannel)
 	suite.position = &msgpb.MsgPosition{
 		ChannelName: suite.vchannel,

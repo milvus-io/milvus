@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -86,23 +87,31 @@ type baseSegment struct {
 	bloomFilterSet *pkoracle.BloomFilterSet
 	loadInfo       *atomic.Pointer[querypb.SegmentLoadInfo]
 	isLazyLoad     bool
+	channel        metautil.Channel
 
 	resourceUsageCache *atomic.Pointer[ResourceUsage]
 
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
 }
 
-func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) baseSegment {
-	return baseSegment{
-		collection:         collection,
-		loadInfo:           atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
-		version:            atomic.NewInt64(version),
-		isLazyLoad:         isLazyLoad(collection, segmentType),
-		segmentType:        segmentType,
-		bloomFilterSet:     pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
+func newBaseSegment(collection *Collection, segmentType SegmentType, version int64, loadInfo *querypb.SegmentLoadInfo) (baseSegment, error) {
+	channel, err := metautil.ParseChannel(loadInfo.GetInsertChannel(), channelMapper)
+	if err != nil {
+		return baseSegment{}, err
+	}
+	bs := baseSegment{
+		collection:     collection,
+		loadInfo:       atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+		version:        atomic.NewInt64(version),
+		segmentType:    segmentType,
+		bloomFilterSet: pkoracle.NewBloomFilterSet(loadInfo.GetSegmentID(), loadInfo.GetPartitionID(), segmentType),
+		channel:        channel,
+		isLazyLoad:     isLazyLoad(collection, segmentType),
+
 		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
 	}
+	return bs, nil
 }
 
 // isLazyLoad checks if the segment is lazy load
@@ -138,8 +147,8 @@ func (s *baseSegment) ResourceGroup() string {
 	return s.collection.GetResourceGroup()
 }
 
-func (s *baseSegment) Shard() string {
-	return s.loadInfo.Load().GetInsertChannel()
+func (s *baseSegment) Shard() metautil.Channel {
+	return s.channel
 }
 
 func (s *baseSegment) Type() SegmentType {
@@ -257,6 +266,12 @@ func NewSegment(ctx context.Context,
 	if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
 		return NewL0Segment(collection, segmentType, version, loadInfo)
 	}
+
+	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
+	if err != nil {
+		return nil, err
+	}
+
 	var cSegType C.SegmentType
 	var locker *state.LoadStateLock
 	switch segmentType {
@@ -271,7 +286,7 @@ func NewSegment(ctx context.Context,
 	}
 
 	var newPtr C.CSegmentInterface
-	_, err := GetDynamicPool().Submit(func() (any, error) {
+	_, err = GetDynamicPool().Submit(func() (any, error) {
 		status := C.NewSegment(collection.collectionPtr, cSegType, C.int64_t(loadInfo.GetSegmentID()), &newPtr)
 		err := HandleCStatus(ctx, &status, "NewSegmentFailed",
 			zap.Int64("collectionID", loadInfo.GetCollectionID()),
@@ -293,7 +308,7 @@ func NewSegment(ctx context.Context,
 	)
 
 	segment := &LocalSegment{
-		baseSegment:        newBaseSegment(collection, segmentType, version, loadInfo),
+		baseSegment:        base,
 		ptrLock:            locker,
 		ptr:                newPtr,
 		lastDeltaTimestamp: atomic.NewUint64(0),
@@ -324,6 +339,10 @@ func NewSegmentV2(
 	*/
 	if loadInfo.GetLevel() == datapb.SegmentLevel_L0 {
 		return NewL0Segment(collection, segmentType, version, loadInfo)
+	}
+	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
+	if err != nil {
+		return nil, err
 	}
 	var segmentPtr C.CSegmentInterface
 	var status C.CStatus
@@ -359,7 +378,7 @@ func NewSegmentV2(
 	}
 
 	segment := &LocalSegment{
-		baseSegment:        newBaseSegment(collection, segmentType, version, loadInfo),
+		baseSegment:        base,
 		ptrLock:            locker,
 		ptr:                segmentPtr,
 		lastDeltaTimestamp: atomic.NewUint64(0),

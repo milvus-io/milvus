@@ -18,6 +18,7 @@ package querynodev2
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"sync/atomic"
 	"testing"
@@ -231,8 +232,8 @@ func (suite *QueryNodeSuite) TestStop() {
 			SegmentID:     100,
 			PartitionID:   10,
 			CollectionID:  1,
-			InsertChannel: "test_stop_channel",
 			Level:         datapb.SegmentLevel_Legacy,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", 1),
 		},
 	)
 	suite.NoError(err)

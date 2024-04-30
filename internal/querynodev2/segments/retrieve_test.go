@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"testing"
 
@@ -91,8 +92,8 @@ func (suite *RetrieveSuite) SetupTest() {
 			SegmentID:     suite.segmentID,
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
 			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
@@ -120,7 +121,7 @@ func (suite *RetrieveSuite) SetupTest() {
 			SegmentID:     suite.segmentID + 1,
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)

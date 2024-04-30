@@ -2,6 +2,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -69,7 +70,7 @@ func (suite *SegmentSuite) SetupTest() {
 			CollectionID:  suite.collectionID,
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 			NumOfRows:     int64(msgLength),
 			BinlogPaths: []*datapb.FieldBinlog{
@@ -111,7 +112,7 @@ func (suite *SegmentSuite) SetupTest() {
 			SegmentID:     suite.segmentID + 1,
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
