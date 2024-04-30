@@ -4134,6 +4134,7 @@ class TestCollectionARRAY(TestcaseBase):
         self.init_collection_wrap(schema=array_schema, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/2041")
     def test_collection_array_field_no_capacity(self):
         """
         target: Create a field without giving max_capacity
@@ -4149,6 +4150,7 @@ class TestCollectionARRAY(TestcaseBase):
                                                ct.err_msg: "the value of max_capacity must be an integer"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/2041")
     @pytest.mark.parametrize("max_capacity", [[], 'a', (), -1, 4097])
     def test_collection_array_field_invalid_capacity(self, max_capacity):
         """
@@ -4184,6 +4186,7 @@ class TestCollectionARRAY(TestcaseBase):
                                                            "varChar field of collection"})
 
     @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.skip("https://github.com/milvus-io/pymilvus/issues/2041")
     @pytest.mark.parametrize("max_length", [[], 'a', (), -1, 65536])
     def test_collection_string_array_max_length_invalid(self, max_length):
         """

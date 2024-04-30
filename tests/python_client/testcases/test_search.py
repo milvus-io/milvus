@@ -3194,12 +3194,17 @@ class TestCollectionSearch(TestcaseBase):
             bool_type_cmp = True
         if bool_type == "false":
             bool_type_cmp = False
-        for i, _id in enumerate(insert_ids):
-            if enable_dynamic_field:
-                if _vectors[0][i][f"{default_bool_field_name}"] == bool_type_cmp:
+        if enable_dynamic_field:
+            for i, _id in enumerate(insert_ids):
+                if _vectors[0][i][f"{ct.default_bool_field_name}"] == bool_type_cmp:
                     filter_ids.append(_id)
-            else:
-                if _vectors[0][f"{default_bool_field_name}"][i] == bool_type_cmp:
+        else:
+            for i in range(len(_vectors[0])):
+                if _vectors[0][i].dtypes == bool:
+                    num = i
+                    break
+            for i, _id in enumerate(insert_ids):
+                if _vectors[0][num][i] == bool_type_cmp:
                     filter_ids.append(_id)
 
         # 4. search with different expressions
@@ -3394,7 +3399,6 @@ class TestCollectionSearch(TestcaseBase):
                                                                       is_all_data_type=True,
                                                                       auto_id=auto_id,
                                                                       dim=dim,
-                                                                      enable_dynamic_field=enable_dynamic_field,
                                                                       multiple_dim_array=[dim, dim])[0:4]
         # 2. search
         log.info("test_search_expression_all_data_type: Searching collection %s" %
@@ -3403,7 +3407,7 @@ class TestCollectionSearch(TestcaseBase):
                      "&& int8 >= 0 && float >= 0 && double >= 0"
         vector_name_list = cf.extract_vector_field_name_list(collection_w)
         for search_field in vector_name_list:
-            vector_data_type = search_field[:-9].lstrip("multiple_vector_")
+            vector_data_type = search_field.lstrip("multiple_vector_")
             vectors = cf.gen_vectors_based_on_vector_type(nq, dim, vector_data_type)
             res = collection_w.search(vectors[:nq], search_field,
                                       default_search_params, default_limit,
@@ -7477,6 +7481,8 @@ class TestCollectionRangeSearch(TestcaseBase):
         method: test range search with different metric type
         expected: searched successfully
         """
+        if index == "SCANN":
+            pytest.skip("https://github.com/milvus-io/milvus/issues/32648")
         # 1. initialize with data
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
@@ -11545,6 +11551,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("k", [1, 60, 1000, 16383])
     @pytest.mark.parametrize("offset", [0, 1, 5])
+    @pytest.mark.skip("https://github.com/milvus-io/milvus/issues/32650")
     def test_hybrid_search_RRFRanker_different_k(self, dim, auto_id, is_flush, enable_dynamic_field, k, offset):
         """
         target: test hybrid search normal case
@@ -11949,7 +11956,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_hybrid_search_with_output_fields_all_fields(self, nq, dim, auto_id, is_flush, enable_dynamic_field,
-                                  primary_field, vector_data_type):
+                                                         primary_field, vector_data_type):
         """
         target: test hybrid search normal case
         method: create connection, collection, insert and search
@@ -11996,12 +12003,12 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 vectors_search = vectors[k]
                 # 5. search to get the base line of hybrid_search
                 search_res = collection_w.search([vectors_search], vector_name_list[i],
-                                             single_search_param, default_limit,
-                                             default_search_exp,
-                                             check_task=CheckTasks.check_search_results,
-                                             check_items={"nq": 1,
-                                                          "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                 single_search_param, default_limit,
+                                                 default_search_exp,
+                                                 check_task=CheckTasks.check_search_results,
+                                                 check_items={"nq": 1,
+                                                              "ids": insert_ids,
+                                                              "limit": default_limit})[0]
                 ids = search_res[0].ids
                 distance_array = search_res[0].distances
                 for j in range(len(ids)):
@@ -12032,7 +12039,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("primary_field", [ct.default_int64_field_name, ct.default_string_field_name])
     def test_hybrid_search_with_output_fields_all_fields(self, nq, dim, auto_id, is_flush, enable_dynamic_field,
-                                  primary_field, vector_data_type):
+                                                         primary_field, vector_data_type):
         """
         target: test hybrid search normal case
         method: create connection, collection, insert and search
@@ -12156,13 +12163,13 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 vectors_search = vectors[k]
                 # 5. search to get the base line of hybrid_search
                 search_res = collection_w.search([vectors_search], vector_name_list[i],
-                                             single_search_param, default_limit,
-                                             default_search_exp,
-                                             _async=_async,
-                                             check_task=CheckTasks.check_search_results,
-                                             check_items={"nq": 1,
-                                                          "ids": insert_ids,
-                                                          "limit": default_limit})[0]
+                                                 single_search_param, default_limit,
+                                                 default_search_exp, _async=_async,
+                                                 check_task=CheckTasks.check_search_results,
+                                                 check_items={"nq": 1,
+                                                              "ids": insert_ids,
+                                                              "limit": default_limit,
+                                                              "_async": _async})[0]
                 if _async:
                     search_res.done()
                     search_res = search_res.result()
@@ -12180,12 +12187,13 @@ class TestCollectionHybridSearchValid(TestcaseBase):
             score_answer_nq.append(score_answer)
         # 7. hybrid search
         hybrid_res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), default_limit,
-                                                output_fields= output_fields,
+                                                output_fields=output_fields,
                                                 _async=_async,
                                                 check_task=CheckTasks.check_search_results,
                                                 check_items={"nq": nq,
                                                              "ids": insert_ids,
-                                                             "limit": default_limit})[0]
+                                                             "limit": default_limit,
+                                                             "_async": _async})[0]
         if _async:
             hybrid_res.done()
             hybrid_res = hybrid_res.result()

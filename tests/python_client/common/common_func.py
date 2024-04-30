@@ -182,7 +182,6 @@ def gen_bfloat16_vec_field(name=ct.default_float_vec_field_name, is_primary=Fals
     return float_vec_field
 
 
-
 def gen_default_collection_schema(description=ct.default_desc, primary_field=ct.default_int64_field_name,
                                   auto_id=False, dim=ct.default_dim, enable_dynamic_field=False, with_json=True,
                                   multiple_dim_array=[], is_partition_key=None, vector_data_type="FLOAT_VECTOR",
@@ -695,6 +694,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
 
     return df
 
+
 def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                    auto_id=False, random_primary_key=False, multiple_dim_array=[],
                                    multiple_vector_field_name=[], primary_field=ct.default_int64_field_name):
@@ -734,6 +734,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
 
     return insert_list
 
+
 def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                         multiple_dim_array=[], multiple_vector_field_name=[], partition_id=0,
                                         auto_id=False, primary_field=ct.default_int64_field_name):
@@ -765,9 +766,9 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
                 dict[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i],
                                                                   ct.vector_data_type_all[i])[0]
     if len(multiple_dim_array) != 0:
-        with open(ct.rows_all_data_type_file_path + f'_{partition_id}' + '.txt', 'wb') as json_file:
+        with open(ct.rows_all_data_type_file_path + f'_{partition_id}' + f'_dim{dim}.txt', 'wb') as json_file:
             pickle.dump(array, json_file)
-            log.info("generated rows data file")
+            log.info("generated rows data")
 
     return array
 
@@ -1734,11 +1735,11 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
             else:
                 if not enable_dynamic_field:
                     if vector_data_type == "FLOAT_VECTOR":
-                        default_data = gen_dataframe_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
-                                                                   random_primary_key=random_primary_key,
-                                                                   multiple_dim_array=multiple_dim_array,
-                                                                   multiple_vector_field_name=vector_name_list,
-                                                                   auto_id=auto_id, primary_field=primary_field)
+                        default_data = gen_general_list_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
+                                                                      random_primary_key=random_primary_key,
+                                                                      multiple_dim_array=multiple_dim_array,
+                                                                      multiple_vector_field_name=vector_name_list,
+                                                                      auto_id=auto_id, primary_field=primary_field)
                     elif vector_data_type == "FLOAT16_VECTOR" or "BFLOAT16_VECTOR":
                         default_data = gen_general_list_all_data_type(nb // num, dim=dim, start=start, with_json=with_json,
                                                                       random_primary_key=random_primary_key,
@@ -1746,8 +1747,8 @@ def insert_data(collection_w, nb=ct.default_nb, is_binary=False, is_all_data_typ
                                                                       multiple_vector_field_name=vector_name_list,
                                                                       auto_id=auto_id, primary_field=primary_field)
                 else:
-                    if os.path.exists(ct.rows_all_data_type_file_path + f'_{i}' + '.txt'):
-                        with open(ct.rows_all_data_type_file_path + f'_{i}' + '.txt', 'rb') as f:
+                    if os.path.exists(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt'):
+                        with open(ct.rows_all_data_type_file_path + f'_{i}' + f'_dim{dim}.txt', 'rb') as f:
                             default_data = pickle.load(f)
                     else:
                         default_data = gen_default_rows_data_all_data_type(nb // num, dim=dim, start=start,
@@ -1930,6 +1931,7 @@ def extract_vector_field_name_list(collection_w):
 
     return vector_name_list
 
+
 def get_activate_func_from_metric_type(metric_type):
     activate_function = lambda x: x
     if metric_type == "COSINE":
@@ -1939,6 +1941,7 @@ def get_activate_func_from_metric_type(metric_type):
     else:
         activate_function  = lambda x: 1.0 - 2*math.atan(x) / math.pi
     return activate_function
+
 
 def get_hybrid_search_base_results_rrf(search_res_dict_array, round_decimal=-1):
     """
@@ -1956,7 +1959,7 @@ def get_hybrid_search_base_results_rrf(search_res_dict_array, round_decimal=-1):
         for key, distance in result.items():
             search_res_dict_merge[key] = search_res_dict_merge.get(key, 0) + distance
 
-    if round_decimal != -1 :
+    if round_decimal != -1:
         for k, v in search_res_dict_merge.items():
             multiplier = math.pow(10.0, round_decimal)
             v = math.floor(v*multiplier+0.5) / multiplier
@@ -1990,7 +1993,7 @@ def get_hybrid_search_base_results(search_res_dict_array, weights, metric_types,
             weight = weights[i]
             search_res_dict_merge[key] = search_res_dict_merge.get(key, 0) + activate_function(distance) * weights[i]
 
-    if round_decimal != -1 :
+    if round_decimal != -1:
         for k, v in search_res_dict_merge.items():
             multiplier = math.pow(10.0, round_decimal)
             v = math.floor(v*multiplier+0.5) / multiplier

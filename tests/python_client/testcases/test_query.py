@@ -3593,8 +3593,12 @@ class TestQueryCount(TestcaseBase):
             bool_type_cmp = True
         if bool_type == "false":
             bool_type_cmp = False
+        for i in range(len(_vectors[0])):
+            if _vectors[0][i].dtypes == bool:
+                num = i
+                break
         for i, _id in enumerate(insert_ids):
-            if _vectors[0][f"{ct.default_bool_field_name}"][i] == bool_type_cmp:
+            if _vectors[0][num][i] == bool_type_cmp:
                 filter_ids.append(_id)
         res = len(filter_ids)
 
