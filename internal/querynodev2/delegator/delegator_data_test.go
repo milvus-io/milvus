@@ -90,7 +90,6 @@ func (s *DelegatorDataSuite) TearDownSuite() {
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
-
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.tsafeManager = tsafe.NewTSafeReplica()
