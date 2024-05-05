@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -71,6 +72,11 @@ func NewClient(ctx context.Context, addr string, nodeID int64, encryption bool) 
 	client.grpcClient.SetSession(sess)
 	if encryption {
 		client.grpcClient.EnableEncryption()
+	}
+	if config.InternalTLSEnabled.GetAsBool() {
+		client.grpcClient.EnableEncryption()
+		cp := utils.CreateCertPoolforClient(Params.IndexNodeGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "IndexNode")
+		client.grpcClient.SetInternalTLSCertPool(cp)
 	}
 	return client, nil
 }

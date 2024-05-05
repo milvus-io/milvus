@@ -106,7 +106,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 	}
 
 	opts := tracer.GetInterceptorOpts()
-	s.grpcServer = grpc.NewServer(
+	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
@@ -132,7 +132,10 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 				}
 				return s.serverID.Load()
 			}),
-		)))
+		))}
+
+	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("IndexNode"))
+	s.grpcServer = grpc.NewServer(grpcOpts...)
 	indexpb.RegisterIndexNodeServer(s.grpcServer, s)
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)
 	if err := s.grpcServer.Serve(lis); err != nil {

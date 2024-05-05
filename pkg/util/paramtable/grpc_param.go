@@ -55,15 +55,19 @@ const (
 // /////////////////////////////////////////////////////////////////////////////
 // --- grpc ---
 type grpcConfig struct {
-	Domain        string    `refreshable:"false"`
-	IP            string    `refreshable:"false"`
-	TLSMode       ParamItem `refreshable:"false"`
-	IPItem        ParamItem `refreshable:"false"`
-	Port          ParamItem `refreshable:"false"`
-	InternalPort  ParamItem `refreshable:"false"`
-	ServerPemPath ParamItem `refreshable:"false"`
-	ServerKeyPath ParamItem `refreshable:"false"`
-	CaPemPath     ParamItem `refreshable:"false"`
+	Domain                   string    `refreshable:"false"`
+	IP                       string    `refreshable:"false"`
+	InternalTLSEnabled       ParamItem `refreshable:"false"`
+	TLSMode                  ParamItem `refreshable:"false"`
+	IPItem                   ParamItem `refreshable:"false"`
+	Port                     ParamItem `refreshable:"false"`
+	InternalPort             ParamItem `refreshable:"false"`
+	ServerPemPath            ParamItem `refreshable:"false"`
+	ServerKeyPath            ParamItem `refreshable:"false"`
+	CaPemPath                ParamItem `refreshable:"false"`
+	InternalTLSServerPemPath ParamItem `refreshable:"false"`
+	InternalTLSServerKeyPath ParamItem `refreshable:"false"`
+	InternalTLSCaPemPath     ParamItem `refreshable:"false"`
 }
 
 func (p *grpcConfig) init(domain string, base *BaseTable) {
@@ -120,6 +124,35 @@ func (p *grpcConfig) init(domain string, base *BaseTable) {
 		Export:  true,
 	}
 	p.CaPemPath.Init(base.mgr)
+
+	p.InternalTLSEnabled = ParamItem{
+		Key:          "common.security.internaltlsEnabled",
+		Version:      "2.0.0",
+		DefaultValue: "0",
+		Export:       true,
+	}
+	p.InternalTLSEnabled.Init(base.mgr)
+
+	p.InternalTLSServerPemPath = ParamItem{
+		Key:     "internaltls.serverPemPath",
+		Version: "2.0.0",
+		Export:  true,
+	}
+	p.InternalTLSServerPemPath.Init(base.mgr)
+
+	p.InternalTLSServerKeyPath = ParamItem{
+		Key:     "internaltls.serverKeyPath",
+		Version: "2.0.0",
+		Export:  true,
+	}
+	p.InternalTLSServerKeyPath.Init(base.mgr)
+
+	p.InternalTLSCaPemPath = ParamItem{
+		Key:     "internaltls.caPemPath",
+		Version: "2.0.0",
+		Export:  true,
+	}
+	p.InternalTLSCaPemPath.Init(base.mgr)
 }
 
 // GetAddress return grpc address

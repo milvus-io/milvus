@@ -273,7 +273,7 @@ func (s *Server) startGrpcLoop(port int) {
 	defer cancel()
 
 	opts := tracer.GetInterceptorOpts()
-	s.grpcServer = grpc.NewServer(
+	grpcOpts := []grpc.ServerOption{
 		grpc.KeepaliveEnforcementPolicy(kaep),
 		grpc.KeepaliveParams(kasp),
 		grpc.MaxRecvMsgSize(Params.ServerMaxRecvSize.GetAsInt()),
@@ -299,7 +299,10 @@ func (s *Server) startGrpcLoop(port int) {
 				}
 				return s.serverID.Load()
 			}),
-		)))
+		))}
+
+	grpcOpts = append(grpcOpts, utils.EnableInternalTLS("RootCoord"))
+	s.grpcServer = grpc.NewServer(grpcOpts...)
 	rootcoordpb.RegisterRootCoordServer(s.grpcServer, s)
 
 	go funcutil.CheckGrpcReady(ctx, s.grpcErrChan)

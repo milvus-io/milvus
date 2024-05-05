@@ -26,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -70,7 +71,11 @@ func NewClient(ctx context.Context) (types.DataCoordClient, error) {
 	client.grpcClient.SetGetAddrFunc(client.getDataCoordAddr)
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetSession(sess)
-
+	if config.InternalTLSEnabled.GetAsBool() {
+		client.grpcClient.EnableEncryption()
+		cp := utils.CreateCertPoolforClient(Params.DataCoordGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "Datacoord")
+		client.grpcClient.SetInternalTLSCertPool(cp)
+	}
 	return client, nil
 }
 

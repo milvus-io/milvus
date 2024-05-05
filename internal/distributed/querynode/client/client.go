@@ -25,6 +25,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/distributed/utils"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -36,6 +37,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+var Params *paramtable.ComponentParam = paramtable.Get()
 
 // Client is the grpc client of QueryNode.
 type Client struct {
@@ -69,7 +72,11 @@ func NewClient(ctx context.Context, addr string, nodeID int64) (types.QueryNodeC
 	client.grpcClient.SetNewGrpcClientFunc(client.newGrpcClient)
 	client.grpcClient.SetNodeID(nodeID)
 	client.grpcClient.SetSession(sess)
-
+	if config.InternalTLSEnabled.GetAsBool() {
+		client.grpcClient.EnableEncryption()
+		cp := utils.CreateCertPoolforClient(Params.QueryNodeGrpcClientCfg.InternalTLSCaPemPath.GetValue(), "QueryNode")
+		client.grpcClient.SetInternalTLSCertPool(cp)
+	}
 	return client, nil
 }
 
