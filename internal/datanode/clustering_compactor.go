@@ -352,10 +352,10 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
 	//centroidFilePath := t.plan.GetCentroidFilePath()
 	analyzeResultPath := t.plan.AnalyzeResultPath
-	centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), "centroids")
+	centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
 	offsetMappingFiles := make(map[int64]string, 0)
 	for _, segmentID := range t.plan.AnalyzeSegmentIds {
-		path := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), "offsets_mapping")
+		path := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), common.OffsetMapping)
 		offsetMappingFiles[segmentID] = path
 		log.Debug("read segment offset mapping file", zap.Int64("segmentID", segmentID), zap.String("path", path))
 	}

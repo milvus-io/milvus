@@ -186,18 +186,88 @@ func (t *ClusteringCompactionManager) gc() error {
 		}
 	}
 	// gc partition stats
-	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo, 0)
+	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo)
+	unusedPartStats := make([]*datapb.PartitionStatsInfo, 0)
 	for _, partitionStatsInfo := range t.meta.partitionStatsInfos {
-		channel := fmt.Sprintf("%d/%d/%s", partitionStatsInfo.CollectionID, partitionStatsInfo.PartitionID, partitionStatsInfo.VChannel)
-		infos, exist := channelPartitionStatsInfos[channel]
-		if exist {
-			infos = append(infos, partitionStatsInfo)
-			channelPartitionStatsInfos[channel] = infos
-		} else {
-			channelPartitionStatsInfos[channel] = []*datapb.PartitionStatsInfo{partitionStatsInfo}
+		collInfo := t.meta.GetCollection(partitionStatsInfo.GetCollectionID())
+		if collInfo == nil {
+			unusedPartStats = append(unusedPartStats, partitionStatsInfo)
+			continue
 		}
+		channel := fmt.Sprintf("%d/%d/%s", partitionStatsInfo.CollectionID, partitionStatsInfo.PartitionID, partitionStatsInfo.VChannel)
+		if _, ok := channelPartitionStatsInfos[channel]; !ok {
+			channelPartitionStatsInfos[channel] = make([]*datapb.PartitionStatsInfo, 0)
+		}
+		channelPartitionStatsInfos[channel] = append(channelPartitionStatsInfos[channel], partitionStatsInfo)
 	}
 	log.Debug("channels with PartitionStats meta", zap.Int("len", len(channelPartitionStatsInfos)))
+
+	gcFunc := func(info *datapb.PartitionStatsInfo) error {
+		removePaths := make([]string, 0)
+
+		partitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath,
+			metautil.JoinIDPath(info.CollectionID, info.PartitionID),
+			info.GetVChannel(), strconv.FormatInt(info.GetVersion(), 10))
+		removePaths = append(removePaths, partitionStatsPath)
+		analyzeT := t.meta.analyzeMeta.GetTask(info.GetAnalyzeTaskID())
+		if analyzeT != nil {
+			centroidsFilePath := path.Join(t.meta.chunkManager.RootPath(), common.AnalyzeStatsPath,
+				metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(),
+					analyzeT.GetPartitionID(), analyzeT.GetFieldID()),
+				"centroids",
+			)
+			removePaths = append(removePaths, centroidsFilePath)
+			for _, segID := range info.GetSegmentIDs() {
+				segmentOffsetMappingFilePath := path.Join(t.meta.chunkManager.RootPath(), common.AnalyzeStatsPath,
+					metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(),
+						analyzeT.GetPartitionID(), analyzeT.GetFieldID(), segID),
+					"offset_mapping",
+				)
+				removePaths = append(removePaths, segmentOffsetMappingFilePath)
+			}
+		}
+
+		//err := t.meta.chunkManager.Remove(t.ctx, partitionStatsPath)
+		//log.Debug("remove partition stats file", zap.String("path", partitionStatsPath))
+		log.Debug("remove clustering compaction stats files",
+			zap.Int64("collectionID", info.GetCollectionID()),
+			zap.Int64("partitionID", info.GetPartitionID()),
+			zap.String("vChannel", info.GetVChannel()),
+			zap.Int64("planID", info.GetVersion()),
+			zap.Strings("removePaths", removePaths))
+		err := t.meta.chunkManager.MultiRemove(t.ctx, removePaths)
+		if err != nil {
+			log.Warn("remove clustering compaction stats files failed", zap.Error(err))
+			return err
+		}
+
+		// first clean analyze task
+		if err = t.meta.analyzeMeta.DropAnalyzeTask(info.GetAnalyzeTaskID()); err != nil {
+			log.Warn("remove analyze task failed", zap.Int64("analyzeTaskID", info.GetAnalyzeTaskID()), zap.Error(err))
+			return err
+		}
+
+		// finally clean up the partition stats info, and make sure the analysis task is cleaned up
+		err = t.meta.DropPartitionStatsInfo(info)
+		log.Debug("drop partition stats meta",
+			zap.Int64("collectionID", info.GetCollectionID()),
+			zap.Int64("partitionID", info.GetPartitionID()),
+			zap.String("vChannel", info.GetVChannel()),
+			zap.Int64("planID", info.GetVersion()))
+		if err != nil {
+			return err
+		}
+		return nil
+	}
+
+	for _, info := range unusedPartStats {
+		log.Debug("collection has been dropped, remove partition stats",
+			zap.Int64("collID", info.GetCollectionID()))
+		if err := gcFunc(info); err != nil {
+			return err
+		}
+
+	}
 
 	for channel, infos := range channelPartitionStatsInfos {
 		sort.Slice(infos, func(i, j int) bool {
@@ -206,50 +276,8 @@ func (t *ClusteringCompactionManager) gc() error {
 		log.Debug("PartitionStats in channel", zap.String("channel", channel), zap.Int("len", len(infos)))
 		if len(infos) > 2 {
 			for i := 2; i < len(infos); i++ {
-				removePaths := make([]string, 0)
 				info := infos[i]
-				log := log.With(zap.Int64("collectionID", info.GetCollectionID()),
-					zap.Int64("partitionID", info.GetPartitionID()),
-					zap.String("vChannel", info.GetVChannel()),
-					zap.Int64("planID", info.GetVersion()))
-
-				partitionStatsPath := path.Join(t.meta.chunkManager.RootPath(), common.PartitionStatsPath, metautil.JoinIDPath(info.CollectionID, info.PartitionID), info.GetVChannel(), strconv.FormatInt(info.GetVersion(), 10))
-				removePaths = append(removePaths, partitionStatsPath)
-				analyzeT := t.meta.analyzeMeta.GetTask(info.GetAnalyzeTaskID())
-				if analyzeT != nil {
-					centroidsFilePath := path.Join(t.meta.chunkManager.RootPath(), common.AnalyzeStatsPath,
-						metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(), analyzeT.GetPartitionID(), analyzeT.GetFieldID()),
-						"centroids",
-					)
-					removePaths = append(removePaths, centroidsFilePath)
-					for _, segID := range info.GetSegmentIDs() {
-						segmentOffsetMappingFilePath := path.Join(t.meta.chunkManager.RootPath(), common.AnalyzeStatsPath,
-							metautil.JoinIDPath(analyzeT.GetTaskID(), analyzeT.GetVersion(), analyzeT.GetCollectionID(), analyzeT.GetPartitionID(), analyzeT.GetFieldID(), segID),
-							"offset_mapping",
-						)
-						removePaths = append(removePaths, segmentOffsetMappingFilePath)
-					}
-				}
-
-				//err := t.meta.chunkManager.Remove(t.ctx, partitionStatsPath)
-				//log.Debug("remove partition stats file", zap.String("path", partitionStatsPath))
-				log.Debug("remove clustering compaction stats files", zap.Strings("removePaths", removePaths))
-				err := t.meta.chunkManager.MultiRemove(t.ctx, removePaths)
-				if err != nil {
-					log.Warn("remove clustering compaction stats files failed", zap.Error(err))
-					return err
-				}
-
-				// first clean analyze task
-				if err = t.meta.analyzeMeta.DropAnalyzeTask(info.GetAnalyzeTaskID()); err != nil {
-					log.Warn("remove analyze task failed", zap.Int64("analyzeTaskID", info.GetAnalyzeTaskID()), zap.Error(err))
-					return err
-				}
-
-				// finally clean up the partition stats info, and make sure the analysis task is cleaned up
-				err = t.meta.DropPartitionStatsInfo(info)
-				log.Debug("drop partition stats meta")
-				if err != nil {
+				if err := gcFunc(info); err != nil {
 					return err
 				}
 			}

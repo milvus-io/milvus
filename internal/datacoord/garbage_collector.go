@@ -591,13 +591,13 @@ func (gc *garbageCollector) recycleUnusedAnalyzeFiles() {
 		log.Info("garbageCollector will recycle analyze stats files", zap.Int64("taskID", taskID))
 		canRecycle, task := gc.meta.analyzeMeta.CheckCleanAnalyzeTask(taskID)
 		if !canRecycle {
-			// Even if the analyze task is marked as deleted, the analyze stats file will not be recycled, wait for the next gc,
+			// Even if the analysis task is marked as deleted, the analysis stats file will not be recycled, wait for the next gc,
 			// and delete all index files about the taskID at one time.
 			log.Info("garbageCollector no need to recycle analyze stats files", zap.Int64("taskID", taskID))
 			continue
 		}
 		if task == nil {
-			// buildID no longer exists in meta, remove all index files
+			// taskID no longer exists in meta, remove all analysis files
 			log.Info("garbageCollector recycleUnusedAnalyzeFiles find meta has not exist, remove index files",
 				zap.Int64("taskID", taskID))
 			err = gc.option.cli.RemoveWithPrefix(ctx, key)
