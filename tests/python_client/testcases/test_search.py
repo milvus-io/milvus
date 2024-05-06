@@ -6891,7 +6891,7 @@ class TestCollectionRangeSearch(TestcaseBase):
     @pytest.fixture(scope="function", params=ct.all_index_types[:7])
     def index_type(self, request):
         tags = request.config.getoption("--tags")
-        if CaseLabel.L2 not in tags:
+        if CaseLabel.L2 not in tags or "all" not in tags:
             if request.param not in ct.L0_index_types:
                 pytest.skip(f"skip index type {request.param}")
         yield request.param
@@ -6899,7 +6899,7 @@ class TestCollectionRangeSearch(TestcaseBase):
     @pytest.fixture(scope="function", params=ct.float_metrics)
     def metric(self, request):
         tags = request.config.getoption("--tags")
-        if CaseLabel.L2 not in tags:
+        if CaseLabel.L2 not in tags or "all" not in tags:
             if request.param not in ct.default_L0_metric:
                 pytest.skip(f"skip index type {request.param}")
         yield request.param
@@ -10989,7 +10989,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         expected: hybrid search successfully with limit(topK)
         """
         # 1. initialize collection with data
-        dim = 77
+        dim = 128
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, dim=dim, is_flush=is_flush, is_index=False,
                                          primary_field=primary_field,
@@ -11444,7 +11444,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
         expected: hybrid search successfully with limit(topK)
         """
         # 1. initialize collection with data
-        dim = 77
+        dim = 128
         multiple_dim_array = [dim, dim]
         collection_w, _, _, insert_ids, time_stamp = \
             self.init_collection_general(prefix, True, dim=dim, is_index=False, primary_field=primary_field,

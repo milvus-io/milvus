@@ -1674,12 +1674,12 @@ def index_to_dict(index):
 
 def get_index_params_params(index_type):
     """get default params of index params  by index type"""
-    return ct.default_all_indexes_params[ct.all_index_types.index(index_type)]
+    return ct.default_all_indexes_params[ct.all_index_types.index(index_type)].copy()
 
 
 def get_search_params_params(index_type):
     """get default params of search params by index type"""
-    return ct.default_all_search_params_params[ct.all_index_types.index(index_type)]
+    return ct.default_all_search_params_params[ct.all_index_types.index(index_type)].copy()
 
 
 def assert_json_contains(expr, list_data):
