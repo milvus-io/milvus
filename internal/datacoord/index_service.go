@@ -208,14 +208,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	// merge with previous params because create index would not pass mmap params
 	indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
 	if len(indexes) == 1 {
-		req.UserIndexParams, err = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
-		req.IndexParams, err = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
+		req.UserIndexParams = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
+		req.IndexParams = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
 	}
 
 	if indexID == 0 {
@@ -246,6 +240,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		UserIndexParams: req.GetUserIndexParams(),
 	}
 
+	if err := ValidateIndexParams(index); err != nil {
+		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
 	// Get flushed segments and create index
 	err = s.meta.indexMeta.CreateIndex(index)
 	if err != nil {
@@ -267,22 +266,27 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return merr.Success(), nil
 }
 
-func ValidateIndexParams(index *model.Index, key, value string) error {
-	switch key {
-	case common.MmapEnabledKey:
-		indexType := GetIndexType(index.IndexParams)
-		if !indexparamcheck.IsMmapSupported(indexType) {
-			return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
-		}
+func ValidateIndexParams(index *model.Index) error {
+	for _, paramSet := range [][]*commonpb.KeyValuePair{index.IndexParams, index.UserIndexParams} {
+		for _, param := range paramSet {
+			switch param.GetKey() {
+			case common.MmapEnabledKey:
+				indexType := GetIndexType(index.IndexParams)
+				if !indexparamcheck.IsMmapSupported(indexType) {
+					return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
+				}
 
-		if _, err := strconv.ParseBool(value); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", key, value)
+				if _, err := strconv.ParseBool(param.GetValue()); err != nil {
+					return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", param.GetKey(), param.GetValue())
+				}
+			}
 		}
 	}
+
 	return nil
 }
 
-func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	params := make(map[string]string)
 	for _, param := range from {
 		params[param.GetKey()] = param.GetValue()
@@ -290,10 +294,6 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 
 	// update the params
 	for _, param := range updates {
-		if err := ValidateIndexParams(index, param.GetKey(), param.GetValue()); err != nil {
-			log.Warn("failed to alter index params", zap.Error(err))
-			return nil, err
-		}
 		params[param.GetKey()] = param.GetValue()
 	}
 
@@ -302,7 +302,7 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 			Key:   k,
 			Value: v,
 		}
-	}), nil
+	})
 }
 
 func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
@@ -329,10 +329,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 
 	for _, index := range indexes {
 		// update user index params
-		newUserIndexParams, err := UpdateParams(index, index.UserIndexParams, req.GetParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
+		newUserIndexParams := UpdateParams(index, index.UserIndexParams, req.GetParams())
 		log.Info("alter index user index params",
 			zap.String("indexName", index.IndexName),
 			zap.Any("params", newUserIndexParams),
@@ -340,15 +337,16 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		index.UserIndexParams = newUserIndexParams
 
 		// update index params
-		newIndexParams, err := UpdateParams(index, index.IndexParams, req.GetParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
+		newIndexParams := UpdateParams(index, index.IndexParams, req.GetParams())
 		log.Info("alter index user index params",
 			zap.String("indexName", index.IndexName),
 			zap.Any("params", newIndexParams),
 		)
 		index.IndexParams = newIndexParams
+
+		if err := ValidateIndexParams(index); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	err := s.meta.indexMeta.AlterIndex(ctx, indexes...)

@@ -112,8 +112,7 @@ func TestServer_CreateIndex(t *testing.T) {
 
 		s.broker = broker.NewCoordinatorBroker(b)
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Error(t, merr.CheckRPCCall(resp, err))
 		assert.Equal(t, "mock error", resp.GetReason())
 	})
 
@@ -169,22 +168,19 @@ func TestServer_CreateIndex(t *testing.T) {
 
 	t.Run("success", func(t *testing.T) {
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("success with index exist", func(t *testing.T) {
 		req.IndexName = ""
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		assert.NoError(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("server not healthy", func(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Abnormal)
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 
 	req.IndexName = "FieldFloatVector"
@@ -192,8 +188,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.stateCode.Store(commonpb.StateCode_Healthy)
 		req.FieldID++
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("alloc ID fail", func(t *testing.T) {
@@ -201,8 +196,7 @@ func TestServer_CreateIndex(t *testing.T) {
 		s.allocator = &FailsAllocator{allocIDSucceed: false}
 		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("not support disk index", func(t *testing.T) {
@@ -216,8 +210,35 @@ func TestServer_CreateIndex(t *testing.T) {
 		}
 		s.indexNodeManager = NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Error(t, merr.CheckRPCCall(resp, err))
+	})
+
+	t.Run("disk index with mmap", func(t *testing.T) {
+		s.allocator = newMockAllocator()
+		s.meta.indexMeta.indexes = map[UniqueID]map[UniqueID]*model.Index{}
+		req.IndexParams = []*commonpb.KeyValuePair{
+			{
+				Key:   common.IndexTypeKey,
+				Value: "DISKANN",
+			},
+			{
+				Key:   common.MmapEnabledKey,
+				Value: "true",
+			},
+		}
+		nodeManager := NewNodeManager(ctx, defaultIndexNodeCreatorFunc)
+		s.indexNodeManager = nodeManager
+		mockNode := mocks.NewMockIndexNodeClient(t)
+		s.indexNodeManager.lock.Lock()
+		s.indexNodeManager.nodeClients[1001] = mockNode
+		s.indexNodeManager.lock.Unlock()
+		mockNode.EXPECT().GetJobStats(mock.Anything, mock.Anything).Return(&indexpb.GetJobStatsResponse{
+			Status:     merr.Success(),
+			EnableDisk: true,
+		}, nil)
+
+		resp, err := s.CreateIndex(ctx, req)
+		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 
 	t.Run("save index fail", func(t *testing.T) {
@@ -234,8 +255,7 @@ func TestServer_CreateIndex(t *testing.T) {
 			},
 		}
 		resp, err := s.CreateIndex(ctx, req)
-		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Error(t, merr.CheckRPCCall(resp, err))
 	})
 }
 

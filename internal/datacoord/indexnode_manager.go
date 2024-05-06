@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // IndexNodeManager is used to manage the client of IndexNode.
@@ -175,13 +176,8 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 		go func() {
 			defer wg.Done()
 			resp, err := client.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
-			if err != nil {
+			if err := merr.CheckRPCCall(resp, err); err != nil {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-				return
-			}
-			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
-					zap.String("reason", resp.GetStatus().GetReason()))
 				return
 			}
 			log.Debug("get job stats success", zap.Int64("nodeID", nodeID), zap.Bool("enable disk", resp.GetEnableDisk()))
