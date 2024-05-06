@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -53,6 +54,40 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 	s.mockSch = NewMockScheduler(s.T())
 	s.mockCm = NewMockChannelManager(s.T())
 	s.mockSessMgr = NewMockSessionManager(s.T())
+}
+
+func (s *CompactionPlanHandlerSuite) TestSchedule() {
+	tests := []struct {
+		enableConfig string
+
+		expectedTasksCount int
+		description        string
+	}{
+		{"true", 3, "enable"},
+		{"false", 2, "disabled"},
+	}
+
+	s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Maybe()
+	s.mockSch.EXPECT().Schedule().Return(nil).Maybe()
+	enableLZCKey := paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.Key
+	defer paramtable.Get().Reset(enableLZCKey)
+	for _, test := range tests {
+		s.Run(test.description, func() {
+			handler := newCompactionPlanHandler(nil, nil, nil, nil)
+			handler.scheduler = s.mockSch
+			handler.plans = map[int64]*compactionTask{
+				1: {state: pipelining, plan: &datapb.CompactionPlan{PlanID: 1, Type: datapb.CompactionType_MixCompaction}},
+				2: {state: pipelining, plan: &datapb.CompactionPlan{PlanID: 2, Type: datapb.CompactionType_MixCompaction}},
+				3: {state: pipelining, plan: &datapb.CompactionPlan{PlanID: 2, Type: datapb.CompactionType_Level0DeleteCompaction}},
+			}
+
+			paramtable.Get().Save(enableLZCKey, test.enableConfig)
+			handler.schedule()
+
+			tasks := handler.getTasksByState(pipelining)
+			s.Equal(test.expectedTasksCount, len(tasks))
+		})
+	}
 }
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
@@ -440,13 +475,17 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 	}).Twice()
 	s.mockSch.EXPECT().Submit(mock.Anything).Return().Once()
 
+	enableLZCKey := paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.Key
+	defer paramtable.Get().Reset(enableLZCKey)
 	tests := []struct {
-		description string
-		channel     string
-		hasError    bool
+		description          string
+		channel              string
+		enalbleL0CompactionV string
+		hasError             bool
 	}{
-		{"channel with error", "ch-1", true},
-		{"channel with no error", "ch-2", false},
+		{"channel with error", "ch-1", "true", true},
+		{"channel with no error", "ch-2", "true", false},
+		{"disable l0 compaction", "ch-2", "false", true},
 	}
 
 	handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
@@ -456,9 +495,11 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 		sig := &compactionSignal{id: int64(idx)}
 		plan := &datapb.CompactionPlan{
 			PlanID: int64(idx),
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
 		}
 		s.Run(test.description, func() {
 			plan.Channel = test.channel
+			paramtable.Get().Save(enableLZCKey, test.enalbleL0CompactionV)
 
 			err := handler.execCompactionPlan(sig, plan)
 			if test.hasError {
@@ -688,6 +729,7 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 		3: {A: 111, B: &datapb.CompactionPlanResult{PlanID: 3, State: commonpb.CompactionState_Executing}},
 		5: {A: 222, B: &datapb.CompactionPlanResult{PlanID: 5, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 5}}}},
 		6: {A: 111, B: &datapb.CompactionPlanResult{Channel: "ch-2", PlanID: 5, State: commonpb.CompactionState_Completed, Segments: []*datapb.CompactionSegment{{PlanID: 6}}}},
+		7: {A: 111, B: &datapb.CompactionPlanResult{Channel: "ch-2", PlanID: 7, State: commonpb.CompactionState_Executing, Segments: []*datapb.CompactionSegment{{PlanID: 7}}}},
 	}, nil)
 
 	inPlans := map[int64]*compactionTask{
@@ -721,6 +763,12 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 			state:       executing,
 			dataNodeID:  111,
 		},
+		7: {
+			triggerInfo: &compactionSignal{},
+			plan:        &datapb.CompactionPlan{PlanID: 7, Channel: "ch-1", Type: datapb.CompactionType_Level0DeleteCompaction},
+			state:       executing,
+			dataNodeID:  111,
+		},
 	}
 
 	s.mockSessMgr.EXPECT().SyncSegments(int64(222), mock.Anything).RunAndReturn(func(nodeID int64, req *datapb.SyncSegmentsRequest) error {
@@ -733,6 +781,9 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.mockSessMgr.EXPECT().SyncSegments(int64(111), mock.Anything).Return(nil)
 	s.mockCm.EXPECT().Match(int64(111), "ch-1").Return(true)
 	s.mockCm.EXPECT().Match(int64(111), "ch-2").Return(false).Once()
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.Key, "false")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.Key)
 
 	handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 	handler.plans = inPlans
@@ -756,6 +807,9 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.Equal(failed, task.state)
 
 	task = handler.plans[6]
+	s.Equal(failed, task.state)
+
+	task = handler.plans[7]
 	s.Equal(failed, task.state)
 }
 

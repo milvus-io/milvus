@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -88,7 +89,9 @@ func (m *CompactionViewManager) checkLoop() {
 			log.Info("Compaction View checkLoop quit")
 			return
 		case <-checkTicker.C:
-			refreshViewsAndTrigger(context.Background())
+			if paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.GetAsBool() {
+				refreshViewsAndTrigger(context.Background())
+			}
 
 		case <-idleTicker.C:
 			// idelTicker will be reset everytime when Check's able to
@@ -96,8 +99,10 @@ func (m *CompactionViewManager) checkLoop() {
 
 			// if no views are freshed, try to get cached views and trigger a
 			// TriggerTypeViewIDLE event
-			if !refreshViewsAndTrigger(context.Background()) {
-				m.triggerEventForIDLEView()
+			if paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.GetAsBool() {
+				if !refreshViewsAndTrigger(context.Background()) {
+					m.triggerEventForIDLEView()
+				}
 			}
 		}
 	}

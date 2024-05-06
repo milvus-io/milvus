@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -165,6 +166,19 @@ func (c *compactionPlanHandler) GetCurrentTS() (Timestamp, error) {
 }
 
 func (c *compactionPlanHandler) schedule() {
+	if !paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.GetAsBool() {
+		// remove pipelining L0 tasks
+		pipeliningTasks := c.getTasksByState(pipelining)
+		for _, task := range pipeliningTasks {
+			if task.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+				c.updateTask(task.plan.PlanID, setState(failed), endSpan())
+				c.setSegmentsCompacting(task.plan, true)
+				c.scheduler.Finish(task.dataNodeID, task.plan)
+				log.Warn("Discard LevelZeore compaction plans for LevelZero compaction disabled", zap.Int64("planID", task.plan.GetPlanID()))
+			}
+		}
+	}
+
 	// schedule queuing tasks
 	tasks := c.scheduler.Schedule()
 	if len(tasks) > 0 {
@@ -277,6 +291,12 @@ func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskO
 }
 
 func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
+	if !paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.GetAsBool() &&
+		plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+		log.Error("failed to enqueuePlan, level zero compaction disabled", zap.Int64("planID", plan.GetPlanID()))
+		return errors.New("levelzero compaction is not enabled")
+	}
+
 	nodeID, err := c.chManager.FindWatcher(plan.GetChannel())
 	if err != nil {
 		log.Error("failed to find watcher", zap.Int64("planID", plan.GetPlanID()), zap.Error(err))
@@ -549,6 +569,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 
 		if nodePlan, ok := planStates[planID]; ok {
 			planResult := nodePlan.B
+
 			switch planResult.GetState() {
 			case commonpb.CompactionState_Completed:
 				log.Info("start to complete compaction")
@@ -575,6 +596,20 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 				}
 
 			case commonpb.CompactionState_Executing:
+				// Discard l0 plans executing in DataNode when disabled level zero compaction
+				if !paramtable.Get().DataCoordCfg.EnableLevelZeroCompaction.GetAsBool() &&
+					task.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+					log.Warn("compaction failed for level zero compaction disabled")
+					if err := c.sessions.SyncSegments(task.dataNodeID, &datapb.SyncSegmentsRequest{PlanID: planID}); err != nil {
+						log.Warn("compaction failed to sync segments with node", zap.Error(err))
+						continue
+					}
+					c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
+					c.setSegmentsCompacting(task.plan, false)
+					c.scheduler.Finish(task.dataNodeID, task.plan)
+					continue
+				}
+
 				if c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
 					log.Warn("compaction timeout",
 						zap.Int32("timeout in seconds", task.plan.GetTimeoutInSeconds()),
@@ -624,11 +659,12 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		return planState.B.GetState() == commonpb.CompactionState_Completed
 	})
 
-	unkonwnPlansInWorker, _ := lo.Difference(lo.Keys(completedPlans), cachedPlans)
-	for _, planID := range unkonwnPlansInWorker {
-		if nodeUnkonwnPlan, ok := completedPlans[planID]; ok {
-			nodeID, plan := nodeUnkonwnPlan.A, nodeUnkonwnPlan.B
-			log := log.With(zap.Int64("planID", planID), zap.Int64("nodeID", nodeID), zap.String("channel", plan.GetChannel()))
+	unknownPlansInWorker, _ := lo.Difference(lo.Keys(completedPlans), cachedPlans)
+
+	for _, planID := range unknownPlansInWorker {
+		if nodeUnknownPlan, ok := completedPlans[planID]; ok {
+			nodeID, plan := nodeUnknownPlan.A, nodeUnknownPlan.B
+			log := log.With(zap.Int64("planID", planID), zap.String("type", plan.GetType().String()), zap.Int64("nodeID", nodeID), zap.String("channel", plan.GetChannel()))
 
 			// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
 			// without changing the meta

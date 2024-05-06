@@ -103,11 +103,12 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(taskID int64, outView
 
 	// TODO, remove handler, use scheduler
 	// m.scheduler.Submit(plan)
-	m.handler.execCompactionPlan(signal, plan)
+	err := m.handler.execCompactionPlan(signal, plan)
 	log.Info("Finish to submit a LevelZeroCompaction plan",
 		zap.Int64("taskID", taskID),
 		zap.Int64("planID", plan.GetPlanID()),
 		zap.String("type", plan.GetType().String()),
+		zap.Error(err),
 	)
 }
 

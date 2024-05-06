@@ -302,6 +302,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	if len(req.GetCompactedFrom()) <= 0 {
 		log.Info("SyncSegments with empty compactedFrom, clearing the plan")
+		// remove from executing
+		node.compactionExecutor.stopTask(req.GetPlanID())
+		// remove from completing
 		node.compactionExecutor.injectDone(req.GetPlanID())
 		return merr.Success(), nil
 	}
