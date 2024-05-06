@@ -1147,6 +1147,10 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 		if !fieldSchema.AutoID {
 			requiredFieldsNum++
 		}
+
+		if fieldSchema.AutoID && Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() {
+			requiredFieldsNum++
+		}
 		// if has no field pass in, consider use default value
 		// so complete it with field schema
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
