@@ -142,13 +142,12 @@ func (at *analyzeTask) SaveResult(ctx context.Context) error {
 	}
 	defer gc()
 
-	centroidsFile, _, segmentsOffsetMappingFiles, _, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
+	centroidsFile, _, _, _, err := at.analyze.GetResult(len(at.req.GetSegmentStats()))
 	if err != nil {
 		log.Error("failed to upload index", zap.Error(err))
 		return err
 	}
-	log.Info("debug for analyze result", zap.String("centroidsFile", centroidsFile),
-		zap.Strings("segmentsOffsetMappingFiles", segmentsOffsetMappingFiles))
+	log.Info("debug for analyze result", zap.String("centroidsFile", centroidsFile))
 	//segmentsOffsetMappingFiles := make(map[int64]string)
 	//segmentsOffsetMappingFilesSize := make(map[string]int64)
 	//for i, file := range offsetMappingFiles {
