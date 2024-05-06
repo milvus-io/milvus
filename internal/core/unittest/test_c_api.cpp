@@ -1640,7 +1640,8 @@ TEST(CApiTest, ReduceNullResult) {
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+        status = ReduceSearchResultsAndFillData({},
+                                                &cSearchResultData,
                                                 plan,
                                                 results.data(),
                                                 results.size(),
@@ -1733,7 +1734,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         results.push_back(res2);
 
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+        status = ReduceSearchResultsAndFillData({},
+                                                &cSearchResultData,
                                                 plan,
                                                 results.data(),
                                                 results.size(),
@@ -1769,7 +1771,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         results.push_back(res2);
         results.push_back(res3);
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+        status = ReduceSearchResultsAndFillData({},
+                                                &cSearchResultData,
                                                 plan,
                                                 results.data(),
                                                 results.size(),
@@ -1912,7 +1915,8 @@ testReduceSearchWithExpr(int N,
 
     // 1. reduce
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+    status = ReduceSearchResultsAndFillData({},
+                                            &cSearchResultData,
                                             plan,
                                             results.data(),
                                             results.size(),
@@ -3606,7 +3610,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto slice_topKs = std::vector<int64_t>{topK};
 
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+    status = ReduceSearchResultsAndFillData({},
+                                            &cSearchResultData,
                                             plan,
                                             results.data(),
                                             results.size(),
@@ -3802,7 +3807,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto slice_topKs = std::vector<int64_t>{topK};
 
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+    status = ReduceSearchResultsAndFillData({},
+                                            &cSearchResultData,
                                             plan,
                                             results.data(),
                                             results.size(),
