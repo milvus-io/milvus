@@ -480,7 +480,7 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	l0Segment.EXPECT().Level().Return(datapb.SegmentLevel_L0)
 	l0Segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
 	l0Segment.EXPECT().Indexes().Return(nil)
-	l0Segment.EXPECT().Shard().Return(suite.vchannel)
+	l0Segment.EXPECT().Shard().Return(suite.channel)
 	l0Segment.EXPECT().Release(ctx).Return()
 
 	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeSealed, l0Segment)
