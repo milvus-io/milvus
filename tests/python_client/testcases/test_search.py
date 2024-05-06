@@ -7570,7 +7570,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         expected: search successfully with limit(topK)
         """
         # 1. initialize with data
-        dim = 100
+        dim = 96
         enable_dynamic_field = False
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
@@ -7612,7 +7612,7 @@ class TestCollectionRangeSearch(TestcaseBase):
         if index == "SCANN":
             pytest.skip("https://github.com/milvus-io/milvus/issues/32648")
         # 1. initialize with data
-        dim = 200
+        dim = 208
         collection_w, _, _, insert_ids, time_stamp = self.init_collection_general(prefix, True, 5000,
                                                                                   partition_num=1,
                                                                                   dim=dim, is_index=False)[0:5]
