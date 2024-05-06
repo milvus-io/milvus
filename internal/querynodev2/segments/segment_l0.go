@@ -63,8 +63,6 @@ func NewL0Segment(collection *Collection,
 	}
 
 	// level 0 segments are always in memory
-	segment.loadStatus.Store(string(LoadStatusInMemory))
-
 	return segment, nil
 }
 
@@ -164,10 +162,14 @@ func (s *L0Segment) DeleteRecords() ([]storage.PrimaryKey, []uint64) {
 	return s.pks, s.tss
 }
 
-func (s *L0Segment) Release(opts ...releaseOption) {
+func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
 
 	s.pks = nil
 	s.tss = nil
+}
+
+func (s *L0Segment) RemoveUnusedFieldFiles() error {
+	panic("not implemented")
 }

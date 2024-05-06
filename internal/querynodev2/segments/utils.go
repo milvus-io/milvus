@@ -182,3 +182,13 @@ func getSegmentMetricLabel(segment Segment) metricsutil.SegmentLabel {
 		ResourceGroup: segment.ResourceGroup(),
 	}
 }
+
+func FilterZeroValuesFromSlice(intVals []int64) []int64 {
+	var result []int64
+	for _, value := range intVals {
+		if value != 0 {
+			result = append(result, value)
+		}
+	}
+	return result
+}

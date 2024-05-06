@@ -261,13 +261,57 @@ func (_c *MockLoader_LoadIndex_Call) RunAndReturn(run func(context.Context, *Loc
 	return _c
 }
 
-// LoadSegment provides a mock function with given fields: ctx, segment, loadInfo, loadStatus
-func (_m *MockLoader) LoadSegment(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, loadStatus LoadStatus) error {
-	ret := _m.Called(ctx, segment, loadInfo, loadStatus)
+// LoadLazySegment provides a mock function with given fields: ctx, segment, loadInfo
+func (_m *MockLoader) LoadLazySegment(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, segment, loadInfo)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo, LoadStatus) error); ok {
-		r0 = rf(ctx, segment, loadInfo, loadStatus)
+	if rf, ok := ret.Get(0).(func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, segment, loadInfo)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// MockLoader_LoadLazySegment_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LoadLazySegment'
+type MockLoader_LoadLazySegment_Call struct {
+	*mock.Call
+}
+
+// LoadLazySegment is a helper method to define mock.On call
+//   - ctx context.Context
+//   - segment *LocalSegment
+//   - loadInfo *querypb.SegmentLoadInfo
+func (_e *MockLoader_Expecter) LoadLazySegment(ctx interface{}, segment interface{}, loadInfo interface{}) *MockLoader_LoadLazySegment_Call {
+	return &MockLoader_LoadLazySegment_Call{Call: _e.mock.On("LoadLazySegment", ctx, segment, loadInfo)}
+}
+
+func (_c *MockLoader_LoadLazySegment_Call) Run(run func(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo)) *MockLoader_LoadLazySegment_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*LocalSegment), args[2].(*querypb.SegmentLoadInfo))
+	})
+	return _c
+}
+
+func (_c *MockLoader_LoadLazySegment_Call) Return(_a0 error) *MockLoader_LoadLazySegment_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockLoader_LoadLazySegment_Call) RunAndReturn(run func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo) error) *MockLoader_LoadLazySegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LoadSegment provides a mock function with given fields: ctx, segment, loadInfo
+func (_m *MockLoader) LoadSegment(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo) error {
+	ret := _m.Called(ctx, segment, loadInfo)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo) error); ok {
+		r0 = rf(ctx, segment, loadInfo)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -284,14 +328,13 @@ type MockLoader_LoadSegment_Call struct {
 //   - ctx context.Context
 //   - segment *LocalSegment
 //   - loadInfo *querypb.SegmentLoadInfo
-//   - loadStatus LoadStatus
-func (_e *MockLoader_Expecter) LoadSegment(ctx interface{}, segment interface{}, loadInfo interface{}, loadStatus interface{}) *MockLoader_LoadSegment_Call {
-	return &MockLoader_LoadSegment_Call{Call: _e.mock.On("LoadSegment", ctx, segment, loadInfo, loadStatus)}
+func (_e *MockLoader_Expecter) LoadSegment(ctx interface{}, segment interface{}, loadInfo interface{}) *MockLoader_LoadSegment_Call {
+	return &MockLoader_LoadSegment_Call{Call: _e.mock.On("LoadSegment", ctx, segment, loadInfo)}
 }
 
-func (_c *MockLoader_LoadSegment_Call) Run(run func(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo, loadStatus LoadStatus)) *MockLoader_LoadSegment_Call {
+func (_c *MockLoader_LoadSegment_Call) Run(run func(ctx context.Context, segment *LocalSegment, loadInfo *querypb.SegmentLoadInfo)) *MockLoader_LoadSegment_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*LocalSegment), args[2].(*querypb.SegmentLoadInfo), args[3].(LoadStatus))
+		run(args[0].(context.Context), args[1].(*LocalSegment), args[2].(*querypb.SegmentLoadInfo))
 	})
 	return _c
 }
@@ -301,7 +344,7 @@ func (_c *MockLoader_LoadSegment_Call) Return(_a0 error) *MockLoader_LoadSegment
 	return _c
 }
 
-func (_c *MockLoader_LoadSegment_Call) RunAndReturn(run func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo, LoadStatus) error) *MockLoader_LoadSegment_Call {
+func (_c *MockLoader_LoadSegment_Call) RunAndReturn(run func(context.Context, *LocalSegment, *querypb.SegmentLoadInfo) error) *MockLoader_LoadSegment_Call {
 	_c.Call.Return(run)
 	return _c
 }

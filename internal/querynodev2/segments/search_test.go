@@ -83,6 +83,7 @@ func (suite *SearchSuite) SetupTest() {
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
 			InsertChannel: "dml",
+			NumOfRows:     int64(msgLength),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
@@ -122,12 +123,12 @@ func (suite *SearchSuite) SetupTest() {
 	suite.Require().NoError(err)
 	suite.growing.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 
-	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
-	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)
+	suite.manager.Segment.Put(context.Background(), SegmentTypeSealed, suite.sealed)
+	suite.manager.Segment.Put(context.Background(), SegmentTypeGrowing, suite.growing)
 }
 
 func (suite *SearchSuite) TearDownTest() {
-	suite.sealed.Release()
+	suite.sealed.Release(context.Background())
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, paramtable.Get().MinioCfg.RootPath.GetValue())
