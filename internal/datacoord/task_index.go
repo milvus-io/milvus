@@ -100,37 +100,29 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 	if isFlatIndex(indexType) || segIndex.NumRows < Params.DataCoordCfg.MinSegmentNumRowsToEnableIndex.GetAsInt64() {
 		log.Ctx(ctx).Info("segment does not need index really", zap.Int64("buildID", it.buildID),
 			zap.Int64("segmentID", segIndex.SegmentID), zap.Int64("num rows", segIndex.NumRows))
-		if err := dependency.meta.indexMeta.FinishTask(&indexpb.IndexTaskInfo{
-			BuildID:        it.buildID,
-			State:          commonpb.IndexState_Finished,
-			IndexFileKeys:  nil,
-			SerializedSize: 0,
-			FailReason:     "",
-		}); err != nil {
-			log.Ctx(ctx).Warn("fake finished index failed", zap.Int64("buildID", it.buildID), zap.Error(err))
-			it.SetState(indexpb.JobState_JobStateInit, "fake finished index failed")
-			return false, true
-		}
 		it.SetState(indexpb.JobState_JobStateFinished, "fake finished index success")
 		return true, true
 	}
 	// vector index build needs information of optional scalar fields data
 	optionalFields := make([]*indexpb.OptionalFieldInfo, 0)
 	if Params.CommonCfg.EnableMaterializedView.GetAsBool() && isOptionalScalarFieldSupported(indexType) {
-		colSchema := dependency.meta.GetCollection(segIndex.CollectionID).Schema
-		hasPartitionKey := typeutil.HasPartitionKey(colSchema)
-		if hasPartitionKey {
-			partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(colSchema)
-			if partitionKeyField == nil || err != nil {
-				log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("buildID", it.buildID), zap.Error(err))
-			} else {
-				optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
-					FieldID:   partitionKeyField.FieldID,
-					FieldName: partitionKeyField.Name,
-					FieldType: int32(partitionKeyField.DataType),
-					DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
-				})
-			}
+		collInfo, err := dependency.handler.GetCollection(ctx, segIndex.CollectionID)
+		if err != nil || collInfo == nil {
+			log.Ctx(ctx).Warn("get collection failed", zap.Int64("collID", segIndex.CollectionID), zap.Error(err))
+			it.SetState(indexpb.JobState_JobStateInit, err.Error())
+			return false, false
+		}
+		colSchema := collInfo.Schema
+		partitionKeyField, err := typeutil.GetPartitionKeyFieldSchema(colSchema)
+		if partitionKeyField == nil || err != nil {
+			log.Ctx(ctx).Warn("index builder get partition key field failed", zap.Int64("buildID", it.buildID), zap.Error(err))
+		} else {
+			optionalFields = append(optionalFields, &indexpb.OptionalFieldInfo{
+				FieldID:   partitionKeyField.FieldID,
+				FieldName: partitionKeyField.Name,
+				FieldType: int32(partitionKeyField.DataType),
+				DataIds:   getBinLogIDs(segment, partitionKeyField.FieldID),
+			})
 		}
 	}
 

@@ -181,11 +181,19 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 			TaskID:       1,
 			State:        indexpb.JobState_JobStateInit,
 		},
+		{
+			CollectionID: s.collectionID,
+			PartitionID:  s.partitionID,
+			FieldID:      s.fieldID,
+			SegmentIDs:   s.segmentIDs,
+			TaskID:       2,
+			State:        indexpb.JobState_JobStateFinished,
+		},
 	}, nil)
 	am, err = newAnalyzeMeta(ctx, catalog)
 	s.NoError(err)
 	s.NotNil(am)
-	s.Equal(1, len(am.GetAllTasks()))
+	s.Equal(2, len(am.GetAllTasks()))
 
 	catalog.EXPECT().SaveAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
 	catalog.EXPECT().DropAnalyzeTask(mock.Anything, mock.Anything).Return(errors.New("error"))
@@ -237,6 +245,21 @@ func (s *AnalyzeMetaSuite) Test_failCase() {
 		})
 		s.Error(err)
 		s.Equal(indexpb.JobState_JobStateInit, am.GetTask(1).State)
+	})
+
+	s.Run("CheckCleanAnalyzeTask", func() {
+		canRecycle, t := am.CheckCleanAnalyzeTask(1)
+		s.False(canRecycle)
+		s.Equal(indexpb.JobState_JobStateInit, t.GetState())
+
+		canRecycle, t = am.CheckCleanAnalyzeTask(777)
+		s.True(canRecycle)
+		s.Nil(t)
+
+		canRecycle, t = am.CheckCleanAnalyzeTask(2)
+		s.True(canRecycle)
+		s.Equal(indexpb.JobState_JobStateFinished, t.GetState())
+
 	})
 }
 
