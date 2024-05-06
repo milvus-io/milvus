@@ -303,12 +303,12 @@ func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeu
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
 	case schemapb.DataType_Array:
-		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetArrayData().Data)
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetArrayData().GetData())
 	case schemapb.DataType_JSON:
-		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().Data)
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().GetData())
 	case schemapb.DataType_FloatVector:
 		dim := fieldData.GetVectors().GetDim()
-		fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().Data, dim)
+		fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
 		if err != nil {
 			return 0, err
 		}
