@@ -841,7 +841,7 @@ func doRequery(ctx context.Context,
 	//  3  2  5  4  1  (result ids)
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reorganizeRequeryResults")
+	_, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reorganizeRequeryResults")
 	defer sp.End()
 	pkFieldData, err := typeutil.GetPrimaryFieldData(queryResult.GetFieldsData(), pkField)
 	if err != nil {
