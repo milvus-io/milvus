@@ -281,6 +281,65 @@ func GetNumRowsOfBFloat16VectorField(bf16Datas []byte, dim int64) (uint64, error
 	return uint64((int64(l)) / dim / 2), nil
 }
 
+// GetNumRowOfFieldDataWithSchema returns num of rows with schema specification.
+func GetNumRowOfFieldDataWithSchema(fieldData *schemapb.FieldData, helper *typeutil.SchemaHelper) (uint64, error) {
+	var fieldNumRows uint64
+	var err error
+	fieldSchema, err := helper.GetFieldFromName(fieldData.GetFieldName())
+	if err != nil {
+		return 0, err
+	}
+	switch fieldSchema.GetDataType() {
+	case schemapb.DataType_Bool:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetBoolData().GetData())
+	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetIntData().GetData())
+	case schemapb.DataType_Int64:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetLongData().GetData())
+	case schemapb.DataType_Float:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetFloatData().GetData())
+	case schemapb.DataType_Double:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetDoubleData().GetData())
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetStringData().GetData())
+	case schemapb.DataType_Array:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetArrayData().GetData())
+	case schemapb.DataType_JSON:
+		fieldNumRows = getNumRowsOfScalarField(fieldData.GetScalars().GetJsonData().GetData())
+	case schemapb.DataType_FloatVector:
+		dim := fieldData.GetVectors().GetDim()
+		fieldNumRows, err = GetNumRowsOfFloatVectorField(fieldData.GetVectors().GetFloatVector().GetData(), dim)
+		if err != nil {
+			return 0, err
+		}
+	case schemapb.DataType_BinaryVector:
+		dim := fieldData.GetVectors().GetDim()
+		fieldNumRows, err = GetNumRowsOfBinaryVectorField(fieldData.GetVectors().GetBinaryVector(), dim)
+		if err != nil {
+			return 0, err
+		}
+	case schemapb.DataType_Float16Vector:
+		dim := fieldData.GetVectors().GetDim()
+		fieldNumRows, err = GetNumRowsOfFloat16VectorField(fieldData.GetVectors().GetFloat16Vector(), dim)
+		if err != nil {
+			return 0, err
+		}
+	case schemapb.DataType_BFloat16Vector:
+		dim := fieldData.GetVectors().GetDim()
+		fieldNumRows, err = GetNumRowsOfBFloat16VectorField(fieldData.GetVectors().GetBfloat16Vector(), dim)
+		if err != nil {
+			return 0, err
+		}
+	case schemapb.DataType_SparseFloatVector:
+		fieldNumRows = uint64(len(fieldData.GetVectors().GetSparseFloatVector().GetContents()))
+	default:
+		return 0, fmt.Errorf("%s is not supported now", fieldSchema.GetDataType())
+	}
+
+	return fieldNumRows, nil
+}
+
+// GetNumRowOfFieldData returns num of rows from the field data type
 func GetNumRowOfFieldData(fieldData *schemapb.FieldData) (uint64, error) {
 	var fieldNumRows uint64
 	var err error
