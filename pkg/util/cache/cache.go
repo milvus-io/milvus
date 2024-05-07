@@ -349,9 +349,9 @@ func (c *lruCache[K, V]) getAndPin(ctx context.Context, key K) (*cacheItem[K, V]
 		timer := time.Now()
 		value, err := c.loader(ctx, key)
 		c.stats.TotalLoadTimeMs.Add(uint64(time.Since(timer).Milliseconds()))
-		// try to evict one item if not enough disk space and retry
+		// Try to evict one item if there is not enough disk space, then retry.
 		if merr.ErrServiceDiskLimitExceeded.Is(err) {
-			c.evictItems(1)
+			c.evictItems(ctx, 1)
 			value, err = c.loader(ctx, key)
 		}
 		if err != nil {
@@ -464,7 +464,7 @@ func (c *lruCache[K, V]) evict(ctx context.Context, key K) {
 	}
 }
 
-func (c *lruCache[K, V]) evictItems(n int) {
+func (c *lruCache[K, V]) evictItems(ctx context.Context, n int) {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
 
@@ -479,7 +479,7 @@ func (c *lruCache[K, V]) evictItems(n int) {
 	}
 
 	for _, key := range toEvict {
-		c.evict(context.Background(), key)
+		c.evict(ctx, key)
 	}
 }
 
