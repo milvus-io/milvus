@@ -41,9 +41,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/cache"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+// TODO maybe move to manager and change segment constructor
+var channelMapper = metautil.NewDynChannelMapper()
 
 // SegmentFilter is the interface for segment selection criteria.
 type SegmentFilter interface {
@@ -109,8 +113,14 @@ func WithPartition(partitionID typeutil.UniqueID) SegmentFilter {
 }
 
 func WithChannel(channel string) SegmentFilter {
+	ac, err := metautil.ParseChannel(channel, channelMapper)
+	if err != nil {
+		return SegmentFilterFunc(func(segment Segment) bool {
+			return false
+		})
+	}
 	return SegmentFilterFunc(func(segment Segment) bool {
-		return segment.Shard() == channel
+		return segment.Shard().Equal(ac)
 	})
 }
 

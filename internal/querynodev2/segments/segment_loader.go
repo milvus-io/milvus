@@ -399,7 +399,7 @@ func (loader *segmentLoaderV2) LoadSegment(ctx context.Context,
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
 		zap.Int64("partitionID", segment.Partition()),
-		zap.String("shard", segment.Shard()),
+		zap.String("shard", segment.Shard().VirtualName()),
 		zap.Int64("segmentID", segment.ID()),
 	)
 	log.Info("start loading segment files",
@@ -1075,7 +1075,7 @@ func (loader *segmentLoader) LoadSegment(ctx context.Context,
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", segment.Collection()),
 		zap.Int64("partitionID", segment.Partition()),
-		zap.String("shard", segment.Shard()),
+		zap.String("shard", segment.Shard().VirtualName()),
 		zap.Int64("segmentID", segment.ID()),
 	)
 	log.Info("start loading segment files",

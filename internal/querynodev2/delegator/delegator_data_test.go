@@ -18,6 +18,7 @@ package delegator
 
 import (
 	"context"
+	"fmt"
 	"path"
 	"strconv"
 	"testing"
@@ -61,6 +62,8 @@ type DelegatorDataSuite struct {
 	tsafeManager  tsafe.Manager
 	loader        *segments.MockLoader
 	mq            *msgstream.MockMsgStream
+	channel       metautil.Channel
+	mapper        metautil.ChannelMapper
 
 	delegator    *shardDelegator
 	rootPath     string
@@ -71,6 +74,15 @@ func (s *DelegatorDataSuite) SetupSuite() {
 	paramtable.Init()
 	paramtable.SetNodeID(1)
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.CleanExcludeSegInterval.Key, "1")
+
+	s.collectionID = 1000
+	s.replicaID = 65535
+	s.vchannelName = "rootcoord-dml_1000v0"
+	s.version = 2000
+	var err error
+	s.mapper = metautil.NewDynChannelMapper()
+	s.channel, err = metautil.ParseChannel(s.vchannelName, s.mapper)
+	s.Require().NoError(err)
 }
 
 func (s *DelegatorDataSuite) TearDownSuite() {
@@ -78,10 +90,6 @@ func (s *DelegatorDataSuite) TearDownSuite() {
 }
 
 func (s *DelegatorDataSuite) SetupTest() {
-	s.collectionID = 1000
-	s.replicaID = 65535
-	s.vchannelName = "rootcoord-dml_1000_v0"
-	s.version = 2000
 	s.workerManager = &cluster.MockManager{}
 	s.manager = segments.NewManager()
 	s.tsafeManager = tsafe.NewTSafeReplica()
@@ -290,9 +298,10 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 	defer cancel()
 	err := s.delegator.LoadGrowing(ctx, []*querypb.SegmentLoadInfo{
 		{
-			SegmentID:    1001,
-			CollectionID: s.collectionID,
-			PartitionID:  500,
+			SegmentID:     1001,
+			CollectionID:  s.collectionID,
+			PartitionID:   500,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 		},
 	}, 0)
 	s.Require().NoError(err)
@@ -308,6 +317,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 	})
@@ -334,6 +344,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 5000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 5000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 	})
@@ -390,6 +401,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 		Version: 1,
@@ -424,6 +436,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 		Version: 2,
@@ -482,6 +495,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -563,6 +577,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					Deltalogs:     []*datapb.FieldBinlog{},
 					Level:         datapb.SegmentLevel_L0,
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -578,6 +593,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -724,6 +740,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 2},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 2},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -750,6 +767,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -788,6 +806,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -832,6 +851,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 					PartitionID:   500,
 					StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 					DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+					InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 				},
 			},
 		})
@@ -896,9 +916,10 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 	defer cancel()
 	err := s.delegator.LoadGrowing(ctx, []*querypb.SegmentLoadInfo{
 		{
-			SegmentID:    1001,
-			CollectionID: s.collectionID,
-			PartitionID:  500,
+			SegmentID:     1001,
+			CollectionID:  s.collectionID,
+			PartitionID:   500,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 		},
 	}, 0)
 	s.Require().NoError(err)
@@ -914,6 +935,7 @@ func (s *DelegatorDataSuite) TestReleaseSegment() {
 				PartitionID:   500,
 				StartPosition: &msgpb.MsgPosition{Timestamp: 20000},
 				DeltaPosition: &msgpb.MsgPosition{Timestamp: 20000},
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", s.collectionID),
 			},
 		},
 	})
@@ -1066,7 +1088,7 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		ms.EXPECT().Partition().Return(1)
 		ms.EXPECT().InsertCount().Return(0)
 		ms.EXPECT().Indexes().Return(nil)
-		ms.EXPECT().Shard().Return(s.vchannelName)
+		ms.EXPECT().Shard().Return(s.channel)
 		ms.EXPECT().Level().Return(datapb.SegmentLevel_L1)
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}

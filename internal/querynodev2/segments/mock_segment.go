@@ -9,6 +9,8 @@ import (
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 
+	metautil "github.com/milvus-io/milvus/pkg/util/metautil"
+
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -1327,14 +1329,14 @@ func (_c *MockSegment_Search_Call) RunAndReturn(run func(context.Context, *Searc
 }
 
 // Shard provides a mock function with given fields:
-func (_m *MockSegment) Shard() string {
+func (_m *MockSegment) Shard() metautil.Channel {
 	ret := _m.Called()
 
-	var r0 string
-	if rf, ok := ret.Get(0).(func() string); ok {
+	var r0 metautil.Channel
+	if rf, ok := ret.Get(0).(func() metautil.Channel); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(string)
+		r0 = ret.Get(0).(metautil.Channel)
 	}
 
 	return r0
@@ -1357,12 +1359,12 @@ func (_c *MockSegment_Shard_Call) Run(run func()) *MockSegment_Shard_Call {
 	return _c
 }
 
-func (_c *MockSegment_Shard_Call) Return(_a0 string) *MockSegment_Shard_Call {
+func (_c *MockSegment_Shard_Call) Return(_a0 metautil.Channel) *MockSegment_Shard_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_Shard_Call) RunAndReturn(run func() string) *MockSegment_Shard_Call {
+func (_c *MockSegment_Shard_Call) RunAndReturn(run func() metautil.Channel) *MockSegment_Shard_Call {
 	_c.Call.Return(run)
 	return _c
 }

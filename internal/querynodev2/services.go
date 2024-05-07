@@ -598,7 +598,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 		info := &querypb.SegmentInfo{
 			SegmentID:    segment.ID(),
 			SegmentState: segment.Type(),
-			DmChannel:    segment.Shard(),
+			DmChannel:    segment.Shard().VirtualName(),
 			PartitionID:  segment.Partition(),
 			CollectionID: segment.Collection(),
 			NodeID:       node.GetNodeID(),
@@ -1165,7 +1165,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			ID:                 s.ID(),
 			Collection:         s.Collection(),
 			Partition:          s.Partition(),
-			Channel:            s.Shard(),
+			Channel:            s.Shard().VirtualName(),
 			Version:            s.Version(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {

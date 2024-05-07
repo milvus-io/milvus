@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 	"time"
@@ -120,12 +121,13 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	suite.NoError(err)
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.NoError(err)
 
@@ -141,12 +143,13 @@ func (suite *SegmentLoaderSuite) TestLoad() {
 	suite.NoError(err)
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID + 1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID + 1,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.NoError(err)
 }
@@ -175,12 +178,13 @@ func (suite *SegmentLoaderSuite) TestLoadFail() {
 	}
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.Error(err)
 }
@@ -203,12 +207,13 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 		)
 		suite.NoError(err)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:    segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			BinlogPaths:  binlogs,
-			Statslogs:    statsLogs,
-			NumOfRows:    int64(msgLength),
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 	}
 
@@ -237,12 +242,13 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 		)
 		suite.NoError(err)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:    segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			BinlogPaths:  binlogs,
-			Statslogs:    statsLogs,
-			NumOfRows:    int64(msgLength),
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 	}
 
@@ -288,13 +294,14 @@ func (suite *SegmentLoaderSuite) TestLoadWithIndex() {
 		)
 		suite.NoError(err)
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:    segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			BinlogPaths:  binlogs,
-			Statslogs:    statsLogs,
-			IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
-			NumOfRows:    int64(msgLength),
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			IndexInfos:    []*querypb.FieldIndexInfo{indexInfo},
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 	}
 
@@ -326,12 +333,13 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 		suite.NoError(err)
 
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:    segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			BinlogPaths:  binlogs,
-			Statslogs:    statsLogs,
-			NumOfRows:    int64(msgLength),
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 	}
 
@@ -373,13 +381,14 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 		suite.NoError(err)
 
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:    segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			BinlogPaths:  binlogs,
-			Statslogs:    statsLogs,
-			Deltalogs:    deltaLogs,
-			NumOfRows:    int64(msgLength),
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			Deltalogs:     deltaLogs,
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 	}
 
@@ -425,13 +434,14 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 		suite.NoError(err)
 
 		loadInfos = append(loadInfos, &querypb.SegmentLoadInfo{
-			SegmentID:    segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			BinlogPaths:  binlogs,
-			Statslogs:    statsLogs,
-			Deltalogs:    deltaLogs,
-			NumOfRows:    int64(msgLength),
+			SegmentID:     segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			BinlogPaths:   binlogs,
+			Statslogs:     statsLogs,
+			Deltalogs:     deltaLogs,
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 	}
 
@@ -469,6 +479,7 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 				IndexFilePaths: []string{},
 			},
 		},
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}
 	segment := &LocalSegment{
 		baseSegment: baseSegment{
@@ -507,12 +518,13 @@ func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	suite.NoError(err)
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.NoError(err)
 }
@@ -545,13 +557,14 @@ func (suite *SegmentLoaderSuite) TestPatchEntryNum() {
 	)
 	suite.NoError(err)
 	loadInfo := &querypb.SegmentLoadInfo{
-		SegmentID:    segmentID,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		IndexInfos:   []*querypb.FieldIndexInfo{indexInfo},
-		NumOfRows:    int64(msgLength),
+		SegmentID:     segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		IndexInfos:    []*querypb.FieldIndexInfo{indexInfo},
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	}
 
 	// mock legacy binlog entry num is zero case
@@ -593,12 +606,13 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	suite.NoError(err)
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.Error(err)
 
@@ -614,32 +628,35 @@ func (suite *SegmentLoaderSuite) TestRunOutMemory() {
 	suite.NoError(err)
 
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID + 1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID + 1,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.Error(err)
 
 	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.MmapDirPath.Key, "./mmap")
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeSealed, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.Error(err)
 	_, err = suite.loader.Load(ctx, suite.collectionID, SegmentTypeGrowing, 0, &querypb.SegmentLoadInfo{
-		SegmentID:    suite.segmentID + 1,
-		PartitionID:  suite.partitionID,
-		CollectionID: suite.collectionID,
-		BinlogPaths:  binlogs,
-		Statslogs:    statsLogs,
-		NumOfRows:    int64(msgLength),
+		SegmentID:     suite.segmentID + 1,
+		PartitionID:   suite.partitionID,
+		CollectionID:  suite.collectionID,
+		BinlogPaths:   binlogs,
+		Statslogs:     statsLogs,
+		NumOfRows:     int64(msgLength),
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.Error(err)
 }
@@ -720,10 +737,11 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 		})
 		suite.segmentManager.EXPECT().UpdateBy(mock.Anything, mock.Anything, mock.Anything).Return(0)
 		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
-			SegmentID:    suite.segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			NumOfRows:    100,
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 
 		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
@@ -748,10 +766,11 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			return nil
 		})
 		infos = suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
-			SegmentID:    suite.segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			NumOfRows:    100,
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 
 		err := suite.loader.waitSegmentLoadDone(context.Background(), SegmentTypeSealed, []int64{suite.segmentID}, 0)
@@ -766,10 +785,11 @@ func (suite *SegmentLoaderDetailSuite) TestWaitSegmentLoadDone() {
 			return nil
 		})
 		suite.loader.prepare(context.Background(), SegmentTypeSealed, &querypb.SegmentLoadInfo{
-			SegmentID:    suite.segmentID,
-			PartitionID:  suite.partitionID,
-			CollectionID: suite.collectionID,
-			NumOfRows:    100,
+			SegmentID:     suite.segmentID,
+			PartitionID:   suite.partitionID,
+			CollectionID:  suite.collectionID,
+			NumOfRows:     100,
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 
 		ctx, cancel := context.WithCancel(context.Background())
@@ -806,6 +826,7 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 					},
 				},
 			},
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 		})
 
 		suite.NoError(err)
@@ -944,6 +965,7 @@ func (suite *SegmentLoaderV2Suite) TestLoad() {
 		CollectionID:   suite.collectionID,
 		NumOfRows:      int64(msgLength),
 		StorageVersion: 3,
+		InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.NoError(err)
 
@@ -953,6 +975,7 @@ func (suite *SegmentLoaderV2Suite) TestLoad() {
 		CollectionID:   suite.collectionID,
 		NumOfRows:      int64(msgLength),
 		StorageVersion: 3,
+		InsertChannel:  fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 	})
 	suite.NoError(err)
 
