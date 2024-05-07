@@ -30,15 +30,27 @@ import (
 	"go.opentelemetry.io/otel/trace"
 )
 
+// CTraceContext is the wrapper for `C.CTraceContext`
+// it stores the internal C.CTraceContext and
+type CTraceContext struct {
+	traceID trace.TraceID
+	spanID  trace.SpanID
+	ctx     C.CTraceContext
+}
+
 // ParseCTraceContext parses tracing span and convert it into `C.CTraceContext`.
-func ParseCTraceContext(ctx context.Context) C.CTraceContext {
+func ParseCTraceContext(ctx context.Context) *CTraceContext {
 	span := trace.SpanFromContext(ctx)
 
-	traceID := span.SpanContext().TraceID()
-	spanID := span.SpanContext().SpanID()
-	return C.CTraceContext{
-		traceID:    (*C.uint8_t)(unsafe.Pointer(&traceID[0])),
-		spanID:     (*C.uint8_t)(unsafe.Pointer(&spanID[0])),
+	cctx := &CTraceContext{
+		traceID: span.SpanContext().TraceID(),
+		spanID:  span.SpanContext().SpanID(),
+	}
+	cctx.ctx = C.CTraceContext{
+		traceID:    (*C.uint8_t)(unsafe.Pointer(&cctx.traceID[0])),
+		spanID:     (*C.uint8_t)(unsafe.Pointer(&cctx.spanID[0])),
 		traceFlags: (C.uint8_t)(span.SpanContext().TraceFlags()),
 	}
+
+	return cctx
 }

@@ -43,6 +43,7 @@ var (
 	ErrServiceQuotaExceeded        = newMilvusError("quota exceeded", 9, false)
 	ErrServiceUnimplemented        = newMilvusError("service unimplemented", 10, false)
 	ErrServiceTimeTickLongDelay    = newMilvusError("time tick long delay", 11, false)
+	ErrServiceResourceInsufficient = newMilvusError("service resource insufficient", 12, true)
 
 	// Collection related
 	ErrCollectionNotFound         = newMilvusError("collection not found", 100, false)
@@ -85,6 +86,7 @@ var (
 	ErrSegmentNotLoaded   = newMilvusError("segment not loaded", 601, false)
 	ErrSegmentLack        = newMilvusError("segment lacks", 602, false)
 	ErrSegmentReduplicate = newMilvusError("segment reduplicates", 603, false)
+	ErrSegmentLoadFailed  = newMilvusError("segment load failed", 604, false)
 
 	// Index related
 	ErrIndexNotFound     = newMilvusError("index not found", 700, false)
@@ -167,6 +169,15 @@ var (
 
 	// Search/Query related
 	ErrInconsistentRequery = newMilvusError("inconsistent requery result", 2200, true)
+
+	// Compaction
+	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)
+	ErrClusteringCompactionClusterNotSupport      = newMilvusError("milvus cluster not support clustering compaction", 2301, false)
+	ErrClusteringCompactionCollectionNotSupport   = newMilvusError("collection not support clustering compaction", 2302, false)
+	ErrClusteringCompactionCollectionIsCompacting = newMilvusError("collection is compacting", 2303, false)
+
+	// General
+	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
 )
 
 type milvusError struct {

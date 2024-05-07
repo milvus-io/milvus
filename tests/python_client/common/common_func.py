@@ -359,9 +359,9 @@ def gen_collection_schema_all_datatype(description=ct.default_desc,
     else:
         multiple_dim_array.insert(0, dim)
         for i in range(len(multiple_dim_array)):
-            fields.append(gen_float_vec_field(name=f"multiple_vector_{ct.vector_data_type_all[i%3]}",
+            fields.append(gen_float_vec_field(name=f"multiple_vector_{ct.all_float_vector_types[i%3]}",
                                               dim=multiple_dim_array[i],
-                                              vector_data_type=ct.vector_data_type_all[i%3]))
+                                              vector_data_type=ct.all_float_vector_types[i%3]))
 
     schema, _ = ApiCollectionSchemaWrapper().init_collection_schema(fields=fields, description=description,
                                                                     primary_field=primary_field, auto_id=auto_id,
@@ -485,8 +485,8 @@ def gen_default_dataframe_data(nb=ct.default_nb, dim=ct.default_dim, start=0, wi
 
 def gen_general_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0, with_json=True,
                                   random_primary_key=False, multiple_dim_array=[], multiple_vector_field_name=[],
-                                  vector_data_type="FLOAT_VECTOR", auto_id = False,
-                                  primary_field = ct.default_int64_field_name):
+                                  vector_data_type="FLOAT_VECTOR", auto_id=False,
+                                  primary_field=ct.default_int64_field_name):
     insert_list = []
     if not random_primary_key:
         int_values = pd.Series(data=[i for i in range(start, start + nb)])
@@ -496,14 +496,15 @@ def gen_general_default_list_data(nb=ct.default_nb, dim=ct.default_dim, start=0,
     string_values = pd.Series(data=[str(i) for i in range(start, start + nb)], dtype="string")
     json_values = [{"number": i, "float": i*1.0} for i in range(start, start + nb)]
     float_vec_values = gen_vectors(nb, dim, vector_data_type=vector_data_type)
-    insert_list = [int_values, float_values, string_values, json_values, float_vec_values]
+    insert_list = [int_values, float_values, string_values]
 
-    if with_json is False:
-        index = insert_list.index(json_values)
-        del insert_list[index]
+    if with_json is True:
+        insert_list.append(json_values)
+    insert_list.append(float_vec_values)
+
     if auto_id is True:
         if primary_field == ct.default_int64_field_name:
-            index = insert_list.index(int_values)
+            index = 0
         elif primary_field == ct.default_string_field_name:
             index = 2
         del insert_list[index]
@@ -699,7 +700,7 @@ def gen_dataframe_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0, w
         df[ct.default_float_vec_field_name] = float_vec_values
     else:
         for i in range(len(multiple_dim_array)):
-            df[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i], ct.vector_data_type_all[i%3])
+            df[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i], ct.all_float_vector_types[i%3])
 
     if with_json is False:
         df.drop(ct.default_json_field_name, axis=1, inplace=True)
@@ -737,7 +738,7 @@ def gen_general_list_all_data_type(nb=ct.default_nb, dim=ct.default_dim, start=0
         insert_list.append(float_vec_values)
     else:
         for i in range(len(multiple_dim_array)):
-            insert_list.append(gen_vectors(nb, multiple_dim_array[i], ct.vector_data_type_all[i%3]))
+            insert_list.append(gen_vectors(nb, multiple_dim_array[i], ct.all_float_vector_types[i%3]))
 
     if with_json is False:
         # index = insert_list.index(json_values)
@@ -782,7 +783,7 @@ def gen_default_rows_data_all_data_type(nb=ct.default_nb, dim=ct.default_dim, st
         else:
             for i in range(len(multiple_dim_array)):
                 dict[multiple_vector_field_name[i]] = gen_vectors(nb, multiple_dim_array[i],
-                                                                  ct.vector_data_type_all[i])[0]
+                                                                  ct.all_float_vector_types[i])[0]
     if len(multiple_dim_array) != 0:
         with open(ct.rows_all_data_type_file_path + f'_{partition_id}' + f'_dim{dim}.txt', 'wb') as json_file:
             pickle.dump(array, json_file)
@@ -1233,7 +1234,7 @@ def gen_simple_index():
         elif ct.all_index_types[i] in ct.sparse_support:
             continue
         dic = {"index_type": ct.all_index_types[i], "metric_type": "L2"}
-        dic.update({"params": ct.default_index_params[i]})
+        dic.update({"params": ct.default_all_indexes_params[i]})
         index_params.append(dic)
     return index_params
 
@@ -1669,6 +1670,16 @@ def index_to_dict(index):
         # "name": index.name,
         "params": index.params
     }
+
+
+def get_index_params_params(index_type):
+    """get default params of index params  by index type"""
+    return ct.default_all_indexes_params[ct.all_index_types.index(index_type)].copy()
+
+
+def get_search_params_params(index_type):
+    """get default params of search params by index type"""
+    return ct.default_all_search_params_params[ct.all_index_types.index(index_type)].copy()
 
 
 def assert_json_contains(expr, list_data):

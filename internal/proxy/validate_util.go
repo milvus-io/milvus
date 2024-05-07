@@ -97,8 +97,20 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 			if err := v.checkJSONFieldData(field, fieldSchema); err != nil {
 				return err
 			}
-		case schemapb.DataType_Int8, schemapb.DataType_Int16:
+		case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 			if err := v.checkIntegerFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_Int64:
+			if err := v.checkLongFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_Float:
+			if err := v.checkFloatFieldData(field, fieldSchema); err != nil {
+				return err
+			}
+		case schemapb.DataType_Double:
+			if err := v.checkDoubleFieldData(field, fieldSchema); err != nil {
 				return err
 			}
 		case schemapb.DataType_Array:
@@ -237,7 +249,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 
 		default:
 			// error won't happen here.
-			n, err := funcutil.GetNumRowOfFieldData(field)
+			n, err := funcutil.GetNumRowOfFieldDataWithSchema(field, schema)
 			if err != nil {
 				return err
 			}
@@ -366,7 +378,11 @@ func (v *validateUtil) checkBFloat16VectorFieldData(field *schemapb.FieldData, f
 }
 
 func (v *validateUtil) checkBinaryVectorFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	// TODO
+	bVecArray := field.GetVectors().GetBinaryVector()
+	if bVecArray == nil {
+		msg := fmt.Sprintf("binary float vector field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need bytes array", "got nil", msg)
+	}
 	return nil
 }
 
@@ -449,21 +465,57 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 }
 
 func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
-	if !v.checkOverflow {
-		return nil
-	}
-
 	data := field.GetScalars().GetIntData().GetData()
 	if data == nil && fieldSchema.GetDefaultValue() == nil {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need int array", "got nil", msg)
 	}
 
-	switch fieldSchema.GetDataType() {
-	case schemapb.DataType_Int8:
-		return verifyOverflowByRange(data, math.MinInt8, math.MaxInt8)
-	case schemapb.DataType_Int16:
-		return verifyOverflowByRange(data, math.MinInt16, math.MaxInt16)
+	if v.checkOverflow {
+		switch fieldSchema.GetDataType() {
+		case schemapb.DataType_Int8:
+			return verifyOverflowByRange(data, math.MinInt8, math.MaxInt8)
+		case schemapb.DataType_Int16:
+			return verifyOverflowByRange(data, math.MinInt16, math.MaxInt16)
+		}
+	}
+
+	return nil
+}
+
+func (v *validateUtil) checkLongFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	data := field.GetScalars().GetLongData().GetData()
+	if data == nil && fieldSchema.GetDefaultValue() == nil {
+		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need long int array", "got nil", msg)
+	}
+
+	return nil
+}
+
+func (v *validateUtil) checkFloatFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	data := field.GetScalars().GetFloatData().GetData()
+	if data == nil && fieldSchema.GetDefaultValue() == nil {
+		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need float32 array", "got nil", msg)
+	}
+
+	if v.checkNAN {
+		return typeutil.VerifyFloats32(data)
+	}
+
+	return nil
+}
+
+func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
+	data := field.GetScalars().GetDoubleData().GetData()
+	if data == nil && fieldSchema.GetDefaultValue() == nil {
+		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
+		return merr.WrapErrParameterInvalid("need float64(double) array", "got nil", msg)
+	}
+
+	if v.checkNAN {
+		return typeutil.VerifyFloats64(data)
 	}
 
 	return nil

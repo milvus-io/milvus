@@ -206,9 +206,19 @@ func (t *createCollectionTask) validatePartitionKey() error {
 				return errors.New("the specified partitions should be greater than 0 if partition key is used")
 			}
 
+			maxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt64()
+			if t.GetNumPartitions() > maxPartitionNum {
+				return merr.WrapErrParameterInvalidMsg("partition number (%d) exceeds max configuration (%d)",
+					t.GetNumPartitions(), maxPartitionNum)
+			}
+
 			// set default physical partitions num if enable partition key mode
 			if t.GetNumPartitions() == 0 {
-				t.NumPartitions = common.DefaultPartitionsWithPartitionKey
+				defaultNum := common.DefaultPartitionsWithPartitionKey
+				if defaultNum > maxPartitionNum {
+					defaultNum = maxPartitionNum
+				}
+				t.NumPartitions = defaultNum
 			}
 
 			idx = i
