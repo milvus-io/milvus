@@ -30,6 +30,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
@@ -118,6 +119,10 @@ OUTER:
 		if insertData.Data[fieldID].RowNum() == 0 {
 			return nil, io.EOF
 		}
+	}
+	err = common.FillDynamicData(insertData, r.schema)
+	if err != nil {
+		return nil, err
 	}
 	return insertData, nil
 }
