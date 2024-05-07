@@ -30,10 +30,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
@@ -277,12 +275,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 	t.Run("Test merge", func(t *testing.T) {
 		collectionID := int64(1)
 		meta := NewMetaFactory().GetCollectionMeta(collectionID, "test", schemapb.DataType_Int64)
-
-		broker := broker.NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Schema: meta.GetSchema(),
-			}, nil).Maybe()
 
 		metaCache := metacache.NewMockMetaCache(t)
 		metaCache.EXPECT().Schema().Return(meta.GetSchema()).Maybe()

@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -46,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type DataNodeServicesSuite struct {
@@ -94,21 +92,12 @@ func (s *DataNodeServicesSuite) SetupTest() {
 		}, nil).Maybe()
 	s.node.allocator = alloc
 
-	meta := NewMetaFactory().GetCollectionMeta(1, "collection", schemapb.DataType_Int64)
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
 		Return([]*datapb.SegmentInfo{}, nil).Maybe()
-	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
-		Return(&milvuspb.DescribeCollectionResponse{
-			Status:    merr.Status(nil),
-			Schema:    meta.GetSchema(),
-			ShardsNum: common.DefaultShardsNum,
-		}, nil).Maybe()
 	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Call.Return(tsoutil.ComposeTSByTime(time.Now(), 0),
-		func(_ context.Context, num uint32) uint32 { return num }, nil).Maybe()
 
 	s.broker = broker
 	s.node.broker = broker
