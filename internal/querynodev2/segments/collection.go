@@ -93,6 +93,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		return
 	}
 
+	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
 	collection := NewCollection(collectionID, schema, meta, loadMeta)
 	collection.Ref(1)
 	m.collections[collectionID] = collection
