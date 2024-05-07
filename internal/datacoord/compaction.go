@@ -134,7 +134,7 @@ func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta C
 		meta:      meta,
 		sessions:  sessions,
 		allocator: allocator,
-		scheduler: NewCompactionScheduler(),
+		scheduler: NewCompactionScheduler(sessions),
 	}
 }
 
@@ -198,7 +198,7 @@ func (c *compactionPlanHandler) start() {
 	// influence the schedule
 	go func() {
 		defer c.stopWg.Done()
-		scheduleTicker := time.NewTicker(200 * time.Millisecond)
+		scheduleTicker := time.NewTicker(2 * time.Second)
 		defer scheduleTicker.Stop()
 		log.Info("compaction handler start schedule")
 		for {

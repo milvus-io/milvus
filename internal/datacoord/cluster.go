@@ -31,6 +31,8 @@ import (
 )
 
 // Cluster provides interfaces to interact with datanode cluster
+//
+//go:generate mockery --name=Cluster --structname=MockCluster --output=./  --filename=mock_cluster.go --with-expecter --inpackage
 type Cluster interface {
 	Startup(ctx context.Context, nodes []*NodeInfo) error
 	Register(node *NodeInfo) error

@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -22,7 +23,8 @@ type SchedulerSuite struct {
 }
 
 func (s *SchedulerSuite) SetupTest() {
-	s.scheduler = NewCompactionScheduler()
+	sessionMgr := NewMockSessionManager(s.T())
+	s.scheduler = NewCompactionScheduler(sessionMgr)
 	s.scheduler.parallelTasks = map[int64][]*compactionTask{
 		100: {
 			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
@@ -39,7 +41,8 @@ func (s *SchedulerSuite) SetupTest() {
 }
 
 func (s *SchedulerSuite) TestScheduleEmpty() {
-	emptySch := NewCompactionScheduler()
+	sessionMgr := NewMockSessionManager(s.T())
+	emptySch := NewCompactionScheduler(sessionMgr)
 
 	tasks := emptySch.Schedule()
 	s.Empty(tasks)
@@ -71,6 +74,13 @@ func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
 		s.Run(test.description, func() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
+
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 100}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
 
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
@@ -111,6 +121,13 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 2}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
+
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
@@ -120,7 +137,13 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 				return t.plan.PlanID
 			}))
 
-			// the second schedule returns empty for full paralleTasks
+			// the second schedule returns empty for no slot
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
 			gotTasks = s.scheduler.Schedule()
 			s.Empty(gotTasks)
 
@@ -158,6 +181,13 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 102}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 2}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
+
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
@@ -167,7 +197,13 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 				return t.plan.PlanID
 			}))
 
-			// the second schedule returns empty for full paralleTasks
+			// the second schedule returns empty for no slot
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
 			if len(gotTasks) > 0 {
 				gotTasks = s.scheduler.Schedule()
 				s.Empty(gotTasks)
