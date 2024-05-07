@@ -249,7 +249,7 @@ func (v *validateUtil) checkAligned(data []*schemapb.FieldData, schema *typeutil
 
 		default:
 			// error won't happen here.
-			n, err := funcutil.GetNumRowOfFieldData(field)
+			n, err := funcutil.GetNumRowOfFieldDataWithSchema(field, schema)
 			if err != nil {
 				return err
 			}
