@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -93,7 +94,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			return nil, err
 		}
 	}
-	err = fillDynamicData(insertData, r.schema)
+	err = common.FillDynamicData(insertData, r.schema)
 	if err != nil {
 		return nil, err
 	}
