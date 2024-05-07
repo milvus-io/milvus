@@ -299,7 +299,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
 				segments.WithType(segments.SegmentTypeGrowing))
 			// remove legacy l0 segments
-			node.manager.Segment.RemoveBy(segments.WithChannel(channel.GetChannelName()),
+			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
 				segments.WithLevel(datapb.SegmentLevel_L0))
 		}
 	}()
