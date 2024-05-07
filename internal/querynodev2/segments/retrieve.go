@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"sync"
-	"time"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
@@ -86,15 +85,16 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}()
 
 			if seg.IsLazyLoad() {
-				var timeout time.Duration
-				timeout, err = lazyloadWaitTimeout(ctx)
-				if err != nil {
-					return err
-				}
+				ctx, cancel := withLazyLoadTimeoutContext(ctx)
+				defer cancel()
+
 				var missing bool
-				missing, err = mgr.DiskCache.DoWait(ctx, seg.ID(), timeout, retriever)
+				missing, err = mgr.DiskCache.Do(ctx, seg.ID(), retriever)
 				if missing {
 					accessRecord.CacheMissing()
+				}
+				if err != nil {
+					log.Warn("failed to do query disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
 				}
 				return err
 			}
