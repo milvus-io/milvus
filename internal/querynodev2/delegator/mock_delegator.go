@@ -28,6 +28,39 @@ func (_m *MockShardDelegator) EXPECT() *MockShardDelegator_Expecter {
 	return &MockShardDelegator_Expecter{mock: &_m.Mock}
 }
 
+// AddExcludedSegments provides a mock function with given fields: excludeInfo
+func (_m *MockShardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {
+	_m.Called(excludeInfo)
+}
+
+// MockShardDelegator_AddExcludedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddExcludedSegments'
+type MockShardDelegator_AddExcludedSegments_Call struct {
+	*mock.Call
+}
+
+// AddExcludedSegments is a helper method to define mock.On call
+//   - excludeInfo map[int64]uint64
+func (_e *MockShardDelegator_Expecter) AddExcludedSegments(excludeInfo interface{}) *MockShardDelegator_AddExcludedSegments_Call {
+	return &MockShardDelegator_AddExcludedSegments_Call{Call: _e.mock.On("AddExcludedSegments", excludeInfo)}
+}
+
+func (_c *MockShardDelegator_AddExcludedSegments_Call) Run(run func(excludeInfo map[int64]uint64)) *MockShardDelegator_AddExcludedSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(map[int64]uint64))
+	})
+	return _c
+}
+
+func (_c *MockShardDelegator_AddExcludedSegments_Call) Return() *MockShardDelegator_AddExcludedSegments_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockShardDelegator_AddExcludedSegments_Call) RunAndReturn(run func(map[int64]uint64)) *MockShardDelegator_AddExcludedSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Close provides a mock function with given fields:
 func (_m *MockShardDelegator) Close() {
 	_m.Called()
@@ -249,39 +282,6 @@ func (_c *MockShardDelegator_GetTargetVersion_Call) Return(_a0 int64) *MockShard
 }
 
 func (_c *MockShardDelegator_GetTargetVersion_Call) RunAndReturn(run func() int64) *MockShardDelegator_GetTargetVersion_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// AddExcludedSegments provides a mock function with given fields: excludeInfo
-func (_m *MockShardDelegator) AddExcludedSegments(excludeInfo map[int64]uint64) {
-	_m.Called(excludeInfo)
-}
-
-// MockShardDelegator_AddExcludedSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddExcludedSegments'
-type MockShardDelegator_AddExcludedSegments_Call struct {
-	*mock.Call
-}
-
-// AddExcludedSegments is a helper method to define mock.On call
-//   - excludeInfo map[int64]uint64
-func (_e *MockShardDelegator_Expecter) AddExcludedSegments(excludeInfo interface{}) *MockShardDelegator_AddExcludedSegments_Call {
-	return &MockShardDelegator_AddExcludedSegments_Call{Call: _e.mock.On("AddExcludedSegments", excludeInfo)}
-}
-
-func (_c *MockShardDelegator_AddExcludedSegments_Call) Run(run func(excludeInfo map[int64]uint64)) *MockShardDelegator_AddExcludedSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(map[int64]uint64))
-	})
-	return _c
-}
-
-func (_c *MockShardDelegator_AddExcludedSegments_Call) Return() *MockShardDelegator_AddExcludedSegments_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockShardDelegator_AddExcludedSegments_Call) RunAndReturn(run func(map[int64]uint64)) *MockShardDelegator_AddExcludedSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

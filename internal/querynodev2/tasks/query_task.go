@@ -91,6 +91,10 @@ func (t *QueryTask) PreExecute() error {
 	return nil
 }
 
+func (t *QueryTask) SearchResult() *internalpb.SearchResults {
+	return nil
+}
+
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
 	if t.scheduleSpan != nil {
@@ -125,7 +129,8 @@ func (t *QueryTask) Execute() error {
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel,
-		metrics.ReduceSegments).Observe(float64(time.Since(beforeReduce).Milliseconds()))
+		metrics.ReduceSegments,
+		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Milliseconds()))
 	if err != nil {
 		return err
 	}

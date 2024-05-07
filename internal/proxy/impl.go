@@ -2750,6 +2750,9 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 	}
 
 	rateCol.Add(internalpb.RateType_DMLUpsert.String(), float64(it.upsertMsg.InsertMsg.Size()+it.upsertMsg.DeleteMsg.Size()))
+	if merr.Ok(it.result.GetStatus()) {
+		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeUpsert, dbName, username).Add(float64(v))
+	}
 	metrics.ProxyFunctionCall.WithLabelValues(nodeID, method,
 		metrics.SuccessLabel, dbName, collectionName).Inc()
 	successCnt := it.result.UpsertCnt - int64(len(it.result.ErrIndex))

@@ -138,14 +138,14 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
 				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
 				sd.growingSegmentLock.Unlock()
-				growing.Release()
+				growing.Release(context.Background())
 				continue
 			}
 
 			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
 				sd.pkOracle.Register(growing, paramtable.GetNodeID())
-				sd.segmentManager.Put(segments.SegmentTypeGrowing, growing)
+				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
 					SegmentID:     segmentID,
@@ -378,7 +378,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 			// clear loaded growing segments
 			for _, segment := range loaded {
-				segment.Release()
+				segment.Release(ctx)
 			}
 			return err
 		}

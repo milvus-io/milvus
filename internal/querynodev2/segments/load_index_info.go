@@ -26,6 +26,7 @@ import "C"
 
 import (
 	"context"
+	"runtime"
 	"unsafe"
 
 	"github.com/pingcap/log"
@@ -223,7 +224,8 @@ func (li *LoadIndexInfo) appendIndexData(ctx context.Context, indexKeys []string
 			status = C.AppendIndexV3(li.cLoadIndexInfo)
 		} else {
 			traceCtx := ParseCTraceContext(ctx)
-			status = C.AppendIndexV2(traceCtx, li.cLoadIndexInfo)
+			status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
+			runtime.KeepAlive(traceCtx)
 		}
 		return nil, nil
 	}).Await()

@@ -14,14 +14,6 @@ default_nq = 2
 default_limit = 10
 default_batch_size = 1000
 max_limit = 16384
-default_search_params = {"metric_type": "COSINE", "params": {"nprobe": 10}}
-default_search_ip_params = {"metric_type": "IP", "params": {"nprobe": 10}}
-default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 10}}
-default_index = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"nlist": 64}}
-default_binary_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
-default_diskann_index = {"index_type": "DISKANN", "metric_type": "COSINE", "params": {}}
-default_diskann_search_params = {"metric_type": "COSINE", "params": {"search_list": 30}}
-default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
 max_top_k = 16384
 max_partition_num = 4096
 max_role_num = 10
@@ -52,7 +44,7 @@ default_binary_vec_field_name = "binary_vector"
 float_type = "FLOAT_VECTOR"
 float16_type = "FLOAT16_VECTOR"
 bfloat16_type = "BFLOAT16_VECTOR"
-vector_data_type_all = [float_type, float16_type, bfloat16_type]
+all_float_vector_types = [float_type, float16_type, bfloat16_type]
 default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
@@ -108,11 +100,6 @@ code = "code"
 err_code = "err_code"
 err_msg = "err_msg"
 in_cluster_env = "IN_CLUSTER"
-
-default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": "COSINE"}
-default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
-default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
-                                 "params": {"drop_ratio_build": 0.2}}
 default_count_output = "count(*)"
 
 rows_all_data_type_file_path = "/tmp/rows_all_data_type"
@@ -250,24 +237,48 @@ get_wrong_format_dict = [
 ]
 
 """ Specially defined list """
-all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "SCANN", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT",
-                   "SPARSE_INVERTED_INDEX", "SPARSE_WAND", "GPU_IVF_FLAT", "GPU_IVF_PQ"]
+L0_index_types = ["IVF_SQ8", "HNSW", "DISKANN"]
+all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ",
+                   "HNSW", "SCANN", "DISKANN",
+                   "BIN_FLAT", "BIN_IVF_FLAT",
+                   "SPARSE_INVERTED_INDEX", "SPARSE_WAND",
+                   "GPU_IVF_FLAT", "GPU_IVF_PQ"]
 
-default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
-                        {"M": 48, "efConstruction": 500}, {"nlist": 128}, {}, {"nlist": 128}, {"nlist": 128},
-                        {"drop_ratio_build": 0.2}, {"drop_ratio_build": 0.2},
-                        {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
+default_all_indexes_params = [{}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
+                              {"M": 32, "efConstruction": 360}, {"nlist": 128}, {},
+                              {}, {"nlist": 64},
+                              {"drop_ratio_build": 0.2}, {"drop_ratio_build": 0.2},
+                              {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
+
+default_all_search_params_params = [{}, {"nprobe": 32}, {"nprobe": 32}, {"nprobe": 32},
+                                    {"ef": 100}, {"nprobe": 32, "reorder_k": 100}, {"search_list": 30},
+                                    {}, {"nprobe": 32},
+                                    {"drop_ratio_search": "0.2"}, {"drop_ratio_search": "0.2"},
+                                    {}, {}]
 
 Handler_type = ["GRPC", "HTTP"]
 binary_support = ["BIN_FLAT", "BIN_IVF_FLAT"]
-delete_support = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
-ivf = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
-skip_pq = ["IVF_PQ"]
 sparse_support = ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"]
+default_L0_metric = "COSINE"
 float_metrics = ["L2", "IP", "COSINE"]
 binary_metrics = ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
+
+
+default_flat_index = {"index_type": "FLAT", "params": {}, "metric_type": default_L0_metric}
+default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type": "JACCARD"}
+default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
+                                 "params": {"drop_ratio_build": 0.2}}
+
+default_search_params = {"params": default_all_search_params_params[2].copy()}
+default_search_ip_params = {"metric_type": "IP", "params": default_all_search_params_params[2].copy()}
+default_search_binary_params = {"metric_type": "JACCARD", "params": {"nprobe": 32}}
+default_index = {"index_type": "IVF_SQ8", "metric_type": default_L0_metric, "params": default_all_indexes_params[2].copy()}
+default_binary_index = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": default_all_indexes_params[8].copy()}
+default_diskann_index = {"index_type": "DISKANN", "metric_type": default_L0_metric, "params": {}}
+default_diskann_search_params = {"params": {"search_list": 30}}
+default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
 
 
 class CheckTasks:

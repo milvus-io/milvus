@@ -88,6 +88,9 @@ class SegmentSealedImpl : public SegmentSealed {
     DataType
     GetFieldDataType(FieldId fieldId) const override;
 
+    void
+    RemoveFieldFile(const FieldId field_id);
+
  public:
     size_t
     GetMemoryUsageInBytes() const override {

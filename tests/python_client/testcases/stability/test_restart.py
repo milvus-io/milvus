@@ -189,12 +189,12 @@ class TestRestartBase:
         #         # logging.getLogger().info(file)
         #         if file["field"] == field_name and file["name"] != "_raw":
         #             assert file["data_size"] > 0
-        #             if file["index_type"] != default_index["index_type"]:
+        #             if file["index_type"] != default_ivf_flat_index["index_type"]:
         #                 continue
         # for file in stats["partitions"][0]["segments"][0]["files"]:
         #     if file["field"] == field_name and file["name"] != "_raw":
         #         assert file["data_size"] > 0
-        #         if file["index_type"] != default_index["index_type"]:
+        #         if file["index_type"] != default_ivf_flat_index["index_type"]:
         #             assert False
         #         else:
         #             assert True

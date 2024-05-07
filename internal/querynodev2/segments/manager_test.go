@@ -62,7 +62,7 @@ func (s *ManagerSuite) SetupTest() {
 		s.Require().NoError(err)
 		s.segments = append(s.segments, segment)
 
-		s.mgr.Put(s.types[i], segment)
+		s.mgr.Put(context.Background(), s.types[i], segment)
 	}
 }
 
@@ -82,7 +82,7 @@ func (s *ManagerSuite) TestGetBy() {
 		segments := s.mgr.GetBy(WithType(typ))
 		s.Contains(lo.Map(segments, func(segment Segment, _ int) int64 { return segment.ID() }), s.segmentIDs[i])
 	}
-	s.mgr.Clear()
+	s.mgr.Clear(context.Background())
 
 	for _, typ := range s.types {
 		segments := s.mgr.GetBy(WithType(typ))
@@ -101,7 +101,7 @@ func (s *ManagerSuite) TestRemoveGrowing() {
 	for i, id := range s.segmentIDs {
 		isGrowing := s.types[i] == SegmentTypeGrowing
 
-		s.mgr.Remove(id, querypb.DataScope_Streaming)
+		s.mgr.Remove(context.Background(), id, querypb.DataScope_Streaming)
 		s.Equal(s.mgr.Get(id) == nil, isGrowing)
 	}
 }
@@ -110,21 +110,21 @@ func (s *ManagerSuite) TestRemoveSealed() {
 	for i, id := range s.segmentIDs {
 		isSealed := s.types[i] == SegmentTypeSealed
 
-		s.mgr.Remove(id, querypb.DataScope_Historical)
+		s.mgr.Remove(context.Background(), id, querypb.DataScope_Historical)
 		s.Equal(s.mgr.Get(id) == nil, isSealed)
 	}
 }
 
 func (s *ManagerSuite) TestRemoveAll() {
 	for _, id := range s.segmentIDs {
-		s.mgr.Remove(id, querypb.DataScope_All)
+		s.mgr.Remove(context.Background(), id, querypb.DataScope_All)
 		s.Nil(s.mgr.Get(id))
 	}
 }
 
 func (s *ManagerSuite) TestRemoveBy() {
 	for _, id := range s.segmentIDs {
-		s.mgr.RemoveBy(WithID(id))
+		s.mgr.RemoveBy(context.Background(), WithID(id))
 		s.Nil(s.mgr.Get(id))
 	}
 }

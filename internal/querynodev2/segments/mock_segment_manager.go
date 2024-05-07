@@ -3,7 +3,10 @@
 package segments
 
 import (
+	context "context"
+
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+
 	mock "github.com/stretchr/testify/mock"
 
 	querypb "github.com/milvus-io/milvus/internal/proto/querypb"
@@ -22,9 +25,9 @@ func (_m *MockSegmentManager) EXPECT() *MockSegmentManager_Expecter {
 	return &MockSegmentManager_Expecter{mock: &_m.Mock}
 }
 
-// Clear provides a mock function with given fields:
-func (_m *MockSegmentManager) Clear() {
-	_m.Called()
+// Clear provides a mock function with given fields: ctx
+func (_m *MockSegmentManager) Clear(ctx context.Context) {
+	_m.Called(ctx)
 }
 
 // MockSegmentManager_Clear_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Clear'
@@ -33,13 +36,14 @@ type MockSegmentManager_Clear_Call struct {
 }
 
 // Clear is a helper method to define mock.On call
-func (_e *MockSegmentManager_Expecter) Clear() *MockSegmentManager_Clear_Call {
-	return &MockSegmentManager_Clear_Call{Call: _e.mock.On("Clear")}
+//   - ctx context.Context
+func (_e *MockSegmentManager_Expecter) Clear(ctx interface{}) *MockSegmentManager_Clear_Call {
+	return &MockSegmentManager_Clear_Call{Call: _e.mock.On("Clear", ctx)}
 }
 
-func (_c *MockSegmentManager_Clear_Call) Run(run func()) *MockSegmentManager_Clear_Call {
+func (_c *MockSegmentManager_Clear_Call) Run(run func(ctx context.Context)) *MockSegmentManager_Clear_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run()
+		run(args[0].(context.Context))
 	})
 	return _c
 }
@@ -49,7 +53,7 @@ func (_c *MockSegmentManager_Clear_Call) Return() *MockSegmentManager_Clear_Call
 	return _c
 }
 
-func (_c *MockSegmentManager_Clear_Call) RunAndReturn(run func()) *MockSegmentManager_Clear_Call {
+func (_c *MockSegmentManager_Clear_Call) RunAndReturn(run func(context.Context)) *MockSegmentManager_Clear_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -465,14 +469,14 @@ func (_c *MockSegmentManager_GetWithType_Call) RunAndReturn(run func(int64, comm
 	return _c
 }
 
-// Put provides a mock function with given fields: segmentType, segments
-func (_m *MockSegmentManager) Put(segmentType commonpb.SegmentState, segments ...Segment) {
+// Put provides a mock function with given fields: ctx, segmentType, segments
+func (_m *MockSegmentManager) Put(ctx context.Context, segmentType commonpb.SegmentState, segments ...Segment) {
 	_va := make([]interface{}, len(segments))
 	for _i := range segments {
 		_va[_i] = segments[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, segmentType)
+	_ca = append(_ca, ctx, segmentType)
 	_ca = append(_ca, _va...)
 	_m.Called(_ca...)
 }
@@ -483,22 +487,23 @@ type MockSegmentManager_Put_Call struct {
 }
 
 // Put is a helper method to define mock.On call
+//   - ctx context.Context
 //   - segmentType commonpb.SegmentState
 //   - segments ...Segment
-func (_e *MockSegmentManager_Expecter) Put(segmentType interface{}, segments ...interface{}) *MockSegmentManager_Put_Call {
+func (_e *MockSegmentManager_Expecter) Put(ctx interface{}, segmentType interface{}, segments ...interface{}) *MockSegmentManager_Put_Call {
 	return &MockSegmentManager_Put_Call{Call: _e.mock.On("Put",
-		append([]interface{}{segmentType}, segments...)...)}
+		append([]interface{}{ctx, segmentType}, segments...)...)}
 }
 
-func (_c *MockSegmentManager_Put_Call) Run(run func(segmentType commonpb.SegmentState, segments ...Segment)) *MockSegmentManager_Put_Call {
+func (_c *MockSegmentManager_Put_Call) Run(run func(ctx context.Context, segmentType commonpb.SegmentState, segments ...Segment)) *MockSegmentManager_Put_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]Segment, len(args)-1)
-		for i, a := range args[1:] {
+		variadicArgs := make([]Segment, len(args)-2)
+		for i, a := range args[2:] {
 			if a != nil {
 				variadicArgs[i] = a.(Segment)
 			}
 		}
-		run(args[0].(commonpb.SegmentState), variadicArgs...)
+		run(args[0].(context.Context), args[1].(commonpb.SegmentState), variadicArgs...)
 	})
 	return _c
 }
@@ -508,28 +513,28 @@ func (_c *MockSegmentManager_Put_Call) Return() *MockSegmentManager_Put_Call {
 	return _c
 }
 
-func (_c *MockSegmentManager_Put_Call) RunAndReturn(run func(commonpb.SegmentState, ...Segment)) *MockSegmentManager_Put_Call {
+func (_c *MockSegmentManager_Put_Call) RunAndReturn(run func(context.Context, commonpb.SegmentState, ...Segment)) *MockSegmentManager_Put_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// Remove provides a mock function with given fields: segmentID, scope
-func (_m *MockSegmentManager) Remove(segmentID int64, scope querypb.DataScope) (int, int) {
-	ret := _m.Called(segmentID, scope)
+// Remove provides a mock function with given fields: ctx, segmentID, scope
+func (_m *MockSegmentManager) Remove(ctx context.Context, segmentID int64, scope querypb.DataScope) (int, int) {
+	ret := _m.Called(ctx, segmentID, scope)
 
 	var r0 int
 	var r1 int
-	if rf, ok := ret.Get(0).(func(int64, querypb.DataScope) (int, int)); ok {
-		return rf(segmentID, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, querypb.DataScope) (int, int)); ok {
+		return rf(ctx, segmentID, scope)
 	}
-	if rf, ok := ret.Get(0).(func(int64, querypb.DataScope) int); ok {
-		r0 = rf(segmentID, scope)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, querypb.DataScope) int); ok {
+		r0 = rf(ctx, segmentID, scope)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
 
-	if rf, ok := ret.Get(1).(func(int64, querypb.DataScope) int); ok {
-		r1 = rf(segmentID, scope)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, querypb.DataScope) int); ok {
+		r1 = rf(ctx, segmentID, scope)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
@@ -543,15 +548,16 @@ type MockSegmentManager_Remove_Call struct {
 }
 
 // Remove is a helper method to define mock.On call
+//   - ctx context.Context
 //   - segmentID int64
 //   - scope querypb.DataScope
-func (_e *MockSegmentManager_Expecter) Remove(segmentID interface{}, scope interface{}) *MockSegmentManager_Remove_Call {
-	return &MockSegmentManager_Remove_Call{Call: _e.mock.On("Remove", segmentID, scope)}
+func (_e *MockSegmentManager_Expecter) Remove(ctx interface{}, segmentID interface{}, scope interface{}) *MockSegmentManager_Remove_Call {
+	return &MockSegmentManager_Remove_Call{Call: _e.mock.On("Remove", ctx, segmentID, scope)}
 }
 
-func (_c *MockSegmentManager_Remove_Call) Run(run func(segmentID int64, scope querypb.DataScope)) *MockSegmentManager_Remove_Call {
+func (_c *MockSegmentManager_Remove_Call) Run(run func(ctx context.Context, segmentID int64, scope querypb.DataScope)) *MockSegmentManager_Remove_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(querypb.DataScope))
+		run(args[0].(context.Context), args[1].(int64), args[2].(querypb.DataScope))
 	})
 	return _c
 }
@@ -561,34 +567,35 @@ func (_c *MockSegmentManager_Remove_Call) Return(_a0 int, _a1 int) *MockSegmentM
 	return _c
 }
 
-func (_c *MockSegmentManager_Remove_Call) RunAndReturn(run func(int64, querypb.DataScope) (int, int)) *MockSegmentManager_Remove_Call {
+func (_c *MockSegmentManager_Remove_Call) RunAndReturn(run func(context.Context, int64, querypb.DataScope) (int, int)) *MockSegmentManager_Remove_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// RemoveBy provides a mock function with given fields: filters
-func (_m *MockSegmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
+// RemoveBy provides a mock function with given fields: ctx, filters
+func (_m *MockSegmentManager) RemoveBy(ctx context.Context, filters ...SegmentFilter) (int, int) {
 	_va := make([]interface{}, len(filters))
 	for _i := range filters {
 		_va[_i] = filters[_i]
 	}
 	var _ca []interface{}
+	_ca = append(_ca, ctx)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
 	var r0 int
 	var r1 int
-	if rf, ok := ret.Get(0).(func(...SegmentFilter) (int, int)); ok {
-		return rf(filters...)
+	if rf, ok := ret.Get(0).(func(context.Context, ...SegmentFilter) (int, int)); ok {
+		return rf(ctx, filters...)
 	}
-	if rf, ok := ret.Get(0).(func(...SegmentFilter) int); ok {
-		r0 = rf(filters...)
+	if rf, ok := ret.Get(0).(func(context.Context, ...SegmentFilter) int); ok {
+		r0 = rf(ctx, filters...)
 	} else {
 		r0 = ret.Get(0).(int)
 	}
 
-	if rf, ok := ret.Get(1).(func(...SegmentFilter) int); ok {
-		r1 = rf(filters...)
+	if rf, ok := ret.Get(1).(func(context.Context, ...SegmentFilter) int); ok {
+		r1 = rf(ctx, filters...)
 	} else {
 		r1 = ret.Get(1).(int)
 	}
@@ -602,21 +609,22 @@ type MockSegmentManager_RemoveBy_Call struct {
 }
 
 // RemoveBy is a helper method to define mock.On call
+//   - ctx context.Context
 //   - filters ...SegmentFilter
-func (_e *MockSegmentManager_Expecter) RemoveBy(filters ...interface{}) *MockSegmentManager_RemoveBy_Call {
+func (_e *MockSegmentManager_Expecter) RemoveBy(ctx interface{}, filters ...interface{}) *MockSegmentManager_RemoveBy_Call {
 	return &MockSegmentManager_RemoveBy_Call{Call: _e.mock.On("RemoveBy",
-		append([]interface{}{}, filters...)...)}
+		append([]interface{}{ctx}, filters...)...)}
 }
 
-func (_c *MockSegmentManager_RemoveBy_Call) Run(run func(filters ...SegmentFilter)) *MockSegmentManager_RemoveBy_Call {
+func (_c *MockSegmentManager_RemoveBy_Call) Run(run func(ctx context.Context, filters ...SegmentFilter)) *MockSegmentManager_RemoveBy_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]SegmentFilter, len(args)-0)
-		for i, a := range args[0:] {
+		variadicArgs := make([]SegmentFilter, len(args)-1)
+		for i, a := range args[1:] {
 			if a != nil {
 				variadicArgs[i] = a.(SegmentFilter)
 			}
 		}
-		run(variadicArgs...)
+		run(args[0].(context.Context), variadicArgs...)
 	})
 	return _c
 }
@@ -626,7 +634,7 @@ func (_c *MockSegmentManager_RemoveBy_Call) Return(_a0 int, _a1 int) *MockSegmen
 	return _c
 }
 
-func (_c *MockSegmentManager_RemoveBy_Call) RunAndReturn(run func(...SegmentFilter) (int, int)) *MockSegmentManager_RemoveBy_Call {
+func (_c *MockSegmentManager_RemoveBy_Call) RunAndReturn(run func(context.Context, ...SegmentFilter) (int, int)) *MockSegmentManager_RemoveBy_Call {
 	_c.Call.Return(run)
 	return _c
 }

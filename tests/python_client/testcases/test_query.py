@@ -27,8 +27,8 @@ default_mix_expr = "int64 >= 0 && varchar >= \"0\""
 default_expr = f'{ct.default_int64_field_name} >= 0'
 default_invalid_expr = "varchar >= 0"
 default_string_term_expr = f'{ct.default_string_field_name} in [\"0\", \"1\"]'
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
-binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
+default_index_params = ct.default_index
+binary_index_params = ct.default_binary_index
 
 default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 default_pos = 5

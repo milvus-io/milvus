@@ -62,18 +62,6 @@ def binary_support():
     return ["BIN_FLAT", "BIN_IVF_FLAT"]
 
 
-def delete_support():
-    return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
-
-
-def ivf():
-    return ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
-
-
-def skip_pq():
-    return ["IVF_PQ"]
-
-
 def binary_metrics():
     return ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 
@@ -721,30 +709,6 @@ def gen_invalid_vectors():
     return invalid_vectors
 
 
-def gen_invaild_search_params():
-    invalid_search_key = 100
-    search_params = []
-    for index_type in all_index_types:
-        if index_type == "FLAT":
-            continue
-        search_params.append({"index_type": index_type, "search_params": {"invalid_key": invalid_search_key}})
-        if index_type in delete_support():
-            for nprobe in gen_invalid_params():
-                ivf_search_params = {"index_type": index_type, "search_params": {"nprobe": nprobe}}
-                search_params.append(ivf_search_params)
-        elif index_type in ["HNSW"]:
-            for ef in gen_invalid_params():
-                hnsw_search_param = {"index_type": index_type, "search_params": {"ef": ef}}
-                search_params.append(hnsw_search_param)
-        elif index_type == "ANNOY":
-            for search_k in gen_invalid_params():
-                if isinstance(search_k, int):
-                    continue
-                annoy_search_param = {"index_type": index_type, "search_params": {"search_k": search_k}}
-                search_params.append(annoy_search_param)
-    return search_params
-
-
 def gen_invalid_index():
     index_params = []
     for index_type in gen_invalid_strs():
@@ -823,23 +787,6 @@ def gen_normal_expressions():
         "int64 == 0 || int64 == 1 || int64 == 2 || int64 == 3",  # term
     ]
     return expressions
-
-
-def get_search_param(index_type, metric_type="L2"):
-    search_params = {"metric_type": metric_type}
-    if index_type in ivf() or index_type in binary_support():
-        nprobe64 = {"nprobe": 64}
-        search_params.update({"params": nprobe64})
-    elif index_type in ["HNSW"]:
-        ef64 = {"ef": 64}
-        search_params.update({"params": ef64})
-    elif index_type == "ANNOY":
-        search_k = {"search_k": 1000}
-        search_params.update({"params": search_k})
-    else:
-        log.error("Invalid index_type.")
-        raise Exception("Invalid index_type.")
-    return search_params
 
 
 def assert_equal_vector(v1, v2):
