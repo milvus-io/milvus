@@ -65,7 +65,6 @@ require (
 require github.com/milvus-io/milvus-storage/go v0.0.0-20231227072638-ebd0b8e56d70
 
 require (
-	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/pkg/errors v0.9.1
 	github.com/x448/float16 v0.8.4
 	gopkg.in/yaml.v3 v3.0.1
