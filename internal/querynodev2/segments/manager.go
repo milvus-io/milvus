@@ -328,6 +328,7 @@ func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, seg
 				continue
 			}
 			replacedSegment = append(replacedSegment, oldSegment)
+			mgr.doReleaseCallBack(oldSegment)
 		}
 		targetMap[segment.ID()] = segment
 
@@ -646,6 +647,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.growingSegments[segmentID]
 		if ok {
 			delete(mgr.growingSegments, segmentID)
+			mgr.doReleaseCallBack(s)
 			return s
 		}
 
@@ -653,6 +655,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.sealedSegments[segmentID]
 		if ok {
 			delete(mgr.sealedSegments, segmentID)
+			mgr.doReleaseCallBack(s)
 			return s
 		}
 	default:
@@ -697,11 +700,13 @@ func (mgr *segmentManager) Clear(ctx context.Context) {
 
 	for id, segment := range mgr.growingSegments {
 		delete(mgr.growingSegments, id)
+		mgr.doReleaseCallBack(segment)
 		mgr.remove(ctx, segment)
 	}
 
 	for id, segment := range mgr.sealedSegments {
 		delete(mgr.sealedSegments, id)
+		mgr.doReleaseCallBack(segment)
 		mgr.remove(ctx, segment)
 	}
 	mgr.updateMetric()
@@ -711,6 +716,13 @@ func (mgr *segmentManager) Clear(ctx context.Context) {
 // TODO: bad implementation for keep consistency with DiskCache, need to be refactor.
 func (mgr *segmentManager) registerReleaseCallback(callback func(s Segment)) {
 	mgr.releaseCallback = callback
+}
+
+// doReleaseCallBack calls the registered callback function when a segment is released.
+func (mgr *segmentManager) doReleaseCallBack(segment Segment) {
+	if mgr.releaseCallback != nil {
+		mgr.releaseCallback(segment)
+	}
 }
 
 func (mgr *segmentManager) updateMetric() {
@@ -730,9 +742,6 @@ func (mgr *segmentManager) updateMetric() {
 
 func (mgr *segmentManager) remove(ctx context.Context, segment Segment) bool {
 	segment.Release(ctx)
-	if mgr.releaseCallback != nil {
-		mgr.releaseCallback(segment)
-	}
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
