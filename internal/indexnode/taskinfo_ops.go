@@ -141,13 +141,10 @@ func (i *IndexNode) deleteAllIndexTasks() []*indexTaskInfo {
 }
 
 type analyzeTaskInfo struct {
-	cancel                    context.CancelFunc
-	state                     indexpb.JobState
-	failReason                string
-	centroidsFile             string
-	segmentsOffsetMapping     map[int64]string
-	centroidsFileSize         int64
-	segmentsOffsetMappingSize map[string]int64
+	cancel        context.CancelFunc
+	state         indexpb.JobState
+	failReason    string
+	centroidsFile string
 }
 
 func (i *IndexNode) loadOrStoreAnalyzeTask(clusterID string, taskID UniqueID, info *analyzeTaskInfo) *analyzeTaskInfo {
@@ -197,18 +194,12 @@ func (i *IndexNode) storeAnalyzeFilesAndStatistic(
 	ClusterID string,
 	taskID UniqueID,
 	centroidsFile string,
-	offsetMapping map[int64]string,
-	centroidsFileSize int64,
-	offsetMappingFilesSize map[string]int64,
 ) {
 	key := taskKey{ClusterID: ClusterID, BuildID: taskID}
 	i.stateLock.Lock()
 	defer i.stateLock.Unlock()
 	if info, ok := i.analyzeTasks[key]; ok {
 		info.centroidsFile = centroidsFile
-		info.segmentsOffsetMapping = offsetMapping
-		info.centroidsFileSize = centroidsFileSize
-		info.segmentsOffsetMappingSize = offsetMappingFilesSize
 		return
 	}
 }

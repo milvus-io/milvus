@@ -94,6 +94,8 @@ const (
 
 	// AnalyzeStatsPath storage path const for analyze.
 	AnalyzeStatsPath = `analyze_stats`
+	OffsetMapping    = `offset_mapping`
+	Centroids        = "centroids"
 )
 
 // Search, Index parameter keys

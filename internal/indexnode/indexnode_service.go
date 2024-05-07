@@ -322,6 +322,20 @@ func (i *IndexNode) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Req
 	switch req.GetJobType() {
 	case indexpb.JobType_JobTypeIndexJob:
 		indexRequest := req.GetIndexRequest()
+		log.Info("IndexNode building index ...",
+			zap.Int64("indexID", indexRequest.GetIndexID()),
+			zap.String("indexName", indexRequest.GetIndexName()),
+			zap.String("indexFilePrefix", indexRequest.GetIndexFilePrefix()),
+			zap.Int64("indexVersion", indexRequest.GetIndexVersion()),
+			zap.Strings("dataPaths", indexRequest.GetDataPaths()),
+			zap.Any("typeParams", indexRequest.GetTypeParams()),
+			zap.Any("indexParams", indexRequest.GetIndexParams()),
+			zap.Int64("numRows", indexRequest.GetNumRows()),
+			zap.Int32("current_index_version", indexRequest.GetCurrentIndexVersion()),
+			zap.String("storePath", indexRequest.GetStorePath()),
+			zap.Int64("storeVersion", indexRequest.GetStoreVersion()),
+			zap.String("indexStorePath", indexRequest.GetIndexStorePath()),
+			zap.Int64("dim", indexRequest.GetDim()))
 		taskCtx, taskCancel := context.WithCancel(i.loopCtx)
 		if oldInfo := i.loadOrStoreIndexTask(indexRequest.GetClusterID(), indexRequest.GetBuildID(), &indexTaskInfo{
 			cancel: taskCancel,
@@ -472,14 +486,9 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *indexpb.QueryJobsV2Req
 				results[i].FailReason = info.failReason
 				results[i].CurrentIndexVersion = info.currentIndexVersion
 				results[i].IndexStoreVersion = info.indexStoreVersion
-				log.RatedDebug(5, "querying index build task",
-					zap.Int64("indexBuildID", buildID),
-					zap.String("state", info.state.String()),
-					zap.String("reason", info.failReason),
-				)
 			}
 		}
-		log.Info("query index jobs result success", zap.Any("results", results))
+		log.Debug("query index jobs result success", zap.Any("results", results))
 		return &indexpb.QueryJobsV2Response{
 			Status:    merr.Success(),
 			ClusterID: req.GetClusterID(),
@@ -495,17 +504,14 @@ func (i *IndexNode) QueryJobsV2(ctx context.Context, req *indexpb.QueryJobsV2Req
 			info := i.getAnalyzeTaskInfo(req.GetClusterID(), taskID)
 			if info != nil {
 				results = append(results, &indexpb.AnalyzeResult{
-					TaskID:                 taskID,
-					State:                  info.state,
-					FailReason:             info.failReason,
-					CentroidsFile:          info.centroidsFile,
-					OffsetMapping:          info.segmentsOffsetMapping,
-					CentroidsFileSize:      info.centroidsFileSize,
-					OffsetMappingFilesSize: info.segmentsOffsetMappingSize,
+					TaskID:        taskID,
+					State:         info.state,
+					FailReason:    info.failReason,
+					CentroidsFile: info.centroidsFile,
 				})
 			}
 		}
-		log.Info("query analyze jobs result success", zap.Any("results", results))
+		log.Debug("query analyze jobs result success", zap.Any("results", results))
 		return &indexpb.QueryJobsV2Response{
 			Status:    merr.Success(),
 			ClusterID: req.GetClusterID(),

@@ -26,6 +26,8 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/milvus-io/milvus/pkg/util/metautil"
+
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
@@ -100,9 +102,9 @@ type clusteringCompactionTask struct {
 
 type ClusterBuffer struct {
 	id                  int
-	bufferSize          int64
+	bufferSize          atomic.Int64
 	buffer              *InsertData
-	bufferRowNum        int64
+	bufferRowNum        atomic.Int64
 	bufferTimeStampFrom int64
 	bufferTimeStampTo   int64
 
@@ -275,73 +277,12 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 
 	// todo move analyze to indexnode Analyze method
 	if t.isVectorClusteringKey {
-		//analyzeResultPath := t.plan.AnalyzeResultPath
-		//centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), "centroids")
-		centroidFilePath := t.plan.GetCentroidFilePath()
-		centroidBytes, err := t.io.Download(ctx, []string{centroidFilePath})
-		if err != nil {
+		if err := t.getVectorAnalyzeResult(ctx); err != nil {
 			return nil, err
-		}
-		centroids := &segcorepb.ClusteringCentroidsStats{}
-		err = proto.Unmarshal(centroidBytes[0], centroids)
-		if err != nil {
-			return nil, err
-		}
-		log.Debug("read clustering centroids stats", zap.String("path", centroidFilePath), zap.Int("centroidNum", len(centroids.GetCentroids())))
-		//offsetMappingFiles := make(map[int64]string, 0)
-		//for _, segmentID := range t.plan.AnalyzeSegmentIds {
-		//	path := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), "offsets_mapping")
-		//	offsetMappingFiles[segmentID] = path
-		//	log.Debug("read segment offset mapping file", zap.Int64("segmentID", segmentID), zap.String("path", path))
-		//}
-		t.segmentIDOffsetMapping = t.plan.GetOffsetMappingFiles()
-
-		for id, centroid := range centroids.GetCentroids() {
-			fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
-			if err != nil {
-				return nil, err
-			}
-			fieldStats.SetVectorCentroids(storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroid))
-			clusterBuffer := &ClusterBuffer{
-				id:                      id,
-				uploadedSegments:        make([]*datapb.CompactionSegment, 0),
-				uploadedSegmentStats:    make(map[UniqueID]storage.SegmentStats, 0),
-				clusteringKeyFieldStats: fieldStats,
-			}
-			t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
-		}
-		t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
-			return t.clusterBuffers[idMapping[offset]]
 		}
 	} else {
-		analyzeDict, err := t.scalarAnalyze(ctx)
-		if err != nil {
+		if err := t.getScalarAnalyzeResult(ctx); err != nil {
 			return nil, err
-		}
-		plan := t.scalarPlan(analyzeDict)
-		scalarToClusterBufferMap := make(map[interface{}]*ClusterBuffer, 0)
-		for id, bucket := range plan {
-			fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
-			if err != nil {
-				return nil, err
-			}
-			for _, key := range bucket {
-				fieldStats.UpdateMinMax(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, key))
-			}
-			buffer := &ClusterBuffer{
-				id:                      id,
-				uploadedSegments:        make([]*datapb.CompactionSegment, 0),
-				uploadedSegmentStats:    make(map[UniqueID]storage.SegmentStats, 0),
-				clusteringKeyFieldStats: fieldStats,
-			}
-			t.clusterBuffers = append(t.clusterBuffers, buffer)
-			for _, key := range bucket {
-				scalarToClusterBufferMap[key] = buffer
-			}
-		}
-		t.keyToBufferFunc = func(key interface{}) *ClusterBuffer {
-			// todo: if keys are too many, the map will be quite large, we should mark the range of each buffer and select buffer by range
-			return scalarToClusterBufferMap[key]
 		}
 	}
 
@@ -373,6 +314,84 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 	log.Info("L2 compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()))
 
 	return planResult, nil
+}
+
+func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) error {
+	analyzeDict, err := t.scalarAnalyze(ctx)
+	if err != nil {
+		return err
+	}
+	plan := t.scalarPlan(analyzeDict)
+	scalarToClusterBufferMap := make(map[interface{}]*ClusterBuffer, 0)
+	for id, bucket := range plan {
+		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
+		if err != nil {
+			return err
+		}
+		for _, key := range bucket {
+			fieldStats.UpdateMinMax(storage.NewScalarFieldValue(t.clusteringKeyField.DataType, key))
+		}
+		buffer := &ClusterBuffer{
+			id:                      id,
+			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
+			uploadedSegmentStats:    make(map[UniqueID]storage.SegmentStats, 0),
+			clusteringKeyFieldStats: fieldStats,
+		}
+		t.clusterBuffers = append(t.clusterBuffers, buffer)
+		for _, key := range bucket {
+			scalarToClusterBufferMap[key] = buffer
+		}
+	}
+	t.keyToBufferFunc = func(key interface{}) *ClusterBuffer {
+		// todo: if keys are too many, the map will be quite large, we should mark the range of each buffer and select buffer by range
+		return scalarToClusterBufferMap[key]
+	}
+	return nil
+}
+
+func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
+	//centroidFilePath := t.plan.GetCentroidFilePath()
+	analyzeResultPath := t.plan.AnalyzeResultPath
+	centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
+	offsetMappingFiles := make(map[int64]string, 0)
+	for _, segmentID := range t.plan.AnalyzeSegmentIds {
+		path := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), common.OffsetMapping)
+		offsetMappingFiles[segmentID] = path
+		log.Debug("read segment offset mapping file", zap.Int64("segmentID", segmentID), zap.String("path", path))
+	}
+	//t.segmentIDOffsetMapping = t.plan.GetOffsetMappingFiles()
+	t.segmentIDOffsetMapping = offsetMappingFiles
+	centroidBytes, err := t.io.Download(ctx, []string{centroidFilePath})
+	if err != nil {
+		return err
+	}
+	centroids := &segcorepb.ClusteringCentroidsStats{}
+	err = proto.Unmarshal(centroidBytes[0], centroids)
+	if err != nil {
+		return err
+	}
+	log.Debug("read clustering centroids stats", zap.String("path", centroidFilePath),
+		zap.Int("centroidNum", len(centroids.GetCentroids())),
+		zap.Any("offsetMappingFiles", t.segmentIDOffsetMapping))
+
+	for id, centroid := range centroids.GetCentroids() {
+		fieldStats, err := storage.NewFieldStats(t.clusteringKeyField.FieldID, t.clusteringKeyField.DataType, 0)
+		if err != nil {
+			return err
+		}
+		fieldStats.SetVectorCentroids(storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroid))
+		clusterBuffer := &ClusterBuffer{
+			id:                      id,
+			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
+			uploadedSegmentStats:    make(map[UniqueID]storage.SegmentStats, 0),
+			clusteringKeyFieldStats: fieldStats,
+		}
+		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
+	}
+	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
+		return t.clusterBuffers[idMapping[offset]]
+	}
+	return nil
 }
 
 // mapping read and split input segments into buffers
@@ -410,7 +429,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 
 	resultSegments := make([]*datapb.CompactionSegment, 0)
 	resultPartitionStats := &storage.PartitionStatsSnapshot{
-		SegmentStats: make(map[UniqueID]storage.SegmentStats, 0),
+		SegmentStats: make(map[UniqueID]storage.SegmentStats),
 	}
 	for _, buffer := range t.clusterBuffers {
 		for _, seg := range buffer.uploadedSegments {
@@ -524,8 +543,6 @@ func (t *clusteringCompactionTask) mappingSegment(
 			log.Warn("new insert binlogs Itr wrong", zap.Strings("path", path), zap.Error(err))
 			return err
 		}
-		// approximate row size
-		rowSize := pkIter.DataSize() / pkIter.RowNum()
 
 		var offset int64 = -1
 		for pkIter.HasNext() {
@@ -562,15 +579,15 @@ func (t *clusteringCompactionTask) mappingSegment(
 			} else {
 				clusterBuffer = t.keyToBufferFunc(clusteringKey)
 			}
-			err = t.writeToBuffer(ctx, clusterBuffer, v, rowSize)
+			err = t.writeToBuffer(ctx, clusterBuffer, v)
 			if err != nil {
 				return err
 			}
 			remained++
 
 			// trigger spill
-			if clusterBuffer.bufferRowNum > t.plan.GetMaxSegmentRows() ||
-				clusterBuffer.bufferSize > int64(Params.DataNodeCfg.BinLogMaxSize.GetAsInt()) {
+			if int64(clusterBuffer.buffer.GetRowNum()) > t.plan.GetMaxSegmentRows() ||
+				clusterBuffer.buffer.GetMemorySize() > Params.DataNodeCfg.BinLogMaxSize.GetAsInt() {
 				t.spillChan <- SpillSignal{
 					buffer: clusterBuffer,
 				}
@@ -610,7 +627,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	return nil
 }
 
-func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *ClusterBuffer, value *storage.Value, rowSize int) error {
+func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuffer *ClusterBuffer, value *storage.Value) error {
 	pk := value.PK
 	timestamp := value.Timestamp
 	row, ok := value.Value.(map[UniqueID]interface{})
@@ -654,9 +671,12 @@ func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuf
 	if timestamp > clusterBuffer.bufferTimeStampTo || clusterBuffer.bufferTimeStampFrom == -1 {
 		clusterBuffer.bufferTimeStampTo = timestamp
 	}
-	clusterBuffer.buffer.Append(row)
-	clusterBuffer.bufferSize = clusterBuffer.bufferSize + int64(rowSize)
-	clusterBuffer.bufferRowNum = clusterBuffer.bufferRowNum + 1
+	if err := clusterBuffer.buffer.Append(row); err != nil {
+		return err
+	}
+	rowSize := clusterBuffer.buffer.GetRowSize(clusterBuffer.buffer.GetRowNum() - 1)
+	clusterBuffer.bufferSize.Add(int64(rowSize))
+	clusterBuffer.bufferRowNum.Add(1)
 	clusterBuffer.currentPKStats.Update(pk)
 	t.totalBufferSize.Add(int64(rowSize))
 	return nil
@@ -714,7 +734,7 @@ func (t *clusteringCompactionTask) spillLargestBuffers(ctx context.Context) erro
 		}
 	}()
 	sort.Slice(bufferIDs, func(i, j int) bool {
-		return t.clusterBuffers[i].bufferSize > t.clusterBuffers[j].bufferSize
+		return t.clusterBuffers[i].buffer.GetMemorySize() > t.clusterBuffers[j].buffer.GetMemorySize()
 	})
 	for index, id := range bufferIDs {
 		err := t.spill(ctx, t.clusterBuffers[id])
@@ -836,16 +856,18 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 		}
 		buffer.currentSpillBinlogs[fID] = tmpBinlog
 	}
-	buffer.currentSpillRowNum = buffer.currentSpillRowNum + buffer.bufferRowNum
+	buffer.currentSpillRowNum = buffer.currentSpillRowNum + buffer.bufferRowNum.Load()
 
 	// clean buffer
-	t.totalBufferSize.Add(-buffer.bufferSize)
+	t.totalBufferSize.Add(-buffer.bufferSize.Load())
 	buffer.buffer = nil
-	buffer.bufferSize = 0
-	buffer.bufferRowNum = 0
+	buffer.bufferSize.Store(0)
+	buffer.bufferRowNum.Store(0)
 
 	if buffer.currentSpillRowNum > t.plan.GetMaxSegmentRows() {
-		t.packBuffersToSegments(ctx, buffer)
+		if err := t.packBuffersToSegments(ctx, buffer); err != nil {
+			return err
+		}
 	}
 	return nil
 }
@@ -1063,10 +1085,12 @@ func (t *clusteringCompactionTask) scalarPlan(dict map[interface{}]int64) [][]in
 	for _, key := range keys {
 		// todo can optimize
 		if dict[key] > preferRows {
-			buckets = append(buckets, currentBucket)
+			if len(currentBucket) != 0 {
+				buckets = append(buckets, currentBucket)
+				currentBucket = make([]interface{}, 0)
+				currentBucketSize = 0
+			}
 			buckets = append(buckets, []interface{}{key})
-			currentBucket = make([]interface{}, 0)
-			currentBucketSize = 0
 		} else if currentBucketSize+dict[key] > maxRows {
 			buckets = append(buckets, currentBucket)
 			currentBucket = []interface{}{key}

@@ -528,8 +528,6 @@ message CompactionPlan {
   string analyze_result_path = 13;
   repeated int64 analyze_segment_ids = 14;
   int32 state = 15;
-  string centroid_file_path = 16;
-  map<int64, string> offset_mapping_files = 17;
 }
 
 message CompactionSegment {
@@ -854,4 +852,5 @@ message PartitionStatsInfo {
   string vChannel = 3;
   int64 version = 4;
   repeated int64 segmentIDs = 5;
+  int64 analyzeTaskID = 6;
 }

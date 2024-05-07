@@ -158,7 +158,6 @@ func (m *analyzeMeta) FinishTask(taskID int64, result *indexpb.AnalyzeResult) er
 	cloneT.State = result.GetState()
 	cloneT.FailReason = result.GetFailReason()
 	cloneT.CentroidsFile = result.GetCentroidsFile()
-	cloneT.OffsetMapping = result.GetOffsetMapping()
 	return m.saveTask(cloneT)
 }
 
@@ -167,4 +166,17 @@ func (m *analyzeMeta) GetAllTasks() map[int64]*indexpb.AnalyzeTask {
 	defer m.RUnlock()
 
 	return m.tasks
+}
+
+func (m *analyzeMeta) CheckCleanAnalyzeTask(taskID UniqueID) (bool, *indexpb.AnalyzeTask) {
+	m.RLock()
+	defer m.RUnlock()
+
+	if t, ok := m.tasks[taskID]; ok {
+		if t.State == indexpb.JobState_JobStateFinished {
+			return true, t
+		}
+		return false, t
+	}
+	return true, nil
 }

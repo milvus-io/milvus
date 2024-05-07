@@ -366,10 +366,6 @@ message AnalyzeTask {
     string fail_reason = 11;
     int64 dim = 12;
     string centroids_file = 13;
-    map<int64, string> offset_mapping = 14;
-    bool deleted = 15;
-    int64 centroids_file_size = 16;
-    map<string, int64> offset_mapping_files_size=17;
 }
 
 message SegmentStats {
@@ -399,9 +395,6 @@ message AnalyzeResult {
     JobState state = 2;
     string fail_reason = 3;
     string centroids_file = 4;
-    map<int64, string> offset_mapping = 5;
-    int64 centroids_file_size = 6;
-    map<string, int64> offset_mapping_files_size=7;
 }
 
 enum JobType {
