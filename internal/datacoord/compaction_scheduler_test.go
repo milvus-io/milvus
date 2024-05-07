@@ -2,6 +2,8 @@ package datacoord
 
 import (
 	"fmt"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/stretchr/testify/mock"
 	"testing"
 
 	"github.com/samber/lo"
@@ -22,7 +24,9 @@ type SchedulerSuite struct {
 }
 
 func (s *SchedulerSuite) SetupTest() {
-	s.scheduler = NewCompactionScheduler()
+	sessionMgr := NewMockSessionManager(s.T())
+	sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64()}, nil)
+	s.scheduler = NewCompactionScheduler(sessionMgr)
 	s.scheduler.parallelTasks = map[int64][]*compactionTask{
 		100: {
 			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
@@ -39,7 +43,9 @@ func (s *SchedulerSuite) SetupTest() {
 }
 
 func (s *SchedulerSuite) TestScheduleEmpty() {
-	emptySch := NewCompactionScheduler()
+	sessionMgr := NewMockSessionManager(s.T())
+	sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64()}, nil)
+	emptySch := NewCompactionScheduler(sessionMgr)
 
 	tasks := emptySch.Schedule()
 	s.Empty(tasks)

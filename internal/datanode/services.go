@@ -515,3 +515,16 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 
 	return merr.Success(), nil
 }
+
+func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &datapb.QuerySlotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &datapb.QuerySlotResponse{
+		Status:   merr.Success(),
+		NumSlots: Params.DataNodeCfg.SlotCap.GetAsInt64() - int64(node.compactionExecutor.executing.Len()),
+	}, nil
+}

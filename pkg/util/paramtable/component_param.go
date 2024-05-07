@@ -3345,6 +3345,9 @@ type dataNodeConfig struct {
 	L0BatchMemoryRatio ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	// slot
+	SlotCap ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3650,6 +3653,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.SlotCap = ParamItem{
+		Key:          "dataNode.slot.slotCap",
+		Version:      "2.4.2",
+		DefaultValue: "2",
+		Doc:          "The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode",
+		Export:       true,
+	}
+	p.SlotCap.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

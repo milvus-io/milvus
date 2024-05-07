@@ -44,8 +44,10 @@ import (
 const (
 	flushTimeout      = 15 * time.Second
 	importTaskTimeout = 10 * time.Second
+	querySlotTimeout  = 10 * time.Second
 )
 
+//go:generate mockery --name=SessionManager --structname=MockSessionManager --output=./  --filename=mock_session_manager.go --with-expecter --inpackage
 type SessionManager interface {
 	AddSession(node *NodeInfo)
 	DeleteSession(node *NodeInfo)
@@ -65,6 +67,7 @@ type SessionManager interface {
 	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
 	DropImport(nodeID int64, in *datapb.DropImportRequest) error
 	CheckHealth(ctx context.Context) error
+	QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error)
 	Close()
 }
 
@@ -472,6 +475,22 @@ func (c *SessionManagerImpl) CheckHealth(ctx context.Context) error {
 	}
 
 	return group.Wait()
+}
+
+func (c *SessionManagerImpl) QuerySlot(nodeID int64) (*datapb.QuerySlotResponse, error) {
+	log := log.With(zap.Int64("nodeID", nodeID))
+	ctx, cancel := context.WithTimeout(context.Background(), querySlotTimeout)
+	defer cancel()
+	cli, err := c.getClient(ctx, nodeID)
+	if err != nil {
+		log.Info("failed to get client", zap.Error(err))
+		return nil, err
+	}
+	resp, err := cli.QuerySlot(ctx, &datapb.QuerySlotRequest{})
+	if err = VerifyResponse(resp.GetStatus(), err); err != nil {
+		return nil, err
+	}
+	return resp, nil
 }
 
 // Close release sessions
