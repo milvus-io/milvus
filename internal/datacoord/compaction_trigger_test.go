@@ -19,9 +19,12 @@ package datacoord
 import (
 	"context"
 	"sort"
-	"sync/atomic"
+	satomic "sync/atomic"
 	"testing"
 	"time"
+
+	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
@@ -35,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -2074,7 +2078,7 @@ func Test_triggerSingleCompaction(t *testing.T) {
 		err := got.triggerSingleCompaction(2, 2, 2, "b", false)
 		assert.NoError(t, err)
 	}
-	var i atomic.Value
+	var i satomic.Value
 	i.Store(0)
 	check := func() {
 		for {
@@ -2095,7 +2099,7 @@ func Test_triggerSingleCompaction(t *testing.T) {
 		err := got.triggerSingleCompaction(3, 3, 3, "c", true)
 		assert.NoError(t, err)
 	}
-	var j atomic.Value
+	var j satomic.Value
 	j.Store(0)
 	go func() {
 		timeoutCtx, cancelFunc := context.WithTimeout(context.Background(), time.Second)
@@ -2598,6 +2602,27 @@ func (s *CompactionTriggerSuite) TestIsChannelCheckpointHealthy() {
 		result := s.tr.isChannelCheckpointHealthy(s.channel)
 		s.False(result, "check shall fail when checkpoint lag larger than config")
 	})
+}
+
+func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
+	expectedSize := int64(70000)
+	smallsegments := []*SegmentInfo{
+		{SegmentInfo: &datapb.SegmentInfo{ID: 3}, size: *atomic.NewInt64(69999)},
+		{SegmentInfo: &datapb.SegmentInfo{ID: 1}, size: *atomic.NewInt64(100)},
+	}
+
+	largeSegment := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{ID: 2}, size: *atomic.NewInt64(expectedSize)}
+	buckets := [][]*SegmentInfo{{largeSegment}}
+	s.Require().Equal(1, len(buckets))
+	s.Require().Equal(1, len(buckets[0]))
+
+	remaining := s.tr.squeezeSmallSegmentsToBuckets(smallsegments, buckets, expectedSize)
+	s.Equal(1, len(remaining))
+	s.EqualValues(3, remaining[0].ID)
+
+	s.Equal(1, len(buckets))
+	s.Equal(2, len(buckets[0]))
+	log.Info("buckets", zap.Any("buckets", buckets))
 }
 
 func TestCompactionTriggerSuite(t *testing.T) {
