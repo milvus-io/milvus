@@ -19,7 +19,6 @@ package pipeline
 import (
 	"github.com/milvus-io/milvus/internal/querynodev2/delegator"
 	base "github.com/milvus-io/milvus/internal/util/pipeline"
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -37,7 +36,6 @@ type pipeline struct {
 
 func (p *pipeline) Close() {
 	p.StreamPipeline.Close()
-	metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), p.collectionID)
 }
 
 func NewPipeLine(
