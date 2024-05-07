@@ -121,6 +121,7 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		default:
 		}
 	}
+	log.Info("lxg want", zap.Any("data", data))
 
 	err = v.fillWithValue(data, helper, int(numRows))
 	if err != nil {
@@ -392,7 +393,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.Nullable {
+			if !fieldSchema.GetNullable() {
 				field.ValidData = []bool{}
 			}
 
@@ -407,7 +408,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.Nullable {
+			if !fieldSchema.GetNullable() {
 				field.ValidData = []bool{}
 			}
 
@@ -421,7 +422,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 			if err != nil {
 				return err
 			}
-			if !fieldSchema.Nullable {
+			if !fieldSchema.GetNullable() {
 				field.ValidData = []bool{}
 			}
 
@@ -436,7 +437,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.Nullable {
+			if !fieldSchema.GetNullable() {
 				field.ValidData = []bool{}
 			}
 
@@ -451,7 +452,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.Nullable {
+			if !fieldSchema.GetNullable() {
 				field.ValidData = []bool{}
 			}
 
@@ -466,7 +467,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.Nullable {
+			if !fieldSchema.GetNullable() {
 				field.ValidData = []bool{}
 			}
 
@@ -486,7 +487,7 @@ func (v *validateUtil) fillWithDefaultValue(field *schemapb.FieldData, fieldSche
 				return err
 			}
 
-			if !fieldSchema.Nullable {
+			if !fieldSchema.GetNullable() {
 				field.ValidData = []bool{}
 			}
 
@@ -526,8 +527,7 @@ func checkValidData(data *schemapb.FieldData, schema *schemapb.FieldSchema, numR
 func fillWithNullValueImpl[T any](array []T, validData []bool) ([]T, error) {
 	n := getValidNumber(validData)
 	if len(array) != n {
-		msg := fmt.Sprintf("the length of field (%d) is wrong", len(array))
-		return nil, merr.WrapErrParameterInvalid(n, len(array), msg)
+		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
 	}
 	if n == len(validData) {
 		return array, nil
@@ -546,8 +546,7 @@ func fillWithNullValueImpl[T any](array []T, validData []bool) ([]T, error) {
 func fillWithDefaultValueImpl[T any](array []T, value T, validData []bool) ([]T, error) {
 	n := getValidNumber(validData)
 	if len(array) != n {
-		msg := fmt.Sprintf("the length of field (%d) is wrong", len(array))
-		return nil, merr.WrapErrParameterInvalid(n, len(array), msg)
+		return nil, merr.WrapErrParameterInvalid(n, len(array), "the length of field is wrong")
 	}
 	if n == len(validData) {
 		return array, nil
@@ -637,7 +636,7 @@ func (v *validateUtil) checkSparseFloatFieldData(field *schemapb.FieldData, fiel
 
 func (v *validateUtil) checkVarCharFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	strArr := field.GetScalars().GetStringData().GetData()
-	if strArr == nil && fieldSchema.GetDefaultValue() == nil {
+	if strArr == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("varchar field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need string array", "got nil", msg)
 	}
@@ -702,7 +701,7 @@ func (v *validateUtil) checkJSONFieldData(field *schemapb.FieldData, fieldSchema
 
 func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetIntData().GetData()
-	if data == nil && fieldSchema.GetDefaultValue() == nil {
+	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need int array", "got nil", msg)
 	}
@@ -721,7 +720,7 @@ func (v *validateUtil) checkIntegerFieldData(field *schemapb.FieldData, fieldSch
 
 func (v *validateUtil) checkLongFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetLongData().GetData()
-	if data == nil && fieldSchema.GetDefaultValue() == nil {
+	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need long int array", "got nil", msg)
 	}
@@ -731,7 +730,7 @@ func (v *validateUtil) checkLongFieldData(field *schemapb.FieldData, fieldSchema
 
 func (v *validateUtil) checkFloatFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetFloatData().GetData()
-	if data == nil && fieldSchema.GetDefaultValue() == nil {
+	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need float32 array", "got nil", msg)
 	}
@@ -745,7 +744,7 @@ func (v *validateUtil) checkFloatFieldData(field *schemapb.FieldData, fieldSchem
 
 func (v *validateUtil) checkDoubleFieldData(field *schemapb.FieldData, fieldSchema *schemapb.FieldSchema) error {
 	data := field.GetScalars().GetDoubleData().GetData()
-	if data == nil && fieldSchema.GetDefaultValue() == nil {
+	if data == nil && fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 		msg := fmt.Sprintf("field '%v' is illegal, array type mismatch", field.GetFieldName())
 		return merr.WrapErrParameterInvalid("need float64(double) array", "got nil", msg)
 	}

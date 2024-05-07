@@ -4834,7 +4834,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_BytesData{
-							BytesData: []byte("0"),
+							BytesData: []byte("{\"Hello\":\"world\"}"),
 						},
 					},
 				},
@@ -4879,7 +4879,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 					DataType: schemapb.DataType_Int32,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_BytesData{
-							BytesData: []byte("0"),
+							BytesData: []byte("{\"Hello\":\"world\"}"),
 						},
 					},
 				},
@@ -4904,7 +4904,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_JsonData{
 							JsonData: &schemapb.JSONArray{
-								Data: [][]byte{[]byte("0")},
+								Data: [][]byte{[]byte("{\"Hello\":\"world\"}")},
 							},
 						},
 					},
@@ -4927,7 +4927,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 
 		err = v.fillWithValue(data, h, 1)
 		assert.NoError(t, err)
-		flag, err := checkJsonfillWithValueData(data[0].GetScalars().GetJsonData().Data, []byte("0"), 1)
+		flag, err := checkJsonfillWithValueData(data[0].GetScalars().GetJsonData().Data, []byte("{\"Hello\":\"world\"}"), 1)
 
 		assert.True(t, flag)
 		assert.NoError(t, err)
@@ -4942,7 +4942,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_JsonData{
 							JsonData: &schemapb.JSONArray{
-								Data: [][]byte{[]byte("0")},
+								Data: [][]byte{[]byte("{\"Hello\":\"world\"}")},
 							},
 						},
 					},
@@ -4958,7 +4958,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_BytesData{
-							BytesData: []byte("0"),
+							BytesData: []byte("{\"Hello\":\"world\"}"),
 						},
 					},
 				},
@@ -4987,7 +4987,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_JsonData{
 							JsonData: &schemapb.JSONArray{
-								Data: [][]byte{[]byte("0")},
+								Data: [][]byte{[]byte("{\"Hello\":\"world\"}")},
 							},
 						},
 					},
@@ -5003,7 +5003,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 					DataType: schemapb.DataType_BinaryVector,
 					DefaultValue: &schemapb.ValueField{
 						Data: &schemapb.ValueField_BytesData{
-							BytesData: []byte("1"),
+							BytesData: []byte("{\"hello\":\"world\"}"),
 						},
 					},
 				},
@@ -5018,7 +5018,7 @@ func Test_validateUtil_fillWithValue(t *testing.T) {
 
 		assert.NoError(t, err)
 
-		flag, err := checkJsonfillWithValueData(data[0].GetScalars().GetJsonData().Data, []byte("0"), 1)
+		flag, err := checkJsonfillWithValueData(data[0].GetScalars().GetJsonData().Data, []byte("{\"Hello\":\"world\"}"), 1)
 		assert.NoError(t, err)
 		assert.True(t, flag)
 	})

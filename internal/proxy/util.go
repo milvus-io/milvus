@@ -1154,7 +1154,7 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 				autoGenFieldNum++
 				continue
 			}
-			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.Nullable {
+			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
 				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
 				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
 			}
