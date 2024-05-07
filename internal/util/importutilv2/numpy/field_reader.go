@@ -51,7 +51,8 @@ func NewFieldReader(reader io.Reader, field *schemapb.FieldSchema) (*FieldReader
 	}
 
 	var dim int64 = 1
-	if typeutil.IsVectorType(field.GetDataType()) {
+	dataType := field.GetDataType()
+	if typeutil.IsVectorType(dataType) && !typeutil.IsSparseFloatVectorType(dataType) {
 		dim, err = typeutil.GetDim(field)
 		if err != nil {
 			return nil, err

@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -80,7 +81,7 @@ func buildArrayData(schema *schemapb.CollectionSchema, rows int) ([]arrow.Array,
 	}
 	for _, field := range schema.Fields {
 		dim := 1
-		if typeutil.IsVectorType(field.GetDataType()) {
+		if typeutil.IsVectorType(field.GetDataType()) && !typeutil.IsSparseFloatVectorType(field.GetDataType()) {
 			dim2, err := typeutil.GetDim(field)
 			if err != nil {
 				return nil, nil, err
@@ -211,6 +212,25 @@ func buildArrayData(schema *schemapb.CollectionSchema, rows int) ([]arrow.Array,
 				valid = append(valid, true)
 			}
 			insertData.Data[field.GetFieldID()] = &storage.BFloat16VectorFieldData{Data: bfloat16VecData, Dim: dim}
+			builder.AppendValues(offsets, valid)
+			columns = append(columns, builder.NewListArray())
+		case schemapb.DataType_SparseFloatVector:
+			sparsefloatVecData := make([]byte, 0)
+			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+			offsets := make([]int32, 0, rows+1)
+			valid := make([]bool, 0, rows)
+			vecData := testutils.GenerateSparseFloatVectors(rows)
+			offsets = append(offsets, 0)
+			for i := 0; i < rows; i++ {
+				rowVecData := vecData.GetContents()[i]
+				sparsefloatVecData = append(sparsefloatVecData, rowVecData...)
+				offsets = append(offsets, offsets[i]+int32(len(rowVecData)))
+				valid = append(valid, true)
+			}
+			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(sparsefloatVecData, nil)
+			insertData.Data[field.GetFieldID()] = &storage.SparseFloatVectorFieldData{
+				SparseFloatArray: *vecData,
+			}
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_BinaryVector:
@@ -616,6 +636,8 @@ func (s *ReaderSuite) TestVector() {
 	s.vecDataType = schemapb.DataType_Float16Vector
 	s.run(schemapb.DataType_Int32)
 	s.vecDataType = schemapb.DataType_BFloat16Vector
+	s.run(schemapb.DataType_Int32)
+	s.vecDataType = schemapb.DataType_SparseFloatVector
 	s.run(schemapb.DataType_Int32)
 }
 
