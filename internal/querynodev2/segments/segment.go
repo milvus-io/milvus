@@ -558,7 +558,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	var status C.CStatus
 
 	tr := timerecord.NewTimeRecorder("cgoSearch")
-	status = C.Search(traceCtx,
+	status = C.Search(traceCtx.ctx,
 		s.ptr,
 		searchReq.plan.cSearchPlan,
 		searchReq.cPlaceholderGroup,
@@ -602,7 +602,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 
 	ts := C.uint64_t(plan.Timestamp)
 	tr := timerecord.NewTimeRecorder("cgoRetrieve")
-	status = C.Retrieve(traceCtx,
+	status = C.Retrieve(traceCtx.ctx,
 		s.ptr,
 		plan.cRetrievePlan,
 		ts,
