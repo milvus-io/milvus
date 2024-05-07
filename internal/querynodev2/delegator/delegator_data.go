@@ -283,12 +283,13 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 
 	var futures []*conc.Future[struct{}]
 	for _, segmentEntry := range entries {
+		segmentEntry := segmentEntry
+		delRecord, ok := delRecords[segmentEntry.SegmentID]
 		log := log.With(
 			zap.Int64("segmentID", segmentEntry.SegmentID),
 			zap.Int64("workerID", nodeID),
+			zap.Int("forwardRowCount", len(delRecord.PrimaryKeys)),
 		)
-		segmentEntry := segmentEntry
-		delRecord, ok := delRecords[segmentEntry.SegmentID]
 		if ok {
 			future := pool.Submit(func() (struct{}, error) {
 				log.Debug("delegator plan to applyDelete via worker")
