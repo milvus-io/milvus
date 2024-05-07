@@ -117,7 +117,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 
 	p.ScalarAutoIndexEnable = ParamItem{
 		Key:          "scalarAutoIndex.enable",
-		Version:      "2.3.4",
+		Version:      "2.4.0",
 		DefaultValue: "false",
 		PanicIfEmpty: true,
 	}
@@ -125,7 +125,7 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 
 	p.ScalarAutoIndexParams = ParamItem{
 		Key:          "scalarAutoIndex.params.build",
-		Version:      "2.3.4",
+		Version:      "2.4.0",
 		DefaultValue: `{"numeric": "INVERTED","varchar": "INVERTED","bool": "INVERTED"}`,
 	}
 	p.ScalarAutoIndexParams.Init(base.mgr)
