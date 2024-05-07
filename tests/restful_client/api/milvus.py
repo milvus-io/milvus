@@ -3,7 +3,8 @@ import requests
 import time
 import uuid
 from utils.util_log import test_log as logger
-
+from tenacity import retry, retry_if_exception_type, stop_after_attempt
+from requests.exceptions import ConnectionError
 
 def logger_request_response(response, url, tt, headers, data, str_data, str_response, method):
     if len(data) > 2000:
@@ -42,6 +43,7 @@ class Requests:
         }
         return headers
 
+    @retry(retry=retry_if_exception_type(ConnectionError), stop=stop_after_attempt(3))
     def post(self, url, headers=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
@@ -53,6 +55,7 @@ class Requests:
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "post")
         return response
 
+    @retry(retry=retry_if_exception_type(ConnectionError), stop=stop_after_attempt(3))
     def get(self, url, headers=None, params=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
@@ -67,6 +70,7 @@ class Requests:
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "get")
         return response
 
+    @retry(retry=retry_if_exception_type(ConnectionError), stop=stop_after_attempt(3))
     def put(self, url, headers=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
@@ -78,6 +82,7 @@ class Requests:
         logger_request_response(response, url, tt, headers, data, str_data, str_response, "put")
         return response
 
+    @retry(retry=retry_if_exception_type(ConnectionError), stop=stop_after_attempt(3))
     def delete(self, url, headers=None, data=None):
         headers = headers if headers is not None else self.update_headers()
         data = json.dumps(data)
