@@ -3,12 +3,16 @@ package proxy
 import (
 	"context"
 
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -279,7 +283,20 @@ func (t *alterDatabaseTask) Execute(ctx context.Context) error {
 		DbId:       t.AlterDatabaseRequest.GetDbId(),
 		Properties: t.AlterDatabaseRequest.GetProperties(),
 	}
-	t.result, err = t.rootCoord.AlterDatabase(ctx, req)
+
+	ret, err := t.rootCoord.AlterDatabase(ctx, req)
+	if err != nil {
+		log.Warn("AlterDatabase failed", zap.Error(err))
+		return err
+	}
+
+	if err := merr.CheckRPCCall(t.result, err); err != nil {
+		log.Warn("AlterDatabase failed", zap.Error(err))
+		return err
+	}
+
+	t.result = ret
+
 	return err
 }
 
@@ -349,6 +366,12 @@ func (t *describeDatabaseTask) Execute(ctx context.Context) error {
 	}
 	ret, err := t.rootCoord.DescribeDatabase(ctx, req)
 	if err != nil {
+		log.Warn("DescribeDatabase failed", zap.Error(err))
+		return err
+	}
+
+	if err := merr.CheckRPCCall(ret, err); err != nil {
+		log.Warn("DescribeDatabase failed", zap.Error(err))
 		return err
 	}
 
