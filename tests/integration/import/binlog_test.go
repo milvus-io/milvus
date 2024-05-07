@@ -199,6 +199,7 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	}
 	importResp, err := c.Proxy.ImportV2(ctx, &internalpb.ImportRequest{
 		CollectionName: collectionName,
+		PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 		Files:          files,
 		Options: []*commonpb.KeyValuePair{
 			{Key: "startTs", Value: startTs},
