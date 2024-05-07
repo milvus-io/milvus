@@ -65,11 +65,6 @@ class SegmentInterface {
            Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
-             Timestamp timestamp,
-             int64_t limit_size) const = 0;
-
-    virtual std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
              const query::RetrievePlan* Plan,
              Timestamp timestamp,
@@ -166,11 +161,6 @@ class SegmentInternalInterface : public SegmentInterface {
     void
     FillTargetEntry(const query::Plan* plan,
                     SearchResult& results) const override;
-
-    std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
-             Timestamp timestamp,
-             int64_t limit_size) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
     Retrieve(tracer::TraceContext* trace_ctx,
