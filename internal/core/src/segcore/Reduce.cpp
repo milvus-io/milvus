@@ -62,6 +62,7 @@ ReduceHelper::Reduce() {
 
 void
 ReduceHelper::Marshal() {
+    tracer::AutoSpan span("ReduceHelper::Marshal", trace_ctx_, false);
     // get search result data blobs of slices
     search_result_data_blobs_ =
         std::make_unique<milvus::segcore::SearchResultDataBlobs>();
@@ -131,6 +132,7 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
 
 void
 ReduceHelper::FillPrimaryKey() {
+    tracer::AutoSpan span("ReduceHelper::FillPrimaryKey", trace_ctx_, false);
     // get primary keys for duplicates removal
     uint32_t valid_index = 0;
     for (auto& search_result : search_results_) {
@@ -153,6 +155,8 @@ ReduceHelper::FillPrimaryKey() {
 
 void
 ReduceHelper::RefreshSearchResult() {
+    tracer::AutoSpan span(
+        "ReduceHelper::RefreshSearchResult", trace_ctx_, false);
     for (int i = 0; i < num_segments_; i++) {
         std::vector<int64_t> real_topks(total_nq_, 0);
         auto search_result = search_results_[i];
@@ -212,6 +216,7 @@ ReduceHelper::RefreshSearchResult() {
 
 void
 ReduceHelper::FillEntryData() {
+    tracer::AutoSpan span("ReduceHelper::FillEntryData", trace_ctx_, false);
     for (auto search_result : search_results_) {
         auto segment = static_cast<milvus::segcore::SegmentInterface*>(
             search_result->segment_);
@@ -312,6 +317,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
 
 void
 ReduceHelper::ReduceResultData() {
+    tracer::AutoSpan span("ReduceHelper::ReduceResultData", trace_ctx_, false);
     for (int i = 0; i < num_segments_; i++) {
         auto search_result = search_results_[i];
         auto result_count = search_result->get_total_result_count();

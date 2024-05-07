@@ -141,8 +141,8 @@ Retrieve(CTraceContext c_trace,
             c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
         milvus::tracer::AutoSpan span("SegCoreRetrieve", &trace_ctx, true);
 
-        auto retrieve_result =
-            segment->Retrieve(plan, timestamp, limit_size, ignore_non_pk);
+        auto retrieve_result = segment->Retrieve(
+            &trace_ctx, plan, timestamp, limit_size, ignore_non_pk);
 
         auto size = retrieve_result->ByteSizeLong();
         std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);
@@ -174,7 +174,8 @@ RetrieveByOffsets(CTraceContext c_trace,
         milvus::tracer::AutoSpan span(
             "SegCoreRetrieveByOffsets", &trace_ctx, true);
 
-        auto retrieve_result = segment->Retrieve(plan, offsets, len);
+        auto retrieve_result =
+            segment->Retrieve(&trace_ctx, plan, offsets, len);
 
         auto size = retrieve_result->ByteSizeLong();
         std::unique_ptr<uint8_t[]> buffer(new uint8_t[size]);

@@ -151,7 +151,8 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	cSliceTopKSPtr := (*C.int64_t)(&sliceTopKs[0])
 	cNumSlices := C.int64_t(len(sliceNQs))
 	var cSearchResultDataBlobs SearchResultDataBlobs
-	status := C.ReduceSearchResultsAndFillData(&cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
+	traceCtx := ParseCTraceContext(ctx)
+	status := C.ReduceSearchResultsAndFillData(traceCtx.ctx, &cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
 		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)
 	if err := HandleCStatus(ctx, &status, "ReduceSearchResultsAndFillData failed"); err != nil {
 		return nil, err

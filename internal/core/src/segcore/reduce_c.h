@@ -37,7 +37,8 @@ GetStreamReduceResult(CSearchStreamReducer c_stream_reducer,
                       CSearchResultDataBlobs* c_search_result_data_blobs);
 
 CStatus
-ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
+ReduceSearchResultsAndFillData(CTraceContext c_trace,
+                               CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchPlan c_plan,
                                CSearchResult* search_results,
                                int64_t num_segments,
