@@ -431,7 +431,6 @@ func ReadBinaryDataForSparseFloatVector(pcr *FieldReader, count int64) (any, err
 	data := make([][]byte, 0, count)
 	maxDim := uint32(0)
 	for _, chunk := range chunked.Chunks() {
-		rows := chunk.Data().Len()
 		listReader := chunk.(*array.List)
 		offsets := listReader.Offsets()
 		if !isVectorAligned(offsets, pcr.dim, schemapb.DataType_SparseFloatVector) {
@@ -442,9 +441,9 @@ func ReadBinaryDataForSparseFloatVector(pcr *FieldReader, count int64) (any, err
 			return nil, WrapTypeErr("binary", listReader.ListValues().DataType().Name(), pcr.field)
 		}
 		vecData := uint8Reader.Uint8Values()
-		for i := 0; i < rows; i++ {
-			elemCount := int((offsets[i+1] - offsets[i]) / 8)
-			rowVec := vecData[offsets[i]:offsets[i+1]]
+		for i := 1; i < len(offsets); i++ {
+			elemCount := int((offsets[i] - offsets[i-1]) / 8)
+			rowVec := vecData[offsets[i-1]:offsets[i]]
 			data = append(data, rowVec)
 			maxIdx := typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1)
 			if maxIdx+1 > maxDim {
