@@ -19,9 +19,14 @@ package datacoord
 import (
 	"fmt"
 
+	"github.com/gogo/protobuf/proto"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ROChannel interface {
@@ -39,7 +44,30 @@ type RWChannel interface {
 	UpdateWatchInfo(info *datapb.ChannelWatchInfo)
 }
 
-var _ RWChannel = (*channelMeta)(nil)
+func NewRWChannel(name string,
+	collectionID int64,
+	startPos []*commonpb.KeyDataPair,
+	schema *schemapb.CollectionSchema,
+	createTs uint64,
+) RWChannel {
+	if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
+		return &StateChannel{
+			Name:            name,
+			CollectionID:    collectionID,
+			StartPositions:  startPos,
+			Schema:          schema,
+			CreateTimestamp: createTs,
+		}
+	}
+
+	return &channelMeta{
+		Name:            name,
+		CollectionID:    collectionID,
+		StartPositions:  startPos,
+		Schema:          schema,
+		CreateTimestamp: createTs,
+	}
+}
 
 type channelMeta struct {
 	Name            string
@@ -50,8 +78,13 @@ type channelMeta struct {
 	WatchInfo       *datapb.ChannelWatchInfo
 }
 
+var _ RWChannel = (*channelMeta)(nil)
+
 func (ch *channelMeta) UpdateWatchInfo(info *datapb.ChannelWatchInfo) {
-	ch.WatchInfo = info
+	log.Info("Channel updating watch info",
+		zap.Any("old watch info", ch.WatchInfo),
+		zap.Any("new watch info", info))
+	ch.WatchInfo = proto.Clone(info).(*datapb.ChannelWatchInfo)
 }
 
 func (ch *channelMeta) GetWatchInfo() *datapb.ChannelWatchInfo {
@@ -82,4 +115,167 @@ func (ch *channelMeta) GetCreateTimestamp() Timestamp {
 func (ch *channelMeta) String() string {
 	// schema maybe too large to print
 	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v", ch.Name, ch.CollectionID, ch.StartPositions)
+}
+
+type ChannelState string
+
+const (
+	Standby   ChannelState = "Standby"
+	ToWatch   ChannelState = "ToWatch"
+	Watching  ChannelState = "Watching"
+	Watched   ChannelState = "Watched"
+	ToRelease ChannelState = "ToRelease"
+	Releasing ChannelState = "Releasing"
+	Legacy    ChannelState = "Legacy"
+)
+
+type StateChannel struct {
+	Name            string
+	CollectionID    UniqueID
+	StartPositions  []*commonpb.KeyDataPair
+	Schema          *schemapb.CollectionSchema
+	CreateTimestamp uint64
+	Info            *datapb.ChannelWatchInfo
+
+	currentState ChannelState
+	assignedNode int64
+}
+
+var _ RWChannel = (*StateChannel)(nil)
+
+func NewStateChannel(ch RWChannel) *StateChannel {
+	c := &StateChannel{
+		Name:            ch.GetName(),
+		CollectionID:    ch.GetCollectionID(),
+		StartPositions:  ch.GetStartPositions(),
+		Schema:          ch.GetSchema(),
+		CreateTimestamp: ch.GetCreateTimestamp(),
+		Info:            ch.GetWatchInfo(),
+
+		assignedNode: bufferID,
+	}
+
+	c.setState(Standby)
+	return c
+}
+
+func NewStateChannelByWatchInfo(nodeID int64, info *datapb.ChannelWatchInfo) *StateChannel {
+	c := &StateChannel{
+		Name:         info.GetVchan().GetChannelName(),
+		CollectionID: info.GetVchan().GetCollectionID(),
+		Schema:       info.GetSchema(),
+		Info:         info,
+		assignedNode: nodeID,
+	}
+
+	switch info.GetState() {
+	case datapb.ChannelWatchState_ToWatch:
+		c.setState(ToWatch)
+	case datapb.ChannelWatchState_ToRelease:
+		c.setState(ToRelease)
+		// legacy state
+	case datapb.ChannelWatchState_WatchSuccess:
+		c.setState(Watched)
+	case datapb.ChannelWatchState_WatchFailure, datapb.ChannelWatchState_ReleaseSuccess, datapb.ChannelWatchState_ReleaseFailure:
+		c.setState(Standby)
+	default:
+		c.setState(Standby)
+	}
+
+	if nodeID == bufferID {
+		c.setState(Standby)
+	}
+	return c
+}
+
+func (c *StateChannel) TransitionOnSuccess() {
+	switch c.currentState {
+	case Standby:
+		c.setState(ToWatch)
+	case ToWatch:
+		c.setState(Watching)
+	case Watching:
+		c.setState(Watched)
+	case Watched:
+		c.setState(ToRelease)
+	case ToRelease:
+		c.setState(Releasing)
+	case Releasing:
+		c.setState(Standby)
+	}
+}
+
+func (c *StateChannel) TransitionOnFailure() {
+	switch c.currentState {
+	case Watching:
+		c.setState(Standby)
+	case Releasing:
+		c.setState(Standby)
+	case Standby, ToWatch, Watched, ToRelease:
+		// Stay original state
+	}
+}
+
+func (c *StateChannel) Clone() *StateChannel {
+	return &StateChannel{
+		Name:            c.Name,
+		CollectionID:    c.CollectionID,
+		StartPositions:  c.StartPositions,
+		Schema:          c.Schema,
+		CreateTimestamp: c.CreateTimestamp,
+		Info:            proto.Clone(c.Info).(*datapb.ChannelWatchInfo),
+
+		currentState: c.currentState,
+		assignedNode: c.assignedNode,
+	}
+}
+
+func (c *StateChannel) String() string {
+	// schema maybe too large to print
+	return fmt.Sprintf("Name: %s, CollectionID: %d, StartPositions: %v", c.Name, c.CollectionID, c.StartPositions)
+}
+
+func (c *StateChannel) GetName() string {
+	return c.Name
+}
+
+func (c *StateChannel) GetCollectionID() UniqueID {
+	return c.CollectionID
+}
+
+func (c *StateChannel) GetStartPositions() []*commonpb.KeyDataPair {
+	return c.StartPositions
+}
+
+func (c *StateChannel) GetSchema() *schemapb.CollectionSchema {
+	return c.Schema
+}
+
+func (c *StateChannel) GetCreateTimestamp() Timestamp {
+	return c.CreateTimestamp
+}
+
+func (c *StateChannel) GetWatchInfo() *datapb.ChannelWatchInfo {
+	return c.Info
+}
+
+func (c *StateChannel) UpdateWatchInfo(info *datapb.ChannelWatchInfo) {
+	if c.Info != nil && c.Info.Vchan != nil && info.GetVchan().GetChannelName() != c.Info.GetVchan().GetChannelName() {
+		log.Warn("Updating incorrect channel watch info",
+			zap.Any("old watch info", c.Info),
+			zap.Any("new watch info", info),
+			zap.Stack("call stack"),
+		)
+		return
+	}
+
+	c.Info = proto.Clone(info).(*datapb.ChannelWatchInfo)
+}
+
+func (c *StateChannel) Assign(nodeID int64) {
+	c.assignedNode = nodeID
+}
+
+func (c *StateChannel) setState(state ChannelState) {
+	c.currentState = state
 }
