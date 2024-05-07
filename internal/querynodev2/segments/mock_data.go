@@ -1075,7 +1075,6 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 
 	return &querypb.FieldIndexInfo{
 		FieldID:             fieldSchema.GetFieldID(),
-		EnableIndex:         true,
 		IndexName:           indexInfo.GetIndexName(),
 		IndexParams:         indexInfo.GetIndexParams(),
 		IndexFilePaths:      indexPaths,
@@ -1136,7 +1135,6 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 
 	return &querypb.FieldIndexInfo{
 		FieldID:             fieldID,
-		EnableIndex:         true,
 		IndexName:           "querynode-test",
 		IndexParams:         funcutil.Map2KeyValuePair(indexParams),
 		IndexFilePaths:      indexPaths,

@@ -1556,10 +1556,8 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 	vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, fieldIndexInfo := range loadInfo.IndexInfos {
-		if fieldIndexInfo.EnableIndex {
-			fieldID := fieldIndexInfo.FieldID
-			vecFieldID2IndexInfo[fieldID] = fieldIndexInfo
-		}
+		fieldID := fieldIndexInfo.FieldID
+		vecFieldID2IndexInfo[fieldID] = fieldIndexInfo
 	}
 
 	for _, fieldBinlog := range loadInfo.BinlogPaths {

@@ -499,7 +499,7 @@ func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 	if !ok {
 		return false
 	}
-	return fieldInfo.IndexInfo != nil && fieldInfo.IndexInfo.EnableIndex
+	return fieldInfo.IndexInfo != nil
 }
 
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
