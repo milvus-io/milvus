@@ -24,13 +24,11 @@ import (
 	"strconv"
 	"unicode/utf8"
 
-	"github.com/samber/lo"
 	"github.com/sbinet/npyio"
 	"github.com/sbinet/npyio/npy"
 	"golang.org/x/text/encoding/unicode"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -251,39 +249,4 @@ func calcRowCount(bufferSize int, schema *schemapb.CollectionSchema) (int64, err
 	}
 	rowCount := int64(bufferSize) / int64(sizePerRecord)
 	return rowCount, nil
-}
-
-func fillDynamicData(data *storage.InsertData, schema *schemapb.CollectionSchema) error {
-	if !schema.GetEnableDynamicField() {
-		return nil
-	}
-	dynamicField := typeutil.GetDynamicField(schema)
-	if dynamicField == nil {
-		return nil
-	}
-	totalRowNum := getInsertDataRowNum(data, schema)
-	dynamicData := data.Data[dynamicField.GetFieldID()]
-	jsonFD := dynamicData.(*storage.JSONFieldData)
-	bs := []byte("{}")
-	existedRowNum := dynamicData.RowNum()
-	for i := 0; i < totalRowNum-existedRowNum; i++ {
-		jsonFD.Data = append(jsonFD.Data, bs)
-	}
-	data.Data[dynamicField.GetFieldID()] = dynamicData
-	return nil
-}
-
-func getInsertDataRowNum(data *storage.InsertData, schema *schemapb.CollectionSchema) int {
-	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
-		return field.GetFieldID()
-	})
-	for fieldID, fd := range data.Data {
-		if fields[fieldID].GetIsDynamic() {
-			continue
-		}
-		if fd.RowNum() != 0 {
-			return fd.RowNum()
-		}
-	}
-	return 0
 }
