@@ -3,6 +3,7 @@ package proxy
 import (
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
