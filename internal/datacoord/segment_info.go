@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
@@ -32,6 +33,7 @@ import (
 // SegmentsInfo wraps a map, which maintains ID to SegmentInfo relation
 type SegmentsInfo struct {
 	segments     map[UniqueID]*SegmentInfo
+	collSegments map[UniqueID]*CollectionSegments
 	compactionTo map[UniqueID]UniqueID // map the compact relation, value is the segment which `CompactFrom` contains key.
 	// A segment can be compacted to only one segment finally in meta.
 }
@@ -68,8 +70,13 @@ func NewSegmentInfo(info *datapb.SegmentInfo) *SegmentInfo {
 func NewSegmentsInfo() *SegmentsInfo {
 	return &SegmentsInfo{
 		segments:     make(map[UniqueID]*SegmentInfo),
+		collSegments: make(map[UniqueID]*CollectionSegments),
 		compactionTo: make(map[UniqueID]UniqueID),
 	}
+}
+
+type CollectionSegments struct {
+	segments map[int64]*SegmentInfo
 }
 
 // GetSegment returns SegmentInfo
@@ -86,21 +93,33 @@ func (s *SegmentsInfo) GetSegment(segmentID UniqueID) *SegmentInfo {
 // no deep copy applied
 // the logPath in meta is empty
 func (s *SegmentsInfo) GetSegments() []*SegmentInfo {
-	segments := make([]*SegmentInfo, 0, len(s.segments))
-	for _, segment := range s.segments {
-		segments = append(segments, segment)
-	}
-	return segments
+	return lo.Values(s.segments)
 }
 
-func (s *SegmentsInfo) GetSegmentsBySelector(selector SegmentInfoSelector) []*SegmentInfo {
-	var segments []*SegmentInfo
-	for _, segment := range s.segments {
-		if selector(segment) {
-			segments = append(segments, segment)
+func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*SegmentInfo {
+	criterion := &segmentCriterion{}
+	for _, filter := range filters {
+		filter.AddFilter(criterion)
+	}
+	var result []*SegmentInfo
+	var candidates []*SegmentInfo
+	// apply criterion
+	switch {
+	case criterion.collectionID > 0:
+		collSegments, ok := s.collSegments[criterion.collectionID]
+		if !ok {
+			return nil
+		}
+		candidates = lo.Values(collSegments.segments)
+	default:
+		candidates = lo.Values(s.segments)
+	}
+	for _, segment := range candidates {
+		if criterion.Match(segment) {
+			result = append(result, segment)
 		}
 	}
-	return segments
+	return result
 }
 
 // GetCompactionTo returns the segment that the provided segment is compacted to.
@@ -125,6 +144,7 @@ func (s *SegmentsInfo) GetCompactionTo(fromSegmentID int64) (*SegmentInfo, bool)
 func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 	if segment, ok := s.segments[segmentID]; ok {
 		s.deleteCompactTo(segment)
+		s.delCollection(segment)
 		delete(s.segments, segmentID)
 	}
 }
@@ -136,8 +156,10 @@ func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	if segment, ok := s.segments[segmentID]; ok {
 		// Remove old segment compact to relation first.
 		s.deleteCompactTo(segment)
+		s.delCollection(segment)
 	}
 	s.segments[segmentID] = segment
+	s.addCollection(segment)
 	s.addCompactTo(segment)
 }
 
@@ -272,6 +294,31 @@ func (s *SegmentInfo) ShadowClone(opts ...SegmentInfoOption) *SegmentInfo {
 		opt(cloned)
 	}
 	return cloned
+}
+
+func (s *SegmentsInfo) addCollection(segment *SegmentInfo) {
+	collID := segment.GetCollectionID()
+	collSegment, ok := s.collSegments[collID]
+	if !ok {
+		collSegment = &CollectionSegments{
+			segments: make(map[UniqueID]*SegmentInfo),
+		}
+		s.collSegments[collID] = collSegment
+	}
+	collSegment.segments[segment.GetID()] = segment
+	log.Warn("CQX add collection", zap.Any("collSegments", s.collSegments))
+}
+
+func (s *SegmentsInfo) delCollection(segment *SegmentInfo) {
+	collID := segment.GetCollectionID()
+	collSegment, ok := s.collSegments[collID]
+	if !ok {
+		return
+	}
+	delete(collSegment.segments, segment.GetID())
+	if len(collSegment.segments) == 0 {
+		delete(s.collSegments, segment.GetCollectionID())
+	}
 }
 
 // addCompactTo adds the compact relation to the segment
