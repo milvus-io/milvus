@@ -120,11 +120,6 @@ func (s *BulkInsertSuite) testImportDynamicField() {
 		}
 	case importutilv2.Parquet:
 		filePath := fmt.Sprintf("/tmp/test_%d.parquet", rand.Int())
-		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
-			FieldID:  102,
-			Name:     "$meta",
-			DataType: schemapb.DataType_JSON,
-		})
 		err = GenerateParquetFile(filePath, schema, rowCount)
 		s.NoError(err)
 		defer os.Remove(filePath)

@@ -239,6 +239,9 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		}
 		arrField, ok := arrNameToField[field.GetName()]
 		if !ok {
+			if field.GetIsDynamic() {
+				continue
+			}
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' not in arrow schema", field.GetName()))
 		}
 		toArrDataType, err := convertToArrowDataType(field, false)
