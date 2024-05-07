@@ -187,7 +187,16 @@ func Test_validateUtil_checkVarCharFieldData(t *testing.T) {
 }
 
 func Test_validateUtil_checkBinaryVectorFieldData(t *testing.T) {
-	assert.NoError(t, newValidateUtil().checkBinaryVectorFieldData(nil, nil))
+	v := newValidateUtil()
+	assert.Error(t, v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{}}, nil))
+	assert.NoError(t, v.checkBinaryVectorFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Vectors{
+		Vectors: &schemapb.VectorField{
+			Dim: 128,
+			Data: &schemapb.VectorField_BinaryVector{
+				BinaryVector: []byte(strings.Repeat("1", 128)),
+			},
+		},
+	}}, nil))
 }
 
 func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
@@ -2539,6 +2548,45 @@ func Test_validateUtil_Validate(t *testing.T) {
 					},
 				},
 			},
+			{
+				FieldName: "test6",
+				Type:      schemapb.DataType_Int64,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_LongData{
+							LongData: &schemapb.LongArray{
+								Data: []int64{(math.MinInt8) + 1, (math.MaxInt8) - 1},
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "test7",
+				Type:      schemapb.DataType_Float,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_FloatData{
+							FloatData: &schemapb.FloatArray{
+								Data: generateFloat32Array(2),
+							},
+						},
+					},
+				},
+			},
+			{
+				FieldName: "test8",
+				Type:      schemapb.DataType_Double,
+				Field: &schemapb.FieldData_Scalars{
+					Scalars: &schemapb.ScalarField{
+						Data: &schemapb.ScalarField_DoubleData{
+							DoubleData: &schemapb.DoubleArray{
+								Data: generateFloat64Array(2),
+							},
+						},
+					},
+				},
+			},
 		}
 
 		schema := &schemapb.CollectionSchema{
@@ -2661,6 +2709,21 @@ func Test_validateUtil_Validate(t *testing.T) {
 							Value: "10",
 						},
 					},
+				},
+				{
+					Name:     "test6",
+					FieldID:  112,
+					DataType: schemapb.DataType_Int64,
+				},
+				{
+					Name:     "test7",
+					FieldID:  113,
+					DataType: schemapb.DataType_Float,
+				},
+				{
+					Name:     "test8",
+					FieldID:  114,
+					DataType: schemapb.DataType_Double,
 				},
 			},
 		}
@@ -3599,7 +3662,16 @@ func Test_verifyOverflowByRange(t *testing.T) {
 func Test_validateUtil_checkIntegerFieldData(t *testing.T) {
 	t.Run("no check", func(t *testing.T) {
 		v := newValidateUtil()
-		assert.NoError(t, v.checkIntegerFieldData(nil, nil))
+		assert.Error(t, v.checkIntegerFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Vectors{}}, nil))
+		assert.NoError(t, v.checkIntegerFieldData(&schemapb.FieldData{Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: []int32{1, 2, 3, 4},
+					},
+				},
+			},
+		}}, nil))
 	})
 
 	t.Run("tiny int, type mismatch", func(t *testing.T) {
@@ -3810,4 +3882,80 @@ func Test_validateUtil_checkJSONData(t *testing.T) {
 		err := v.checkJSONFieldData(data, f)
 		assert.Error(t, err)
 	})
+}
+
+func Test_validateUtil_checkLongFieldData(t *testing.T) {
+	v := newValidateUtil()
+	assert.Error(t, v.checkLongFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Vectors{},
+	}, nil))
+	assert.NoError(t, v.checkLongFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: []int64{1, 2, 3, 4},
+					},
+				},
+			},
+		},
+	}, nil))
+}
+
+func Test_validateUtil_checkFloatFieldData(t *testing.T) {
+	v := newValidateUtil(withNANCheck())
+	assert.Error(t, v.checkFloatFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Vectors{},
+	}, nil))
+	assert.NoError(t, v.checkFloatFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: []float32{1, 2, 3, 4},
+					},
+				},
+			},
+		},
+	}, nil))
+	assert.Error(t, v.checkFloatFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: []float32{float32(math.NaN())},
+					},
+				},
+			},
+		},
+	}, nil))
+}
+
+func Test_validateUtil_checkDoubleFieldData(t *testing.T) {
+	v := newValidateUtil(withNANCheck())
+	assert.Error(t, v.checkDoubleFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Vectors{},
+	}, nil))
+	assert.NoError(t, v.checkDoubleFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: []float64{1, 2, 3, 4},
+					},
+				},
+			},
+		},
+	}, nil))
+	assert.Error(t, v.checkDoubleFieldData(&schemapb.FieldData{
+		Field: &schemapb.FieldData_Scalars{
+			Scalars: &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: []float64{math.NaN()},
+					},
+				},
+			},
+		},
+	}, nil))
 }
