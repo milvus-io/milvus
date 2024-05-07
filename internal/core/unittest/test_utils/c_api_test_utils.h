@@ -63,6 +63,7 @@ generate_max_float_query_data(int all_nq, int max_float_nq) {
     auto blob = raw_group.SerializeAsString();
     return blob;
 }
+
 std::string
 generate_query_data(int nq) {
     namespace ser = milvus::proto::common;
@@ -102,7 +103,8 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
                 auto ret = pk_set.insert(search_result->primary_keys_[ki]);
                 ASSERT_TRUE(ret.second);
 
-                if (search_result->group_by_values_.value().size() > ki) {
+                if (search_result->group_by_values_.has_value() &&
+                    search_result->group_by_values_.value().size() > ki) {
                     auto group_by_val =
                         search_result->group_by_values_.value()[ki];
                     ASSERT_TRUE(group_by_val_set.count(group_by_val) == 0);
@@ -112,4 +114,41 @@ CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
         }
     }
 }
+
+const char*
+get_default_schema_config() {
+    static std::string conf = R"(name: "default-collection"
+                            fields: <
+                              fieldID: 100
+                              name: "fakevec"
+                              data_type: FloatVector
+                              type_params: <
+                                key: "dim"
+                                value: "16"
+                              >
+                              index_params: <
+                                key: "metric_type"
+                                value: "L2"
+                              >
+                            >
+                            fields: <
+                              fieldID: 101
+                              name: "age"
+                              data_type: Int64
+                              is_primary_key: true
+                            >)";
+    static std::string fake_conf = "";
+    return conf.c_str();
+}
+
+CStatus
+CSearch(CSegmentInterface c_segment,
+        CSearchPlan c_plan,
+        CPlaceholderGroup c_placeholder_group,
+        uint64_t timestamp,
+        CSearchResult* result) {
+    return Search(
+        {}, c_segment, c_plan, c_placeholder_group, timestamp, result);
+}
+
 }  // namespace

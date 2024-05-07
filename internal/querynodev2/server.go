@@ -484,7 +484,7 @@ func (node *QueryNode) Stop() error {
 			node.dispClient.Close()
 		}
 		if node.manager != nil {
-			node.manager.Segment.Clear()
+			node.manager.Segment.Clear(context.Background())
 		}
 
 		node.CloseSegcore()

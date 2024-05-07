@@ -66,6 +66,39 @@ Here's a list of verified OS types where Milvus can successfully build and run:
 - MacOS (x86_64)
 - MacOS (Apple Silicon)
 
+### Compiler Setup
+You can use Vscode to integrate C++ and Go together. Please replace user.settings file with below configs:
+```bash
+{
+    "go.toolsEnvVars": {
+        "PKG_CONFIG_PATH": "/Users/zilliz/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
+        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+    },
+    "go.testEnvVars": {
+        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
+        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+    },
+    "go.buildFlags": [
+        "-ldflags=-r /Users/zilliz/workspace/milvus/internal/core/output/lib"
+    ],
+    "terminal.integrated.env.linux": {
+        "PKG_CONFIG_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib/pkgconfig:/Users/zilliz/workspace/milvus/internal/core/output/lib64/pkgconfig",
+        "LD_LIBRARY_PATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64",
+        "RPATH": "/Users/zilliz/workspace/milvus/internal/core/output/lib:/Users/zilliz/workspace/milvus/internal/core/output/lib64"
+    },
+    "go.useLanguageServer": true,
+    "gopls": {
+        "formatting.gofumpt": true
+    },
+    "go.formatTool": "gofumpt",
+    "go.lintTool": "golangci-lint",
+    "go.testTags": "dynamic",
+    "go.testTimeout": "10m"
+}
+```
+
 #### Prerequisites
 
 Linux systems (Recommend Ubuntu 20.04 or later):
@@ -74,6 +107,7 @@ Linux systems (Recommend Ubuntu 20.04 or later):
 go: >= 1.20
 cmake: >= 3.18
 gcc: 7.5
+conan: 1.61
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
@@ -82,6 +116,7 @@ MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 go: >= 1.20
 cmake: >= 3.18
 llvm: >= 15
+conan: 1.61
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
@@ -90,6 +125,7 @@ MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 go: >= 1.20 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
+conan: 1.61
 ```
 
 #### Installing Dependencies
@@ -413,7 +449,14 @@ $ make codecov-cpp
 
 ### E2E Tests
 
-Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before running E2E tests, you need a running Milvus:
+Milvus uses Python SDK to write test cases to verify the correctness of Milvus functions. Before running E2E tests, you need a running Milvus. There are two modes of operation to build Milvus — Milvus Standalone and Milvus Cluster. Milvus Standalone operates independently as a single instance. Milvus Cluster operates across multiple nodes. All milvus instances are clustered together to form a unified system to support larger volumes of data and higher traffic loads.
+
+Both include three components:
+
+1. Milvus: The core functional component.
+2. Etcd: The metadata engine. Access and store metadata of Milvus’ internal components.
+3. MinIO: The storage engine. Responsible for data persistence for Milvus.
+Milvus Cluster includes further component — Pulsar, to be distributed through Pub/Sub mechanism.
 
 ```shell
 # Running Milvus cluster
@@ -495,3 +538,68 @@ A: Use **Software Update** (from **About this Mac** -> **Overview**) to install 
 Q: Some Go unit tests failed.
 
 A: We are aware that some tests can be flaky occasionally. If there's something you believe is abnormal (i.e. tests that fail every single time). You are more than welcome to [file an issue](https://github.com/milvus-io/milvus/issues/new/choose)!
+
+---
+
+Q: Brew: Unexpected Disconnect while reading sideband packet
+```bash
+==> Tapping homebrew/core
+remote: Enumerating objects: 1107077, done.
+remote: Counting objects: 100% (228/228), done.
+remote: Compressing objects: 100% (157/157), done.
+error: 545 bytes of body are still expected.44 MiB | 341.00 KiB/s
+fetch-pack: unexpected disconnect while reading sideband packet
+fatal: early EOF
+fatal: index-pack failed
+Failed during: git fetch --force origin refs/heads/master:refs/remotes/origin/master
+```
+
+A: try to increase http post buffer
+```bash
+git config --global http.postBuffer 1M
+```
+
+---
+
+Q: Brew: command not found” after installation
+
+A: set up git config
+```bash
+git config --global user.email xxx
+git config --global user.name xxx
+```
+
+---
+
+Q: Docker: error getting credentials - err: exit status 1, out: ``
+
+A: removing “credsStore”:from ~/.docker/config.json
+
+---
+
+Q: ModuleNotFoundError: No module named 'imp'
+
+A: Python 3.12 has removed the imp module, please downgrade to 3.11 for now.
+
+---
+
+Q: Conan: Unrecognized arguments: — install-folder conan
+
+A: The version is not correct. Please change to 1.61 for now.
+
+---
+
+Q: Conan command not found
+
+A: Fixed by exporting Python bin PATH in your bash.
+
+---
+
+Q: Llvm: use of undeclared identifier ‘kSecFormatOpenSSL’
+
+A: Reinstall llvm@15
+```bash
+brew reinstall llvm@15
+export LDFLAGS="-L/opt/homebrew/opt/llvm@15/lib"
+export CPPFLAGS="-I/opt/homebrew/opt/llvm@15/include"
+```

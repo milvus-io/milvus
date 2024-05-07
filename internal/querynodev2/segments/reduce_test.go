@@ -83,6 +83,7 @@ func (suite *ReduceSuite) SetupTest() {
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
 			InsertChannel: "dml",
+			NumOfRows:     int64(msgLength),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
@@ -104,7 +105,7 @@ func (suite *ReduceSuite) SetupTest() {
 }
 
 func (suite *ReduceSuite) TearDownTest() {
-	suite.segment.Release()
+	suite.segment.Release(context.Background())
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)

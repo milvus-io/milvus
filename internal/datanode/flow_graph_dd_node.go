@@ -170,14 +170,14 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 		case commonpb.MsgType_Insert:
 			imsg := msg.(*msgstream.InsertMsg)
 			if imsg.CollectionID != ddn.collectionID {
-				log.Info("filter invalid insert message, collection mis-match",
+				log.Warn("filter invalid insert message, collection mis-match",
 					zap.Int64("Get collID", imsg.CollectionID),
 					zap.Int64("Expected collID", ddn.collectionID))
 				continue
 			}
 
 			if ddn.tryToFilterSegmentInsertMessages(imsg) {
-				log.Info("filter insert messages",
+				log.Debug("filter insert messages",
 					zap.Int64("filter segmentID", imsg.GetSegmentID()),
 					zap.Uint64("message timestamp", msg.EndTs()),
 					zap.String("segment's vChannel", imsg.GetShardName()),
