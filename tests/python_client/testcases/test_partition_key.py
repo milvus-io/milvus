@@ -236,7 +236,7 @@ class TestPartitionKeyInvalidParams(TestcaseBase):
         collection_w, _ = self.collection_wrap.init_collection(name=c_name, schema=schema,
                                                                num_partitions=num_partitions,
                                                                check_task=CheckTasks.err_res,
-                                                               check_items={"err_code": 2, "err_msg": err_msg})
+                                                               check_items={"err_code": 1100, "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_min_partitions(self):
