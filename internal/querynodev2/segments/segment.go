@@ -29,6 +29,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"runtime"
 	"strconv"
 	"strings"
 	"unsafe"
@@ -557,13 +558,14 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 	var status C.CStatus
 	GetSQPool().Submit(func() (any, error) {
 		tr := timerecord.NewTimeRecorder("cgoSearch")
-		status = C.Search(traceCtx,
+		status = C.Search(traceCtx.ctx,
 			s.ptr,
 			searchReq.plan.cSearchPlan,
 			searchReq.cPlaceholderGroup,
 			C.uint64_t(searchReq.mvccTimestamp),
 			&searchResult.cSearchResult,
 		)
+		runtime.KeepAlive(traceCtx)
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.SearchLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil, nil
 	}).Await()
@@ -601,13 +603,14 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 	GetSQPool().Submit(func() (any, error) {
 		ts := C.uint64_t(plan.Timestamp)
 		tr := timerecord.NewTimeRecorder("cgoRetrieve")
-		status = C.Retrieve(traceCtx,
+		status = C.Retrieve(traceCtx.ctx,
 			s.ptr,
 			plan.cRetrievePlan,
 			ts,
 			&retrieveResult.cRetrieveResult,
 			C.int64_t(maxLimitSize),
 			C.bool(plan.ignoreNonPk))
+		runtime.KeepAlive(traceCtx)
 
 		metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
@@ -674,12 +677,13 @@ func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan
 	var status C.CStatus
 
 	tr := timerecord.NewTimeRecorder("cgoRetrieveByOffsets")
-	status = C.RetrieveByOffsets(traceCtx,
+	status = C.RetrieveByOffsets(traceCtx.ctx,
 		s.ptr,
 		plan.cRetrievePlan,
 		&retrieveResult.cRetrieveResult,
 		(*C.int64_t)(unsafe.Pointer(&offsets[0])),
 		C.int64_t(len(offsets)))
+	runtime.KeepAlive(traceCtx)
 
 	metrics.QueryNodeSQSegmentLatencyInCore.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
