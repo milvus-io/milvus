@@ -244,6 +244,47 @@ func (_c *MockSegment_ExistIndex_Call) RunAndReturn(run func(int64) bool) *MockS
 	return _c
 }
 
+// GetHashFuncNum provides a mock function with given fields:
+func (_m *MockSegment) GetHashFuncNum() uint {
+	ret := _m.Called()
+
+	var r0 uint
+	if rf, ok := ret.Get(0).(func() uint); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(uint)
+	}
+
+	return r0
+}
+
+// MockSegment_GetHashFuncNum_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetHashFuncNum'
+type MockSegment_GetHashFuncNum_Call struct {
+	*mock.Call
+}
+
+// GetHashFuncNum is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) GetHashFuncNum() *MockSegment_GetHashFuncNum_Call {
+	return &MockSegment_GetHashFuncNum_Call{Call: _e.mock.On("GetHashFuncNum")}
+}
+
+func (_c *MockSegment_GetHashFuncNum_Call) Run(run func()) *MockSegment_GetHashFuncNum_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockSegment_GetHashFuncNum_Call) Return(_a0 uint) *MockSegment_GetHashFuncNum_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_GetHashFuncNum_Call) RunAndReturn(run func() uint) *MockSegment_GetHashFuncNum_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetIndex provides a mock function with given fields: fieldID
 func (_m *MockSegment) GetIndex(fieldID int64) *IndexedFieldInfo {
 	ret := _m.Called(fieldID)
@@ -1395,6 +1436,49 @@ func (_c *MockSegment_StartPosition_Call) Return(_a0 *msgpb.MsgPosition) *MockSe
 }
 
 func (_c *MockSegment_StartPosition_Call) RunAndReturn(run func() *msgpb.MsgPosition) *MockSegment_StartPosition_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TestLocations provides a mock function with given fields: pk, loc
+func (_m *MockSegment) TestLocations(pk storage.PrimaryKey, loc []uint64) bool {
+	ret := _m.Called(pk, loc)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(storage.PrimaryKey, []uint64) bool); ok {
+		r0 = rf(pk, loc)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockSegment_TestLocations_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TestLocations'
+type MockSegment_TestLocations_Call struct {
+	*mock.Call
+}
+
+// TestLocations is a helper method to define mock.On call
+//   - pk storage.PrimaryKey
+//   - loc []uint64
+func (_e *MockSegment_Expecter) TestLocations(pk interface{}, loc interface{}) *MockSegment_TestLocations_Call {
+	return &MockSegment_TestLocations_Call{Call: _e.mock.On("TestLocations", pk, loc)}
+}
+
+func (_c *MockSegment_TestLocations_Call) Run(run func(pk storage.PrimaryKey, loc []uint64)) *MockSegment_TestLocations_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(storage.PrimaryKey), args[1].([]uint64))
+	})
+	return _c
+}
+
+func (_c *MockSegment_TestLocations_Call) Return(_a0 bool) *MockSegment_TestLocations_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockSegment_TestLocations_Call) RunAndReturn(run func(storage.PrimaryKey, []uint64) bool) *MockSegment_TestLocations_Call {
 	_c.Call.Return(run)
 	return _c
 }
