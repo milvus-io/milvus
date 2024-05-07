@@ -19,6 +19,7 @@
 package hookutil
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -37,6 +38,34 @@ func TestInitHook(t *testing.T) {
 	err := initHook()
 	assert.Error(t, err)
 	paramtable.Get().Save(Params.ProxyCfg.SoPath.Key, "")
+}
+
+func TestHookInitPanicError(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	p.Save(p.ProxyCfg.SoPath.Key, "/a/b/hook.so")
+	defer p.Reset(p.ProxyCfg.SoPath.Key)
+	err := initHook()
+	assert.Error(t, err)
+	assert.Panics(t, func() {
+		initOnce = sync.Once{}
+		InitOnceHook()
+	})
+}
+
+func TestHookInitLogError(t *testing.T) {
+	paramtable.Init()
+	p := paramtable.Get()
+	p.Save(p.ProxyCfg.SoPath.Key, "/a/b/hook.so")
+	defer p.Reset(p.ProxyCfg.SoPath.Key)
+	p.Save(p.CommonCfg.PanicWhenPluginFail.Key, "false")
+	defer p.Reset(p.CommonCfg.PanicWhenPluginFail.Key)
+	err := initHook()
+	assert.Error(t, err)
+	assert.NotPanics(t, func() {
+		initOnce = sync.Once{}
+		InitOnceHook()
+	})
 }
 
 func TestDefaultHook(t *testing.T) {
