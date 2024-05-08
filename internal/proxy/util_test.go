@@ -2209,3 +2209,35 @@ func TestAppendUserInfoForRPC(t *testing.T) {
 	expectAuth := crypto.Base64Encode("root:root")
 	assert.Equal(t, expectAuth, authorization[0])
 }
+
+func TestGetCostValue(t *testing.T) {
+	t.Run("empty status", func(t *testing.T) {
+		{
+			cost := GetCostValue(&commonpb.Status{})
+			assert.Equal(t, 0, cost)
+		}
+
+		{
+			cost := GetCostValue(nil)
+			assert.Equal(t, 0, cost)
+		}
+	})
+
+	t.Run("wrong cost value style", func(t *testing.T) {
+		cost := GetCostValue(&commonpb.Status{
+			ExtraInfo: map[string]string{
+				"report_value": "abc",
+			},
+		})
+		assert.Equal(t, 0, cost)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		cost := GetCostValue(&commonpb.Status{
+			ExtraInfo: map[string]string{
+				"report_value": "100",
+			},
+		})
+		assert.Equal(t, 100, cost)
+	})
+}
