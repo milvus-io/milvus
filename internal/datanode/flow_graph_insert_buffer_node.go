@@ -156,6 +156,11 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		}
 		return in
 	}
+	log := log.With(
+		zap.String("channel", ibNode.channelName),
+		zap.Uint64("lastTimestamp", ibNode.lastTimestamp),
+		zap.Uint64("startTs", startPositions[0].Timestamp),
+		zap.Uint64("endTs", endPositions[0].Timestamp))
 
 	if fgMsg.dropCollection {
 		ibNode.flushManager.startDropping()
@@ -176,7 +181,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 
 	if startPositions[0].Timestamp < ibNode.lastTimestamp {
 		// message stream should guarantee that this should not happen
-		log.Fatal("insert buffer node consumed old messages", zap.String("channel", ibNode.channelName), zap.Uint64("timestamp", startPositions[0].Timestamp), zap.Uint64("lastTimestamp", ibNode.lastTimestamp))
+		log.Fatal("insert buffer node consumed old messages")
 	}
 
 	ibNode.lastTimestamp = endPositions[0].Timestamp
@@ -185,7 +190,7 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 	seg2Upload, err := ibNode.addSegmentAndUpdateRowNum(fgMsg.insertMessages, startPositions[0], endPositions[0])
 	if err != nil {
 		// Occurs only if the collectionID is mismatch, should not happen
-		log.Fatal("failed to update segment states in channel meta", zap.String("channelName", ibNode.channelName), zap.Error(err))
+		log.Fatal("failed to update segment states in channel meta", zap.Error(err))
 	}
 
 	// insert messages -> buffer
@@ -194,7 +199,6 @@ func (ibNode *insertBufferNode) Operate(in []Msg) []Msg {
 		if err != nil {
 			// error occurs when missing schema info or data is misaligned, should not happen
 			log.Fatal("insertBufferNode failed to buffer insert msg",
-				zap.String("channelName", ibNode.channelName),
 				zap.Int64("segmentID", msg.SegmentID),
 				zap.Int64("msgID", msg.GetBase().GetMsgID()),
 				zap.Error(err),

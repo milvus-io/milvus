@@ -581,21 +581,21 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 
 	downloadStart := time.Now()
 	for _, s := range t.plan.GetSegmentBinlogs() {
-		// Get the number of field binlog files from non-empty segment
-		var binlogNum int
+		log := log.With(zap.Int64("segmentID", s.GetSegmentID()))
+		// Get the batch count of field binlog files
+		var binlogBatch int
 		for _, b := range s.GetFieldBinlogs() {
 			if b != nil {
-				binlogNum = len(b.GetBinlogs())
+				binlogBatch = len(b.GetBinlogs())
 				break
 			}
 		}
-		// Unable to deal with all empty segments cases, so return error
-		if binlogNum == 0 {
-			log.Warn("compact wrong, all segments' binlogs are empty")
-			return nil, errIllegalCompactionPlan
+		if binlogBatch == 0 {
+			log.Warn("compacting empty segment")
+			continue
 		}
 
-		for idx := 0; idx < binlogNum; idx++ {
+		for idx := 0; idx < binlogBatch; idx++ {
 			var ps []string
 			for _, f := range s.GetFieldBinlogs() {
 				ps = append(ps, f.GetBinlogs()[idx].GetLogPath())
@@ -603,7 +603,6 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 			allPath = append(allPath, ps)
 		}
 
-		segID := s.GetSegmentID()
 		paths := make([]string, 0)
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
@@ -615,11 +614,17 @@ func (t *compactionTask) compact() (*datapb.CompactionResult, error) {
 		if len(paths) != 0 {
 			bs, err := t.download(ctxTimeout, paths)
 			if err != nil {
-				log.Warn("compact download deltalogs wrong", zap.Int64("segment", segID), zap.Strings("path", paths), zap.Error(err))
+				log.Warn("compact download deltalogs wrong", zap.Strings("path", paths), zap.Error(err))
 				return nil, err
 			}
-			dblobs[segID] = append(dblobs[segID], bs...)
+			dblobs[s.GetSegmentID()] = append(dblobs[s.GetSegmentID()], bs...)
 		}
+	}
+
+	// Unable to deal with all empty segments cases, so return error
+	if len(allPath) == 0 {
+		log.Warn("compact wrong, all segments are empty")
+		return nil, errIllegalCompactionPlan
 	}
 
 	log.Info("compact download deltalogs elapse", zap.Duration("elapse", time.Since(downloadStart)))
