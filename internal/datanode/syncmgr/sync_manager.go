@@ -125,6 +125,7 @@ func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
 
 	key, err := task.CalcTargetSegment()
 	if err != nil {
+		task.HandleError(err)
 		return conc.Go(func() (struct{}, error) { return struct{}{}, err })
 	}
 
@@ -146,7 +147,8 @@ func (mgr *syncManager) submit(key int64, task Task) *conc.Future[struct{}] {
 			return err
 		}
 		if targetID == key {
-			task.HandleError(merr.WrapErrServiceInternal("recaluated with same key", fmt.Sprint(targetID)))
+			err = merr.WrapErrServiceInternal("recaluated with same key", fmt.Sprint(targetID))
+			task.HandleError(err)
 			return err
 		}
 		log.Info("task calculated target segment id",
