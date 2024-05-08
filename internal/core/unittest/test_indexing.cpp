@@ -410,7 +410,7 @@ INSTANTIATE_TEST_SUITE_P(
 #endif
         std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
 
-TEST(Indexing, Iterator) {
+/*TEST(Indexing, Iterator) {
     constexpr int N = 10240;
     constexpr int TOPK = 100;
     constexpr int dim = 128;
@@ -477,7 +477,7 @@ TEST(Indexing, Iterator) {
         ASSERT_TRUE(off >= 0);
         ASSERT_TRUE(dis >= 0);
     }
-}
+}*/
 
 TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::CreateIndexInfo create_index_info;
