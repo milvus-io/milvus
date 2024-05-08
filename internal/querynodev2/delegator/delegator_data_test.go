@@ -624,13 +624,13 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		growing0.EXPECT().ID().Return(1)
 		growing0.EXPECT().Partition().Return(10)
 		growing0.EXPECT().Type().Return(segments.SegmentTypeGrowing)
-		growing0.EXPECT().Release()
+		growing0.EXPECT().Release(context.Background())
 
 		growing1 := segments.NewMockSegment(s.T())
 		growing1.EXPECT().ID().Return(2)
 		growing1.EXPECT().Partition().Return(10)
 		growing1.EXPECT().Type().Return(segments.SegmentTypeGrowing)
-		growing1.EXPECT().Release()
+		growing1.EXPECT().Release(context.Background())
 
 		mockErr := merr.WrapErrServiceInternal("mock")
 

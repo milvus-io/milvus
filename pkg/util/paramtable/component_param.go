@@ -2551,7 +2551,7 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 	p.DefaultSegmentFilterRatio = ParamItem{
 		Key:          "queryNode.defaultSegmentFilterRatio",
 		Version:      "2.4.0",
-		DefaultValue: "0.5",
+		DefaultValue: "2",
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
