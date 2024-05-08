@@ -88,6 +88,7 @@ type ProxyClientManagerInterface interface {
 	GetProxyCount() int
 
 	InvalidateCollectionMetaCache(ctx context.Context, request *proxypb.InvalidateCollMetaCacheRequest, opts ...ExpireCacheOpt) error
+	InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) error
 	InvalidateCredentialCache(ctx context.Context, request *proxypb.InvalidateCredCacheRequest) error
 	UpdateCredentialCache(ctx context.Context, request *proxypb.UpdateCredCacheRequest) error
 	RefreshPolicyInfoCache(ctx context.Context, req *proxypb.RefreshPolicyInfoCacheRequest) error
@@ -188,6 +189,11 @@ func (p *ProxyClientManager) InvalidateCollectionMetaCache(ctx context.Context, 
 					log.Warn("InvalidateCollectionMetaCache failed due to proxy service not found", zap.Error(err))
 					return nil
 				}
+
+				if errors.Is(err, merr.ErrServiceUnimplemented) {
+					return nil
+				}
+
 				return fmt.Errorf("InvalidateCollectionMetaCache failed, proxyID = %d, err = %s", k, err)
 			}
 			if sta.ErrorCode != commonpb.ErrorCode_Success {
@@ -362,4 +368,32 @@ func (p *ProxyClientManager) GetComponentStates(ctx context.Context) (map[int64]
 	}
 
 	return states, nil
+}
+
+func (p *ProxyClientManager) InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) error {
+	if p.proxyClient.Len() == 0 {
+		log.Warn("proxy client is empty, InvalidateShardLeaderCache will not send to any client")
+		return nil
+	}
+
+	group := &errgroup.Group{}
+	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
+		k, v := key, value
+		group.Go(func() error {
+			sta, err := v.InvalidateShardLeaderCache(ctx, request)
+			if err != nil {
+				if errors.Is(err, merr.ErrNodeNotFound) {
+					log.Warn("InvalidateShardLeaderCache failed due to proxy service not found", zap.Error(err))
+					return nil
+				}
+				return fmt.Errorf("InvalidateShardLeaderCache failed, proxyID = %d, err = %s", k, err)
+			}
+			if sta.ErrorCode != commonpb.ErrorCode_Success {
+				return fmt.Errorf("InvalidateShardLeaderCache failed, proxyID = %d, err = %s", k, sta.Reason)
+			}
+			return nil
+		})
+		return true
+	})
+	return group.Wait()
 }

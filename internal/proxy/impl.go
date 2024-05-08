@@ -172,6 +172,29 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	return merr.Success(), nil
 }
 
+// InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
+func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	ctx = logutil.WithModule(ctx, moduleName)
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateShardLeaderCache")
+	defer sp.End()
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
+
+	log.Info("received request to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
+
+	if globalMetaCache != nil {
+		globalMetaCache.InvalidateShardLeaderCache(request.GetCollectionIDs())
+	}
+	log.Info("complete to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
+
+	return merr.Success(), nil
+}
+
 func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil

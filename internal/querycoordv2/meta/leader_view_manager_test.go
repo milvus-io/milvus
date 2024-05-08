@@ -208,6 +208,58 @@ func (suite *LeaderViewManagerSuite) TestClone() {
 	}
 }
 
+func (suite *LeaderViewManagerSuite) TestNotifyDelegatorChanges() {
+	mgr := NewLeaderViewManager()
+
+	oldViews := []*LeaderView{
+		{
+			ID:           1,
+			CollectionID: 100,
+			Channel:      "test-channel-1",
+		},
+		{
+			ID:           1,
+			CollectionID: 101,
+			Channel:      "test-channel-2",
+		},
+		{
+			ID:           1,
+			CollectionID: 102,
+			Channel:      "test-channel-3",
+		},
+	}
+	mgr.Update(1, oldViews...)
+
+	newViews := []*LeaderView{
+		{
+			ID:           1,
+			CollectionID: 101,
+			Channel:      "test-channel-2",
+		},
+		{
+			ID:           1,
+			CollectionID: 102,
+			Channel:      "test-channel-3",
+		},
+		{
+			ID:           1,
+			CollectionID: 103,
+			Channel:      "test-channel-4",
+		},
+	}
+
+	updateCollections := make([]int64, 0)
+	mgr.SetNotifyFunc(func(collectionIDs ...int64) {
+		updateCollections = append(updateCollections, collectionIDs...)
+	})
+
+	mgr.Update(1, newViews...)
+
+	suite.Equal(2, len(updateCollections))
+	suite.Contains(updateCollections, int64(100))
+	suite.Contains(updateCollections, int64(103))
+}
+
 func TestLeaderViewManager(t *testing.T) {
 	suite.Run(t, new(LeaderViewManagerSuite))
 }
