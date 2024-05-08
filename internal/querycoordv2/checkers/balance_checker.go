@@ -113,10 +113,12 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 		return stoppingReplicas
 	}
 
-	// no stopping balance and auto balance is disabled, return empty collections for balance
-	if !Params.QueryCoordCfg.AutoBalance.GetAsBool() {
+	// 1. if auto balance is disabled, return empty collections for balance
+	// 2. when balancer isn't active, skip auto balance
+	if !Params.QueryCoordCfg.AutoBalance.GetAsBool() || !b.IsActive() {
 		return nil
 	}
+
 	// scheduler is handling segment task, skip
 	if b.scheduler.GetSegmentTaskNum() != 0 {
 		return nil
@@ -165,9 +167,6 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 }
 
 func (b *BalanceChecker) Check(ctx context.Context) []task.Task {
-	if !b.IsActive() {
-		return nil
-	}
 	ret := make([]task.Task, 0)
 
 	replicasToBalance := b.replicasToBalance()
