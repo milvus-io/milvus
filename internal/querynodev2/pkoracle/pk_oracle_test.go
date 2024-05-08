@@ -37,7 +37,7 @@ func TestGet(t *testing.T) {
 		pks = append(pks, pk)
 	}
 
-	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
+	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Growing)
 	bfs.UpdateBloomFilter(pks)
 	pko.Register(bfs, 1)
 

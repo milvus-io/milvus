@@ -22,8 +22,6 @@ import (
 	"sync"
 
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // PkOracle interface for pk oracle.
@@ -42,52 +40,35 @@ var _ PkOracle = (*pkOracle)(nil)
 
 // pkOracle implementation.
 type pkOracle struct {
-	candidates *typeutil.ConcurrentMap[string, candidateWithWorker]
+	candidates map[string]candidateWithWorker
 
-	hashFuncNumMutex sync.RWMutex
-	maxHashFuncNum   uint
+	candidatesMutex sync.RWMutex
+	maxHashFuncNum  uint
 }
 
 func (pko *pkOracle) GetMaxHashFuncNum() uint {
-	pko.hashFuncNumMutex.RLock()
-	defer pko.hashFuncNumMutex.RUnlock()
 	return pko.maxHashFuncNum
-}
-
-func (pko *pkOracle) TryUpdateHashFuncNum(newValue uint) {
-	pko.hashFuncNumMutex.Lock()
-	defer pko.hashFuncNumMutex.Unlock()
-	if newValue > pko.maxHashFuncNum {
-		pko.maxHashFuncNum = newValue
-	}
 }
 
 // Get implements PkOracle.
 func (pko *pkOracle) Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]int64, error) {
 	var result []int64
-	var locations []uint64
 
-	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
+	pko.candidatesMutex.RLock()
+	defer pko.candidatesMutex.RUnlock()
+	locations := storage.Locations(pk, pko.GetMaxHashFuncNum())
+
+	for _, candidate := range pko.candidates {
 		for _, filter := range filters {
 			if !filter(candidate) {
-				return true
-			}
-		}
-
-		if locations == nil {
-			locations = storage.Locations(pk, pko.GetMaxHashFuncNum())
-			if len(locations) == 0 {
-				log.Warn("pkOracle: no location found for pk")
-				return true
+				continue
 			}
 		}
 
 		if candidate.TestLocations(pk, locations) {
 			result = append(result, candidate.ID())
 		}
-		return true
-	})
-
+	}
 	return result, nil
 }
 
@@ -97,44 +78,57 @@ func (pko *pkOracle) candidateKey(candidate Candidate, workerID int64) string {
 
 // Register register candidate
 func (pko *pkOracle) Register(candidate Candidate, workerID int64) error {
-	pko.TryUpdateHashFuncNum(candidate.GetHashFuncNum())
-	pko.candidates.Insert(pko.candidateKey(candidate, workerID), candidateWithWorker{
+	pko.candidatesMutex.Lock()
+	defer pko.candidatesMutex.Unlock()
+
+	pko.candidates[pko.candidateKey(candidate, workerID)] = candidateWithWorker{
 		Candidate: candidate,
 		workerID:  workerID,
-	})
+	}
+	if candidate.GetHashFuncNum() > pko.maxHashFuncNum {
+		pko.maxHashFuncNum = candidate.GetHashFuncNum()
+	}
 
 	return nil
 }
 
 // Remove removes candidate from pko.
 func (pko *pkOracle) Remove(filters ...CandidateFilter) error {
+	pko.candidatesMutex.Lock()
+	defer pko.candidatesMutex.Unlock()
+
 	max := uint(0)
-	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
+
+	for _, candidate := range pko.candidates {
+		toRemove := true
 		for _, filter := range filters {
 			if !filter(candidate) {
-				return true
+				toRemove = false
+				break
 			}
 		}
-		pko.candidates.GetAndRemove(pko.candidateKey(candidate, candidate.workerID))
-		if candidate.GetHashFuncNum() > max {
-			max = candidate.GetHashFuncNum()
+		if toRemove {
+			delete(pko.candidates, pko.candidateKey(candidate, candidate.workerID))
+		} else {
+			if candidate.GetHashFuncNum() > max {
+				max = candidate.GetHashFuncNum()
+			}
 		}
-
-		return true
-	})
-
-	pko.TryUpdateHashFuncNum(max)
+	}
+	pko.maxHashFuncNum = max
 	return nil
 }
 
 func (pko *pkOracle) Exists(candidate Candidate, workerID int64) bool {
-	_, ok := pko.candidates.Get(pko.candidateKey(candidate, workerID))
+	pko.candidatesMutex.Lock()
+	defer pko.candidatesMutex.Unlock()
+	_, ok := pko.candidates[pko.candidateKey(candidate, workerID)]
 	return ok
 }
 
 // NewPkOracle returns pkOracle as PkOracle interface.
 func NewPkOracle() PkOracle {
 	return &pkOracle{
-		candidates: typeutil.NewConcurrentMap[string, candidateWithWorker](),
+		candidates: make(map[string]candidateWithWorker),
 	}
 }

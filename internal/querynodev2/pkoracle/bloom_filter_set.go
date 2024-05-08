@@ -6,21 +6,19 @@
 // "License"); you may not use this file except in compliance
 // with the License. You may obtain a copy of the License at
 //
-//     http://www.apache.org/licenses/LICENSE-2.0
+//	http://www.apache.org/licenses/LICENSE-2.0
 //
 // Unless required by applicable law or agreed to in writing, software
 // distributed under the License is distributed on an "AS IS" BASIS,
 // WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 // See the License for the specific language governing permissions and
 // limitations under the License.
-
 package pkoracle
 
 import (
-	"context"
 	"sync"
 
-	bloom "github.com/bits-and-blooms/bloom/v3"
+	"github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -37,7 +35,7 @@ var _ Candidate = (*BloomFilterSet)(nil)
 type BloomFilterSet struct {
 	statsMutex   sync.RWMutex
 	segmentID    int64
-	paritionID   int64
+	partitionID  int64
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
@@ -47,6 +45,17 @@ type BloomFilterSet struct {
 
 // MayPkExist returns whether any bloom filters returns positive.
 func (s *BloomFilterSet) MayPkExist(pk storage.PrimaryKey) bool {
+	// fast path for sealed segment, avoid read lock
+	if s.segType != commonpb.SegmentState_Growing {
+		for _, historyStat := range s.historyStats {
+			if historyStat.PkExist(pk) {
+				return true
+			}
+		}
+		return false
+	}
+
+	// for mutable bf, need to lock to avoid roll bf and update bf
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 	if s.currentStat != nil && s.currentStat.PkExist(pk) {
@@ -63,36 +72,28 @@ func (s *BloomFilterSet) MayPkExist(pk storage.PrimaryKey) bool {
 }
 
 func (s *BloomFilterSet) TestLocations(pk storage.PrimaryKey, locs []uint64) bool {
-	log := log.Ctx(context.TODO()).WithRateGroup("BloomFilterSet.TestLocations", 1, 60)
+	// fast path for sealed segment, avoid read lock
+	if s.segType != commonpb.SegmentState_Growing {
+		for _, historyStat := range s.historyStats {
+			if historyStat.TestLocations(pk, locs) {
+				return true
+			}
+		}
+		return false
+	}
+
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 
 	if s.currentStat != nil {
-		k := s.currentStat.PkFilter.K()
-		if k > uint(len(locs)) {
-			log.RatedWarn(30, "locations num is less than hash func num, return false positive result",
-				zap.Int("locationNum", len(locs)),
-				zap.Uint("hashFuncNum", k),
-				zap.Int64("segmentID", s.segmentID))
-			return true
-		}
-
-		if s.currentStat.TestLocations(pk, locs[:k]) {
+		if s.currentStat.TestLocations(pk, locs) {
 			return true
 		}
 	}
 
 	// for sealed, if one of the stats shows it exist, then we have to check it
 	for _, historyStat := range s.historyStats {
-		k := historyStat.PkFilter.K()
-		if k > uint(len(locs)) {
-			log.RatedWarn(30, "locations num is less than hash func num, return false positive result",
-				zap.Int("locationNum", len(locs)),
-				zap.Uint("hashFuncNum", k),
-				zap.Int64("segmentID", s.segmentID))
-			return true
-		}
-		if historyStat.TestLocations(pk, locs[:k]) {
+		if historyStat.TestLocations(pk, locs) {
 			return true
 		}
 	}
@@ -110,7 +111,7 @@ func (s *BloomFilterSet) ID() int64 {
 
 // Partition implements candidate.
 func (s *BloomFilterSet) Partition() int64 {
-	return s.paritionID
+	return s.partitionID
 }
 
 // Type implements candidate.
@@ -164,11 +165,11 @@ func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 }
 
 // NewBloomFilterSet returns a new BloomFilterSet.
-func NewBloomFilterSet(segmentID int64, paritionID int64, segType commonpb.SegmentState) *BloomFilterSet {
+func NewBloomFilterSet(segmentID int64, partitionID int64, segType commonpb.SegmentState) *BloomFilterSet {
 	bfs := &BloomFilterSet{
-		segmentID:  segmentID,
-		paritionID: paritionID,
-		segType:    segType,
+		segmentID:   segmentID,
+		partitionID: partitionID,
+		segType:     segType,
 	}
 	// does not need to init current
 	return bfs
