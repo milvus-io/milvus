@@ -93,9 +93,9 @@ func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
 }
 
 func (s *Server) getUnIndexTaskSegments() []*SegmentInfo {
-	flushedSegments := s.meta.SelectSegments(func(seg *SegmentInfo) bool {
+	flushedSegments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
 		return isFlush(seg)
-	})
+	}))
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
@@ -127,9 +127,9 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case collectionID := <-s.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
-			segments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
-				return isFlush(info) && collectionID == info.CollectionID
-			})
+			segments := s.meta.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+				return isFlush(info)
+			}))
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(segment); err != nil {
 					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
@@ -396,9 +396,9 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 
 	indexInfo := &indexpb.IndexInfo{}
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
+	}))
 
 	s.completeIndexInfo(indexInfo, indexes[0], segments, false, indexes[0].CreateTime)
 	ret.State = indexInfo.State
@@ -448,10 +448,10 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	return ret, nil
 }
 
-func (s *Server) selectSegmentIndexesStats(selector SegmentInfoSelector) map[int64]*indexStats {
+func (s *Server) selectSegmentIndexesStats(filters ...SegmentFilter) map[int64]*indexStats {
 	ret := make(map[int64]*indexStats)
 
-	segments := s.meta.SelectSegments(selector)
+	segments := s.meta.SelectSegments(filters...)
 	segmentIDs := lo.Map(segments, func(info *SegmentInfo, i int) int64 {
 		return info.GetID()
 	})
@@ -647,9 +647,9 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
+	}))
 
 	s.completeIndexInfo(indexInfo, indexes[0], segments, false, indexes[0].CreateTime)
 	log.Info("GetIndexBuildProgress success", zap.Int64("collectionID", req.GetCollectionID()),
@@ -700,9 +700,9 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
+	}))
 
 	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {
@@ -759,9 +759,9 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
+	}))
 
 	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {
