@@ -478,7 +478,7 @@ func (s *AssignByCountPolicySuite) TestWithoutUnassignedChannels() {
 		opSet := AvgAssignByCountPolicy(s.curCluster, nil, nil)
 		s.NotNil(opSet)
 
-		s.Equal(2, opSet.GetChannelNumber())
+		s.Equal(2, opSet.Len())
 		for _, op := range opSet.Collect() {
 			s.True(lo.Contains([]int64{1, 2}, op.NodeID))
 		}
