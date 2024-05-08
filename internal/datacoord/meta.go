@@ -1397,7 +1397,7 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 		return err
 	}
 	delete(m.channelCPs.checkpoints, vChannel)
-	log.Debug("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
+	log.Info("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }
 
