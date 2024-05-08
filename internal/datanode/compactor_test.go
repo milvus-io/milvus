@@ -778,6 +778,31 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		Deltalogs:           nil,
 	}}
 	paramtable.Get().Save(Params.CommonCfg.EntityExpirationTTL.Key, "0") // Turn off auto expiration
+	t.Run("Test compact with all segment empty", func(t *testing.T) {
+		alloc := allocator.NewMockAllocator(t)
+		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
+		ctx, cancel := context.WithCancel(context.TODO())
+
+		mockSyncmgr := syncmgr.NewMockSyncManager(t)
+		mockSyncmgr.EXPECT().Block(mock.Anything).Return()
+		task := &compactionTask{
+			ctx:       ctx,
+			cancel:    cancel,
+			Allocator: alloc,
+			done:      make(chan struct{}, 1),
+			tr:        timerecord.NewTimeRecorder("test"),
+			syncMgr:   mockSyncmgr,
+			plan: &datapb.CompactionPlan{
+				PlanID:           999,
+				SegmentBinlogs:   []*datapb.CompactionSegmentBinlogs{{SegmentID: 100}},
+				TimeoutInSeconds: 10,
+				Type:             datapb.CompactionType_MixCompaction,
+			},
+		}
+
+		_, err := task.compact()
+		assert.ErrorIs(t, errIllegalCompactionPlan, err)
+	})
 
 	t.Run("Test compact invalid empty segment binlogs", func(t *testing.T) {
 		plan := &datapb.CompactionPlan{
@@ -894,16 +919,17 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				NumOfRows:    2,
 			}, bfs)
 
-			metaCache.EXPECT().GetSegmentByID(mock.Anything).RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-				switch id {
-				case c.segID1:
-					return seg1, true
-				case c.segID2:
-					return seg2, true
-				default:
-					return nil, false
-				}
-			})
+			bfs = metacache.NewBloomFilterSet()
+			seg3 := metacache.NewSegmentInfo(&datapb.SegmentInfo{
+				CollectionID: c.colID,
+				PartitionID:  c.parID,
+				ID:           99999,
+			}, bfs)
+
+			metaCache.EXPECT().GetSegmentByID(c.segID1).Return(seg1, true)
+			metaCache.EXPECT().GetSegmentByID(c.segID2).Return(seg2, true)
+			metaCache.EXPECT().GetSegmentByID(seg3.SegmentID()).Return(seg3, true)
+			metaCache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false)
 
 			iData1 := genInsertDataWithPKs(c.pks1, c.pkType)
 			dData1 := &DeleteData{
@@ -952,6 +978,9 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 						FieldBinlogs:        lo.Values(iPaths2),
 						Field2StatslogPaths: lo.Values(sPaths2),
 						Deltalogs:           dPaths2,
+					},
+					{
+						SegmentID: seg3.SegmentID(), // empty segment
 					},
 				},
 				StartTime:        0,
