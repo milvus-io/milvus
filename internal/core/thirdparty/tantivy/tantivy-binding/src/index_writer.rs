@@ -99,6 +99,8 @@ impl IndexWriterWrapper {
     }
 
     pub fn finish(mut self) {
-        self.index_writer.finalize().expect("failed to build inverted index");
+        self.index_writer
+            .finalize()
+            .expect("failed to build inverted index");
     }
 }
