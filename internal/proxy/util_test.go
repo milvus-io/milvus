@@ -1104,6 +1104,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 }
 
 func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
+	paramtable.Init()
 	var err error
 
 	// schema is empty, though won't happen in system
@@ -1381,6 +1382,93 @@ func Test_InsertTaskfillFieldsDataBySchema(t *testing.T) {
 	err = fillFieldsDataBySchema(case8.schema, case8.insertMsg)
 	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	assert.Equal(t, len(case8.insertMsg.FieldsData), 0)
+
+	// skip the auto id
+	case9 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_fillFieldsDataBySchema",
+			Description: "TestInsertTask_fillFieldsDataBySchema",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "a",
+					AutoID:       true,
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					Name:     "b",
+					AutoID:   false,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: msgpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "a",
+						Type:      schemapb.DataType_Int64,
+					},
+					{
+						FieldName: "b",
+						Type:      schemapb.DataType_Int64,
+					},
+				},
+			},
+		},
+	}
+
+	err = fillFieldsDataBySchema(case9.schema, case9.insertMsg)
+	assert.ErrorIs(t, merr.ErrParameterInvalid, err)
+	assert.Equal(t, len(case9.insertMsg.FieldsData), 2)
+
+	paramtable.Get().Save(Params.ProxyCfg.SkipAutoIDCheck.Key, "true")
+	case10 := insertTask{
+		schema: &schemapb.CollectionSchema{
+			Name:        "TestInsertTask_fillFieldsDataBySchema",
+			Description: "TestInsertTask_fillFieldsDataBySchema",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "a",
+					AutoID:       true,
+					IsPrimaryKey: true,
+					DataType:     schemapb.DataType_Int64,
+				},
+				{
+					Name:     "b",
+					AutoID:   false,
+					DataType: schemapb.DataType_Int64,
+				},
+			},
+		},
+		insertMsg: &BaseInsertTask{
+			InsertRequest: msgpb.InsertRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_Insert,
+				},
+				FieldsData: []*schemapb.FieldData{
+					{
+						FieldName: "a",
+						Type:      schemapb.DataType_Int64,
+					},
+					{
+						FieldName: "b",
+						Type:      schemapb.DataType_Int64,
+					},
+				},
+			},
+		},
+	}
+
+	err = fillFieldsDataBySchema(case10.schema, case10.insertMsg)
+	assert.NoError(t, err)
+	assert.Equal(t, len(case10.insertMsg.FieldsData), 2)
+	paramtable.Get().Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)
 }
 
 func Test_InsertTaskCheckPrimaryFieldData(t *testing.T) {
