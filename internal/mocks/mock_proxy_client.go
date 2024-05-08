@@ -632,6 +632,76 @@ func (_c *MockProxyClient_InvalidateCredentialCache_Call) RunAndReturn(run func(
 	return _c
 }
 
+// InvalidateShardLeaderCache provides a mock function with given fields: ctx, in, opts
+func (_m *MockProxyClient) InvalidateShardLeaderCache(ctx context.Context, in *proxypb.InvalidateShardLeaderCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest, ...grpc.CallOption) (*commonpb.Status, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest, ...grpc.CallOption) *commonpb.Status); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxyClient_InvalidateShardLeaderCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InvalidateShardLeaderCache'
+type MockProxyClient_InvalidateShardLeaderCache_Call struct {
+	*mock.Call
+}
+
+// InvalidateShardLeaderCache is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *proxypb.InvalidateShardLeaderCacheRequest
+//   - opts ...grpc.CallOption
+func (_e *MockProxyClient_Expecter) InvalidateShardLeaderCache(ctx interface{}, in interface{}, opts ...interface{}) *MockProxyClient_InvalidateShardLeaderCache_Call {
+	return &MockProxyClient_InvalidateShardLeaderCache_Call{Call: _e.mock.On("InvalidateShardLeaderCache",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockProxyClient_InvalidateShardLeaderCache_Call) Run(run func(ctx context.Context, in *proxypb.InvalidateShardLeaderCacheRequest, opts ...grpc.CallOption)) *MockProxyClient_InvalidateShardLeaderCache_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*proxypb.InvalidateShardLeaderCacheRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockProxyClient_InvalidateShardLeaderCache_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxyClient_InvalidateShardLeaderCache_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxyClient_InvalidateShardLeaderCache_Call) RunAndReturn(run func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest, ...grpc.CallOption) (*commonpb.Status, error)) *MockProxyClient_InvalidateShardLeaderCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ListClientInfos provides a mock function with given fields: ctx, in, opts
 func (_m *MockProxyClient) ListClientInfos(ctx context.Context, in *proxypb.ListClientInfosRequest, opts ...grpc.CallOption) (*proxypb.ListClientInfosResponse, error) {
 	_va := make([]interface{}, len(opts))

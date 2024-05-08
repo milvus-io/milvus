@@ -216,3 +216,9 @@ func (c *Client) ListImports(ctx context.Context, req *internalpb.ListImportsReq
 		return client.ListImports(ctx, req)
 	})
 }
+
+func (c *Client) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.InvalidateShardLeaderCacheRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client proxypb.ProxyClient) (*commonpb.Status, error) {
+		return client.InvalidateShardLeaderCache(ctx, req)
+	})
+}

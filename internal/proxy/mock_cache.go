@@ -952,6 +952,39 @@ func (_c *MockCache_InitPolicyInfo_Call) RunAndReturn(run func([]string, []strin
 	return _c
 }
 
+// InvalidateShardLeaderCache provides a mock function with given fields: collections
+func (_m *MockCache) InvalidateShardLeaderCache(collections []int64) {
+	_m.Called(collections)
+}
+
+// MockCache_InvalidateShardLeaderCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InvalidateShardLeaderCache'
+type MockCache_InvalidateShardLeaderCache_Call struct {
+	*mock.Call
+}
+
+// InvalidateShardLeaderCache is a helper method to define mock.On call
+//   - collections []int64
+func (_e *MockCache_Expecter) InvalidateShardLeaderCache(collections interface{}) *MockCache_InvalidateShardLeaderCache_Call {
+	return &MockCache_InvalidateShardLeaderCache_Call{Call: _e.mock.On("InvalidateShardLeaderCache", collections)}
+}
+
+func (_c *MockCache_InvalidateShardLeaderCache_Call) Run(run func(collections []int64)) *MockCache_InvalidateShardLeaderCache_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockCache_InvalidateShardLeaderCache_Call) Return() *MockCache_InvalidateShardLeaderCache_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockCache_InvalidateShardLeaderCache_Call) RunAndReturn(run func([]int64)) *MockCache_InvalidateShardLeaderCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // RefreshPolicyInfo provides a mock function with given fields: op
 func (_m *MockCache) RefreshPolicyInfo(op typeutil.CacheOp) error {
 	ret := _m.Called(op)
