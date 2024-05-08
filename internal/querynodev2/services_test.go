@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -72,6 +73,8 @@ type ServiceSuite struct {
 	// Test channel
 	vchannel string
 	pchannel string
+	channel  metautil.Channel
+	mapper   metautil.ChannelMapper
 	position *msgpb.MsgPosition
 
 	// Dependency
@@ -100,9 +103,14 @@ func (suite *ServiceSuite) SetupSuite() {
 	suite.flushedSegmentIDs = []int64{4, 5, 6}
 	suite.droppedSegmentIDs = []int64{7, 8, 9}
 
+	var err error
+	suite.mapper = metautil.NewDynChannelMapper()
 	// channel data
-	suite.vchannel = "test-channel"
+	suite.vchannel = "by-dev-rootcoord-dml_0_111v0"
 	suite.pchannel = funcutil.ToPhysicalChannel(suite.vchannel)
+	suite.channel, err = metautil.ParseChannel(suite.vchannel, suite.mapper)
+	suite.Require().NoError(err)
+
 	suite.position = &msgpb.MsgPosition{
 		ChannelName: suite.vchannel,
 		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -160,7 +168,6 @@ func (suite *ServiceSuite) TearDownTest() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
 	suite.node.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
-
 	suite.node.Stop()
 	suite.etcdClient.Close()
 }
@@ -473,10 +480,10 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	l0Segment.EXPECT().Level().Return(datapb.SegmentLevel_L0)
 	l0Segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
 	l0Segment.EXPECT().Indexes().Return(nil)
-	l0Segment.EXPECT().Shard().Return(suite.vchannel)
-	l0Segment.EXPECT().Release().Return()
+	l0Segment.EXPECT().Shard().Return(suite.channel)
+	l0Segment.EXPECT().Release(ctx).Return()
 
-	suite.node.manager.Segment.Put(segments.SegmentTypeSealed, l0Segment)
+	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeSealed, l0Segment)
 
 	// data
 	req := &querypb.UnsubDmChannelRequest{
@@ -1356,6 +1363,48 @@ func (suite *ServiceSuite) TestSearchSegments_Normal() {
 
 		DmlChannels:     []string{suite.vchannel},
 		TotalChannelNum: 2,
+	}
+	suite.NoError(err)
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestStreamingSearch() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	suite.TestLoadSegments_Int64()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key, "true")
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	req := &querypb.SearchRequest{
+		Req:             creq,
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
+		SegmentIDs:      suite.validSegmentIDs,
+		Scope:           querypb.DataScope_Historical,
+	}
+	suite.NoError(err)
+
+	rsp, err := suite.node.SearchSegments(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, rsp.GetStatus().GetErrorCode())
+}
+
+func (suite *ServiceSuite) TestStreamingSearchGrowing() {
+	ctx := context.Background()
+	// pre
+	suite.TestWatchDmChannelsInt64()
+	paramtable.Get().Save(paramtable.Get().QueryNodeCfg.UseStreamComputing.Key, "true")
+	creq, err := suite.genCSearchRequest(10, schemapb.DataType_FloatVector, 107, defaultMetricType)
+	req := &querypb.SearchRequest{
+		Req:             creq,
+		FromShardLeader: true,
+		DmlChannels:     []string{suite.vchannel},
+		TotalChannelNum: 2,
+		Scope:           querypb.DataScope_Streaming,
 	}
 	suite.NoError(err)
 

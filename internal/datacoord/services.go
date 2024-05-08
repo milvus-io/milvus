@@ -1249,20 +1249,14 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := &channelMeta{
-			Name:            channelName,
-			CollectionID:    req.GetCollectionID(),
-			StartPositions:  req.GetStartPositions(),
-			Schema:          req.GetSchema(),
-			CreateTimestamp: req.GetCreateTimestamp(),
-		}
+		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp())
 		err := s.channelManager.Watch(ctx, ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		if err := s.meta.catalog.MarkChannelAdded(ctx, ch.Name); err != nil {
+		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			log.Error("failed to mark channel added", zap.Error(err))
 			resp.Status = merr.Status(err)

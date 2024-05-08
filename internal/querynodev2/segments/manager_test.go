@@ -34,7 +34,7 @@ func (s *ManagerSuite) SetupSuite() {
 	s.segmentIDs = []int64{1, 2, 3, 4}
 	s.collectionIDs = []int64{100, 200, 300, 400}
 	s.partitionIDs = []int64{10, 11, 12, 13}
-	s.channels = []string{"dml1", "dml2", "dml3", "dml4"}
+	s.channels = []string{"by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_200v0", "by-dev-rootcoord-dml_2_300v0", "by-dev-rootcoord-dml_3_400v0"}
 	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed, SegmentTypeSealed}
 	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
 }
@@ -62,7 +62,7 @@ func (s *ManagerSuite) SetupTest() {
 		s.Require().NoError(err)
 		s.segments = append(s.segments, segment)
 
-		s.mgr.Put(s.types[i], segment)
+		s.mgr.Put(context.Background(), s.types[i], segment)
 	}
 }
 
@@ -82,7 +82,7 @@ func (s *ManagerSuite) TestGetBy() {
 		segments := s.mgr.GetBy(WithType(typ))
 		s.Contains(lo.Map(segments, func(segment Segment, _ int) int64 { return segment.ID() }), s.segmentIDs[i])
 	}
-	s.mgr.Clear()
+	s.mgr.Clear(context.Background())
 
 	for _, typ := range s.types {
 		segments := s.mgr.GetBy(WithType(typ))
@@ -101,7 +101,7 @@ func (s *ManagerSuite) TestRemoveGrowing() {
 	for i, id := range s.segmentIDs {
 		isGrowing := s.types[i] == SegmentTypeGrowing
 
-		s.mgr.Remove(id, querypb.DataScope_Streaming)
+		s.mgr.Remove(context.Background(), id, querypb.DataScope_Streaming)
 		s.Equal(s.mgr.Get(id) == nil, isGrowing)
 	}
 }
@@ -110,21 +110,21 @@ func (s *ManagerSuite) TestRemoveSealed() {
 	for i, id := range s.segmentIDs {
 		isSealed := s.types[i] == SegmentTypeSealed
 
-		s.mgr.Remove(id, querypb.DataScope_Historical)
+		s.mgr.Remove(context.Background(), id, querypb.DataScope_Historical)
 		s.Equal(s.mgr.Get(id) == nil, isSealed)
 	}
 }
 
 func (s *ManagerSuite) TestRemoveAll() {
 	for _, id := range s.segmentIDs {
-		s.mgr.Remove(id, querypb.DataScope_All)
+		s.mgr.Remove(context.Background(), id, querypb.DataScope_All)
 		s.Nil(s.mgr.Get(id))
 	}
 }
 
 func (s *ManagerSuite) TestRemoveBy() {
 	for _, id := range s.segmentIDs {
-		s.mgr.RemoveBy(WithID(id))
+		s.mgr.RemoveBy(context.Background(), WithID(id))
 		s.Nil(s.mgr.Get(id))
 	}
 }

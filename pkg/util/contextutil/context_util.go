@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"google.golang.org/grpc/metadata"
 
@@ -89,4 +90,34 @@ func GetAuthInfoFromContext(ctx context.Context) (string, string, error) {
 	// username: secrets[0]
 	// password: secrets[1]
 	return secrets[0], secrets[1], nil
+}
+
+// TODO: use context.WithTimeoutCause instead in go 1.21.0, then deprecated this function
+// !!! We cannot keep same implementation with context.WithDeadlineCause.
+// if cancel happens, context.WithTimeoutCause will return context.Err() == context.Timeout and context.Cause(ctx) == err.
+// if cancel happens, WithTimeoutCause will return context.Err() == context.Canceled and context.Cause(ctx) == err.
+func WithTimeoutCause(parent context.Context, timeout time.Duration, err error) (context.Context, context.CancelFunc) {
+	return WithDeadlineCause(parent, time.Now().Add(timeout), err)
+}
+
+// TODO: use context.WithDeadlineCause instead in go 1.21.0, then deprecated this function
+// !!! We cannot keep same implementation with context.WithDeadlineCause.
+// if cancel happens, context.WithDeadlineCause will return context.Err() == context.DeadlineExceeded and context.Cause(ctx) == err.
+// if cancel happens, WithDeadlineCause will return context.Err() == context.Canceled and context.Cause(ctx) == err.
+func WithDeadlineCause(parent context.Context, deadline time.Time, err error) (context.Context, context.CancelFunc) {
+	if parent == nil {
+		panic("cannot create context from nil parent")
+	}
+	if parentDeadline, ok := parent.Deadline(); ok && parentDeadline.Before(deadline) {
+		// The current deadline is already sooner than the new one.
+		return context.WithCancel(parent)
+	}
+	ctx, cancel := context.WithCancelCause(parent)
+	time.AfterFunc(time.Until(deadline), func() {
+		cancel(err)
+	})
+
+	return ctx, func() {
+		cancel(context.Canceled)
+	}
 }

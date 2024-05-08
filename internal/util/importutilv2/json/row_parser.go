@@ -49,9 +49,12 @@ func NewRowParser(schema *schemapb.CollectionSchema) (RowParser, error) {
 	if err != nil {
 		return nil, err
 	}
-	dim, err := typeutil.GetDim(vecField)
-	if err != nil {
-		return nil, err
+	dim := int64(0)
+	if typeutil.IsVectorType(vecField.DataType) && !typeutil.IsSparseFloatVectorType(vecField.DataType) {
+		dim, err = typeutil.GetDim(vecField)
+		if err != nil {
+			return nil, err
+		}
 	}
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
 	if err != nil {
@@ -309,6 +312,27 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		}
 		if len(arr) != r.dim*2 {
 			return nil, r.wrapDimError(len(arr)/2, fieldID)
+		}
+		vec := make([]byte, len(arr))
+		for i := 0; i < len(arr); i++ {
+			value, ok := arr[i].(json.Number)
+			if !ok {
+				return nil, r.wrapTypeError(arr[i], fieldID)
+			}
+			num, err := strconv.ParseUint(value.String(), 0, 8)
+			if err != nil {
+				return nil, err
+			}
+			vec[i] = byte(num)
+		}
+		return vec, nil
+	case schemapb.DataType_SparseFloatVector:
+		arr, ok := obj.([]interface{})
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		if len(arr)%8 != 0 {
+			return nil, r.wrapDimError(len(arr), fieldID)
 		}
 		vec := make([]byte, len(arr))
 		for i := 0; i < len(arr); i++ {

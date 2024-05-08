@@ -24,15 +24,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-type LoadStatus string
-
-const (
-	LoadStatusMeta     LoadStatus = "meta"
-	LoadStatusMapped   LoadStatus = "mapped"
-	LoadStatusInMemory LoadStatus = "in_memory"
 )
 
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
@@ -54,13 +47,12 @@ type Segment interface {
 	ResourceGroup() string
 	Collection() int64
 	Partition() int64
-	Shard() string
+	Shard() metautil.Channel
 	Version() int64
 	CASVersion(int64, int64) bool
 	StartPosition() *msgpb.MsgPosition
 	Type() SegmentType
 	Level() datapb.SegmentLevel
-	LoadStatus() LoadStatus
 	LoadInfo() *querypb.SegmentLoadInfo
 	// PinIfNotReleased the segment to prevent it from being released
 	PinIfNotReleased() error
@@ -87,11 +79,13 @@ type Segment interface {
 	Delete(ctx context.Context, primaryKeys []storage.PrimaryKey, timestamps []typeutil.Timestamp) error
 	LoadDeltaData(ctx context.Context, deltaData *storage.DeleteData) error
 	LastDeltaTimestamp() uint64
-	Release(opts ...releaseOption)
+	Release(ctx context.Context, opts ...releaseOption)
 
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(pk storage.PrimaryKey) bool
+	TestLocations(pk storage.PrimaryKey, loc []uint64) bool
+	GetHashFuncNum() uint
 
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)
@@ -99,4 +93,8 @@ type Segment interface {
 	RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error)
 	IsLazyLoad() bool
 	ResetIndexesLazyLoad(lazyState bool)
+
+	// lazy load related
+	NeedUpdatedVersion() int64
+	RemoveUnusedFieldFiles() error
 }

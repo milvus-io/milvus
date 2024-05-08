@@ -727,8 +727,8 @@ TEST(AlwaysTrueStringPlan, QueryWithOutputFields) {
 
     Timestamp time = MAX_TIMESTAMP;
 
-    auto retrieved =
-        segment->Retrieve(plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieved = segment->Retrieve(
+        nullptr, plan.get(), time, DEFAULT_MAX_OUTPUT_SIZE, false);
     ASSERT_EQ(retrieved->ids().str_id().data().size(), N);
     ASSERT_EQ(retrieved->offset().size(), N);
     ASSERT_EQ(retrieved->fields_data().size(), 1);

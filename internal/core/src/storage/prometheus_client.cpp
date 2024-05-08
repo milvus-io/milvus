@@ -148,6 +148,24 @@ DEFINE_PROMETHEUS_COUNTER(internal_storage_op_count_remove_fail,
                           internal_storage_op_count,
                           removeFailMap)
 
+//load metrics
+std::map<std::string, std::string> downloadDurationLabels{{"type", "download"}};
+std::map<std::string, std::string> writeDiskDurationLabels{
+    {"type", "write_disk"}};
+std::map<std::string, std::string> deserializeDurationLabels{
+    {"type", "deserialize"}};
+DEFINE_PROMETHEUS_HISTOGRAM_FAMILY(internal_storage_load_duration,
+                                   "[cpp]durations of load segment")
+DEFINE_PROMETHEUS_HISTOGRAM(internal_storage_download_duration,
+                            internal_storage_load_duration,
+                            downloadDurationLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_storage_write_disk_duration,
+                            internal_storage_load_duration,
+                            writeDiskDurationLabels)
+DEFINE_PROMETHEUS_HISTOGRAM(internal_storage_deserialize_duration,
+                            internal_storage_load_duration,
+                            deserializeDurationLabels)
+
 // mmap metrics
 std::map<std::string, std::string> mmapAllocatedSpaceAnonLabel = {
     {"type", "anon"}};

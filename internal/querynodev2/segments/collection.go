@@ -25,7 +25,6 @@ package segments
 import "C"
 
 import (
-	"fmt"
 	"sync"
 	"unsafe"
 
@@ -93,6 +92,7 @@ func (m *collectionManager) PutOrRef(collectionID int64, schema *schemapb.Collec
 		return
 	}
 
+	log.Info("put new collection", zap.Int64("collectionID", collectionID), zap.Any("schema", schema))
 	collection := NewCollection(collectionID, schema, meta, loadMeta)
 	collection.Ref(1)
 	m.collections[collectionID] = collection
@@ -119,16 +119,8 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 			log.Info("release collection due to ref count to 0", zap.Int64("collectionID", collectionID))
 			delete(m.collections, collectionID)
 			DeleteCollection(collection)
-			metrics.QueryNodeEntitiesSize.DeleteLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
-				fmt.Sprint(collectionID),
-				SegmentTypeSealed.String(),
-			)
-			metrics.QueryNodeEntitiesSize.DeleteLabelValues(
-				fmt.Sprint(paramtable.GetNodeID()),
-				fmt.Sprint(collectionID),
-				SegmentTypeGrowing.String(),
-			)
+
+			metrics.CleanupQueryNodeCollectionMetrics(paramtable.GetNodeID(), collectionID)
 			return true
 		}
 		return false

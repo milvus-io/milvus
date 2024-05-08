@@ -953,7 +953,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field):
+    @pytest.mark.parametrize("include_meta", [True, False])
+    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, include_meta):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -963,6 +964,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         2. import data
         3. verify
         """
+        if enable_dynamic_field is False and include_meta is True:
+            pytest.skip("include_meta only works with enable_dynamic_field")
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field),
@@ -985,6 +988,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
+            include_meta=include_meta,
+
         )
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
@@ -1043,7 +1048,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     fields_from_search = r.fields.keys()
                     for f in fields:
                         assert f.name in fields_from_search
-                    if enable_dynamic_field:
+                    if enable_dynamic_field and include_meta:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
 
@@ -1064,7 +1069,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     fields_from_search = r.fields.keys()
                     for f in fields:
                         assert f.name in fields_from_search
-                    if enable_dynamic_field:
+                    if enable_dynamic_field and include_meta:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
 
@@ -1072,10 +1077,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
-    @pytest.mark.parametrize("file_nums", [1])
-    @pytest.mark.parametrize("array_len", [None, 0, 100])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, file_nums, array_len, enable_dynamic_field):
+    @pytest.mark.parametrize("include_meta", [True, False])
+    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, enable_dynamic_field, include_meta):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -1084,6 +1088,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         2. import data
         3. verify
         """
+        if enable_dynamic_field is False and include_meta is True:
+            pytest.skip("include_meta only works with enable_dynamic_field")
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field),
@@ -1110,6 +1116,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
+            include_meta=include_meta,
         )
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
@@ -1168,7 +1175,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     fields_from_search = r.fields.keys()
                     for f in fields:
                         assert f.name in fields_from_search
-                    if enable_dynamic_field:
+                    if enable_dynamic_field and include_meta:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
 
@@ -1189,7 +1196,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                     fields_from_search = r.fields.keys()
                     for f in fields:
                         assert f.name in fields_from_search
-                    if enable_dynamic_field:
+                    if enable_dynamic_field and include_meta:
                         assert "name" in fields_from_search
                         assert "address" in fields_from_search
 

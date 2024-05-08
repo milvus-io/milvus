@@ -333,6 +333,11 @@ func (node *DataNode) NotifyChannelOperation(ctx context.Context, req *datapb.Ch
 	log.Ctx(ctx).Info("DataNode receives NotifyChannelOperation",
 		zap.Int("operation count", len(req.GetInfos())))
 
+	if node.channelManager == nil {
+		log.Warn("DataNode NotifyChannelOperation failed due to nil channelManager")
+		return merr.Status(merr.WrapErrServiceInternal("channelManager is nil! Ignore if you are upgrading datanode/coord to rpc based watch")), nil
+	}
+
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.NotifyChannelOperation failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
 		return merr.Status(err), nil
@@ -356,6 +361,14 @@ func (node *DataNode) CheckChannelOperationProgress(ctx context.Context, req *da
 	)
 
 	log.Info("DataNode receives CheckChannelOperationProgress")
+
+	if node.channelManager == nil {
+		log.Warn("DataNode CheckChannelOperationProgress failed due to nil channelManager")
+		return &datapb.ChannelOperationProgressResponse{
+			Status: merr.Status(merr.WrapErrServiceInternal("channelManager is nil! Ignore if you are upgrading datanode/coord to rpc based watch")),
+		}, nil
+	}
+
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		log.Warn("DataNode.CheckChannelOperationProgress failed", zap.Int64("nodeId", node.GetNodeID()), zap.Error(err))
 		return &datapb.ChannelOperationProgressResponse{

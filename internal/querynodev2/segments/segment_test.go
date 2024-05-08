@@ -2,6 +2,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -69,8 +70,9 @@ func (suite *SegmentSuite) SetupTest() {
 			CollectionID:  suite.collectionID,
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
+			NumOfRows:     int64(msgLength),
 			BinlogPaths: []*datapb.FieldBinlog{
 				{
 					FieldID: 101,
@@ -110,7 +112,7 @@ func (suite *SegmentSuite) SetupTest() {
 			SegmentID:     suite.segmentID + 1,
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
@@ -123,14 +125,14 @@ func (suite *SegmentSuite) SetupTest() {
 	err = suite.growing.Insert(ctx, insertMsg.RowIDs, insertMsg.Timestamps, insertRecord)
 	suite.Require().NoError(err)
 
-	suite.manager.Segment.Put(SegmentTypeSealed, suite.sealed)
-	suite.manager.Segment.Put(SegmentTypeGrowing, suite.growing)
+	suite.manager.Segment.Put(context.Background(), SegmentTypeSealed, suite.sealed)
+	suite.manager.Segment.Put(context.Background(), SegmentTypeGrowing, suite.growing)
 }
 
 func (suite *SegmentSuite) TearDownTest() {
 	ctx := context.Background()
-	suite.sealed.Release()
-	suite.growing.Release()
+	suite.sealed.Release(context.Background())
+	suite.growing.Release(context.Background())
 	DeleteCollection(suite.collection)
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
 }
@@ -139,7 +141,7 @@ func (suite *SegmentSuite) TestLoadInfo() {
 	// sealed segment has load info
 	suite.NotNil(suite.sealed.LoadInfo())
 	// growing segment has no load info
-	suite.Nil(suite.growing.LoadInfo())
+	suite.NotNil(suite.growing.LoadInfo())
 }
 
 func (suite *SegmentSuite) TestResourceUsageEstimate() {
@@ -185,6 +187,14 @@ func (suite *SegmentSuite) TestHasRawData() {
 	suite.True(has)
 }
 
+func (suite *SegmentSuite) TestLocation() {
+	pk := storage.NewInt64PrimaryKey(100)
+	locations := storage.Locations(pk, suite.sealed.GetHashFuncNum())
+	ret1 := suite.sealed.TestLocations(pk, locations)
+	ret2 := suite.sealed.MayPkExist(pk)
+	suite.Equal(ret1, ret2)
+}
+
 func (suite *SegmentSuite) TestCASVersion() {
 	segment := suite.sealed
 
@@ -196,8 +206,11 @@ func (suite *SegmentSuite) TestCASVersion() {
 	suite.Equal(curVersion+1, segment.Version())
 }
 
+func (suite *SegmentSuite) TestSegmentRemoveUnusedFieldFiles() {
+}
+
 func (suite *SegmentSuite) TestSegmentReleased() {
-	suite.sealed.Release()
+	suite.sealed.Release(context.Background())
 
 	sealed := suite.sealed.(*LocalSegment)
 

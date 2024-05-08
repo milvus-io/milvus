@@ -43,6 +43,7 @@
 #include "plan/PlanNode.h"
 #include "exec/expression/Expr.h"
 #include "segcore/load_index_c.h"
+#include "test_utils/c_api_test_utils.h"
 
 namespace chrono = std::chrono;
 
@@ -60,16 +61,6 @@ const int64_t ROW_COUNT = 10 * 1000;
 const int64_t BIAS = 4200;
 
 CStatus
-CSearch(CSegmentInterface c_segment,
-        CSearchPlan c_plan,
-        CPlaceholderGroup c_placeholder_group,
-        uint64_t timestamp,
-        CSearchResult* result) {
-    return Search(
-        {}, c_segment, c_plan, c_placeholder_group, timestamp, result);
-}
-
-CStatus
 CRetrieve(CSegmentInterface c_segment,
           CRetrievePlan c_plan,
           uint64_t timestamp,
@@ -81,32 +72,6 @@ CRetrieve(CSegmentInterface c_segment,
                     result,
                     DEFAULT_MAX_OUTPUT_SIZE,
                     false);
-}
-
-const char*
-get_default_schema_config() {
-    static std::string conf = R"(name: "default-collection"
-                                fields: <
-                                  fieldID: 100
-                                  name: "fakevec"
-                                  data_type: FloatVector
-                                  type_params: <
-                                    key: "dim"
-                                    value: "16"
-                                  >
-                                  index_params: <
-                                    key: "metric_type"
-                                    value: "L2"
-                                  >
-                                >
-                                fields: <
-                                  fieldID: 101
-                                  name: "age"
-                                  data_type: Int64
-                                  is_primary_key: true
-                                >)";
-    static std::string fake_conf = "";
-    return conf.c_str();
 }
 
 const char*
@@ -212,52 +177,6 @@ generate_data(int N) {
     }
     return std::make_tuple(raw_data, timestamps, uids);
 }
-std::string
-generate_max_float_query_data(int all_nq, int max_float_nq) {
-    assert(max_float_nq <= all_nq);
-    namespace ser = milvus::proto::common;
-    int dim = DIM;
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < all_nq; ++i) {
-        std::vector<float> vec;
-        if (i < max_float_nq) {
-            for (int d = 0; d < dim; ++d) {
-                vec.push_back(std::numeric_limits<float>::max());
-            }
-        } else {
-            for (int d = 0; d < dim; ++d) {
-                vec.push_back(1);
-            }
-        }
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
-    return blob;
-}
-
-std::string
-generate_query_data(int nq) {
-    namespace ser = milvus::proto::common;
-    std::default_random_engine e(67);
-    int dim = DIM;
-    std::normal_distribution<double> dis(0.0, 1.0);
-    ser::PlaceholderGroup raw_group;
-    auto value = raw_group.add_placeholders();
-    value->set_tag("$0");
-    value->set_type(ser::PlaceholderType::FloatVector);
-    for (int i = 0; i < nq; ++i) {
-        std::vector<float> vec;
-        for (int d = 0; d < dim; ++d) {
-            vec.push_back(dis(e));
-        }
-        value->add_values(vec.data(), vec.size() * sizeof(float));
-    }
-    auto blob = raw_group.SerializeAsString();
-    return blob;
-}
 
 std::string
 generate_query_data_float16(int nq) {
@@ -300,7 +219,7 @@ generate_query_data_bfloat16(int nq) {
     auto blob = raw_group.SerializeAsString();
     return blob;
 }
-// 创建枚举，包含schema::DataType::BinaryVector，schema::DataType::FloatVector
+// create Enum for schema::DataType::BinaryVector，schema::DataType::FloatVector
 enum VectorType {
     BinaryVector = 0,
     FloatVector = 1,
@@ -1558,27 +1477,6 @@ TEST(CApiTest, GetRealCount) {
     DeleteSegment(segment);
 }
 
-void
-CheckSearchResultDuplicate(const std::vector<CSearchResult>& results) {
-    auto nq = ((SearchResult*)results[0])->total_nq_;
-
-    std::unordered_set<PkType> pk_set;
-    for (int qi = 0; qi < nq; qi++) {
-        pk_set.clear();
-        for (size_t i = 0; i < results.size(); i++) {
-            auto search_result = (SearchResult*)results[i];
-            ASSERT_EQ(nq, search_result->total_nq_);
-            auto topk_beg = search_result->topk_per_nq_prefix_sum_[qi];
-            auto topk_end = search_result->topk_per_nq_prefix_sum_[qi + 1];
-            for (size_t ki = topk_beg; ki < topk_end; ki++) {
-                ASSERT_NE(search_result->seg_offsets_[ki], INVALID_SEG_OFFSET);
-                auto ret = pk_set.insert(search_result->primary_keys_[ki]);
-                ASSERT_TRUE(ret.second);
-            }
-        }
-    }
-}
-
 TEST(CApiTest, ReduceNullResult) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
@@ -1640,7 +1538,8 @@ TEST(CApiTest, ReduceNullResult) {
         ASSERT_EQ(status.error_code, Success);
         results.push_back(res);
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+        status = ReduceSearchResultsAndFillData({},
+                                                &cSearchResultData,
                                                 plan,
                                                 results.data(),
                                                 results.size(),
@@ -1733,7 +1632,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         results.push_back(res2);
 
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+        status = ReduceSearchResultsAndFillData({},
+                                                &cSearchResultData,
                                                 plan,
                                                 results.data(),
                                                 results.size(),
@@ -1769,7 +1669,8 @@ TEST(CApiTest, ReduceRemoveDuplicates) {
         results.push_back(res2);
         results.push_back(res3);
         CSearchResultDataBlobs cSearchResultData;
-        status = ReduceSearchResultsAndFillData(&cSearchResultData,
+        status = ReduceSearchResultsAndFillData({},
+                                                &cSearchResultData,
                                                 plan,
                                                 results.data(),
                                                 results.size(),
@@ -1912,7 +1813,8 @@ testReduceSearchWithExpr(int N,
 
     // 1. reduce
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+    status = ReduceSearchResultsAndFillData({},
+                                            &cSearchResultData,
                                             plan,
                                             results.data(),
                                             results.size(),
@@ -3606,7 +3508,8 @@ TEST(CApiTest, Indexing_With_binary_Predicate_Term) {
     auto slice_topKs = std::vector<int64_t>{topK};
 
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+    status = ReduceSearchResultsAndFillData({},
+                                            &cSearchResultData,
                                             plan,
                                             results.data(),
                                             results.size(),
@@ -3802,7 +3705,8 @@ TEST(CApiTest, Indexing_Expr_With_binary_Predicate_Term) {
     auto slice_topKs = std::vector<int64_t>{topK};
 
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+    status = ReduceSearchResultsAndFillData({},
+                                            &cSearchResultData,
                                             plan,
                                             results.data(),
                                             results.size(),

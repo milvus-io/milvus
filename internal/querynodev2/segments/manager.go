@@ -41,9 +41,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/cache"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+// TODO maybe move to manager and change segment constructor
+var channelMapper = metautil.NewDynChannelMapper()
 
 // SegmentFilter is the interface for segment selection criteria.
 type SegmentFilter interface {
@@ -109,8 +113,14 @@ func WithPartition(partitionID typeutil.UniqueID) SegmentFilter {
 }
 
 func WithChannel(channel string) SegmentFilter {
+	ac, err := metautil.ParseChannel(channel, channelMapper)
+	if err != nil {
+		return SegmentFilterFunc(func(segment Segment) bool {
+			return false
+		})
+	}
 	return SegmentFilterFunc(func(segment Segment) bool {
-		return segment.Shard() == channel
+		return segment.Shard().Equal(ac)
 	})
 }
 
@@ -148,13 +158,6 @@ func IncreaseVersion(version int64) SegmentAction {
 	}
 }
 
-type actionType int32
-
-const (
-	removeAction actionType = iota
-	addAction
-)
-
 type Manager struct {
 	Collection CollectionManager
 	Segment    SegmentManager
@@ -163,7 +166,7 @@ type Manager struct {
 }
 
 func NewManager() *Manager {
-	diskCap := paramtable.Get().QueryNodeCfg.DiskCacheCapacityLimit.GetAsInt64()
+	diskCap := paramtable.Get().QueryNodeCfg.DiskCacheCapacityLimit.GetAsSize()
 
 	segMgr := NewSegmentManager()
 	sf := singleflight.Group{}
@@ -173,18 +176,19 @@ func NewManager() *Manager {
 	}
 
 	manager.DiskCache = cache.NewCacheBuilder[int64, Segment]().WithLazyScavenger(func(key int64) int64 {
-		return int64(segMgr.sealedSegments[key].ResourceUsageEstimate().DiskSize)
-	}, diskCap).WithLoader(func(key int64) (Segment, bool) {
-		log.Debug("cache missed segment", zap.Int64("segmentID", key))
-		segMgr.mu.RLock()
-		defer segMgr.mu.RUnlock()
-
-		segment, ok := segMgr.sealedSegments[key]
-		if !ok {
-			// the segment has been released, just ignore it
-			return nil, false
+		segment := segMgr.GetWithType(key, SegmentTypeSealed)
+		if segment == nil {
+			return 0
 		}
-
+		return int64(segment.ResourceUsageEstimate().DiskSize)
+	}, diskCap).WithLoader(func(ctx context.Context, key int64) (Segment, error) {
+		log.Debug("cache missed segment", zap.Int64("segmentID", key))
+		segment := segMgr.GetWithType(key, SegmentTypeSealed)
+		if segment == nil {
+			// the segment has been released, just ignore it
+			log.Warn("segment is not found when loading", zap.Int64("segmentID", key))
+			return nil, merr.ErrSegmentNotFound
+		}
 		info := segment.LoadInfo()
 		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (nop interface{}, err error) {
 			cacheLoadRecord := metricsutil.NewCacheLoadRecord(getSegmentMetricLabel(segment))
@@ -197,23 +201,50 @@ func NewManager() *Manager {
 			if collection == nil {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
 			}
-			err = manager.Loader.LoadSegment(context.Background(), segment.(*LocalSegment), info, LoadStatusMapped)
+
+			err = manager.Loader.LoadLazySegment(ctx, segment.(*LocalSegment), info)
 			return nil, err
 		})
 		if err != nil {
 			log.Warn("cache sealed segment failed", zap.Error(err))
-			return nil, false
+			return nil, err
 		}
-		return segment, true
-	}).WithFinalizer(func(key int64, segment Segment) error {
-		log.Debug("evict segment from cache", zap.Int64("segmentID", key))
+		return segment, nil
+	}).WithFinalizer(func(ctx context.Context, key int64, segment Segment) error {
+		log.Ctx(ctx).Debug("evict segment from cache", zap.Int64("segmentID", key))
 		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
 		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
 		defer cacheEvictRecord.Finish(nil)
-
-		segment.Release(WithReleaseScope(ReleaseScopeData))
+		segment.Release(ctx, WithReleaseScope(ReleaseScopeData))
 		return nil
+	}).WithReloader(func(ctx context.Context, key int64) (Segment, error) {
+		segment := segMgr.GetWithType(key, SegmentTypeSealed)
+		if segment == nil {
+			// the segment has been released, just ignore it
+			log.Debug("segment is not found when reloading", zap.Int64("segmentID", key))
+			return nil, merr.ErrSegmentNotFound
+		}
+
+		localSegment := segment.(*LocalSegment)
+		err := manager.Loader.LoadIndex(ctx, localSegment, segment.LoadInfo(), segment.NeedUpdatedVersion())
+		if err != nil {
+			log.Warn("reload segment failed", zap.Int64("segmentID", key), zap.Error(err))
+			return nil, merr.ErrSegmentLoadFailed
+		}
+		if err := localSegment.RemoveUnusedFieldFiles(); err != nil {
+			log.Warn("remove unused field files failed", zap.Int64("segmentID", key), zap.Error(err))
+			return nil, merr.ErrSegmentReduplicate
+		}
+
+		return segment, nil
 	}).Build()
+
+	segMgr.registerReleaseCallback(func(s Segment) {
+		if s.Type() == SegmentTypeSealed {
+			manager.DiskCache.Expire(context.Background(), s.ID())
+		}
+	})
+
 	return manager
 }
 
@@ -225,7 +256,7 @@ type SegmentManager interface {
 	// Put puts the given segments in,
 	// and increases the ref count of the corresponding collection,
 	// dup segments will not increase the ref count
-	Put(segmentType SegmentType, segments ...Segment)
+	Put(ctx context.Context, segmentType SegmentType, segments ...Segment)
 	UpdateBy(action SegmentAction, filters ...SegmentFilter) int
 	Get(segmentID typeutil.UniqueID) Segment
 	GetWithType(segmentID typeutil.UniqueID, typ SegmentType) Segment
@@ -242,9 +273,9 @@ type SegmentManager interface {
 	// Remove removes the given segment,
 	// and decreases the ref count of the corresponding collection,
 	// will not decrease the ref count if the given segment not exists
-	Remove(segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int)
-	RemoveBy(filters ...SegmentFilter) (int, int)
-	Clear()
+	Remove(ctx context.Context, segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int)
+	RemoveBy(ctx context.Context, filters ...SegmentFilter) (int, int)
+	Clear(ctx context.Context)
 }
 
 var _ SegmentManager = (*segmentManager)(nil)
@@ -255,6 +286,9 @@ type segmentManager struct {
 
 	growingSegments map[typeutil.UniqueID]Segment
 	sealedSegments  map[typeutil.UniqueID]Segment
+
+	// releaseCallback is the callback function when a segment is released.
+	releaseCallback func(s Segment)
 }
 
 func NewSegmentManager() *segmentManager {
@@ -265,7 +299,7 @@ func NewSegmentManager() *segmentManager {
 	return mgr
 }
 
-func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
+func (mgr *segmentManager) Put(ctx context.Context, segmentType SegmentType, segments ...Segment) {
 	var replacedSegment []Segment
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
@@ -278,7 +312,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	default:
 		panic("unexpected segment type")
 	}
-
+	log := log.Ctx(ctx)
 	for _, segment := range segments {
 		oldSegment, ok := targetMap[segment.ID()]
 
@@ -290,7 +324,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 					zap.Int64("newVersion", segment.Version()),
 				)
 				// delete redundant segment
-				segment.Release()
+				segment.Release(ctx)
 				continue
 			}
 			replacedSegment = append(replacedSegment, oldSegment)
@@ -313,7 +347,7 @@ func (mgr *segmentManager) Put(segmentType SegmentType, segments ...Segment) {
 	if len(replacedSegment) > 0 {
 		go func() {
 			for _, segment := range replacedSegment {
-				remove(segment)
+				mgr.remove(ctx, segment)
 			}
 		}()
 	}
@@ -563,7 +597,7 @@ func (mgr *segmentManager) Empty() bool {
 
 // returns true if the segment exists,
 // false otherwise
-func (mgr *segmentManager) Remove(segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int) {
+func (mgr *segmentManager) Remove(ctx context.Context, segmentID typeutil.UniqueID, scope querypb.DataScope) (int, int) {
 	mgr.mu.Lock()
 
 	var removeGrowing, removeSealed int
@@ -596,11 +630,11 @@ func (mgr *segmentManager) Remove(segmentID typeutil.UniqueID, scope querypb.Dat
 	mgr.mu.Unlock()
 
 	if growing != nil {
-		remove(growing)
+		mgr.remove(ctx, growing)
 	}
 
 	if sealed != nil {
-		remove(sealed)
+		mgr.remove(ctx, sealed)
 	}
 
 	return removeGrowing, removeSealed
@@ -628,7 +662,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 	return nil
 }
 
-func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
+func (mgr *segmentManager) RemoveBy(ctx context.Context, filters ...SegmentFilter) (int, int) {
 	mgr.mu.Lock()
 
 	var removeSegments []Segment
@@ -651,26 +685,32 @@ func (mgr *segmentManager) RemoveBy(filters ...SegmentFilter) (int, int) {
 	mgr.mu.Unlock()
 
 	for _, s := range removeSegments {
-		remove(s)
+		mgr.remove(ctx, s)
 	}
 
 	return removeGrowing, removeSealed
 }
 
-func (mgr *segmentManager) Clear() {
+func (mgr *segmentManager) Clear(ctx context.Context) {
 	mgr.mu.Lock()
 	defer mgr.mu.Unlock()
 
 	for id, segment := range mgr.growingSegments {
 		delete(mgr.growingSegments, id)
-		remove(segment)
+		mgr.remove(ctx, segment)
 	}
 
 	for id, segment := range mgr.sealedSegments {
 		delete(mgr.sealedSegments, id)
-		remove(segment)
+		mgr.remove(ctx, segment)
 	}
 	mgr.updateMetric()
+}
+
+// registerReleaseCallback registers the callback function when a segment is released.
+// TODO: bad implementation for keep consistency with DiskCache, need to be refactor.
+func (mgr *segmentManager) registerReleaseCallback(callback func(s Segment)) {
+	mgr.releaseCallback = callback
 }
 
 func (mgr *segmentManager) updateMetric() {
@@ -688,8 +728,11 @@ func (mgr *segmentManager) updateMetric() {
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
 }
 
-func remove(segment Segment) bool {
-	segment.Release()
+func (mgr *segmentManager) remove(ctx context.Context, segment Segment) bool {
+	segment.Release(ctx)
+	if mgr.releaseCallback != nil {
+		mgr.releaseCallback(segment)
+	}
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),

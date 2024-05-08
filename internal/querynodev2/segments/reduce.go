@@ -39,8 +39,11 @@ type SearchResult struct {
 	cSearchResult C.CSearchResult
 }
 
-// searchResultDataBlobs is the CSearchResultsDataBlobs in C++
-type searchResultDataBlobs = C.CSearchResultDataBlobs
+// SearchResultDataBlobs is the CSearchResultsDataBlobs in C++
+type (
+	SearchResultDataBlobs = C.CSearchResultDataBlobs
+	StreamSearchReducer   = C.CSearchStreamReducer
+)
 
 // RetrieveResult contains a pointer to the retrieve result in C++ memory
 type RetrieveResult struct {
@@ -71,9 +74,58 @@ func ParseSliceInfo(originNQs []int64, originTopKs []int64, nqPerSlice int64) *S
 	return sInfo
 }
 
+func NewStreamReducer(ctx context.Context,
+	plan *SearchPlan,
+	sliceNQs []int64,
+	sliceTopKs []int64,
+) (StreamSearchReducer, error) {
+	if plan.cSearchPlan == nil {
+		return nil, fmt.Errorf("nil search plan")
+	}
+	if len(sliceNQs) == 0 {
+		return nil, fmt.Errorf("empty slice nqs is not allowed")
+	}
+	if len(sliceNQs) != len(sliceTopKs) {
+		return nil, fmt.Errorf("unaligned sliceNQs(len=%d) and sliceTopKs(len=%d)", len(sliceNQs), len(sliceTopKs))
+	}
+	cSliceNQSPtr := (*C.int64_t)(&sliceNQs[0])
+	cSliceTopKSPtr := (*C.int64_t)(&sliceTopKs[0])
+	cNumSlices := C.int64_t(len(sliceNQs))
+
+	var streamReducer StreamSearchReducer
+	status := C.NewStreamReducer(plan.cSearchPlan, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices, &streamReducer)
+	if err := HandleCStatus(ctx, &status, "MergeSearchResultsWithOutputFields failed"); err != nil {
+		return nil, err
+	}
+	return streamReducer, nil
+}
+
+func StreamReduceSearchResult(ctx context.Context,
+	newResult *SearchResult, streamReducer StreamSearchReducer,
+) error {
+	cSearchResults := make([]C.CSearchResult, 0)
+	cSearchResults = append(cSearchResults, newResult.cSearchResult)
+	cSearchResultPtr := &cSearchResults[0]
+
+	status := C.StreamReduce(streamReducer, cSearchResultPtr, 1)
+	if err := HandleCStatus(ctx, &status, "StreamReduceSearchResult failed"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func GetStreamReduceResult(ctx context.Context, streamReducer StreamSearchReducer) (SearchResultDataBlobs, error) {
+	var cSearchResultDataBlobs SearchResultDataBlobs
+	status := C.GetStreamReduceResult(streamReducer, &cSearchResultDataBlobs)
+	if err := HandleCStatus(ctx, &status, "ReduceSearchResultsAndFillData failed"); err != nil {
+		return nil, err
+	}
+	return cSearchResultDataBlobs, nil
+}
+
 func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searchResults []*SearchResult,
 	numSegments int64, sliceNQs []int64, sliceTopKs []int64,
-) (searchResultDataBlobs, error) {
+) (SearchResultDataBlobs, error) {
 	if plan.cSearchPlan == nil {
 		return nil, fmt.Errorf("nil search plan")
 	}
@@ -98,8 +150,9 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	cSliceNQSPtr := (*C.int64_t)(&sliceNQs[0])
 	cSliceTopKSPtr := (*C.int64_t)(&sliceTopKs[0])
 	cNumSlices := C.int64_t(len(sliceNQs))
-	var cSearchResultDataBlobs searchResultDataBlobs
-	status := C.ReduceSearchResultsAndFillData(&cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
+	var cSearchResultDataBlobs SearchResultDataBlobs
+	traceCtx := ParseCTraceContext(ctx)
+	status := C.ReduceSearchResultsAndFillData(traceCtx.ctx, &cSearchResultDataBlobs, plan.cSearchPlan, cSearchResultPtr,
 		cNumSegments, cSliceNQSPtr, cSliceTopKSPtr, cNumSlices)
 	if err := HandleCStatus(ctx, &status, "ReduceSearchResultsAndFillData failed"); err != nil {
 		return nil, err
@@ -107,7 +160,7 @@ func ReduceSearchResultsAndFillData(ctx context.Context, plan *SearchPlan, searc
 	return cSearchResultDataBlobs, nil
 }
 
-func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs searchResultDataBlobs, blobIndex int) ([]byte, error) {
+func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs SearchResultDataBlobs, blobIndex int) ([]byte, error) {
 	var blob C.CProto
 	status := C.GetSearchResultDataBlob(&blob, cSearchResultDataBlobs, C.int32_t(blobIndex))
 	if err := HandleCStatus(ctx, &status, "marshal failed"); err != nil {
@@ -116,8 +169,12 @@ func GetSearchResultDataBlob(ctx context.Context, cSearchResultDataBlobs searchR
 	return GetCProtoBlob(&blob), nil
 }
 
-func DeleteSearchResultDataBlobs(cSearchResultDataBlobs searchResultDataBlobs) {
+func DeleteSearchResultDataBlobs(cSearchResultDataBlobs SearchResultDataBlobs) {
 	C.DeleteSearchResultDataBlobs(cSearchResultDataBlobs)
+}
+
+func DeleteStreamReduceHelper(cStreamReduceHelper StreamSearchReducer) {
+	C.DeleteStreamSearchReducer(cStreamReduceHelper)
 }
 
 func DeleteSearchResults(results []*SearchResult) {

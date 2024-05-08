@@ -183,7 +183,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 			Nullable: true,
 			Metadata: arrow.Metadata{},
 		}), nil
-	case schemapb.DataType_BinaryVector:
+	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     &arrow.Uint8Type{},
@@ -194,13 +194,6 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     &arrow.Float32Type{},
-			Nullable: true,
-			Metadata: arrow.Metadata{},
-		}), nil
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-		return arrow.ListOfField(arrow.Field{
-			Name:     "item",
-			Type:     &arrow.Uint8Type{},
 			Nullable: true,
 			Metadata: arrow.Metadata{},
 		}), nil
@@ -239,6 +232,9 @@ func isSchemaEqual(schema *schemapb.CollectionSchema, arrSchema *arrow.Schema) e
 		}
 		arrField, ok := arrNameToField[field.GetName()]
 		if !ok {
+			if field.GetIsDynamic() {
+				continue
+			}
 			return merr.WrapErrImportFailed(fmt.Sprintf("field '%s' not in arrow schema", field.GetName()))
 		}
 		toArrDataType, err := convertToArrowDataType(field, false)

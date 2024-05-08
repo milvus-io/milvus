@@ -244,6 +244,7 @@ type commonConfig struct {
 	TraceLogMode          ParamItem `refreshable:"true"`
 	BloomFilterSize       ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive ParamItem `refreshable:"true"`
+	PanicWhenPluginFail   ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -723,6 +724,14 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
+
+	p.PanicWhenPluginFail = ParamItem{
+		Key:          "common.panicWhenPluginFail",
+		Version:      "2.4.2",
+		DefaultValue: "true",
+		Doc:          "panic or not when plugin fail to init",
+	}
+	p.PanicWhenPluginFail.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -1994,7 +2003,10 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 	MmapEnabled      ParamItem `refreshable:"false"`
 
-	LazyLoadEnabled ParamItem `refreshable:"false"`
+	LazyLoadEnabled                      ParamItem `refreshable:"false"`
+	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceTimeout       ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceRetryInterval ParamItem `refreshable:"true"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -2045,6 +2057,7 @@ type queryNodeConfig struct {
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	UseStreamComputing                      ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2231,12 +2244,36 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.LazyLoadEnabled = ParamItem{
 		Key:          "queryNode.lazyloadEnabled",
-		Version:      "2.4.0",
+		Version:      "2.4.2",
 		DefaultValue: "false",
 		Doc:          "Enable lazyload for loading data",
 		Export:       true,
 	}
 	p.LazyLoadEnabled.Init(base.mgr)
+	p.LazyLoadWaitTimeout = ParamItem{
+		Key:          "queryNode.lazyloadWaitTimeout",
+		Version:      "2.4.2",
+		DefaultValue: "30000",
+		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
+		Export:       true,
+	}
+	p.LazyLoadWaitTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceTimeout = ParamItem{
+		Key:          "queryNode.lazyLoadRequestResourceTimeout",
+		Version:      "2.4.2",
+		DefaultValue: "5000",
+		Doc:          "max timeout in milliseconds for waiting request resource for lazy load, 5s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceRetryInterval = ParamItem{
+		Key:          "queryNode.lazyLoadRequestResourceRetryInterval",
+		Version:      "2.4.2",
+		DefaultValue: "2000",
+		Doc:          "retry interval in milliseconds for waiting request resource for lazy load, 2s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceRetryInterval.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",
@@ -2569,6 +2606,13 @@ user-task-polling:
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
+	p.UseStreamComputing = ParamItem{
+		Key:          "queryNode.useStreamComputing",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "use stream search mode when searching or querying",
+	}
+	p.UseStreamComputing.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2576,6 +2620,8 @@ user-task-polling:
 type dataCoordConfig struct {
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	EnableBalanceChannelWithRPC  ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
@@ -2667,6 +2713,24 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
 
+	p.EnableBalanceChannelWithRPC = ParamItem{
+		Key:          "dataCoord.channel.balanceWithRpc",
+		Version:      "2.4.0",
+		DefaultValue: "true",
+		Doc:          "Whether to enable balance with RPC, default to use etcd watch",
+		Export:       true,
+	}
+	p.EnableBalanceChannelWithRPC.Init(base.mgr)
+
+	p.LegacyVersionWithoutRPCWatch = ParamItem{
+		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
+		Version:      "2.4.0",
+		DefaultValue: "2.4.0",
+		Doc:          "Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels",
+		Export:       true,
+	}
+	p.LegacyVersionWithoutRPCWatch.Init(base.mgr)
+
 	p.ChannelBalanceSilentDuration = ParamItem{
 		Key:          "dataCoord.channel.balanceSilentDuration",
 		Version:      "2.2.3",
@@ -2688,7 +2752,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval = ParamItem{
 		Key:          "dataCoord.channel.checkInterval",
 		Version:      "2.4.0",
-		DefaultValue: "10",
+		DefaultValue: "1",
 		Doc:          "The interval in seconds with which the channel manager advances channel states",
 		Export:       true,
 	}

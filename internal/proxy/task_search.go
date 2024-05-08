@@ -524,6 +524,9 @@ func (t *searchTask) reduceResults(ctx context.Context, toReduceResults []*inter
 		metricType = toReduceResults[0].GetMetricType()
 	}
 
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reduceResults")
+	defer sp.End()
+
 	// Decode all search results
 	validSearchResults, err := decodeSearchResults(ctx, toReduceResults)
 	if err != nil {
@@ -838,6 +841,8 @@ func doRequery(ctx context.Context,
 	//  3  2  5  4  1  (result ids)
 	// v3 v2 v5 v4 v1  (result vectors)
 	// ===========================================
+	_, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "reorganizeRequeryResults")
+	defer sp.End()
 	pkFieldData, err := typeutil.GetPrimaryFieldData(queryResult.GetFieldsData(), pkField)
 	if err != nil {
 		return err
@@ -867,6 +872,8 @@ func doRequery(ctx context.Context,
 }
 
 func decodeSearchResults(ctx context.Context, searchResults []*internalpb.SearchResults) ([]*schemapb.SearchResultData, error) {
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "decodeSearchResults")
+	defer sp.End()
 	tr := timerecord.NewTimeRecorder("decodeSearchResults")
 	results := make([]*schemapb.SearchResultData, 0)
 	for _, partialSearchResult := range searchResults {

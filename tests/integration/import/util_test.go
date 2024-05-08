@@ -43,6 +43,7 @@ import (
 	pq "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
@@ -133,6 +134,11 @@ func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount 
 			_, err = rand2.Read(bfloat16VecData)
 			assert.NoError(t, err)
 			insertData.Data[field.GetFieldID()] = &storage.BFloat16VectorFieldData{Data: bfloat16VecData, Dim: int(dim)}
+		case schemapb.DataType_SparseFloatVector:
+			sparseFloatVecData := testutils.GenerateSparseFloatVectors(rowCount)
+			insertData.Data[field.GetFieldID()] = &storage.SparseFloatVectorFieldData{
+				SparseFloatArray: *sparseFloatVecData,
+			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			varcharData := make([]string, 0)
 			for i := 0; i < rowCount; i++ {
@@ -263,6 +269,22 @@ func buildArrayData(dataType, elemType schemapb.DataType, dim, rows int) arrow.A
 			offsets = append(offsets, int32(rowBytes*i))
 			valid = append(valid, true)
 		}
+		builder.AppendValues(offsets, valid)
+		return builder.NewListArray()
+	case schemapb.DataType_SparseFloatVector:
+		sparsefloatVecData := make([]byte, 0)
+		builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+		offsets := make([]int32, 0, rows+1)
+		valid := make([]bool, 0, rows)
+		vecData := testutils.GenerateSparseFloatVectors(rows)
+		offsets = append(offsets, 0)
+		for i := 0; i < rows; i++ {
+			rowVecData := vecData.GetContents()[i]
+			sparsefloatVecData = append(sparsefloatVecData, rowVecData...)
+			offsets = append(offsets, offsets[i]+int32(len(rowVecData)))
+			valid = append(valid, true)
+		}
+		builder.ValueBuilder().(*array.Uint8Builder).AppendValues(sparsefloatVecData, nil)
 		builder.AppendValues(offsets, valid)
 		return builder.NewListArray()
 	case schemapb.DataType_JSON:
@@ -575,7 +597,7 @@ func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.Collection
 				data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
 			case schemapb.DataType_JSON:
 				data[fieldID] = string(v.GetRow(i).([]byte))
-			case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+			case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
 				bytes := v.GetRow(i).([]byte)
 				ints := make([]int, 0, len(bytes))
 				for _, b := range bytes {

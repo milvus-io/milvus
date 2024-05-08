@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -1069,4 +1070,52 @@ func TestGlobalMetaCache_GetCollectionNamesByID(t *testing.T) {
 		assert.Equal(t, []string{"collection1", "collection2"}, collectionNames)
 		assert.Equal(t, []string{"db1", "db1"}, dbNames)
 	})
+}
+
+func TestMetaCache_InvalidateShardLeaderCache(t *testing.T) {
+	paramtable.Init()
+	paramtable.Get().Save(Params.ProxyCfg.ShardLeaderCacheInterval.Key, "1")
+
+	ctx := context.Background()
+	rootCoord := &MockRootCoordClientInterface{}
+	queryCoord := &mocks.MockQueryCoordClient{}
+	shardMgr := newShardClientMgr()
+	err := InitMetaCache(ctx, rootCoord, queryCoord, shardMgr)
+	assert.NoError(t, err)
+
+	queryCoord.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&querypb.ShowCollectionsResponse{
+		Status:              merr.Success(),
+		CollectionIDs:       []UniqueID{1},
+		InMemoryPercentages: []int64{100},
+	}, nil)
+
+	called := uatomic.NewInt32(0)
+	queryCoord.EXPECT().GetShardLeaders(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context,
+		gslr *querypb.GetShardLeadersRequest, co ...grpc.CallOption,
+	) (*querypb.GetShardLeadersResponse, error) {
+		called.Inc()
+		return &querypb.GetShardLeadersResponse{
+			Status: merr.Success(),
+			Shards: []*querypb.ShardLeadersList{
+				{
+					ChannelName: "channel-1",
+					NodeIds:     []int64{1, 2, 3},
+					NodeAddrs:   []string{"localhost:9000", "localhost:9001", "localhost:9002"},
+				},
+			},
+		}, nil
+	})
+	nodeInfos, err := globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
+	assert.NoError(t, err)
+	assert.Len(t, nodeInfos["channel-1"], 3)
+	assert.Equal(t, called.Load(), int32(1))
+
+	globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
+	assert.Equal(t, called.Load(), int32(1))
+
+	globalMetaCache.InvalidateShardLeaderCache([]int64{1})
+	nodeInfos, err = globalMetaCache.GetShards(ctx, true, dbName, "collection1", 1)
+	assert.NoError(t, err)
+	assert.Len(t, nodeInfos["channel-1"], 3)
+	assert.Equal(t, called.Load(), int32(2))
 }

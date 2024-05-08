@@ -22,6 +22,7 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
+	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -44,11 +45,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		result  *segcorepb.RetrieveResults
 		segment Segment
 	}
-	var (
-		resultCh = make(chan segmentResult, len(segments))
-		errs     = make([]error, len(segments))
-		wg       sync.WaitGroup
-	)
+	resultCh := make(chan segmentResult, len(segments))
 
 	plan.ignoreNonPk = len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
 
@@ -57,25 +54,29 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		label = metrics.GrowingSegmentLabel
 	}
 
-	retriever := func(s Segment) error {
+	retriever := func(ctx context.Context, s Segment) error {
 		tr := timerecord.NewTimeRecorder("retrieveOnSegments")
 		result, err := s.Retrieve(ctx, plan)
+		if err != nil {
+			return err
+		}
 		resultCh <- segmentResult{
 			result,
 			s,
-		}
-		if err != nil {
-			return err
 		}
 		metrics.QueryNodeSQSegmentLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
 			metrics.QueryLabel, label).Observe(float64(tr.ElapseSpan().Milliseconds()))
 		return nil
 	}
 
-	for i, segment := range segments {
-		wg.Add(1)
-		go func(seg Segment, i int) {
-			defer wg.Done()
+	errGroup, ctx := errgroup.WithContext(ctx)
+	for _, segment := range segments {
+		seg := segment
+		errGroup.Go(func() error {
+			if ctx.Err() != nil {
+				return ctx.Err()
+			}
+
 			// record search time and cache miss
 			var err error
 			accessRecord := metricsutil.NewQuerySegmentAccessRecord(getSegmentMetricLabel(seg))
@@ -84,26 +85,27 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 			}()
 
 			if seg.IsLazyLoad() {
+				ctx, cancel := withLazyLoadTimeoutContext(ctx)
+				defer cancel()
+
 				var missing bool
-				missing, err = mgr.DiskCache.Do(seg.ID(), retriever)
+				missing, err = mgr.DiskCache.Do(ctx, seg.ID(), retriever)
 				if missing {
 					accessRecord.CacheMissing()
 				}
-			} else {
-				err = retriever(seg)
+				if err != nil {
+					log.Warn("failed to do query disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
+				}
+				return err
 			}
-			if err != nil {
-				errs[i] = err
-			}
-		}(segment, i)
+			return retriever(ctx, seg)
+		})
 	}
-	wg.Wait()
+	err := errGroup.Wait()
 	close(resultCh)
 
-	for _, err := range errs {
-		if err != nil {
-			return nil, nil, err
-		}
+	if err != nil {
+		return nil, nil, err
 	}
 
 	var retrieveSegments []Segment
@@ -163,9 +165,12 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 
 // retrieve will retrieve all the validate target segments
 func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]*segcorepb.RetrieveResults, []Segment, error) {
+	if ctx.Err() != nil {
+		return nil, nil, ctx.Err()
+	}
+
 	var err error
 	var SegType commonpb.SegmentState
-	var retrieveResults []*segcorepb.RetrieveResults
 	var retrieveSegments []Segment
 
 	segIDs := req.GetSegmentIDs()
@@ -181,7 +186,7 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	}
 
 	if err != nil {
-		return retrieveResults, retrieveSegments, err
+		return nil, nil, err
 	}
 
 	return retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)

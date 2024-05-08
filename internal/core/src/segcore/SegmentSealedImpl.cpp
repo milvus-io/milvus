@@ -105,6 +105,10 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
                        ") than other column's row count (" +
                        std::to_string(num_rows_.value()) + ")");
     }
+    LOG_INFO(
+        "Before setting field_bit for field index, fieldID:{}. segmentID:{}, ",
+        info.field_id,
+        id_);
     if (get_bit(field_data_ready_bitset_, field_id)) {
         fields_.erase(field_id);
         set_bit(field_data_ready_bitset_, field_id, false);
@@ -118,6 +122,9 @@ SegmentSealedImpl::LoadVecIndex(const LoadIndexInfo& info) {
         metric_type,
         std::move(const_cast<LoadIndexInfo&>(info).index));
     set_bit(index_ready_bitset_, field_id, true);
+    LOG_INFO("Has load vec index done, fieldID:{}. segmentID:{}, ",
+             info.field_id,
+             id_);
 }
 
 void
@@ -1021,7 +1028,8 @@ SegmentSealedImpl::bulk_subscript(SystemFieldType system_type,
                                   int64_t count,
                                   void* output) const {
     AssertInfo(is_system_field_ready(),
-               "System field isn't ready when do bulk_insert");
+               "System field isn't ready when do bulk_insert, segID:{}",
+               id_);
     switch (system_type) {
         case SystemFieldType::Timestamp:
             AssertInfo(
@@ -1645,6 +1653,21 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
     } catch (std::exception& e) {
         LOG_WARN("fail to generate binlog index, because {}", e.what());
         return false;
+    }
+}
+void
+SegmentSealedImpl::RemoveFieldFile(const FieldId field_id) {
+    auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
+    if (cc == nullptr) {
+        return;
+    }
+    for (const auto& iter : field_data_info_.field_infos) {
+        if (iter.second.field_id == field_id.get()) {
+            for (const auto& binlog : iter.second.insert_files) {
+                cc->Remove(binlog);
+            }
+            return;
+        }
     }
 }
 
