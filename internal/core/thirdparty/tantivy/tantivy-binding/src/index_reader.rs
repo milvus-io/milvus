@@ -6,6 +6,7 @@ use tantivy::query::{Query, RangeQuery, RegexQuery, TermQuery};
 use tantivy::schema::{Field, IndexRecordOption};
 use tantivy::{Index, IndexReader, ReloadPolicy, Term};
 
+use crate::log::init_log;
 use crate::util::make_bounds;
 use crate::vec_collector::VecCollector;
 
@@ -18,6 +19,8 @@ pub struct IndexReaderWrapper {
 
 impl IndexReaderWrapper {
     pub fn new(index: &Index, field_name: &String, field: Field) -> IndexReaderWrapper {
+        init_log();
+
         let reader = index
             .reader_builder()
             .reload_policy(ReloadPolicy::Manual)
