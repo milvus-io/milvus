@@ -9,6 +9,7 @@ mod linkedlist_collector;
 mod util;
 mod util_c;
 mod vec_collector;
+mod log;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
