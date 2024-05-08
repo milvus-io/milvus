@@ -229,7 +229,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	for _, info := range segmentInfo.GetIndexInfos() {
 		indexes = append(indexes, &querypb.FieldIndexInfo{
 			FieldID:             info.GetFieldID(),
-			EnableIndex:         true,
+			EnableIndex:         true, // deprecated, but keep it for compatibility
 			IndexName:           info.GetIndexName(),
 			IndexID:             info.GetIndexID(),
 			BuildID:             info.GetBuildID(),
