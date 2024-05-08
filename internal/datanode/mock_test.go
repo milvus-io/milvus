@@ -83,7 +83,7 @@ var segID2SegInfo = map[int64]*datapb.SegmentInfo{
 
 func newIDLEDataNodeMock(ctx context.Context, pkType schemapb.DataType) *DataNode {
 	factory := dependency.NewDefaultFactory(true)
-	node := NewDataNode(ctx, factory, 1)
+	node := NewDataNode(ctx, factory)
 	node.SetSession(&sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}})
 	node.dispClient = msgdispatcher.NewClient(factory, typeutil.DataNodeRole, paramtable.GetNodeID())
 
