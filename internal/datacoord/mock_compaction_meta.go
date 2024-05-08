@@ -84,13 +84,13 @@ func (_c *MockCompactionMeta_CompleteCompactionMutation_Call) RunAndReturn(run f
 	return _c
 }
 
-// DropClusteringCompactionInfo provides a mock function with given fields: info
-func (_m *MockCompactionMeta) DropClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error {
-	ret := _m.Called(info)
+// DropClusteringCompactionTask provides a mock function with given fields: task
+func (_m *MockCompactionMeta) DropClusteringCompactionTask(task *datapb.CompactionTask) error {
+	ret := _m.Called(task)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*datapb.ClusteringCompactionInfo) error); ok {
-		r0 = rf(info)
+	if rf, ok := ret.Get(0).(func(*datapb.CompactionTask) error); ok {
+		r0 = rf(task)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -98,30 +98,74 @@ func (_m *MockCompactionMeta) DropClusteringCompactionInfo(info *datapb.Clusteri
 	return r0
 }
 
-// MockCompactionMeta_DropClusteringCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropClusteringCompactionInfo'
-type MockCompactionMeta_DropClusteringCompactionInfo_Call struct {
+// MockCompactionMeta_DropClusteringCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropClusteringCompactionTask'
+type MockCompactionMeta_DropClusteringCompactionTask_Call struct {
 	*mock.Call
 }
 
-// DropClusteringCompactionInfo is a helper method to define mock.On call
-//   - info *datapb.ClusteringCompactionInfo
-func (_e *MockCompactionMeta_Expecter) DropClusteringCompactionInfo(info interface{}) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
-	return &MockCompactionMeta_DropClusteringCompactionInfo_Call{Call: _e.mock.On("DropClusteringCompactionInfo", info)}
+// DropClusteringCompactionTask is a helper method to define mock.On call
+//   - task *datapb.CompactionTask
+func (_e *MockCompactionMeta_Expecter) DropClusteringCompactionTask(task interface{}) *MockCompactionMeta_DropClusteringCompactionTask_Call {
+	return &MockCompactionMeta_DropClusteringCompactionTask_Call{Call: _e.mock.On("DropClusteringCompactionTask", task)}
 }
 
-func (_c *MockCompactionMeta_DropClusteringCompactionInfo_Call) Run(run func(info *datapb.ClusteringCompactionInfo)) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
+func (_c *MockCompactionMeta_DropClusteringCompactionTask_Call) Run(run func(task *datapb.CompactionTask)) *MockCompactionMeta_DropClusteringCompactionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*datapb.ClusteringCompactionInfo))
+		run(args[0].(*datapb.CompactionTask))
 	})
 	return _c
 }
 
-func (_c *MockCompactionMeta_DropClusteringCompactionInfo_Call) Return(_a0 error) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
+func (_c *MockCompactionMeta_DropClusteringCompactionTask_Call) Return(_a0 error) *MockCompactionMeta_DropClusteringCompactionTask_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCompactionMeta_DropClusteringCompactionInfo_Call) RunAndReturn(run func(*datapb.ClusteringCompactionInfo) error) *MockCompactionMeta_DropClusteringCompactionInfo_Call {
+func (_c *MockCompactionMeta_DropClusteringCompactionTask_Call) RunAndReturn(run func(*datapb.CompactionTask) error) *MockCompactionMeta_DropClusteringCompactionTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetClusteringCompactionTasksBySelector provides a mock function with given fields: selector
+func (_m *MockCompactionMeta) GetClusteringCompactionTasksBySelector(selector CompactionTaskSelector) []*datapb.CompactionTask {
+	ret := _m.Called(selector)
+
+	var r0 []*datapb.CompactionTask
+	if rf, ok := ret.Get(0).(func(CompactionTaskSelector) []*datapb.CompactionTask); ok {
+		r0 = rf(selector)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.CompactionTask)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetClusteringCompactionTasksBySelector'
+type MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call struct {
+	*mock.Call
+}
+
+// GetClusteringCompactionTasksBySelector is a helper method to define mock.On call
+//   - selector CompactionTaskSelector
+func (_e *MockCompactionMeta_Expecter) GetClusteringCompactionTasksBySelector(selector interface{}) *MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call {
+	return &MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call{Call: _e.mock.On("GetClusteringCompactionTasksBySelector", selector)}
+}
+
+func (_c *MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call) Run(run func(selector CompactionTaskSelector)) *MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(CompactionTaskSelector))
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call) Return(_a0 []*datapb.CompactionTask) *MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call) RunAndReturn(run func(CompactionTaskSelector) []*datapb.CompactionTask) *MockCompactionMeta_GetClusteringCompactionTasksBySelector_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -170,13 +214,13 @@ func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(int64
 	return _c
 }
 
-// SaveClusteringCompactionInfo provides a mock function with given fields: info
-func (_m *MockCompactionMeta) SaveClusteringCompactionInfo(info *datapb.ClusteringCompactionInfo) error {
-	ret := _m.Called(info)
+// SaveClusteringCompactionTask provides a mock function with given fields: task
+func (_m *MockCompactionMeta) SaveClusteringCompactionTask(task *datapb.CompactionTask) error {
+	ret := _m.Called(task)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(*datapb.ClusteringCompactionInfo) error); ok {
-		r0 = rf(info)
+	if rf, ok := ret.Get(0).(func(*datapb.CompactionTask) error); ok {
+		r0 = rf(task)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -184,30 +228,30 @@ func (_m *MockCompactionMeta) SaveClusteringCompactionInfo(info *datapb.Clusteri
 	return r0
 }
 
-// MockCompactionMeta_SaveClusteringCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveClusteringCompactionInfo'
-type MockCompactionMeta_SaveClusteringCompactionInfo_Call struct {
+// MockCompactionMeta_SaveClusteringCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveClusteringCompactionTask'
+type MockCompactionMeta_SaveClusteringCompactionTask_Call struct {
 	*mock.Call
 }
 
-// SaveClusteringCompactionInfo is a helper method to define mock.On call
-//   - info *datapb.ClusteringCompactionInfo
-func (_e *MockCompactionMeta_Expecter) SaveClusteringCompactionInfo(info interface{}) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
-	return &MockCompactionMeta_SaveClusteringCompactionInfo_Call{Call: _e.mock.On("SaveClusteringCompactionInfo", info)}
+// SaveClusteringCompactionTask is a helper method to define mock.On call
+//   - task *datapb.CompactionTask
+func (_e *MockCompactionMeta_Expecter) SaveClusteringCompactionTask(task interface{}) *MockCompactionMeta_SaveClusteringCompactionTask_Call {
+	return &MockCompactionMeta_SaveClusteringCompactionTask_Call{Call: _e.mock.On("SaveClusteringCompactionTask", task)}
 }
 
-func (_c *MockCompactionMeta_SaveClusteringCompactionInfo_Call) Run(run func(info *datapb.ClusteringCompactionInfo)) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
+func (_c *MockCompactionMeta_SaveClusteringCompactionTask_Call) Run(run func(task *datapb.CompactionTask)) *MockCompactionMeta_SaveClusteringCompactionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*datapb.ClusteringCompactionInfo))
+		run(args[0].(*datapb.CompactionTask))
 	})
 	return _c
 }
 
-func (_c *MockCompactionMeta_SaveClusteringCompactionInfo_Call) Return(_a0 error) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
+func (_c *MockCompactionMeta_SaveClusteringCompactionTask_Call) Return(_a0 error) *MockCompactionMeta_SaveClusteringCompactionTask_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCompactionMeta_SaveClusteringCompactionInfo_Call) RunAndReturn(run func(*datapb.ClusteringCompactionInfo) error) *MockCompactionMeta_SaveClusteringCompactionInfo_Call {
+func (_c *MockCompactionMeta_SaveClusteringCompactionTask_Call) RunAndReturn(run func(*datapb.CompactionTask) error) *MockCompactionMeta_SaveClusteringCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

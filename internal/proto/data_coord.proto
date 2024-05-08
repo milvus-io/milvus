@@ -320,6 +320,12 @@ message SegmentInfo {
   // so segments with Legacy level shall be treated as L1 segment
   SegmentLevel level = 20;
   int64 storage_version = 21;
+
+  int64 partition_stats_version = 22;
+  // use in major compaction, if compaction fail, should revert segment level to last value
+  SegmentLevel last_level = 23;
+  // use in major compaction, if compaction fail, should revert partition stats version to last value 
+  int64 last_partition_stats_version = 24;
 }
 
 message SegmentStartPosition {
@@ -833,17 +839,44 @@ message GcControlRequest {
   repeated common.KeyValuePair params = 3;
 }
 
-message ClusteringCompactionInfo {
-  int64 triggerID = 1;
-  int64 collectionID = 2;
-  int64 clusteringKeyID = 3;
-  string clusteringKeyName = 4;
-  schema.DataType clusteringKeyType = 5;
-  int32 state = 6;
-  uint64 startTime = 7;
-  uint64 endTime = 8;
-  repeated CompactionPlan compactionPlans = 9;
-  int64 analyzeTaskID = 10;
+enum CompactionTaskState {
+  unknown = 0;
+  compact_executing = 1; // => executing
+  compact_pipelining = 2;
+  compact_completed = 3; // => completed
+  failed = 4;
+  timeout = 5;
+  init = 6;
+  analyzing = 7;
+  analyzed = 8;
+  indexing = 9;
+  indexed = 10;
+  cleaned = 11;
+}
+
+message CompactionTask {
+  int64 planID = 1;
+  int64 triggerID = 2;
+  CompactionTaskState state = 3;
+  string fail_reason = 4;
+  int32 retry_times = 5;
+  uint64 start_time = 6;
+  uint64 end_time = 7;
+  int32 timeout_in_seconds = 8;
+  CompactionType type = 9;
+  uint64 timetravel = 10;
+  int64 collection_ttl = 11;
+  int64 total_rows = 12;
+  int64 collectionID = 13;
+  int64 partitionID = 14;
+  string channel = 15;
+  schema.FieldSchema clustering_key_field = 16;
+  int64 max_segment_rows = 17;
+  int64 prefer_segment_rows = 18;
+  repeated int64 inputSegments = 19;
+  repeated int64 resultSegments = 20;
+  int64 analyzeTaskID = 21;
+  int64 analyzeVersionID = 22;
 }
 
 message PartitionStatsInfo {

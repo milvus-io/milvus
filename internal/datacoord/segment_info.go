@@ -206,6 +206,13 @@ func (s *SegmentsInfo) SetIsCompacting(segmentID UniqueID, isCompacting bool) {
 	}
 }
 
+// SetLevel sets level for segment
+func (s *SegmentsInfo) SetLevel(segmentID UniqueID, level datapb.SegmentLevel) {
+	if segment, ok := s.segments[segmentID]; ok {
+		s.segments[segmentID] = segment.ShadowClone(SetLevel(level))
+	}
+}
+
 // Clone deep clone the segment info and return a new instance
 func (s *SegmentInfo) Clone(opts ...SegmentInfoOption) *SegmentInfo {
 	info := proto.Clone(s.SegmentInfo).(*datapb.SegmentInfo)
@@ -328,6 +335,13 @@ func SetFlushTime(t time.Time) SegmentInfoOption {
 func SetIsCompacting(isCompacting bool) SegmentInfoOption {
 	return func(segment *SegmentInfo) {
 		segment.isCompacting = isCompacting
+	}
+}
+
+// SetLevel is the option to set level for segment info
+func SetLevel(level datapb.SegmentLevel) SegmentInfoOption {
+	return func(segment *SegmentInfo) {
+		segment.Level = level
 	}
 }
 

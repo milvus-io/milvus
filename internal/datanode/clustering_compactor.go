@@ -61,8 +61,7 @@ import (
 
 type clusteringCompactionTask struct {
 	compactor
-	io io.BinlogIO
-	//stageIO   io.BinlogIO
+	io        io.BinlogIO
 	allocator allocator.Allocator
 	metaCache metacache.MetaCache
 	syncMgr   syncmgr.SyncManager
@@ -127,7 +126,6 @@ type SpillSignal struct {
 func newClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	//stagingIO io.BinlogIO,
 	alloc allocator.Allocator,
 	metaCache metacache.MetaCache,
 	syncMgr syncmgr.SyncManager,
@@ -135,10 +133,9 @@ func newClusteringCompactionTask(
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	return &clusteringCompactionTask{
-		ctx:    ctx,
-		cancel: cancel,
-		io:     binlogIO,
-		//stageIO:            stagingIO,
+		ctx:                ctx,
+		cancel:             cancel,
+		io:                 binlogIO,
 		allocator:          alloc,
 		metaCache:          metaCache,
 		syncMgr:            syncMgr,
@@ -224,7 +221,7 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 		log.Warn("compact wrong, illegal compaction type")
 		return nil, errIllegalCompactionPlan
 	}
-	log.Info("L2 compaction", zap.Duration("wait in queue elapse", t.tr.RecordSpan()))
+	log.Info("Clustering compaction", zap.Duration("wait in queue elapse", t.tr.RecordSpan()))
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, errContext
@@ -287,7 +284,7 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 	}
 
 	// 3, mapping
-	log.Info("L2 compaction start mapping", zap.Int("bufferNum", len(t.clusterBuffers)))
+	log.Info("Clustering compaction start mapping", zap.Int("bufferNum", len(t.clusterBuffers)))
 	uploadSegments, partitionStats, err := t.mapping(ctx, deltaPk2Ts)
 	if err != nil {
 		return nil, err
@@ -311,7 +308,7 @@ func (t *clusteringCompactionTask) compact() (*datapb.CompactionPlanResult, erro
 	metrics.DataNodeCompactionLatency.
 		WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), t.plan.GetType().String()).
 		Observe(float64(t.tr.ElapseSpan().Milliseconds()))
-	log.Info("L2 compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()))
+	log.Info("Clustering compaction finished", zap.Duration("elapse", t.tr.ElapseSpan()))
 
 	return planResult, nil
 }
@@ -828,7 +825,7 @@ func (t *clusteringCompactionTask) packBuffersToSegments(ctx context.Context, bu
 	}
 	buffer.currentSegmentID = segmentID
 	buffer.currentSpillBinlogs = make(map[UniqueID]*datapb.FieldBinlog, 0)
-	log.Debug("finish pack segment", zap.Int64("segID", buffer.currentSegmentID), zap.String("seg", seg.String()), zap.Any("segStats", segmentStats))
+	log.Debug("finish pack segment", zap.Int64("partitionID", t.partitionID), zap.Int64("segID", buffer.currentSegmentID), zap.String("seg", seg.String()), zap.Any("segStats", segmentStats))
 	return nil
 }
 
