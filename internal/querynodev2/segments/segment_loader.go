@@ -1642,7 +1642,15 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 
 	indexInfo := lo.Map(infos, func(info *querypb.SegmentLoadInfo, _ int) *querypb.SegmentLoadInfo {
 		info = typeutil.Clone(info)
-		info.BinlogPaths = nil
+		// remain binlog paths whose field id is in index infos to estimate resource usage correctly
+		indexFields := typeutil.NewSet(lo.Map(info.GetIndexInfos(), func(indexInfo *querypb.FieldIndexInfo, _ int) int64 { return indexInfo.GetFieldID() })...)
+		var binlogPaths []*datapb.FieldBinlog
+		for _, binlog := range info.GetBinlogPaths() {
+			if indexFields.Contain(binlog.GetFieldID()) {
+				binlogPaths = append(binlogPaths, binlog)
+			}
+		}
+		info.BinlogPaths = binlogPaths
 		info.Deltalogs = nil
 		info.Statslogs = nil
 		return info

@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -489,6 +490,42 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.ErrorIs(err, merr.ErrIndexNotFound)
+}
+
+func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
+	ctx := context.Background()
+	segment := &LocalSegment{}
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    1,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        1,
+				IndexFilePaths: []string{},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: indexparamcheck.IndexINVERTED,
+					},
+				},
+			},
+		},
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogSize: 1000000000,
+					},
+				},
+			},
+		},
+	}
+
+	paramtable.Get().QueryNodeCfg.DiskCapacityLimit.SwapTempValue("100000")
+	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
+	suite.Error(err)
 }
 
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
