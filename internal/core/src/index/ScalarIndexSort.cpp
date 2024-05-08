@@ -479,6 +479,13 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
     return true;
 }
 
+template <typename T>
+ResourceUsage
+ScalarIndexSort<T>::GetResourceUsage() const {
+    // TODO: we cannot estimate the memory usage now.
+    return ResourceUsage{0, 0};
+}
+
 template class ScalarIndexSort<bool>;
 template class ScalarIndexSort<int8_t>;
 template class ScalarIndexSort<int16_t>;

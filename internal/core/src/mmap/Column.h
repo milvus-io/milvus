@@ -168,6 +168,14 @@ class ColumnBase {
         return cap_size_ + padding_;
     }
 
+    ResourceUsage
+    GetResourceUsage() const {
+        if (is_map_anonymous_) {
+            return ResourceUsage{cap_size_ + padding_, 0};
+        }
+        return ResourceUsage{0, cap_size_ + padding_};
+    }
+
     // The capacity of the column,
     // DO NOT call this for variable length column(including SparseFloatColumn).
     virtual size_t

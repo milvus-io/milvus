@@ -14,6 +14,7 @@
 #include <map>
 #include <unordered_map>
 #include <memory>
+#include <vector>
 #include <shared_mutex>
 #include <utility>
 #include <tbb/concurrent_hash_map.h>
@@ -66,6 +67,17 @@ struct SealedIndexingRecord {
     clear() {
         std::unique_lock lck(mutex_);
         field_indexings_.clear();
+    }
+
+    void
+    range_over(std::function<bool(const FieldId&, const SealedIndexingEntryPtr)>
+                   f) const {
+        std::shared_lock lck(mutex_);
+        for (auto& kv : field_indexings_) {
+            if (!f(kv.first, kv.second)) {
+                return;
+            }
+        }
     }
 
  private:

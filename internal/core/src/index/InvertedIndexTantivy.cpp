@@ -447,6 +447,14 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     }
 }
 
+template <typename T>
+ResourceUsage
+InvertedIndexTantivy<T>::GetResourceUsage() const {
+    // TODO: we can't get the memory usage of disk index now.
+    auto disk_size = disk_file_manager_->GetLocalFileSize();
+    return ResourceUsage{0, disk_size};
+}
+
 template class InvertedIndexTantivy<bool>;
 template class InvertedIndexTantivy<int8_t>;
 template class InvertedIndexTantivy<int16_t>;

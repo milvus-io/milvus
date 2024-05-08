@@ -19,6 +19,7 @@
 #include <memory>
 #include <vector>
 
+#include "common/Types.h"
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/space.h"
@@ -104,13 +105,17 @@ class VectorDiskAnnIndex : public VectorIndex {
                   "get sparse vector not supported for disk index");
     }
 
-    void CleanLocalData() override;
+    void
+    CleanLocalData() override;
 
     knowhere::expected<
         std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
                     const BitsetView& bitset) const override;
+
+    ResourceUsage
+    GetResourceUsage() const override;
 
  private:
     knowhere::Json

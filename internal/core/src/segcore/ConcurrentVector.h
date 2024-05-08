@@ -257,6 +257,15 @@ class ConcurrentVectorImpl : public VectorBase {
         return get_chunk(chunk_id).data() + chunk_offset * elements_per_row_;
     }
 
+    size_t
+    num_of_element() const {
+        size_t num = 0;
+        for (size_t i = 0; i < chunks_.size(); i++) {
+            num += chunks_[i].size();
+        }
+        return num;
+    }
+
     const Type&
     operator[](ssize_t element_index) const {
         AssertInfo(

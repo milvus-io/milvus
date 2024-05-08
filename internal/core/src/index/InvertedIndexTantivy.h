@@ -156,6 +156,9 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     const TargetBitmap
     RegexQuery(const std::string& pattern) override;
 
+    ResourceUsage
+    GetResourceUsage() const override;
+
  private:
     void
     finish();

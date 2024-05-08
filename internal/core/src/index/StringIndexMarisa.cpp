@@ -37,6 +37,7 @@
 #include "index/Index.h"
 #include "storage/Util.h"
 #include "storage/space.h"
+#include "storage/LocalChunkManagerSingleton.h"
 
 namespace milvus::index {
 
@@ -256,18 +257,21 @@ StringIndexMarisa::LoadWithoutAssemble(const BinarySet& set,
     auto len = index->size;
 
     auto file = File::Open(file_name, O_RDWR | O_CREAT | O_EXCL);
-    auto written = file.Write(index->data.get(), len);
-    if (written != len) {
+    try {
+        auto written = file.Write(index->data.get(), len);
+    } catch (const SegcoreError& e) {
         file.Close();
         remove(file_name.c_str());
-        throw SegcoreError(
-            ErrorCode::UnistdError,
-            fmt::format("write index to fd error: {}", strerror(errno)));
+        throw;
     }
 
     file.Seek(0, SEEK_SET);
     if (config.contains(kEnableMmap)) {
         trie_.mmap(file_name.c_str());
+        auto local_chunk_manager =
+            milvus::storage::LocalChunkManagerSingleton::GetInstance()
+                .GetChunkManager();
+        resource_usage_.disk_size += local_chunk_manager->Size(file_name);
     } else {
         trie_.read(file.Descriptor());
     }
@@ -561,6 +565,12 @@ StringIndexMarisa::Reverse_Lookup(size_t offset) const {
     agent.set_query(str_ids_[offset]);
     trie_.reverse_lookup(agent);
     return std::string(agent.key().ptr(), agent.key().length());
+}
+
+ResourceUsage
+StringIndexMarisa::GetResourceUsage() const {
+    // TODO: we cannot estimate the memory usage now.
+    return ResourceUsage{0, resource_usage_.disk_size};
 }
 
 }  // namespace milvus::index

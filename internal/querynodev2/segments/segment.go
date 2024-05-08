@@ -500,14 +500,14 @@ func (s *LocalSegment) MemSize() int64 {
 
 	memSize := s.memSize.Load()
 	if memSize < 0 {
-		var cMemSize C.int64_t
+		var usage C.CSegmentResourceUsage
 		GetDynamicPool().Submit(func() (any, error) {
-			cMemSize = C.GetMemoryUsageInBytes(s.ptr)
-			s.memSize.Store(int64(cMemSize))
+			usage = C.GetResourceUsageOfSegment(s.ptr)
+			s.memSize.Store(int64(usage.mem_size))
 			return nil, nil
 		}).Await()
 
-		memSize = int64(cMemSize)
+		memSize = int64(usage.mem_size)
 	}
 	return memSize
 }

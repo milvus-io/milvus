@@ -190,11 +190,11 @@ RetrieveByOffsets(CTraceContext c_trace,
     }
 }
 
-int64_t
-GetMemoryUsageInBytes(CSegmentInterface c_segment) {
+CSegmentResourceUsage
+GetResourceUsageOfSegment(CSegmentInterface c_segment) {
     auto segment = static_cast<milvus::segcore::SegmentInterface*>(c_segment);
-    auto mem_size = segment->GetMemoryUsageInBytes();
-    return mem_size;
+    auto usage = segment->GetResourceUsage();
+    return CSegmentResourceUsage{usage.mem_size, usage.disk_size};
 }
 
 int64_t

@@ -98,6 +98,9 @@ class StringIndexMarisa : public StringIndex {
         return true;
     }
 
+    ResourceUsage
+    GetResourceUsage() const override;
+
  private:
     void
     fill_str_ids(size_t n, const std::string* values);
@@ -123,6 +126,7 @@ class StringIndexMarisa : public StringIndex {
     bool built_ = false;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<milvus_storage::Space> space_;
+    ResourceUsage resource_usage_;
 };
 
 using StringIndexMarisaPtr = std::unique_ptr<StringIndexMarisa>;
