@@ -111,7 +111,8 @@ type QueryNode struct {
 	loader segments.Loader
 
 	// Search/Query
-	scheduler tasks.Scheduler
+	scheduler       tasks.Scheduler
+	streamBatchSzie int
 
 	// etcd client
 	etcdCli *clientv3.Client
@@ -328,6 +329,7 @@ func (node *QueryNode) Init() error {
 		node.scheduler = tasks.NewScheduler(
 			schedulePolicy,
 		)
+		node.streamBatchSzie = paramtable.Get().QueryNodeCfg.QueryStreamBatchSize.GetAsInt()
 		log.Info("queryNode init scheduler", zap.String("policy", schedulePolicy))
 
 		node.clusterManager = cluster.NewWorkerManager(func(ctx context.Context, nodeID int64) (cluster.Worker, error) {
