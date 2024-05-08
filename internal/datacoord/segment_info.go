@@ -306,7 +306,6 @@ func (s *SegmentsInfo) addCollection(segment *SegmentInfo) {
 		s.collSegments[collID] = collSegment
 	}
 	collSegment.segments[segment.GetID()] = segment
-	log.Warn("CQX add collection", zap.Any("collSegments", s.collSegments))
 }
 
 func (s *SegmentsInfo) delCollection(segment *SegmentInfo) {
