@@ -120,7 +120,7 @@ func (suite *ReplicaObserverSuite) TestCheckNodesInReplica() {
 	replicas, err := suite.meta.Spawn(suite.collectionID, map[string]int{
 		"rg1": 1,
 		"rg2": 1,
-	})
+	}, nil)
 	suite.NoError(err)
 	suite.Equal(2, len(replicas))
 
