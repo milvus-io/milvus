@@ -155,6 +155,39 @@ func (_c *MockTask_Checkpoint_Call) RunAndReturn(run func() *msgpb.MsgPosition) 
 	return _c
 }
 
+// HandleError provides a mock function with given fields: _a0
+func (_m *MockTask) HandleError(_a0 error) {
+	_m.Called(_a0)
+}
+
+// MockTask_HandleError_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'HandleError'
+type MockTask_HandleError_Call struct {
+	*mock.Call
+}
+
+// HandleError is a helper method to define mock.On call
+//   - _a0 error
+func (_e *MockTask_Expecter) HandleError(_a0 interface{}) *MockTask_HandleError_Call {
+	return &MockTask_HandleError_Call{Call: _e.mock.On("HandleError", _a0)}
+}
+
+func (_c *MockTask_HandleError_Call) Run(run func(_a0 error)) *MockTask_HandleError_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(error))
+	})
+	return _c
+}
+
+func (_c *MockTask_HandleError_Call) Return() *MockTask_HandleError_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTask_HandleError_Call) RunAndReturn(run func(error)) *MockTask_HandleError_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Run provides a mock function with given fields:
 func (_m *MockTask) Run() error {
 	ret := _m.Called()
