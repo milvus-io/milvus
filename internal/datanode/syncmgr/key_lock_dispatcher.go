@@ -13,32 +13,33 @@ type Task interface {
 	StartPosition() *msgpb.MsgPosition
 	ChannelName() string
 	Run() error
+	HandleError(error)
 }
 
 type keyLockDispatcher[K comparable] struct {
 	keyLock    *lock.KeyLock[K]
-	workerPool *conc.Pool[error]
+	workerPool *conc.Pool[struct{}]
 }
 
 func newKeyLockDispatcher[K comparable](maxParallel int) *keyLockDispatcher[K] {
 	dispatcher := &keyLockDispatcher[K]{
-		workerPool: conc.NewPool[error](maxParallel, conc.WithPreAlloc(false)),
+		workerPool: conc.NewPool[struct{}](maxParallel, conc.WithPreAlloc(false)),
 		keyLock:    lock.NewKeyLock[K](),
 	}
 	return dispatcher
 }
 
-func (d *keyLockDispatcher[K]) Submit(key K, t Task, callbacks ...func(error)) *conc.Future[error] {
+func (d *keyLockDispatcher[K]) Submit(key K, t Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	d.keyLock.Lock(key)
 
-	return d.workerPool.Submit(func() (error, error) {
+	return d.workerPool.Submit(func() (struct{}, error) {
 		defer d.keyLock.Unlock(key)
 		err := t.Run()
 
 		for _, callback := range callbacks {
-			callback(err)
+			err = callback(err)
 		}
 
-		return err, nil
+		return struct{}{}, err
 	})
 }
