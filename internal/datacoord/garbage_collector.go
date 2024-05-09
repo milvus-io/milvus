@@ -411,7 +411,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 	log.Info("start clear dropped segments...")
 	defer func() { log.Info("clear dropped segments done", zap.Duration("timeCost", time.Since(start))) }()
 
-	all := gc.meta.SelectSegments(func(si *SegmentInfo) bool { return true })
+	all := gc.meta.SelectSegments()
 	drops := make(map[int64]*SegmentInfo, 0)
 	compactTo := make(map[int64]*SegmentInfo)
 	channels := typeutil.NewSet[string]()
