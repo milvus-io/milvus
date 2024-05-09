@@ -318,7 +318,6 @@ func (s *SyncManagerSuite) TestTargetUpdated() {
 	task.EXPECT().CalcTargetSegment().Return(1001, nil).Once()
 	task.EXPECT().Run().Return(errTargetSegmentNotMatch).Once()
 	task.EXPECT().Run().Return(nil).Once()
-	task.EXPECT().HandleError(mock.Anything)
 
 	f := manager.SyncData(context.Background(), task)
 	_, err = f.Await()
