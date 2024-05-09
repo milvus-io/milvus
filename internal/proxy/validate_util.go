@@ -121,7 +121,6 @@ func (v *validateUtil) Validate(data []*schemapb.FieldData, schema *schemapb.Col
 		default:
 		}
 	}
-	log.Info("lxg want", zap.Any("data", data))
 
 	err = v.fillWithValue(data, helper, int(numRows))
 	if err != nil {
