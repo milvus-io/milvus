@@ -61,7 +61,7 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
 	s.mockMeta = metacache.NewMockMetaCache(s.T())
 	// plan of the task is unset
-	s.task = newLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil)
+	s.task = newLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
