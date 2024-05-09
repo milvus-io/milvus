@@ -127,13 +127,6 @@ class DiskFileManagerImpl : public FileManagerImpl {
     std::string
     GetRemoteIndexPath(const std::string& file_name, int64_t slice_num) const;
 
-    std::string
-    GetCentroidsPath(const std::string& file_name, int64_t slice_num) const;
-
-    std::string
-    GetCentroidIdMappingPath(const std::string& file_name,
-                             int64_t slice_num) const;
-
  private:
     // local file path (abs path)
     std::vector<std::string> local_paths_;

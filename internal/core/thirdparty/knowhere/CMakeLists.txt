@@ -12,8 +12,8 @@
 #-------------------------------------------------------------------------------
 
 # Update KNOWHERE_VERSION for the first occurrence
-set( KNOWHERE_VERSION serverless )
-set( GIT_REPOSITORY  "https://github.com/chasingegg/Knowhere.git")
+set( KNOWHERE_VERSION f29da89 )
+set( GIT_REPOSITORY  "https://github.com/zilliztech/knowhere.git")
 message(STATUS "Knowhere repo: ${GIT_REPOSITORY}")
 message(STATUS "Knowhere version: ${KNOWHERE_VERSION}")
 
