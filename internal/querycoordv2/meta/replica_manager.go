@@ -21,6 +21,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -406,15 +407,7 @@ func (m *ReplicaManager) RemoveNode(replicaID typeutil.UniqueID, nodes ...typeut
 }
 
 func (m *ReplicaManager) GetResourceGroupByCollection(collection typeutil.UniqueID) typeutil.Set[string] {
-	m.rwmutex.Lock()
-	defer m.rwmutex.Unlock()
-
-	ret := typeutil.NewSet[string]()
-	for _, r := range m.replicas {
-		if r.GetCollectionID() == collection {
-			ret.Insert(r.GetResourceGroup())
-		}
-	}
-
+	replicas := m.GetByCollection(collection)
+	ret := typeutil.NewSet(lo.Map(replicas, func(r *Replica, _ int) string { return r.GetResourceGroup() })...)
 	return ret
 }
