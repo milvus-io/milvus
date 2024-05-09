@@ -14,40 +14,18 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-#pragma once
+package initcore
 
-#ifdef __cplusplus
-extern "C" {
-#endif
+import (
+	"testing"
 
-#include <stdbool.h>
-#include <stdint.h>
-#include "common/type_c.h"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+)
 
-void
-InitIndexSliceSize(const int64_t);
+func TestTracer(t *testing.T) {
+	paramtable.Init()
+	InitTraceConfig(paramtable.Get())
 
-void
-InitHighPriorityThreadCoreCoefficient(const int64_t);
-
-void
-InitMiddlePriorityThreadCoreCoefficient(const int64_t);
-
-void
-InitLowPriorityThreadCoreCoefficient(const int64_t);
-
-void
-InitDefaultExprEvalBatchSize(int64_t val);
-
-void
-InitCpuNum(const int);
-
-void
-InitTrace(CTraceConfig* config);
-
-void
-SetTrace(CTraceConfig* config);
-
-#ifdef __cplusplus
-};
-#endif
+	paramtable.Get().Save(paramtable.Get().TraceCfg.Exporter.Key, "stdout")
+	ResetTraceConfig(paramtable.Get())
+}

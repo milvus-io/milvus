@@ -169,14 +169,14 @@ func buildArrayData(schema *schemapb.CollectionSchema, rows int) ([]arrow.Array,
 			builder := array.NewListBuilder(mem, &arrow.Float32Type{})
 			offsets := make([]int32, 0, rows)
 			valid := make([]bool, 0, rows)
-			for i := 0; i < dim*rows; i++ {
-				floatVecData = append(floatVecData, float32(i))
-			}
-			builder.ValueBuilder().(*array.Float32Builder).AppendValues(floatVecData, nil)
 			for i := 0; i < rows; i++ {
+				for j := 0; j < dim; j++ {
+					floatVecData = append(floatVecData, float32(i*dim+j))
+				}
 				offsets = append(offsets, int32(i*dim))
 				valid = append(valid, true)
 			}
+			builder.ValueBuilder().(*array.Float32Builder).AppendValues(floatVecData, nil)
 			insertData.Data[field.GetFieldID()] = &storage.FloatVectorFieldData{Data: floatVecData, Dim: dim}
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
@@ -186,14 +186,14 @@ func buildArrayData(schema *schemapb.CollectionSchema, rows int) ([]arrow.Array,
 			offsets := make([]int32, 0, rows)
 			valid := make([]bool, 0, rows)
 			rowBytes := dim * 2
-			for i := 0; i < rowBytes*rows; i++ {
-				float16VecData = append(float16VecData, uint8(i%256))
-			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(float16VecData, nil)
 			for i := 0; i < rows; i++ {
-				offsets = append(offsets, int32(rowBytes*i))
+				for j := 0; j < rowBytes; j++ {
+					float16VecData = append(float16VecData, uint8((i+j)%256))
+				}
+				offsets = append(offsets, int32(i*rowBytes))
 				valid = append(valid, true)
 			}
+			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(float16VecData, nil)
 			insertData.Data[field.GetFieldID()] = &storage.Float16VectorFieldData{Data: float16VecData, Dim: dim}
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
@@ -203,28 +203,29 @@ func buildArrayData(schema *schemapb.CollectionSchema, rows int) ([]arrow.Array,
 			offsets := make([]int32, 0, rows)
 			valid := make([]bool, 0, rows)
 			rowBytes := dim * 2
-			for i := 0; i < rowBytes*rows; i++ {
-				bfloat16VecData = append(bfloat16VecData, uint8(i%256))
-			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(bfloat16VecData, nil)
 			for i := 0; i < rows; i++ {
-				offsets = append(offsets, int32(rowBytes*i))
+				for j := 0; j < rowBytes; j++ {
+					bfloat16VecData = append(bfloat16VecData, uint8((i+j)%256))
+				}
+				offsets = append(offsets, int32(i*rowBytes))
 				valid = append(valid, true)
 			}
+			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(bfloat16VecData, nil)
 			insertData.Data[field.GetFieldID()] = &storage.BFloat16VectorFieldData{Data: bfloat16VecData, Dim: dim}
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_SparseFloatVector:
 			sparsefloatVecData := make([]byte, 0)
 			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
-			offsets := make([]int32, 0, rows+1)
+			offsets := make([]int32, 0, rows)
 			valid := make([]bool, 0, rows)
 			vecData := testutils.GenerateSparseFloatVectors(rows)
-			offsets = append(offsets, 0)
+			currOffset := int32(0)
 			for i := 0; i < rows; i++ {
 				rowVecData := vecData.GetContents()[i]
 				sparsefloatVecData = append(sparsefloatVecData, rowVecData...)
-				offsets = append(offsets, offsets[i]+int32(len(rowVecData)))
+				offsets = append(offsets, currOffset)
+				currOffset = currOffset + int32(len(rowVecData))
 				valid = append(valid, true)
 			}
 			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(sparsefloatVecData, nil)
@@ -253,14 +254,14 @@ func buildArrayData(schema *schemapb.CollectionSchema, rows int) ([]arrow.Array,
 				offsets := make([]int32, 0, rows)
 				valid := make([]bool, 0)
 				rowBytes := dim / 8
-				for i := 0; i < rowBytes*rows; i++ {
-					binVecData = append(binVecData, uint8(i))
-				}
-				builder.ValueBuilder().(*array.Uint8Builder).AppendValues(binVecData, nil)
 				for i := 0; i < rows; i++ {
-					offsets = append(offsets, int32(rowBytes*i))
+					for j := 0; j < rowBytes; j++ {
+						binVecData = append(binVecData, uint8((i+j)%256))
+					}
+					offsets = append(offsets, int32(i*rowBytes))
 					valid = append(valid, true)
 				}
+				builder.ValueBuilder().(*array.Uint8Builder).AppendValues(binVecData, nil)
 				builder.AppendValues(offsets, valid)
 				columns = append(columns, builder.NewListArray())
 				insertData.Data[field.GetFieldID()] = &storage.BinaryVectorFieldData{Data: binVecData, Dim: dim}
