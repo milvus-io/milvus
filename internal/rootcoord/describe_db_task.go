@@ -51,6 +51,7 @@ func (t *describeDBTask) Execute(ctx context.Context) (err error) {
 		DbID:             db.ID,
 		DbName:           db.Name,
 		CreatedTimestamp: db.CreatedTime,
+		Properties:       db.Properties,
 	}
 	return nil
 }

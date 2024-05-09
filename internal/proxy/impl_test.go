@@ -1144,6 +1144,58 @@ func TestProxyAlterDatabase(t *testing.T) {
 	})
 }
 
+func TestProxyDescribeDatabase(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := node.DescribeDatabase(ctx, &milvuspb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	factory := dependency.NewDefaultFactory(true)
+	ctx := context.Background()
+
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.simpleLimiter = NewSimpleLimiter()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	node.sched.ddQueue.setMaxTaskNum(10)
+	assert.NoError(t, err)
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	defer node.sched.Close()
+
+	t.Run("describe database fail", func(t *testing.T) {
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.On("DescribeDatabase", mock.Anything, mock.Anything).Return(nil, errors.New("fail"))
+		node.rootCoord = rc
+		ctx := context.Background()
+		resp, err := node.DescribeDatabase(ctx, &milvuspb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+	})
+
+	t.Run("describe database ok", func(t *testing.T) {
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.On("DescribeDatabase", mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{Status: merr.Success()}, nil)
+		node.rootCoord = rc
+		node.UpdateStateCode(commonpb.StateCode_Healthy)
+		ctx := context.Background()
+
+		resp, err := node.DescribeDatabase(ctx, &milvuspb.DescribeDatabaseRequest{})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+	})
+}
+
 func TestProxy_AllocTimestamp(t *testing.T) {
 	t.Run("proxy unhealthy", func(t *testing.T) {
 		node := &Proxy{}
