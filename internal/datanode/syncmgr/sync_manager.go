@@ -134,6 +134,9 @@ func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
 
 func (mgr *syncManager) submit(key int64, task Task) *conc.Future[struct{}] {
 	handler := func(err error) error {
+		if err == nil {
+			return nil
+		}
 		// unexpected error
 		if !errors.Is(err, errTargetSegmentNotMatch) {
 			task.HandleError(err)
