@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -37,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -399,22 +401,38 @@ func (t *levelZeroCompactionTask) loadBF(l1Segments []*datapb.CompactionSegmentB
 		zap.String("type", t.plan.GetType().String()),
 	)
 
-	bfs := make(map[int64]*metacache.BloomFilterSet)
+	var (
+		futures = make([]*conc.Future[any], 0, len(l1Segments))
+		pool    = getOrCreateStatsPool()
+
+		mu  = &sync.Mutex{}
+		bfs = make(map[int64]*metacache.BloomFilterSet)
+	)
+
 	for _, segment := range l1Segments {
-		err := binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
-			segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
-		if err != nil {
-			log.Warn("failed to DecompressBinLog", zap.Error(err))
-			return nil, err
-		}
-		pks, err := loadStats(t.ctx, t.cm,
-			t.metacache.Schema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
-		if err != nil {
-			log.Warn("failed to load segment stats log", zap.Error(err))
-			return nil, err
-		}
-		bf := metacache.NewBloomFilterSet(pks...)
-		bfs[segment.GetSegmentID()] = bf
+		segment := segment
+		future := pool.Submit(func() (any, error) {
+			err := binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
+				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+			if err != nil {
+				log.Warn("failed to DecompressBinLog", zap.Error(err))
+				return err, err
+			}
+			pks, err := loadStats(t.ctx, t.cm,
+				t.metacache.Schema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+			if err != nil {
+				log.Warn("failed to load segment stats log", zap.Error(err))
+				return err, err
+			}
+			bf := metacache.NewBloomFilterSet(pks...)
+			mu.Lock()
+			defer mu.Unlock()
+			bfs[segment.GetSegmentID()] = bf
+			return nil, nil
+		})
+		futures = append(futures, future)
 	}
-	return bfs, nil
+
+	err := conc.AwaitAll(futures...)
+	return bfs, err
 }
