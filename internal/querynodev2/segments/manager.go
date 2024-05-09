@@ -417,6 +417,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 			for _, segment := range ret {
 				segment.Unpin()
 			}
+			ret = nil
 		}
 	}()
 
@@ -432,7 +433,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 		return true
 	}, filters...)
 
-	return ret, nil
+	return ret, err
 }
 
 func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error) {
@@ -446,6 +447,7 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 			for _, segment := range lockedSegments {
 				segment.Unpin()
 			}
+			lockedSegments = nil
 		}
 	}()
 
