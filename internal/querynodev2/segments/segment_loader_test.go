@@ -494,7 +494,6 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 
 func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 	ctx := context.Background()
-	segment := &LocalSegment{}
 	loadInfo := &querypb.SegmentLoadInfo{
 		SegmentID:    1,
 		PartitionID:  suite.partitionID,
@@ -523,6 +522,11 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 		},
 	}
 
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+		},
+	}
 	paramtable.Get().QueryNodeCfg.DiskCapacityLimit.SwapTempValue("100000")
 	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
 	suite.Error(err)
