@@ -3,6 +3,7 @@ package delegator
 import (
 	"context"
 	"fmt"
+	"math"
 	"sort"
 	"strconv"
 
@@ -25,8 +26,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
-
-const defaultFilterRatio float64 = 0.5
 
 type PruneInfo struct {
 	filterRatio float64
@@ -106,7 +105,7 @@ func PruneSegments(ctx context.Context,
 
 	// 2. remove filtered segments from sealed segment list
 	if len(filteredSegments) > 0 {
-		var realFilteredSegments = 0
+		realFilteredSegments := 0
 		totalSegNum := 0
 		for idx, item := range sealedSegments {
 			newSegments := make([]SegmentEntry, 0)
@@ -125,7 +124,7 @@ func PruneSegments(ctx context.Context,
 		metrics.QueryNodeSegmentPruneRatio.
 			WithLabelValues(fmt.Sprint(collectionID), fmt.Sprint(typeutil.IsVectorType(clusteringKeyField.GetDataType()))).
 			Observe(float64(realFilteredSegments / totalSegNum))
-		log.RatedInfo(30, "Pruned segment for search/query",
+		log.Debug("Pruned segment for search/query",
 			zap.Int("filtered_segment_num[excluded]", realFilteredSegments),
 			zap.Int("total_segment_num", totalSegNum),
 			zap.Float32("filtered_ratio", float32(realFilteredSegments/totalSegNum)),
@@ -202,13 +201,20 @@ func FilterSegmentsByVector(partitionStats *storage.PartitionStatsSnapshot,
 
 		// 3. filtered non-target segments
 		segmentCount := len(segmentsToSearch)
-		targetSegNum := int(float64(segmentCount) * filterRatio)
+		targetSegNum := int(math.Sqrt(float64(segmentCount)) * filterRatio)
+		if targetSegNum > segmentCount {
+			log.Debug("Warn! targetSegNum is larger or equal than segmentCount, no prune effect at all",
+				zap.Int("targetSegNum", targetSegNum),
+				zap.Int("segmentCount", segmentCount),
+				zap.Float64("filterRatio", filterRatio))
+			targetSegNum = segmentCount
+		}
 		optimizedRowCount := 0
 		// set the last n - targetSegNum as being filtered
 		for i := 0; i < segmentCount; i++ {
 			optimizedRowCount += segmentsToSearch[i].rows
 			neededSegments[segmentsToSearch[i].segmentID] = struct{}{}
-			if int64(optimizedRowCount) >= searchReq.GetTopk() && i >= targetSegNum {
+			if int64(optimizedRowCount) >= searchReq.GetTopk() && i+1 >= targetSegNum {
 				break
 			}
 		}
@@ -233,15 +239,15 @@ func FilterSegmentsOnScalarField(partitionStats *storage.PartitionStatsSnapshot,
 			switch keyField.DataType {
 			case schemapb.DataType_Int8:
 				targetRange := tRange.ToIntRange()
-				statRange := exprutil.NewIntRange(int64(min.GetValue().(int8)), int64(max.GetValue().(int8)), true, true)
+				statRange := exprutil.NewIntRange(min.GetValue().(int64), max.GetValue().(int64), true, true)
 				return exprutil.IntRangeOverlap(targetRange, statRange)
 			case schemapb.DataType_Int16:
 				targetRange := tRange.ToIntRange()
-				statRange := exprutil.NewIntRange(int64(min.GetValue().(int16)), int64(max.GetValue().(int16)), true, true)
+				statRange := exprutil.NewIntRange(min.GetValue().(int64), max.GetValue().(int64), true, true)
 				return exprutil.IntRangeOverlap(targetRange, statRange)
 			case schemapb.DataType_Int32:
 				targetRange := tRange.ToIntRange()
-				statRange := exprutil.NewIntRange(int64(min.GetValue().(int32)), int64(max.GetValue().(int32)), true, true)
+				statRange := exprutil.NewIntRange(min.GetValue().(int64), max.GetValue().(int64), true, true)
 				return exprutil.IntRangeOverlap(targetRange, statRange)
 			case schemapb.DataType_Int64:
 				targetRange := tRange.ToIntRange()
