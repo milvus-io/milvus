@@ -122,7 +122,7 @@ func TestLRUCache(t *testing.T) {
 			return nil
 		})
 		assert.True(t, missing)
-		assert.ErrorIs(t, err, context.Canceled)
+		assert.ErrorIs(t, err, errTimeout)
 		assert.ErrorIs(t, context.Cause(ctx), errTimeout)
 	})
 
@@ -282,7 +282,7 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			return nil
 		})
 		wg.Done()
-		assert.ErrorIs(t, err, context.Canceled)
+		assert.ErrorIs(t, err, errTimeout)
 		assert.ErrorIs(t, context.Cause(ctx), errTimeout)
 	})
 
@@ -311,7 +311,7 @@ func TestLRUCacheConcurrency(t *testing.T) {
 		})
 		wg.Done()
 		assert.True(t, missing)
-		assert.ErrorIs(t, err, context.Canceled)
+		assert.ErrorIs(t, err, errTimeout)
 		assert.ErrorIs(t, context.Cause(ctx), errTimeout)
 	})
 
@@ -406,7 +406,7 @@ func TestLRUCacheConcurrency(t *testing.T) {
 		wg.Wait()
 	})
 
-	t.Run("test expire", func(t *testing.T) {
+	t.Run("test remove", func(t *testing.T) {
 		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
 			return key, nil
 		}).WithCapacity(5).WithFinalizer(func(ctx context.Context, key, value int) error {
@@ -423,13 +423,12 @@ func TestLRUCacheConcurrency(t *testing.T) {
 
 		evicted := 0
 		for i := 0; i < 100; i++ {
-			if cache.Expire(context.Background(), i) {
+			if cache.Remove(context.Background(), i) == nil {
 				evicted++
 			}
 		}
 		assert.Equal(t, 100, evicted)
 
-		// all item shouldn't be evicted if they are in used.
 		for i := 0; i < 5; i++ {
 			ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 2*time.Second, errTimeout)
 			defer cancel()
@@ -440,28 +439,37 @@ func TestLRUCacheConcurrency(t *testing.T) {
 		for i := 0; i < 5; i++ {
 			go func(i int) {
 				defer wg.Done()
-				ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 2*time.Second, errTimeout)
-				defer cancel()
-
-				cache.Do(ctx, i, func(ctx context.Context, v int) error {
-					time.Sleep(2 * time.Second)
+				cache.Do(context.Background(), i, func(ctx context.Context, v int) error {
+					time.Sleep(3 * time.Second)
 					return nil
 				})
 			}(i)
 		}
+		// wait for all goroutine to start
 		time.Sleep(1 * time.Second)
-		evicted = 0
-		for i := 0; i < 5; i++ {
-			if cache.Expire(context.Background(), i) {
-				evicted++
-			}
-		}
-		assert.Zero(t, evicted)
-		wg.Wait()
 
+		// all item shouldn't be evicted if they are in-used in 500ms.
+		evictedCount := atomic.NewInt32(0)
+		wgEvict := sync.WaitGroup{}
+		wgEvict.Add(5)
+		for i := 0; i < 5; i++ {
+			go func(i int) {
+				defer wgEvict.Done()
+				ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 500*time.Millisecond, errTimeout)
+				defer cancel()
+
+				if cache.Remove(ctx, i) == nil {
+					evictedCount.Inc()
+				}
+			}(i)
+		}
+		wgEvict.Wait()
+		assert.Zero(t, evictedCount.Load())
+
+		// given enough time, all item should be evicted.
 		evicted = 0
 		for i := 0; i < 5; i++ {
-			if cache.Expire(context.Background(), i) {
+			if cache.Remove(context.Background(), i) == nil {
 				evicted++
 			}
 		}
