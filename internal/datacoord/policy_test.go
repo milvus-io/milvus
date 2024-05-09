@@ -467,8 +467,8 @@ func TestAssignByCountPolicySuite(t *testing.T) {
 
 func (s *AssignByCountPolicySuite) SetupSubTest() {
 	s.curCluster = []*NodeChannelInfo{
-		{1, getChannels(map[string]int64{"ch-1": 1, "ch-2": 1, "ch-3": 2})},
-		{2, getChannels(map[string]int64{"ch-3": 1, "ch-4": 1, "ch-5": 4})},
+		{1, getChannels(map[string]int64{"ch-1": 1, "ch-2": 1, "ch-3": 1})},
+		{2, getChannels(map[string]int64{"ch-4": 1, "ch-5": 1, "ch-6": 4})},
 		{NodeID: 3, Channels: map[string]RWChannel{}},
 	}
 }
