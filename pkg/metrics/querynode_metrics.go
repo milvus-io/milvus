@@ -343,11 +343,24 @@ var (
 			Namespace: milvusNamespace,
 			Subsystem: typeutil.QueryNodeRole,
 			Name:      "segment_prune_ratio",
-			Help:      "latency of compaction operation",
+			Help:      "ratio of segment prune",
 			Buckets:   buckets,
 		}, []string{
 			collectionIDLabelName,
 			isVectorFieldLabelName,
+		})
+
+	QueryNodeSegmentPruneLatency = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "segment_prune_latency",
+			Help:      "latency of pruning segment when searching or querying",
+			Buckets:   buckets,
+		}, []string{
+			nodeIDLabelName,
+			queryTypeLabelName,
+			collectionIDLabelName,
 		})
 
 	QueryNodeEvictedReadReqCount = prometheus.NewCounterVec(
@@ -767,6 +780,7 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
 	registry.MustRegister(QueryNodeSegmentPruneRatio)
+	registry.MustRegister(QueryNodeSegmentPruneLatency)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
