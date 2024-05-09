@@ -33,7 +33,7 @@ DataNode discovers DataCoord and RootCoord, in *HEALTHY* and *IDLE* state.
 
 ### 3. Flowgraph Recovery
 
-The detailed design can be found at [datanode flowgraph recovery design](datanode_flowgraph_recovery_design_0604_2021.md).
+The detailed design can be found at [datanode flowgraph recovery design](20210604-datanode_flowgraph_recovery_design.md).
 
 After DataNode subscribes to a stateful vchannel, DataNode starts to work, or more specifically, flowgraph starts to work.
 
