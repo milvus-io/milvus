@@ -24,6 +24,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/distance"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -42,6 +44,7 @@ func PruneSegments(ctx context.Context,
 	log := log.Ctx(ctx)
 	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("segmentPrune"))
 	defer span.End()
+	tr := timerecord.NewTimeRecorder("PruneSegments")
 	// 1. calculate filtered segments
 	filteredSegments := make(map[UniqueID]struct{}, 0)
 	clusteringKeyField := clustering.GetClusteringKeyField(schema)
@@ -130,6 +133,14 @@ func PruneSegments(ctx context.Context,
 			zap.Float32("filtered_ratio", float32(realFilteredSegments/totalSegNum)),
 		)
 	}
+
+	pruneDuration := tr.ElapseSpan()
+	queryType := metrics.SearchLabel
+	if queryReq != nil {
+		queryType = metrics.QueryLabel
+	}
+	metrics.QueryNodeSegmentPruneLatency.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()),
+		queryType, fmt.Sprint(collectionID)).Observe(float64(pruneDuration.Milliseconds()))
 }
 
 type segmentDisStruct struct {
