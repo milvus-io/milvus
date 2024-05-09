@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -168,6 +169,10 @@ func (dh *distHandler) updateChannelsDistribution(resp *querypb.GetDataDistribut
 
 func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionResponse) {
 	updates := make([]*meta.LeaderView, 0, len(resp.GetLeaderViews()))
+
+	channels := lo.SliceToMap(resp.GetChannels(), func(channel *querypb.ChannelVersionInfo) (string, *querypb.ChannelVersionInfo) {
+		return channel.GetChannel(), channel
+	})
 	for _, lview := range resp.GetLeaderViews() {
 		segments := make(map[int64]*meta.Segment)
 
@@ -184,11 +189,9 @@ func (dh *distHandler) updateLeaderView(resp *querypb.GetDataDistributionRespons
 		}
 
 		var version int64
-		for _, channel := range resp.GetChannels() {
-			if channel.GetChannel() == lview.GetChannel() {
-				version = channel.GetVersion()
-				break
-			}
+		channel, ok := channels[lview.GetChannel()]
+		if ok {
+			version = channel.GetVersion()
 		}
 
 		view := &meta.LeaderView{
