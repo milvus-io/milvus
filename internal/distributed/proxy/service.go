@@ -1233,3 +1233,7 @@ func (s *Server) AlterDatabase(ctx context.Context, req *milvuspb.AlterDatabaseR
 func (s *Server) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
 	return s.proxy.InvalidateShardLeaderCache(ctx, req)
 }
+
+func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
+	return s.proxy.DescribeDatabase(ctx, req)
+}
