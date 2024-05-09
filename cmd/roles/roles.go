@@ -37,7 +37,9 @@ import (
 	rocksmqimpl "github.com/milvus-io/milvus/internal/mq/mqimpl/rocksmq/server"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
+	"github.com/milvus-io/milvus/internal/util/initcore"
 	internalmetrics "github.com/milvus-io/milvus/internal/util/metrics"
+	"github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper/nmq"
@@ -392,6 +394,30 @@ func (mr *MilvusRoles) Run() {
 
 	mr.setupLogger()
 	tracer.Init()
+	paramtable.Get().WatchKeyPrefix("trace", config.NewHandler("tracing handler", func(e *config.Event) {
+		params := paramtable.Get()
+
+		exp, err := tracer.CreateTracerExporter(params)
+		if err != nil {
+			log.Warn("Init tracer faield", zap.Error(err))
+			return
+		}
+
+		// close old provider
+		err = tracer.CloseTracerProvider(context.Background())
+		if err != nil {
+			log.Warn("Close old provider failed, stop reset", zap.Error(err))
+			return
+		}
+
+		tracer.SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
+		log.Info("Reset tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+
+		if paramtable.GetRole() == typeutil.QueryNodeRole || paramtable.GetRole() == typeutil.StandaloneRole {
+			initcore.InitTraceConfig(params)
+			log.Info("Reset segcore tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+		}
+	}))
 
 	paramtable.SetCreateTime(time.Now())
 	paramtable.SetUpdateTime(time.Now())

@@ -790,8 +790,8 @@ quotaAndLimits:
 
 trace:
   # trace exporter type, default is stdout,
-  # optional values: ['stdout', 'jaeger', 'otlp']
-  exporter: stdout
+  # optional values: ['noop','stdout', 'jaeger', 'otlp']
+  exporter: noop
   # fraction of traceID based sampler,
   # optional values: [0, 1]
   # Fractions >= 1 will always sample. Fractions < 0 are treated as zero.
