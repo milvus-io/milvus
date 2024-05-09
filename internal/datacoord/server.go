@@ -517,7 +517,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.clusteringCompactionManager = newClusteringCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler, s.taskScheduler)
+	s.clusteringCompactionManager = newClusteringCompactionManager(s.ctx, s.meta, s.allocator, s.compactionHandler, s.taskScheduler, s.handler)
 	s.compactionTrigger = newCompactionTrigger(s.ctx, s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager, s.clusteringCompactionManager)
 }
 

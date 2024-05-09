@@ -475,13 +475,13 @@ func (_c *DataCoordCatalog_DropChannelCheckpoint_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// DropClusteringCompactionInfo provides a mock function with given fields: ctx, info
-func (_m *DataCoordCatalog) DropClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error {
-	ret := _m.Called(ctx, info)
+// DropCompactionTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	ret := _m.Called(ctx, task)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ClusteringCompactionInfo) error); ok {
-		r0 = rf(ctx, info)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask) error); ok {
+		r0 = rf(ctx, task)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -489,31 +489,31 @@ func (_m *DataCoordCatalog) DropClusteringCompactionInfo(ctx context.Context, in
 	return r0
 }
 
-// DataCoordCatalog_DropClusteringCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropClusteringCompactionInfo'
-type DataCoordCatalog_DropClusteringCompactionInfo_Call struct {
+// DataCoordCatalog_DropCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionTask'
+type DataCoordCatalog_DropCompactionTask_Call struct {
 	*mock.Call
 }
 
-// DropClusteringCompactionInfo is a helper method to define mock.On call
+// DropCompactionTask is a helper method to define mock.On call
 //   - ctx context.Context
-//   - info *datapb.ClusteringCompactionInfo
-func (_e *DataCoordCatalog_Expecter) DropClusteringCompactionInfo(ctx interface{}, info interface{}) *DataCoordCatalog_DropClusteringCompactionInfo_Call {
-	return &DataCoordCatalog_DropClusteringCompactionInfo_Call{Call: _e.mock.On("DropClusteringCompactionInfo", ctx, info)}
+//   - task *datapb.CompactionTask
+func (_e *DataCoordCatalog_Expecter) DropCompactionTask(ctx interface{}, task interface{}) *DataCoordCatalog_DropCompactionTask_Call {
+	return &DataCoordCatalog_DropCompactionTask_Call{Call: _e.mock.On("DropCompactionTask", ctx, task)}
 }
 
-func (_c *DataCoordCatalog_DropClusteringCompactionInfo_Call) Run(run func(ctx context.Context, info *datapb.ClusteringCompactionInfo)) *DataCoordCatalog_DropClusteringCompactionInfo_Call {
+func (_c *DataCoordCatalog_DropCompactionTask_Call) Run(run func(ctx context.Context, task *datapb.CompactionTask)) *DataCoordCatalog_DropCompactionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.ClusteringCompactionInfo))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_DropClusteringCompactionInfo_Call) Return(_a0 error) *DataCoordCatalog_DropClusteringCompactionInfo_Call {
+func (_c *DataCoordCatalog_DropCompactionTask_Call) Return(_a0 error) *DataCoordCatalog_DropCompactionTask_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *DataCoordCatalog_DropClusteringCompactionInfo_Call) RunAndReturn(run func(context.Context, *datapb.ClusteringCompactionInfo) error) *DataCoordCatalog_DropClusteringCompactionInfo_Call {
+func (_c *DataCoordCatalog_DropCompactionTask_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask) error) *DataCoordCatalog_DropCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -972,20 +972,20 @@ func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) RunAndReturn(run func(con
 	return _c
 }
 
-// ListClusteringCompactionInfos provides a mock function with given fields: ctx
-func (_m *DataCoordCatalog) ListClusteringCompactionInfos(ctx context.Context) ([]*datapb.ClusteringCompactionInfo, error) {
+// ListCompactionTask provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
 	ret := _m.Called(ctx)
 
-	var r0 []*datapb.ClusteringCompactionInfo
+	var r0 []*datapb.CompactionTask
 	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.ClusteringCompactionInfo, error)); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.CompactionTask, error)); ok {
 		return rf(ctx)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.ClusteringCompactionInfo); ok {
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.CompactionTask); ok {
 		r0 = rf(ctx)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*datapb.ClusteringCompactionInfo)
+			r0 = ret.Get(0).([]*datapb.CompactionTask)
 		}
 	}
 
@@ -998,30 +998,30 @@ func (_m *DataCoordCatalog) ListClusteringCompactionInfos(ctx context.Context) (
 	return r0, r1
 }
 
-// DataCoordCatalog_ListClusteringCompactionInfos_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListClusteringCompactionInfos'
-type DataCoordCatalog_ListClusteringCompactionInfos_Call struct {
+// DataCoordCatalog_ListCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCompactionTask'
+type DataCoordCatalog_ListCompactionTask_Call struct {
 	*mock.Call
 }
 
-// ListClusteringCompactionInfos is a helper method to define mock.On call
+// ListCompactionTask is a helper method to define mock.On call
 //   - ctx context.Context
-func (_e *DataCoordCatalog_Expecter) ListClusteringCompactionInfos(ctx interface{}) *DataCoordCatalog_ListClusteringCompactionInfos_Call {
-	return &DataCoordCatalog_ListClusteringCompactionInfos_Call{Call: _e.mock.On("ListClusteringCompactionInfos", ctx)}
+func (_e *DataCoordCatalog_Expecter) ListCompactionTask(ctx interface{}) *DataCoordCatalog_ListCompactionTask_Call {
+	return &DataCoordCatalog_ListCompactionTask_Call{Call: _e.mock.On("ListCompactionTask", ctx)}
 }
 
-func (_c *DataCoordCatalog_ListClusteringCompactionInfos_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListClusteringCompactionInfos_Call {
+func (_c *DataCoordCatalog_ListCompactionTask_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListCompactionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListClusteringCompactionInfos_Call) Return(_a0 []*datapb.ClusteringCompactionInfo, _a1 error) *DataCoordCatalog_ListClusteringCompactionInfos_Call {
+func (_c *DataCoordCatalog_ListCompactionTask_Call) Return(_a0 []*datapb.CompactionTask, _a1 error) *DataCoordCatalog_ListCompactionTask_Call {
 	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *DataCoordCatalog_ListClusteringCompactionInfos_Call) RunAndReturn(run func(context.Context) ([]*datapb.ClusteringCompactionInfo, error)) *DataCoordCatalog_ListClusteringCompactionInfos_Call {
+func (_c *DataCoordCatalog_ListCompactionTask_Call) RunAndReturn(run func(context.Context) ([]*datapb.CompactionTask, error)) *DataCoordCatalog_ListCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1617,13 +1617,13 @@ func (_c *DataCoordCatalog_SaveChannelCheckpoints_Call) RunAndReturn(run func(co
 	return _c
 }
 
-// SaveClusteringCompactionInfo provides a mock function with given fields: ctx, info
-func (_m *DataCoordCatalog) SaveClusteringCompactionInfo(ctx context.Context, info *datapb.ClusteringCompactionInfo) error {
-	ret := _m.Called(ctx, info)
+// SaveCompactionTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	ret := _m.Called(ctx, task)
 
 	var r0 error
-	if rf, ok := ret.Get(0).(func(context.Context, *datapb.ClusteringCompactionInfo) error); ok {
-		r0 = rf(ctx, info)
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask) error); ok {
+		r0 = rf(ctx, task)
 	} else {
 		r0 = ret.Error(0)
 	}
@@ -1631,31 +1631,31 @@ func (_m *DataCoordCatalog) SaveClusteringCompactionInfo(ctx context.Context, in
 	return r0
 }
 
-// DataCoordCatalog_SaveClusteringCompactionInfo_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveClusteringCompactionInfo'
-type DataCoordCatalog_SaveClusteringCompactionInfo_Call struct {
+// DataCoordCatalog_SaveCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCompactionTask'
+type DataCoordCatalog_SaveCompactionTask_Call struct {
 	*mock.Call
 }
 
-// SaveClusteringCompactionInfo is a helper method to define mock.On call
+// SaveCompactionTask is a helper method to define mock.On call
 //   - ctx context.Context
-//   - info *datapb.ClusteringCompactionInfo
-func (_e *DataCoordCatalog_Expecter) SaveClusteringCompactionInfo(ctx interface{}, info interface{}) *DataCoordCatalog_SaveClusteringCompactionInfo_Call {
-	return &DataCoordCatalog_SaveClusteringCompactionInfo_Call{Call: _e.mock.On("SaveClusteringCompactionInfo", ctx, info)}
+//   - task *datapb.CompactionTask
+func (_e *DataCoordCatalog_Expecter) SaveCompactionTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveCompactionTask_Call {
+	return &DataCoordCatalog_SaveCompactionTask_Call{Call: _e.mock.On("SaveCompactionTask", ctx, task)}
 }
 
-func (_c *DataCoordCatalog_SaveClusteringCompactionInfo_Call) Run(run func(ctx context.Context, info *datapb.ClusteringCompactionInfo)) *DataCoordCatalog_SaveClusteringCompactionInfo_Call {
+func (_c *DataCoordCatalog_SaveCompactionTask_Call) Run(run func(ctx context.Context, task *datapb.CompactionTask)) *DataCoordCatalog_SaveCompactionTask_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(*datapb.ClusteringCompactionInfo))
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask))
 	})
 	return _c
 }
 
-func (_c *DataCoordCatalog_SaveClusteringCompactionInfo_Call) Return(_a0 error) *DataCoordCatalog_SaveClusteringCompactionInfo_Call {
+func (_c *DataCoordCatalog_SaveCompactionTask_Call) Return(_a0 error) *DataCoordCatalog_SaveCompactionTask_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *DataCoordCatalog_SaveClusteringCompactionInfo_Call) RunAndReturn(run func(context.Context, *datapb.ClusteringCompactionInfo) error) *DataCoordCatalog_SaveClusteringCompactionInfo_Call {
+func (_c *DataCoordCatalog_SaveCompactionTask_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask) error) *DataCoordCatalog_SaveCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
