@@ -1,3 +1,4 @@
+use log::warn;
 use tantivy::{
     collector::{Collector, SegmentCollector},
     DocId,
@@ -26,6 +27,10 @@ impl Collector for VecCollector {
         if segment_fruits.len() == 1 {
             Ok(segment_fruits.into_iter().next().unwrap())
         } else {
+            warn!(
+                "inverted index should have only one segment, but got {} segments",
+                segment_fruits.len()
+            );
             let len: usize = segment_fruits.iter().map(|docset| docset.len()).sum();
             let mut result = Vec::with_capacity(len);
             for docs in segment_fruits {

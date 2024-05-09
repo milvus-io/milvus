@@ -212,10 +212,7 @@ pub extern "C" fn tantivy_prefix_query_keyword(
 }
 
 #[no_mangle]
-pub extern "C" fn tantivy_regex_query(
-    ptr: *mut c_void,
-    pattern: *const c_char,
-) -> RustArray {
+pub extern "C" fn tantivy_regex_query(ptr: *mut c_void, pattern: *const c_char) -> RustArray {
     let real = ptr as *mut IndexReaderWrapper;
     unsafe {
         let c_str = CStr::from_ptr(pattern);
