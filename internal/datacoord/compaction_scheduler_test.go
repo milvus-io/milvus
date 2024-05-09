@@ -2,15 +2,15 @@ package datacoord
 
 import (
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/stretchr/testify/mock"
 	"testing"
 
 	"github.com/samber/lo"
+	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -25,6 +25,7 @@ type SchedulerSuite struct {
 
 func (s *SchedulerSuite) SetupTest() {
 	sessionMgr := NewMockSessionManager(s.T())
+	sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 1}}})
 	sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64()}, nil)
 	s.scheduler = NewCompactionScheduler(sessionMgr)
 	s.scheduler.parallelTasks = map[int64][]*compactionTask{
