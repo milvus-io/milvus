@@ -87,7 +87,7 @@ The ID is stored in a key-value pair on etcd. The key is metaRootPath + "/sessio
 
 ###### Interface
 
-````go
+```go
 const (
 	DefaultServiceRoot = "session/"
 	DefaultIDKey       = "id"
@@ -130,11 +130,11 @@ func (s *Session) GetSessions(prefix string) (map[string]*Session, int64, error)
 // If a server up, an event will be added to channel with eventType SessionAddType.
 // If a server down, an event will be added to channel with eventType SessionDelType.
 func (s *Session) WatchServices(prefix string, revision int64) (eventChannel <-chan *SessionEvent) {}
-
+```
 
 #### A.3 Global Parameter Table
 
-``` go
+```go
 type BaseTable struct {
 	params *memkv.MemoryKV
 }
@@ -154,7 +154,7 @@ func (gp *BaseTable) WriteNodeIDList() []UniqueID
 func (gp *BaseTable) DataNodeIDList() []UniqueID
 func (gp *BaseTable) ProxyIDList() []UniqueID
 func (gp *BaseTable) QueryNodeIDList() []UniqueID
-````
+```
 
 - _LoadYaml(filePath string)_ turns a YAML file into multiple key-value pairs. For example, given the following YAML
 
