@@ -100,12 +100,17 @@ func (replica *Replica) NodesCount() int {
 
 // Contains checks if the node is in rw nodes of the replica.
 func (replica *Replica) Contains(node int64) bool {
-	return replica.rwNodes.Contain(node)
+	return replica.ContainRONode(node) || replica.ContainRWNode(node)
 }
 
 // ContainRONode checks if the node is in ro nodes of the replica.
 func (replica *Replica) ContainRONode(node int64) bool {
 	return replica.roNodes.Contain(node)
+}
+
+// ContainRONode checks if the node is in ro nodes of the replica.
+func (replica *Replica) ContainRWNode(node int64) bool {
+	return replica.rwNodes.Contain(node)
 }
 
 // Deprecated: Warning, break the consistency of ReplicaManager, use `SetAvailableNodesInSameCollectionAndRG` in ReplicaManager instead.

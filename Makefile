@@ -505,6 +505,9 @@ generate-mockery-pkg:
 
 generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg
 
+generate-yaml: milvus-tools
+	@echo "Updating milvus config yaml"
+	@$(PWD)/bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml
 
 MMAP_MIGRATION_PATH = $(PWD)/cmd/tools/migration/mmap/tool
 mmap-migration:
