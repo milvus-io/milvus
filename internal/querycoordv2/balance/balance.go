@@ -52,13 +52,6 @@ func (chanPlan *ChannelAssignPlan) ToString() string {
 		chanPlan.Channel.CollectionID, chanPlan.Channel.ChannelName, chanPlan.Replica.GetID(), chanPlan.From, chanPlan.To)
 }
 
-var (
-	RoundRobinBalancerName    = "RoundRobinBalancer"
-	RowCountBasedBalancerName = "RowCountBasedBalancer"
-	ScoreBasedBalancerName    = "ScoreBasedBalancer"
-	MultiTargetBalancerName   = "MultipleTargetBalancer"
-)
-
 type Balance interface {
 	AssignSegment(collectionID int64, segments []*meta.Segment, nodes []int64, manualBalance bool) []SegmentAssignPlan
 	AssignChannel(channels []*meta.DmChannel, nodes []int64, manualBalance bool) []ChannelAssignPlan
