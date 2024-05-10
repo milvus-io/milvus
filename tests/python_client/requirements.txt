@@ -46,7 +46,7 @@ loguru==0.7.0
 psutil==5.9.4
 pandas==1.5.3
 tenacity==8.1.0
-rich=13.7.0
+rich==13.7.0
 # for standby test
 etcd-sdk-python==0.0.4
 deepdiff==6.7.1
