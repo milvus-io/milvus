@@ -16,6 +16,7 @@
 
 #pragma once
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -62,6 +63,12 @@ typedef struct CStatus {
     int error_code;
     const char* error_msg;
 } CStatus;
+
+// CSegmentResourceUsage is used to represent the resource usage of a segment, and used by CGO.
+typedef struct CSegmentResourceUsage {
+    size_t mem_size;
+    size_t disk_size;
+} CSegmentResourceUsage;
 
 typedef struct CProto {
     const void* proto_blob;

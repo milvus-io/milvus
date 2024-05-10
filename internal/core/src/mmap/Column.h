@@ -168,6 +168,15 @@ class ColumnBase {
         return cap_size_ + padding_;
     }
 
+    virtual ResourceUsage
+    GetResourceUsage() const {
+        if (is_map_anonymous_) {
+            return ResourceUsage{cap_size_ + padding_, 0};
+        }
+        // mmaped, the memory area is a disk usage.
+        return ResourceUsage{0, cap_size_ + padding_};
+    }
+
     // The capacity of the column,
     // DO NOT call this for variable length column(including SparseFloatColumn).
     virtual size_t
@@ -311,7 +320,7 @@ class ColumnBase {
         }
     }
 
- private:
+ protected:
     // is MAP_ANONYMOUS
     bool is_map_anonymous_;
 };
@@ -380,6 +389,11 @@ class SparseFloatColumn : public ColumnBase {
             "ByteSize not supported for sparse float column");
     }
 
+    ResourceUsage
+    GetResourceUsage() const override {
+        return ResourceUsage{mem_size_, 0};
+    }
+
     size_t
     Capacity() const override {
         throw std::runtime_error(
@@ -400,6 +414,7 @@ class SparseFloatColumn : public ColumnBase {
             dim_ = std::max(dim_, ptr[i].dim());
         }
         num_rows_ += data->Length();
+        mem_size_ += data->Size();
     }
 
     void
@@ -415,6 +430,7 @@ class SparseFloatColumn : public ColumnBase {
 
  private:
     int64_t dim_ = 0;
+    uint64_t mem_size_ = 0;
     std::vector<knowhere::sparse::SparseRow<float>> vec_;
 };
 
@@ -504,10 +520,21 @@ class VariableColumn : public ColumnBase {
         ConstructViews();
     }
 
+    ResourceUsage
+    GetResourceUsage() const override {
+        // StringView is plain, unnecessary to consider insides cost.
+        auto extra_mem_size = views_.capacity() * sizeof(ViewType) +
+                              indices_.capacity() * sizeof(uint64_t);
+
+        if (is_map_anonymous_) {
+            return ResourceUsage{cap_size_ + padding_ + extra_mem_size, 0};
+        }
+        return ResourceUsage{extra_mem_size, cap_size_ + padding_};
+    }
+
  protected:
     void
     ConstructViews() {
-        views_.reserve(indices_.size());
         for (size_t i = 0; i < indices_.size() - 1; i++) {
             views_.emplace_back(data_ + indices_[i],
                                 indices_[i + 1] - indices_[i]);
@@ -586,16 +613,34 @@ class ArrayColumn : public ColumnBase {
         ConstructViews();
     }
 
+    ResourceUsage
+    GetResourceUsage() const override {
+        auto extra_mem_size =
+            view_mem_size_ + indices_.capacity() * sizeof(uint64_t);
+
+        if (is_map_anonymous_) {
+            return ResourceUsage{cap_size_ + padding_ + extra_mem_size, 0};
+        }
+        return ResourceUsage{extra_mem_size, cap_size_ + padding_};
+    }
+
  protected:
     void
     ConstructViews() {
         views_.reserve(indices_.size());
         for (size_t i = 0; i < indices_.size() - 1; i++) {
+            // add element size.
+            view_mem_size_ += sizeof(uint64_t) * element_indices_[i].capacity();
             views_.emplace_back(data_ + indices_[i],
                                 indices_[i + 1] - indices_[i],
                                 element_type_,
                                 std::move(element_indices_[i]));
         }
+
+        // add views_ vector size and last elements size.
+        view_mem_size_ +=
+            views_.capacity() * sizeof(ArrayView) +
+            sizeof(uint64_t) * element_indices_[indices_.size() - 1].capacity();
         views_.emplace_back(data_ + indices_.back(),
                             size_ - indices_.back(),
                             element_type_,
@@ -608,6 +653,7 @@ class ArrayColumn : public ColumnBase {
     std::vector<std::vector<uint64_t>> element_indices_{};
     // Compatible with current Span type
     std::vector<ArrayView> views_{};
+    size_t view_mem_size_ = 0;
     DataType element_type_;
 };
 }  // namespace milvus

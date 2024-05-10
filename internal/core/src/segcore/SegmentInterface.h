@@ -43,6 +43,7 @@ struct SegmentStats {
     // we stat the memory size used by the segment,
     // including the insert data and delete data.
     std::atomic<size_t> mem_size{};
+    std::atomic<size_t> disk_size{};
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API
@@ -77,8 +78,8 @@ class SegmentInterface {
              const int64_t* offsets,
              int64_t size) const = 0;
 
-    virtual size_t
-    GetMemoryUsageInBytes() const = 0;
+    virtual milvus::ResourceUsage
+    GetResourceUsage() const = 0;
 
     virtual int64_t
     get_row_count() const = 0;
