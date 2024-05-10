@@ -10,7 +10,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -25,8 +24,6 @@ type SchedulerSuite struct {
 
 func (s *SchedulerSuite) SetupTest() {
 	sessionMgr := NewMockSessionManager(s.T())
-	sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 1}}})
-	sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64()}, nil)
 	s.scheduler = NewCompactionScheduler(sessionMgr)
 	s.scheduler.parallelTasks = map[int64][]*compactionTask{
 		100: {
@@ -45,7 +42,6 @@ func (s *SchedulerSuite) SetupTest() {
 
 func (s *SchedulerSuite) TestScheduleEmpty() {
 	sessionMgr := NewMockSessionManager(s.T())
-	sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: paramtable.Get().DataNodeCfg.SlotCap.GetAsInt64()}, nil)
 	emptySch := NewCompactionScheduler(sessionMgr)
 
 	tasks := emptySch.Schedule()
@@ -78,6 +74,13 @@ func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
 		s.Run(test.description, func() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
+
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 100}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
 
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
@@ -118,6 +121,13 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 2}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
+
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
@@ -127,7 +137,13 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 				return t.plan.PlanID
 			}))
 
-			// the second schedule returns empty for full paralleTasks
+			// the second schedule returns empty for no slot
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
 			gotTasks = s.scheduler.Schedule()
 			s.Empty(gotTasks)
 
@@ -165,6 +181,13 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 102}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 2}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
+
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
@@ -174,7 +197,13 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 				return t.plan.PlanID
 			}))
 
-			// the second schedule returns empty for full paralleTasks
+			// the second schedule returns empty for no slot
+			if len(test.tasks) > 0 {
+				sessionMgr := NewMockSessionManager(s.T())
+				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
+				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
+				s.scheduler.sessions = sessionMgr
+			}
 			if len(gotTasks) > 0 {
 				gotTasks = s.scheduler.Schedule()
 				s.Empty(gotTasks)
