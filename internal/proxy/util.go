@@ -1123,7 +1123,7 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 	return false, nil
 }
 
-func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg, inInsert bool) error {
 	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
 	autoGenFieldNum := 0
@@ -1142,16 +1142,20 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			log.Warn("not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
+
 		if fieldSchema.IsPrimaryKey {
 			primaryKeyNum++
 		}
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
+		if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+			// when inInsert, no need to pass when pk is autoid and SkipAutoIDCheck is false
+			autoGenFieldNum++
+		}
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() {
-				// no need to pass when pk is autoid and SkipAutoIDCheck is false
-				autoGenFieldNum++
+			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() && inInsert {
+				// autoGenField
 				continue
 			}
 			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
@@ -1173,13 +1177,10 @@ func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgst
 			zap.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
-	// // in upsert, must assign pk when autoid == true
-	// if !inInsert {
-	// 	requiredFieldsNum = len(schema.Fields)
-	// }
 
 	expectedNum := len(schema.Fields)
-	actualNum := autoGenFieldNum + len(insertMsg.FieldsData)
+	actualNum := len(insertMsg.FieldsData) + autoGenFieldNum
+
 	if expectedNum != actualNum {
 		log.Warn("the number of fields is not the same as needed", zap.Int("expected", expectedNum), zap.Int("actual", actualNum))
 		return merr.WrapErrParameterInvalid(expectedNum, actualNum, "more fieldData has pass in")
@@ -1196,7 +1197,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, insertMsg *msgstre
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := checkFieldsDataBySchema(schema, insertMsg); err != nil {
+	if err := checkFieldsDataBySchema(schema, insertMsg, inInsert); err != nil {
 		return nil, err
 	}
 

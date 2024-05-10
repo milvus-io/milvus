@@ -646,7 +646,7 @@ func TestProxy(t *testing.T) {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		hashKeys := generateHashKeys(rowNum)
+		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
 			Base:           nil,
 			DbName:         dbName,

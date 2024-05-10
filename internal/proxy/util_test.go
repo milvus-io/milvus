@@ -1122,7 +1122,7 @@ func Test_isPartitionIsLoaded(t *testing.T) {
 	})
 }
 
-func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
+func Test_InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 	paramtable.Init()
 	log.Info("InsertTaskcheckFieldsDataBySchema", zap.Bool("enable", Params.ProxyCfg.SkipAutoIDCheck.GetAsBool()))
 	var err error
@@ -1148,7 +1148,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
 	})
@@ -1178,7 +1178,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1219,7 +1219,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 	})
@@ -1249,7 +1249,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.Equal(t, nil, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 0)
 	})
@@ -1278,7 +1278,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1312,7 +1312,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1350,7 +1350,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1384,7 +1384,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1397,13 +1397,13 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 				Fields: []*schemapb.FieldSchema{
 					{
 						Name:         "a",
-						AutoID:       false,
+						AutoID:       true,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
 					{
 						Name:         "b",
-						AutoID:       false,
+						AutoID:       true,
 						IsPrimaryKey: true,
 						DataType:     schemapb.DataType_Int64,
 					},
@@ -1418,7 +1418,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 	})
 
@@ -1451,8 +1451,92 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
+	})
+	t.Run("normal when upsert", func(t *testing.T) {
+		task := insertTask{
+			schema: &schemapb.CollectionSchema{
+				Name:        "Test_CheckFieldsDataBySchema",
+				Description: "Test_CheckFieldsDataBySchema",
+				AutoID:      false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:         "a",
+						AutoID:       false,
+						IsPrimaryKey: true,
+						DataType:     schemapb.DataType_Int64,
+					},
+					{
+						Name:         "b",
+						AutoID:       false,
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			insertMsg: &BaseInsertTask{
+				InsertRequest: msgpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType: commonpb.MsgType_Insert,
+					},
+					FieldsData: []*schemapb.FieldData{
+						{
+							FieldName: "a",
+							Type:      schemapb.DataType_Int64,
+						},
+						{
+							FieldName: "b",
+							Type:      schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+		}
+
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		assert.NoError(t, err)
+
+		task = insertTask{
+			schema: &schemapb.CollectionSchema{
+				Name:        "Test_CheckFieldsDataBySchema",
+				Description: "Test_CheckFieldsDataBySchema",
+				AutoID:      false,
+				Fields: []*schemapb.FieldSchema{
+					{
+						Name:         "a",
+						AutoID:       true,
+						IsPrimaryKey: true,
+						DataType:     schemapb.DataType_Int64,
+					},
+					{
+						Name:         "b",
+						AutoID:       false,
+						IsPrimaryKey: false,
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			insertMsg: &BaseInsertTask{
+				InsertRequest: msgpb.InsertRequest{
+					Base: &commonpb.MsgBase{
+						MsgType: commonpb.MsgType_Insert,
+					},
+					FieldsData: []*schemapb.FieldData{
+						{
+							FieldName: "a",
+							Type:      schemapb.DataType_Int64,
+						},
+						{
+							FieldName: "b",
+							Type:      schemapb.DataType_Int64,
+						},
+					},
+				},
+			},
+		}
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, false)
+		assert.NoError(t, err)
 	})
 
 	t.Run("skip the auto id", func(t *testing.T) {
@@ -1494,7 +1578,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.ErrorIs(t, merr.ErrParameterInvalid, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 
@@ -1537,7 +1621,7 @@ func InsertTaskcheckFieldsDataBySchema(t *testing.T) {
 			},
 		}
 
-		err = checkFieldsDataBySchema(task.schema, task.insertMsg)
+		err = checkFieldsDataBySchema(task.schema, task.insertMsg, true)
 		assert.NoError(t, err)
 		assert.Equal(t, len(task.insertMsg.FieldsData), 2)
 		paramtable.Get().Reset(Params.ProxyCfg.SkipAutoIDCheck.Key)
