@@ -67,8 +67,13 @@ set(MILVUS_TEST_FILES
         test_group_by.cpp
         test_regex_query_util.cpp
         test_regex_query.cpp
-        test_kmeans_clustering.cpp
         )
+
+if ( INDEX_ENGINE STREQUAL "cardinal" )
+    set(MILVUS_TEST_FILES
+        ${MILVUS_TEST_FILES}
+        test_kmeans_clustering.cpp)
+endif()
 
 if ( BUILD_DISK_ANN STREQUAL "ON" )
     set(MILVUS_TEST_FILES
