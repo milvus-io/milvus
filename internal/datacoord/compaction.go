@@ -494,14 +494,7 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 
 	nodeID := c.plans[plan.GetPlanID()].dataNodeID
 	req := &datapb.SyncSegmentsRequest{
-		PlanID:        plan.PlanID,
-		CompactedTo:   newSegmentInfo.GetID(),
-		CompactedFrom: newSegmentInfo.GetCompactionFrom(),
-		NumOfRows:     newSegmentInfo.GetNumOfRows(),
-		StatsLogs:     newSegmentInfo.GetStatslogs(),
-		ChannelName:   plan.GetChannel(),
-		PartitionId:   newSegmentInfo.GetPartitionID(),
-		CollectionId:  newSegmentInfo.GetCollectionID(),
+		PlanID: plan.PlanID,
 	}
 
 	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
@@ -633,8 +626,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			// without changing the meta
 			log.Info("compaction syncing unknown plan with node")
 			if err := c.sessions.SyncSegments(nodeID, &datapb.SyncSegmentsRequest{
-				PlanID:      planID,
-				ChannelName: plan.GetChannel(),
+				PlanID: planID,
 			}); err != nil {
 				log.Warn("compaction failed to sync segments with node", zap.Error(err))
 				return err

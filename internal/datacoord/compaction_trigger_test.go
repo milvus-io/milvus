@@ -106,6 +106,22 @@ func Test_compactionTrigger_force(t *testing.T) {
 
 	vecFieldID := int64(201)
 	indexID := int64(1001)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  vecFieldID,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -292,21 +308,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 					},
 					collections: map[int64]*collectionInfo{
 						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
+							ID:     2,
+							Schema: schema,
 							Properties: map[string]string{
 								common.CollectionTTLConfigKey: "0",
 							},
@@ -469,6 +472,9 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Type:             datapb.CompactionType_MixCompaction,
 					Channel:          "ch1",
 					TotalRows:        200,
+					CollectionID:     2,
+					PartitionID:      1,
+					Schema:           schema,
 				},
 			},
 		},

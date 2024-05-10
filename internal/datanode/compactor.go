@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	sio "io"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -32,8 +31,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -41,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -55,12 +51,9 @@ var (
 	errContext               = errors.New("context done or timeout")
 )
 
-type iterator = storage.Iterator
-
 type compactor interface {
 	complete()
 	compact() (*datapb.CompactionPlanResult, error)
-	injectDone()
 	stop()
 	getPlanID() UniqueID
 	getCollection() UniqueID
@@ -73,9 +66,6 @@ var _ compactor = (*compactionTask)(nil)
 // for MixCompaction only
 type compactionTask struct {
 	binlogIO io.BinlogIO
-	compactor
-	metaCache metacache.MetaCache
-	syncMgr   syncmgr.SyncManager
 	allocator.Allocator
 
 	plan *datapb.CompactionPlan
@@ -83,16 +73,13 @@ type compactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	injectDoneOnce sync.Once
-	done           chan struct{}
-	tr             *timerecord.TimeRecorder
+	done chan struct{}
+	tr   *timerecord.TimeRecorder
 }
 
 func newCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	metaCache metacache.MetaCache,
-	syncMgr syncmgr.SyncManager,
 	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
 ) *compactionTask {
@@ -101,8 +88,6 @@ func newCompactionTask(
 		ctx:       ctx1,
 		cancel:    cancel,
 		binlogIO:  binlogIO,
-		syncMgr:   syncMgr,
-		metaCache: metaCache,
 		Allocator: alloc,
 		plan:      plan,
 		tr:        timerecord.NewTimeRecorder("levelone compaction"),
@@ -117,7 +102,6 @@ func (t *compactionTask) complete() {
 func (t *compactionTask) stop() {
 	t.cancel()
 	<-t.done
-	t.injectDone()
 }
 
 func (t *compactionTask) getPlanID() UniqueID {
@@ -129,18 +113,16 @@ func (t *compactionTask) getChannelName() string {
 }
 
 // return num rows of all segment compaction from
-func (t *compactionTask) getNumRows() (int64, error) {
+func (t *compactionTask) getNumRows() int64 {
 	numRows := int64(0)
 	for _, binlog := range t.plan.SegmentBinlogs {
-		seg, ok := t.metaCache.GetSegmentByID(binlog.GetSegmentID())
-		if !ok {
-			return 0, merr.WrapErrSegmentNotFound(binlog.GetSegmentID(), "get compaction segments num rows failed")
+		if len(binlog.GetFieldBinlogs()) > 0 {
+			for _, ct := range binlog.GetFieldBinlogs()[0].GetBinlogs() {
+				numRows += ct.GetEntriesNum()
+			}
 		}
-
-		numRows += seg.NumOfRows()
 	}
-
-	return numRows, nil
+	return numRows
 }
 
 func (t *compactionTask) mergeDeltalogs(dBlobs map[UniqueID][]*Blob) (map[interface{}]Timestamp, error) {
@@ -310,10 +292,7 @@ func (t *compactionTask) merge(
 	downloadTimeCost := time.Duration(0)
 	uploadInsertTimeCost := time.Duration(0)
 
-	oldRowNums, err := t.getNumRows()
-	if err != nil {
-		return nil, nil, 0, err
-	}
+	oldRowNums := t.getNumRows()
 
 	stats, err := storage.NewPrimaryKeyStats(pkID, int64(pkType), oldRowNums)
 	if err != nil {
@@ -471,14 +450,6 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		return binlogs.GetSegmentID()
 	})
 
-	// Inject to stop flush
-	// when compaction failed, these segments need to be Unblocked by injectDone in compaction_executor
-	// when compaction succeeded, these segments will be Unblocked by SyncSegments from DataCoord.
-	for _, segID := range segIDs {
-		t.syncMgr.Block(segID)
-	}
-	log.Info("compact finsh injection", zap.Duration("elapse", t.tr.RecordSpan()))
-
 	if err := binlog.DecompressCompactionBinlogs(t.plan.GetSegmentBinlogs()); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
 		return nil, err
@@ -537,7 +508,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 
 	segmentBinlog := t.plan.GetSegmentBinlogs()[0]
 	partID := segmentBinlog.GetPartitionID()
-	meta := &etcdpb.CollectionMeta{ID: t.metaCache.Collection(), Schema: t.metaCache.Schema()}
+	meta := &etcdpb.CollectionMeta{ID: t.plan.GetCollectionID(), Schema: t.plan.GetSchema()}
 
 	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPath, targetSegID, partID, meta, deltaPk2Ts)
 	if err != nil {
@@ -574,14 +545,6 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	}
 
 	return planResult, nil
-}
-
-func (t *compactionTask) injectDone() {
-	t.injectDoneOnce.Do(func() {
-		for _, binlog := range t.plan.SegmentBinlogs {
-			t.syncMgr.Unblock(binlog.SegmentID)
-		}
-	})
 }
 
 // TODO copy maybe expensive, but this seems to be the only convinent way.
@@ -810,7 +773,7 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 }
 
 func (t *compactionTask) getCollection() UniqueID {
-	return t.metaCache.Collection()
+	return t.plan.GetCollectionID()
 }
 
 func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {

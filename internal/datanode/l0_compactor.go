@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -41,7 +40,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -49,12 +47,8 @@ import (
 )
 
 type levelZeroCompactionTask struct {
-	compactor
 	io.BinlogIO
-
 	allocator allocator.Allocator
-	metacache metacache.MetaCache
-	syncmgr   syncmgr.SyncManager
 	cm        storage.ChunkManager
 
 	plan *datapb.CompactionPlan
@@ -70,8 +64,6 @@ func newLevelZeroCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	alloc allocator.Allocator,
-	metaCache metacache.MetaCache,
-	syncmgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 ) *levelZeroCompactionTask {
@@ -82,8 +74,6 @@ func newLevelZeroCompactionTask(
 
 		BinlogIO:  binlogIO,
 		allocator: alloc,
-		metacache: metaCache,
-		syncmgr:   syncmgr,
 		cm:        cm,
 		plan:      plan,
 		tr:        timerecord.NewTimeRecorder("levelzero compaction"),
@@ -109,11 +99,8 @@ func (t *levelZeroCompactionTask) getChannelName() string {
 }
 
 func (t *levelZeroCompactionTask) getCollection() int64 {
-	return t.metacache.Collection()
+	return t.plan.GetCollectionID()
 }
-
-// Do nothing for levelzero compaction
-func (t *levelZeroCompactionTask) injectDone() {}
 
 func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
@@ -332,15 +319,12 @@ func (t *levelZeroCompactionTask) splitDelta(
 
 func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storage.DeleteData) (map[string][]byte, *datapb.Binlog, error) {
 	var (
-		collID   = t.metacache.Collection()
-		uploadKv = make(map[string][]byte)
+		collectionID = t.plan.GetCollectionID()
+		partitionID  = t.plan.GetPartitionID()
+		uploadKv     = make(map[string][]byte)
 	)
 
-	seg, ok := t.metacache.GetSegmentByID(segmentID)
-	if !ok {
-		return nil, nil, merr.WrapErrSegmentLack(segmentID)
-	}
-	blob, err := storage.NewDeleteCodec().Serialize(collID, seg.PartitionID(), segmentID, dData)
+	blob, err := storage.NewDeleteCodec().Serialize(collectionID, partitionID, segmentID, dData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -350,7 +334,7 @@ func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storag
 		return nil, nil, err
 	}
 
-	blobKey := metautil.JoinIDPath(collID, seg.PartitionID(), segmentID, logID)
+	blobKey := metautil.JoinIDPath(collectionID, partitionID, segmentID, logID)
 	blobPath := t.BinlogIO.JoinFullPath(common.SegmentDeltaLogPath, blobKey)
 
 	uploadKv[blobPath] = blob.GetValue()
@@ -415,7 +399,7 @@ func (t *levelZeroCompactionTask) loadBF(l1Segments []*datapb.CompactionSegmentB
 			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
 				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			pks, err := loadStats(t.ctx, t.cm,
-				t.metacache.Schema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			if err != nil {
 				log.Warn("failed to load segment stats log", zap.Error(err))
 				return err, err

@@ -35,8 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	memkv "github.com/milvus-io/milvus/internal/kv/mem"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
@@ -284,18 +282,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 				Schema: meta.GetSchema(),
 			}, nil).Maybe()
 
-		metaCache := metacache.NewMockMetaCache(t)
-		metaCache.EXPECT().Schema().Return(meta.GetSchema()).Maybe()
-		metaCache.EXPECT().GetSegmentByID(mock.Anything).RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-			segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-				CollectionID: 1,
-				PartitionID:  0,
-				ID:           id,
-				NumOfRows:    10,
-			}, nil)
-			return segment, true
-		})
-
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 		alloc.EXPECT().AllocOne().Return(0, nil)
@@ -324,13 +310,16 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			ct := &compactionTask{
-				metaCache: metaCache,
 				binlogIO:  mockbIO,
 				Allocator: alloc,
 				done:      make(chan struct{}, 1),
 				plan: &datapb.CompactionPlan{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{
+							Binlogs: []*datapb.Binlog{{
+								EntriesNum: 100,
+							}},
+						}}},
 					},
 				},
 			}
@@ -372,13 +361,16 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			dm := map[interface{}]Timestamp{}
 
 			ct := &compactionTask{
-				metaCache: metaCache,
 				binlogIO:  mockbIO,
 				Allocator: alloc,
 				done:      make(chan struct{}, 1),
 				plan: &datapb.CompactionPlan{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{
+							Binlogs: []*datapb.Binlog{{
+								EntriesNum: 100,
+							}},
+						}}},
 					},
 				},
 			}
@@ -423,13 +415,16 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			ct := &compactionTask{
-				metaCache: metaCache,
 				binlogIO:  mockbIO,
 				Allocator: alloc,
 				done:      make(chan struct{}, 1),
 				plan: &datapb.CompactionPlan{
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{
+							Binlogs: []*datapb.Binlog{{
+								EntriesNum: 100,
+							}},
+						}}},
 					},
 				},
 			}
@@ -471,13 +466,16 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 
 			// 10 days in seconds
 			ct := &compactionTask{
-				metaCache: metaCache,
 				binlogIO:  mockbIO,
 				Allocator: alloc,
 				plan: &datapb.CompactionPlan{
 					CollectionTtl: 864000,
 					SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-						{SegmentID: 1},
+						{SegmentID: 1, FieldBinlogs: []*datapb.FieldBinlog{{
+							Binlogs: []*datapb.Binlog{{
+								EntriesNum: 100,
+							}},
+						}}},
 					},
 				},
 				done: make(chan struct{}, 1),
@@ -494,17 +492,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			iData := genInsertDataWithExpiredTS()
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 			meta := NewMetaFactory().GetCollectionMeta(1, "test", schemapb.DataType_Int64)
-			metaCache := metacache.NewMockMetaCache(t)
-			metaCache.EXPECT().Schema().Return(meta.GetSchema()).Maybe()
-			metaCache.EXPECT().GetSegmentByID(mock.Anything).RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-				segment := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-					CollectionID: 1,
-					PartitionID:  0,
-					ID:           id,
-					NumOfRows:    0,
-				}, nil)
-				return segment, true
-			})
 
 			var allPaths [][]string
 			inpath, err := uploadInsertLog(context.Background(), mockbIO, alloc, meta.GetID(), 0, 1, iData, iCodec)
@@ -526,7 +513,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			ct := &compactionTask{
-				metaCache: metaCache,
 				binlogIO:  mockbIO,
 				Allocator: alloc,
 				done:      make(chan struct{}, 1),
@@ -569,7 +555,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			ct := &compactionTask{
-				metaCache: metaCache,
 				binlogIO:  mockbIO,
 				Allocator: alloc,
 				done:      make(chan struct{}, 1),
@@ -616,7 +601,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			}
 
 			ct := &compactionTask{
-				metaCache: metaCache,
 				binlogIO:  mockbIO,
 				Allocator: alloc,
 				done:      make(chan struct{}, 1),
@@ -702,25 +686,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			res = ct.isExpiredEntity(math.MaxInt64, 0)
 			assert.Equal(t, false, res)
 		})
-	})
-
-	t.Run("Test getNumRows error", func(t *testing.T) {
-		metaCache := metacache.NewMockMetaCache(t)
-		metaCache.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false)
-		ct := &compactionTask{
-			metaCache: metaCache,
-			plan: &datapb.CompactionPlan{
-				SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
-					{
-						SegmentID: 1,
-					},
-				},
-			},
-			done: make(chan struct{}, 1),
-		}
-
-		_, err := ct.getNumRows()
-		assert.Error(t, err, "segment not found")
 	})
 
 	t.Run("Test uploadRemainLog error", func(t *testing.T) {
@@ -871,39 +836,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			mockbIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 			iCodec := storage.NewInsertCodecWithSchema(meta)
 			mockKv := memkv.NewMemoryKV()
-			metaCache := metacache.NewMockMetaCache(t)
-			metaCache.EXPECT().Collection().Return(c.colID)
-			metaCache.EXPECT().Schema().Return(meta.GetSchema())
-			syncMgr := syncmgr.NewMockSyncManager(t)
-			syncMgr.EXPECT().Block(mock.Anything).Return()
-
-			bfs := metacache.NewBloomFilterSet()
-			bfs.UpdatePKRange(c.iData1)
-			seg1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-				CollectionID: c.colID,
-				PartitionID:  c.parID,
-				ID:           c.segID1,
-				NumOfRows:    2,
-			}, bfs)
-			bfs = metacache.NewBloomFilterSet()
-			bfs.UpdatePKRange(c.iData2)
-			seg2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-				CollectionID: c.colID,
-				PartitionID:  c.parID,
-				ID:           c.segID2,
-				NumOfRows:    2,
-			}, bfs)
-
-			metaCache.EXPECT().GetSegmentByID(mock.Anything).RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-				switch id {
-				case c.segID1:
-					return seg1, true
-				case c.segID2:
-					return seg2, true
-				default:
-					return nil, false
-				}
-			})
 
 			iData1 := genInsertDataWithPKs(c.pks1, c.pkType)
 			dData1 := &DeleteData{
@@ -958,9 +890,10 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 				TimeoutInSeconds: 10,
 				Type:             datapb.CompactionType_MergeCompaction,
 				Channel:          "channelname",
+				Schema:           meta.GetSchema(),
 			}
 
-			task := newCompactionTask(context.TODO(), mockbIO, metaCache, syncMgr, alloc, plan)
+			task := newCompactionTask(context.TODO(), mockbIO, alloc, plan)
 			result, err := task.compact()
 			assert.NoError(t, err)
 			assert.NotNil(t, result)
@@ -1008,40 +941,6 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 
 		mockbIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 		iCodec := storage.NewInsertCodecWithSchema(meta)
-
-		metaCache := metacache.NewMockMetaCache(t)
-		metaCache.EXPECT().Collection().Return(collID)
-		metaCache.EXPECT().Schema().Return(meta.GetSchema())
-		syncMgr := syncmgr.NewMockSyncManager(t)
-		syncMgr.EXPECT().Block(mock.Anything).Return()
-
-		bfs := metacache.NewBloomFilterSet()
-		bfs.UpdatePKRange(&storage.Int64FieldData{Data: []UniqueID{1}})
-		seg1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			CollectionID: collID,
-			PartitionID:  partID,
-			ID:           segID1,
-			NumOfRows:    2,
-		}, bfs)
-		bfs = metacache.NewBloomFilterSet()
-		bfs.UpdatePKRange(&storage.Int64FieldData{Data: []UniqueID{1}})
-		seg2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{
-			CollectionID: collID,
-			PartitionID:  partID,
-			ID:           segID2,
-			NumOfRows:    2,
-		}, bfs)
-
-		metaCache.EXPECT().GetSegmentByID(mock.Anything).RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-			switch id {
-			case segID1:
-				return seg1, true
-			case segID2:
-				return seg2, true
-			default:
-				return nil, false
-			}
-		})
 
 		// the same pk for segmentI and segmentII
 		pks := [2]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(2)}
@@ -1101,9 +1000,10 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 			TimeoutInSeconds: 10,
 			Type:             datapb.CompactionType_MergeCompaction,
 			Channel:          "channelname",
+			Schema:           meta.GetSchema(),
 		}
 
-		task := newCompactionTask(context.TODO(), mockbIO, metaCache, syncMgr, alloc, plan)
+		task := newCompactionTask(context.TODO(), mockbIO, alloc, plan)
 		result, err := task.compact()
 		assert.NoError(t, err)
 		assert.NotNil(t, result)
@@ -1117,25 +1017,4 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		assert.NotEmpty(t, segment.InsertLogs)
 		assert.NotEmpty(t, segment.Field2StatslogPaths)
 	})
-}
-
-func TestInjectDone(t *testing.T) {
-	syncMgr := syncmgr.NewMockSyncManager(t)
-
-	segmentIDs := []int64{100, 200, 300}
-	task := &compactionTask{
-		plan: &datapb.CompactionPlan{
-			SegmentBinlogs: lo.Map(segmentIDs, func(id int64, _ int) *datapb.CompactionSegmentBinlogs {
-				return &datapb.CompactionSegmentBinlogs{SegmentID: id}
-			}),
-		},
-		syncMgr: syncMgr,
-	}
-
-	for _, segmentID := range segmentIDs {
-		syncMgr.EXPECT().Unblock(segmentID).Return().Once()
-	}
-
-	task.injectDone()
-	task.injectDone()
 }

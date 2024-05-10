@@ -69,12 +69,11 @@ func (c *compactionExecutor) toCompleteState(task compactor) {
 	c.executing.GetAndRemove(task.getPlanID())
 }
 
-func (c *compactionExecutor) injectDone(planID UniqueID) {
+func (c *compactionExecutor) removeTask(planID UniqueID) {
 	c.completed.GetAndRemove(planID)
 	task, loaded := c.completedCompactor.GetAndRemove(planID)
 	if loaded {
-		log.Info("Compaction task inject done", zap.Int64("planID", planID), zap.String("channel", task.getChannelName()))
-		task.injectDone()
+		log.Info("Compaction task removed", zap.Int64("planID", planID), zap.String("channel", task.getChannelName()))
 	}
 }
 
@@ -109,14 +108,14 @@ func (c *compactionExecutor) executeTask(task compactor) {
 
 	result, err := task.compact()
 	if err != nil {
-		task.injectDone()
 		log.Warn("compaction task failed", zap.Error(err))
+		return
 	} else {
 		c.completed.Insert(result.GetPlanID(), result)
 		c.completedCompactor.Insert(result.GetPlanID(), task)
 	}
 
-	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))
+	log.Info("end to execute compaction")
 }
 
 func (c *compactionExecutor) stopTask(planID UniqueID) {
@@ -151,7 +150,7 @@ func (c *compactionExecutor) discardPlan(channel string) {
 	// remove all completed plans of channel
 	c.completed.Range(func(planID int64, result *datapb.CompactionPlanResult) bool {
 		if result.GetChannel() == channel {
-			c.injectDone(planID)
+			c.removeTask(planID)
 			log.Info("remove compaction plan and results",
 				zap.String("channel", channel),
 				zap.Int64("planID", planID))

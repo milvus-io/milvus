@@ -51,7 +51,6 @@ type LevelZeroCompactionTaskSuite struct {
 
 	mockBinlogIO *io.MockBinlogIO
 	mockAlloc    *allocator.MockAllocator
-	mockMeta     *metacache.MockMetaCache
 	task         *levelZeroCompactionTask
 
 	dData *storage.DeleteData
@@ -61,9 +60,8 @@ type LevelZeroCompactionTaskSuite struct {
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
-	s.mockMeta = metacache.NewMockMetaCache(s.T())
 	// plan of the task is unset
-	s.task = newLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil, nil)
+	s.task = newLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -101,19 +99,18 @@ func (s *LevelZeroCompactionTaskSuite) TestLinearBatchLoadDeltaFail() {
 			},
 			{SegmentID: 200, Level: datapb.SegmentLevel_L1},
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock download fail")).Twice()
-
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
 
 	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L1
@@ -154,6 +151,13 @@ func (s *LevelZeroCompactionTaskSuite) TestLinearBatchUploadByCheckFail() {
 				},
 			}},
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 
 	s.task.plan = plan
@@ -170,15 +174,9 @@ func (s *LevelZeroCompactionTaskSuite) TestLinearBatchUploadByCheckFail() {
 	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(2)
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Twice()
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
+	mockAlloc := allocator.NewMockAllocator(s.T())
+	mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
+	s.task.allocator = mockAlloc
 
 	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L1
@@ -238,6 +236,15 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 				},
 			}},
 		},
+		CollectionID: 1,
+		PartitionID:  10,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 
 	s.task.plan = plan
@@ -254,18 +261,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(2)
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentByID(mock.Anything, mock.Anything).
-		RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-			return metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: id, PartitionID: 10}, nil), true
-		})
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
 
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 	s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).
@@ -357,6 +352,15 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 				},
 			}},
 		},
+		CollectionID: 1,
+		PartitionID:  10,
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 
 	s.task.plan = plan
@@ -373,18 +377,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentByID(mock.Anything, mock.Anything).
-		RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-			return metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: id, PartitionID: 10}, nil), true
-		})
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
 
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 	s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).
@@ -432,9 +424,9 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	ctx := context.Background()
 	s.Run("uploadByCheck directly composeDeltalog failed", func() {
 		s.SetupTest()
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
-
+		mockAlloc := allocator.NewMockAllocator(s.T())
+		mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
+		s.task.allocator = mockAlloc
 		segments := map[int64]*storage.DeleteData{100: s.dData}
 		results := make(map[int64]*datapb.CompactionSegment)
 		err := s.task.uploadByCheck(ctx, false, segments, results)
@@ -445,12 +437,6 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	s.Run("uploadByCheck directly Upload failed", func() {
 		s.SetupTest()
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
 
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
@@ -467,12 +453,6 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	s.Run("upload directly", func() {
 		s.SetupTest()
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
 
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
@@ -507,12 +487,6 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
 
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
 
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
@@ -539,21 +513,6 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestComposeDeltalog() {
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().
-		GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-		Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
-
-	s.mockMeta.EXPECT().
-		GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 101
-			}), mock.Anything).
-		Return(nil, false)
-
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 
 	blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
@@ -568,8 +527,13 @@ func (s *LevelZeroCompactionTaskSuite) TestComposeDeltalog() {
 	s.NotNil(v)
 	s.Equal(blobPath, binlog.LogPath)
 
-	_, _, err = s.task.composeDeltalog(101, s.dData)
-	s.Error(err)
+	kvs, _, err = s.task.composeDeltalog(101, s.dData)
+	s.NoError(err)
+	s.Equal(1, len(kvs))
+	v, ok = kvs[blobPath]
+	s.True(ok)
+	s.NotNil(v)
+	s.Equal(blobPath, binlog.LogPath)
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
@@ -684,6 +648,13 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 				},
 			}},
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 
 	s.task.plan = plan
@@ -697,14 +668,6 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
-
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
 
 	bfs, err := s.task.loadBF(plan.SegmentBinlogs)
 	s.NoError(err)
@@ -729,17 +692,16 @@ func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 					},
 				}},
 			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						IsPrimaryKey: false,
+					},
+				},
+			},
 		}
 
 		s.task.plan = plan
-
-		s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					IsPrimaryKey: false,
-				},
-			},
-		})
 
 		_, err := s.task.loadBF(plan.SegmentBinlogs)
 		s.Error(err)

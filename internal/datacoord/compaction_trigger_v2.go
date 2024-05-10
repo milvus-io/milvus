@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"context"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -33,16 +34,18 @@ type TriggerManager interface {
 // 2. SystemIDLE & schedulerIDLE
 // 3. Manual Compaction
 type CompactionTriggerManager struct {
-	scheduler Scheduler
-	handler   compactionPlanContext // TODO replace with scheduler
+	scheduler         Scheduler
+	handler           Handler
+	compactionHandler compactionPlanContext // TODO replace with scheduler
 
 	allocator allocator
 }
 
-func NewCompactionTriggerManager(alloc allocator, handler compactionPlanContext) *CompactionTriggerManager {
+func NewCompactionTriggerManager(alloc allocator, handler Handler, compactionHandler compactionPlanContext) *CompactionTriggerManager {
 	m := &CompactionTriggerManager{
-		allocator: alloc,
-		handler:   handler,
+		allocator:         alloc,
+		handler:           handler,
+		compactionHandler: compactionHandler,
 	}
 
 	return m
@@ -51,7 +54,7 @@ func NewCompactionTriggerManager(alloc allocator, handler compactionPlanContext)
 func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionTriggerType, views []CompactionView) {
 	log := log.With(zap.Int64("taskID", taskID))
 	for _, view := range views {
-		if m.handler.isFull() {
+		if m.compactionHandler.isFull() {
 			log.RatedInfo(1.0, "Skip trigger compaction for scheduler is full")
 			return
 		}
@@ -103,7 +106,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(taskID int64, outView
 
 	// TODO, remove handler, use scheduler
 	// m.scheduler.Submit(plan)
-	m.handler.execCompactionPlan(signal, plan)
+	m.compactionHandler.execCompactionPlan(signal, plan)
 	log.Info("Finish to submit a LevelZeroCompaction plan",
 		zap.Int64("taskID", taskID),
 		zap.Int64("planID", plan.GetPlanID()),
@@ -130,7 +133,7 @@ func (m *CompactionTriggerManager) buildL0CompactionPlan(view CompactionView) *d
 		Channel:        view.GetGroupLabel().Channel,
 	}
 
-	if err := fillOriginPlan(m.allocator, plan); err != nil {
+	if err := fillOriginPlan(view.GetGroupLabel().CollectionID, view.GetGroupLabel().PartitionID, m.handler, m.allocator, plan); err != nil {
 		return nil
 	}
 
@@ -145,14 +148,22 @@ type chanPartSegments struct {
 	segments     []*SegmentInfo
 }
 
-func fillOriginPlan(alloc allocator, plan *datapb.CompactionPlan) error {
-	// TODO context
-	id, err := alloc.allocID(context.TODO())
+func fillOriginPlan(collectionID, partitionID int64, handler Handler, alloc allocator, plan *datapb.CompactionPlan) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+	id, err := alloc.allocID(ctx)
 	if err != nil {
 		return err
 	}
 
 	plan.PlanID = id
 	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32()
+	plan.CollectionID = collectionID
+	plan.PartitionID = partitionID
+	collection, err := handler.GetCollection(ctx, collectionID)
+	if err != nil {
+		return err
+	}
+	plan.Schema = collection.Schema
 	return nil
 }
