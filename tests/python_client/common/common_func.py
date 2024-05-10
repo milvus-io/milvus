@@ -899,12 +899,12 @@ def get_column_data_by_schema(nb=ct.default_nb, schema=None, skip_vectors=False,
         if field.dtype == DataType.FLOAT_VECTOR and skip_vectors is True:
             tmp = []
         else:
-            tmp = gen_data_by_type(field, nb=nb, start=start)
+            tmp = gen_data_by_collection_field(field, nb=nb, start=start)
         data.append(tmp)
     return data
 
 
-def get_row_data_by_schema(nb=ct.default_nb, schema=None):
+def gen_row_data_by_schema(nb=ct.default_nb, schema=None):
     if schema is None:
         schema = gen_default_collection_schema()
     fields = schema.fields
@@ -916,7 +916,7 @@ def get_row_data_by_schema(nb=ct.default_nb, schema=None):
     for i in range(nb):
         tmp = {}
         for field in fields_not_auto_id:
-            tmp[field.name] = gen_data_by_type(field)
+            tmp[field.name] = gen_data_by_collection_field(field)
         data.append(tmp)
     return data
 
@@ -1016,7 +1016,7 @@ def get_dim_by_schema(schema=None):
     return None
 
 
-def gen_data_by_type(field, nb=None, start=None):
+def gen_data_by_collection_field(field, nb=None, start=None):
     # if nb is None, return one data, else return a list of data
     data_type = field.dtype
     if data_type == DataType.BOOL:
@@ -1122,6 +1122,19 @@ def gen_data_by_type(field, nb=None, start=None):
             return [["".join([chr(random.randint(97, 122)) for _ in range(length)]) for _ in range(max_capacity)] for _ in range(nb)]
 
     return None
+
+
+def gen_data_by_collection_schema(schema, nb, r=0):
+    """
+    gen random data by collection schema, regardless of primary key or auto_id
+    vector type only support for DataType.FLOAT_VECTOR
+    """
+    data = []
+    start_uid = r * nb
+    fields = schema.fields
+    for field in fields:
+        data.append(gen_data_by_collection_field(field, nb, start_uid))
+    return data
 
 
 def gen_json_files_for_bulk_insert(data, schema, data_dir):
