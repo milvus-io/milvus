@@ -63,14 +63,31 @@ func GetIP(ip string) string {
 func GetLocalIP() string {
 	addrs, err := net.InterfaceAddrs()
 	if err == nil {
-		for _, addr := range addrs {
-			ipaddr, ok := addr.(*net.IPNet)
-			if ok && ipaddr.IP.IsGlobalUnicast() && ipaddr.IP.To4() != nil {
-				return ipaddr.IP.String()
-			}
+		ip := GetValidLocalIP(addrs)
+		if len(ip) != 0 {
+			return ip
 		}
 	}
 	return "127.0.0.1"
+}
+
+// GetValidLocalIP return the first valid local ip address
+func GetValidLocalIP(addrs []net.Addr) string {
+	// Search for valid ipv4 addresses
+	for _, addr := range addrs {
+		ipaddr, ok := addr.(*net.IPNet)
+		if ok && ipaddr.IP.IsGlobalUnicast() && ipaddr.IP.To4() != nil {
+			return ipaddr.IP.String()
+		}
+	}
+	// Search for valid ipv6 addresses
+	for _, addr := range addrs {
+		ipaddr, ok := addr.(*net.IPNet)
+		if ok && ipaddr.IP.IsGlobalUnicast() && ipaddr.IP.To16() != nil && ipaddr.IP.To4() == nil {
+			return "[" + ipaddr.IP.String() + "]"
+		}
+	}
+	return ""
 }
 
 // JSONToMap parse the jsonic index parameters to map
