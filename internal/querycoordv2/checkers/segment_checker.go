@@ -383,19 +383,6 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		return nil
 	}
 
-	// filter out stopping nodes.
-	availableNodes := lo.Filter(replica.GetNodes(), func(node int64, _ int) bool {
-		stop, err := c.nodeMgr.IsStoppingNode(node)
-		if err != nil {
-			return false
-		}
-		return !stop
-	})
-
-	if len(availableNodes) == 0 {
-		return nil
-	}
-
 	isLevel0 := segments[0].GetLevel() == datapb.SegmentLevel_L0
 	shardSegments := lo.GroupBy(segments, func(s *datapb.SegmentInfo) string {
 		return s.GetInsertChannel()
@@ -407,6 +394,24 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 		leader := c.dist.LeaderViewManager.GetLatestShardLeaderByFilter(meta.WithReplica2LeaderView(replica), meta.WithChannelName2LeaderView(shard))
 		if leader == nil {
 			continue
+		}
+
+		rwNodes := replica.GetChannelRWNodes(shard)
+		if len(rwNodes) == 0 {
+			rwNodes = replica.GetNodes()
+		}
+
+		// filter out stopping nodes.
+		availableNodes := lo.Filter(rwNodes, func(node int64, _ int) bool {
+			stop, err := c.nodeMgr.IsStoppingNode(node)
+			if err != nil {
+				return false
+			}
+			return !stop
+		})
+
+		if len(availableNodes) == 0 {
+			return nil
 		}
 
 		// L0 segment can only be assign to shard leader's node
