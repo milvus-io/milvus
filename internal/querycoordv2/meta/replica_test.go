@@ -96,8 +96,8 @@ func (suite *ReplicaSuite) TestWriteOperation() {
 	suite.True(mr.Contains(6))
 
 	// test add ro node.
-	suite.False(mr.Contains(4))
-	suite.False(mr.Contains(7))
+	suite.False(mr.ContainRWNode(4))
+	suite.False(mr.ContainRWNode(7))
 	mr.AddRWNode(4, 7)
 	suite.Equal(3, r.RWNodesCount())
 	suite.Equal(1, r.RONodesCount())
@@ -116,8 +116,10 @@ func (suite *ReplicaSuite) TestWriteOperation() {
 	suite.Equal(5, mr.RWNodesCount())
 	suite.Equal(2, mr.RONodesCount())
 	suite.Equal(7, mr.NodesCount())
-	suite.False(mr.Contains(4))
-	suite.False(mr.Contains(7))
+	suite.False(mr.ContainRWNode(4))
+	suite.False(mr.ContainRWNode(7))
+	suite.True(mr.ContainRONode(4))
+	suite.True(mr.ContainRONode(7))
 
 	// test remove node.
 	mr.RemoveNode(4, 5, 7, 8)
@@ -164,10 +166,15 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 
 	// Test Contains()
 	suite.True(r.Contains(1))
-	suite.False(r.Contains(4))
+	suite.True(r.Contains(4))
 
 	// Test ContainRONode()
+	suite.False(r.ContainRONode(1))
 	suite.True(r.ContainRONode(4))
+
+	// Test ContainsRWNode()
+	suite.True(r.ContainRWNode(1))
+	suite.False(r.ContainRWNode(4))
 }
 
 func TestReplica(t *testing.T) {
