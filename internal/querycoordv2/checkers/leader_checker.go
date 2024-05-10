@@ -25,12 +25,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 var _ Checker = (*LeaderChecker)(nil)
@@ -105,12 +103,45 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(ch), meta.WithReplica(replica))
 					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, leaderView, dist)...)
 					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, leaderView, dist)...)
+					tasks = append(tasks, c.findNeedSyncPartitionStats(ctx, replica, leaderView, node)...)
 				}
 			}
 		}
 	}
 
 	return tasks
+}
+
+func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, nodeID int64) []task.Task {
+	curDmlChannel := c.target.GetDmChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	partStatsInTarget := curDmlChannel.GetPartitionStatsVersions()
+	partStatsInLView := leaderView.PartitionStatsVersions
+	partStatsToUpdate := make(map[int64]int64)
+
+	ret := make([]task.Task, 0)
+	for partID, psVersionInTarget := range partStatsInTarget {
+		psVersionInLView := partStatsInLView[partID]
+		if psVersionInLView < psVersionInTarget {
+			partStatsToUpdate[partID] = psVersionInTarget
+		}
+	}
+
+	action := task.NewLeaderUpdatePartStatsAction(leaderView.ID, nodeID, task.ActionTypeUpdate, leaderView.Channel, partStatsToUpdate)
+
+	t := task.NewLeaderPartStatsTask(
+		ctx,
+		c.ID(),
+		leaderView.CollectionID,
+		replica,
+		leaderView.ID,
+		action,
+	)
+
+	// leader task shouldn't replace executing segment task
+	t.SetPriority(task.TaskPriorityLow)
+	t.SetReason("sync partition stats versions")
+	ret = append(ret, t)
+	return ret
 }
 
 func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, dist []*meta.Segment) []task.Task {
@@ -145,9 +176,8 @@ func (c *LeaderChecker) findNeedLoadedSegments(ctx context.Context, replica *met
 				zap.Int64("segmentID", s.GetID()),
 				zap.Int64("nodeID", s.Node))
 			action := task.NewLeaderAction(leaderView.ID, s.Node, task.ActionTypeGrow, s.GetInsertChannel(), s.GetID(), time.Now().UnixNano())
-			t := task.NewLeaderTask(
+			t := task.NewLeaderSegmentTask(
 				ctx,
-				params.Params.QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 				c.ID(),
 				s.GetCollectionID(),
 				replica,
@@ -192,9 +222,8 @@ func (c *LeaderChecker) findNeedRemovedSegments(ctx context.Context, replica *me
 		// reduce leader action won't be execute on worker, in  order to remove segment from delegator success even when worker done
 		// set workerID to leader view's node
 		action := task.NewLeaderAction(leaderView.ID, leaderView.ID, task.ActionTypeReduce, leaderView.Channel, sid, 0)
-		t := task.NewLeaderTask(
+		t := task.NewLeaderSegmentTask(
 			ctx,
-			paramtable.Get().QueryCoordCfg.SegmentTaskTimeout.GetAsDuration(time.Millisecond),
 			c.ID(),
 			leaderView.CollectionID,
 			replica,

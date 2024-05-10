@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"math"
 	"time"
 
 	"github.com/samber/lo"
@@ -206,14 +207,35 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 	// unindexed is flushed segments as well
 	indexedIDs.Insert(unIndexedIDs.Collect()...)
 
+	// update partition stats versions
+	findMaxPartVersion := func(partStats []*datapb.PartitionStatsInfo) []*datapb.PartitionStatsInfo {
+		var maxVersion int64 = math.MinInt64
+		var maxPartInfo *datapb.PartitionStatsInfo = nil
+		for _, partStat := range partStats {
+			if partStat != nil && partStat.Version > maxVersion {
+				maxVersion = partStat.Version
+				maxPartInfo = partStat
+			}
+		}
+		return []*datapb.PartitionStatsInfo{maxPartInfo}
+	}
+	partStatsVersionsMap := make(map[int64]int64)
+	for partID := range partitionSet {
+		partStatsInfos := h.s.meta.ListPartitionStatsInfos(channel.GetCollectionID(), partID, channel.GetName(), findMaxPartVersion)
+		if len(partStatsInfos) == 1 && partStatsInfos[0] != nil {
+			partStatsVersionsMap[partID] = partStatsInfos[0].Version
+		}
+	}
+
 	return &datapb.VchannelInfo{
-		CollectionID:        channel.GetCollectionID(),
-		ChannelName:         channel.GetName(),
-		SeekPosition:        h.GetChannelSeekPosition(channel, partitionIDs...),
-		FlushedSegmentIds:   indexedIDs.Collect(),
-		UnflushedSegmentIds: growingIDs.Collect(),
-		DroppedSegmentIds:   droppedIDs.Collect(),
-		LevelZeroSegmentIds: levelZeroIDs.Collect(),
+		CollectionID:           channel.GetCollectionID(),
+		ChannelName:            channel.GetName(),
+		SeekPosition:           h.GetChannelSeekPosition(channel, partitionIDs...),
+		FlushedSegmentIds:      indexedIDs.Collect(),
+		UnflushedSegmentIds:    growingIDs.Collect(),
+		DroppedSegmentIds:      droppedIDs.Collect(),
+		LevelZeroSegmentIds:    levelZeroIDs.Collect(),
+		PartitionStatsVersions: partStatsVersionsMap,
 	}
 }
 

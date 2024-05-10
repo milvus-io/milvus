@@ -472,7 +472,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	lo.ForEach(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) {
 		partStatsToReload = append(partStatsToReload, info.PartitionID)
 	})
-	sd.maybeReloadPartitionStats(ctx, partStatsToReload...)
 
 	return nil
 }
@@ -856,7 +855,6 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			partitionsToReload = append(partitionsToReload, segment.Partition())
 		}
 	})
-	sd.maybeReloadPartitionStats(ctx, partitionsToReload...)
 	return nil
 }
 

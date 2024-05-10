@@ -264,6 +264,7 @@ message VchannelInfo {
   repeated int64 indexed_segmentIds = 10;
   repeated SegmentInfo indexed_segments = 11;
   repeated int64 level_zero_segment_ids = 12;
+  map<int64, int64> partition_stats_versions = 13;
 }
 
 message WatchDmChannelsRequest {

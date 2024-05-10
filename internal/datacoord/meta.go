@@ -1757,7 +1757,7 @@ func (m *meta) ListAllPartitionStatsInfos() []*datapb.PartitionStatsInfo {
 	return res
 }
 
-func (m *meta) ListPartitionStatsInfos(collectionID int64, partitionID int64, vchannel string) []*datapb.PartitionStatsInfo {
+func (m *meta) ListPartitionStatsInfos(collectionID int64, partitionID int64, vchannel string, filters ...func([]*datapb.PartitionStatsInfo) []*datapb.PartitionStatsInfo) []*datapb.PartitionStatsInfo {
 	m.RLock()
 	defer m.RUnlock()
 	res := make([]*datapb.PartitionStatsInfo, 0)
@@ -1766,6 +1766,9 @@ func (m *meta) ListPartitionStatsInfos(collectionID int64, partitionID int64, vc
 		if strings.HasPrefix(key, keyPrefix) {
 			res = append(res, partitionStats)
 		}
+	}
+	for _, filter := range filters {
+		res = filter(res)
 	}
 	return res
 }
