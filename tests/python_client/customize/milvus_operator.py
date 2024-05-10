@@ -80,13 +80,13 @@ class MilvusOperator(object):
         del_configs = {}
         if delete_depends:
             del_configs = {'spec.dependencies.etcd.inCluster.deletionPolicy': 'Delete',
-                           # 'spec.dependencies.pulsar.inCluster.deletionPolicy': 'Delete',
+                           'spec.dependencies.pulsar.inCluster.deletionPolicy': 'Delete',
                            'spec.dependencies.kafka.inCluster.deletionPolicy': 'Delete',
                            'spec.dependencies.storage.inCluster.deletionPolicy': 'Delete'
                            }
         if delete_pvc:
             del_configs.update({'spec.dependencies.etcd.inCluster.pvcDeletion': True,
-                                # 'spec.dependencies.pulsar.inCluster.pvcDeletion': True,
+                                'spec.dependencies.pulsar.inCluster.pvcDeletion': True,
                                 'spec.dependencies.kafka.inCluster.pvcDeletion': True,
                                 'spec.dependencies.storage.inCluster.pvcDeletion': True
                                 })

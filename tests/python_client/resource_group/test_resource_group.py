@@ -34,7 +34,7 @@ from rich.console import Console
 
 def display_resource_group_info(info: Union[ResourceGroupInfo, List[ResourceGroupInfo]]):
     table = Table(title="Resource Group Info")
-
+    table.width = 200
     table.add_column("Name", style="cyan")
     table.add_column("Capacity", style="cyan")
     table.add_column("Available Node", style="cyan")
@@ -71,11 +71,13 @@ def display_resource_group_info(info: Union[ResourceGroupInfo, List[ResourceGrou
         )
 
     console = Console()
+    console.width = 300
     console.print(table)
 
 
 def display_segment_distribution_info(collection_name, release_name):
     table = Table(title=f"{collection_name} Segment Distribution Info")
+    table.width = 200
     table.add_column("Segment ID", style="cyan")
     table.add_column("Collection ID", style="cyan")
     table.add_column("Partition ID", style="cyan")
@@ -98,6 +100,7 @@ def display_segment_distribution_info(collection_name, release_name):
             str([querynode_id_pod_pair.get(node_id) for node_id in r.nodeIds])
         )
     console = Console()
+    console.width = 300
     console.print(table)
 
 
