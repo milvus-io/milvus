@@ -24,9 +24,9 @@ type segCoreReducer interface {
 	Reduce(context.Context, []*segcorepb.RetrieveResults, []Segment, *RetrievePlan) (*segcorepb.RetrieveResults, error)
 }
 
-func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) segCoreReducer {
+func CreateSegCoreReducer(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) segCoreReducer {
 	if req.GetReq().GetIsCount() {
 		return &cntReducerSegCore{}
 	}
-	return newDefaultLimitReducerSegcore(req, schema)
+	return newDefaultLimitReducerSegcore(req, schema, manager)
 }

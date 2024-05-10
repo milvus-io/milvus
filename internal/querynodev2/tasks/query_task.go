@@ -122,6 +122,7 @@ func (t *QueryTask) Execute() error {
 	reducer := segments.CreateSegCoreReducer(
 		t.req,
 		t.collection.Schema(),
+		t.segmentManager,
 	)
 	beforeReduce := time.Now()
 	reducedResult, err := reducer.Reduce(t.ctx, results, querySegments, retrievePlan)

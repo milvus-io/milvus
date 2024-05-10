@@ -22,13 +22,11 @@ import (
 	"sync"
 
 	"go.uber.org/zap"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/util/streamrpc"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -46,6 +44,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		segment Segment
 	}
 	resultCh := make(chan segmentResult, len(segments))
+	defer func() { close(resultCh) }()
 
 	// TODO(longjiquan): remove this limit after two-phase retrieval can be applied on lru-segment.
 	plan.ignoreNonPk = !paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() &&
@@ -71,44 +70,10 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		return nil
 	}
 
-	errGroup, ctx := errgroup.WithContext(ctx)
-	for _, segment := range segments {
-		seg := segment
-		errGroup.Go(func() error {
-			if ctx.Err() != nil {
-				return ctx.Err()
-			}
-
-			// record search time and cache miss
-			var err error
-			accessRecord := metricsutil.NewQuerySegmentAccessRecord(getSegmentMetricLabel(seg))
-			defer func() {
-				accessRecord.Finish(err)
-			}()
-
-			if seg.IsLazyLoad() {
-				ctx, cancel := withLazyLoadTimeoutContext(ctx)
-				defer cancel()
-
-				var missing bool
-				missing, err = mgr.DiskCache.Do(ctx, seg.ID(), retriever)
-				if missing {
-					accessRecord.CacheMissing()
-				}
-				if err != nil {
-					log.Warn("failed to do query disk cache", zap.Int64("segID", seg.ID()), zap.Error(err))
-				}
-				return err
-			}
-			return retriever(ctx, seg)
-		})
-	}
-	err := errGroup.Wait()
-	close(resultCh)
-
-	if err != nil {
+	if err := doOnSegments(ctx, mgr, segments, retriever); err != nil {
 		return nil, nil, err
 	}
+	close(resultCh)
 
 	var retrieveSegments []Segment
 	var retrieveResults []*segcorepb.RetrieveResults
@@ -120,7 +85,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	return retrieveResults, retrieveSegments, nil
 }
 
-func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
+func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
 	var (
 		errs = make([]error, len(segments))
 		wg   sync.WaitGroup
@@ -136,7 +101,12 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 		go func(segment Segment, i int) {
 			defer wg.Done()
 			tr := timerecord.NewTimeRecorder("retrieveOnSegmentsWithStream")
-			result, err := segment.Retrieve(ctx, plan)
+			var result *segcorepb.RetrieveResults
+			err := doOnSegment(ctx, mgr, segment, func(ctx context.Context, segment Segment) error {
+				var err error
+				result, err = segment.Retrieve(ctx, plan)
+				return err
+			})
 			if err != nil {
 				errs[i] = err
 				return
@@ -215,6 +185,6 @@ func RetrieveStream(ctx context.Context, manager *Manager, plan *RetrievePlan, r
 		return retrieveSegments, err
 	}
 
-	err = retrieveOnSegmentsWithStream(ctx, retrieveSegments, SegType, plan, srv)
+	err = retrieveOnSegmentsWithStream(ctx, manager, retrieveSegments, SegType, plan, srv)
 	return retrieveSegments, err
 }
