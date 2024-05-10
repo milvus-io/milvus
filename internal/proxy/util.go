@@ -1200,6 +1200,9 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		log.Error("get primary field schema failed", zap.String("collectionName", insertMsg.CollectionName), zap.Any("schema", schema), zap.Error(err))
 		return nil, err
 	}
+	if primaryFieldSchema.GetNullable() {
+		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
+	}
 	// get primaryFieldData whether autoID is true or not
 	var primaryFieldData *schemapb.FieldData
 	if inInsert {
