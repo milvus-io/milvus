@@ -42,4 +42,17 @@ TEST(Bitmap, Naive) {
         }
         ASSERT_NEAR(count / N, 0.682, 0.01);
     }
+
+    {
+        auto binary_set = sort_index->Serialize(nullptr);
+        auto new_index = std::make_shared<index::ScalarIndexSort<float>>();
+        auto usage = new_index->GetResourceUsage();
+        ASSERT_EQ(usage.mem_size, 0);
+        ASSERT_EQ(usage.disk_size, 0);
+
+        new_index->Load(binary_set);
+        usage = new_index->GetResourceUsage();
+        ASSERT_GT(usage.mem_size, N * sizeof(float));
+        ASSERT_EQ(usage.disk_size, 0);
+    }
 }

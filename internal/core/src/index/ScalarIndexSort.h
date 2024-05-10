@@ -100,6 +100,9 @@ class ScalarIndexSort : public ScalarIndex<T> {
         return true;
     }
 
+    ResourceUsage
+    GetResourceUsage() const override;
+
  private:
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);

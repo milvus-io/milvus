@@ -47,6 +47,7 @@
 #include "log/Log.h"
 #include "storage/DataCodec.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/space.h"
 #include "storage/Util.h"
@@ -696,7 +697,8 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void
+VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto filepath = GetValueFromConfig<std::string>(config, kMmapFilepath);
     AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
 
@@ -760,14 +762,9 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                                "lost index slice data");
                     auto data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    auto written = file.Write(data->Data(), data->Size());
+                    file.Write(data->Data(), data->Size());
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
-                    AssertInfo(
-                        written == data->Size(),
-                        fmt::format("failed to write index data to disk {}: {}",
-                                    filepath->data(),
-                                    strerror(errno)));
                 }
                 for (auto& file : batch) {
                     pending_index_files.erase(file);
@@ -830,6 +827,11 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
+
+    auto local_chunk_manager =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager();
+    resource_usage_.disk_size += local_chunk_manager->Size(filepath.value());
 
     auto ok = unlink(filepath->data());
     AssertInfo(ok == 0,
@@ -953,6 +955,14 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
                strerror(errno));
     LOG_INFO("load vector index done");
 }
+
+template <typename T>
+ResourceUsage
+VectorMemIndex<T>::GetResourceUsage() const {
+    // TODO: we can't get the memory usage of vector index now.
+    return resource_usage_;
+}
+
 template class VectorMemIndex<float>;
 template class VectorMemIndex<uint8_t>;
 template class VectorMemIndex<float16>;

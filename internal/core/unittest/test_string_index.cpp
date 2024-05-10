@@ -197,6 +197,32 @@ TEST_F(StringIndexMarisaTest, Query) {
     }
 }
 
+TEST_F(StringIndexMarisaTest, ResourceUsage) {
+    auto builder = milvus::index::CreateStringIndexMarisa();
+    std::vector<std::string> strings(nb);
+    for (int i = 0; i < nb; ++i) {
+        strings[i] = std::to_string(std::rand() % 10);
+    }
+    builder->Build(nb, strings.data());
+    auto usage = builder->GetResourceUsage();
+
+    ASSERT_EQ(usage.mem_size, 0);
+    ASSERT_EQ(usage.disk_size, 0);
+
+    {
+        auto binary_set = builder->Serialize(nullptr);
+        auto index = milvus::index::CreateStringIndexMarisa();
+        // load index with mmap, so that disk usage should not be 0.
+        milvus::Config config;
+        config[kEnableMmap] = "";
+        index->Load(binary_set, config);
+
+        usage = index->GetResourceUsage();
+        ASSERT_EQ(usage.mem_size, 0);
+        ASSERT_GT(usage.disk_size, 0);
+    }
+}
+
 TEST_F(StringIndexMarisaTest, Codec) {
     auto index = milvus::index::CreateStringIndexMarisa();
     std::vector<std::string> strings(nb);
