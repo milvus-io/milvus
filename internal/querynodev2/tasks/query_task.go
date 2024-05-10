@@ -144,7 +144,10 @@ func (t *QueryTask) Execute() error {
 	}
 
 	relatedDataSize := lo.Reduce(querySegments, func(acc int64, seg segments.Segment, _ int) int64 {
-		return acc + seg.MemSize()
+		if seg.Type() == segments.SegmentTypeSealed {
+			return acc + int64(seg.ResourceUsageEstimate().BinLogSizeAtOSS)
+		}
+		return acc + int64(seg.ResourceUsageEstimate().InUsed.MemorySize)
 	}, 0)
 
 	t.result = &internalpb.RetrieveResults{

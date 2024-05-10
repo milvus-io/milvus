@@ -140,13 +140,18 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 				return
 			}
 
+			relatedDataSize := int64(segment.ResourceUsageEstimate().InUsed.MemorySize)
+			if segment.Type() == SegmentTypeSealed {
+				relatedDataSize = int64(segment.ResourceUsageEstimate().BinLogSizeAtOSS)
+			}
+
 			if len(result.GetOffset()) != 0 {
 				if err = svr.Send(&internalpb.RetrieveResults{
 					Status:     merr.Success(),
 					Ids:        result.GetIds(),
 					FieldsData: result.GetFieldsData(),
 					CostAggregation: &internalpb.CostAggregation{
-						TotalRelatedDataSize: segment.MemSize(),
+						TotalRelatedDataSize: relatedDataSize,
 					},
 					AllRetrieveCount: result.GetAllRetrieveCount(),
 				}); err != nil {

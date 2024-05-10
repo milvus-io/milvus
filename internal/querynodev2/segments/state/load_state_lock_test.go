@@ -167,20 +167,27 @@ func TestStartReleaseAll(t *testing.T) {
 
 func TestRLock(t *testing.T) {
 	l := NewLoadStateLock(LoadStateOnlyMeta)
-	assert.True(t, l.RLockIf(IsNotReleased))
+	state, locked := l.RLockIf(IsNotReleased)
+	assert.True(t, locked)
+	assert.Equal(t, LoadStateOnlyMeta, state)
 	l.RUnlock()
-	assert.False(t, l.RLockIf(IsDataLoaded))
+	state, locked = l.RLockIf(IsDataLoaded)
+	assert.False(t, locked)
 
 	l = NewLoadStateLock(LoadStateDataLoaded)
-	assert.True(t, l.RLockIf(IsNotReleased))
+	state, locked = l.RLockIf(IsNotReleased)
+	assert.True(t, locked)
 	l.RUnlock()
-	assert.True(t, l.RLockIf(IsDataLoaded))
+	state, locked = l.RLockIf(IsDataLoaded)
+	assert.True(t, locked)
 	l.RUnlock()
 
 	l = NewLoadStateLock(LoadStateOnlyMeta)
 	l.StartReleaseAll().Done(nil)
-	assert.False(t, l.RLockIf(IsNotReleased))
-	assert.False(t, l.RLockIf(IsDataLoaded))
+	state, locked = l.RLockIf(IsNotReleased)
+	assert.False(t, locked)
+	state, locked = l.RLockIf(IsDataLoaded)
+	assert.False(t, locked)
 }
 
 func TestPin(t *testing.T) {
