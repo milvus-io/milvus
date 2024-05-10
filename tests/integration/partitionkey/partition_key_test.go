@@ -99,7 +99,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	{
 		pkColumn := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, rowNum)
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
-		partitionKeyColumn := integration.NewInt64SameFieldData("pid", rowNum, 2)
+		partitionKeyColumn := integration.NewInt64SameFieldData("pid", rowNum, 10)
 		hashKeys := integration.GenerateHashKeys(rowNum)
 		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
@@ -115,7 +115,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	{
 		pkColumn := integration.NewInt64FieldDataWithStart(integration.Int64Field, rowNum, rowNum*2)
 		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
-		partitionKeyColumn := integration.NewInt64SameFieldData("pid", rowNum, 3)
+		partitionKeyColumn := integration.NewInt64SameFieldData("pid", rowNum, 100)
 		hashKeys := integration.GenerateHashKeys(rowNum)
 		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
 			DbName:         dbName,
@@ -216,7 +216,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 	}
 
 	{
-		// search without partition key
+		// search with partition key
 		expr := fmt.Sprintf("%s > 0 && pid == 1", integration.Int64Field)
 		nq := 10
 		topk := 10
@@ -382,7 +382,7 @@ func (s *PartitionKeySuite) TestPartitionKey() {
 		deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
 			DbName:         dbName,
 			CollectionName: collectionName,
-			Expr:           integration.Int64Field + " < 2000 && pid == 2",
+			Expr:           integration.Int64Field + " < 2000 && pid == 10",
 		})
 		if deleteResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
 			log.Warn("deleteResult fail reason", zap.String("reason", deleteResult.GetStatus().GetReason()))
