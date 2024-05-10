@@ -412,12 +412,8 @@ func (t *levelZeroCompactionTask) loadBF(l1Segments []*datapb.CompactionSegmentB
 	for _, segment := range l1Segments {
 		segment := segment
 		future := pool.Submit(func() (any, error) {
-			err := binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
+			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
 				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
-			if err != nil {
-				log.Warn("failed to DecompressBinLog", zap.Error(err))
-				return err, err
-			}
 			pks, err := loadStats(t.ctx, t.cm,
 				t.metacache.Schema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			if err != nil {

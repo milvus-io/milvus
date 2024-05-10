@@ -714,3 +714,49 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 		s.True(bfs[201].PkExists(pk))
 	}
 }
+
+func (s *LevelZeroCompactionTaskSuite) TestFailed() {
+	s.Run("no primary key", func() {
+		plan := &datapb.CompactionPlan{
+			PlanID: 19530,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogID: 9999, LogSize: 100},
+						},
+					},
+				}},
+			},
+		}
+
+		s.task.plan = plan
+
+		s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: false,
+				},
+			},
+		})
+
+		_, err := s.task.loadBF(plan.SegmentBinlogs)
+		s.Error(err)
+	})
+
+	s.Run("no l1 segments", func() {
+		plan := &datapb.CompactionPlan{
+			PlanID: 19530,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 201, Level: datapb.SegmentLevel_L0},
+			},
+		}
+
+		s.task.plan = plan
+
+		_, err := s.task.compact()
+		s.Error(err)
+	})
+}
