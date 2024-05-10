@@ -18,6 +18,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/samber/lo"
 )
 
 type l0WriteBuffer struct {
@@ -51,6 +52,7 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 	for _, delMsg := range deleteMsgs {
 		l0SegmentID := wb.getL0SegmentID(delMsg.GetPartitionID(), startPos)
 		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
+		lcs := lo.Map(pks, func(pk storage.PrimaryKey, _ int) storage.LocationsCache { return storage.NewLocationsCache(pk) })
 		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
 			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
 		for _, segment := range segments {
@@ -59,9 +61,9 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 			}
 			var deletePks []storage.PrimaryKey
 			var deleteTss []typeutil.Timestamp
-			for idx, pk := range pks {
-				if segment.GetBloomFilterSet().PkExists(pk) {
-					deletePks = append(deletePks, pk)
+			for idx, lc := range lcs {
+				if segment.GetBloomFilterSet().PkExists(lc) {
+					deletePks = append(deletePks, pks[idx])
 					deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
 				}
 			}
