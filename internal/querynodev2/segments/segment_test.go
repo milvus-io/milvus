@@ -148,13 +148,12 @@ func (suite *SegmentSuite) TestResourceUsageEstimate() {
 	// growing segment has resource usage
 	// growing segment can not estimate resource usage
 	usage := suite.growing.ResourceUsageEstimate()
-	suite.Zero(usage.MemorySize)
-	suite.Zero(usage.DiskSize)
+	suite.Zero(usage.Predict.MemorySize)
+	suite.Zero(usage.Predict.DiskSize)
 	// growing segment has no resource usage
 	usage = suite.sealed.ResourceUsageEstimate()
-	suite.NotZero(usage.MemorySize)
-	suite.Zero(usage.DiskSize)
-	suite.Zero(usage.MmapFieldCount)
+	suite.NotZero(usage.Predict.MemorySize)
+	suite.Zero(usage.Predict.DiskSize)
 }
 
 func (suite *SegmentSuite) TestDelete() {
@@ -216,7 +215,7 @@ func (suite *SegmentSuite) TestSegmentReleased() {
 
 	suite.False(sealed.ptrLock.PinIfNotReleased())
 	suite.EqualValues(0, sealed.RowNum())
-	suite.EqualValues(0, sealed.MemSize())
+	suite.EqualValues(0, sealed.ResourceUsageEstimate().InUsed.MemorySize)
 	suite.False(sealed.HasRawData(101))
 }
 

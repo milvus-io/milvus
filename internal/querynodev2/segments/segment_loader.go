@@ -1524,7 +1524,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 	mmapFieldCount := 0
 	for _, loadInfo := range segmentLoadInfos {
 		collection := loader.manager.Collection.Get(loadInfo.GetCollectionID())
-		usage, err := getResourceUsageEstimateOfSegment(collection.Schema(), loadInfo, factor)
+		usage, mmapFieldCount, err := getResourceUsageEstimateOfSegment(collection.Schema(), loadInfo, factor)
 		if err != nil {
 			log.Warn(
 				"failed to estimate resource usage of segment",
@@ -1540,7 +1540,7 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 			zap.Float64("diskUsage(MB)", toMB(usage.DiskSize)),
 			zap.Float64("memoryLoadFactor", factor.memoryUsageFactor),
 		)
-		mmapFieldCount += usage.MmapFieldCount
+		mmapFieldCount += mmapFieldCount
 		predictDiskUsage += usage.DiskSize
 		predictMemUsage += usage.MemorySize
 		if usage.MemorySize > maxSegmentSize {
@@ -1581,9 +1581,8 @@ func (loader *segmentLoader) checkSegmentSize(ctx context.Context, segmentLoadIn
 }
 
 // getResourceUsageEstimateOfSegment estimates the resource usage of the segment
-func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor) (usage *ResourceUsage, err error) {
+func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadInfo *querypb.SegmentLoadInfo, multiplyFactor resourceEstimateFactor) (usage *ResourceUsage, mmapFieldCount int, err error) {
 	var segmentMemorySize, segmentDiskSize uint64
-	var mmapFieldCount int
 
 	vecFieldID2IndexInfo := make(map[int64]*querypb.FieldIndexInfo)
 	for _, fieldIndexInfo := range loadInfo.IndexInfos {
@@ -1598,7 +1597,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 			mmapEnabled = isIndexMmapEnable(fieldIndexInfo)
 			neededMemSize, neededDiskSize, err := getIndexAttrCache().GetIndexResourceUsage(fieldIndexInfo, multiplyFactor.memoryIndexUsageFactor, fieldBinlog)
 			if err != nil {
-				return nil, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
+				return nil, 0, errors.Wrapf(err, "failed to get index size collection %d, segment %d, indexBuildID %d",
 					loadInfo.GetCollectionID(),
 					loadInfo.GetSegmentID(),
 					fieldIndexInfo.GetBuildID())
@@ -1640,10 +1639,9 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		segmentMemorySize += uint64(float64(getBinlogDataSize(fieldBinlog)) * multiplyFactor.deltaDataExpansionFactor)
 	}
 	return &ResourceUsage{
-		MemorySize:     segmentMemorySize,
-		DiskSize:       segmentDiskSize,
-		MmapFieldCount: mmapFieldCount,
-	}, nil
+		MemorySize: segmentMemorySize,
+		DiskSize:   segmentDiskSize,
+	}, mmapFieldCount, nil
 }
 
 func (loader *segmentLoader) getFieldType(collectionID, fieldID int64) (schemapb.DataType, error) {

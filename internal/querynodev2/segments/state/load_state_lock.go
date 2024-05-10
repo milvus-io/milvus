@@ -68,14 +68,14 @@ type LoadStateLock struct {
 	// We need it to be modified when lock is
 }
 
-// RLockIfNotReleased locks the segment if the state is not released.
-func (ls *LoadStateLock) RLockIf(pred StatePredicate) bool {
+// RLockIf locks the segment if pred is true, and return the current state.
+func (ls *LoadStateLock) RLockIf(pred StatePredicate) (loadStateEnum, bool) {
 	ls.mu.RLock()
 	if !pred(ls.state) {
 		ls.mu.RUnlock()
-		return false
+		return ls.state, false
 	}
-	return true
+	return ls.state, true
 }
 
 // RUnlock unlocks the segment.

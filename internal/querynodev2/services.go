@@ -603,7 +603,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 			CollectionID: segment.Collection(),
 			NodeID:       node.GetNodeID(),
 			NodeIds:      []int64{node.GetNodeID()},
-			MemSize:      segment.MemSize(),
+			MemSize:      int64(segment.ResourceUsageEstimate().InUsed.MemorySize),
 			NumRows:      segment.InsertCount(),
 			IndexName:    indexName,
 			IndexID:      indexID,

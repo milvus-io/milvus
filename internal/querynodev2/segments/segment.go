@@ -90,8 +90,6 @@ type baseSegment struct {
 	isLazyLoad     bool
 	channel        metautil.Channel
 
-	resourceUsageCache *atomic.Pointer[ResourceUsage]
-
 	needUpdatedVersion *atomic.Int64 // only for lazy load mode update index
 }
 
@@ -109,7 +107,6 @@ func newBaseSegment(collection *Collection, segmentType SegmentType, version int
 		channel:        channel,
 		isLazyLoad:     isLazyLoad(collection, segmentType),
 
-		resourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
 		needUpdatedVersion: atomic.NewInt64(0),
 	}
 	return bs, nil
@@ -195,42 +192,12 @@ func (s *baseSegment) GetHashFuncNum() uint {
 	return s.bloomFilterSet.GetHashFuncNum()
 }
 
-// ResourceUsageEstimate returns the estimated resource usage of the segment.
-func (s *baseSegment) ResourceUsageEstimate() ResourceUsage {
-	if s.segmentType == SegmentTypeGrowing {
-		// Growing segment cannot do resource usage estimate.
-		return ResourceUsage{}
-	}
-	cache := s.resourceUsageCache.Load()
-	if cache != nil {
-		return *cache
-	}
-
-	usage, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
-		memoryUsageFactor:        1.0,
-		memoryIndexUsageFactor:   1.0,
-		enableTempSegmentIndex:   false,
-		deltaDataExpansionFactor: paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
-	})
-	if err != nil {
-		// Should never failure, if failed, segment should never be loaded.
-		log.Warn("unreachable: failed to get resource usage estimate of segment", zap.Error(err), zap.Int64("collectionID", s.Collection()), zap.Int64("segmentID", s.ID()))
-		return ResourceUsage{}
-	}
-	s.resourceUsageCache.Store(usage)
-	return *usage
-}
-
 func (s *baseSegment) IsLazyLoad() bool {
 	return s.isLazyLoad
 }
 
 func (s *baseSegment) NeedUpdatedVersion() int64 {
 	return s.needUpdatedVersion.Load()
-}
-
-func (s *baseSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
-	s.loadInfo.Store(loadInfo)
 }
 
 func (s *baseSegment) SetNeedUpdatedVersion(version int64) {
@@ -251,9 +218,10 @@ type LocalSegment struct {
 	ptr     C.CSegmentInterface
 
 	// cached results, to avoid too many CGO calls
-	memSize     *atomic.Int64
-	rowNum      *atomic.Int64
-	insertCount *atomic.Int64
+	predictResourceUsageCache *atomic.Pointer[ResourceUsage]
+	inUseResourceUsageCache   *atomic.Pointer[ResourceUsage]
+	rowNum                    *atomic.Int64
+	insertCount               *atomic.Int64
 
 	lastDeltaTimestamp *atomic.Uint64
 	fields             *typeutil.ConcurrentMap[int64, *FieldInfo]
@@ -324,9 +292,11 @@ func NewSegment(ctx context.Context,
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 
-		memSize:     atomic.NewInt64(-1),
 		rowNum:      atomic.NewInt64(-1),
 		insertCount: atomic.NewInt64(0),
+
+		predictResourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+		inUseResourceUsageCache:   atomic.NewPointer[ResourceUsage](nil),
 	}
 
 	if err := segment.initializeSegment(); err != nil {
@@ -394,7 +364,6 @@ func NewSegmentV2(
 		fields:             typeutil.NewConcurrentMap[int64, *FieldInfo](),
 		fieldIndexes:       typeutil.NewConcurrentMap[int64, *IndexedFieldInfo](),
 		space:              space,
-		memSize:            atomic.NewInt64(-1),
 		rowNum:             atomic.NewInt64(-1),
 		insertCount:        atomic.NewInt64(0),
 	}
@@ -472,8 +441,7 @@ func (s *LocalSegment) InsertCount() int64 {
 
 func (s *LocalSegment) RowNum() int64 {
 	// if segment is not loaded, return 0 (maybe not loaded or release by lru)
-	if !s.ptrLock.RLockIf(state.IsDataLoaded) {
-		log.Warn("segment is not valid", zap.Int64("segmentID", s.ID()))
+	if _, locked := s.ptrLock.RLockIf(state.IsDataLoaded); !locked {
 		return 0
 	}
 	defer s.ptrLock.RUnlock()
@@ -492,24 +460,93 @@ func (s *LocalSegment) RowNum() int64 {
 	return rowNum
 }
 
-func (s *LocalSegment) MemSize() int64 {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
-		return 0
+// ResourceUsageEstimate estimates the resource usage of a segment.
+func (s *LocalSegment) ResourceUsageEstimate() SegmentResourceUsage {
+	predictResourceUsage := s.predictResourceUsageEstimate()
+	inUseResourceUsage := s.inUseResourceUsageEstimate()
+	segmentSize := s.LoadInfo().GetSegmentSize()
+
+	usage := SegmentResourceUsage{
+		BinLogSizeAtOSS: uint64(segmentSize),
+	}
+	if predictResourceUsage != nil {
+		usage.Predict = *predictResourceUsage
+	}
+	if inUseResourceUsage != nil {
+		usage.InUsed = *inUseResourceUsage
+	}
+	return usage
+}
+
+// inUseResourceUsageEstimate estimates the resource usage of a sealed segment based on loaded.
+func (s *LocalSegment) inUseResourceUsageEstimate() *ResourceUsage {
+	cachedUsage := s.inUseResourceUsageCache.Load()
+	if cachedUsage != nil {
+		return cachedUsage
+	}
+
+	if _, locked := s.ptrLock.RLockIf(state.IsDataLoaded); !locked {
+		return &ResourceUsage{}
 	}
 	defer s.ptrLock.RUnlock()
 
-	memSize := s.memSize.Load()
-	if memSize < 0 {
-		var cMemSize C.int64_t
-		GetDynamicPool().Submit(func() (any, error) {
-			cMemSize = C.GetMemoryUsageInBytes(s.ptr)
-			s.memSize.Store(int64(cMemSize))
-			return nil, nil
-		}).Await()
+	// Get the resource usage of the segment from C side.
+	var resourceUsage *ResourceUsage
+	GetDynamicPool().Submit(func() (any, error) {
+		usage := C.GetResourceUsageOfSegment(s.ptr)
+		resourceUsage = &ResourceUsage{
+			MemorySize: uint64(usage.mem_size),
+			DiskSize:   uint64(usage.disk_size),
+		}
+		return nil, nil
+	})
 
-		memSize = int64(cMemSize)
+	// vector' bin log size need to be include if vector index doesn't has raw data.
+	// we can calculate on go side, because the bin log size may be not loaded (Warmup or search) when we start to estimate the disk usage.
+	// scalar has been included at C side, so don't need to include here.
+	binLogDiskSize := uint64(0)
+	for _, fieldSchema := range s.collection.Schema().GetFields() {
+		if typeutil.IsVectorType(fieldSchema.GetDataType()) {
+			if fieldIndexInfo, ok := s.fieldIndexes.Get(fieldSchema.GetFieldID()); ok && fieldIndexInfo.IsLoaded && !s.HasRawData(fieldSchema.FieldID) {
+				for _, binlog := range fieldIndexInfo.FieldBinlog.GetBinlogs() {
+					binLogDiskSize += uint64(binlog.GetLogSize())
+				}
+			}
+		}
 	}
-	return memSize
+	// always mmap here, so it's a disk size but not a mem size.
+	resourceUsage.DiskSize += binLogDiskSize
+
+	s.inUseResourceUsageCache.Store(resourceUsage)
+	return resourceUsage
+}
+
+// predictResourceUsageEstimate estimates the resource usage of a sealed segment based on meta info.
+func (s *LocalSegment) predictResourceUsageEstimate() *ResourceUsage {
+	if s.segmentType == SegmentTypeGrowing {
+		// Growing segment cannot do resource usage estimate.
+		return &ResourceUsage{}
+	}
+
+	cachedUsage := s.predictResourceUsageCache.Load()
+	if cachedUsage != nil {
+		return cachedUsage
+	}
+
+	usage, _, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
+		memoryUsageFactor:        1.0,
+		memoryIndexUsageFactor:   1.0,
+		enableTempSegmentIndex:   false,
+		deltaDataExpansionFactor: paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.GetAsFloat(),
+	})
+	if err != nil {
+		// Should never failure, if failed, segment should never be loaded.
+		log.Warn("unreachable: failed to get resource usage estimate of segment", zap.Error(err), zap.Int64("collectionID", s.Collection()), zap.Int64("segmentID", s.ID()))
+		return nil
+	}
+
+	s.predictResourceUsageCache.Store(usage)
+	return usage
 }
 
 func (s *LocalSegment) LastDeltaTimestamp() uint64 {
@@ -530,7 +567,7 @@ func (s *LocalSegment) ExistIndex(fieldID int64) bool {
 }
 
 func (s *LocalSegment) HasRawData(fieldID int64) bool {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return false
 	}
 	defer s.ptrLock.RUnlock()
@@ -569,8 +606,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 		zap.Int64("segmentID", s.ID()),
 		zap.String("segmentType", s.segmentType.String()),
 	)
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
-		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
+	if _, locked := s.ptrLock.RLockIf(state.IsDataLoaded); !locked {
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -607,8 +643,7 @@ func (s *LocalSegment) Search(ctx context.Context, searchReq *SearchRequest) (*S
 }
 
 func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
-		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
+	if _, locked := s.ptrLock.RLockIf(state.IsDataLoaded); !locked {
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -672,15 +707,10 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 }
 
 func (s *LocalSegment) RetrieveByOffsets(ctx context.Context, plan *RetrievePlan, offsets []int64) (*segcorepb.RetrieveResults, error) {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
-		// TODO: check if the segment is readable but not released. too many related logic need to be refactor.
+	if _, locked := s.ptrLock.RLockIf(state.IsDataLoaded); !locked {
 		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
-
-	if s.ptr == nil {
-		return nil, merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
-	}
 
 	if len(offsets) == 0 {
 		return nil, merr.WrapErrParameterInvalid("segment offsets", "empty offsets")
@@ -770,7 +800,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	if s.Type() != SegmentTypeGrowing {
 		return fmt.Errorf("unexpected segmentType when segmentInsert, segmentType = %s", s.segmentType.String())
 	}
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -819,7 +849,7 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	).Add(float64(numOfRow))
 
 	s.rowNum.Store(-1)
-	s.memSize.Store(-1)
+	s.inUseResourceUsageCache.Store(nil)
 	return nil
 }
 
@@ -836,10 +866,13 @@ func (s *LocalSegment) Delete(ctx context.Context, primaryKeys []storage.Primary
 	if len(primaryKeys) == 0 {
 		return nil
 	}
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
-	defer s.ptrLock.RUnlock()
+	defer func() {
+		s.inUseResourceUsageCache.Store(nil)
+		s.ptrLock.RUnlock()
+	}()
 
 	cOffset := C.int64_t(0) // depre
 	cSize := C.int64_t(len(primaryKeys))
@@ -904,7 +937,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	rowCount := loadInfo.GetNumOfRows()
 	fields := loadInfo.GetBinlogPaths()
 
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -969,7 +1002,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 }
 
 func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -1132,7 +1165,7 @@ func (s *LocalSegment) LoadDeltaData2(ctx context.Context, schema *schemapb.Coll
 }
 
 func (s *LocalSegment) AddFieldDataInfo(ctx context.Context, rowCount int64, fields []*datapb.FieldBinlog) error {
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -1185,7 +1218,7 @@ func (s *LocalSegment) LoadDeltaData(ctx context.Context, deltaData *storage.Del
 	pks, tss := deltaData.Pks, deltaData.Tss
 	rowNum := deltaData.RowCount
 
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -1277,7 +1310,10 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 	}
 
 	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, fmt.Sprintf("LoadIndex-%d-%d", s.ID(), indexInfo.GetFieldID()))
-	defer sp.End()
+	defer func() {
+		s.inUseResourceUsageCache.Store(nil)
+		sp.End()
+	}()
 
 	tr := timerecord.NewTimeRecorder("loadIndex")
 	// 1.
@@ -1340,7 +1376,7 @@ func (s *LocalSegment) UpdateIndexInfo(ctx context.Context, indexInfo *querypb.F
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", indexInfo.FieldID),
 	)
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
 	defer s.ptrLock.RUnlock()
@@ -1377,7 +1413,7 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 		zap.Int64("segmentID", s.ID()),
 		zap.Int64("fieldID", fieldID),
 	)
-	if !s.ptrLock.RLockIf(state.IsNotReleased) {
+	if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 		return
 	}
 	defer s.ptrLock.RUnlock()
@@ -1399,7 +1435,7 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 		}).Await()
 	case "async":
 		GetLoadPool().Submit(func() (any, error) {
-			if !s.ptrLock.RLockIf(state.IsNotReleased) {
+			if _, locked := s.ptrLock.RLockIf(state.IsNotReleased); !locked {
 				return nil, nil
 			}
 			defer s.ptrLock.RUnlock()
@@ -1556,4 +1592,11 @@ func (s *LocalSegment) indexNeedLoadRawData(schema *schemapb.CollectionSchema, i
 		return false, err
 	}
 	return !typeutil.IsVectorType(fieldSchema.DataType) && s.HasRawData(indexInfo.IndexInfo.FieldID), nil
+}
+
+// SetLoadInfo sets the load info of the segment.
+func (s *LocalSegment) SetLoadInfo(loadInfo *querypb.SegmentLoadInfo) {
+	s.loadInfo.Store(loadInfo)
+	s.inUseResourceUsageCache.Store(nil)
+	s.predictResourceUsageCache.Store(nil)
 }

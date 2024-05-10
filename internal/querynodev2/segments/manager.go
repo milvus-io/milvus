@@ -180,7 +180,7 @@ func NewManager() *Manager {
 		if segment == nil {
 			return 0
 		}
-		return int64(segment.ResourceUsageEstimate().DiskSize)
+		return int64(segment.ResourceUsageEstimate().Predict.DiskSize)
 	}, diskCap).WithLoader(func(ctx context.Context, key int64) (Segment, error) {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segment := segMgr.GetWithType(key, SegmentTypeSealed)
@@ -192,7 +192,7 @@ func NewManager() *Manager {
 		info := segment.LoadInfo()
 		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (nop interface{}, err error) {
 			cacheLoadRecord := metricsutil.NewCacheLoadRecord(getSegmentMetricLabel(segment))
-			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
+			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().Predict.DiskSize)
 			defer func() {
 				cacheLoadRecord.Finish(err)
 			}()
@@ -213,7 +213,7 @@ func NewManager() *Manager {
 	}).WithFinalizer(func(ctx context.Context, key int64, segment Segment) error {
 		log.Ctx(ctx).Debug("evict segment from cache", zap.Int64("segmentID", key))
 		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
-		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().DiskSize)
+		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().Predict.DiskSize)
 		defer cacheEvictRecord.Finish(nil)
 		segment.Release(ctx, WithReleaseScope(ReleaseScopeData))
 		return nil
