@@ -35,26 +35,61 @@ class File {
     static File
     Open(const std::string_view filepath, int flags) {
         int fd = open(filepath.data(), flags, S_IRUSR | S_IWUSR);
-        AssertInfo(fd != -1,
-                   "failed to create mmap file {}: {}",
-                   filepath,
-                   strerror(errno));
+        if (fd < 0) {
+            throw SegcoreError(ErrorCode::UnistdError,
+                               fmt::format("failed to open file at {}: {}",
+                                           filepath,
+                                           strerror(errno)));
+        }
         return File(fd);
     }
 
     int
     Descriptor() const {
+        if (fd_ < 0) {
+            throw SegcoreError(ErrorCode::UnistdError,
+                               "file descriptor is invalid");
+        }
         return fd_;
     }
 
     ssize_t
     Write(const void* buf, size_t size) {
-        return write(fd_, buf, size);
+        if (fd_ < 0) {
+            throw SegcoreError(ErrorCode::UnistdError,
+                               "file descriptor is invalid when writing file");
+        }
+
+        ssize_t cnt = write(fd_, buf, size);
+        if (cnt < 0) {
+            throw SegcoreError(ErrorCode::UnistdError,
+                               fmt::format("failed to write file: stderror: {}",
+                                           strerror(errno)));
+        }
+        if (cnt != size) {
+            throw SegcoreError(
+                ErrorCode::UnistdError,
+                fmt::format("short write to file: written: {}, expected: {}",
+                            cnt,
+                            size));
+        }
+        return cnt;
     }
 
     offset_t
     Seek(offset_t offset, int whence) {
-        return lseek(fd_, offset, whence);
+        if (fd_ < 0) {
+            throw SegcoreError(ErrorCode::UnistdError,
+                               "file descriptor is invalid when seek file");
+        }
+
+        offset_t position = lseek(fd_, offset, whence);
+        if (position < 0) {
+            throw SegcoreError(ErrorCode::UnistdError,
+                               fmt::format("failed to seek file: stderror: {}",
+                                           strerror(errno)));
+        }
+        return position;
     }
 
     void
