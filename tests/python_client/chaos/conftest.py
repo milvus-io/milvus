@@ -12,6 +12,7 @@ def pytest_addoption(parser):
     parser.addoption("--chaos_interval", action="store", default="2m", help="chaos_interval")
     parser.addoption("--is_check", action="store", type=bool, default=False, help="is_check")
     parser.addoption("--wait_signal", action="store", type=bool, default=True, help="wait_signal")
+    parser.addoption("--enable_import", action="store", type=bool, default=False, help="enable_import")
     parser.addoption("--collection_num", action="store", default="1", help="collection_num")
 
 
@@ -68,3 +69,8 @@ def is_check(request):
 @pytest.fixture
 def wait_signal(request):
     return request.config.getoption("--wait_signal")
+
+
+@pytest.fixture
+def enable_import(request):
+    return request.config.getoption("--enable_import")
