@@ -80,6 +80,6 @@ func Test_packLoadSegmentRequest(t *testing.T) {
 		req := PackSegmentLoadInfo(segmentInfo, channel.GetSeekPosition(), nil)
 		assert.NotNil(t, req.GetDeltaPosition())
 		assert.Equal(t, mockPChannel, req.GetDeltaPosition().ChannelName)
-		assert.Equal(t, segmentInfo.GetDmlPosition().GetTimestamp(), req.GetDeltaPosition().GetTimestamp())
+		assert.Equal(t, channel.SeekPosition.Timestamp, req.GetDeltaPosition().GetTimestamp())
 	})
 }
