@@ -46,9 +46,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	resultCh := make(chan segmentResult, len(segments))
 	defer func() { close(resultCh) }()
 
-	// TODO(longjiquan): remove this limit after two-phase retrieval can be applied on lru-segment.
-	plan.ignoreNonPk = !paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() &&
-		len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
+	plan.ignoreNonPk = len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
 
 	label := metrics.SealedSegmentLabel
 	if segType == commonpb.SegmentState_Growing {
