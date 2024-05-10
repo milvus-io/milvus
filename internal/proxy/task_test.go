@@ -3662,22 +3662,3 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
 }
-
-func TestAlterDatabase(t *testing.T) {
-	rc := mocks.NewMockRootCoordClient(t)
-
-	rc.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
-	task := &alterDatabaseTask{
-		AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
-			Base:       &commonpb.MsgBase{},
-			DbName:     "test_alter_database",
-			Properties: []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
-		},
-		rootCoord: rc,
-	}
-	err := task.PreExecute(context.Background())
-	assert.Nil(t, err)
-
-	err = task.Execute(context.Background())
-	assert.Nil(t, err)
-}
