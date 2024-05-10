@@ -4,7 +4,7 @@
 
 1. `get_row_count`: Get the number of entities in the segment
 2. `get_schema`: Get the corresponding collection schema in the segment
-3. `GetMemoryUsageInBytes`: Get memory usage of a segment
+3. `GetResourceUsage`: Get memory and disk usage of a segment.
 4. `Search(plan, placeholderGroup, timestamp) -> QueryResult`: Perform search operations according to the plan containing search parameters and predicate conditions, and return search results. Ensure that the time of all search results is before the specified timestamp(MVCC)
 5. `FillTargetEntry(plan, &queryResult)`: Fill the missing column data for search results based on target columns in the plan
 

@@ -479,6 +479,15 @@ ScalarIndexSort<T>::ShouldSkip(const T lower_value,
     return true;
 }
 
+template <typename T>
+ResourceUsage
+ScalarIndexSort<T>::GetResourceUsage() const {
+    auto mem_size = data_.capacity() * sizeof(IndexStructure<T>) +
+                    idx_to_offsets_.capacity() * sizeof(int32_t);
+    // TODO: after enabling mmap, move the mem_size as disk_size.
+    return ResourceUsage{mem_size, 0};
+}
+
 template class ScalarIndexSort<bool>;
 template class ScalarIndexSort<int8_t>;
 template class ScalarIndexSort<int16_t>;

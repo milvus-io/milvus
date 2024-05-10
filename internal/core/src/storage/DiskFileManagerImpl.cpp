@@ -282,6 +282,18 @@ DiskFileManagerImpl::CacheIndexToDisk() {
     }
 }
 
+size_t
+DiskFileManagerImpl::GetLocalFileSize() const {
+    auto local_chunk_manager =
+        LocalChunkManagerSingleton::GetInstance().GetChunkManager();
+    size_t local_file_size = 0;
+    for (auto& file : local_paths_) {
+        auto size = local_chunk_manager->Size(file);
+        local_file_size += size;
+    }
+    return local_file_size;
+}
+
 void
 DiskFileManagerImpl::CacheIndexToDisk(
     const std::vector<std::string>& remote_files) {

@@ -89,6 +89,9 @@ class IndexBase {
         return index_type_;
     }
 
+    virtual ResourceUsage
+    GetResourceUsage() const = 0;
+
  protected:
     explicit IndexBase(IndexType index_type)
         : index_type_(std::move(index_type)) {

@@ -507,6 +507,11 @@ struct TypeTraits<DataType::VECTOR_FLOAT> {
     static constexpr const char* Name = "VECTOR_FLOAT";
 };
 
+struct ResourceUsage {
+    size_t mem_size;
+    size_t disk_size;
+};
+
 }  // namespace milvus
 template <>
 struct fmt::formatter<milvus::DataType> : formatter<string_view> {

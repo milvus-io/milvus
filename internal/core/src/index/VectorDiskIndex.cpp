@@ -510,6 +510,14 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
     return load_config;
 }
 
+template <typename T>
+ResourceUsage
+VectorDiskAnnIndex<T>::GetResourceUsage() const {
+    // TODO: we can't get the memory usage of vector index now.
+    auto disk_size = file_manager_->GetLocalFileSize();
+    return ResourceUsage{0, disk_size};
+}
+
 template class VectorDiskAnnIndex<float>;
 template class VectorDiskAnnIndex<float16>;
 template class VectorDiskAnnIndex<bfloat16>;

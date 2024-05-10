@@ -169,7 +169,18 @@ test_run() {
 
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
+
+        // There should no resource usage before Load.
+        auto usage = index->GetResourceUsage();
+        ASSERT_EQ(usage.mem_size, 0);
+        ASSERT_EQ(usage.disk_size, 0);
+
         index->Load(milvus::tracer::TraceContext{}, config);
+
+        // There should be some disk usage after load.
+        usage = index->GetResourceUsage();
+        ASSERT_EQ(usage.mem_size, 0);
+        ASSERT_GT(usage.disk_size, 0);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
@@ -370,7 +381,18 @@ test_string() {
 
         auto index =
             index::IndexFactory::GetInstance().CreateIndex(index_info, ctx);
+
+        // There should no resource usage before Load.
+        auto usage = index->GetResourceUsage();
+        ASSERT_EQ(usage.mem_size, 0);
+        ASSERT_EQ(usage.disk_size, 0);
+
         index->Load(milvus::tracer::TraceContext{}, config);
+
+        // There should be some disk usage after Load.
+        usage = index->GetResourceUsage();
+        ASSERT_EQ(usage.mem_size, 0);
+        ASSERT_GT(usage.disk_size, 0);
 
         auto cnt = index->Count();
         ASSERT_EQ(cnt, nb);
