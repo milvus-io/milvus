@@ -252,8 +252,8 @@ go version
 
 ```bash
 git clone https://github.com/milvus-io/milvus.git
-git checkout v2.3.4
 cd ./milvus
+git checkout v2.3.4
 ```
 
 #### Check OS PAGESIZE 
