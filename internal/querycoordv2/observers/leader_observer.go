@@ -166,7 +166,7 @@ func (o *LeaderObserver) findNeedLoadedSegments(leaderView *meta.LeaderView, dis
 					PartitionID: s.GetPartitionID(),
 					SegmentID:   s.GetID(),
 					NodeID:      s.Node,
-					Version:     time.Now().Unix(),
+					Version:     time.Now().UnixNano(),
 					Info:        loadInfo,
 				})
 			}
