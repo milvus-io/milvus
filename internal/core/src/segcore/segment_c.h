@@ -71,8 +71,8 @@ RetrieveByOffsets(CTraceContext c_trace,
                   int64_t* offsets,
                   int64_t len);
 
-int64_t
-GetMemoryUsageInBytes(CSegmentInterface c_segment);
+CSegmentResourceUsage
+GetResourceUsageOfSegment(CSegmentInterface c_segment);
 
 int64_t
 GetRowCount(CSegmentInterface c_segment);

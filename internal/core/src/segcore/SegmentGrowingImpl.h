@@ -130,9 +130,10 @@ class SegmentGrowingImpl : public SegmentGrowing {
     try_remove_chunks(FieldId fieldId);
 
  public:
-    size_t
-    GetMemoryUsageInBytes() const override {
-        return stats_.mem_size.load() + deleted_record_.mem_size();
+    milvus::ResourceUsage
+    GetResourceUsage() const override {
+        auto mem_size = stats_.mem_size.load() + deleted_record_.mem_size();
+        return milvus::ResourceUsage{mem_size, 0};
     }
 
     int64_t

@@ -1335,15 +1335,15 @@ TEST(CApiTest, RetrieveTestWithExpr) {
     DeleteSegment(segment);
 }
 
-TEST(CApiTest, GetMemoryUsageInBytesTest) {
+TEST(CApiTest, GetResourceUsageOfSegmentTest) {
     auto collection = NewCollection(get_default_schema_config());
     CSegmentInterface segment;
     auto status = NewSegment(collection, Growing, -1, &segment);
     ASSERT_EQ(status.error_code, Success);
 
-    auto old_memory_usage_size = GetMemoryUsageInBytes(segment);
-    // std::cout << "old_memory_usage_size = " << old_memory_usage_size << std::endl;
-    ASSERT_EQ(old_memory_usage_size, 0);
+    auto resource_usage = GetResourceUsageOfSegment(segment);
+    ASSERT_EQ(resource_usage.mem_size, 0);
+    ASSERT_EQ(resource_usage.disk_size, 0);
 
     auto schema = ((milvus::segcore::Collection*)collection)->get_schema();
     int N = 10000;
@@ -1361,6 +1361,14 @@ TEST(CApiTest, GetMemoryUsageInBytesTest) {
                       insert_data.data(),
                       insert_data.size());
     ASSERT_EQ(res.error_code, Success);
+
+    // growing segment is in memory now, so the mem_size should be greater than least mem size.
+    auto least_mem_size = dataset.row_ids_.size() * sizeof(idx_t) +
+                          dataset.timestamps_.size() * sizeof(Timestamp) +
+                          insert_data.size() * sizeof(uint8_t);
+    resource_usage = GetResourceUsageOfSegment(segment);
+    ASSERT_GT(resource_usage.mem_size, least_mem_size);
+    ASSERT_EQ(resource_usage.disk_size, 0);
 
     DeleteCollection(collection);
     DeleteSegment(segment);

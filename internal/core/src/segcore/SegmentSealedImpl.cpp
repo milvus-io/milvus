@@ -403,7 +403,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     }
                     var_column->Seal();
                     field_data_size = var_column->ByteSize();
-                    stats_.mem_size += var_column->ByteSize();
                     LoadStringSkipIndex(field_id, 0, *var_column);
                     column = std::move(var_column);
                     break;
@@ -417,7 +416,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                         var_column->Append(std::move(field_data));
                     }
                     var_column->Seal();
-                    stats_.mem_size += var_column->ByteSize();
                     field_data_size = var_column->ByteSize();
                     column = std::move(var_column);
                     break;
@@ -436,8 +434,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                             // we stores the offset for each array element, so there is a additional uint64_t for each array element
                             field_data_size =
                                 array->byte_size() + sizeof(uint64_t);
-                            stats_.mem_size +=
-                                array->byte_size() + sizeof(uint64_t);
                         }
                     }
                     var_column->Seal();
@@ -448,7 +444,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
                     auto col = std::make_shared<SparseFloatColumn>(field_meta);
                     FieldDataPtr field_data;
                     while (data.channel->pop(field_data)) {
-                        stats_.mem_size += field_data->Size();
                         col->AppendBatch(field_data);
                     }
                     column = std::move(col);
@@ -468,8 +463,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             FieldDataPtr field_data;
             while (data.channel->pop(field_data)) {
                 column->AppendBatch(field_data);
-
-                stats_.mem_size += field_data->Size();
             }
             LoadPrimitiveSkipIndex(
                 field_id, 0, data_type, column->Span().data(), num_rows);
@@ -1127,6 +1120,44 @@ SegmentSealedImpl::bulk_subscript_impl(int64_t element_sizeof,
         auto dst = dst_vec + i * element_sizeof;
         memcpy(dst, src, element_sizeof);
     }
+}
+
+milvus::ResourceUsage
+SegmentSealedImpl::GetResourceUsage() const {
+    std::shared_lock lck(mutex_);
+
+    milvus::ResourceUsage usage{};
+    // Add all field data size.
+    for (const auto& field : fields_) {
+        auto fieldColumnResourceUsage = field.second->GetResourceUsage();
+        usage.mem_size += fieldColumnResourceUsage.mem_size;
+        usage.disk_size += fieldColumnResourceUsage.disk_size;
+    }
+    // Add all index size.
+    for (const auto& index : scalar_indexings_) {
+        auto indexResourceUsage = index.second->GetResourceUsage();
+        usage.mem_size += indexResourceUsage.mem_size;
+        usage.disk_size += indexResourceUsage.disk_size;
+    }
+    vector_indexings_.range_over(
+        [&](const auto& field_id, const auto& indexEntry) {
+            auto indexResourceUsage = indexEntry->indexing_->GetResourceUsage();
+            usage.mem_size += indexResourceUsage.mem_size;
+            usage.disk_size += indexResourceUsage.disk_size;
+            return true;
+        });
+
+    // Add delete record mem size.
+    usage.mem_size += deleted_record_.mem_size();
+
+    // Add system field mem size.
+    usage.mem_size +=
+        insert_record_.timestamps_.num_of_element() * sizeof(Timestamp);
+    usage.mem_size += insert_record_.row_ids_.num_of_element() * sizeof(idx_t);
+
+    // Memory and disk cost of ChunkCache is not included here.
+    // It's done by Go-side.
+    return usage;
 }
 
 void

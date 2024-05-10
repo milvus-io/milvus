@@ -68,6 +68,17 @@ struct SealedIndexingRecord {
         field_indexings_.clear();
     }
 
+    void
+    range_over(std::function<bool(const FieldId&, const SealedIndexingEntryPtr)>
+                   f) const {
+        std::shared_lock lck(mutex_);
+        for (auto& kv : field_indexings_) {
+            if (!f(kv.first, kv.second)) {
+                return;
+            }
+        }
+    }
+
  private:
     // field_offset -> SealedIndexingEntry
     std::unordered_map<FieldId, SealedIndexingEntryPtr> field_indexings_;
