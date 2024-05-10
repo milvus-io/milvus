@@ -988,18 +988,27 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             ),
             file_type=BulkFileType.JSON,
         ) as remote_writer:
+            json_value = [
+                1,
+                1.0,
+                "1",
+                [1, 2, 3],
+                ["1", "2", "3"],
+                [1, 2, "3"],
+                {"key": "value"},
+            ]
             for i in range(entities):
                 row = {
                     df.pk_field: i,
                     df.int_field: 1,
                     df.float_field: 1.0,
                     df.string_field: "string",
-                    df.json_field: {"key": "value"},
+                    df.json_field: json_value[i%len(json_value)],
                     df.array_int_field: [1, 2],
                     df.array_float_field: [1.0, 2.0],
                     df.array_string_field: ["string1", "string2"],
                     df.array_bool_field: [True, False],
-                    df.vec_field: cf.gen_vectors(1, dim)[1][0]
+                    df.vec_field: cf.gen_vectors(1, dim)[0]
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -1086,14 +1095,23 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             ),
             file_type=BulkFileType.NUMPY,
         ) as remote_writer:
+            json_value = [
+                1,
+                1.0,
+                "1",
+                [1, 2, 3],
+                ["1", "2", "3"],
+                [1, 2, "3"],
+                {"key": "value"},
+            ]
             for i in range(entities):
                 row = {
                     df.pk_field: i,
                     df.int_field: 1,
                     df.float_field: 1.0,
                     df.string_field: "string",
-                    df.json_field: {"key": "value"},
-                    df.vec_field: cf.gen_vectors(1, dim)[1][0]
+                    df.json_field: json_value[i%len(json_value)],
+                    df.vec_field: cf.gen_vectors(1, dim)[0]
                 }
                 if auto_id:
                     row.pop(df.pk_field)
@@ -1182,18 +1200,27 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             ),
             file_type=BulkFileType.JSON,
         ) as remote_writer:
+            json_value = [
+                1,
+                1.0,
+                "1",
+                [1, 2, 3],
+                ["1", "2", "3"],
+                [1, 2, "3"],
+                {"key": "value"},
+            ]
             for i in range(entities):
                 row = {
                     df.pk_field: i,
                     df.int_field: 1,
                     df.float_field: 1.0,
                     df.string_field: "string",
-                    df.json_field: {"key": "value"},
+                    df.json_field: json_value[i%len(json_value)],
                     df.array_int_field: [1, 2],
                     df.array_float_field: [1.0, 2.0],
                     df.array_string_field: ["string1", "string2"],
                     df.array_bool_field: [True, False],
-                    df.vec_field: cf.gen_vectors(1, dim)[1][0]
+                    df.vec_field: cf.gen_vectors(1, dim)[0]
                 }
                 if auto_id:
                     row.pop(df.pk_field)
