@@ -466,40 +466,35 @@ func (s *LocalSegment) ResourceUsageEstimate() SegmentResourceUsage {
 	inUseResourceUsage := s.inUseResourceUsageEstimate()
 	segmentSize := s.LoadInfo().GetSegmentSize()
 
-	usage := SegmentResourceUsage{
+	return SegmentResourceUsage{
+		Predict:         predictResourceUsage,
+		InUsed:          inUseResourceUsage,
 		BinLogSizeAtOSS: uint64(segmentSize),
 	}
-	if predictResourceUsage != nil {
-		usage.Predict = *predictResourceUsage
-	}
-	if inUseResourceUsage != nil {
-		usage.InUsed = *inUseResourceUsage
-	}
-	return usage
 }
 
 // inUseResourceUsageEstimate estimates the resource usage of a sealed segment based on loaded.
-func (s *LocalSegment) inUseResourceUsageEstimate() *ResourceUsage {
+func (s *LocalSegment) inUseResourceUsageEstimate() ResourceUsage {
 	cachedUsage := s.inUseResourceUsageCache.Load()
 	if cachedUsage != nil {
-		return cachedUsage
+		return *cachedUsage
 	}
 
 	if _, locked := s.ptrLock.RLockIf(state.IsDataLoaded); !locked {
-		return &ResourceUsage{}
+		return ResourceUsage{}
 	}
 	defer s.ptrLock.RUnlock()
 
 	// Get the resource usage of the segment from C side.
-	var resourceUsage *ResourceUsage
+	var resourceUsage ResourceUsage
 	GetDynamicPool().Submit(func() (any, error) {
 		usage := C.GetResourceUsageOfSegment(s.ptr)
-		resourceUsage = &ResourceUsage{
+		resourceUsage = ResourceUsage{
 			MemorySize: uint64(usage.mem_size),
 			DiskSize:   uint64(usage.disk_size),
 		}
 		return nil, nil
-	})
+	}).Await()
 
 	// vector' bin log size need to be include if vector index doesn't has raw data.
 	// we can calculate on go side, because the bin log size may be not loaded (Warmup or search) when we start to estimate the disk usage.
@@ -517,20 +512,20 @@ func (s *LocalSegment) inUseResourceUsageEstimate() *ResourceUsage {
 	// always mmap here, so it's a disk size but not a mem size.
 	resourceUsage.DiskSize += binLogDiskSize
 
-	s.inUseResourceUsageCache.Store(resourceUsage)
+	s.inUseResourceUsageCache.Store(&resourceUsage)
 	return resourceUsage
 }
 
 // predictResourceUsageEstimate estimates the resource usage of a sealed segment based on meta info.
-func (s *LocalSegment) predictResourceUsageEstimate() *ResourceUsage {
+func (s *LocalSegment) predictResourceUsageEstimate() ResourceUsage {
 	if s.segmentType == SegmentTypeGrowing {
 		// Growing segment cannot do resource usage estimate.
-		return &ResourceUsage{}
+		return ResourceUsage{}
 	}
 
 	cachedUsage := s.predictResourceUsageCache.Load()
 	if cachedUsage != nil {
-		return cachedUsage
+		return *cachedUsage
 	}
 
 	usage, _, err := getResourceUsageEstimateOfSegment(s.collection.Schema(), s.LoadInfo(), resourceEstimateFactor{
@@ -542,11 +537,11 @@ func (s *LocalSegment) predictResourceUsageEstimate() *ResourceUsage {
 	if err != nil {
 		// Should never failure, if failed, segment should never be loaded.
 		log.Warn("unreachable: failed to get resource usage estimate of segment", zap.Error(err), zap.Int64("collectionID", s.Collection()), zap.Int64("segmentID", s.ID()))
-		return nil
+		return ResourceUsage{}
 	}
 
 	s.predictResourceUsageCache.Store(usage)
-	return usage
+	return *usage
 }
 
 func (s *LocalSegment) LastDeltaTimestamp() uint64 {

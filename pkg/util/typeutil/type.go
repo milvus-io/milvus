@@ -26,6 +26,8 @@ type IntPrimaryKey = int64
 type UniqueID = int64
 
 const (
+	Milvus = "milvus"
+
 	// EmbeddedRole is for embedded Milvus.
 	EmbeddedRole = "embedded"
 	// StandaloneRole is a constant represent Standalone

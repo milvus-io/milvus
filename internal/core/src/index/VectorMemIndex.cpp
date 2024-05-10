@@ -697,8 +697,7 @@ VectorMemIndex<T>::GetSparseVector(const DatasetPtr dataset) const {
 }
 
 template <typename T>
-void
-VectorMemIndex<T>::LoadFromFile(const Config& config) {
+void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto filepath = GetValueFromConfig<std::string>(config, kMmapFilepath);
     AssertInfo(filepath.has_value(), "mmap filepath is empty when load index");
 

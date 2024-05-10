@@ -126,7 +126,7 @@ class StringIndexMarisa : public StringIndex {
     bool built_ = false;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<milvus_storage::Space> space_;
-    ResourceUsage resource_usage_;
+    ResourceUsage resource_usage_{};
 };
 
 using StringIndexMarisaPtr = std::unique_ptr<StringIndexMarisa>;

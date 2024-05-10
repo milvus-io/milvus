@@ -165,8 +165,6 @@ func newPromObserver(nodeID string, label SegmentLabel) promMetricsObserver {
 		SearchSegmentAccessWaitCacheTotal:    metrics.QueryNodeSegmentAccessWaitCacheTotal.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.SearchLabel),
 		SearchSegmentAccessWaitCacheDuration: metrics.QueryNodeSegmentAccessWaitCacheDuration.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.SearchLabel),
 
-		DiskCacheLoadGlobalDuration:                metrics.QueryNodeDiskCacheLoadGlobalDuration.WithLabelValues(nodeID),
-		DiskCacheEvictGlobalDuration:               metrics.QueryNodeDiskCacheEvictGlobalDuration.WithLabelValues(nodeID),
 		QuerySegmentAccessGlobalDuration:           metrics.QueryNodeSegmentAccessGlobalDuration.WithLabelValues(nodeID, metrics.QueryLabel),
 		SearchSegmentAccessGlobalDuration:          metrics.QueryNodeSegmentAccessGlobalDuration.WithLabelValues(nodeID, metrics.SearchLabel),
 		QuerySegmentAccessWaitCacheGlobalDuration:  metrics.QueryNodeSegmentAccessWaitCacheGlobalDuration.WithLabelValues(nodeID, metrics.QueryLabel),
@@ -194,8 +192,6 @@ type promMetricsObserver struct {
 	SearchSegmentAccessWaitCacheTotal    prometheus.Counter
 	SearchSegmentAccessWaitCacheDuration prometheus.Counter
 
-	DiskCacheLoadGlobalDuration                prometheus.Observer
-	DiskCacheEvictGlobalDuration               prometheus.Observer
 	QuerySegmentAccessGlobalDuration           prometheus.Observer
 	SearchSegmentAccessGlobalDuration          prometheus.Observer
 	QuerySegmentAccessWaitCacheGlobalDuration  prometheus.Observer
@@ -208,7 +204,6 @@ func (o *promMetricsObserver) ObserveCacheLoad(r *CacheLoadRecord) {
 	o.DiskCacheLoadBytes.Add(r.getBytes())
 	d := r.getMilliseconds()
 	o.DiskCacheLoadDuration.Add(d)
-	o.DiskCacheLoadGlobalDuration.Observe(d)
 }
 
 // ObserveCacheEvict records a new cache evict.
@@ -217,7 +212,6 @@ func (o *promMetricsObserver) ObserveCacheEvict(r *CacheEvictRecord) {
 	o.DiskCacheEvictBytes.Add(r.getBytes())
 	d := r.getMilliseconds()
 	o.DiskCacheEvictDuration.Add(d)
-	o.DiskCacheEvictGlobalDuration.Observe(d)
 }
 
 // ObserveQueryAccess records a new query access.

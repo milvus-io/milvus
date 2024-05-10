@@ -17,8 +17,68 @@
 package cache
 
 import (
+	"fmt"
+
+	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
+
+// RegisterLRUCacheMetrics registers metrics for LRU cache.
+func RegisterLRUCacheMetrics[K comparable, V any](c Cache[K, V], namespace string, subsystem string, prefix string, constLabel prometheus.Labels) {
+	newGaugeFunc := func(name string, help string, valueFunc func() float64) prometheus.Collector {
+		return prometheus.NewGaugeFunc(
+			prometheus.GaugeOpts{
+				Namespace:   namespace,
+				Subsystem:   subsystem,
+				Name:        fmt.Sprintf("%s_%s", prefix, name),
+				Help:        help,
+				ConstLabels: constLabel,
+			},
+			valueFunc,
+		)
+	}
+
+	ms := []prometheus.Collector{
+		newGaugeFunc("hit_total", "cache hit count", func() float64 {
+			return float64(c.Stats().HitCount.Load())
+		}),
+		newGaugeFunc("miss_total", "cache miss count", func() float64 {
+			return float64(c.Stats().MissCount.Load())
+		}),
+		newGaugeFunc("size_bytes", "cache size", func() float64 {
+			return float64(c.Size())
+		}),
+		newGaugeFunc("capacity_bytes", "cache capacity", func() float64 {
+			return float64(c.Capacity())
+		}),
+		newGaugeFunc("load_success_total", "cache load success count", func() float64 {
+			return float64(c.Stats().LoadSuccessCount.Load())
+		}),
+		newGaugeFunc("load_fail_total", "cache load fail count", func() float64 {
+			return float64(c.Stats().LoadFailCount.Load())
+		}),
+		newGaugeFunc("load_duration", "cache load duration", func() float64 {
+			return float64(c.Stats().TotalLoadDuration.Load() * 1000)
+		}),
+		newGaugeFunc("evict_total", "cache evict count", func() float64 {
+			return float64(c.Stats().EvictionCount.Load())
+		}),
+		newGaugeFunc("finalize_total", "cache finalize total", func() float64 {
+			return float64(c.Stats().TotalFinalizeCount.Load())
+		}),
+		newGaugeFunc("finalize_duration", "cache finalize duration", func() float64 {
+			return float64(c.Stats().TotalFinalizeDuration.Load() * 1000)
+		}),
+		newGaugeFunc("reload_total", "cache reload total", func() float64 {
+			return float64(c.Stats().TotalReloadCount.Load())
+		}),
+		newGaugeFunc("reload_duration", "cache reload duration", func() float64 {
+			return float64(c.Stats().TotalReloadDuration.Load() * 1000)
+		}),
+	}
+
+	metrics.GetRegisterer().MustRegister(ms...)
+}
 
 // WIP: this function is a showcase of how to use prometheus, do not use it in production.
 func PrometheusCacheMonitor[K comparable, V any](c Cache[K, V], namespace, subsystem string) {
