@@ -57,7 +57,7 @@ func (cv *ContextCond) Wait(ctx context.Context) error {
 	select {
 	case <-ch:
 	case <-ctx.Done():
-		return ctx.Err()
+		return context.Cause(ctx)
 	}
 	cv.L.Lock()
 	return nil

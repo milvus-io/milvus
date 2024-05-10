@@ -153,10 +153,10 @@ type Cache[K comparable, V any] interface {
 
 	MarkItemNeedReload(ctx context.Context, key K) bool
 
-	// Expire removes the item from the cache.
-	// Return true if the item is not in used and removed immediately or the item is not in cache now.
-	// Return false if the item is in used, it will be marked as need to be reloaded, a lazy expire is applied.
-	Expire(ctx context.Context, key K) (evicted bool)
+	// Remove removes the item from the cache.
+	// Return nil if the item is removed.
+	// Return error if the Remove operation is canceled.
+	Remove(ctx context.Context, key K) error
 }
 
 // lruCache extends the ccache library to provide pinning and unpinning of items.
@@ -435,7 +435,22 @@ func (c *lruCache[K, V]) setAndPin(ctx context.Context, key K, value V) (*cacheI
 	return item, nil
 }
 
-func (c *lruCache[K, V]) Expire(ctx context.Context, key K) (evicted bool) {
+func (c *lruCache[K, V]) Remove(ctx context.Context, key K) error {
+	for {
+		listener := c.waitNotifier.Listen(syncutil.VersionedListenAtLatest)
+
+		if c.tryToRemoveKey(ctx, key) {
+			return nil
+		}
+
+		if err := listener.Wait(ctx); err != nil {
+			log.Warn("failed to remove item for key with timeout", zap.Error(err))
+			return err
+		}
+	}
+}
+
+func (c *lruCache[K, V]) tryToRemoveKey(ctx context.Context, key K) (removed bool) {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
 
@@ -449,8 +464,6 @@ func (c *lruCache[K, V]) Expire(ctx context.Context, key K) (evicted bool) {
 		c.evict(ctx, key)
 		return true
 	}
-
-	item.needReload = true
 	return false
 }
 
