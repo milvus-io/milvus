@@ -110,11 +110,11 @@ def list_all_resource_groups():
     display_resource_group_info(resource_groups)
 
 
-def _install_milvus():
+def _install_milvus(image_tag="master-latest"):
     release_name = f"rg-test-{cf.gen_digits_by_length(6)}"
     cus_configs = {'spec.mode': 'cluster',
                    'spec.dependencies.msgStreamType': 'kafka',
-                   'spec.components.image': 'harbor.milvus.io/milvus/milvus:master-20240507-53874ce2-amd64',
+                   'spec.components.image': f'harbor.milvus.io/milvus/milvus:{image_tag}',
                    'metadata.namespace': namespace,
                    'metadata.name': release_name,
                    'spec.components.proxy.serviceType': 'LoadBalancer',
@@ -145,12 +145,12 @@ class TestResourceGroup(TestcaseBase):
         connections.remove_connection("default")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_scale_up(self):
+    def test_resource_group_scale_up(self, image_tag):
         """
        steps
        """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -178,12 +178,12 @@ class TestResourceGroup(TestcaseBase):
         assert resource_group.num_available_node >= 4
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_scale_down(self):
+    def test_resource_group_scale_down(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 8, namespace)
         self.release_name = release_name
         assert host is not None
@@ -209,12 +209,12 @@ class TestResourceGroup(TestcaseBase):
         assert resource_group.num_available_node <= 1
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_all_querynode_add_into_two_different_config_rg(self):
+    def test_resource_group_all_querynode_add_into_two_different_config_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 8, namespace)
         self.release_name = release_name
         assert host is not None
@@ -254,12 +254,12 @@ class TestResourceGroup(TestcaseBase):
             list_all_resource_groups()
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_querynode_add_into_two_different_config_rg_one_by_one(self):
+    def test_resource_group_querynode_add_into_two_different_config_rg_one_by_one(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -301,12 +301,12 @@ class TestResourceGroup(TestcaseBase):
 
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_querynode_add_into_new_rg(self):
+    def test_resource_group_querynode_add_into_new_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
 
         self.release_name = release_name
         milvus_op.scale(release_name, 'queryNode', 10, namespace)
@@ -342,12 +342,12 @@ class TestResourceGroup(TestcaseBase):
             assert resource_group.num_available_node >= resource_group.config.requests.node_num
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_with_two_rg_link_to_each_other_when_all_not_reached_to_request(self):
+    def test_resource_group_with_two_rg_link_to_each_other_when_all_not_reached_to_request(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -394,12 +394,12 @@ class TestResourceGroup(TestcaseBase):
         assert resource_group.num_available_node == 4
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_with_rg_transfer_from_non_default_rg(self):
+    def test_resource_group_with_rg_transfer_from_non_default_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -438,12 +438,12 @@ class TestResourceGroup(TestcaseBase):
         assert rg2_available_node_before > rg2_available_node_after
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_with_rg_transfer_to_non_default_rg(self):
+    def test_resource_group_with_rg_transfer_to_non_default_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -483,12 +483,12 @@ class TestResourceGroup(TestcaseBase):
 
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_with_rg_transfer_with_rg_list(self):
+    def test_resource_group_with_rg_transfer_with_rg_list(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
@@ -548,12 +548,12 @@ class TestReplicasManagement(TestcaseBase):
         connections.remove_connection("default")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_load_replicas_one_collection_multi_replicas_to_multi_rg(self):
+    def test_load_replicas_one_collection_multi_replicas_to_multi_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 12, namespace)
         self.release_name = release_name
         assert host is not None
@@ -603,12 +603,12 @@ class TestReplicasManagement(TestcaseBase):
         log.info(f"replicas: {replicas}")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_load_multi_collection_multi_replicas_to_multi_rg(self):
+    def test_load_multi_collection_multi_replicas_to_multi_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 12, namespace)
         self.release_name = release_name
         assert host is not None
@@ -645,12 +645,12 @@ class TestReplicasManagement(TestcaseBase):
             log.info(f"replicas: {replicas}")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_load_multi_collection_one_replicas_to_multi_rg(self):
+    def test_load_multi_collection_one_replicas_to_multi_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 12, namespace)
         self.release_name = release_name
         assert host is not None
@@ -687,12 +687,12 @@ class TestReplicasManagement(TestcaseBase):
             log.info(f"replicas: {replicas}")
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_transfer_replicas_to_other_rg(self):
+    def test_transfer_replicas_to_other_rg(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 12, namespace)
         self.release_name = release_name
         assert host is not None
@@ -761,12 +761,12 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         connections.disconnect("default")
         connections.remove_connection("default")
 
-    def test_service_available_during_scale_up(self):
+    def test_service_available_during_scale_up(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 3, namespace)
         self.release_name = release_name
         assert host is not None
@@ -811,12 +811,12 @@ class TestServiceAvailableDuringScale(TestcaseBase):
         for k, v in self.health_checkers.items():
             v.terminate()
 
-    def test_service_available_during_scale_down(self):
+    def test_service_available_during_scale_down(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 3, namespace)
         self.release_name = release_name
         assert host is not None
@@ -886,12 +886,12 @@ class TestServiceAvailableDuringTransferReplicas(TestcaseBase):
         connections.disconnect("default")
         connections.remove_connection("default")
 
-    def test_service_available_during_transfer_replicas(self):
+    def test_service_available_during_transfer_replicas(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
-        release_name, host, port = _install_milvus()
+        release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 5, namespace)
         self.release_name = release_name
         assert host is not None
