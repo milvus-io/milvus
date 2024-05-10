@@ -410,11 +410,10 @@ INSTANTIATE_TEST_SUITE_P(
 #endif
         std::pair(knowhere::IndexEnum::INDEX_HNSW, knowhere::metric::L2)));
 
-/*TEST(Indexing, Iterator) {
+TEST(Indexing, Iterator) {
     constexpr int N = 10240;
     constexpr int TOPK = 100;
     constexpr int dim = 128;
-    constexpr int chunk_size = 5120;
 
     auto [raw_data, timestamps, uids] = generate_data<dim>(N);
     milvus::index::CreateIndexInfo create_index_info;
@@ -437,21 +436,8 @@ INSTANTIATE_TEST_SUITE_P(
         {knowhere::indexparam::NPROBE, 4},
     };
 
-    std::vector<knowhere::DataSetPtr> datasets;
-    auto raw = raw_data.data();
-    for (int beg = 0; beg < N; beg += chunk_size) {
-        auto end = beg + chunk_size;
-        if (end > N) {
-            end = N;
-        }
-        std::vector<float> ft(raw + dim * beg, raw + dim * end);
-        auto ds = knowhere::GenDataSet(end - beg, dim, ft.data());
-        datasets.push_back(ds);
-    }
-
-    for (auto& ds : datasets) {
-        index->BuildWithDataset(ds, build_conf);
-    }
+    index->BuildWithDataset(knowhere::GenDataSet(N, dim, raw_data.data()),
+                            build_conf);
 
     auto bitmap = BitsetType(N, false);
 
@@ -477,7 +463,7 @@ INSTANTIATE_TEST_SUITE_P(
         ASSERT_TRUE(off >= 0);
         ASSERT_TRUE(dis >= 0);
     }
-}*/
+}
 
 TEST_P(IndexTest, BuildAndQuery) {
     milvus::index::CreateIndexInfo create_index_info;
