@@ -545,3 +545,25 @@ func (s *DataNodeServicesSuite) TestRPCWatch() {
 		s.False(merr.Ok(resp.GetStatus()))
 	})
 }
+
+func (s *DataNodeServicesSuite) TestQuerySlot() {
+	s.Run("node not healthy", func() {
+		s.SetupTest()
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		ctx := context.Background()
+		resp, err := s.node.QuerySlot(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(resp.GetStatus()))
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	s.Run("normal case", func() {
+		s.SetupTest()
+		ctx := context.Background()
+		resp, err := s.node.QuerySlot(ctx, nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		s.NoError(merr.Error(resp.GetStatus()))
+	})
+}

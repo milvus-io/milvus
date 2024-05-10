@@ -251,3 +251,17 @@ func (s *SchedulerSuite) TestFinish() {
 		s.MetricsEqual(taskNum, 1)
 	})
 }
+
+func (s *SchedulerSuite) TestPickNode() {
+	s.Run("test pickAnyNode", func() {
+		nodeSlots := map[int64]int64{
+			100: 2,
+			101: 6,
+		}
+		node := s.scheduler.pickAnyNode(nodeSlots)
+		s.Equal(int64(101), node)
+
+		node = s.scheduler.pickAnyNode(map[int64]int64{})
+		s.Equal(int64(NullNodeID), node)
+	})
+}
