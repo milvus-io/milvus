@@ -78,7 +78,7 @@ services:
       - "14268:14268" # jaeger.thirft
 
   zookeeper:
-    image: wurstmeister/zookeeper:latest
+    image: zookeeper:latest
     ports:
       - "2181:2181"
 
