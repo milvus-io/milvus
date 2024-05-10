@@ -38,8 +38,17 @@ type SegmentResourceUsage struct {
 	// include stat_log, insert_log and delta_log, not include any index files.
 }
 
+// GetInuseOrPredictDiskUsage return the inused disk usage.
+// if the inused disk usage is 0,return the predicted disk usage.
+func (sru SegmentResourceUsage) GetInuseOrPredictDiskUsage() uint64 {
+	if sru.InUsed.DiskSize != 0 {
+		return sru.InUsed.DiskSize
+	}
+	return sru.Predict.DiskSize
+}
+
 // String returns a string representation of the SegmentResourceUsage.
-func (sru *SegmentResourceUsage) String() string {
+func (sru SegmentResourceUsage) String() string {
 	return fmt.Sprintf("Predict: %s, InUsed: %s, BinLogSizeAtOSS: %d", sru.Predict.String(), sru.InUsed.String(), sru.BinLogSizeAtOSS)
 }
 

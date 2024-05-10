@@ -117,7 +117,7 @@ class VectorMemIndex : public VectorIndex {
  protected:
     Config config_;
 
-    ResourceUsage resource_usage_;
+    ResourceUsage resource_usage_{};
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<milvus_storage::Space> space_;

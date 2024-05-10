@@ -21,10 +21,12 @@ import (
 	_ "net/http/pprof"
 
 	"github.com/prometheus/client_golang/prometheus"
+
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
-	milvusNamespace = "milvus"
+	milvusNamespace = typeutil.Milvus
 
 	AbandonLabel = "abandon"
 	SuccessLabel = "success"

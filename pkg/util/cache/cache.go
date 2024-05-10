@@ -71,7 +71,7 @@ type Scavenger[K comparable] interface {
 
 type LazyScavenger[K comparable] struct {
 	capacity int64
-	size     int64
+	size     *atomic.Int64
 	weight   func(K) int64
 	weights  map[K]int64
 }
@@ -79,6 +79,7 @@ type LazyScavenger[K comparable] struct {
 func NewLazyScavenger[K comparable](weight func(K) int64, capacity int64) *LazyScavenger[K] {
 	return &LazyScavenger[K]{
 		capacity: capacity,
+		size:     atomic.NewInt64(0),
 		weight:   weight,
 		weights:  make(map[K]int64),
 	}
@@ -86,14 +87,14 @@ func NewLazyScavenger[K comparable](weight func(K) int64, capacity int64) *LazyS
 
 func (s *LazyScavenger[K]) Collect(key K) (bool, func(K) bool) {
 	w := s.weight(key)
-	if s.size+w > s.capacity {
-		needCollect := s.size + w - s.capacity
+	if s.size.Load()+w > s.capacity {
+		needCollect := s.size.Load() + w - s.capacity
 		return false, func(key K) bool {
 			needCollect -= s.weights[key]
 			return needCollect <= 0
 		}
 	}
-	s.size += w
+	s.size.Add(w)
 	s.weights[key] = w
 	return true, nil
 }
@@ -101,31 +102,31 @@ func (s *LazyScavenger[K]) Collect(key K) (bool, func(K) bool) {
 func (s *LazyScavenger[K]) Replace(key K) (bool, func(K) bool, func()) {
 	pw := s.weights[key]
 	w := s.weight(key)
-	if s.size-pw+w > s.capacity {
-		needCollect := s.size - pw + w - s.capacity
+	if s.size.Load()-pw+w > s.capacity {
+		needCollect := s.size.Load() - pw + w - s.capacity
 		return false, func(key K) bool {
 			needCollect -= s.weights[key]
 			return needCollect <= 0
 		}, nil
 	}
-	s.size += w - pw
+	s.size.Add(w - pw)
 	s.weights[key] = w
 	return true, nil, func() {
-		s.size -= w - pw
+		s.size.Sub(w - pw)
 		s.weights[key] = pw
 	}
 }
 
 func (s *LazyScavenger[K]) Throw(key K) {
 	if w, ok := s.weights[key]; ok {
-		s.size -= w
+		s.size.Sub(w)
 		delete(s.weights, key)
 	}
 }
 
 func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
 	w := s.weight(key)
-	available := s.capacity - s.size + w
+	available := s.capacity - s.size.Load() + w
 	return func(k K) bool {
 		available -= s.weight(k)
 		return available >= 0
@@ -133,13 +134,16 @@ func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
 }
 
 type Stats struct {
-	HitCount            atomic.Uint64
-	MissCount           atomic.Uint64
-	LoadSuccessCount    atomic.Uint64
-	LoadFailCount       atomic.Uint64
-	TotalLoadTimeMs     atomic.Uint64
-	TotalFinalizeTimeMs atomic.Uint64
-	EvictionCount       atomic.Uint64
+	HitCount              atomic.Uint64
+	MissCount             atomic.Uint64
+	LoadSuccessCount      atomic.Uint64
+	LoadFailCount         atomic.Uint64
+	TotalLoadDuration     atomic.Float64
+	TotalFinalizeCount    atomic.Uint64
+	TotalFinalizeDuration atomic.Float64
+	TotalReloadCount      atomic.Uint64
+	TotalReloadDuration   atomic.Float64
+	EvictionCount         atomic.Uint64
 }
 
 type Cache[K comparable, V any] interface {
@@ -157,6 +161,12 @@ type Cache[K comparable, V any] interface {
 	// Return nil if the item is removed.
 	// Return error if the Remove operation is canceled.
 	Remove(ctx context.Context, key K) error
+
+	// Current size of the cache
+	Size() (size int64)
+
+	// Capacity of the cache
+	Capacity() (capacity int64)
 }
 
 // lruCache extends the ccache library to provide pinning and unpinning of items.
@@ -306,7 +316,10 @@ func (c *lruCache[K, V]) peekAndPin(ctx context.Context, key K) *cacheItem[K, V]
 			if ok {
 				// there is room for reload and no one is using the item
 				if c.reloader != nil {
+					start := time.Now()
 					reloaded, err := c.reloader(ctx, key)
+					c.stats.TotalReloadCount.Inc()
+					c.stats.TotalReloadDuration.Add(time.Since(start).Seconds())
 					if err == nil {
 						item.value = reloaded
 					} else if retback != nil {
@@ -347,7 +360,7 @@ func (c *lruCache[K, V]) getAndPin(ctx context.Context, key K) (*cacheItem[K, V]
 		if item := c.peekAndPin(ctx, key); item != nil {
 			return item, false, nil
 		}
-		timer := time.Now()
+		start := time.Now()
 		value, err := c.loader(ctx, key)
 
 		for retryAttempt := 0; merr.ErrServiceDiskLimitExceeded.Is(err) && retryAttempt < paramtable.Get().QueryNodeCfg.LazyLoadMaxRetryTimes.GetAsInt(); retryAttempt++ {
@@ -362,8 +375,8 @@ func (c *lruCache[K, V]) getAndPin(ctx context.Context, key K) (*cacheItem[K, V]
 			return nil, true, err
 		}
 
-		c.stats.TotalLoadTimeMs.Add(uint64(time.Since(timer).Milliseconds()))
 		c.stats.LoadSuccessCount.Inc()
+		c.stats.TotalLoadDuration.Add(time.Since(start).Seconds())
 		item, err := c.setAndPin(ctx, key, value)
 		if err != nil {
 			log.Debug("setAndPin failed for key", zap.Any("key", key), zap.Error(err))
@@ -415,10 +428,8 @@ func (c *lruCache[K, V]) setAndPin(ctx context.Context, key K, value V) (*cacheI
 	toEvict, ok := c.lockfreeTryScavenge(key)
 	log := log.Ctx(ctx)
 	if !ok {
-		if c.finalizer != nil {
-			log.Warn("setAndPin ran into scavenge failure, release data for", zap.Any("key", key))
-			c.finalizer(ctx, key, value)
-		}
+		log.Warn("setAndPin ran into scavenge failure, release data for", zap.Any("key", key))
+		c.callFinalize(ctx, key, value)
 		return nil, ErrNotEnoughSpace
 	}
 
@@ -474,9 +485,15 @@ func (c *lruCache[K, V]) evict(ctx context.Context, key K) {
 	c.accessList.Remove(e)
 	c.scavenger.Throw(key)
 
+	c.callFinalize(ctx, key, e.Value.(*cacheItem[K, V]).value)
+}
+
+func (c *lruCache[K, V]) callFinalize(ctx context.Context, key K, value V) {
 	if c.finalizer != nil {
-		item := e.Value.(*cacheItem[K, V])
-		c.finalizer(ctx, key, item.value)
+		start := time.Now()
+		c.stats.TotalFinalizeCount.Inc()
+		c.stats.TotalFinalizeDuration.Add(time.Since(start).Seconds())
+		c.finalizer(ctx, key, value)
 	}
 }
 
@@ -510,4 +527,13 @@ func (c *lruCache[K, V]) MarkItemNeedReload(ctx context.Context, key K) bool {
 	}
 
 	return false
+}
+
+func (c *lruCache[K, V]) Size() int64 {
+	return c.scavenger.(*LazyScavenger[K]).size.Load()
+}
+
+func (c *lruCache[K, V]) Capacity() int64 {
+	// capacity is immutable.
+	return c.scavenger.(*LazyScavenger[K]).capacity
 }

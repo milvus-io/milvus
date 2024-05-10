@@ -631,18 +631,6 @@ var (
 			resourceGroupLabelName,
 		})
 
-	// QueryNodeDiskCacheLoadGlobalDuration records the global time cost of loading segments from disk cache.
-	QueryNodeDiskCacheLoadGlobalDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "disk_cache_load_global_duration",
-			Help:      "global duration of loading segments from disk cache",
-			Buckets:   longTaskBuckets,
-		}, []string{
-			nodeIDLabelName,
-		})
-
 	// QueryNodeDiskCacheEvictTotal records the number of real segments evicted from disk cache.
 	QueryNodeDiskCacheEvictTotal = prometheus.NewCounterVec(
 		prometheus.CounterOpts{
@@ -680,18 +668,6 @@ var (
 			nodeIDLabelName,
 			databaseLabelName,
 			resourceGroupLabelName,
-		})
-
-	// QueryNodeDiskCacheEvictGlobalDuration records the global time cost of evicting segments from disk cache.
-	QueryNodeDiskCacheEvictGlobalDuration = prometheus.NewHistogramVec(
-		prometheus.HistogramOpts{
-			Namespace: milvusNamespace,
-			Subsystem: typeutil.QueryNodeRole,
-			Name:      "disk_cache_evict_global_duration",
-			Help:      "global duration of evicting segments from disk cache",
-			Buckets:   longTaskBuckets,
-		}, []string{
-			nodeIDLabelName,
 		})
 )
 
@@ -749,11 +725,9 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskCacheLoadTotal)
 	registry.MustRegister(QueryNodeDiskCacheLoadBytes)
 	registry.MustRegister(QueryNodeDiskCacheLoadDuration)
-	registry.MustRegister(QueryNodeDiskCacheLoadGlobalDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictTotal)
 	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
-	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

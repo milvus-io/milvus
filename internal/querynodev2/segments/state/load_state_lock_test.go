@@ -171,22 +171,22 @@ func TestRLock(t *testing.T) {
 	assert.True(t, locked)
 	assert.Equal(t, LoadStateOnlyMeta, state)
 	l.RUnlock()
-	state, locked = l.RLockIf(IsDataLoaded)
+	_, locked = l.RLockIf(IsDataLoaded)
 	assert.False(t, locked)
 
 	l = NewLoadStateLock(LoadStateDataLoaded)
-	state, locked = l.RLockIf(IsNotReleased)
+	_, locked = l.RLockIf(IsNotReleased)
 	assert.True(t, locked)
 	l.RUnlock()
-	state, locked = l.RLockIf(IsDataLoaded)
+	_, locked = l.RLockIf(IsDataLoaded)
 	assert.True(t, locked)
 	l.RUnlock()
 
 	l = NewLoadStateLock(LoadStateOnlyMeta)
 	l.StartReleaseAll().Done(nil)
-	state, locked = l.RLockIf(IsNotReleased)
+	_, locked = l.RLockIf(IsNotReleased)
 	assert.False(t, locked)
-	state, locked = l.RLockIf(IsDataLoaded)
+	_, locked = l.RLockIf(IsDataLoaded)
 	assert.False(t, locked)
 }
 

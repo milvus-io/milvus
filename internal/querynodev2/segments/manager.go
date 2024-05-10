@@ -44,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TODO maybe move to manager and change segment constructor
@@ -180,7 +181,7 @@ func NewManager() *Manager {
 		if segment == nil {
 			return 0
 		}
-		return int64(segment.ResourceUsageEstimate().Predict.DiskSize)
+		return int64(segment.ResourceUsageEstimate().GetInuseOrPredictDiskUsage())
 	}, diskCap).WithLoader(func(ctx context.Context, key int64) (Segment, error) {
 		log.Debug("cache missed segment", zap.Int64("segmentID", key))
 		segment := segMgr.GetWithType(key, SegmentTypeSealed)
@@ -192,7 +193,7 @@ func NewManager() *Manager {
 		info := segment.LoadInfo()
 		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (nop interface{}, err error) {
 			cacheLoadRecord := metricsutil.NewCacheLoadRecord(getSegmentMetricLabel(segment))
-			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().Predict.DiskSize)
+			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().GetInuseOrPredictDiskUsage())
 			defer func() {
 				cacheLoadRecord.Finish(err)
 			}()
@@ -213,8 +214,9 @@ func NewManager() *Manager {
 	}).WithFinalizer(func(ctx context.Context, key int64, segment Segment) error {
 		log.Ctx(ctx).Debug("evict segment from cache", zap.Int64("segmentID", key))
 		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
-		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().Predict.DiskSize)
+		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().GetInuseOrPredictDiskUsage())
 		defer cacheEvictRecord.Finish(nil)
+
 		segment.Release(ctx, WithReleaseScope(ReleaseScopeData))
 		return nil
 	}).WithReloader(func(ctx context.Context, key int64) (Segment, error) {
@@ -238,6 +240,15 @@ func NewManager() *Manager {
 
 		return segment, nil
 	}).Build()
+
+	// register the lru cache metrics.
+	cache.RegisterLRUCacheMetrics(
+		manager.DiskCache,
+		typeutil.Milvus,
+		typeutil.QueryNodeRole,
+		"disk_cache",
+		prometheus.Labels{"node_id": paramtable.GetStringNodeID()},
+	)
 
 	segMgr.registerReleaseCallback(func(s Segment) {
 		if s.Type() == SegmentTypeSealed {
