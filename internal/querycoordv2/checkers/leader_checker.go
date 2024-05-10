@@ -113,12 +113,15 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 }
 
 func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica *meta.Replica, leaderView *meta.LeaderView, nodeID int64) []task.Task {
+	ret := make([]task.Task, 0)
 	curDmlChannel := c.target.GetDmChannel(leaderView.CollectionID, leaderView.Channel, meta.CurrentTarget)
+	if curDmlChannel == nil {
+		return ret
+	}
 	partStatsInTarget := curDmlChannel.GetPartitionStatsVersions()
 	partStatsInLView := leaderView.PartitionStatsVersions
 	partStatsToUpdate := make(map[int64]int64)
 
-	ret := make([]task.Task, 0)
 	for partID, psVersionInTarget := range partStatsInTarget {
 		psVersionInLView := partStatsInLView[partID]
 		if psVersionInLView < psVersionInTarget {
