@@ -25,7 +25,7 @@ require (
 	github.com/grpc-ecosystem/go-grpc-middleware v1.3.0
 	github.com/klauspost/compress v1.16.5
 	github.com/mgutz/ansi v0.0.0-20200706080929-d51e80ef957d
-	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.14
+	github.com/milvus-io/milvus-proto/go-api/v2 v2.3.15-0.20240428121542-39656cacf5f8
 	github.com/milvus-io/milvus/pkg v0.0.1
 	github.com/minio/minio-go/v7 v7.0.56
 	github.com/prometheus/client_golang v1.14.0
@@ -64,6 +64,7 @@ require (
 	github.com/go-playground/validator/v10 v10.14.0
 	github.com/pingcap/log v1.1.1-0.20221015072633-39906604fb81
 	github.com/tencentcloud/tencentcloud-sdk-go/tencentcloud/common v1.0.865
+	google.golang.org/protobuf v1.31.0
 )
 
 require (
@@ -228,7 +229,6 @@ require (
 	gonum.org/v1/gonum v0.11.0 // indirect
 	google.golang.org/appengine v1.6.7 // indirect
 	google.golang.org/genproto v0.0.0-20230331144136-dcfb400f0633 // indirect
-	google.golang.org/protobuf v1.31.0 // indirect
 	gopkg.in/inf.v0 v0.9.1 // indirect
 	gopkg.in/ini.v1 v1.67.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.0.0 // indirect

@@ -350,7 +350,7 @@ func TestFlush(t *testing.T) {
 				return datanodeClient, nil
 			},
 		}}}
-
+		svr.meta.AddCollection(&collectionInfo{ID: 0})
 		svr.sessionManager = sm
 		svr.cluster = NewClusterImpl(sm, svr.channelManager)
 
@@ -363,6 +363,32 @@ func TestFlush(t *testing.T) {
 		assert.NoError(t, err)
 		assert.EqualValues(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
 		assert.Equal(t, Timestamp(0), resp.GetFlushTs())
+	})
+
+	t.Run("test collection not exist", func(t *testing.T) {
+		req := &datapb.FlushRequest{
+			Base: &commonpb.MsgBase{
+				MsgType:   commonpb.MsgType_Flush,
+				MsgID:     0,
+				Timestamp: 0,
+				SourceID:  0,
+			},
+			DbID:         0,
+			CollectionID: 0,
+		}
+		svr := newTestServer(t, nil)
+		defer closeTestServer(t, svr)
+		resp, err := svr.Flush(context.TODO(), req)
+		assert.NoError(t, err)
+		assert.EqualValues(t, commonpb.ErrorCode_CollectionNotExists, resp.GetStatus().GetErrorCode())
+
+		mockHandler := NewNMockHandler(t)
+		mockHandler.EXPECT().GetCollection(mock.Anything, mock.Anything).
+			Return(nil, errors.New("mock error"))
+		svr.handler = mockHandler
+		resp2, err2 := svr.Flush(context.TODO(), req)
+		assert.NoError(t, err2)
+		assert.EqualValues(t, commonpb.ErrorCode_UnexpectedError, resp2.GetStatus().GetErrorCode())
 	})
 }
 
