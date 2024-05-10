@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -1763,27 +1762,13 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 	}))
 	server.handleNodeUp(111)
 	// wait for async update by observer
-	time.Sleep(100 * time.Millisecond)
+	suite.Eventually(func() bool {
+		nodes := suite.server.meta.ReplicaManager.Get(1).GetNodes()
+		nodesInRG, _ := suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+		return len(nodes) == len(nodesInRG)
+	}, 5*time.Second, 100*time.Millisecond)
 	nodes := suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	nodesInRG, _ := suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
-	suite.ElementsMatch(nodes, nodesInRG)
-	log.Info("handleNodeUp")
-
-	// when more rg exist, new node shouldn't be assign to replica in default rg in handleNodeUp
-	suite.server.meta.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
-		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
-		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
-	})
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   222,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	server.handleNodeUp(222)
-	// wait for async update by observer
-	time.Sleep(100 * time.Millisecond)
-	nodes = suite.server.meta.ReplicaManager.Get(1).GetNodes()
-	nodesInRG, _ = suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
 	suite.ElementsMatch(nodes, nodesInRG)
 }
 

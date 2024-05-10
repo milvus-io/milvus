@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ReplicaSuite struct {
@@ -15,6 +16,7 @@ type ReplicaSuite struct {
 }
 
 func (suite *ReplicaSuite) SetupSuite() {
+	paramtable.Init()
 	suite.replicaPB = &querypb.Replica{
 		ID:            1,
 		CollectionID:  2,
@@ -175,6 +177,60 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 	// Test ContainsRWNode()
 	suite.True(r.ContainRWNode(1))
 	suite.False(r.ContainRWNode(4))
+}
+
+func (suite *ReplicaSuite) TestChannelExclusiveMode() {
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+			"channel1": {},
+			"channel2": {},
+			"channel3": {},
+			"channel4": {},
+		},
+	})
+
+	mutableReplica := r.copyForWrite()
+	// add 10 rw nodes, exclusive mode is false.
+	for i := 0; i < 10; i++ {
+		mutableReplica.AddRWNode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(0, len(channelNodeInfo.GetRwNodes()))
+	}
+
+	mutableReplica = r.copyForWrite()
+	// add 10 rw nodes, exclusive mode is true.
+	for i := 10; i < 20; i++ {
+		mutableReplica.AddRWNode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(5, len(channelNodeInfo.GetRwNodes()))
+	}
+
+	// 4 node become read only, exclusive mode still be true
+	mutableReplica = r.copyForWrite()
+	for i := 0; i < 4; i++ {
+		mutableReplica.AddRONode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(4, len(channelNodeInfo.GetRwNodes()))
+	}
+
+	// 4 node has been removed, exclusive mode back to false
+	mutableReplica = r.copyForWrite()
+	for i := 4; i < 8; i++ {
+		mutableReplica.RemoveNode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(0, len(channelNodeInfo.GetRwNodes()))
+	}
 }
 
 func TestReplica(t *testing.T) {
