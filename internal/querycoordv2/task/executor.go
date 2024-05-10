@@ -470,7 +470,7 @@ func (ex *Executor) updatePartStatsVersions(task *LeaderTask, step int) error {
 
 	req := &querypb.SyncDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_LoadSegments),
+			commonpbutil.WithMsgType(commonpb.MsgType_SyncDistribution),
 			commonpbutil.WithMsgID(task.ID()),
 		),
 		CollectionID: task.collectionID,
