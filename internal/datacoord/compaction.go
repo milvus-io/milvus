@@ -321,7 +321,6 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 
 		// Select sealed L1 segments for LevelZero compaction that meets the condition:
 		// dmlPos < triggerInfo.pos
-		// TODO: select L2 segments too
 		sealedSegments := c.meta.SelectSegments(WithCollection(task.triggerInfo.collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 			return (task.triggerInfo.partitionID == -1 || info.GetPartitionID() == task.triggerInfo.partitionID) &&
 				info.GetInsertChannel() == plan.GetChannel() &&
@@ -338,7 +337,7 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
 				SegmentID:    info.GetID(),
-				Level:        datapb.SegmentLevel_L1,
+				Level:        info.GetLevel(),
 				CollectionID: info.GetCollectionID(),
 				PartitionID:  info.GetPartitionID(),
 			}
