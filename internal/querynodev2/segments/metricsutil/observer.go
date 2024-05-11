@@ -127,10 +127,6 @@ func (o *segmentObserver) Observe(m labeledRecord) {
 	o.lastUpdates.Store(&now)
 
 	switch mm := m.(type) {
-	case *CacheLoadRecord:
-		o.prom.ObserveCacheLoad(mm)
-	case *CacheEvictRecord:
-		o.prom.ObserveCacheEvict(mm)
 	case QuerySegmentAccessRecord:
 		o.prom.ObserveQueryAccess(mm)
 	case SearchSegmentAccessRecord:
@@ -150,12 +146,6 @@ func newPromObserver(nodeID string, label SegmentLabel) promMetricsObserver {
 	return promMetricsObserver{
 		nodeID:                               nodeID,
 		label:                                label,
-		DiskCacheLoadTotal:                   metrics.QueryNodeDiskCacheLoadTotal.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup),
-		DiskCacheLoadDuration:                metrics.QueryNodeDiskCacheLoadDuration.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup),
-		DiskCacheLoadBytes:                   metrics.QueryNodeDiskCacheLoadBytes.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup),
-		DiskCacheEvictTotal:                  metrics.QueryNodeDiskCacheEvictTotal.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup),
-		DiskCacheEvictDuration:               metrics.QueryNodeDiskCacheEvictDuration.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup),
-		DiskCacheEvictBytes:                  metrics.QueryNodeDiskCacheEvictBytes.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup),
 		QuerySegmentAccessTotal:              metrics.QueryNodeSegmentAccessTotal.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.QueryLabel),
 		QuerySegmentAccessDuration:           metrics.QueryNodeSegmentAccessDuration.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.QueryLabel),
 		QuerySegmentAccessWaitCacheTotal:     metrics.QueryNodeSegmentAccessWaitCacheTotal.WithLabelValues(nodeID, label.DatabaseName, label.ResourceGroup, metrics.QueryLabel),
@@ -177,12 +167,6 @@ type promMetricsObserver struct {
 	nodeID string
 	label  SegmentLabel // never updates
 
-	DiskCacheLoadTotal                   prometheus.Counter
-	DiskCacheLoadDuration                prometheus.Counter
-	DiskCacheLoadBytes                   prometheus.Counter
-	DiskCacheEvictTotal                  prometheus.Counter
-	DiskCacheEvictBytes                  prometheus.Counter
-	DiskCacheEvictDuration               prometheus.Counter
 	QuerySegmentAccessTotal              prometheus.Counter
 	QuerySegmentAccessDuration           prometheus.Counter
 	QuerySegmentAccessWaitCacheTotal     prometheus.Counter
@@ -196,22 +180,6 @@ type promMetricsObserver struct {
 	SearchSegmentAccessGlobalDuration          prometheus.Observer
 	QuerySegmentAccessWaitCacheGlobalDuration  prometheus.Observer
 	SearchSegmentAccessWaitCacheGlobalDuration prometheus.Observer
-}
-
-// ObserveLoad records a new cache load
-func (o *promMetricsObserver) ObserveCacheLoad(r *CacheLoadRecord) {
-	o.DiskCacheLoadTotal.Inc()
-	o.DiskCacheLoadBytes.Add(r.getBytes())
-	d := r.getMilliseconds()
-	o.DiskCacheLoadDuration.Add(d)
-}
-
-// ObserveCacheEvict records a new cache evict.
-func (o *promMetricsObserver) ObserveCacheEvict(r *CacheEvictRecord) {
-	o.DiskCacheEvictTotal.Inc()
-	o.DiskCacheEvictBytes.Add(r.getBytes())
-	d := r.getMilliseconds()
-	o.DiskCacheEvictDuration.Add(d)
 }
 
 // ObserveQueryAccess records a new query access.
@@ -245,13 +213,6 @@ func (o *promMetricsObserver) ObserveSearchAccess(r SearchSegmentAccessRecord) {
 // Clear clears the prometheus metrics.
 func (o *promMetricsObserver) Clear() {
 	label := o.label
-
-	metrics.QueryNodeDiskCacheLoadTotal.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup)
-	metrics.QueryNodeDiskCacheLoadBytes.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup)
-	metrics.QueryNodeDiskCacheLoadDuration.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup)
-	metrics.QueryNodeDiskCacheEvictTotal.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup)
-	metrics.QueryNodeDiskCacheEvictBytes.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup)
-	metrics.QueryNodeDiskCacheEvictDuration.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup)
 
 	metrics.QueryNodeSegmentAccessTotal.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup, metrics.SearchLabel)
 	metrics.QueryNodeSegmentAccessTotal.DeleteLabelValues(o.nodeID, label.DatabaseName, label.ResourceGroup, metrics.QueryLabel)

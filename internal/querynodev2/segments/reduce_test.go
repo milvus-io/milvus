@@ -99,10 +99,14 @@ func (suite *ReduceSuite) SetupTest() {
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
+
+	guard, err := suite.segment.(*LocalSegment).StartLoadData()
+	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
 		err = suite.segment.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
+	guard.Done(nil)
 }
 
 func (suite *ReduceSuite) TearDownTest() {

@@ -19,12 +19,18 @@ package cache
 import (
 	"fmt"
 
-	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/prometheus/client_golang/prometheus"
 )
 
 // RegisterLRUCacheMetrics registers metrics for LRU cache.
-func RegisterLRUCacheMetrics[K comparable, V any](c Cache[K, V], namespace string, subsystem string, prefix string, constLabel prometheus.Labels) {
+func RegisterLRUCacheMetrics[K comparable, V any](
+	registry prometheus.Registerer,
+	c Cache[K, V],
+	namespace string,
+	subsystem string,
+	prefix string,
+	constLabel prometheus.Labels,
+) {
 	newGaugeFunc := func(name string, help string, valueFunc func() float64) prometheus.Collector {
 		return prometheus.NewGaugeFunc(
 			prometheus.GaugeOpts{
@@ -58,7 +64,7 @@ func RegisterLRUCacheMetrics[K comparable, V any](c Cache[K, V], namespace strin
 			return float64(c.Stats().LoadFailCount.Load())
 		}),
 		newGaugeFunc("load_duration", "cache load duration", func() float64 {
-			return float64(c.Stats().TotalLoadDuration.Load() * 1000)
+			return c.Stats().TotalLoadDuration.Load() * 1000
 		}),
 		newGaugeFunc("evict_total", "cache evict count", func() float64 {
 			return float64(c.Stats().EvictionCount.Load())
@@ -67,17 +73,19 @@ func RegisterLRUCacheMetrics[K comparable, V any](c Cache[K, V], namespace strin
 			return float64(c.Stats().TotalFinalizeCount.Load())
 		}),
 		newGaugeFunc("finalize_duration", "cache finalize duration", func() float64 {
-			return float64(c.Stats().TotalFinalizeDuration.Load() * 1000)
+			return c.Stats().TotalFinalizeDuration.Load() * 1000
 		}),
 		newGaugeFunc("reload_total", "cache reload total", func() float64 {
 			return float64(c.Stats().TotalReloadCount.Load())
 		}),
 		newGaugeFunc("reload_duration", "cache reload duration", func() float64 {
-			return float64(c.Stats().TotalReloadDuration.Load() * 1000)
+			return c.Stats().TotalReloadDuration.Load() * 1000
 		}),
 	}
-
-	metrics.GetRegisterer().MustRegister(ms...)
+	for _, m := range ms {
+		// maybe report duplicate metrics registration in unittest. so don't use MustRegister here.
+		_ = registry.Register(m)
+	}
 }
 
 // WIP: this function is a showcase of how to use prometheus, do not use it in production.

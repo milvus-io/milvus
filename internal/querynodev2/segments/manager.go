@@ -29,13 +29,13 @@ import (
 	"fmt"
 	"sync"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -44,7 +44,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"github.com/prometheus/client_golang/prometheus"
 )
 
 // TODO maybe move to manager and change segment constructor
@@ -192,12 +191,6 @@ func NewManager() *Manager {
 		}
 		info := segment.LoadInfo()
 		_, err, _ := sf.Do(fmt.Sprint(segment.ID()), func() (nop interface{}, err error) {
-			cacheLoadRecord := metricsutil.NewCacheLoadRecord(getSegmentMetricLabel(segment))
-			cacheLoadRecord.WithBytes(segment.ResourceUsageEstimate().GetInuseOrPredictDiskUsage())
-			defer func() {
-				cacheLoadRecord.Finish(err)
-			}()
-
 			collection := manager.Collection.Get(segment.Collection())
 			if collection == nil {
 				return nil, merr.WrapErrCollectionNotLoaded(segment.Collection(), "failed to load segment fields")
@@ -213,10 +206,6 @@ func NewManager() *Manager {
 		return segment, nil
 	}).WithFinalizer(func(ctx context.Context, key int64, segment Segment) error {
 		log.Ctx(ctx).Debug("evict segment from cache", zap.Int64("segmentID", key))
-		cacheEvictRecord := metricsutil.NewCacheEvictRecord(getSegmentMetricLabel(segment))
-		cacheEvictRecord.WithBytes(segment.ResourceUsageEstimate().GetInuseOrPredictDiskUsage())
-		defer cacheEvictRecord.Finish(nil)
-
 		segment.Release(ctx, WithReleaseScope(ReleaseScopeData))
 		return nil
 	}).WithReloader(func(ctx context.Context, key int64) (Segment, error) {
@@ -243,6 +232,7 @@ func NewManager() *Manager {
 
 	// register the lru cache metrics.
 	cache.RegisterLRUCacheMetrics(
+		metrics.GetRegisterer(),
 		manager.DiskCache,
 		typeutil.Milvus,
 		typeutil.QueryNodeRole,

@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <functional>
 
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -79,6 +80,17 @@ class ThreadSafeVector {
     clear() {
         std::lock_guard lck(mutex_);
         vec_.clear();
+    }
+
+    void
+    range_over(std::function<bool(const Type&)> f) const {
+        std::shared_lock lck(mutex_);
+
+        for (auto& x : vec_) {
+            if (!f(x)) {
+                return;
+            }
+        }
     }
 
  private:
@@ -259,9 +271,10 @@ class ConcurrentVectorImpl : public VectorBase {
     size_t
     num_of_element() const {
         size_t num = 0;
-        for (size_t i = 0; i < chunks_.size(); i++) {
-            num += chunks_[i].size();
-        }
+        chunks_.range_over([&num](const auto& chunk) {
+            num += chunk.size();
+            return true;
+        });
         return num;
     }
 

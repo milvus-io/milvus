@@ -363,7 +363,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             insert_record_.timestamp_index_ = std::move(index);
             AssertInfo(insert_record_.timestamps_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
-            stats_.mem_size += sizeof(Timestamp) * data.row_count;
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
@@ -376,7 +375,6 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
             insert_record_.row_ids_.fill_chunk_data(field_data);
             AssertInfo(insert_record_.row_ids_.num_chunk() == 1,
                        "num chunk not equal to 1 for sealed segment");
-            stats_.mem_size += sizeof(idx_t) * data.row_count;
         }
         ++system_ready_count_;
     } else {
@@ -1140,7 +1138,7 @@ SegmentSealedImpl::GetResourceUsage() const {
         usage.disk_size += indexResourceUsage.disk_size;
     }
     vector_indexings_.range_over(
-        [&](const auto& field_id, const auto& indexEntry) {
+        [&usage](const auto& field_id, const auto& indexEntry) {
             auto indexResourceUsage = indexEntry->indexing_->GetResourceUsage();
             usage.mem_size += indexResourceUsage.mem_size;
             usage.disk_size += indexResourceUsage.disk_size;
@@ -1174,7 +1172,6 @@ SegmentSealedImpl::ClearData() {
         insert_record_.clear();
         fields_.clear();
         variable_fields_avg_size_.clear();
-        stats_.mem_size = 0;
     }
     auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
     if (cc == nullptr) {

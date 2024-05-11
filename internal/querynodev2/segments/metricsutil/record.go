@@ -9,73 +9,12 @@ import (
 var (
 	_ labeledRecord = QuerySegmentAccessRecord{}
 	_ labeledRecord = SearchSegmentAccessRecord{}
-	_ labeledRecord = &CacheLoadRecord{}
-	_ labeledRecord = &CacheEvictRecord{}
 )
 
 // SegmentLabel is the label of a segment.
 type SegmentLabel struct {
 	DatabaseName  string `expr:"DatabaseName"`
 	ResourceGroup string `expr:"ResourceGroup"`
-}
-
-// CacheLoadRecord records the metrics of a cache load.
-type CacheLoadRecord struct {
-	numBytes uint64
-	baseRecord
-}
-
-// NewCacheLoadRecord creates a new CacheLoadRecord.
-func NewCacheLoadRecord(label SegmentLabel) *CacheLoadRecord {
-	return &CacheLoadRecord{
-		baseRecord: newBaseRecord(label),
-	}
-}
-
-// WithBytes sets the bytes of the record.
-func (r *CacheLoadRecord) WithBytes(bytes uint64) *CacheLoadRecord {
-	r.numBytes = bytes
-	return r
-}
-
-// getBytes returns the bytes of the record.
-func (r *CacheLoadRecord) getBytes() float64 {
-	return float64(r.numBytes)
-}
-
-// Finish finishes the record.
-func (r *CacheLoadRecord) Finish(err error) {
-	r.baseRecord.finish(err)
-	getGlobalObserver().Observe(r)
-}
-
-type CacheEvictRecord struct {
-	bytes uint64
-	baseRecord
-}
-
-// NewCacheEvictRecord creates a new CacheEvictRecord.
-func NewCacheEvictRecord(label SegmentLabel) *CacheEvictRecord {
-	return &CacheEvictRecord{
-		baseRecord: newBaseRecord(label),
-	}
-}
-
-// WithBytes sets the bytes of the record.
-func (r *CacheEvictRecord) WithBytes(bytes uint64) *CacheEvictRecord {
-	r.bytes = bytes
-	return r
-}
-
-// getBytes returns the bytes of the record.
-func (r *CacheEvictRecord) getBytes() float64 {
-	return float64(r.bytes)
-}
-
-// Finish finishes the record.
-func (r *CacheEvictRecord) Finish(err error) {
-	r.baseRecord.finish(err)
-	getGlobalObserver().Observe(r)
 }
 
 // NewQuerySegmentAccessRecord creates a new QuerySegmentMetricRecorder.

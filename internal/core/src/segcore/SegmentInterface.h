@@ -43,7 +43,6 @@ struct SegmentStats {
     // we stat the memory size used by the segment,
     // including the insert data and delete data.
     std::atomic<size_t> mem_size{};
-    std::atomic<size_t> disk_size{};
 };
 
 // common interface of SegmentSealed and SegmentGrowing used by C API

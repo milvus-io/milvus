@@ -535,6 +535,7 @@ class VariableColumn : public ColumnBase {
  protected:
     void
     ConstructViews() {
+        views_.reserve(indices_.size());
         for (size_t i = 0; i < indices_.size() - 1; i++) {
             views_.emplace_back(data_ + indices_[i],
                                 indices_[i + 1] - indices_[i]);

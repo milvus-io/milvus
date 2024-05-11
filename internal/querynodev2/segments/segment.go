@@ -366,6 +366,9 @@ func NewSegmentV2(
 		space:              space,
 		rowNum:             atomic.NewInt64(-1),
 		insertCount:        atomic.NewInt64(0),
+
+		predictResourceUsageCache: atomic.NewPointer[ResourceUsage](nil),
+		inUseResourceUsageCache:   atomic.NewPointer[ResourceUsage](nil),
 	}
 
 	if err := segment.initializeSegment(); err != nil {
