@@ -80,13 +80,6 @@ SegmentInternalInterface::Search(
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
-                                   Timestamp timestamp,
-                                   int64_t limit_size) const {
-    return Retrieve(nullptr, plan, timestamp, limit_size, false);
-}
-
-std::unique_ptr<proto::segcore::RetrieveResults>
 SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
                                    const query::RetrievePlan* plan,
                                    Timestamp timestamp,
@@ -244,7 +237,7 @@ SegmentInternalInterface::get_real_count() const {
     auto plan = std::make_unique<query::RetrievePlan>(get_schema());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->is_count_ = true;
-    auto res = Retrieve(plan.get(), MAX_TIMESTAMP, INT64_MAX);
+    auto res = Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false);
     AssertInfo(res->fields_data().size() == 1,
                "count result should only have one column");
     AssertInfo(res->fields_data()[0].has_scalars(),

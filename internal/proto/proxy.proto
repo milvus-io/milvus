@@ -27,6 +27,8 @@ service Proxy {
   rpc ImportV2(internal.ImportRequest) returns(internal.ImportResponse){}
   rpc GetImportProgress(internal.GetImportProgressRequest) returns(internal.GetImportProgressResponse){}
   rpc ListImports(internal.ListImportsRequest) returns(internal.ListImportsResponse){}
+  
+  rpc InvalidateShardLeaderCache(InvalidateShardLeaderCacheRequest) returns (common.Status) {}
 }
 
 message InvalidateCollMetaCacheRequest {
@@ -38,6 +40,11 @@ message InvalidateCollMetaCacheRequest {
   string collection_name = 3;
   int64 collectionID = 4;
   string partition_name = 5;
+}
+
+message InvalidateShardLeaderCacheRequest {
+  common.MsgBase base = 1;
+  repeated int64 collectionIDs = 2;
 }
 
 message InvalidateCredCacheRequest {

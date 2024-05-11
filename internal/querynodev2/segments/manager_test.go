@@ -34,7 +34,7 @@ func (s *ManagerSuite) SetupSuite() {
 	s.segmentIDs = []int64{1, 2, 3, 4}
 	s.collectionIDs = []int64{100, 200, 300, 400}
 	s.partitionIDs = []int64{10, 11, 12, 13}
-	s.channels = []string{"dml1", "dml2", "dml3", "dml4"}
+	s.channels = []string{"by-dev-rootcoord-dml_0_100v0", "by-dev-rootcoord-dml_1_200v0", "by-dev-rootcoord-dml_2_300v0", "by-dev-rootcoord-dml_3_400v0"}
 	s.types = []SegmentType{SegmentTypeSealed, SegmentTypeGrowing, SegmentTypeSealed, SegmentTypeSealed}
 	s.levels = []datapb.SegmentLevel{datapb.SegmentLevel_Legacy, datapb.SegmentLevel_Legacy, datapb.SegmentLevel_L1, datapb.SegmentLevel_L0}
 }

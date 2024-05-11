@@ -24,6 +24,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -46,7 +47,7 @@ type Segment interface {
 	ResourceGroup() string
 	Collection() int64
 	Partition() int64
-	Shard() string
+	Shard() metautil.Channel
 	Version() int64
 	CASVersion(int64, int64) bool
 	StartPosition() *msgpb.MsgPosition
@@ -83,6 +84,8 @@ type Segment interface {
 	// Bloom filter related
 	UpdateBloomFilter(pks []storage.PrimaryKey)
 	MayPkExist(pk storage.PrimaryKey) bool
+	TestLocations(pk storage.PrimaryKey, loc []uint64) bool
+	GetHashFuncNum() uint
 
 	// Read operations
 	Search(ctx context.Context, searchReq *SearchRequest) (*SearchResult, error)

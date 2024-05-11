@@ -962,23 +962,17 @@ func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*Segm
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
 func (m *meta) GetSegmentsByChannel(channel string) []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) && segment.InsertChannel == channel
-	})
+	return m.SelectSegments(SegmentFilterFunc(isSegmentHealthy), WithChannel(channel))
 }
 
 // GetSegmentsOfCollection get all segments of collection
 func (m *meta) GetSegmentsOfCollection(collectionID UniqueID) []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID
-	})
+	return m.SelectSegments(SegmentFilterFunc(isSegmentHealthy), WithCollection(collectionID))
 }
 
 // GetSegmentsIDOfCollection returns all segment ids which collection equals to provided `collectionID`
 func (m *meta) GetSegmentsIDOfCollection(collectionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) && segment.CollectionID == collectionID
-	})
+	segments := m.SelectSegments(SegmentFilterFunc(isSegmentHealthy), WithCollection(collectionID))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -987,12 +981,11 @@ func (m *meta) GetSegmentsIDOfCollection(collectionID UniqueID) []UniqueID {
 
 // GetSegmentsIDOfCollection returns all segment ids which collection equals to provided `collectionID`
 func (m *meta) GetSegmentsIDOfCollectionWithDropped(collectionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment != nil &&
 			segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
-			segment.GetState() != commonpb.SegmentState_NotExist &&
-			segment.CollectionID == collectionID
-	})
+			segment.GetState() != commonpb.SegmentState_NotExist
+	}))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -1001,11 +994,10 @@ func (m *meta) GetSegmentsIDOfCollectionWithDropped(collectionID UniqueID) []Uni
 
 // GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
 func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
-			segment.CollectionID == collectionID &&
 			segment.PartitionID == partitionID
-	})
+	}))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -1014,12 +1006,11 @@ func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []Un
 
 // GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
 func (m *meta) GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
 			segment.GetState() != commonpb.SegmentState_NotExist &&
-			segment.CollectionID == collectionID &&
 			segment.PartitionID == partitionID
-	})
+	}))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -1031,34 +1022,34 @@ func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID
 	m.RLock()
 	defer m.RUnlock()
 	var ret int64
-	segments := m.segments.GetSegments()
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return isSegmentHealthy(si) && si.GetPartitionID() == partitionID
+	}))
 	for _, segment := range segments {
-		if isSegmentHealthy(segment) && segment.CollectionID == collectionID && segment.PartitionID == partitionID {
-			ret += segment.NumOfRows
-		}
+		ret += segment.NumOfRows
 	}
 	return ret
 }
 
 // GetUnFlushedSegments get all segments which state is not `Flushing` nor `Flushed`
 func (m *meta) GetUnFlushedSegments() []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
+	return m.SelectSegments(SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed
-	})
+	}))
 }
 
 // GetFlushingSegments get all segments which state is `Flushing`
 func (m *meta) GetFlushingSegments() []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
+	return m.SelectSegments(SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushing
-	})
+	}))
 }
 
 // SelectSegments select segments with selector
-func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
+func (m *meta) SelectSegments(filters ...SegmentFilter) []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
-	return m.segments.GetSegmentsBySelector(selector)
+	return m.segments.GetSegmentsBySelector(filters...)
 }
 
 // AddAllocation add allocation in segment
@@ -1397,7 +1388,7 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 		return err
 	}
 	delete(m.channelCPs.checkpoints, vChannel)
-	log.Debug("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
+	log.Info("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }
 
@@ -1406,12 +1397,12 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 }
 
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
-	allSegs := m.SelectSegments(func(segment *SegmentInfo) bool {
+	allSegs := m.SelectSegments(SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
 			isFlush(segment) && // sealed segment
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() // not importing now
-	})
+	}))
 
 	ret := make(map[int64][]*SegmentInfo)
 	for _, seg := range allSegs {
@@ -1426,12 +1417,11 @@ func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo
 }
 
 func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupLabel) *msgpb.MsgPosition {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(label.CollectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Growing &&
-			segment.GetCollectionID() == label.CollectionID &&
 			segment.GetPartitionID() == label.PartitionID &&
 			segment.GetInsertChannel() == label.Channel
-	})
+	}))
 
 	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	for _, seg := range segments {

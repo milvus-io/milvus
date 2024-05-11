@@ -757,27 +757,31 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {
-	for _, label := range []string{DeleteLabel, InsertLabel} {
-		QueryNodeConsumerMsgCount.
-			Delete(
-				prometheus.Labels{
-					nodeIDLabelName:       fmt.Sprint(nodeID),
-					msgTypeLabelName:      label,
-					collectionIDLabelName: fmt.Sprint(collectionID),
-				})
+	nodeIDLabel := fmt.Sprint(nodeID)
+	collectionIDLabel := fmt.Sprint(collectionID)
+	QueryNodeConsumerMsgCount.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
 
-		QueryNodeConsumeTimeTickLag.
-			Delete(
-				prometheus.Labels{
-					nodeIDLabelName:       fmt.Sprint(nodeID),
-					msgTypeLabelName:      label,
-					collectionIDLabelName: fmt.Sprint(collectionID),
-				})
-		QueryNodeNumEntities.
-			DeletePartialMatch(
-				prometheus.Labels{
-					nodeIDLabelName:       fmt.Sprint(nodeID),
-					collectionIDLabelName: fmt.Sprint(collectionID),
-				})
-	}
+	QueryNodeConsumeTimeTickLag.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+	QueryNodeNumEntities.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
+	QueryNodeEntitiesSize.
+		DeletePartialMatch(
+			prometheus.Labels{
+				nodeIDLabelName:       nodeIDLabel,
+				collectionIDLabelName: collectionIDLabel,
+			})
 }

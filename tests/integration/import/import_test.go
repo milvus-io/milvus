@@ -213,6 +213,11 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 		s.indexType = indexparamcheck.IndexHNSW
 		s.metricType = metric.L2
 		s.run()
+
+		// s.vecType = schemapb.DataType_SparseFloatVector
+		// s.indexType = indexparamcheck.IndexSparseWand
+		// s.metricType = metric.IP
+		// s.run()
 	}
 }
 

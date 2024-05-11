@@ -50,7 +50,7 @@ func WithChannelManager(cm ChannelManager) Option {
 
 func (s *ServerSuite) SetupTest() {
 	s.mockChMgr = NewMockChannelManager(s.T())
-	s.mockChMgr.EXPECT().Startup(mock.Anything, mock.Anything).Return(nil).Maybe()
+	s.mockChMgr.EXPECT().Startup(mock.Anything, mock.Anything, mock.Anything).Return(nil).Maybe()
 	s.mockChMgr.EXPECT().Close().Maybe()
 
 	s.testServer = newTestServer(s.T(), WithChannelManager(s.mockChMgr))

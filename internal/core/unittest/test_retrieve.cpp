@@ -24,7 +24,8 @@ std::unique_ptr<proto::segcore::RetrieveResults>
 RetrieveUsingDefaultOutputSize(SegmentInterface* segment,
                                const query::RetrievePlan* plan,
                                Timestamp timestamp) {
-    return segment->Retrieve(plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE);
+    return segment->Retrieve(
+        nullptr, plan, timestamp, DEFAULT_MAX_OUTPUT_SIZE, false);
 }
 
 using Param = DataType;
@@ -307,10 +308,11 @@ TEST_P(RetrieveTest, Limit) {
     // test query results exceed the limit size
     std::vector<FieldId> target_fields{TimestampFieldID, fid_64, fid_vec};
     plan->field_ids_ = target_fields;
-    EXPECT_THROW(segment->Retrieve(plan.get(), N, 1), std::runtime_error);
+    EXPECT_THROW(segment->Retrieve(nullptr, plan.get(), N, 1, false),
+                 std::runtime_error);
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = segment->Retrieve(
+        nullptr, plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE, false);
     Assert(retrieve_results->fields_data_size() == target_fields.size());
     auto field0 = retrieve_results->fields_data(0);
     auto field2 = retrieve_results->fields_data(2);
@@ -360,10 +362,11 @@ TEST_P(RetrieveTest, FillEntry) {
                                        fid_vec,
                                        fid_vecbin};
     plan->field_ids_ = target_fields;
-    EXPECT_THROW(segment->Retrieve(plan.get(), N, 1), std::runtime_error);
+    EXPECT_THROW(segment->Retrieve(nullptr, plan.get(), N, 1, false),
+                 std::runtime_error);
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = segment->Retrieve(
+        nullptr, plan.get(), N, DEFAULT_MAX_OUTPUT_SIZE, false);
     Assert(retrieve_results->fields_data_size() == target_fields.size());
 }
 

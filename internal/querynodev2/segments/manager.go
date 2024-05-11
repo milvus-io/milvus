@@ -41,9 +41,13 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/cache"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+// TODO maybe move to manager and change segment constructor
+var channelMapper = metautil.NewDynChannelMapper()
 
 // SegmentFilter is the interface for segment selection criteria.
 type SegmentFilter interface {
@@ -109,8 +113,14 @@ func WithPartition(partitionID typeutil.UniqueID) SegmentFilter {
 }
 
 func WithChannel(channel string) SegmentFilter {
+	ac, err := metautil.ParseChannel(channel, channelMapper)
+	if err != nil {
+		return SegmentFilterFunc(func(segment Segment) bool {
+			return false
+		})
+	}
 	return SegmentFilterFunc(func(segment Segment) bool {
-		return segment.Shard() == channel
+		return segment.Shard().Equal(ac)
 	})
 }
 
@@ -156,7 +166,7 @@ type Manager struct {
 }
 
 func NewManager() *Manager {
-	diskCap := paramtable.Get().QueryNodeCfg.DiskCacheCapacityLimit.GetAsInt64()
+	diskCap := paramtable.Get().QueryNodeCfg.DiskCacheCapacityLimit.GetAsSize()
 
 	segMgr := NewSegmentManager()
 	sf := singleflight.Group{}
@@ -231,7 +241,10 @@ func NewManager() *Manager {
 
 	segMgr.registerReleaseCallback(func(s Segment) {
 		if s.Type() == SegmentTypeSealed {
-			manager.DiskCache.Expire(context.Background(), s.ID())
+			// !!! We cannot use ctx of request to call Remove,
+			// Once context canceled, the segment will be leak in cache forever.
+			// Because it has been cleaned from segment manager.
+			manager.DiskCache.Remove(context.Background(), s.ID())
 		}
 	})
 
@@ -407,6 +420,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 			for _, segment := range ret {
 				segment.Unpin()
 			}
+			ret = nil
 		}
 	}()
 
@@ -422,7 +436,7 @@ func (mgr *segmentManager) GetAndPinBy(filters ...SegmentFilter) ([]Segment, err
 		return true
 	}, filters...)
 
-	return ret, nil
+	return ret, err
 }
 
 func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter) ([]Segment, error) {
@@ -436,6 +450,7 @@ func (mgr *segmentManager) GetAndPin(segments []int64, filters ...SegmentFilter)
 			for _, segment := range lockedSegments {
 				segment.Unpin()
 			}
+			lockedSegments = nil
 		}
 	}()
 
@@ -719,10 +734,11 @@ func (mgr *segmentManager) updateMetric() {
 }
 
 func (mgr *segmentManager) remove(ctx context.Context, segment Segment) bool {
-	segment.Release(ctx)
 	if mgr.releaseCallback != nil {
 		mgr.releaseCallback(segment)
+		log.Ctx(ctx).Info("remove segment from cache", zap.Int64("segmentID", segment.ID()))
 	}
+	segment.Release(ctx)
 
 	metrics.QueryNodeNumSegments.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),

@@ -128,13 +128,19 @@ func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(int64
 	return _c
 }
 
-// SelectSegments provides a mock function with given fields: selector
-func (_m *MockCompactionMeta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
-	ret := _m.Called(selector)
+// SelectSegments provides a mock function with given fields: filters
+func (_m *MockCompactionMeta) SelectSegments(filters ...SegmentFilter) []*SegmentInfo {
+	_va := make([]interface{}, len(filters))
+	for _i := range filters {
+		_va[_i] = filters[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
 
 	var r0 []*SegmentInfo
-	if rf, ok := ret.Get(0).(func(SegmentInfoSelector) []*SegmentInfo); ok {
-		r0 = rf(selector)
+	if rf, ok := ret.Get(0).(func(...SegmentFilter) []*SegmentInfo); ok {
+		r0 = rf(filters...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*SegmentInfo)
@@ -150,14 +156,21 @@ type MockCompactionMeta_SelectSegments_Call struct {
 }
 
 // SelectSegments is a helper method to define mock.On call
-//   - selector SegmentInfoSelector
-func (_e *MockCompactionMeta_Expecter) SelectSegments(selector interface{}) *MockCompactionMeta_SelectSegments_Call {
-	return &MockCompactionMeta_SelectSegments_Call{Call: _e.mock.On("SelectSegments", selector)}
+//   - filters ...SegmentFilter
+func (_e *MockCompactionMeta_Expecter) SelectSegments(filters ...interface{}) *MockCompactionMeta_SelectSegments_Call {
+	return &MockCompactionMeta_SelectSegments_Call{Call: _e.mock.On("SelectSegments",
+		append([]interface{}{}, filters...)...)}
 }
 
-func (_c *MockCompactionMeta_SelectSegments_Call) Run(run func(selector SegmentInfoSelector)) *MockCompactionMeta_SelectSegments_Call {
+func (_c *MockCompactionMeta_SelectSegments_Call) Run(run func(filters ...SegmentFilter)) *MockCompactionMeta_SelectSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(SegmentInfoSelector))
+		variadicArgs := make([]SegmentFilter, len(args)-0)
+		for i, a := range args[0:] {
+			if a != nil {
+				variadicArgs[i] = a.(SegmentFilter)
+			}
+		}
+		run(variadicArgs...)
 	})
 	return _c
 }
@@ -167,7 +180,7 @@ func (_c *MockCompactionMeta_SelectSegments_Call) Return(_a0 []*SegmentInfo) *Mo
 	return _c
 }
 
-func (_c *MockCompactionMeta_SelectSegments_Call) RunAndReturn(run func(SegmentInfoSelector) []*SegmentInfo) *MockCompactionMeta_SelectSegments_Call {
+func (_c *MockCompactionMeta_SelectSegments_Call) RunAndReturn(run func(...SegmentFilter) []*SegmentInfo) *MockCompactionMeta_SelectSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

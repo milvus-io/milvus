@@ -653,7 +653,7 @@ func (data *BFloat16VectorFieldData) AppendRows(rows interface{}) error {
 }
 
 func (data *SparseFloatVectorFieldData) AppendRows(rows interface{}) error {
-	v, ok := rows.(SparseFloatVectorFieldData)
+	v, ok := rows.(*SparseFloatVectorFieldData)
 	if !ok {
 		return merr.WrapErrParameterInvalid("SparseFloatVectorFieldData", rows, "Wrong rows type")
 	}

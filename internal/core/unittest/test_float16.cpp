@@ -240,8 +240,8 @@ TEST(Float16, RetrieveEmpty) {
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = segment->Retrieve(
+        nullptr, plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE, false);
 
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     auto field0 = retrieve_results->fields_data(0);
@@ -493,8 +493,8 @@ TEST(BFloat16, RetrieveEmpty) {
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
-    auto retrieve_results =
-        segment->Retrieve(plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE);
+    auto retrieve_results = segment->Retrieve(
+        nullptr, plan.get(), 100, DEFAULT_MAX_OUTPUT_SIZE, false);
 
     Assert(retrieve_results->fields_data_size() == target_offsets.size());
     auto field0 = retrieve_results->fields_data(0);

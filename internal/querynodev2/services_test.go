@@ -52,6 +52,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -72,6 +73,8 @@ type ServiceSuite struct {
 	// Test channel
 	vchannel string
 	pchannel string
+	channel  metautil.Channel
+	mapper   metautil.ChannelMapper
 	position *msgpb.MsgPosition
 
 	// Dependency
@@ -100,9 +103,14 @@ func (suite *ServiceSuite) SetupSuite() {
 	suite.flushedSegmentIDs = []int64{4, 5, 6}
 	suite.droppedSegmentIDs = []int64{7, 8, 9}
 
+	var err error
+	suite.mapper = metautil.NewDynChannelMapper()
 	// channel data
-	suite.vchannel = "test-channel"
+	suite.vchannel = "by-dev-rootcoord-dml_0_111v0"
 	suite.pchannel = funcutil.ToPhysicalChannel(suite.vchannel)
+	suite.channel, err = metautil.ParseChannel(suite.vchannel, suite.mapper)
+	suite.Require().NoError(err)
+
 	suite.position = &msgpb.MsgPosition{
 		ChannelName: suite.vchannel,
 		MsgID:       []byte{0, 0, 0, 0, 0, 0, 0, 0},
@@ -472,7 +480,7 @@ func (suite *ServiceSuite) TestUnsubDmChannels_Normal() {
 	l0Segment.EXPECT().Level().Return(datapb.SegmentLevel_L0)
 	l0Segment.EXPECT().Type().Return(commonpb.SegmentState_Sealed)
 	l0Segment.EXPECT().Indexes().Return(nil)
-	l0Segment.EXPECT().Shard().Return(suite.vchannel)
+	l0Segment.EXPECT().Shard().Return(suite.channel)
 	l0Segment.EXPECT().Release(ctx).Return()
 
 	suite.node.manager.Segment.Put(ctx, segments.SegmentTypeSealed, l0Segment)

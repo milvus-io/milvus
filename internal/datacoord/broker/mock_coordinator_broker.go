@@ -77,59 +77,6 @@ func (_c *MockBroker_DescribeCollectionInternal_Call) RunAndReturn(run func(cont
 	return _c
 }
 
-// GetDatabaseID provides a mock function with given fields: ctx, dbName
-func (_m *MockBroker) GetDatabaseID(ctx context.Context, dbName string) (int64, error) {
-	ret := _m.Called(ctx, dbName)
-
-	var r0 int64
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (int64, error)); ok {
-		return rf(ctx, dbName)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string) int64); ok {
-		r0 = rf(ctx, dbName)
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, dbName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBroker_GetDatabaseID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetDatabaseID'
-type MockBroker_GetDatabaseID_Call struct {
-	*mock.Call
-}
-
-// GetDatabaseID is a helper method to define mock.On call
-//   - ctx context.Context
-//   - dbName string
-func (_e *MockBroker_Expecter) GetDatabaseID(ctx interface{}, dbName interface{}) *MockBroker_GetDatabaseID_Call {
-	return &MockBroker_GetDatabaseID_Call{Call: _e.mock.On("GetDatabaseID", ctx, dbName)}
-}
-
-func (_c *MockBroker_GetDatabaseID_Call) Run(run func(ctx context.Context, dbName string)) *MockBroker_GetDatabaseID_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string))
-	})
-	return _c
-}
-
-func (_c *MockBroker_GetDatabaseID_Call) Return(_a0 int64, _a1 error) *MockBroker_GetDatabaseID_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockBroker_GetDatabaseID_Call) RunAndReturn(run func(context.Context, string) (int64, error)) *MockBroker_GetDatabaseID_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // HasCollection provides a mock function with given fields: ctx, collectionID
 func (_m *MockBroker) HasCollection(ctx context.Context, collectionID int64) (bool, error) {
 	ret := _m.Called(ctx, collectionID)

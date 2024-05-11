@@ -13,6 +13,7 @@ from prettytable import PrettyTable
 import functools
 from time import sleep
 from pymilvus import AnnSearchRequest, RRFRanker
+from pymilvus import RemoteBulkWriter, BulkFileType
 from base.database_wrapper import ApiDatabaseWrapper
 from base.collection_wrapper import ApiCollectionWrapper
 from base.partition_wrapper import ApiPartitionWrapper
@@ -1539,7 +1540,7 @@ class BulkInsertChecker(Checker):
     """check bulk insert operations in a dependent thread"""
 
     def __init__(self, collection_name=None, files=[], use_one_collection=False, dim=ct.default_dim,
-                 schema=None, insert_data=False):
+                 schema=None, insert_data=False, minio_endpoint=None, bucket_name=None):
         if collection_name is None:
             collection_name = cf.gen_unique_str("BulkInsertChecker_")
         super().__init__(collection_name=collection_name, dim=dim, schema=schema, insert_data=insert_data)
@@ -1548,14 +1549,45 @@ class BulkInsertChecker(Checker):
         self.files = files
         self.recheck_failed_task = False
         self.failed_tasks = []
+        self.failed_tasks_id = []
         self.use_one_collection = use_one_collection  # if True, all tasks will use one collection to bulk insert
         self.c_name = collection_name
+        self.minio_endpoint = minio_endpoint
+        self.bucket_name = bucket_name
+
+    def prepare(self, data_size=100000):
+        with RemoteBulkWriter(
+                schema=self.schema,
+                file_type=BulkFileType.NUMPY,
+                remote_path="bulk_data",
+                connect_param=RemoteBulkWriter.ConnectParam(
+                    endpoint=self.minio_endpoint,
+                    access_key="minioadmin",
+                    secret_key="minioadmin",
+                    bucket_name=self.bucket_name
+                )
+        ) as remote_writer:
+
+            for i in range(data_size):
+                row = cf.get_row_data_by_schema(nb=1, schema=self.schema)[0]
+                remote_writer.append_row(row)
+            remote_writer.commit()
+            batch_files = remote_writer.batch_files
+            log.info(f"batch files: {batch_files}")
+            self.files = batch_files[0]
 
     def update(self, files=None, schema=None):
         if files is not None:
             self.files = files
         if schema is not None:
             self.schema = schema
+
+    def get_bulk_insert_task_state(self):
+        state_map = {}
+        for task_id in self.failed_tasks_id:
+            state, _ = self.utility_wrap.get_bulk_insert_state(task_id=task_id)
+            state_map[task_id] = state
+        return state_map
 
     @trace()
     def bulk_insert(self):
@@ -1584,9 +1616,11 @@ class BulkInsertChecker(Checker):
         log.info(f"after bulk insert, collection {self.c_name} has num entities {num_entities}")
         if not completed:
             self.failed_tasks.append(self.c_name)
+            self.failed_tasks_id.append(task_ids)
         return task_ids, completed
 
     def keep_running(self):
+        self.prepare()
         while self._keep_running:
             self.run_task()
             sleep(constants.WAIT_PER_OP / 10)

@@ -180,7 +180,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			interceptor.ClusterValidationUnaryServerInterceptor(),
 			interceptor.ServerIDValidationUnaryServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
-					s.serverID.Store(paramtable.GetNodeID())
+					s.serverID.Store(s.dataCoord.(*datacoord.Server).GetServerID())
 				}
 				return s.serverID.Load()
 			}),
@@ -191,7 +191,7 @@ func (s *Server) startGrpcLoop(grpcPort int) {
 			interceptor.ClusterValidationStreamServerInterceptor(),
 			interceptor.ServerIDValidationStreamServerInterceptor(func() int64 {
 				if s.serverID.Load() == 0 {
-					s.serverID.Store(paramtable.GetNodeID())
+					s.serverID.Store(s.dataCoord.(*datacoord.Server).GetServerID())
 				}
 				return s.serverID.Load()
 			}),

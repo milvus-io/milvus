@@ -799,6 +799,8 @@ class TestCreateImportJob(TestBase):
             }
 
         }
+        if is_partition_key:
+            payload["partitionName"] = "partition_0"
         rsp = self.import_job_client.create_import_jobs(payload)
         assert rsp['code'] == 200
         # list import job

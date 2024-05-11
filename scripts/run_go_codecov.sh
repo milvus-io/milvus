@@ -58,6 +58,16 @@ for d in $(go list ./... | grep -v -e vendor -e kafka -e planparserv2/generated 
     fi
 done
 popd
+# milvusclient
+pushd client
+for d in $(go list ./... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
+    $TEST_CMD -race -tags dynamic -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    if [ -f profile.out ]; then
+        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ../${FILE_COVERAGE_INFO}
+        rm profile.out
+    fi
+done
+popd
 endTime=`date +%s`
 
 echo "Total time for go unittest:" $(($endTime-$beginTime)) "s"

@@ -58,8 +58,13 @@ func NewL0Segment(collection *Collection,
 		zap.Int64("segmentID", loadInfo.GetSegmentID()),
 		zap.String("segmentType", segmentType.String()))
 
+	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
+	if err != nil {
+		return nil, err
+	}
+
 	segment := &L0Segment{
-		baseSegment: newBaseSegment(collection, segmentType, version, loadInfo),
+		baseSegment: base,
 	}
 
 	// level 0 segments are always in memory

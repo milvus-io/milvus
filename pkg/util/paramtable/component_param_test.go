@@ -305,6 +305,8 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryCoord.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
 		assert.Equal(t, true, Params.EnableStoppingBalance.GetAsBool())
+
+		assert.Equal(t, 4, Params.ChannelExclusiveNodeFactor.GetAsInt())
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
@@ -378,9 +380,27 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryNode.memoryIndexLoadPredictMemoryUsageFactor", "2.0")
 		assert.Equal(t, 2.0, Params.MemoryIndexLoadPredictMemoryUsageFactor.GetAsFloat())
 
-		assert.NotZero(t, Params.DiskCacheCapacityLimit.GetAsInt64())
+		assert.NotZero(t, Params.DiskCacheCapacityLimit.GetAsSize())
 		params.Save("queryNode.diskCacheCapacityLimit", "70")
-		assert.Equal(t, int64(70), Params.DiskCacheCapacityLimit.GetAsInt64())
+		assert.Equal(t, int64(70), Params.DiskCacheCapacityLimit.GetAsSize())
+		params.Save("queryNode.diskCacheCapacityLimit", "70m")
+		assert.Equal(t, int64(70*1024*1024), Params.DiskCacheCapacityLimit.GetAsSize())
+
+		assert.False(t, Params.LazyLoadEnabled.GetAsBool())
+		params.Save("queryNode.lazyloadEnabled", "true")
+		assert.True(t, Params.LazyLoadEnabled.GetAsBool())
+
+		assert.Equal(t, 30*time.Second, Params.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond))
+		params.Save("queryNode.lazyloadWaitTimeout", "100")
+		assert.Equal(t, 100*time.Millisecond, Params.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond))
+
+		assert.Equal(t, 5*time.Second, Params.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond))
+		params.Save("queryNode.lazyLoadRequestResourceTimeout", "100")
+		assert.Equal(t, 100*time.Millisecond, Params.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond))
+
+		assert.Equal(t, 2*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
+		params.Save("queryNode.lazyLoadRequestResourceRetryInterval", "3000")
+		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 	})
 
 	t.Run("test dataCoordConfig", func(t *testing.T) {

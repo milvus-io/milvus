@@ -624,40 +624,6 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	s.Assert().True(merr.Ok(resp.GetStatus()), "empty call, status shall be OK")
 }
 
-/*
-func (s *DataNodeServicesSuite) TestFlushChannels() {
-	dmChannelName := "fake-by-dev-rootcoord-dml-channel-TestFlushChannels"
-
-	vChan := &datapb.VchannelInfo{
-		CollectionID:        1,
-		ChannelName:         dmChannelName,
-		UnflushedSegmentIds: []int64{},
-		FlushedSegmentIds:   []int64{},
-	}
-
-	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, vChan, nil, genTestTickler())
-	s.Require().NoError(err)
-
-	fgService, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
-	s.Require().True(ok)
-
-	flushTs := Timestamp(100)
-
-	req := &datapb.FlushChannelsRequest{
-		Base: &commonpb.MsgBase{
-			TargetID: s.node.GetSession().ServerID,
-		},
-		FlushTs:  flushTs,
-		Channels: []string{dmChannelName},
-	}
-
-	status, err := s.node.FlushChannels(s.ctx, req)
-	s.Assert().NoError(err)
-	s.Assert().True(merr.Ok(status))
-
-	s.Assert().True(fgService.channel.getFlushTs() == flushTs)
-}*/
-
 func (s *DataNodeServicesSuite) TestRPCWatch() {
 	s.Run("node not healthy", func() {
 		s.SetupTest()
@@ -675,22 +641,16 @@ func (s *DataNodeServicesSuite) TestRPCWatch() {
 		s.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 	})
 
-	s.Run("node healthy", func() {
+	s.Run("submit error", func() {
 		s.SetupTest()
-		mockChManager := NewMockChannelManager(s.T())
-		s.node.channelManager = mockChManager
-		mockChManager.EXPECT().Submit(mock.Anything).Return(nil).Once()
 		ctx := context.Background()
 		status, err := s.node.NotifyChannelOperation(ctx, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{{OpID: 19530}}})
 		s.NoError(err)
-		s.True(merr.Ok(status))
-
-		mockChManager.EXPECT().GetProgress(mock.Anything).Return(
-			&datapb.ChannelOperationProgressResponse{Status: merr.Status(nil)},
-		).Once()
+		s.False(merr.Ok(status))
+		s.NotErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 
 		resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
 		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
+		s.False(merr.Ok(resp.GetStatus()))
 	})
 }

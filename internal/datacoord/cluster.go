@@ -35,7 +35,7 @@ type Cluster interface {
 	Startup(ctx context.Context, nodes []*NodeInfo) error
 	Register(node *NodeInfo) error
 	UnRegister(node *NodeInfo) error
-	Watch(ctx context.Context, ch string, collectionID UniqueID) error
+	Watch(ctx context.Context, ch RWChannel) error
 	Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error
 	FlushChannels(ctx context.Context, nodeID int64, flushTs Timestamp, channels []string) error
 	PreImport(nodeID int64, in *datapb.PreImportRequest) error
@@ -69,10 +69,19 @@ func (c *ClusterImpl) Startup(ctx context.Context, nodes []*NodeInfo) error {
 	for _, node := range nodes {
 		c.sessionManager.AddSession(node)
 	}
-	currs := lo.Map(nodes, func(info *NodeInfo, _ int) int64 {
-		return info.NodeID
+
+	var (
+		legacyNodes []int64
+		allNodes    []int64
+	)
+
+	lo.ForEach(nodes, func(info *NodeInfo, _ int) {
+		if info.IsLegacy {
+			legacyNodes = append(legacyNodes, info.NodeID)
+		}
+		allNodes = append(allNodes, info.NodeID)
 	})
-	return c.channelManager.Startup(ctx, currs)
+	return c.channelManager.Startup(ctx, legacyNodes, allNodes)
 }
 
 // Register registers a new node in cluster
@@ -88,22 +97,21 @@ func (c *ClusterImpl) UnRegister(node *NodeInfo) error {
 }
 
 // Watch tries to add a channel in datanode cluster
-func (c *ClusterImpl) Watch(ctx context.Context, ch string, collectionID UniqueID) error {
-	return c.channelManager.Watch(ctx, &channelMeta{Name: ch, CollectionID: collectionID})
+func (c *ClusterImpl) Watch(ctx context.Context, ch RWChannel) error {
+	return c.channelManager.Watch(ctx, ch)
 }
 
 // Flush sends async FlushSegments requests to dataNodes
 // which also according to channels where segments are assigned to.
 func (c *ClusterImpl) Flush(ctx context.Context, nodeID int64, channel string, segments []*datapb.SegmentInfo) error {
-	if !c.channelManager.Match(nodeID, channel) {
+	ch, founded := c.channelManager.GetChannel(nodeID, channel)
+	if !founded {
 		log.Warn("node is not matched with channel",
 			zap.String("channel", channel),
 			zap.Int64("nodeID", nodeID),
 		)
 		return fmt.Errorf("channel %s is not watched on node %d", channel, nodeID)
 	}
-
-	_, collID := c.channelManager.GetCollectionIDByChannel(channel)
 
 	getSegmentID := func(segment *datapb.SegmentInfo, _ int) int64 {
 		return segment.GetID()
@@ -115,7 +123,7 @@ func (c *ClusterImpl) Flush(ctx context.Context, nodeID int64, channel string, s
 			commonpbutil.WithSourceID(paramtable.GetNodeID()),
 			commonpbutil.WithTargetID(nodeID),
 		),
-		CollectionID: collID,
+		CollectionID: ch.GetCollectionID(),
 		SegmentIDs:   lo.Map(segments, getSegmentID),
 		ChannelName:  channel,
 	}

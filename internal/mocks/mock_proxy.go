@@ -1134,6 +1134,61 @@ func (_c *MockProxy_DescribeCollection_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// DescribeDatabase provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) DescribeDatabase(_a0 context.Context, _a1 *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *milvuspb.DescribeDatabaseResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *milvuspb.DescribeDatabaseRequest) *milvuspb.DescribeDatabaseResponse); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*milvuspb.DescribeDatabaseResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *milvuspb.DescribeDatabaseRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_DescribeDatabase_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeDatabase'
+type MockProxy_DescribeDatabase_Call struct {
+	*mock.Call
+}
+
+// DescribeDatabase is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *milvuspb.DescribeDatabaseRequest
+func (_e *MockProxy_Expecter) DescribeDatabase(_a0 interface{}, _a1 interface{}) *MockProxy_DescribeDatabase_Call {
+	return &MockProxy_DescribeDatabase_Call{Call: _e.mock.On("DescribeDatabase", _a0, _a1)}
+}
+
+func (_c *MockProxy_DescribeDatabase_Call) Run(run func(_a0 context.Context, _a1 *milvuspb.DescribeDatabaseRequest)) *MockProxy_DescribeDatabase_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*milvuspb.DescribeDatabaseRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_DescribeDatabase_Call) Return(_a0 *milvuspb.DescribeDatabaseResponse, _a1 error) *MockProxy_DescribeDatabase_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_DescribeDatabase_Call) RunAndReturn(run func(context.Context, *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error)) *MockProxy_DescribeDatabase_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DescribeIndex provides a mock function with given fields: _a0, _a1
 func (_m *MockProxy) DescribeIndex(_a0 context.Context, _a1 *milvuspb.DescribeIndexRequest) (*milvuspb.DescribeIndexResponse, error) {
 	ret := _m.Called(_a0, _a1)
@@ -3630,6 +3685,61 @@ func (_c *MockProxy_InvalidateCredentialCache_Call) Return(_a0 *commonpb.Status,
 }
 
 func (_c *MockProxy_InvalidateCredentialCache_Call) RunAndReturn(run func(context.Context, *proxypb.InvalidateCredCacheRequest) (*commonpb.Status, error)) *MockProxy_InvalidateCredentialCache_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// InvalidateShardLeaderCache provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) InvalidateShardLeaderCache(_a0 context.Context, _a1 *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_InvalidateShardLeaderCache_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InvalidateShardLeaderCache'
+type MockProxy_InvalidateShardLeaderCache_Call struct {
+	*mock.Call
+}
+
+// InvalidateShardLeaderCache is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *proxypb.InvalidateShardLeaderCacheRequest
+func (_e *MockProxy_Expecter) InvalidateShardLeaderCache(_a0 interface{}, _a1 interface{}) *MockProxy_InvalidateShardLeaderCache_Call {
+	return &MockProxy_InvalidateShardLeaderCache_Call{Call: _e.mock.On("InvalidateShardLeaderCache", _a0, _a1)}
+}
+
+func (_c *MockProxy_InvalidateShardLeaderCache_Call) Run(run func(_a0 context.Context, _a1 *proxypb.InvalidateShardLeaderCacheRequest)) *MockProxy_InvalidateShardLeaderCache_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*proxypb.InvalidateShardLeaderCacheRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_InvalidateShardLeaderCache_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_InvalidateShardLeaderCache_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_InvalidateShardLeaderCache_Call) RunAndReturn(run func(context.Context, *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error)) *MockProxy_InvalidateShardLeaderCache_Call {
 	_c.Call.Return(run)
 	return _c
 }

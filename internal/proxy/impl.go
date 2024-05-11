@@ -172,6 +172,29 @@ func (node *Proxy) InvalidateCollectionMetaCache(ctx context.Context, request *p
 	return merr.Success(), nil
 }
 
+// InvalidateCollectionMetaCache invalidate the meta cache of specific collection.
+func (node *Proxy) InvalidateShardLeaderCache(ctx context.Context, request *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+	ctx = logutil.WithModule(ctx, moduleName)
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-InvalidateShardLeaderCache")
+	defer sp.End()
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+	)
+
+	log.Info("received request to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
+
+	if globalMetaCache != nil {
+		globalMetaCache.InvalidateShardLeaderCache(request.GetCollectionIDs())
+	}
+	log.Info("complete to invalidate shard leader cache", zap.Int64s("collectionIDs", request.GetCollectionIDs()))
+
+	return merr.Success(), nil
+}
+
 func (node *Proxy) CreateDatabase(ctx context.Context, request *milvuspb.CreateDatabaseRequest) (*commonpb.Status, error) {
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
@@ -429,6 +452,66 @@ func (node *Proxy) AlterDatabase(ctx context.Context, request *milvuspb.AlterDat
 	}
 
 	log.Info(rpcDone(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()))
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.SuccessLabel, request.GetDbName(), "").Inc()
+	metrics.ProxyReqLatency.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	return act.result, nil
+}
+
+func (node *Proxy) DescribeDatabase(ctx context.Context, request *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
+	resp := &milvuspb.DescribeDatabaseResponse{}
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-DescribeDatabase")
+	defer sp.End()
+	method := "DescribeDatabase"
+	tr := timerecord.NewTimeRecorder(method)
+
+	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), "").Inc()
+
+	act := &describeDatabaseTask{
+		ctx:                     ctx,
+		Condition:               NewTaskCondition(ctx),
+		DescribeDatabaseRequest: request,
+		rootCoord:               node.rootCoord,
+	}
+
+	log := log.Ctx(ctx).With(
+		zap.String("role", typeutil.ProxyRole),
+		zap.String("db", request.DbName))
+
+	log.Debug(rpcReceived(method))
+
+	if err := node.sched.ddQueue.Enqueue(act); err != nil {
+		log.Warn(rpcFailedToEnqueue(method), zap.Error(err))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.AbandonLabel, request.GetDbName(), "").Inc()
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	log.Debug(rpcEnqueued(method),
+		zap.Uint64("BeginTs", act.BeginTs()),
+		zap.Uint64("EndTs", act.EndTs()),
+		zap.Uint64("timestamp", request.Base.Timestamp))
+
+	if err := act.WaitToFinish(); err != nil {
+		log.Warn(rpcFailedToWaitToFinish(method),
+			zap.Error(err),
+			zap.Uint64("BeginTs", act.BeginTs()),
+			zap.Uint64("EndTs", act.EndTs()))
+
+		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.FailLabel, request.GetDbName(), "").Inc()
+		resp.Status = merr.Status(err)
+		return resp, nil
+	}
+
+	log.Debug(rpcDone(method),
 		zap.Uint64("BeginTs", act.BeginTs()),
 		zap.Uint64("EndTs", act.EndTs()))
 
@@ -5990,14 +6073,16 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		return resp, nil
 	}
 
+	isBackup := importutilv2.IsBackup(req.GetOptions())
 	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
-	if req.GetPartitionName() != "" && hasPartitionKey {
-		resp.Status = merr.Status(merr.WrapErrImportFailed("not allow to set partition name for collection with partition key"))
-		return resp, nil
-	}
 
 	var partitionIDs []int64
-	if req.GetPartitionName() == "" && hasPartitionKey {
+	if isBackup {
+		if req.GetPartitionName() == "" {
+			resp.Status = merr.Status(merr.WrapErrParameterInvalidMsg("partition not specified"))
+			return resp, nil
+		}
+		// Currently, Backup tool call import must with a partition name, each time restore a partition
 		partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
@@ -6005,17 +6090,30 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		}
 		partitionIDs = lo.Values(partitions)
 	} else {
-		partitionName := req.GetPartitionName()
-		if req.GetPartitionName() == "" {
-			partitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+		if hasPartitionKey {
+			if req.GetPartitionName() != "" {
+				resp.Status = merr.Status(merr.WrapErrImportFailed("not allow to set partition name for collection with partition key"))
+				return resp, nil
+			}
+			partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
+			partitionIDs = lo.Values(partitions)
+		} else {
+			if req.GetPartitionName() == "" {
+				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()
+			}
+			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
+			partitionIDs = []UniqueID{partitionID}
 		}
-		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), partitionName)
-		if err != nil {
-			resp.Status = merr.Status(err)
-			return resp, nil
-		}
-		partitionIDs = []UniqueID{partitionID}
 	}
+
 	req.Files = lo.Filter(req.GetFiles(), func(file *internalpb.ImportFile, _ int) bool {
 		return len(file.GetPaths()) > 0
 	})
@@ -6028,7 +6126,6 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))))
 		return resp, nil
 	}
-	isBackup := importutilv2.IsBackup(req.GetOptions())
 	if !isBackup {
 		// check file type
 		for _, file := range req.GetFiles() {

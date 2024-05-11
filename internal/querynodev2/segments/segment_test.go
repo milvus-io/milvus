@@ -2,6 +2,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/suite"
@@ -69,7 +70,7 @@ func (suite *SegmentSuite) SetupTest() {
 			CollectionID:  suite.collectionID,
 			SegmentID:     suite.segmentID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 			NumOfRows:     int64(msgLength),
 			BinlogPaths: []*datapb.FieldBinlog{
@@ -111,7 +112,7 @@ func (suite *SegmentSuite) SetupTest() {
 			SegmentID:     suite.segmentID + 1,
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
@@ -184,6 +185,14 @@ func (suite *SegmentSuite) TestHasRawData() {
 	suite.True(has)
 	has = suite.sealed.HasRawData(simpleFloatVecField.id)
 	suite.True(has)
+}
+
+func (suite *SegmentSuite) TestLocation() {
+	pk := storage.NewInt64PrimaryKey(100)
+	locations := storage.Locations(pk, suite.sealed.GetHashFuncNum())
+	ret1 := suite.sealed.TestLocations(pk, locations)
+	ret2 := suite.sealed.MayPkExist(pk)
+	suite.Equal(ret1, ret2)
 }
 
 func (suite *SegmentSuite) TestCASVersion() {

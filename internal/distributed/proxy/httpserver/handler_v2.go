@@ -558,13 +558,13 @@ func (h *HandlersV2) releaseCollection(ctx context.Context, c *gin.Context, anyR
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
-		DbName:             dbName,
-		CollectionName:     httpReq.CollectionName,
-		Expr:               httpReq.Filter,
-		OutputFields:       httpReq.OutputFields,
-		PartitionNames:     httpReq.PartitionNames,
-		GuaranteeTimestamp: BoundedTimestamp,
-		QueryParams:        []*commonpb.KeyValuePair{},
+		DbName:                dbName,
+		CollectionName:        httpReq.CollectionName,
+		Expr:                  httpReq.Filter,
+		OutputFields:          httpReq.OutputFields,
+		PartitionNames:        httpReq.PartitionNames,
+		QueryParams:           []*commonpb.KeyValuePair{},
+		UseDefaultConsistency: true,
 	}
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
@@ -586,7 +586,11 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			c.JSON(http.StatusOK, gin.H{
+				HTTPReturnCode: http.StatusOK,
+				HTTPReturnData: outputData,
+				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
+			})
 		}
 	}
 	return resp, err
@@ -608,12 +612,12 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	req := &milvuspb.QueryRequest{
-		DbName:             dbName,
-		CollectionName:     httpReq.CollectionName,
-		OutputFields:       httpReq.OutputFields,
-		PartitionNames:     httpReq.PartitionNames,
-		GuaranteeTimestamp: BoundedTimestamp,
-		Expr:               filter,
+		DbName:                dbName,
+		CollectionName:        httpReq.CollectionName,
+		OutputFields:          httpReq.OutputFields,
+		PartitionNames:        httpReq.PartitionNames,
+		Expr:                  filter,
+		UseDefaultConsistency: true,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
@@ -629,7 +633,11 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			c.JSON(http.StatusOK, gin.H{
+				HTTPReturnCode: http.StatusOK,
+				HTTPReturnData: outputData,
+				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
+			})
 		}
 	}
 	return resp, err
@@ -663,7 +671,9 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return h.proxy.Delete(reqCtx, req.(*milvuspb.DeleteRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		c.JSON(http.StatusOK, wrapperReturnDefaultWithCost(
+			proxy.GetCostValue(resp.(*milvuspb.MutationResult).GetStatus()),
+		))
 	}
 	return resp, err
 }
@@ -705,16 +715,29 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	})
 	if err == nil {
 		insertResp := resp.(*milvuspb.MutationResult)
+		cost := proxy.GetCostValue(insertResp.GetStatus())
 		switch insertResp.IDs.GetIdField().(type) {
 		case *schemapb.IDs_IntId:
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}})
+				c.JSON(http.StatusOK, gin.H{
+					HTTPReturnCode: http.StatusOK,
+					HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
+					HTTPReturnCost: cost,
+				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": formatInt64(insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}})
+				c.JSON(http.StatusOK, gin.H{
+					HTTPReturnCode: http.StatusOK,
+					HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": formatInt64(insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
+					HTTPReturnCost: cost,
+				})
 			}
 		case *schemapb.IDs_StrId:
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}})
+			c.JSON(http.StatusOK, gin.H{
+				HTTPReturnCode: http.StatusOK,
+				HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
+				HTTPReturnCost: cost,
+			})
 		default:
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -767,16 +790,29 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	})
 	if err == nil {
 		upsertResp := resp.(*milvuspb.MutationResult)
+		cost := proxy.GetCostValue(upsertResp.GetStatus())
 		switch upsertResp.IDs.GetIdField().(type) {
 		case *schemapb.IDs_IntId:
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}})
+				c.JSON(http.StatusOK, gin.H{
+					HTTPReturnCode: http.StatusOK,
+					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
+					HTTPReturnCost: cost,
+				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}})
+				c.JSON(http.StatusOK, gin.H{
+					HTTPReturnCode: http.StatusOK,
+					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
+					HTTPReturnCost: cost,
+				})
 			}
 		case *schemapb.IDs_StrId:
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}})
+			c.JSON(http.StatusOK, gin.H{
+				HTTPReturnCode: http.StatusOK,
+				HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
+				HTTPReturnCost: cost,
+			})
 		default:
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -879,23 +915,24 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	req := &milvuspb.SearchRequest{
-		DbName:             dbName,
-		CollectionName:     httpReq.CollectionName,
-		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   placeholderGroup,
-		DslType:            commonpb.DslType_BoolExprV1,
-		OutputFields:       httpReq.OutputFields,
-		PartitionNames:     httpReq.PartitionNames,
-		SearchParams:       searchParams,
-		GuaranteeTimestamp: BoundedTimestamp,
+		DbName:                dbName,
+		CollectionName:        httpReq.CollectionName,
+		Dsl:                   httpReq.Filter,
+		PlaceholderGroup:      placeholderGroup,
+		DslType:               commonpb.DslType_BoolExprV1,
+		OutputFields:          httpReq.OutputFields,
+		PartitionNames:        httpReq.PartitionNames,
+		SearchParams:          searchParams,
+		UseDefaultConsistency: true,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
 	if err == nil {
 		searchResp := resp.(*milvuspb.SearchResults)
+		cost := proxy.GetCostValue(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(searchResp.Results.TopK, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
@@ -906,7 +943,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData, HTTPReturnCost: cost})
 			}
 		}
 	}
@@ -947,15 +984,15 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 		searchReq := &milvuspb.SearchRequest{
-			DbName:             dbName,
-			CollectionName:     httpReq.CollectionName,
-			Dsl:                subReq.Filter,
-			PlaceholderGroup:   placeholderGroup,
-			DslType:            commonpb.DslType_BoolExprV1,
-			OutputFields:       httpReq.OutputFields,
-			PartitionNames:     httpReq.PartitionNames,
-			SearchParams:       searchParams,
-			GuaranteeTimestamp: BoundedTimestamp,
+			DbName:                dbName,
+			CollectionName:        httpReq.CollectionName,
+			Dsl:                   subReq.Filter,
+			PlaceholderGroup:      placeholderGroup,
+			DslType:               commonpb.DslType_BoolExprV1,
+			OutputFields:          httpReq.OutputFields,
+			PartitionNames:        httpReq.PartitionNames,
+			SearchParams:          searchParams,
+			UseDefaultConsistency: true,
 		}
 		req.Requests = append(req.Requests, searchReq)
 	}
@@ -971,8 +1008,9 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 	})
 	if err == nil {
 		searchResp := resp.(*milvuspb.SearchResults)
+		cost := proxy.GetCostValue(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
@@ -983,7 +1021,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData, HTTPReturnCost: cost})
 			}
 		}
 	}

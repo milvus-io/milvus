@@ -83,7 +83,6 @@ var Params *paramtable.ComponentParam = paramtable.Get()
 //	`segmentCache` stores all flushing and flushed segments.
 type DataNode struct {
 	ctx              context.Context
-	serverID         int64
 	cancel           context.CancelFunc
 	Role             string
 	stateCode        atomic.Value // commonpb.StateCode_Initializing
@@ -129,7 +128,7 @@ type DataNode struct {
 }
 
 // NewDataNode will return a DataNode with abnormal state.
-func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64) *DataNode {
+func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 	rand.Seed(time.Now().UnixNano())
 	ctx2, cancel2 := context.WithCancel(ctx)
 	node := &DataNode{
@@ -140,13 +139,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory, serverID int64
 		rootCoord:          nil,
 		dataCoord:          nil,
 		factory:            factory,
-		serverID:           serverID,
 		segmentCache:       newCache(),
 		compactionExecutor: newCompactionExecutor(),
 
-		eventManager:     NewEventManager(),
-		flowgraphManager: newFlowgraphManager(),
-		clearSignal:      make(chan string, 100),
+		clearSignal: make(chan string, 100),
 
 		reportImportRetryTimes: 10,
 	}
@@ -228,10 +224,10 @@ func (node *DataNode) initRateCollector() error {
 }
 
 func (node *DataNode) GetNodeID() int64 {
-	if node.serverID == 0 && node.session != nil {
+	if node.session != nil {
 		return node.session.ServerID
 	}
-	return node.serverID
+	return paramtable.GetNodeID()
 }
 
 func (node *DataNode) Init() error {
@@ -246,7 +242,7 @@ func (node *DataNode) Init() error {
 			return
 		}
 
-		serverID := node.session.ServerID
+		serverID := node.GetNodeID()
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
 
 		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
@@ -294,6 +290,13 @@ func (node *DataNode) Init() error {
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr, node.syncMgr, node.chunkManager)
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
+		node.flowgraphManager = newFlowgraphManager()
+
+		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
+			node.channelManager = NewChannelManager(node)
+		} else {
+			node.eventManager = NewEventManager()
+		}
 
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
@@ -322,9 +325,15 @@ func (node *DataNode) handleChannelEvt(evt *clientv3.Event) {
 // tryToReleaseFlowgraph tries to release a flowgraph
 func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 	log.Info("try to release flowgraph", zap.String("channel", channel))
-	node.compactionExecutor.discardPlan(channel)
-	node.flowgraphManager.RemoveFlowgraph(channel)
-	node.writeBufferManager.RemoveChannel(channel)
+	if node.compactionExecutor != nil {
+		node.compactionExecutor.discardPlan(channel)
+	}
+	if node.flowgraphManager != nil {
+		node.flowgraphManager.RemoveFlowgraph(channel)
+	}
+	if node.writeBufferManager != nil {
+		node.writeBufferManager.RemoveChannel(channel)
+	}
 }
 
 // BackGroundGC runs in background to release datanode resources
@@ -398,8 +407,12 @@ func (node *DataNode) Start() error {
 
 		go node.channelCheckpointUpdater.start()
 
-		// Start node watch node
-		node.startWatchChannelsAtBackground(node.ctx)
+		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
+			node.channelManager.Start()
+		} else {
+			// Start node watch node
+			node.startWatchChannelsAtBackground(node.ctx)
+		}
 
 		node.UpdateStateCode(commonpb.StateCode_Healthy)
 	})
@@ -433,9 +446,13 @@ func (node *DataNode) Stop() error {
 	node.stopOnce.Do(func() {
 		// https://github.com/milvus-io/milvus/issues/12282
 		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		if node.channelManager != nil {
+			node.channelManager.Close()
+		}
 
-		node.flowgraphManager.Close()
-		node.eventManager.CloseAll()
+		if node.eventManager != nil {
+			node.eventManager.CloseAll()
+		}
 
 		if node.writeBufferManager != nil {
 			node.writeBufferManager.Stop()
@@ -466,6 +483,7 @@ func (node *DataNode) Stop() error {
 			node.importScheduler.Close()
 		}
 
+		// Delay the cancellation of ctx to ensure that the session is automatically recycled after closed the flow graph
 		node.cancel()
 		node.stopWaiter.Wait()
 	})

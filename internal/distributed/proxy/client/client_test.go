@@ -462,3 +462,40 @@ func Test_ImportV2(t *testing.T) {
 	_, err = client.ListImports(ctx, &internalpb.ListImportsRequest{})
 	assert.Nil(t, err)
 }
+
+func Test_InvalidateShardLeaderCache(t *testing.T) {
+	paramtable.Init()
+
+	ctx := context.Background()
+	client, err := NewClient(ctx, "test", 1)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockProxy := mocks.NewMockProxyClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[proxypb.ProxyClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(proxypb.ProxyClient) (interface{}, error)) (interface{}, error) {
+		return f(mockProxy)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockProxy.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	_, err = client.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
+	assert.Nil(t, err)
+
+	// test return error code
+	mockProxy.ExpectedCalls = nil
+	mockProxy.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+
+	_, err = client.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
+	assert.Nil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.InvalidateShardLeaderCache(ctx, &proxypb.InvalidateShardLeaderCacheRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

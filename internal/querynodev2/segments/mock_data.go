@@ -1075,7 +1075,6 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 
 	return &querypb.FieldIndexInfo{
 		FieldID:             fieldSchema.GetFieldID(),
-		EnableIndex:         true,
 		IndexName:           indexInfo.GetIndexName(),
 		IndexParams:         indexInfo.GetIndexParams(),
 		IndexFilePaths:      indexPaths,
@@ -1136,7 +1135,6 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 
 	return &querypb.FieldIndexInfo{
 		FieldID:             fieldID,
-		EnableIndex:         true,
 		IndexName:           "querynode-test",
 		IndexParams:         funcutil.Map2KeyValuePair(indexParams),
 		IndexFilePaths:      indexPaths,
@@ -1389,7 +1387,7 @@ func genSearchPlanAndRequests(collection *Collection, segments []int64, indexTyp
 	iReq, _ := genSearchRequest(nq, indexType, collection)
 	queryReq := &querypb.SearchRequest{
 		Req:         iReq,
-		DmlChannels: []string{"dml"},
+		DmlChannels: []string{fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collection.ID())},
 		SegmentIDs:  segments,
 		Scope:       querypb.DataScope_Historical,
 	}
@@ -1450,7 +1448,7 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 			CollectionID:   collection.ID(),
 			PartitionID:    partitionID,
 			SegmentID:      segment,
-			ShardName:      "dml",
+			ShardName:      fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collection.ID()),
 			Timestamps:     genSimpleTimestampFieldData(numRows),
 			RowIDs:         genSimpleRowIDField(numRows),
 			FieldsData:     fieldsData,

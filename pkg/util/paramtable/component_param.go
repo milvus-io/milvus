@@ -770,8 +770,8 @@ func (t *traceConfig) init(base *BaseTable) {
 		Key:     "trace.exporter",
 		Version: "2.3.0",
 		Doc: `trace exporter type, default is stdout,
-optional values: ['stdout', 'jaeger', 'otlp']`,
-		DefaultValue: "stdout",
+optional values: ['noop','stdout', 'jaeger', 'otlp']`,
+		DefaultValue: "noop",
 		Export:       true,
 	}
 	t.Exporter.Init(base.mgr)
@@ -1491,6 +1491,7 @@ type queryCoordConfig struct {
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
+	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1967,6 +1968,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableStoppingBalance.Init(base.mgr)
+
+	p.ChannelExclusiveNodeFactor = ParamItem{
+		Key:          "queryCoord.channelExclusiveNodeFactor",
+		Version:      "2.4.2",
+		DefaultValue: "4",
+		Doc:          "the least node number for enable channel's exclusive mode",
+		Export:       true,
+	}
+	p.ChannelExclusiveNodeFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2003,8 +2013,12 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 	MmapEnabled      ParamItem `refreshable:"false"`
 
-	LazyLoadEnabled     ParamItem `refreshable:"false"`
-	LazyLoadWaitTimeout ParamItem `refreshable:"false"`
+	LazyLoadEnabled                      ParamItem `refreshable:"false"`
+	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceTimeout       ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceRetryInterval ParamItem `refreshable:"true"`
+	LazyLoadMaxRetryTimes                ParamItem `refreshable:"true"`
+	LazyLoadMaxEvictPerRetry             ParamItem `refreshable:"true"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -2242,7 +2256,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 
 	p.LazyLoadEnabled = ParamItem{
 		Key:          "queryNode.lazyloadEnabled",
-		Version:      "2.4.0",
+		Version:      "2.4.2",
 		DefaultValue: "false",
 		Doc:          "Enable lazyload for loading data",
 		Export:       true,
@@ -2250,11 +2264,46 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.LazyLoadEnabled.Init(base.mgr)
 	p.LazyLoadWaitTimeout = ParamItem{
 		Key:          "queryNode.lazyloadWaitTimeout",
-		Version:      "2.4.0",
+		Version:      "2.4.2",
 		DefaultValue: "30000",
 		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
+		Export:       true,
 	}
 	p.LazyLoadWaitTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceTimeout = ParamItem{
+		Key:          "queryNode.lazyLoadRequestResourceTimeout",
+		Version:      "2.4.2",
+		DefaultValue: "5000",
+		Doc:          "max timeout in milliseconds for waiting request resource for lazy load, 5s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceRetryInterval = ParamItem{
+		Key:          "queryNode.lazyLoadRequestResourceRetryInterval",
+		Version:      "2.4.2",
+		DefaultValue: "2000",
+		Doc:          "retry interval in milliseconds for waiting request resource for lazy load, 2s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceRetryInterval.Init(base.mgr)
+
+	p.LazyLoadMaxRetryTimes = ParamItem{
+		Key:          "queryNode.lazyLoadMaxRetryTimes",
+		Version:      "2.4.2",
+		DefaultValue: "1",
+		Doc:          "max retry times for lazy load, 1 by default",
+		Export:       true,
+	}
+	p.LazyLoadMaxRetryTimes.Init(base.mgr)
+
+	p.LazyLoadMaxEvictPerRetry = ParamItem{
+		Key:          "queryNode.lazyLoadMaxEvictPerRetry",
+		Version:      "2.4.2",
+		DefaultValue: "1",
+		Doc:          "max evict count for lazy load, 1 by default",
+		Export:       true,
+	}
+	p.LazyLoadMaxEvictPerRetry.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",
@@ -2601,6 +2650,8 @@ user-task-polling:
 type dataCoordConfig struct {
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	EnableBalanceChannelWithRPC  ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
@@ -2692,6 +2743,24 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
 
+	p.EnableBalanceChannelWithRPC = ParamItem{
+		Key:          "dataCoord.channel.balanceWithRpc",
+		Version:      "2.4.0",
+		DefaultValue: "true",
+		Doc:          "Whether to enable balance with RPC, default to use etcd watch",
+		Export:       true,
+	}
+	p.EnableBalanceChannelWithRPC.Init(base.mgr)
+
+	p.LegacyVersionWithoutRPCWatch = ParamItem{
+		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
+		Version:      "2.4.0",
+		DefaultValue: "2.4.0",
+		Doc:          "Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels",
+		Export:       true,
+	}
+	p.LegacyVersionWithoutRPCWatch.Init(base.mgr)
+
 	p.ChannelBalanceSilentDuration = ParamItem{
 		Key:          "dataCoord.channel.balanceSilentDuration",
 		Version:      "2.2.3",
@@ -2713,7 +2782,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval = ParamItem{
 		Key:          "dataCoord.channel.checkInterval",
 		Version:      "2.4.0",
-		DefaultValue: "10",
+		DefaultValue: "1",
 		Doc:          "The interval in seconds with which the channel manager advances channel states",
 		Export:       true,
 	}
