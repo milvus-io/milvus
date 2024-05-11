@@ -712,6 +712,7 @@ func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.C
 	}
 
 	log.Info("generate a plan for priority candidates", zap.Any("plan", plan),
+		zap.Int("len(segments)", len(plan.GetSegmentBinlogs())),
 		zap.Int64("target segment row", plan.TotalRows), zap.Int64("target segment size", size))
 	return plan
 }
