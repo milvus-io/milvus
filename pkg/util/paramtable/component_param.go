@@ -2245,7 +2245,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.MmapEnabled.Init(base.mgr)
 
 	p.LazyLoadEnabled = ParamItem{
-		Key:          "queryNode.lazyloadEnabled",
+		Key:          "queryNode.lazyload.enabled",
 		Version:      "2.4.2",
 		DefaultValue: "false",
 		Doc:          "Enable lazyload for loading data",
@@ -2253,7 +2253,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.LazyLoadEnabled.Init(base.mgr)
 	p.LazyLoadWaitTimeout = ParamItem{
-		Key:          "queryNode.lazyloadWaitTimeout",
+		Key:          "queryNode.lazyload.waitTimeout",
 		Version:      "2.4.2",
 		DefaultValue: "30000",
 		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
@@ -2261,7 +2261,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.LazyLoadWaitTimeout.Init(base.mgr)
 	p.LazyLoadRequestResourceTimeout = ParamItem{
-		Key:          "queryNode.lazyLoadRequestResourceTimeout",
+		Key:          "queryNode.lazyload.requestResourceTimeout",
 		Version:      "2.4.2",
 		DefaultValue: "5000",
 		Doc:          "max timeout in milliseconds for waiting request resource for lazy load, 5s by default",
@@ -2269,7 +2269,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.LazyLoadRequestResourceTimeout.Init(base.mgr)
 	p.LazyLoadRequestResourceRetryInterval = ParamItem{
-		Key:          "queryNode.lazyLoadRequestResourceRetryInterval",
+		Key:          "queryNode.lazyload.requestResourceRetryInterval",
 		Version:      "2.4.2",
 		DefaultValue: "2000",
 		Doc:          "retry interval in milliseconds for waiting request resource for lazy load, 2s by default",
@@ -2278,7 +2278,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.LazyLoadRequestResourceRetryInterval.Init(base.mgr)
 
 	p.LazyLoadMaxRetryTimes = ParamItem{
-		Key:          "queryNode.lazyLoadMaxRetryTimes",
+		Key:          "queryNode.lazyload.maxRetryTimes",
 		Version:      "2.4.2",
 		DefaultValue: "1",
 		Doc:          "max retry times for lazy load, 1 by default",
@@ -2287,7 +2287,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.LazyLoadMaxRetryTimes.Init(base.mgr)
 
 	p.LazyLoadMaxEvictPerRetry = ParamItem{
-		Key:          "queryNode.lazyLoadMaxEvictPerRetry",
+		Key:          "queryNode.lazyload.maxEvictPerRetry",
 		Version:      "2.4.2",
 		DefaultValue: "1",
 		Doc:          "max evict count for lazy load, 1 by default",

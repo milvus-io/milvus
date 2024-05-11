@@ -336,11 +336,13 @@ queryNode:
     warmup: async
   mmap:
     mmapEnabled: false # Enable mmap for loading data
-  mmapEnabled: false # Enable mmap for loading data
-  lazyloadEnabled: false # Enable lazyload for loading data
-  lazyloadWaitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
-  lazyLoadRequestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
-  lazyLoadRequestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
+  lazyload:
+    enabled: false # Enable lazyload for loading data
+    waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
+    requestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
+    requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
+    maxRetryTimes: 1
+    maxEvictPerRetry: 1
   grouping:
     enabled: true
     maxNQ: 1000
