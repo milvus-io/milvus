@@ -200,9 +200,16 @@ def gen_row_based_json_file(row_file, str_pk, data_fields, float_vect,
                     else:
                         f.write('"bool_scalar":' + str(random.choice(["true", "false"])) + '')
                 if data_field == DataField.json_field:
-                    data = {
-                        gen_unique_str(): random.randint(-999999, 9999999),
-                    }
+                    json_value = [
+                        1,
+                        1.0,
+                        "1",
+                        [1, 2, 3],
+                        ["1", "2", "3"],
+                        [1, 2, "3"],
+                        {"key": "value"},
+                    ]
+                    data = random.choice(json_value)
                     f.write('"json":' + json.dumps(data) + '')
                 if data_field == DataField.array_bool_field:
                     if err_type == DataErrorType.empty_array_field:
@@ -435,7 +442,16 @@ def gen_json_in_numpy_file(dir, data_field, rows, start=0, force=False):
     if not os.path.exists(file) or force:
         data = []
         if rows > 0:
-            data = [json.dumps({"name": fake.name(), "address": fake.address()}) for i in range(start, rows+start)]
+            json_value = [
+                1,
+                1.0,
+                "1",
+                [1, 2, 3],
+                ["1", "2", "3"],
+                [1, 2, "3"],
+                {"name": fake.name(), "address": fake.address()},
+            ]
+            data = [json.dumps(json_value[i%len(json_value)]) for i in range(start, rows+start)]
         arr = np.array(data)
         log.info(f"file_name: {file_name} data type: {arr.dtype} data shape: {arr.shape}")
         np.save(file, arr)
@@ -647,7 +663,16 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
             elif data_field == DataField.bool_field:
                 d[data_field] = random.choice([True, False])
             elif data_field == DataField.json_field:
-                d[data_field] = {str(r+start): r+start}
+                json_value = [
+                    1,
+                    1.0,
+                    "1",
+                    [1, 2, 3],
+                    ["1", "2", "3"],
+                    [1, 2, "3"],
+                    {"key": "value"},
+                ]
+                d[data_field] = random.choice(json_value)
             elif data_field == DataField.array_bool_field:
                 array_length = random.randint(0, 10) if array_length is None else array_length
                 d[data_field] = [random.choice([True, False]) for _ in range(array_length)]
