@@ -25,7 +25,6 @@ import (
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
-	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
@@ -122,9 +121,6 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup() {
 				}
 			}
 		}
-	}
-	if enableRGAutoRecover {
-		utils.RecoverAllCollection(ob.meta)
 	}
 	log.Debug("check resource group done", zap.Bool("enableRGAutoRecover", enableRGAutoRecover), zap.Int("resourceGroupNum", len(rgNames)))
 }
