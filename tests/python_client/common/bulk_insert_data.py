@@ -542,9 +542,17 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
         elif data_field == DataField.bool_field:
             data = [random.choice([True, False]) for i in range(start, rows + start)]
         elif data_field == DataField.json_field:
-            data = pd.Series([json.dumps({
-                gen_unique_str(): random.randint(-999999, 9999999)
-            }) for i in range(start, rows + start)], dtype=np.dtype("str"))
+            json_value = [
+                1,
+                1.0,
+                "1",
+                [1, 2, 3],
+                ["1", "2", "3"],
+                [1, 2, "3"],
+                {"key": "value"},
+            ]
+
+            data = pd.Series([json.dumps(random.choice(json_value)) for i in range(start, rows + start)], dtype=np.dtype("str"))
         elif data_field == DataField.array_bool_field:
             data = pd.Series(
                     [np.array([random.choice([True, False]) for _ in range(array_length)], dtype=np.dtype("bool"))
