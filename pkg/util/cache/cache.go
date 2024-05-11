@@ -67,6 +67,9 @@ type Scavenger[K comparable] interface {
 	//	before it gets a false.
 	Spare(key K) func(K) bool
 	Replace(key K) (bool, func(K) bool, func())
+
+	// SyncWeight sync the weight of key in cache.
+	SyncWeight(key K)
 }
 
 type LazyScavenger[K comparable] struct {
@@ -130,6 +133,15 @@ func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
 	return func(k K) bool {
 		available -= s.weight(k)
 		return available >= 0
+	}
+}
+
+// SyncWeight sync the weight of cache.
+func (s *LazyScavenger[K]) SyncWeight(key K) {
+	if pw, ok := s.weights[key]; ok {
+		w := s.weight(key)
+		s.size.Add(w - pw)
+		s.weights[key] = w
 	}
 }
 
@@ -322,6 +334,7 @@ func (c *lruCache[K, V]) peekAndPin(ctx context.Context, key K) *cacheItem[K, V]
 					c.stats.TotalReloadDuration.Add(time.Since(start).Seconds())
 					if err == nil {
 						item.value = reloaded
+						c.scavenger.SyncWeight(key)
 					} else if retback != nil {
 						retback()
 					}

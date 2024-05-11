@@ -96,6 +96,7 @@ func (suite *SegmentSuite) SetupTest() {
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
+
 	g, err := suite.sealed.(*LocalSegment).StartLoadData()
 	suite.Require().NoError(err)
 	for _, binlog := range binlogs {

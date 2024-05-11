@@ -99,10 +99,14 @@ func (suite *SearchSuite) SetupTest() {
 		suite.chunkManager,
 	)
 	suite.Require().NoError(err)
+
+	guard, err := suite.sealed.(*LocalSegment).StartLoadData()
+	suite.Require().NoError(err)
 	for _, binlog := range binlogs {
 		err = suite.sealed.(*LocalSegment).LoadFieldData(ctx, binlog.FieldID, int64(msgLength), binlog)
 		suite.Require().NoError(err)
 	}
+	guard.Done(nil)
 
 	suite.growing, err = NewSegment(ctx,
 		suite.collection,

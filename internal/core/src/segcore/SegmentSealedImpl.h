@@ -308,8 +308,6 @@ class SegmentSealedImpl : public SegmentSealed {
     SegcoreConfig segcore_config_;
     std::unordered_map<FieldId, std::unique_ptr<VecIndexConfig>>
         vec_binlog_config_;
-
-    SegmentStats stats_{};
 };
 
 inline SegmentSealedUPtr

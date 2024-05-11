@@ -60,7 +60,7 @@ type ResourceUsage struct {
 
 // String returns a string representation of the ResourceUsage.
 func (ru *ResourceUsage) String() string {
-	return fmt.Sprintf("MemorySize: %d, DiskSize: %d", ru.MemorySize, ru.DiskSize)
+	return fmt.Sprintf("Mem: %d, Disk: %d", ru.MemorySize, ru.DiskSize)
 }
 
 // Segment is the interface of a segment implementation.

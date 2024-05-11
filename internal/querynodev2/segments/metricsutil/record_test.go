@@ -89,12 +89,3 @@ func TestQuerySegmentAccessMetric(t *testing.T) {
 	m.Finish(nil)
 	assert.NotZero(t, m.getDuration())
 }
-
-func TestCacheRecord(t *testing.T) {
-	r1 := NewCacheLoadRecord(testLabel)
-	r1.WithBytes(1)
-	assert.Equal(t, float64(1), r1.getBytes())
-	r1.Finish(nil)
-	r2 := NewCacheEvictRecord(testLabel)
-	r2.Finish(nil)
-}

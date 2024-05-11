@@ -44,6 +44,9 @@ TEST(ConcurrentVector, TestSingle) {
             ASSERT_EQ(c_vec.get_element(i)[d], std_data);
         }
     }
+
+    auto num_of_element = c_vec.num_of_element();
+    ASSERT_GT(num_of_element, 32 * c_vec.num_chunk());
 }
 
 TEST(ConcurrentVector, TestMultithreads) {

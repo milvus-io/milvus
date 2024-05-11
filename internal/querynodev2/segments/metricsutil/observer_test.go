@@ -14,12 +14,6 @@ func TestSegmentGather(t *testing.T) {
 	}
 	g := newSegmentObserver("1", l)
 
-	r1 := NewCacheLoadRecord(l)
-	g.Observe(r1)
-
-	r2 := NewCacheEvictRecord(l)
-	g.Observe(r2)
-
 	r3 := NewQuerySegmentAccessRecord(l)
 	g.Observe(r3)
 
