@@ -181,7 +181,7 @@ func (m *ChannelManagerImplV2) AddNode(nodeID UniqueID) error {
 	log.Info("register node", zap.Int64("registered node", nodeID))
 
 	m.store.AddNode(nodeID)
-	updates := AvgAssignByCountPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo().GetChannels(), m.legacyNodes.Collect())
+	updates := AvgAssignByCountPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
 
 	if updates == nil {
 		log.Info("register node with no reassignment", zap.Int64("registered node", nodeID))
@@ -234,7 +234,7 @@ func (m *ChannelManagerImplV2) Watch(ctx context.Context, ch RWChannel) error {
 
 	// channel already written into meta, try to assign it to the cluster
 	// not error is returned if failed, the assignment will retry later
-	updates = AvgAssignByCountPolicy(m.store.GetNodesChannels(), []RWChannel{ch}, m.legacyNodes.Collect())
+	updates = AvgAssignByCountPolicy(m.store.GetNodesChannels(), m.store.GetBufferChannelInfo(), m.legacyNodes.Collect())
 	if updates == nil {
 		return nil
 	}
@@ -284,7 +284,7 @@ func (m *ChannelManagerImplV2) reassign(original *NodeChannelInfo) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 
-	updates := AvgAssignByCountPolicy(m.store.GetNodesChannels(), original.GetChannels(), m.legacyNodes.Collect())
+	updates := AvgAssignByCountPolicy(m.store.GetNodesChannels(), original, m.legacyNodes.Collect())
 	if updates != nil {
 		return m.execute(updates)
 	}
