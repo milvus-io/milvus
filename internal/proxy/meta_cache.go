@@ -1002,8 +1002,8 @@ func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 
 func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
 	log.Info("Invalidate shard cache for collections", zap.Int64s("collectionIDs", collections))
-	m.mu.RLock()
-	defer m.mu.RUnlock()
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
 
 	collectionSet := typeutil.NewUniqueSet(collections...)
 	for _, db := range m.collLeader {
