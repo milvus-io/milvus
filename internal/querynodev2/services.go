@@ -1295,7 +1295,7 @@ func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDi
 			})
 			shardDelegator.AddExcludedSegments(droppedInfos)
 			shardDelegator.SyncTargetVersion(action.GetTargetVersion(), action.GetGrowingInTarget(),
-				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetCheckpoint())
+				action.GetSealedInTarget(), action.GetDroppedInTarget(), action.GetL0InTarget(), action.GetCheckpoint())
 		default:
 			return merr.Status(merr.WrapErrServiceInternal("unknown action type", action.GetType().String())), nil
 		}

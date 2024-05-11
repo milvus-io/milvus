@@ -402,6 +402,7 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 			ID:            11,
 			PartitionID:   1,
 			InsertChannel: "channel-1",
+			Level:         datapb.SegmentLevel_L0,
 		},
 		{
 			ID:            12,
@@ -420,6 +421,7 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 	suite.Len(suite.mgr.GetDroppedSegmentsByChannel(collectionID, "channel-1", NextTarget), 3)
 	suite.Len(suite.mgr.GetGrowingSegmentsByCollection(collectionID, NextTarget), 5)
 	suite.Len(suite.mgr.GetSealedSegmentsByPartition(collectionID, 1, NextTarget), 2)
+	suite.Len(suite.mgr.GetL0SegmentsByChannel(collectionID, "channel-1", NextTarget), 1)
 	suite.NotNil(suite.mgr.GetSealedSegment(collectionID, 11, NextTarget))
 	suite.NotNil(suite.mgr.GetDmChannel(collectionID, "channel-1", NextTarget))
 }

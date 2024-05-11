@@ -486,6 +486,30 @@ func (mgr *TargetManager) GetSealedSegmentsByChannel(collectionID int64,
 	return nil
 }
 
+func (mgr *TargetManager) GetL0SegmentsByChannel(collectionID int64,
+	channelName string,
+	scope TargetScope,
+) map[int64]*datapb.SegmentInfo {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+
+	targets := mgr.getCollectionTarget(scope, collectionID)
+	for _, t := range targets {
+		ret := make(map[int64]*datapb.SegmentInfo)
+		for k, v := range t.GetAllSegments() {
+			if v.GetInsertChannel() == channelName && v.Level == datapb.SegmentLevel_L0 {
+				ret[k] = v
+			}
+		}
+
+		if len(ret) > 0 {
+			return ret
+		}
+	}
+
+	return nil
+}
+
 func (mgr *TargetManager) GetDroppedSegmentsByChannel(collectionID int64,
 	channelName string,
 	scope TargetScope,

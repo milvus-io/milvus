@@ -1101,8 +1101,30 @@ func (s *DelegatorDataSuite) TestSyncTargetVersion() {
 		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
 	}
 
-	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(int64(5), []int64{1}, []int64{2}, []int64{3, 4}, []int64{}, &msgpb.MsgPosition{})
 	s.Equal(int64(5), s.delegator.GetTargetVersion())
+}
+
+func (s *DelegatorDataSuite) TestSyncTargetVersionWithMissingL0() {
+	for i := int64(0); i < 5; i++ {
+		ms := &segments.MockSegment{}
+		ms.EXPECT().ID().Return(i)
+		ms.EXPECT().StartPosition().Return(&msgpb.MsgPosition{
+			Timestamp: uint64(i),
+		})
+		ms.EXPECT().Type().Return(segments.SegmentTypeGrowing)
+		ms.EXPECT().Collection().Return(1)
+		ms.EXPECT().Partition().Return(1)
+		ms.EXPECT().InsertCount().Return(0)
+		ms.EXPECT().Indexes().Return(nil)
+		ms.EXPECT().Shard().Return(s.channel)
+		ms.EXPECT().Level().Return(datapb.SegmentLevel_L1)
+		s.manager.Segment.Put(context.Background(), segments.SegmentTypeGrowing, ms)
+	}
+
+	s.delegator.SyncTargetVersion(int64(6), []int64{1}, []int64{2}, []int64{3, 4}, []int64{2}, &msgpb.MsgPosition{})
+	// current we ignore L0 mismatch but only log
+	s.Equal(int64(6), s.delegator.GetTargetVersion())
 }
 
 func (s *DelegatorDataSuite) TestLevel0Deletions() {

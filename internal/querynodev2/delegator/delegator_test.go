@@ -257,7 +257,7 @@ func (s *DelegatorSuite) initSegments() {
 			Version:     2001,
 		},
 	)
-	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{}, &msgpb.MsgPosition{})
+	s.delegator.SyncTargetVersion(2001, []int64{1004}, []int64{1000, 1001, 1002, 1003}, []int64{}, []int64{}, &msgpb.MsgPosition{})
 }
 
 func (s *DelegatorSuite) TestSearch() {

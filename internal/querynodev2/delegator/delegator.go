@@ -76,7 +76,7 @@ type ShardDelegator interface {
 	LoadGrowing(ctx context.Context, infos []*querypb.SegmentLoadInfo, version int64) error
 	LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) error
 	ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest, force bool) error
-	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition)
+	SyncTargetVersion(newVersion int64, growingInTarget []int64, sealedInTarget []int64, droppedInTarget []int64, l0InTarget []int64, checkpoint *msgpb.MsgPosition)
 	GetTargetVersion() int64
 
 	// manage exclude segments
@@ -106,11 +106,12 @@ type shardDelegator struct {
 
 	lifetime lifetime.Lifetime[lifetime.State]
 
-	distribution    *distribution
-	segmentManager  segments.SegmentManager
-	tsafeManager    tsafe.Manager
-	pkOracle        pkoracle.PkOracle
-	level0Mut       sync.RWMutex
+	distribution   *distribution
+	segmentManager segments.SegmentManager
+	tsafeManager   tsafe.Manager
+	pkOracle       pkoracle.PkOracle
+	level0Mut      sync.RWMutex
+	// TODO, there is not reason we want to cache L0Deletions, it also
 	level0Deletions map[int64]*storage.DeleteData // partitionID -> deletions
 	// stream delete buffer
 	deleteMut    sync.RWMutex

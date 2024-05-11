@@ -471,13 +471,17 @@ func (ob *TargetObserver) checkNeedUpdateTargetVersion(ctx context.Context, lead
 	sealedSegments := ob.targetMgr.GetSealedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	growingSegments := ob.targetMgr.GetGrowingSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	droppedSegments := ob.targetMgr.GetDroppedSegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
+	l0Segments := ob.targetMgr.GetL0SegmentsByChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTarget)
 	channel := ob.targetMgr.GetDmChannel(leaderView.CollectionID, leaderView.Channel, meta.NextTargetFirst)
 
+	// Need to sync sealed and dropped segment to remove growing segment
+	// Need to pass L0 target and target version to remove
 	action := &querypb.SyncAction{
 		Type:            querypb.SyncType_UpdateVersion,
 		GrowingInTarget: growingSegments.Collect(),
 		SealedInTarget:  lo.Keys(sealedSegments),
 		DroppedInTarget: droppedSegments,
+		L0InTarget:      lo.Keys(l0Segments),
 		TargetVersion:   targetVersion,
 	}
 

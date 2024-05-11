@@ -488,7 +488,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 	})
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
-		sd.GenerateLevel0DeletionCache()
+		sd.RefreshLevel0DeletionCache()
 	} else {
 		log.Debug("load delete...")
 		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
@@ -556,7 +556,8 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64) ([]storage.Prima
 	return nil, nil
 }
 
-func (sd *shardDelegator) GenerateLevel0DeletionCache() {
+// TODO we can build this cache every time we read. we only need to update stats when load or release l0segments
+func (sd *shardDelegator) RefreshLevel0DeletionCache() {
 	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
 	deletions := make(map[int64]*storage.DeleteData)
 	for _, segment := range level0Segments {
@@ -900,7 +901,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	}
 
 	if hasLevel0 {
-		sd.GenerateLevel0DeletionCache()
+		sd.RefreshLevel0DeletionCache()
 	}
 	partitionsToReload := make([]UniqueID, 0)
 	lo.ForEach(req.GetSegmentIDs(), func(segmentID int64, _ int) {
@@ -916,7 +917,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 }
 
 func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []int64,
-	sealedInTarget []int64, droppedInTarget []int64, checkpoint *msgpb.MsgPosition,
+	sealedInTarget []int64, droppedInTarget []int64, l0InTarget []int64, checkpoint *msgpb.MsgPosition,
 ) {
 	growings := sd.segmentManager.GetBy(
 		segments.WithType(segments.SegmentTypeGrowing),
@@ -946,6 +947,22 @@ func (sd *shardDelegator) SyncTargetVersion(newVersion int64, growingInTarget []
 	if len(redundantGrowing) > 0 {
 		log.Warn("found redundant growing segments",
 			zap.Int64s("growingSegments", redundantGrowingIDs))
+	}
+	// should not happen. coordinator should trigger sync target after all l0 segment has been loaded on delegator.
+	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
+	for _, segmentID := range l0InTarget {
+		find := false
+		for _, segment := range level0Segments {
+			if segment.ID() == segmentID {
+				find = true
+				break
+			}
+		}
+		if !find {
+			log.Warn("found unloaded l0 segments on delegator, delete data might miss",
+				zap.String("collection", checkpoint.ChannelName),
+				zap.Int64("segmentID", segmentID))
+		}
 	}
 	sd.distribution.SyncTargetVersion(newVersion, growingInTarget, sealedInTarget, redundantGrowingIDs)
 	sd.deleteBuffer.TryDiscard(checkpoint.GetTimestamp())
