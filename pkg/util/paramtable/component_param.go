@@ -3113,7 +3113,7 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 	p.ClusteringCompactionMinCentroidsNum = ParamItem{
 		Key:          "dataCoord.compaction.clustering.minCentroidsNum",
 		Version:      "2.4.0",
-		DefaultValue: "128",
+		DefaultValue: "16",
 		Doc:          "minimum centroids number in Kmeans train",
 		Export:       true,
 	}
