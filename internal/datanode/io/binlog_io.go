@@ -91,11 +91,11 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 		innerK, innerV := k, v
 		future := b.pool.Submit(func() (any, error) {
 			var err error
-			log.Debug("BinlogIO upload", zap.String("paths", k))
+			log.Debug("BinlogIO upload", zap.String("paths", innerK))
 			err = retry.Do(ctx, func() error {
 				err = b.Write(ctx, innerK, innerV)
 				if err != nil {
-					log.Warn("BinlogIO fail to upload", zap.String("paths", k), zap.Error(err))
+					log.Warn("BinlogIO fail to upload", zap.String("paths", innerK), zap.Error(err))
 				}
 				return err
 			})
