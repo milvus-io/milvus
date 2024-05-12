@@ -273,6 +273,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	// --- rootcoord ---
 	p.RootCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordTimeTick",
+		DefaultValue: "rootcoord-timetick",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordTimeTick"},
 		PanicIfEmpty: true,
@@ -283,6 +284,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.RootCoordStatistics = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordStatistics",
+		DefaultValue: "rootcoord-statistics",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordStatistics"},
 		PanicIfEmpty: true,
@@ -293,6 +295,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.RootCoordDml = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordDml",
+		DefaultValue: "rootcoord-dml",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
@@ -303,6 +306,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.ReplicateMsgChannel = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.replicateMsg",
+		DefaultValue: "replicate-msg",
 		Version:      "2.3.2",
 		FallbackKeys: []string{"common.chanNamePrefix.replicateMsg"},
 		PanicIfEmpty: true,
@@ -313,6 +317,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.QueryCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.queryTimeTick",
+		DefaultValue: "queryTimeTick",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.queryTimeTick"},
 		PanicIfEmpty: true,
@@ -323,6 +328,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.dataCoordTimeTick",
+		DefaultValue: "datacoord-timetick-channel",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordTimeTick"},
 		PanicIfEmpty: true,
@@ -333,6 +339,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordSegmentInfo = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.dataCoordSegmentInfo",
+		DefaultValue: "segment-info-channel",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordSegmentInfo"},
 		PanicIfEmpty: true,
@@ -343,6 +350,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataCoordSubNamePrefix",
+		DefaultValue: "dataCoord",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataCoordSubNamePrefix"},
 		PanicIfEmpty: true,
@@ -369,6 +377,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataNodeSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
+		DefaultValue: "dataNode",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataNodeSubNamePrefix"},
 		PanicIfEmpty: true,

@@ -385,19 +385,19 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, int64(70*1024*1024), Params.DiskCacheCapacityLimit.GetAsSize())
 
 		assert.False(t, Params.LazyLoadEnabled.GetAsBool())
-		params.Save("queryNode.lazyloadEnabled", "true")
+		params.Save("queryNode.lazyload.enabled", "true")
 		assert.True(t, Params.LazyLoadEnabled.GetAsBool())
 
 		assert.Equal(t, 30*time.Second, Params.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond))
-		params.Save("queryNode.lazyloadWaitTimeout", "100")
+		params.Save("queryNode.lazyload.waitTimeout", "100")
 		assert.Equal(t, 100*time.Millisecond, Params.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 5*time.Second, Params.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond))
-		params.Save("queryNode.lazyLoadRequestResourceTimeout", "100")
+		params.Save("queryNode.lazyload.requestResourceTimeout", "100")
 		assert.Equal(t, 100*time.Millisecond, Params.LazyLoadRequestResourceTimeout.GetAsDuration(time.Millisecond))
 
 		assert.Equal(t, 2*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
-		params.Save("queryNode.lazyLoadRequestResourceRetryInterval", "3000")
+		params.Save("queryNode.lazyload.requestResourceRetryInterval", "3000")
 		assert.Equal(t, 3*time.Second, Params.LazyLoadRequestResourceRetryInterval.GetAsDuration(time.Millisecond))
 	})
 
