@@ -74,6 +74,9 @@ class DiskFileManagerImpl : public FileManagerImpl {
         return local_paths_;
     }
 
+    size_t
+    GetLocalFileSize() const;
+
     void
     CacheIndexToDisk(const std::vector<std::string>& remote_files);
 
@@ -132,6 +135,7 @@ class DiskFileManagerImpl : public FileManagerImpl {
  private:
     // local file path (abs path)
     std::vector<std::string> local_paths_;
+    size_t cached_index_file_size_ = 0;
 
     // remote file path
     std::map<std::string, int64_t> remote_paths_to_size_;

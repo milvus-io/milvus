@@ -24,6 +24,7 @@
 #include <unordered_map>
 #include <utility>
 #include <vector>
+#include <functional>
 
 #include "common/EasyAssert.h"
 #include "common/FieldMeta.h"
@@ -42,47 +43,57 @@ class ThreadSafeVector {
     void
     emplace_to_at_least(int64_t size, Args... args) {
         std::lock_guard lck(mutex_);
-        if (size <= size_) {
+        if (size <= vec_.size()) {
             return;
         }
         while (vec_.size() < size) {
             vec_.emplace_back(std::forward<Args...>(args...));
-            ++size_;
         }
     }
     const Type&
     operator[](int64_t index) const {
         std::shared_lock lck(mutex_);
-        AssertInfo(index < size_,
-                   fmt::format(
-                       "index out of range, index={}, size_={}", index, size_));
+        AssertInfo(
+            index < vec_.size(),
+            fmt::format(
+                "index out of range, index={}, size={}", index, vec_.size()));
         return vec_[index];
     }
 
     Type&
     operator[](int64_t index) {
         std::shared_lock lck(mutex_);
-        AssertInfo(index < size_,
-                   fmt::format(
-                       "index out of range, index={}, size_={}", index, size_));
+        AssertInfo(
+            index < vec_.size(),
+            fmt::format(
+                "index out of range, index={}, size={}", index, vec_.size()));
         return vec_[index];
     }
 
     int64_t
     size() const {
-        std::lock_guard lck(mutex_);
-        return size_;
+        std::shared_lock lck(mutex_);
+        return vec_.size();
     }
 
     void
     clear() {
         std::lock_guard lck(mutex_);
-        size_ = 0;
         vec_.clear();
     }
 
+    void
+    range_over(std::function<bool(const Type&)> f) const {
+        std::shared_lock lck(mutex_);
+
+        for (auto& x : vec_) {
+            if (!f(x)) {
+                return;
+            }
+        }
+    }
+
  private:
-    int64_t size_ = 0;
     std::deque<Type> vec_;
     mutable std::shared_mutex mutex_;
 };
@@ -255,6 +266,16 @@ class ConcurrentVectorImpl : public VectorBase {
         auto chunk_id = element_index / size_per_chunk_;
         auto chunk_offset = element_index % size_per_chunk_;
         return get_chunk(chunk_id).data() + chunk_offset * elements_per_row_;
+    }
+
+    size_t
+    num_of_element() const {
+        size_t num = 0;
+        chunks_.range_over([&num](const auto& chunk) {
+            num += chunk.size();
+            return true;
+        });
+        return num;
     }
 
     const Type&

@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -28,19 +29,44 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+// SegmentResourceUsage is used to estimate the resource usage of a sealed segment.
+type SegmentResourceUsage struct {
+	Predict         ResourceUsage // by predict with segment loader strategy.
+	InUsed          ResourceUsage // only returned if segment is loaded otherwise empty returned.
+	BinLogSizeAtOSS uint64        // bin log size at oss, it is calculated from load meta of segment.
+	// only sealed segment has this value, and it may be not equal to the real disk/mem usage of binary logs.
+	// include stat_log, insert_log and delta_log, not include any index files.
+}
+
+// GetInuseOrPredictDiskUsage return the inused disk usage.
+// if the inused disk usage is 0,return the predicted disk usage.
+func (sru SegmentResourceUsage) GetInuseOrPredictDiskUsage() uint64 {
+	if sru.InUsed.DiskSize != 0 {
+		return sru.InUsed.DiskSize
+	}
+	return sru.Predict.DiskSize
+}
+
+// String returns a string representation of the SegmentResourceUsage.
+func (sru SegmentResourceUsage) String() string {
+	return fmt.Sprintf("Predict: %s, InUsed: %s, BinLogSizeAtOSS: %d", sru.Predict.String(), sru.InUsed.String(), sru.BinLogSizeAtOSS)
+}
+
 // ResourceUsage is used to estimate the resource usage of a sealed segment.
 type ResourceUsage struct {
-	MemorySize     uint64
-	DiskSize       uint64
-	MmapFieldCount int
+	MemorySize uint64
+	DiskSize   uint64
+}
+
+// String returns a string representation of the ResourceUsage.
+func (ru *ResourceUsage) String() string {
+	return fmt.Sprintf("Mem: %d, Disk: %d", ru.MemorySize, ru.DiskSize)
 }
 
 // Segment is the interface of a segment implementation.
-// Some methods can not apply to all segment types，such as LoadInfo, ResourceUsageEstimate.
+// Some methods can not apply to all segment types，such as LoadInfo, ResourceUsageEstimateOfLoad.
 // Add more interface to represent different segment types is a better implementation.
 type Segment interface {
-	// ResourceUsageEstimate() ResourceUsage
-
 	// Properties
 	ID() int64
 	DatabaseName() string
@@ -64,9 +90,9 @@ type Segment interface {
 	InsertCount() int64
 	// RowNum returns the number of rows, it's slow, so DO NOT call it in a loop
 	RowNum() int64
-	MemSize() int64
-	// ResourceUsageEstimate returns the estimated resource usage of the segment
-	ResourceUsageEstimate() ResourceUsage
+
+	// ResourceUsageEstimateOfLoad returns the estimated resource usage of the segment.
+	ResourceUsageEstimateOfLoad() SegmentResourceUsage
 
 	// Index related
 	GetIndex(fieldID int64) *IndexedFieldInfo

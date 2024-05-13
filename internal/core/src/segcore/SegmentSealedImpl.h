@@ -92,10 +92,8 @@ class SegmentSealedImpl : public SegmentSealed {
     RemoveFieldFile(const FieldId field_id);
 
  public:
-    size_t
-    GetMemoryUsageInBytes() const override {
-        return stats_.mem_size.load() + deleted_record_.mem_size();
-    }
+    milvus::ResourceUsage
+    GetResourceUsage() const override;
 
     int64_t
     get_row_count() const override;
@@ -310,8 +308,6 @@ class SegmentSealedImpl : public SegmentSealed {
     SegcoreConfig segcore_config_;
     std::unordered_map<FieldId, std::unique_ptr<VecIndexConfig>>
         vec_binlog_config_;
-
-    SegmentStats stats_{};
 };
 
 inline SegmentSealedUPtr

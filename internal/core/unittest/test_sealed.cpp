@@ -639,10 +639,19 @@ TEST(Sealed, ClearData) {
     std::cout << json.dump(1);
 
     auto sealed_segment = (SegmentSealedImpl*)segment.get();
+
+    auto usage = sealed_segment->GetResourceUsage();
+    ASSERT_GT(usage.mem_size, 0);
+    ASSERT_EQ(usage.disk_size, 0);
+
     sealed_segment->ClearData();
     ASSERT_EQ(sealed_segment->get_row_count(), 0);
     ASSERT_EQ(sealed_segment->get_real_count(), 0);
     ASSERT_ANY_THROW(segment->Search(plan.get(), ph_group.get(), timestamp));
+
+    usage = sealed_segment->GetResourceUsage();
+    ASSERT_EQ(usage.mem_size, 0);
+    ASSERT_EQ(usage.disk_size, 0);
 }
 
 TEST(Sealed, LoadFieldDataMmap) {

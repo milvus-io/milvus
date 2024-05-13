@@ -794,47 +794,6 @@ func (_c *MockSegment_MayPkExist_Call) RunAndReturn(run func(storage.PrimaryKey)
 	return _c
 }
 
-// MemSize provides a mock function with given fields:
-func (_m *MockSegment) MemSize() int64 {
-	ret := _m.Called()
-
-	var r0 int64
-	if rf, ok := ret.Get(0).(func() int64); ok {
-		r0 = rf()
-	} else {
-		r0 = ret.Get(0).(int64)
-	}
-
-	return r0
-}
-
-// MockSegment_MemSize_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'MemSize'
-type MockSegment_MemSize_Call struct {
-	*mock.Call
-}
-
-// MemSize is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) MemSize() *MockSegment_MemSize_Call {
-	return &MockSegment_MemSize_Call{Call: _e.mock.On("MemSize")}
-}
-
-func (_c *MockSegment_MemSize_Call) Run(run func()) *MockSegment_MemSize_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockSegment_MemSize_Call) Return(_a0 int64) *MockSegment_MemSize_Call {
-	_c.Call.Return(_a0)
-	return _c
-}
-
-func (_c *MockSegment_MemSize_Call) RunAndReturn(run func() int64) *MockSegment_MemSize_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // NeedUpdatedVersion provides a mock function with given fields:
 func (_m *MockSegment) NeedUpdatedVersion() int64 {
 	ret := _m.Called()
@@ -1121,43 +1080,43 @@ func (_c *MockSegment_ResourceGroup_Call) RunAndReturn(run func() string) *MockS
 	return _c
 }
 
-// ResourceUsageEstimate provides a mock function with given fields:
-func (_m *MockSegment) ResourceUsageEstimate() ResourceUsage {
+// ResourceUsageEstimateOfLoad provides a mock function with given fields:
+func (_m *MockSegment) ResourceUsageEstimateOfLoad() SegmentResourceUsage {
 	ret := _m.Called()
 
-	var r0 ResourceUsage
-	if rf, ok := ret.Get(0).(func() ResourceUsage); ok {
+	var r0 SegmentResourceUsage
+	if rf, ok := ret.Get(0).(func() SegmentResourceUsage); ok {
 		r0 = rf()
 	} else {
-		r0 = ret.Get(0).(ResourceUsage)
+		r0 = ret.Get(0).(SegmentResourceUsage)
 	}
 
 	return r0
 }
 
-// MockSegment_ResourceUsageEstimate_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResourceUsageEstimate'
-type MockSegment_ResourceUsageEstimate_Call struct {
+// MockSegment_ResourceUsageEstimateOfLoad_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ResourceUsageEstimateOfLoad'
+type MockSegment_ResourceUsageEstimateOfLoad_Call struct {
 	*mock.Call
 }
 
-// ResourceUsageEstimate is a helper method to define mock.On call
-func (_e *MockSegment_Expecter) ResourceUsageEstimate() *MockSegment_ResourceUsageEstimate_Call {
-	return &MockSegment_ResourceUsageEstimate_Call{Call: _e.mock.On("ResourceUsageEstimate")}
+// ResourceUsageEstimateOfLoad is a helper method to define mock.On call
+func (_e *MockSegment_Expecter) ResourceUsageEstimateOfLoad() *MockSegment_ResourceUsageEstimateOfLoad_Call {
+	return &MockSegment_ResourceUsageEstimateOfLoad_Call{Call: _e.mock.On("ResourceUsageEstimateOfLoad")}
 }
 
-func (_c *MockSegment_ResourceUsageEstimate_Call) Run(run func()) *MockSegment_ResourceUsageEstimate_Call {
+func (_c *MockSegment_ResourceUsageEstimateOfLoad_Call) Run(run func()) *MockSegment_ResourceUsageEstimateOfLoad_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run()
 	})
 	return _c
 }
 
-func (_c *MockSegment_ResourceUsageEstimate_Call) Return(_a0 ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
+func (_c *MockSegment_ResourceUsageEstimateOfLoad_Call) Return(_a0 SegmentResourceUsage) *MockSegment_ResourceUsageEstimateOfLoad_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockSegment_ResourceUsageEstimate_Call) RunAndReturn(run func() ResourceUsage) *MockSegment_ResourceUsageEstimate_Call {
+func (_c *MockSegment_ResourceUsageEstimateOfLoad_Call) RunAndReturn(run func() SegmentResourceUsage) *MockSegment_ResourceUsageEstimateOfLoad_Call {
 	_c.Call.Return(run)
 	return _c
 }

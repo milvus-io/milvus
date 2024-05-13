@@ -215,7 +215,10 @@ func (t *SearchTask) Execute() error {
 	}
 
 	relatedDataSize := lo.Reduce(searchedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
-		return acc + seg.MemSize()
+		if seg.Type() == segments.SegmentTypeSealed {
+			return acc + int64(seg.ResourceUsageEstimateOfLoad().BinLogSizeAtOSS)
+		}
+		return acc + int64(seg.ResourceUsageEstimateOfLoad().InUsed.MemorySize)
 	}, 0)
 
 	tr.RecordSpan()

@@ -447,6 +447,15 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     }
 }
 
+template <typename T>
+ResourceUsage
+InvertedIndexTantivy<T>::GetResourceUsage() const {
+    // InvertedIndex always load from disk by mmap, so there's little rss memory usage as expected.
+    // We think it's zero now.
+    auto disk_size = disk_file_manager_->GetLocalFileSize();
+    return ResourceUsage{0, disk_size};
+}
+
 template class InvertedIndexTantivy<bool>;
 template class InvertedIndexTantivy<int8_t>;
 template class InvertedIndexTantivy<int16_t>;

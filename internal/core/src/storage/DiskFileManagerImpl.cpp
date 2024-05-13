@@ -279,7 +279,14 @@ DiskFileManagerImpl::CacheIndexToDisk() {
             batch_remote_files.clear();
         }
         local_paths_.emplace_back(local_index_file_name);
+        auto file_size = local_chunk_manager->Size(local_index_file_name);
+        cached_index_file_size_ += file_size;
     }
+}
+
+size_t
+DiskFileManagerImpl::GetLocalFileSize() const {
+    return cached_index_file_size_;
 }
 
 void
@@ -325,6 +332,8 @@ DiskFileManagerImpl::CacheIndexToDisk(
             file.Write(chunk_data, index_size);
         }
         local_paths_.emplace_back(local_index_file_name);
+        auto file_size = local_chunk_manager->Size(local_index_file_name);
+        cached_index_file_size_ += file_size;
     }
 }
 

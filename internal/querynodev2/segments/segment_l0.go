@@ -85,12 +85,24 @@ func (s *L0Segment) RowNum() int64 {
 	return 0
 }
 
-func (s *L0Segment) MemSize() int64 {
+func (s *L0Segment) ResourceUsageEstimateOfLoad() SegmentResourceUsage {
 	s.dataGuard.RLock()
 	defer s.dataGuard.RUnlock()
-	return lo.SumBy(s.pks, func(pk storage.PrimaryKey) int64 {
+
+	memSize := lo.SumBy(s.pks, func(pk storage.PrimaryKey) int64 {
 		return pk.Size() + 8
 	})
+	return SegmentResourceUsage{
+		Predict: ResourceUsage{
+			MemorySize: uint64(memSize),
+			DiskSize:   0,
+		},
+		InUsed: ResourceUsage{
+			MemorySize: uint64(memSize),
+			DiskSize:   0,
+		},
+		BinLogSizeAtOSS: uint64(s.LoadInfo().GetSegmentSize()),
+	}
 }
 
 func (s *L0Segment) LastDeltaTimestamp() uint64 {

@@ -47,6 +47,7 @@
 #include "log/Log.h"
 #include "storage/DataCodec.h"
 #include "storage/MemFileManagerImpl.h"
+#include "storage/LocalChunkManagerSingleton.h"
 #include "storage/ThreadPools.h"
 #include "storage/space.h"
 #include "storage/Util.h"
@@ -287,6 +288,7 @@ VectorMemIndex<T>::LoadV2(const Config& config) {
     for (auto& [key, data] : index_datas) {
         LOG_INFO("add index data to binary set: {}", key);
         auto size = data->Size();
+        resource_usage_.mem_size += size;
         auto deleter = [&](uint8_t*) {};  // avoid repeated deconstruction
         auto buf = std::shared_ptr<uint8_t[]>(
             (uint8_t*)const_cast<void*>(data->Data()), deleter);
@@ -760,14 +762,9 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
                                "lost index slice data");
                     auto data = batch_data[file_name];
                     auto start_write_file = std::chrono::system_clock::now();
-                    auto written = file.Write(data->Data(), data->Size());
+                    file.Write(data->Data(), data->Size());
                     write_disk_duration_sum +=
                         (std::chrono::system_clock::now() - start_write_file);
-                    AssertInfo(
-                        written == data->Size(),
-                        fmt::format("failed to write index data to disk {}: {}",
-                                    filepath->data(),
-                                    strerror(errno)));
                 }
                 for (auto& file : batch) {
                     pending_index_files.erase(file);
@@ -787,13 +784,13 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
             }
         }
     } else {
-        //1. load files into memory
+        // 1. load files into memory
         auto start_load_files2_mem = std::chrono::system_clock::now();
         auto result = file_manager_->LoadIndexToMemory(std::vector<std::string>(
             pending_index_files.begin(), pending_index_files.end()));
         load_duration_sum +=
             (std::chrono::system_clock::now() - start_load_files2_mem);
-        //2. write data into files
+        // 2. write data into files
         auto start_write_file = std::chrono::system_clock::now();
         for (auto& [_, index_data] : result) {
             file.Write(index_data->Data(), index_data->Size());
@@ -830,6 +827,11 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
 
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
+
+    auto local_chunk_manager =
+        milvus::storage::LocalChunkManagerSingleton::GetInstance()
+            .GetChunkManager();
+    resource_usage_.disk_size += local_chunk_manager->Size(filepath.value());
 
     auto ok = unlink(filepath->data());
     AssertInfo(ok == 0,
@@ -953,6 +955,13 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
                strerror(errno));
     LOG_INFO("load vector index done");
 }
+
+template <typename T>
+ResourceUsage
+VectorMemIndex<T>::GetResourceUsage() const {
+    return resource_usage_;
+}
+
 template class VectorMemIndex<float>;
 template class VectorMemIndex<uint8_t>;
 template class VectorMemIndex<float16>;

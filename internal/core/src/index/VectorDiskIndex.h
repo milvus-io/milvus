@@ -19,6 +19,7 @@
 #include <memory>
 #include <vector>
 
+#include "common/Types.h"
 #include "index/VectorIndex.h"
 #include "storage/DiskFileManagerImpl.h"
 #include "storage/space.h"
@@ -111,6 +112,9 @@ class VectorDiskAnnIndex : public VectorIndex {
     VectorIterators(const DatasetPtr dataset,
                     const knowhere::Json& json,
                     const BitsetView& bitset) const override;
+
+    ResourceUsage
+    GetResourceUsage() const override;
 
  private:
     knowhere::Json

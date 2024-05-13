@@ -116,7 +116,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	for _, collection := range collections {
 		segs := growingGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
-			return seg.MemSize()
+			return int64(seg.ResourceUsageEstimateOfLoad().InUsed.MemorySize)
 		})
 		totalGrowingSize += size
 		metrics.QueryNodeEntitiesSize.WithLabelValues(nodeID, fmt.Sprint(collection),
@@ -147,7 +147,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	for _, collection := range collections {
 		segs := sealedGroupByCollection[collection]
 		size := lo.SumBy(segs, func(seg segments.Segment) int64 {
-			return seg.MemSize()
+			return int64(seg.ResourceUsageEstimateOfLoad().InUsed.MemorySize)
 		})
 		metrics.QueryNodeEntitiesSize.WithLabelValues(fmt.Sprint(node.GetNodeID()),
 			fmt.Sprint(collection), segments.SegmentTypeSealed.String()).Set(float64(size))

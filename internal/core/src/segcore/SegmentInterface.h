@@ -77,8 +77,8 @@ class SegmentInterface {
              const int64_t* offsets,
              int64_t size) const = 0;
 
-    virtual size_t
-    GetMemoryUsageInBytes() const = 0;
+    virtual milvus::ResourceUsage
+    GetResourceUsage() const = 0;
 
     virtual int64_t
     get_row_count() const = 0;

@@ -112,6 +112,10 @@ TEST_F(DiskAnnFileManagerTest, AddFilePositiveParallel) {
         EXPECT_EQ(rawData[4], data[4]);
     }
 
+    // Test file size.
+    auto local_file_size = diskAnnFileManager->GetLocalFileSize();
+    EXPECT_GT(local_file_size, 0);
+
     for (auto file : local_files) {
         cm_->Remove(file);
     }
