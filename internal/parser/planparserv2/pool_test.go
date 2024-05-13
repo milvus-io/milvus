@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"testing"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/stretchr/testify/assert"
 
 	antlrparser "github.com/milvus-io/milvus/internal/parser/planparserv2/generated"

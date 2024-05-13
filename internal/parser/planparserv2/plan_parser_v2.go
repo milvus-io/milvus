@@ -3,7 +3,7 @@ package planparserv2
 import (
 	"fmt"
 
-	"github.com/antlr/antlr4/runtime/Go/antlr"
+	"github.com/antlr4-go/antlr/v4"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
