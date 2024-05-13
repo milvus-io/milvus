@@ -17,7 +17,7 @@ class MilvusSys:
 
         # TODO: for now it only supports non_orm style API for getMetricsRequest
         req = milvus_types.GetMetricsRequest(request=sys_info_req)
-        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=60)
         log.debug(f"sys_info: {self.sys_info}")
 
     @property
