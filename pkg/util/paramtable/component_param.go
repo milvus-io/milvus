@@ -2006,6 +2006,7 @@ type queryNodeConfig struct {
 	DiskCapacityLimit      ParamItem `refreshable:"true"`
 	MaxDiskUsagePercentage ParamItem `refreshable:"true"`
 	DiskCacheCapacityLimit ParamItem `refreshable:"true"`
+	DiskIndexMemoryFactor  ParamItem `refreshable:"true"`
 
 	// cache limit
 	CacheEnabled     ParamItem `refreshable:"false"`
@@ -2465,6 +2466,15 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		},
 	}
 	p.DiskCacheCapacityLimit.Init(base.mgr)
+
+	p.DiskIndexMemoryFactor = ParamItem{
+		Key:          "queryNode.diskIndexMemoryFactor",
+		Version:      "2.4.1",
+		DefaultValue: "0.25",
+		Doc:          "disk index memory factor used when requesting resource",
+		Export:       true,
+	}
+	p.DiskIndexMemoryFactor.Init(base.mgr)
 
 	p.MaxTimestampLag = ParamItem{
 		Key:          "queryNode.scheduler.maxTimestampLag",

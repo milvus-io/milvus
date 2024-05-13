@@ -386,6 +386,12 @@ func TestComponentParam(t *testing.T) {
 		params.Save("queryNode.diskCacheCapacityLimit", "70m")
 		assert.Equal(t, int64(70*1024*1024), Params.DiskCacheCapacityLimit.GetAsSize())
 
+		assert.NotZero(t, Params.DiskIndexMemoryFactor.GetAsFloat())
+		params.Save("queryNode.diskIndexMemoryFactor", "0.3")
+		assert.Equal(t, 0.3, Params.DiskIndexMemoryFactor.GetAsFloat())
+		params.Save("queryNode.diskIndexMemoryFactor", "0.5")
+		assert.Equal(t, 0.5, Params.DiskIndexMemoryFactor.GetAsFloat())
+
 		assert.False(t, Params.LazyLoadEnabled.GetAsBool())
 		params.Save("queryNode.lazyloadEnabled", "true")
 		assert.True(t, Params.LazyLoadEnabled.GetAsBool())

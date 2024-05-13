@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -61,7 +62,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 		return 0, 0, fmt.Errorf("index type not exist in index params")
 	}
 	if indexType == indexparamcheck.IndexDISKANN {
-		neededMemSize := indexInfo.IndexSize / UsedDiskMemoryRatio
+		neededMemSize := int64(float64(indexInfo.IndexSize) * paramtable.Get().QueryNodeCfg.DiskIndexMemoryFactor.GetAsFloat())
 		neededDiskSize := indexInfo.IndexSize - neededMemSize
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}

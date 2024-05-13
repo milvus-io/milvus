@@ -64,10 +64,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-const (
-	UsedDiskMemoryRatio = 4
-)
-
 var errRetryTimerNotified = errors.New("retry timer notified")
 
 type Loader interface {

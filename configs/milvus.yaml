@@ -323,6 +323,7 @@ queryNode:
   loadMemoryUsageFactor: 1 # The multiply factor of calculating the memory usage while loading segments
   enableDisk: false # enable querynode load disk index, and search on disk index
   maxDiskUsagePercentage: 95
+  diskIndexMemoryFactor: 0.25 # disk index memory factor used when requesting resource
   cache:
     enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
