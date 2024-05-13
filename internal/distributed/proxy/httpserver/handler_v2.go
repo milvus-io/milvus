@@ -558,13 +558,13 @@ func (h *HandlersV2) releaseCollection(ctx context.Context, c *gin.Context, anyR
 func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*QueryReqV2)
 	req := &milvuspb.QueryRequest{
-		DbName:             dbName,
-		CollectionName:     httpReq.CollectionName,
-		Expr:               httpReq.Filter,
-		OutputFields:       httpReq.OutputFields,
-		PartitionNames:     httpReq.PartitionNames,
-		GuaranteeTimestamp: BoundedTimestamp,
-		QueryParams:        []*commonpb.KeyValuePair{},
+		DbName:                dbName,
+		CollectionName:        httpReq.CollectionName,
+		Expr:                  httpReq.Filter,
+		OutputFields:          httpReq.OutputFields,
+		PartitionNames:        httpReq.PartitionNames,
+		QueryParams:           []*commonpb.KeyValuePair{},
+		UseDefaultConsistency: true,
 	}
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
@@ -612,12 +612,12 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		return nil, err
 	}
 	req := &milvuspb.QueryRequest{
-		DbName:             dbName,
-		CollectionName:     httpReq.CollectionName,
-		OutputFields:       httpReq.OutputFields,
-		PartitionNames:     httpReq.PartitionNames,
-		GuaranteeTimestamp: BoundedTimestamp,
-		Expr:               filter,
+		DbName:                dbName,
+		CollectionName:        httpReq.CollectionName,
+		OutputFields:          httpReq.OutputFields,
+		PartitionNames:        httpReq.PartitionNames,
+		Expr:                  filter,
+		UseDefaultConsistency: true,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
@@ -915,15 +915,15 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return nil, err
 	}
 	req := &milvuspb.SearchRequest{
-		DbName:             dbName,
-		CollectionName:     httpReq.CollectionName,
-		Dsl:                httpReq.Filter,
-		PlaceholderGroup:   placeholderGroup,
-		DslType:            commonpb.DslType_BoolExprV1,
-		OutputFields:       httpReq.OutputFields,
-		PartitionNames:     httpReq.PartitionNames,
-		SearchParams:       searchParams,
-		GuaranteeTimestamp: BoundedTimestamp,
+		DbName:                dbName,
+		CollectionName:        httpReq.CollectionName,
+		Dsl:                   httpReq.Filter,
+		PlaceholderGroup:      placeholderGroup,
+		DslType:               commonpb.DslType_BoolExprV1,
+		OutputFields:          httpReq.OutputFields,
+		PartitionNames:        httpReq.PartitionNames,
+		SearchParams:          searchParams,
+		UseDefaultConsistency: true,
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
@@ -984,15 +984,15 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 			return nil, err
 		}
 		searchReq := &milvuspb.SearchRequest{
-			DbName:             dbName,
-			CollectionName:     httpReq.CollectionName,
-			Dsl:                subReq.Filter,
-			PlaceholderGroup:   placeholderGroup,
-			DslType:            commonpb.DslType_BoolExprV1,
-			OutputFields:       httpReq.OutputFields,
-			PartitionNames:     httpReq.PartitionNames,
-			SearchParams:       searchParams,
-			GuaranteeTimestamp: BoundedTimestamp,
+			DbName:                dbName,
+			CollectionName:        httpReq.CollectionName,
+			Dsl:                   subReq.Filter,
+			PlaceholderGroup:      placeholderGroup,
+			DslType:               commonpb.DslType_BoolExprV1,
+			OutputFields:          httpReq.OutputFields,
+			PartitionNames:        httpReq.PartitionNames,
+			SearchParams:          searchParams,
+			UseDefaultConsistency: true,
 		}
 		req.Requests = append(req.Requests, searchReq)
 	}
