@@ -448,6 +448,7 @@ func (t *StreamingSearchTask) Execute() error {
 
 	// 1. search&&reduce or streaming-search&&streaming-reduce
 	metricType := searchReq.Plan().GetMetricType()
+	var relatedDataSize int64
 	if req.GetScope() == querypb.DataScope_Historical {
 		streamReduceFunc := func(result *segments.SearchResult) error {
 			reduceErr := t.streamReduce(t.ctx, searchReq.Plan(), result, t.originNqs, t.originTopks)
@@ -473,6 +474,11 @@ func (t *StreamingSearchTask) Execute() error {
 			log.Error("Failed to get stream-reduced search result")
 			return err
 		}
+
+		relatedDataSize = lo.Reduce(pinnedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
+			// sealed segments always use binlog size as related data size.
+			return acc + int64(seg.ResourceUsageEstimate().BinLogSizeAtOSS)
+		}, 0)
 	} else if req.GetScope() == querypb.DataScope_Streaming {
 		results, pinnedSegments, err := segments.SearchStreaming(
 			t.ctx,
@@ -510,6 +516,11 @@ func (t *StreamingSearchTask) Execute() error {
 			metrics.ReduceSegments,
 			metrics.BatchReduce).
 			Observe(float64(tr.RecordSpan().Milliseconds()))
+
+		relatedDataSize = lo.Reduce(pinnedSegments, func(acc int64, seg segments.Segment, _ int) int64 {
+			// growing segments always use mem size as related data size.
+			return acc + int64(seg.ResourceUsageEstimate().InUsed.MemorySize)
+		}, 0)
 	}
 
 	// 2. reorganize blobs to original search request
@@ -542,7 +553,8 @@ func (t *StreamingSearchTask) Execute() error {
 			SlicedOffset:   1,
 			SlicedNumCount: 1,
 			CostAggregation: &internalpb.CostAggregation{
-				ServiceTime: tr.ElapseSpan().Milliseconds(),
+				ServiceTime:          tr.ElapseSpan().Milliseconds(),
+				TotalRelatedDataSize: relatedDataSize,
 			},
 		}
 	}
