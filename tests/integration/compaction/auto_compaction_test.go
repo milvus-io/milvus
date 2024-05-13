@@ -19,6 +19,7 @@ package compaction
 import (
 	"context"
 	"fmt"
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -47,12 +49,20 @@ func waitingForCompacted(ctx context.Context, metaWatcher integration.MetaWatche
 		segments, err := metaWatcher.ShowSegments()
 		assert.NoError(t, err)
 		assert.NotEmpty(t, segments)
-		log.Info("ShowSegments result", zap.Int("len(segments)", len(segments)))
-		return len(segments) == 1
+		compactFromSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetState() == commonpb.SegmentState_Dropped
+		})
+		compactToSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetState() == commonpb.SegmentState_Flushed
+		})
+		log.Info("ShowSegments result", zap.Int("len(compactFromSegments)", len(compactFromSegments)),
+			zap.Int("len(compactToSegments)", len(compactToSegments)))
+		return len(compactToSegments) == 1
 	}
 	for !showSegments() {
 		select {
 		case <-ctx.Done():
+			log.Fatal("waiting for compaction failed") // TODO: test timeout
 			t.FailNow()
 			return
 		case <-time.After(1 * time.Second):
