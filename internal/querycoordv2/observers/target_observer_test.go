@@ -122,7 +122,7 @@ func (suite *TargetObserverSuite) SetupTest() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(suite.nextTargetChannels, suite.nextTargetSegments, nil, nil)
 	suite.observer.Start()
 }
 
@@ -167,8 +167,8 @@ func (suite *TargetObserverSuite) TestTriggerUpdateTarget() {
 
 	// Pull next again
 	suite.broker.EXPECT().
-		GetRecoveryInfoV2(mock.Anything, mock.Anything).
-		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil)
+		GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).
+		Return(suite.nextTargetChannels, suite.nextTargetSegments, nil, nil)
 	suite.Eventually(func() bool {
 		return len(suite.targetMgr.GetSealedSegmentsByCollection(suite.collectionID, meta.NextTarget)) == 3 &&
 			len(suite.targetMgr.GetDmChannelsByCollection(suite.collectionID, meta.NextTarget)) == 2

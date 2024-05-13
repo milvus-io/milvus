@@ -18,16 +18,19 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -198,4 +201,32 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 	}}
 
 	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))
+}
+
+func (s *UtilSuite) TestGenerateDataSignature() {
+	channels := make([]*datapb.VchannelInfo, 0)
+
+	channelSize := 100
+	segmentSize := 10000
+	startSegmentID := time.Now().UnixNano()
+	for i := 1; i <= channelSize; i++ {
+		segmentIDs := make([]int64, 0)
+		for j := 1; j <= segmentSize; j++ {
+			segmentIDs = append(segmentIDs, startSegmentID+int64(i*segmentSize+j))
+		}
+
+		channels = append(channels, &datapb.VchannelInfo{
+			ChannelName:       fmt.Sprintf("channel_%d", i),
+			FlushedSegmentIds: segmentIDs,
+		})
+	}
+
+	start := time.Now()
+	ret1 := GenerateDataSignature(channels)
+	log.Info("GenerateDataSignature cost time: ", zap.Int64("ms", time.Since(start).Milliseconds()))
+	s.True(time.Since(start) < time.Second)
+	s.Len(ret1, 16)
+
+	ret2 := GenerateDataSignature(channels)
+	s.Equal(ret1, ret2)
 }

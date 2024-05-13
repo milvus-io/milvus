@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"github.com/tikv/client-go/v2/txnkv"
 	"go.uber.org/zap"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -306,6 +307,8 @@ func (suite *ServerSuite) TestDisableActiveStandby() {
 	states, err := suite.server.GetComponentStates(context.Background(), nil)
 	suite.NoError(err)
 	suite.Equal(commonpb.StateCode_Healthy, states.GetState().GetStateCode())
+
+	suite.server.Stop()
 }
 
 func (suite *ServerSuite) TestEnableActiveStandby() {
@@ -474,7 +477,7 @@ func (suite *ServerSuite) expectGetRecoverInfo(collection int64) {
 			})
 		}
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Maybe().Return(vChannels, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything, mock.Anything).Maybe().Return(vChannels, segmentInfos, nil, nil)
 }
 
 func (suite *ServerSuite) expectLoadAndReleasePartitions(querynode *mocks.MockQueryNode) {
@@ -487,13 +490,6 @@ func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, 
 		vChannels    []*datapb.VchannelInfo
 		segmentInfos []*datapb.SegmentInfo
 	)
-
-	getRecoveryInfoRequest := &datapb.GetRecoveryInfoRequestV2{
-		Base: commonpbutil.NewMsgBase(
-			commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
-		),
-		CollectionID: collection,
-	}
 
 	vChannels = []*datapb.VchannelInfo{}
 	for _, channel := range suite.channels[collection] {
@@ -512,11 +508,14 @@ func (suite *ServerSuite) expectGetRecoverInfoByMockDataCoord(collection int64, 
 			})
 		}
 	}
-	dataCoord.EXPECT().GetRecoveryInfoV2(mock.Anything, getRecoveryInfoRequest).Return(&datapb.GetRecoveryInfoResponseV2{
-		Status:   merr.Success(),
-		Channels: vChannels,
-		Segments: segmentInfos,
-	}, nil).Maybe()
+	dataCoord.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, grirv *datapb.GetRecoveryInfoRequestV2, co ...grpc.CallOption) (*datapb.GetRecoveryInfoResponseV2, error) {
+			return &datapb.GetRecoveryInfoResponseV2{
+				Status:   merr.Success(),
+				Channels: vChannels,
+				Segments: segmentInfos,
+			}, nil
+		})
 }
 
 func (suite *ServerSuite) updateCollectionStatus(collectionID int64, status querypb.LoadStatus) {

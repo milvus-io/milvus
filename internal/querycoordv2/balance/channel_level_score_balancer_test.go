@@ -413,8 +413,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceOneRound() {
 
 			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
-				c.channels, c.segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+				c.channels, c.segments, nil, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -532,8 +532,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestBalanceMultiRound() {
 	// 1. set up target for multi collections
 	for i := range balanceCase.collectionIDs {
 		collection := utils.CreateTestCollection(balanceCase.collectionIDs[i], int32(balanceCase.replicaIDs[i]))
-		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i]).Return(
-			balanceCase.channels, balanceCase.segments[i], nil)
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i], mock.Anything, mock.Anything, mock.Anything).Return(
+			balanceCase.channels, balanceCase.segments[i], nil, nil)
 
 		collection.LoadPercentage = 100
 		collection.Status = querypb.LoadStatus_Loaded
@@ -696,8 +696,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestStoppedBalance() {
 
 			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
-				c.channels, c.segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+				c.channels, c.segments, nil, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -814,8 +814,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestMultiReplicaBalance() {
 
 			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
-				c.channels, c.segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+				c.channels, c.segments, nil, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -907,8 +907,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Cha
 			CollectionID: 1, ChannelName: "channel2",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 
 	collection := utils.CreateTestCollection(collectionID, int32(1))
@@ -982,8 +982,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 			CollectionID: 1, ChannelName: "channel2",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 
 	collection := utils.CreateTestCollection(collectionID, int32(1))
@@ -1080,8 +1080,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 			CollectionID: 1, ChannelName: "channel2",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 
 	collection := utils.CreateTestCollection(collectionID, int32(1))
@@ -1205,8 +1205,8 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Seg
 			CollectionID: 1, ChannelName: "channel2",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	suite.broker.EXPECT().GetPartitions(mock.Anything, collectionID).Return([]int64{collectionID}, nil).Maybe()
 
 	collection := utils.CreateTestCollection(collectionID, int32(1))

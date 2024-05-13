@@ -448,7 +448,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 					PartitionID: 1,
 				},
 			}
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(nil, segments, nil, nil)
 			collection := utils.CreateTestCollection(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -457,7 +457,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, c.nodes))
 			suite.broker.ExpectedCalls = nil
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(nil, segments, nil, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
@@ -669,11 +669,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, c.segmentInCurrent, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(nil, c.segmentInCurrent, nil, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			suite.broker.ExpectedCalls = nil
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, c.segmentInNext, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(nil, c.segmentInNext, nil, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			suite.mockScheduler.Mock.On("GetNodeChannelDelta", mock.Anything).Return(0).Maybe()
 			for node, s := range c.distributions {
@@ -816,7 +816,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOutboundNodes() {
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(nil, segments, nil, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
@@ -1039,7 +1039,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 					PartitionID: 1,
 				},
 			}
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(nil, segments, nil, nil)
 			collection := utils.CreateTestCollection(1, 1)
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -1048,7 +1048,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestDisableBalanceChannel() {
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
 			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
 			suite.broker.ExpectedCalls = nil
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(nil, segments, nil, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
 			balancer.targetMgr.UpdateCollectionCurrentTarget(1)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
@@ -1167,8 +1167,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestMultiReplicaBalance() {
 
 			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
-				c.channels, c.segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+				c.channels, c.segments, nil, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded

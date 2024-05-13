@@ -224,7 +224,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetRecoveryInfoV2() {
 				}),
 			}, nil)
 
-		vchans, segInfos, err := s.broker.GetRecoveryInfoV2(ctx, collectionID, partitionID)
+		vchans, segInfos, _, err := s.broker.GetRecoveryInfoV2(ctx, collectionID, []int64{partitionID}, nil, true)
 		s.NoError(err)
 		s.ElementsMatch(channels, lo.Map(vchans, func(info *datapb.VchannelInfo, _ int) string {
 			return info.GetChannelName()
@@ -239,7 +239,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetRecoveryInfoV2() {
 		s.datacoord.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).
 			Return(nil, errors.New("mock"))
 
-		_, _, err := s.broker.GetRecoveryInfoV2(ctx, collectionID, partitionID)
+		_, _, _, err := s.broker.GetRecoveryInfoV2(ctx, collectionID, []int64{partitionID}, nil, true)
 		s.Error(err)
 		s.resetMock()
 	})
@@ -250,7 +250,7 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetRecoveryInfoV2() {
 				Status: merr.Status(errors.New("mocked")),
 			}, nil)
 
-		_, _, err := s.broker.GetRecoveryInfoV2(ctx, collectionID, partitionID)
+		_, _, _, err := s.broker.GetRecoveryInfoV2(ctx, collectionID, []int64{partitionID}, nil, true)
 		s.Error(err)
 		s.resetMock()
 	})

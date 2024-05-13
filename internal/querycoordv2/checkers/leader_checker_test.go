@@ -100,8 +100,8 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 
 	// before target ready, should skip check collection
 	tasks := suite.checker.Check(context.TODO())
@@ -166,8 +166,8 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegments() {
 		},
 	}
 	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	// mock l0 segment exist on non delegator node, doesn't set to leader view
@@ -198,8 +198,8 @@ func (suite *LeaderCheckerTestSuite) TestActivation() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -252,8 +252,8 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 	observer.dist.SegmentDistManager.Update(1, utils.CreateTestSegment(1, 1, 1, 2, 1, "test-insert-channel"))
@@ -288,8 +288,8 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncLoadedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -340,8 +340,8 @@ func (suite *LeaderCheckerTestSuite) TestSyncLoadedSegmentsWithReplicas() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 
 	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
 		NodeID:   1,
@@ -391,8 +391,8 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, nil, nil, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
 
@@ -422,8 +422,8 @@ func (suite *LeaderCheckerTestSuite) TestSyncRemovedSegments() {
 		},
 	}
 	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 
 	observer.target.UpdateCollectionNextTarget(int64(1))
 	observer.target.UpdateCollectionCurrentTarget(1)
@@ -456,8 +456,8 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	observer.target.UpdateCollectionNextTarget(int64(1))
 
 	observer.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 1, "test-insert-channel"))

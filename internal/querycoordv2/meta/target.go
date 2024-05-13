@@ -23,6 +23,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 )
 
 // CollectionTarget collection target is immutable,
@@ -150,11 +151,16 @@ func (p *CollectionTarget) IsEmpty() bool {
 type target struct {
 	// just maintain target at collection level
 	collectionTargetMap map[int64]*CollectionTarget
+
+	lastUpdateTs      map[int64]time.Time
+	lastUpdateVersion map[int64][]byte
 }
 
 func newTarget() *target {
 	return &target{
 		collectionTargetMap: make(map[int64]*CollectionTarget),
+		lastUpdateTs:        make(map[int64]time.Time),
+		lastUpdateVersion:   make(map[int64][]byte),
 	}
 }
 
@@ -172,4 +178,19 @@ func (t *target) removeCollectionTarget(collectionID int64) {
 
 func (t *target) getCollectionTarget(collectionID int64) *CollectionTarget {
 	return t.collectionTargetMap[collectionID]
+}
+
+func (t *target) isExpired(collectionID int64) bool {
+	lastUpdated, has := t.lastUpdateTs[collectionID]
+	if !has {
+		return true
+	}
+	return time.Since(lastUpdated) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
+}
+
+func (t *target) updateLastUpdateVersion(collectionID int64, version []byte, ts time.Time) {
+}
+
+func (t *target) getLastUpdateVersion(collectionID int64) []byte {
+	return t.lastUpdateVersion[collectionID]
 }

@@ -135,8 +135,8 @@ func (suite *ChannelCheckerTestSuite) TestLoadChannel() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, nil, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	tasks := checker.Check(context.TODO())
@@ -162,8 +162,8 @@ func (suite *ChannelCheckerTestSuite) TestReduceChannel() {
 			ChannelName:  "test-insert-channel1",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, nil, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
@@ -204,8 +204,8 @@ func (suite *ChannelCheckerTestSuite) TestRepeatedChannels() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.dist.ChannelDistManager.Update(1, utils.CreateTestChannel(1, 1, 1, "test-insert-channel"))
 	checker.dist.ChannelDistManager.Update(2, utils.CreateTestChannel(1, 2, 2, "test-insert-channel"))

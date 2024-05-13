@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"runtime"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -137,11 +138,13 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 		return partition.PartitionID
 	})
 	allocatedTarget := NewCollectionTarget(nil, nil)
+	forceUpdate := mgr.next.isExpired(collectionID)
+	lastUpdateVersion := mgr.next.getLastUpdateVersion(collectionID)
 	mgr.rwMutex.Unlock()
 
 	log := log.With(zap.Int64("collectionID", collectionID),
 		zap.Int64s("PartitionIDs", partitionIDs))
-	segments, channels, err := mgr.PullNextTargetV2(mgr.broker, collectionID, partitionIDs...)
+	segments, channels, lastModifyVersion, err := mgr.PullNextTargetV2(collectionID, partitionIDs, lastUpdateVersion, forceUpdate)
 	if err != nil {
 		log.Warn("failed to get next targets for collection", zap.Error(err))
 		return err
@@ -157,6 +160,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	mgr.rwMutex.Lock()
 	defer mgr.rwMutex.Unlock()
 	mgr.next.updateCollectionTarget(collectionID, allocatedTarget)
+	mgr.next.updateLastUpdateVersion(collectionID, lastModifyVersion, time.Now())
 	log.Debug("finish to update next targets for collection",
 		zap.Int64s("segments", allocatedTarget.GetAllSegmentIDs()),
 		zap.Strings("channels", allocatedTarget.GetAllDmChannelNames()))
@@ -164,7 +168,7 @@ func (mgr *TargetManager) UpdateCollectionNextTarget(collectionID int64) error {
 	return nil
 }
 
-func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
+func (mgr *TargetManager) PullNextTargetV1(collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
 	if len(chosenPartitionIDs) == 0 {
 		return nil, nil, nil
 	}
@@ -172,7 +176,7 @@ func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, ch
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
 	dmChannels := make(map[string]*DmChannel)
 
-	fullPartitions, err := broker.GetPartitions(context.Background(), collectionID)
+	fullPartitions, err := mgr.broker.GetPartitions(context.Background(), collectionID)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -183,7 +187,7 @@ func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, ch
 		log.Debug("get recovery info...",
 			zap.Int64("collectionID", collectionID),
 			zap.Int64("partitionID", partitionID))
-		vChannelInfos, binlogs, err := broker.GetRecoveryInfo(context.TODO(), collectionID, partitionID)
+		vChannelInfos, binlogs, err := mgr.broker.GetRecoveryInfo(context.TODO(), collectionID, partitionID)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -215,32 +219,38 @@ func (mgr *TargetManager) PullNextTargetV1(broker Broker, collectionID int64, ch
 	return segments, dmChannels, nil
 }
 
-func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
+func (mgr *TargetManager) PullNextTargetV2(
+	collectionID int64,
+	chosenPartitionIDs []int64,
+	lastUpdateVersion []byte,
+	forceUpdate bool,
+) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, []byte, error) {
 	log.Debug("start to pull next targets for collection",
 		zap.Int64("collectionID", collectionID),
 		zap.Int64s("chosenPartitionIDs", chosenPartitionIDs))
 
 	if len(chosenPartitionIDs) == 0 {
-		return nil, nil, nil
+		return nil, nil, nil, nil
 	}
 
+	var lastModifyVersion []byte
 	channelInfos := make(map[string][]*datapb.VchannelInfo)
 	segments := make(map[int64]*datapb.SegmentInfo, 0)
 	dmChannels := make(map[string]*DmChannel)
 
 	getRecoveryInfo := func() error {
 		var err error
-
-		vChannelInfos, segmentInfos, err := broker.GetRecoveryInfoV2(context.TODO(), collectionID)
+		vChannelInfos, segmentInfos, lastModify, err := mgr.broker.GetRecoveryInfoV2(context.TODO(), collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)
 		if err != nil {
 			// if meet rpc error, for compatibility with previous versions, try pull next target v1
 			if errors.Is(err, merr.ErrServiceUnimplemented) {
-				segments, dmChannels, err = mgr.PullNextTargetV1(broker, collectionID, chosenPartitionIDs...)
+				segments, dmChannels, err = mgr.PullNextTargetV1(collectionID, chosenPartitionIDs...)
 				return err
 			}
 
 			return err
 		}
+		lastModifyVersion = lastModify
 
 		for _, info := range vChannelInfos {
 			channelInfos[info.GetChannelName()] = append(channelInfos[info.GetChannelName()], info)
@@ -271,10 +281,10 @@ func (mgr *TargetManager) PullNextTargetV2(broker Broker, collectionID int64, ch
 
 	err := retry.Do(context.TODO(), getRecoveryInfo, retry.Attempts(10))
 	if err != nil {
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return segments, dmChannels, nil
+	return segments, dmChannels, lastModifyVersion, nil
 }
 
 func (mgr *TargetManager) mergeDmChannelInfo(infos []*datapb.VchannelInfo) *DmChannel {
@@ -614,6 +624,12 @@ func (mgr *TargetManager) IsNextTargetExist(collectionID int64) bool {
 	newChannels := mgr.GetDmChannelsByCollection(collectionID, NextTarget)
 
 	return len(newChannels) > 0
+}
+
+func (mgr *TargetManager) IsNextTargetExpired(collectionID int64) bool {
+	mgr.rwMutex.RLock()
+	defer mgr.rwMutex.RUnlock()
+	return mgr.next.isExpired(collectionID)
 }
 
 func (mgr *TargetManager) SaveCurrentTarget(catalog metastore.QueryCoordCatalog) {

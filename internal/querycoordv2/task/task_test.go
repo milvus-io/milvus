@@ -275,7 +275,7 @@ func (suite *TaskSuite) TestSubscribeChannelTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(dmChannels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return(dmChannels, nil, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	suite.AssertTaskNum(0, len(suite.subChannels), len(suite.subChannels), 0)
 
@@ -370,7 +370,7 @@ func (suite *TaskSuite) TestUnsubscribeChannelTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return(dmChannels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return(dmChannels, nil, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 
 	// Only first channel exists
@@ -464,7 +464,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segments, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -565,7 +565,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskNotIndex() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segments, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -660,7 +660,7 @@ func (suite *TaskSuite) TestLoadSegmentTaskFailed() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segments, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -878,7 +878,7 @@ func (suite *TaskSuite) TestMoveSegmentTask() {
 		suite.NoError(err)
 		tasks = append(tasks, task)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	suite.target.UpdateCollectionCurrentTarget(suite.collection)
 	suite.dist.SegmentDistManager.Update(sourceNode, segments...)
@@ -962,7 +962,7 @@ func (suite *TaskSuite) TestMoveSegmentTaskStale() {
 		suite.NoError(err)
 		tasks = append(tasks, task)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segmentInfos, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	suite.target.UpdateCollectionCurrentTarget(suite.collection)
 	suite.dist.LeaderViewManager.Update(leader, view)
@@ -1045,7 +1045,7 @@ func (suite *TaskSuite) TestTaskCanceled() {
 	}
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segmentInfos, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segmentInfos, nil, nil)
 	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, partition))
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 
@@ -1136,7 +1136,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segments, nil, nil)
 	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, partition))
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
@@ -1172,7 +1172,7 @@ func (suite *TaskSuite) TestSegmentTaskStale() {
 	bakExpectations := suite.broker.ExpectedCalls
 	suite.broker.AssertExpectations(suite.T())
 	suite.broker.ExpectedCalls = suite.broker.ExpectedCalls[:0]
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segments, nil, nil)
 
 	suite.meta.CollectionManager.PutPartition(utils.CreateTestPartition(suite.collection, 2))
 	suite.target.UpdateCollectionNextTarget(suite.collection)
@@ -1317,7 +1317,7 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 		err := suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segments, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -1490,7 +1490,7 @@ func (suite *TaskSuite) TestNoExecutor() {
 		err = suite.scheduler.Add(task)
 		suite.NoError(err)
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection).Return([]*datapb.VchannelInfo{channel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, suite.collection, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{channel}, segments, nil, nil)
 	suite.target.UpdateCollectionNextTarget(suite.collection)
 	segmentsNum := len(suite.loadSegments)
 	suite.AssertTaskNum(0, segmentsNum, 0, segmentsNum)
@@ -1658,7 +1658,7 @@ func (suite *TaskSuite) TestBalanceChannelTask() {
 	}
 	suite.meta.PutCollection(utils.CreateTestCollection(collectionID, 1), utils.CreateTestPartition(collectionID, 1))
 	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segments, nil, nil)
 	suite.target.UpdateCollectionNextTarget(collectionID)
 	suite.target.UpdateCollectionCurrentTarget(collectionID)
 	suite.target.UpdateCollectionNextTarget(collectionID)
@@ -1747,7 +1747,7 @@ func (suite *TaskSuite) TestBalanceChannelWithL0SegmentTask() {
 	}
 	suite.meta.PutCollection(utils.CreateTestCollection(collectionID, 1), utils.CreateTestPartition(collectionID, 1))
 	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*datapb.VchannelInfo{vchannel}, segments, nil, nil)
 	suite.target.UpdateCollectionNextTarget(collectionID)
 	suite.target.UpdateCollectionCurrentTarget(collectionID)
 	suite.target.UpdateCollectionNextTarget(collectionID)

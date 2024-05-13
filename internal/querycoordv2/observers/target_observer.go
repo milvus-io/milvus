@@ -62,11 +62,10 @@ type TargetObserver struct {
 
 	initChan    chan initRequest
 	manualCheck chan checkRequest
-	// nextTargetLastUpdate map[int64]time.Time
-	nextTargetLastUpdate *typeutil.ConcurrentMap[int64, time.Time]
-	updateChan           chan targetUpdateRequest
-	mut                  sync.Mutex                // Guard readyNotifiers
-	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
+
+	updateChan     chan targetUpdateRequest
+	mut            sync.Mutex                // Guard readyNotifiers
+	readyNotifiers map[int64][]chan struct{} // CollectionID -> Notifiers
 
 	dispatcher *taskDispatcher[int64]
 	keylocks   *lock.KeyLock[int64]
@@ -82,17 +81,16 @@ func NewTargetObserver(
 	cluster session.Cluster,
 ) *TargetObserver {
 	result := &TargetObserver{
-		meta:                 meta,
-		targetMgr:            targetMgr,
-		distMgr:              distMgr,
-		broker:               broker,
-		cluster:              cluster,
-		manualCheck:          make(chan checkRequest, 10),
-		nextTargetLastUpdate: typeutil.NewConcurrentMap[int64, time.Time](),
-		updateChan:           make(chan targetUpdateRequest),
-		readyNotifiers:       make(map[int64][]chan struct{}),
-		initChan:             make(chan initRequest),
-		keylocks:             lock.NewKeyLock[int64](),
+		meta:           meta,
+		targetMgr:      targetMgr,
+		distMgr:        distMgr,
+		broker:         broker,
+		cluster:        cluster,
+		manualCheck:    make(chan checkRequest, 10),
+		updateChan:     make(chan targetUpdateRequest),
+		readyNotifiers: make(map[int64][]chan struct{}),
+		initChan:       make(chan initRequest),
+		keylocks:       lock.NewKeyLock[int64](),
 	}
 
 	dispatcher := newTaskDispatcher(result.check)
@@ -243,13 +241,6 @@ func (ob *TargetObserver) ReleaseCollection(collectionID int64) {
 
 func (ob *TargetObserver) clean() {
 	collectionSet := typeutil.NewUniqueSet(ob.meta.GetAll()...)
-	// for collection which has been removed from target, try to clear nextTargetLastUpdate
-	ob.nextTargetLastUpdate.Range(func(collectionID int64, _ time.Time) bool {
-		if !collectionSet.Contain(collectionID) {
-			ob.nextTargetLastUpdate.Remove(collectionID)
-		}
-		return true
-	})
 
 	ob.mut.Lock()
 	defer ob.mut.Unlock()
@@ -264,15 +255,7 @@ func (ob *TargetObserver) clean() {
 }
 
 func (ob *TargetObserver) shouldUpdateNextTarget(collectionID int64) bool {
-	return !ob.targetMgr.IsNextTargetExist(collectionID) || ob.isNextTargetExpired(collectionID)
-}
-
-func (ob *TargetObserver) isNextTargetExpired(collectionID int64) bool {
-	lastUpdated, has := ob.nextTargetLastUpdate.Get(collectionID)
-	if !has {
-		return true
-	}
-	return time.Since(lastUpdated) > params.Params.QueryCoordCfg.NextTargetSurviveTime.GetAsDuration(time.Second)
+	return !ob.targetMgr.IsNextTargetExist(collectionID) || ob.targetMgr.IsNextTargetExpired(collectionID)
 }
 
 func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
@@ -286,12 +269,7 @@ func (ob *TargetObserver) updateNextTarget(collectionID int64) error {
 			zap.Error(err))
 		return err
 	}
-	ob.updateNextTargetTimestamp(collectionID)
 	return nil
-}
-
-func (ob *TargetObserver) updateNextTargetTimestamp(collectionID int64) {
-	ob.nextTargetLastUpdate.Insert(collectionID, time.Now())
 }
 
 func (ob *TargetObserver) shouldUpdateCurrentTarget(ctx context.Context, collectionID int64) bool {

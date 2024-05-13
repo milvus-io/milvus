@@ -117,8 +117,8 @@ func (suite *CheckerControllerSuite) TestBasic() {
 			InsertChannel: "test-insert-channel2",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	suite.targetManager.UpdateCollectionNextTarget(int64(1))
 
 	// set dist

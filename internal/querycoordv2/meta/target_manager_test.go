@@ -139,7 +139,7 @@ func (suite *TargetManagerSuite) SetupTest() {
 				})
 			}
 		}
-		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything, mock.Anything).Return(dmChannels, allSegments, nil, nil)
 
 		suite.meta.PutCollection(&Collection{
 			CollectionLoadInfo: &querypb.CollectionLoadInfo{
@@ -235,7 +235,7 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(nextTargetChannels, nextTargetSegments, nil, nil)
 	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.assertSegments([]int64{11, 12}, suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget))
 	suite.assertChannels([]string{"channel-1", "channel-2"}, suite.mgr.GetDmChannelsByCollection(collectionID, NextTarget))
@@ -244,8 +244,8 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 
 	suite.broker.ExpectedCalls = nil
 	// test getRecoveryInfoV2 failed , then back to getRecoveryInfo succeed
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(
-		nil, nil, merr.WrapErrServiceUnimplemented(status.Errorf(codes.Unimplemented, "fake not found")))
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+		nil, nil, nil, merr.WrapErrServiceUnimplemented(status.Errorf(codes.Unimplemented, "fake not found")))
 	suite.broker.EXPECT().GetPartitions(mock.Anything, mock.Anything).Return([]int64{1}, nil)
 	suite.broker.EXPECT().GetRecoveryInfo(mock.Anything, collectionID, int64(1)).Return(nextTargetChannels, nextTargetBinlogs, nil)
 	err := suite.mgr.UpdateCollectionNextTarget(collectionID)
@@ -253,8 +253,8 @@ func (suite *TargetManagerSuite) TestUpdateNextTarget() {
 
 	suite.broker.ExpectedCalls = nil
 	// test getRecoveryInfoV2 failed , then retry getRecoveryInfoV2 succeed
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nil, nil, errors.New("fake error")).Times(1)
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(nil, nil, nil, errors.New("fake error")).Times(1)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(nextTargetChannels, nextTargetSegments, nil, nil)
 	err = suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.NoError(err)
 
@@ -410,7 +410,7 @@ func (suite *TargetManagerSuite) TestGetSegmentByChannel() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(nextTargetChannels, nextTargetSegments, nil, nil)
 	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.Len(suite.mgr.GetSealedSegmentsByCollection(collectionID, NextTarget), 2)
 	suite.Len(suite.mgr.GetSealedSegmentsByChannel(collectionID, "channel-1", NextTarget), 1)
@@ -601,7 +601,7 @@ func (suite *TargetManagerSuite) TestRecover() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(nextTargetChannels, nextTargetSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(nextTargetChannels, nextTargetSegments, nil, nil)
 	suite.mgr.UpdateCollectionNextTarget(collectionID)
 	suite.mgr.UpdateCollectionCurrentTarget(collectionID)
 

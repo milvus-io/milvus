@@ -440,7 +440,7 @@ func (suite *CollectionObserverSuite) load(collection int64) {
 		})
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(dmChannels, allSegments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything, mock.Anything).Return(dmChannels, allSegments, nil, nil)
 	suite.targetMgr.UpdateCollectionNextTarget(collection)
 
 	suite.ob.LoadCollection(context.Background(), collection)

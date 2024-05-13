@@ -407,8 +407,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 
 			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
-				nil, c.collectionsSegments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+				nil, c.collectionsSegments, nil, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -521,8 +521,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceMultiRound() {
 	// 1. set up target for multi collections
 	for i := range balanceCase.collectionIDs {
 		collection := utils.CreateTestCollection(balanceCase.collectionIDs[i], int32(balanceCase.replicaIDs[i]))
-		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i]).Return(
-			nil, balanceCase.collectionsSegments[i], nil)
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, balanceCase.collectionIDs[i], mock.Anything, mock.Anything, mock.Anything).Return(
+			nil, balanceCase.collectionsSegments[i], nil, nil)
 
 		collection.LoadPercentage = 100
 		collection.Status = querypb.LoadStatus_Loaded
@@ -669,8 +669,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestStoppedBalance() {
 
 			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(c.replicaID))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
-				nil, c.collectionsSegments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+				nil, c.collectionsSegments, nil, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded
@@ -787,8 +787,8 @@ func (suite *ScoreBasedBalancerTestSuite) TestMultiReplicaBalance() {
 
 			// 1. set up target for multi collections
 			collection := utils.CreateTestCollection(c.collectionID, int32(len(c.replicaWithNodes)))
-			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID).Return(
-				c.channels, c.segments, nil)
+			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, c.collectionID, mock.Anything, mock.Anything, mock.Anything).Return(
+				c.channels, c.segments, nil, nil)
 			suite.broker.EXPECT().GetPartitions(mock.Anything, c.collectionID).Return([]int64{c.collectionID}, nil).Maybe()
 			collection.LoadPercentage = 100
 			collection.Status = querypb.LoadStatus_Loaded

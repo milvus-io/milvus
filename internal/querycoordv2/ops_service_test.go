@@ -577,7 +577,7 @@ func (suite *OpsServiceSuite) TestTransferSegment() {
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(channels, segments, nil, nil)
 	suite.targetMgr.UpdateCollectionNextTarget(1)
 	suite.targetMgr.UpdateCollectionCurrentTarget(1)
 	suite.dist.SegmentDistManager.Update(1, segmentInfos...)
@@ -795,7 +795,7 @@ func (suite *OpsServiceSuite) TestTransferChannel() {
 	suite.NoError(err)
 	suite.True(merr.Ok(resp))
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID).Return(channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collectionID, mock.Anything, mock.Anything, mock.Anything).Return(channels, segments, nil, nil)
 	suite.targetMgr.UpdateCollectionNextTarget(1)
 	suite.targetMgr.UpdateCollectionCurrentTarget(1)
 	suite.dist.SegmentDistManager.Update(1, segmentInfos...)

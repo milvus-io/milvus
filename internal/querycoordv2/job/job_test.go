@@ -125,7 +125,7 @@ func (suite *JobSuite) SetupSuite() {
 				})
 			}
 		}
-		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection).Return(vChannels, segmentBinlogs, nil).Maybe()
+		suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, collection, mock.Anything, mock.Anything, mock.Anything).Return(vChannels, segmentBinlogs, nil, nil).Maybe()
 	}
 
 	suite.broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything).

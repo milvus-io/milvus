@@ -17,6 +17,7 @@
 package datacoord
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"math"
@@ -837,6 +838,25 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
 		)
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
+	}
+
+	// it's too complicated to trace segment changes in datacoord, so we compute md5 here to verify whether segment list changed
+	// todo: we should remove this code after we have a better way to trace segment changes
+	lastModifyVersion := GenerateDataSignature(channelInfos)
+	segmentListChanged := func() bool {
+		if len(req.GetLastUpdatedVersion()) == 0 {
+			return true
+		}
+
+		if req.GetForceUpdate() {
+			return true
+		}
+		return !bytes.Equal(lastModifyVersion, req.GetLastUpdatedVersion())
+	}
+
+	if !segmentListChanged() {
+		resp.LastModifiedVersion = lastModifyVersion
+		return resp, nil
 	}
 
 	segmentInfos := make([]*datapb.SegmentInfo, 0)

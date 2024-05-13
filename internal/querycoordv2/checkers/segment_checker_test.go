@@ -139,8 +139,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadSegments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -207,8 +207,8 @@ func (suite *SegmentCheckerTestSuite) TestLoadL0Segments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -292,8 +292,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
@@ -313,8 +313,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseL0Segments() {
 
 	// test release l0 segment which doesn't exist in target
 	suite.broker.ExpectedCalls = nil
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, nil, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
@@ -365,8 +365,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipLoadSegments() {
 		},
 	}
 
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// when channel not subscribed, segment_checker won't generate load segment task
@@ -388,8 +388,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, nil, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, nil, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -429,8 +429,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseRepeatedSegments() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 
 	// set dist
@@ -476,8 +476,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseSealedSegments() {
 		},
 	}
 	segments := []*datapb.SegmentInfo{}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(collectionID)
 	checker.targetMgr.UpdateCollectionCurrentTarget(collectionID)
 	readableVersion := checker.targetMgr.GetCollectionTargetVersion(collectionID, meta.CurrentTarget)
@@ -546,8 +546,8 @@ func (suite *SegmentCheckerTestSuite) TestReleaseGrowingSegments() {
 			SeekPosition: &msgpb.MsgPosition{Timestamp: 10},
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 
@@ -605,8 +605,8 @@ func (suite *SegmentCheckerTestSuite) TestSkipReleaseGrowingSegments() {
 			SeekPosition: &msgpb.MsgPosition{Timestamp: 10},
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(
-		channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1), mock.Anything, mock.Anything, mock.Anything).Return(
+		channels, segments, nil, nil)
 	checker.targetMgr.UpdateCollectionNextTarget(int64(1))
 	checker.targetMgr.UpdateCollectionCurrentTarget(int64(1))
 

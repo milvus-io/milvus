@@ -429,12 +429,15 @@ message GetRecoveryInfoResponseV2 {
   common.Status status = 1;
   repeated VchannelInfo channels = 2;
   repeated SegmentInfo segments = 3;
+  bytes lastModifiedVersion = 4;
 }
 
 message GetRecoveryInfoRequestV2 {
   common.MsgBase base = 1;
   int64 collectionID = 2;
   repeated int64 partitionIDs = 3;
+  bytes lastUpdatedVersion = 4;
+  bool forceUpdate = 5;
 }
 
 message GetSegmentsByStatesRequest {

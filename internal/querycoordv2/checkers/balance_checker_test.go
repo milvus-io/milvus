@@ -115,7 +115,7 @@ func (suite *BalanceCheckerTestSuite) TestAutoBalanceConf() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(channels, segments, nil, nil)
 
 	// set collections meta
 	cid1, replicaID1, partitionID1 := 1, 1, 1
@@ -191,7 +191,7 @@ func (suite *BalanceCheckerTestSuite) TestBusyScheduler() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(channels, segments, nil, nil)
 
 	// set collections meta
 	cid1, replicaID1, partitionID1 := 1, 1, 1
@@ -255,7 +255,7 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(channels, segments, nil, nil)
 
 	// set collections meta
 	cid1, replicaID1, partitionID1 := 1, 1, 1
@@ -335,7 +335,7 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 			ChannelName:  "test-insert-channel",
 		},
 	}
-	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything).Return(channels, segments, nil)
+	suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(channels, segments, nil, nil)
 
 	// set collections meta
 	cid1, replicaID1, partitionID1 := 1, 1, 1

@@ -259,46 +259,48 @@ func (_c *MockBroker_GetRecoveryInfo_Call) RunAndReturn(run func(context.Context
 	return _c
 }
 
-// GetRecoveryInfoV2 provides a mock function with given fields: ctx, collectionID, partitionIDs
-func (_m *MockBroker) GetRecoveryInfoV2(ctx context.Context, collectionID int64, partitionIDs ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
-	_va := make([]interface{}, len(partitionIDs))
-	for _i := range partitionIDs {
-		_va[_i] = partitionIDs[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, ctx, collectionID)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
+// GetRecoveryInfoV2 provides a mock function with given fields: ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate
+func (_m *MockBroker) GetRecoveryInfoV2(ctx context.Context, collectionID int64, partitionIDs []int64, lastUpdateVersion []byte, forceUpdate bool) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, []byte, error) {
+	ret := _m.Called(ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate)
 
 	var r0 []*datapb.VchannelInfo
 	var r1 []*datapb.SegmentInfo
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)); ok {
-		return rf(ctx, collectionID, partitionIDs...)
+	var r2 []byte
+	var r3 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64, []byte, bool) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, []byte, error)); ok {
+		return rf(ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate)
 	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, ...int64) []*datapb.VchannelInfo); ok {
-		r0 = rf(ctx, collectionID, partitionIDs...)
+	if rf, ok := ret.Get(0).(func(context.Context, int64, []int64, []byte, bool) []*datapb.VchannelInfo); ok {
+		r0 = rf(ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]*datapb.VchannelInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, int64, ...int64) []*datapb.SegmentInfo); ok {
-		r1 = rf(ctx, collectionID, partitionIDs...)
+	if rf, ok := ret.Get(1).(func(context.Context, int64, []int64, []byte, bool) []*datapb.SegmentInfo); ok {
+		r1 = rf(ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).([]*datapb.SegmentInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, int64, ...int64) error); ok {
-		r2 = rf(ctx, collectionID, partitionIDs...)
+	if rf, ok := ret.Get(2).(func(context.Context, int64, []int64, []byte, bool) []byte); ok {
+		r2 = rf(ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate)
 	} else {
-		r2 = ret.Error(2)
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).([]byte)
+		}
 	}
 
-	return r0, r1, r2
+	if rf, ok := ret.Get(3).(func(context.Context, int64, []int64, []byte, bool) error); ok {
+		r3 = rf(ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // MockBroker_GetRecoveryInfoV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetRecoveryInfoV2'
@@ -309,31 +311,26 @@ type MockBroker_GetRecoveryInfoV2_Call struct {
 // GetRecoveryInfoV2 is a helper method to define mock.On call
 //   - ctx context.Context
 //   - collectionID int64
-//   - partitionIDs ...int64
-func (_e *MockBroker_Expecter) GetRecoveryInfoV2(ctx interface{}, collectionID interface{}, partitionIDs ...interface{}) *MockBroker_GetRecoveryInfoV2_Call {
-	return &MockBroker_GetRecoveryInfoV2_Call{Call: _e.mock.On("GetRecoveryInfoV2",
-		append([]interface{}{ctx, collectionID}, partitionIDs...)...)}
+//   - partitionIDs []int64
+//   - lastUpdateVersion []byte
+//   - forceUpdate bool
+func (_e *MockBroker_Expecter) GetRecoveryInfoV2(ctx interface{}, collectionID interface{}, partitionIDs interface{}, lastUpdateVersion interface{}, forceUpdate interface{}) *MockBroker_GetRecoveryInfoV2_Call {
+	return &MockBroker_GetRecoveryInfoV2_Call{Call: _e.mock.On("GetRecoveryInfoV2", ctx, collectionID, partitionIDs, lastUpdateVersion, forceUpdate)}
 }
 
-func (_c *MockBroker_GetRecoveryInfoV2_Call) Run(run func(ctx context.Context, collectionID int64, partitionIDs ...int64)) *MockBroker_GetRecoveryInfoV2_Call {
+func (_c *MockBroker_GetRecoveryInfoV2_Call) Run(run func(ctx context.Context, collectionID int64, partitionIDs []int64, lastUpdateVersion []byte, forceUpdate bool)) *MockBroker_GetRecoveryInfoV2_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]int64, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(int64)
-			}
-		}
-		run(args[0].(context.Context), args[1].(int64), variadicArgs...)
+		run(args[0].(context.Context), args[1].(int64), args[2].([]int64), args[3].([]byte), args[4].(bool))
 	})
 	return _c
 }
 
-func (_c *MockBroker_GetRecoveryInfoV2_Call) Return(_a0 []*datapb.VchannelInfo, _a1 []*datapb.SegmentInfo, _a2 error) *MockBroker_GetRecoveryInfoV2_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *MockBroker_GetRecoveryInfoV2_Call) Return(_a0 []*datapb.VchannelInfo, _a1 []*datapb.SegmentInfo, _a2 []byte, _a3 error) *MockBroker_GetRecoveryInfoV2_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3)
 	return _c
 }
 
-func (_c *MockBroker_GetRecoveryInfoV2_Call) RunAndReturn(run func(context.Context, int64, ...int64) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)) *MockBroker_GetRecoveryInfoV2_Call {
+func (_c *MockBroker_GetRecoveryInfoV2_Call) RunAndReturn(run func(context.Context, int64, []int64, []byte, bool) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, []byte, error)) *MockBroker_GetRecoveryInfoV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

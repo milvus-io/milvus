@@ -18,6 +18,8 @@ package datacoord
 
 import (
 	"context"
+	"crypto/md5" // #nosec
+	"sort"
 	"strconv"
 	"strings"
 	"time"
@@ -236,4 +238,29 @@ func calculateL0SegmentSize(fields []*datapb.FieldBinlog) float64 {
 		}
 	}
 	return float64(size)
+}
+
+func GenerateDataSignature(channels []*datapb.VchannelInfo) []byte {
+	d := md5.New() // #nosec
+
+	for _, ch := range channels {
+		// write channel name
+		d.Write([]byte(ch.GetChannelName()))
+
+		segmentIDs := make([]int64, 0)
+		segmentIDs = append(segmentIDs, ch.GetFlushedSegmentIds()...)
+		segmentIDs = append(segmentIDs, ch.GetLevelZeroSegmentIds()...)
+
+		sort.Slice(segmentIDs, func(i, j int) bool {
+			return segmentIDs[i] < segmentIDs[j]
+		})
+
+		// write flushed and l0 segment id
+		idInByte := make([]byte, 8)
+		for _, id := range segmentIDs {
+			common.Endian.PutUint64(idInByte, uint64(id))
+			d.Write(idInByte)
+		}
+	}
+	return d.Sum(nil)
 }

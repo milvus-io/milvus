@@ -46,7 +46,7 @@ type Broker interface {
 	ListIndexes(ctx context.Context, collectionID UniqueID) ([]*indexpb.IndexInfo, error)
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) (*datapb.GetSegmentInfoResponse, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
-	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
+	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs []UniqueID, lastUpdateVersion []byte, forceUpdate bool) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, []byte, error)
 }
 
 type CoordinatorBroker struct {
@@ -143,7 +143,13 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
 }
 
-func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error) {
+func (broker *CoordinatorBroker) GetRecoveryInfoV2(
+	ctx context.Context,
+	collectionID UniqueID,
+	partitionIDs []UniqueID,
+	lastUpdateVersion []byte,
+	forceUpdate bool,
+) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, []byte, error) {
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	log := log.Ctx(ctx).With(
@@ -155,17 +161,19 @@ func (broker *CoordinatorBroker) GetRecoveryInfoV2(ctx context.Context, collecti
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetRecoveryInfo),
 		),
-		CollectionID: collectionID,
-		PartitionIDs: partitionIDs,
+		CollectionID:       collectionID,
+		PartitionIDs:       partitionIDs,
+		LastUpdatedVersion: lastUpdateVersion,
+		ForceUpdate:        forceUpdate,
 	}
 	recoveryInfo, err := broker.dataCoord.GetRecoveryInfoV2(ctx, getRecoveryInfoRequest)
 
 	if err := merr.CheckRPCCall(recoveryInfo, err); err != nil {
 		log.Warn("get recovery info failed", zap.Error(err))
-		return nil, nil, err
+		return nil, nil, nil, err
 	}
 
-	return recoveryInfo.Channels, recoveryInfo.Segments, nil
+	return recoveryInfo.GetChannels(), recoveryInfo.GetSegments(), recoveryInfo.GetLastModifiedVersion(), nil
 }
 
 func (broker *CoordinatorBroker) GetSegmentInfo(ctx context.Context, ids ...UniqueID) (*datapb.GetSegmentInfoResponse, error) {
