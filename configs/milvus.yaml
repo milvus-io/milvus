@@ -312,6 +312,8 @@ queryNode:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
+    # used for zilliz-cloud ; please ignore it for open source.
+    knowhereScoreConsistency: false
     chunkRows: 128 # The number of vectors in a chunk.
     interimIndex:
       enableIndex: true # Enable segment build with index to accelerate vector search when segment is in growing or binlog.

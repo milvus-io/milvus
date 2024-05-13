@@ -355,6 +355,11 @@ func TestComponentParam(t *testing.T) {
 		enableInterimIndex = Params.EnableTempSegmentIndex.GetAsBool()
 		assert.Equal(t, true, enableInterimIndex)
 
+		assert.Equal(t, false, Params.KnowhereScoreConsistency.GetAsBool())
+		params.Save("queryNode.segcore.knowhereScoreConsistency", "true")
+		assert.Equal(t, true, Params.KnowhereScoreConsistency.GetAsBool())
+		params.Save("queryNode.segcore.knowhereScoreConsistency", "false")
+
 		nlist = Params.InterimIndexNlist.GetAsInt64()
 		assert.Equal(t, int64(128), nlist)
 

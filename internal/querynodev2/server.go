@@ -200,6 +200,11 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
+	enableKnowhereScoreConsistency := paramtable.Get().QueryNodeCfg.KnowhereScoreConsistency.GetAsBool()
+	if enableKnowhereScoreConsistency {
+		C.SegcoreEnableKnowhereScoreConsistency()
+	}
+
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.InitIndexSliceSize(cIndexSliceSize)

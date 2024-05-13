@@ -2006,6 +2006,8 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
+	KnowhereScoreConsistency ParamItem `refreshable:"false"`
+
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
@@ -2158,6 +2160,16 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableTempSegmentIndex.Init(base.mgr)
+
+	p.KnowhereScoreConsistency = ParamItem{
+		Key:          "queryNode.segcore.knowhereScoreConsistency",
+		Version:      "2.3.15",
+		DefaultValue: "false",
+		Doc:          "Enable knowhere strong consistency score computation logic",
+		Export:       true,
+	}
+
+	p.KnowhereScoreConsistency.Init(base.mgr)
 
 	p.InterimIndexNlist = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.nlist",
