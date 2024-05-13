@@ -101,12 +101,11 @@ func genInsertBlobs(b io.BinlogIO, allocator allocator.Allocator, data *InsertDa
 		k := metautil.JoinIDPath(collectionID, partID, segID, fID, <-generator)
 		key := b.JoinFullPath(common.SegmentInsertLogPath, k)
 		value := blob.GetValue()
-		fileLen := len(value)
 
 		kvs[key] = value
 		inpaths[fID] = &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: blob.RowNum}},
+			Binlogs: []*datapb.Binlog{{LogSize: int64(data.GetMemorySize()), LogPath: key, EntriesNum: blob.RowNum}},
 		}
 	}
 
