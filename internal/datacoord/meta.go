@@ -176,8 +176,20 @@ func (m *meta) AddCollection(collection *collectionInfo) {
 // DropCollection drop a collection from meta
 func (m *meta) DropCollection(collectionID int64) {
 	log.Info("meta update: drop collection", zap.Int64("collectionID", collectionID))
+	segments := m.SelectSegments(WithCollection(collectionID))
 	m.Lock()
 	defer m.Unlock()
+	coll, ok := m.collections[collectionID]
+	if ok {
+		metrics.CleanupDataCoordNumStoredRows(coll.DatabaseName, collectionID)
+		metrics.CleanupDataCoordBulkInsertVectors(coll.DatabaseName, collectionID)
+		for _, seg := range segments {
+			metrics.CleanupDataCoordSegmentMetrics(coll.DatabaseName, collectionID, seg.ID)
+		}
+	} else {
+		log.Warn("not found database name", zap.Int64("collectionID", collectionID))
+	}
+
 	delete(m.collections, collectionID)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
@@ -321,6 +333,8 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 
 // GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
 func (m *meta) GetCollectionIndexFilesSize() uint64 {
+	m.RLock()
+	defer m.RUnlock()
 	var total uint64
 	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
 		coll, ok := m.collections[segmentIdx.CollectionID]
@@ -385,6 +399,11 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 		return err
 	}
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Dec()
+	coll, ok := m.collections[segment.CollectionID]
+	if ok {
+		metrics.CleanupDataCoordSegmentMetrics(coll.DatabaseName, segment.CollectionID, segment.ID)
+	}
+
 	m.segments.DropSegment(segmentID)
 	log.Info("meta update: dropping segment - complete",
 		zap.Int64("segmentID", segmentID))
