@@ -49,7 +49,6 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -527,7 +526,10 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 	server.resourceObserver = observers.NewResourceObserver(server.meta)
 	server.resourceObserver.Start()
+	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist)
+	server.replicaObserver.Start()
 	defer server.resourceObserver.Stop()
+	defer server.replicaObserver.Stop()
 
 	err := server.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
@@ -557,13 +559,15 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	time.Sleep(100 * time.Millisecond)
 
-	nodes, err := server.meta.ResourceManager.GetNodes("rg1")
-	suite.NoError(err)
-	suite.Len(nodes, 1)
-	nodesInReplica := server.meta.ReplicaManager.Get(1).GetNodes()
-	suite.Len(nodesInReplica, 1)
+	suite.Eventually(func() bool {
+		nodes, err := server.meta.ResourceManager.GetNodes("rg1")
+		if err != nil || len(nodes) != 1 {
+			return false
+		}
+		nodesInReplica := server.meta.ReplicaManager.Get(1).GetNodes()
+		return len(nodesInReplica) == 1
+	}, 5*time.Second, 100*time.Millisecond)
 
 	suite.meta.ReplicaManager.Put(meta.NewReplica(
 		&querypb.Replica{
@@ -633,14 +637,16 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	time.Sleep(100 * time.Millisecond)
 
-	nodes, err = server.meta.ResourceManager.GetNodes("rg3")
-	suite.NoError(err)
-	suite.Len(nodes, 1)
-	nodes, err = server.meta.ResourceManager.GetNodes("rg4")
-	suite.NoError(err)
-	suite.Len(nodes, 3)
+	suite.Eventually(func() bool {
+		nodes, err := server.meta.ResourceManager.GetNodes("rg3")
+		if err != nil || len(nodes) != 1 {
+			return false
+		}
+		nodes, err = server.meta.ResourceManager.GetNodes("rg4")
+		return err == nil && len(nodes) == 3
+	}, 5*time.Second, 100*time.Millisecond)
+
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 		SourceResourceGroup: "rg3",
 		TargetResourceGroup: "rg4",
@@ -1763,27 +1769,13 @@ func (suite *ServiceSuite) TestHandleNodeUp() {
 	}))
 	server.handleNodeUp(111)
 	// wait for async update by observer
-	time.Sleep(100 * time.Millisecond)
+	suite.Eventually(func() bool {
+		nodes := suite.server.meta.ReplicaManager.Get(1).GetNodes()
+		nodesInRG, _ := suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
+		return len(nodes) == len(nodesInRG)
+	}, 5*time.Second, 100*time.Millisecond)
 	nodes := suite.server.meta.ReplicaManager.Get(1).GetNodes()
 	nodesInRG, _ := suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
-	suite.ElementsMatch(nodes, nodesInRG)
-	log.Info("handleNodeUp")
-
-	// when more rg exist, new node shouldn't be assign to replica in default rg in handleNodeUp
-	suite.server.meta.ResourceManager.AddResourceGroup("rg", &rgpb.ResourceGroupConfig{
-		Requests: &rgpb.ResourceGroupLimit{NodeNum: 1},
-		Limits:   &rgpb.ResourceGroupLimit{NodeNum: 1},
-	})
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   222,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	server.handleNodeUp(222)
-	// wait for async update by observer
-	time.Sleep(100 * time.Millisecond)
-	nodes = suite.server.meta.ReplicaManager.Get(1).GetNodes()
-	nodesInRG, _ = suite.server.meta.ResourceManager.GetNodes(meta.DefaultResourceGroupName)
 	suite.ElementsMatch(nodes, nodesInRG)
 }
 

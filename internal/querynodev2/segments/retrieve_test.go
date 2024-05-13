@@ -161,7 +161,7 @@ func (suite *RetrieveSuite) TestRetrieveSealed() {
 
 	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
-	suite.Len(res[0].Offset, 3)
+	suite.Len(res[0].Result.Offset, 3)
 	suite.manager.Segment.Unpin(segments)
 }
 
@@ -180,7 +180,7 @@ func (suite *RetrieveSuite) TestRetrieveGrowing() {
 
 	res, segments, err := Retrieve(context.TODO(), suite.manager, plan, req)
 	suite.NoError(err)
-	suite.Len(res[0].Offset, 3)
+	suite.Len(res[0].Result.Offset, 3)
 	suite.manager.Segment.Unpin(segments)
 }
 

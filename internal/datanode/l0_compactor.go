@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"math"
 	"sync"
 	"time"
 
@@ -300,9 +301,10 @@ func (t *levelZeroCompactionTask) splitDelta(
 	defer span.End()
 
 	split := func(pk storage.PrimaryKey) []int64 {
+		lc := storage.NewLocationsCache(pk)
 		predicts := make([]int64, 0, len(segmentBfs))
 		for segmentID, bf := range segmentBfs {
-			if bf.PkExists(pk) {
+			if bf.PkExists(lc) {
 				predicts = append(predicts, segmentID)
 			}
 		}
@@ -355,11 +357,24 @@ func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storag
 
 	uploadKv[blobPath] = blob.GetValue()
 
-	// TODO Timestamp?
+	minTs := uint64(math.MaxUint64)
+	maxTs := uint64(0)
+	for _, ts := range dData.Tss {
+		if ts > maxTs {
+			maxTs = ts
+		}
+		if ts < minTs {
+			minTs = ts
+		}
+	}
+
 	deltalog := &datapb.Binlog{
-		LogSize: int64(len(blob.GetValue())),
-		LogPath: blobPath,
-		LogID:   logID,
+		EntriesNum:    dData.RowCount,
+		LogSize:       int64(len(blob.GetValue())),
+		LogPath:       blobPath,
+		LogID:         logID,
+		TimestampFrom: minTs,
+		TimestampTo:   maxTs,
 	}
 
 	return uploadKv, deltalog, nil

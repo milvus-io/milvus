@@ -273,6 +273,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	// --- rootcoord ---
 	p.RootCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordTimeTick",
+		DefaultValue: "rootcoord-timetick",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordTimeTick"},
 		PanicIfEmpty: true,
@@ -283,6 +284,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.RootCoordStatistics = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordStatistics",
+		DefaultValue: "rootcoord-statistics",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordStatistics"},
 		PanicIfEmpty: true,
@@ -293,6 +295,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.RootCoordDml = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordDml",
+		DefaultValue: "rootcoord-dml",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
@@ -303,6 +306,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.ReplicateMsgChannel = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.replicateMsg",
+		DefaultValue: "replicate-msg",
 		Version:      "2.3.2",
 		FallbackKeys: []string{"common.chanNamePrefix.replicateMsg"},
 		PanicIfEmpty: true,
@@ -313,6 +317,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.QueryCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.queryTimeTick",
+		DefaultValue: "queryTimeTick",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.queryTimeTick"},
 		PanicIfEmpty: true,
@@ -323,6 +328,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.dataCoordTimeTick",
+		DefaultValue: "datacoord-timetick-channel",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordTimeTick"},
 		PanicIfEmpty: true,
@@ -333,6 +339,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordSegmentInfo = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.dataCoordSegmentInfo",
+		DefaultValue: "segment-info-channel",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordSegmentInfo"},
 		PanicIfEmpty: true,
@@ -343,6 +350,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataCoordSubNamePrefix",
+		DefaultValue: "dataCoord",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataCoordSubNamePrefix"},
 		PanicIfEmpty: true,
@@ -369,6 +377,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataNodeSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
+		DefaultValue: "dataNode",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataNodeSubNamePrefix"},
 		PanicIfEmpty: true,
@@ -1491,6 +1500,7 @@ type queryCoordConfig struct {
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
+	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1967,6 +1977,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableStoppingBalance.Init(base.mgr)
+
+	p.ChannelExclusiveNodeFactor = ParamItem{
+		Key:          "queryCoord.channelExclusiveNodeFactor",
+		Version:      "2.4.2",
+		DefaultValue: "4",
+		Doc:          "the least node number for enable channel's exclusive mode",
+		Export:       true,
+	}
+	p.ChannelExclusiveNodeFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1986,6 +2005,8 @@ type queryNodeConfig struct {
 	InterimIndexNProbe            ParamItem `refreshable:"false"`
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
+
+	KnowhereScoreConsistency ParamItem `refreshable:"false"`
 
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
@@ -2007,6 +2028,8 @@ type queryNodeConfig struct {
 	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
 	LazyLoadRequestResourceTimeout       ParamItem `refreshable:"true"`
 	LazyLoadRequestResourceRetryInterval ParamItem `refreshable:"true"`
+	LazyLoadMaxRetryTimes                ParamItem `refreshable:"true"`
+	LazyLoadMaxEvictPerRetry             ParamItem `refreshable:"true"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -2138,6 +2161,16 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.EnableTempSegmentIndex.Init(base.mgr)
 
+	p.KnowhereScoreConsistency = ParamItem{
+		Key:          "queryNode.segcore.knowhereScoreConsistency",
+		Version:      "2.3.15",
+		DefaultValue: "false",
+		Doc:          "Enable knowhere strong consistency score computation logic",
+		Export:       true,
+	}
+
+	p.KnowhereScoreConsistency.Init(base.mgr)
+
 	p.InterimIndexNlist = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.nlist",
 		Version:      "2.0.0",
@@ -2243,7 +2276,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.MmapEnabled.Init(base.mgr)
 
 	p.LazyLoadEnabled = ParamItem{
-		Key:          "queryNode.lazyloadEnabled",
+		Key:          "queryNode.lazyload.enabled",
 		Version:      "2.4.2",
 		DefaultValue: "false",
 		Doc:          "Enable lazyload for loading data",
@@ -2251,7 +2284,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.LazyLoadEnabled.Init(base.mgr)
 	p.LazyLoadWaitTimeout = ParamItem{
-		Key:          "queryNode.lazyloadWaitTimeout",
+		Key:          "queryNode.lazyload.waitTimeout",
 		Version:      "2.4.2",
 		DefaultValue: "30000",
 		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
@@ -2259,7 +2292,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.LazyLoadWaitTimeout.Init(base.mgr)
 	p.LazyLoadRequestResourceTimeout = ParamItem{
-		Key:          "queryNode.lazyLoadRequestResourceTimeout",
+		Key:          "queryNode.lazyload.requestResourceTimeout",
 		Version:      "2.4.2",
 		DefaultValue: "5000",
 		Doc:          "max timeout in milliseconds for waiting request resource for lazy load, 5s by default",
@@ -2267,13 +2300,31 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	}
 	p.LazyLoadRequestResourceTimeout.Init(base.mgr)
 	p.LazyLoadRequestResourceRetryInterval = ParamItem{
-		Key:          "queryNode.lazyLoadRequestResourceRetryInterval",
+		Key:          "queryNode.lazyload.requestResourceRetryInterval",
 		Version:      "2.4.2",
 		DefaultValue: "2000",
 		Doc:          "retry interval in milliseconds for waiting request resource for lazy load, 2s by default",
 		Export:       true,
 	}
 	p.LazyLoadRequestResourceRetryInterval.Init(base.mgr)
+
+	p.LazyLoadMaxRetryTimes = ParamItem{
+		Key:          "queryNode.lazyload.maxRetryTimes",
+		Version:      "2.4.2",
+		DefaultValue: "1",
+		Doc:          "max retry times for lazy load, 1 by default",
+		Export:       true,
+	}
+	p.LazyLoadMaxRetryTimes.Init(base.mgr)
+
+	p.LazyLoadMaxEvictPerRetry = ParamItem{
+		Key:          "queryNode.lazyload.maxEvictPerRetry",
+		Version:      "2.4.2",
+		DefaultValue: "1",
+		Doc:          "max evict count for lazy load, 1 by default",
+		Export:       true,
+	}
+	p.LazyLoadMaxEvictPerRetry.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",

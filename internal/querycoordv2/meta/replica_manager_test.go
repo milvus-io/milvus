@@ -111,11 +111,26 @@ func (suite *ReplicaManagerSuite) TestSpawn() {
 	mgr := suite.mgr
 
 	mgr.idAllocator = ErrorIDAllocator()
-	_, err := mgr.Spawn(1, map[string]int{DefaultResourceGroupName: 1})
+	_, err := mgr.Spawn(1, map[string]int{DefaultResourceGroupName: 1}, nil)
 	suite.Error(err)
 
 	replicas := mgr.GetByCollection(1)
 	suite.Len(replicas, 0)
+
+	mgr.idAllocator = suite.idAllocator
+	replicas, err = mgr.Spawn(1, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	suite.NoError(err)
+	for _, replica := range replicas {
+		suite.Len(replica.replicaPB.GetChannelNodeInfos(), 0)
+	}
+
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+	replicas, err = mgr.Spawn(2, map[string]int{DefaultResourceGroupName: 1}, []string{"channel1", "channel2"})
+	suite.NoError(err)
+	for _, replica := range replicas {
+		suite.Len(replica.replicaPB.GetChannelNodeInfos(), 2)
+	}
 }
 
 func (suite *ReplicaManagerSuite) TestGet() {
@@ -262,7 +277,7 @@ func (suite *ReplicaManagerSuite) spawnAll() {
 	mgr := suite.mgr
 
 	for id, cfg := range suite.collections {
-		replicas, err := mgr.Spawn(id, cfg.spawnConfig)
+		replicas, err := mgr.Spawn(id, cfg.spawnConfig, nil)
 		suite.NoError(err)
 		totalSpawn := 0
 		rgsOfCollection := make(map[string]typeutil.UniqueSet)
@@ -277,12 +292,12 @@ func (suite *ReplicaManagerSuite) spawnAll() {
 
 func (suite *ReplicaManagerSuite) TestResourceGroup() {
 	mgr := NewReplicaManager(suite.idAllocator, suite.catalog)
-	replicas1, err := mgr.Spawn(int64(1000), map[string]int{DefaultResourceGroupName: 1})
+	replicas1, err := mgr.Spawn(int64(1000), map[string]int{DefaultResourceGroupName: 1}, nil)
 	suite.NoError(err)
 	suite.NotNil(replicas1)
 	suite.Len(replicas1, 1)
 
-	replica2, err := mgr.Spawn(int64(2000), map[string]int{DefaultResourceGroupName: 1})
+	replica2, err := mgr.Spawn(int64(2000), map[string]int{DefaultResourceGroupName: 1}, nil)
 	suite.NoError(err)
 	suite.NotNil(replica2)
 	suite.Len(replica2, 1)
@@ -365,7 +380,7 @@ func (suite *ReplicaManagerV2Suite) TestSpawn() {
 	mgr := suite.mgr
 
 	for id, cfg := range suite.collections {
-		replicas, err := mgr.Spawn(id, cfg.spawnConfig)
+		replicas, err := mgr.Spawn(id, cfg.spawnConfig, nil)
 		suite.NoError(err)
 		rgsOfCollection := make(map[string]typeutil.UniqueSet)
 		for rg := range cfg.spawnConfig {

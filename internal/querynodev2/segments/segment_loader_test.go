@@ -26,6 +26,7 @@ import (
 	"github.com/apache/arrow/go/v12/arrow"
 	"github.com/apache/arrow/go/v12/arrow/array"
 	"github.com/apache/arrow/go/v12/arrow/memory"
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
@@ -41,7 +42,9 @@ import (
 	"github.com/milvus-io/milvus/internal/util/initcore"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -491,6 +494,46 @@ func (suite *SegmentLoaderSuite) TestLoadIndex() {
 	suite.ErrorIs(err, merr.ErrIndexNotFound)
 }
 
+func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
+	ctx := context.Background()
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    1,
+		PartitionID:  suite.partitionID,
+		CollectionID: suite.collectionID,
+		IndexInfos: []*querypb.FieldIndexInfo{
+			{
+				FieldID:        1,
+				IndexFilePaths: []string{},
+				IndexParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.IndexTypeKey,
+						Value: indexparamcheck.IndexINVERTED,
+					},
+				},
+			},
+		},
+		BinlogPaths: []*datapb.FieldBinlog{
+			{
+				FieldID: 1,
+				Binlogs: []*datapb.Binlog{
+					{
+						LogSize: 1000000000,
+					},
+				},
+			},
+		},
+	}
+
+	segment := &LocalSegment{
+		baseSegment: baseSegment{
+			loadInfo: atomic.NewPointer[querypb.SegmentLoadInfo](loadInfo),
+		},
+	}
+	paramtable.Get().QueryNodeCfg.DiskCapacityLimit.SwapTempValue("100000")
+	err := suite.loader.LoadIndex(ctx, segment, loadInfo, 0)
+	suite.Error(err)
+}
+
 func (suite *SegmentLoaderSuite) TestLoadWithMmap() {
 	key := paramtable.Get().QueryNodeCfg.MmapDirPath.Key
 	paramtable.Get().Save(key, "/tmp/mmap-test")
@@ -806,31 +849,55 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key, "0")
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.OverloadedMemoryThresholdPercentage.Key)
 
-		_, _, err := suite.loader.requestResource(context.Background())
+		_, err := suite.loader.requestResource(context.Background())
 		suite.NoError(err)
 	})
+
+	loadInfo := &querypb.SegmentLoadInfo{
+		SegmentID:    100,
+		CollectionID: suite.collectionID,
+		Level:        datapb.SegmentLevel_L0,
+		Deltalogs: []*datapb.FieldBinlog{
+			{
+				Binlogs: []*datapb.Binlog{
+					{LogSize: 10000},
+					{LogSize: 12000},
+				},
+			},
+		},
+		InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
+	}
 
 	suite.Run("l0_segment_deltalog", func() {
 		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key, "50")
 		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key)
 
-		resource, _, err := suite.loader.requestResource(context.Background(), &querypb.SegmentLoadInfo{
-			SegmentID:    100,
-			CollectionID: suite.collectionID,
-			Level:        datapb.SegmentLevel_L0,
-			Deltalogs: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{LogSize: 10000},
-						{LogSize: 12000},
-					},
-				},
-			},
-			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
-		})
+		resource, err := suite.loader.requestResource(context.Background(), loadInfo)
 
 		suite.NoError(err)
+		suite.EqualValues(1100000, resource.Resource.MemorySize)
+	})
+
+	suite.Run("request_resource_with_timeout", func() {
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key, "50")
+		defer paramtable.Get().Reset(paramtable.Get().QueryNodeCfg.DeltaDataExpansionRate.Key)
+
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceTimeout.Key, "500")
+		paramtable.Get().Save(paramtable.Get().QueryNodeCfg.LazyLoadRequestResourceRetryInterval.Key, "100")
+		resource, err := suite.loader.requestResourceWithTimeout(context.Background(), loadInfo)
+		suite.NoError(err)
 		suite.EqualValues(1100000, resource.MemorySize)
+
+		suite.loader.committedResource.Add(LoadResource{
+			MemorySize: 1024 * 1024 * 1024 * 1024,
+		})
+
+		timeoutErr := errors.New("timeout")
+		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 1000*time.Millisecond, timeoutErr)
+		defer cancel()
+		resource, err = suite.loader.requestResourceWithTimeout(ctx, loadInfo)
+		suite.Error(err)
+		suite.ErrorIs(err, timeoutErr)
 	})
 }
 

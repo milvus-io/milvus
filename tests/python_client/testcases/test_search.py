@@ -594,7 +594,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         nb = ct.default_nb
         schema = cf.gen_array_collection_schema()
         collection_w = self.init_collection_wrap(schema=schema)
-        data = cf.get_row_data_by_schema(schema=schema)
+        data = cf.gen_row_data_by_schema(schema=schema)
         data[1][ct.default_int32_array_field_name] = [1]
         collection_w.insert(data)
         collection_w.create_index("float_vector", ct.default_index)
@@ -623,7 +623,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         nb = ct.default_nb
         schema = cf.gen_array_collection_schema()
         collection_w = self.init_collection_wrap(schema=schema)
-        data = cf.get_row_data_by_schema(schema=schema)
+        data = cf.gen_row_data_by_schema(schema=schema)
         collection_w.insert(data)
         collection_w.create_index("float_vector", ct.default_index)
         collection_w.load()
@@ -3300,7 +3300,7 @@ class TestCollectionSearch(TestcaseBase):
         collection_w = self.init_collection_wrap(schema=schema, enable_dynamic_field=enable_dynamic_field)
         log.info(schema.fields)
         if enable_dynamic_field:
-            data = cf.get_row_data_by_schema(nb, schema=schema)
+            data = cf.gen_row_data_by_schema(nb, schema=schema)
             for i in range(nb):
                 data[i]["new_added_field"] = i
             log.info(data[0])
@@ -3679,7 +3679,7 @@ class TestCollectionSearch(TestcaseBase):
 
         # 2. insert data
         if enable_dynamic_field:
-            data = cf.get_row_data_by_schema(schema=schema)
+            data = cf.gen_row_data_by_schema(schema=schema)
         else:
             data = cf.gen_array_dataframe_data(auto_id=auto_id)
 
@@ -6891,7 +6891,7 @@ class TestCollectionRangeSearch(TestcaseBase):
     @pytest.fixture(scope="function", params=ct.all_index_types[:7])
     def index_type(self, request):
         tags = request.config.getoption("--tags")
-        if CaseLabel.L2 not in tags or "all" not in tags:
+        if CaseLabel.L2 not in tags:
             if request.param not in ct.L0_index_types:
                 pytest.skip(f"skip index type {request.param}")
         yield request.param
@@ -6899,8 +6899,8 @@ class TestCollectionRangeSearch(TestcaseBase):
     @pytest.fixture(scope="function", params=ct.float_metrics)
     def metric(self, request):
         tags = request.config.getoption("--tags")
-        if CaseLabel.L2 not in tags or "all" not in tags:
-            if request.param not in ct.default_L0_metric:
+        if CaseLabel.L2 not in tags:
+            if request.param != ct.default_L0_metric:
                 pytest.skip(f"skip index type {request.param}")
         yield request.param
 

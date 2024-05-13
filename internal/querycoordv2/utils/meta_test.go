@@ -118,7 +118,7 @@ func TestSpawnReplicasWithRG(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			got, err := SpawnReplicasWithRG(tt.args.m, tt.args.collection, tt.args.resourceGroups, tt.args.replicaNumber)
+			got, err := SpawnReplicasWithRG(tt.args.m, tt.args.collection, tt.args.resourceGroups, tt.args.replicaNumber, nil)
 			if (err != nil) != tt.wantErr {
 				t.Errorf("SpawnReplicasWithRG() error = %v, wantErr %v", err, tt.wantErr)
 				return

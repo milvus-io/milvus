@@ -139,3 +139,42 @@ func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
 	// check pk range first, ugly but key it for now
 	return st.MinPK.LE(pk) && st.MaxPK.GE(pk)
 }
+
+func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
+	// empty pkStatics
+	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
+		return false
+	}
+
+	// check bf first, TestLocation just do some bitset compute, cost is cheaper
+	if !st.PkFilter.TestLocations(lc.Locations(st.PkFilter.K())) {
+		return false
+	}
+
+	// check pk range after
+	return st.MinPK.LE(lc.pk) && st.MaxPK.GE(lc.pk)
+}
+
+// LocationsCache is a helper struct caching pk bloom filter locations.
+// Note that this helper is not concurrent safe and shall be used in same goroutine.
+type LocationsCache struct {
+	pk        PrimaryKey
+	locations map[uint][]uint64
+}
+
+func (lc LocationsCache) Locations(k uint) []uint64 {
+	locs, ok := lc.locations[k]
+	if ok {
+		return locs
+	}
+	locs = Locations(lc.pk, k)
+	lc.locations[k] = locs
+	return locs
+}
+
+func NewLocationsCache(pk PrimaryKey) LocationsCache {
+	return LocationsCache{
+		pk:        pk,
+		locations: make(map[uint][]uint64),
+	}
+}
