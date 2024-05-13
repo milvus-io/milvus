@@ -19,8 +19,8 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"sync"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -288,7 +288,7 @@ func (t *levelZeroCompactionTask) splitDelta(
 	defer span.End()
 
 	split := func(pk storage.PrimaryKey) []int64 {
-		lc := storage.NewLocationsCache(pk)		
+		lc := storage.NewLocationsCache(pk)
 		predicts := make([]int64, 0, len(segmentBfs))
 		for segmentID, bf := range segmentBfs {
 			if bf.PkExists(lc) {

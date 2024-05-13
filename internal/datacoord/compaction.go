@@ -277,13 +277,7 @@ func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskO
 }
 
 func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
-	nodeID, err := c.chManager.FindWatcher(plan.GetChannel())
-	if err != nil {
-		log.Error("failed to find watcher", zap.Int64("planID", plan.GetPlanID()), zap.Error(err))
-		return err
-	}
-
-	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", nodeID))
+	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 	c.setSegmentsCompacting(plan, true)
 
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", plan.GetType()))
@@ -292,7 +286,6 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 		triggerInfo: signal,
 		plan:        plan,
 		state:       pipelining,
-		dataNodeID:  nodeID,
 		span:        span,
 	}
 	c.mu.Lock()

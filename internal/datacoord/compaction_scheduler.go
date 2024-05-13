@@ -65,13 +65,11 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 // Schedule pick 1 or 0 tasks for 1 node
 func (s *CompactionScheduler) Schedule() []*compactionTask {
 	s.taskGuard.Lock()
-	nodeTasks := lo.GroupBy(s.queuingTasks, func(t *compactionTask) int64 {
-		return t.dataNodeID
-	})
-	s.taskGuard.Unlock()
-	if len(nodeTasks) == 0 {
+	if len(s.queuingTasks) == 0 {
+		s.taskGuard.Unlock()
 		return nil // To mitigate the need for frequent slot querying
 	}
+	s.taskGuard.Unlock()
 
 	nodeSlots := s.querySlots()
 
@@ -79,8 +77,7 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 
 	pickPriorPolicy := func(tasks []*compactionTask, exclusiveChannels []string, executing []string) *compactionTask {
 		for _, task := range tasks {
-			// TODO: sheep, replace pickShardNode with pickAnyNode
-			if nodeID := s.pickShardNode(task.dataNodeID, nodeSlots); nodeID == NullNodeID {
+			if nodeID := s.pickAnyNode(nodeSlots); nodeID == NullNodeID {
 				log.Warn("cannot find datanode for compaction task", zap.Int64("planID", task.plan.PlanID), zap.String("vchannel", task.plan.Channel))
 				continue
 			}
@@ -109,9 +106,20 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 
 	s.taskGuard.Lock()
 	defer s.taskGuard.Unlock()
+	var (
+		executing         = make(map[int64]typeutil.NewSet[string]())
+		channelsExecPrior = typeutil.NewSet[string]()
+	)
+	for _, t := range parallel {
+		executing.Insert(t.plan.GetChannel())
+		if t.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
+			channelsExecPrior.Insert(t.plan.GetChannel())
+		}
+	}
 	// pick 1 or 0 task for 1 node
-	for node, tasks := range nodeTasks {
+	for _, task := range s.queuingTasks {
 		parallel := s.parallelTasks[node]
+		task.plan.GetPartitionID()
 
 		var (
 			executing         = typeutil.NewSet[string]()
