@@ -234,28 +234,8 @@ def initialize_env(request):
     param_info.prepare_param_info(host, port, handler, replica_num, user, password, secure, uri, token)
 
 
-@pytest.fixture(params=ct.get_invalid_strs)
-def get_invalid_string(request):
-    yield request.param
-
-
 @pytest.fixture(params=cf.gen_simple_index())
 def get_index_param(request):
-    yield request.param
-
-
-@pytest.fixture(params=ct.get_invalid_strs)
-def get_invalid_collection_name(request):
-    yield request.param
-
-
-@pytest.fixture(params=ct.get_invalid_strs)
-def get_invalid_field_name(request):
-    yield request.param
-
-
-@pytest.fixture(params=ct.get_invalid_strs)
-def get_invalid_index_type(request):
     yield request.param
 
 
@@ -264,11 +244,6 @@ def get_invalid_index_type(request):
                         {"metric_type": "L2", "index_type": "IVF_FLAT", "err_params": {"nlist": 10}},
                         {"metric_type": "L2", "index_type": "IVF_FLAT", "params": {"nlist": -1}}])
 def get_invalid_index_params(request):
-    yield request.param
-
-
-@pytest.fixture(params=ct.get_invalid_strs)
-def get_invalid_partition_name(request):
     yield request.param
 
 
