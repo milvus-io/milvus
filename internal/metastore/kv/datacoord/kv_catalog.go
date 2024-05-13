@@ -193,6 +193,13 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 			return fmt.Errorf("prefix:%s, %w", path.Join(kc.metaRootpath, logPathPrefix), err)
 		}
 
+		// set log size to memory size if memory size is zero for old segment before v2.4.3
+		for i, b := range fieldBinlog.GetBinlogs() {
+			if b.GetMemorySize() == 0 {
+				fieldBinlog.Binlogs[i].MemorySize = b.GetLogSize()
+			}
+		}
+
 		// no need to set log path and only store log id
 		ret[segmentID] = append(ret[segmentID], fieldBinlog)
 		return nil

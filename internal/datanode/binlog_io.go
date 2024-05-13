@@ -106,7 +106,7 @@ func genInsertBlobs(b io.BinlogIO, allocator allocator.Allocator, data *InsertDa
 		kvs[key] = value
 		inpaths[fID] = &datapb.FieldBinlog{
 			FieldID: fID,
-			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: blob.RowNum}},
+			Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: blob.RowNum, MemorySize: blob.GetMemorySize()}},
 		}
 	}
 
@@ -135,7 +135,7 @@ func genStatBlobs(b io.BinlogIO, allocator allocator.Allocator, stats *storage.P
 
 	statPaths[fID] = &datapb.FieldBinlog{
 		FieldID: fID,
-		Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: totRows}},
+		Binlogs: []*datapb.Binlog{{LogSize: int64(fileLen), LogPath: key, EntriesNum: totRows, MemorySize: int64(fileLen)}},
 	}
 	return statPaths, nil
 }
@@ -238,6 +238,7 @@ func uploadDeltaLog(
 				EntriesNum: dData.RowCount,
 				LogPath:    k,
 				LogSize:    int64(len(v)),
+				MemorySize: dData.Size(),
 			}},
 		})
 	} else {

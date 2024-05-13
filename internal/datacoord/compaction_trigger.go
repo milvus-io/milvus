@@ -813,7 +813,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 					zap.Uint64("binlogTimestampTo", l.TimestampTo),
 					zap.Uint64("compactExpireTime", compactTime.expireTime))
 				totalExpiredRows += int(l.GetEntriesNum())
-				totalExpiredSize += l.GetLogSize()
+				totalExpiredSize += l.GetMemorySize()
 			}
 		}
 	}

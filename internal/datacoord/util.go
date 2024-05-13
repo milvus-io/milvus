@@ -148,7 +148,7 @@ func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
 	if s != nil {
 		for _, binlogs := range s.GetInsertLogs() {
 			for _, l := range binlogs.GetBinlogs() {
-				segmentSize += l.GetLogSize()
+				segmentSize += l.GetMemorySize()
 			}
 		}
 

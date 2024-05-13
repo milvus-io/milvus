@@ -1422,7 +1422,7 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 	fieldID := fieldBinlog.FieldID
 	fieldDataSize := int64(0)
 	for _, binlog := range fieldBinlog.GetBinlogs() {
-		fieldDataSize += binlog.LogSize
+		fieldDataSize += binlog.GetMemorySize()
 	}
 	GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateFieldRawDataSize(s.ptr, C.int64_t(fieldID), C.int64_t(numRows), C.int64_t(fieldDataSize))

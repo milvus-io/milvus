@@ -414,13 +414,13 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 		var size int64
 		for _, binlogs := range s.GetBinlogs() {
 			for _, l := range binlogs.GetBinlogs() {
-				size += l.GetLogSize()
+				size += l.GetMemorySize()
 			}
 		}
 
 		for _, deltaLogs := range s.GetDeltalogs() {
 			for _, l := range deltaLogs.GetBinlogs() {
-				size += l.GetLogSize()
+				size += l.GetMemorySize()
 			}
 		}
 
