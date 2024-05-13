@@ -70,11 +70,6 @@ func collectRecursive(params *paramtable.ComponentParam, data *[]DocContent, val
 			defaultValue := params.GetWithDefault(item.Key, item.DefaultValue)
 			log.Debug("got key", zap.String("key", item.Key), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
 			*data = append(*data, DocContent{item.Key, defaultValue, item.Version, refreshable, item.Export, item.Doc})
-			for _, fk := range item.FallbackKeys {
-				defaultValue = params.GetWithDefault(fk, item.DefaultValue)
-				log.Debug("got fallback key", zap.String("key", fk), zap.Any("value", defaultValue), zap.String("variable", val.Type().Field(j).Name))
-				*data = append(*data, DocContent{fk, defaultValue, item.Version, refreshable, item.Export, item.Doc})
-			}
 		} else if t == "paramtable.ParamGroup" {
 			item := subVal.Interface().(paramtable.ParamGroup)
 			log.Debug("got key", zap.String("key", item.KeyPrefix), zap.String("variable", val.Type().Field(j).Name))
