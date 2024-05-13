@@ -380,7 +380,7 @@ func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInf
 		}
 
 		// Get toCluster by filtering out execlusive nodes
-		if lo.Contains(execlusiveNodes, info.NodeID) && toAssign != nil && info.NodeID == toAssign.NodeID {
+		if lo.Contains(execlusiveNodes, info.NodeID) || (toAssign != nil && info.NodeID == toAssign.NodeID) {
 			return
 		}
 
