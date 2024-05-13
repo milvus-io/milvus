@@ -278,8 +278,9 @@ func (t *levelZeroCompactionTask) splitDelta(
 	// segments shall be safe to read outside
 	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
 	split := func(pk storage.PrimaryKey) []int64 {
+		lc := storage.NewLocationsCache(pk)
 		return lo.FilterMap(segments, func(segment *metacache.SegmentInfo, _ int) (int64, bool) {
-			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(pk)
+			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(lc)
 		})
 	}
 
