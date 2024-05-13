@@ -45,7 +45,7 @@ type RetrieveSegmentResult struct {
 // all segment ids are validated before calling this function
 func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
 	resultCh := make(chan RetrieveSegmentResult, len(segments))
-	defer func ()  { close(resultCh) }()
+	defer func() { close(resultCh) }()
 
 	plan.ignoreNonPk = len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
 
@@ -70,7 +70,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	}
 
 	if err := doOnSegments(ctx, mgr, segments, retriever); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	results := make([]RetrieveSegmentResult, 0, len(segments))

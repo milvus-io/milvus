@@ -62,5 +62,5 @@ func doOnSegmentsWithPool(ctx context.Context, mgr *Manager, segments []Segment,
 		})
 		futures = append(futures, future)
 	}
-	return conc.AwaitAll(futures...)
+	return conc.BlockOnAll(futures...)
 }
