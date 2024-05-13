@@ -130,7 +130,6 @@ func TestValidateDatabaseName(t *testing.T) {
 
 func TestValidatePartitionTag(t *testing.T) {
 	assert.Nil(t, validatePartitionTag("abc", true))
-	assert.Nil(t, validatePartitionTag("123abc", true))
 	assert.Nil(t, validatePartitionTag("_123abc", true))
 	assert.Nil(t, validatePartitionTag("abc123_", true))
 
@@ -146,6 +145,7 @@ func TestValidatePartitionTag(t *testing.T) {
 		"",
 		string(longName),
 		"中文",
+		"12partition",
 	}
 
 	for _, name := range invalidNames {
