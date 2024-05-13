@@ -517,20 +517,21 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 	}
 
 	// 2. get grouped segments
-	segments := t.meta.SelectSegments(func(segInfo *SegmentInfo) bool {
-		return isSegmentHealthy(segInfo) &&
-			// choose the segments from the same collection, channel, partition
-			segInfo.GetInsertChannel() == segment.GetInsertChannel() &&
-			segInfo.GetCollectionID() == segment.GetCollectionID() &&
-			segInfo.GetPartitionID() == segment.GetPartitionID() &&
+	segments := t.meta.SelectSegments(
+		WithCollection(segment.GetCollectionID()),
+		WithChannel(segment.GetInsertChannel()),
+		SegmentFilterFunc(func(segInfo *SegmentInfo) bool {
+			return isSegmentHealthy(segInfo) &&
+				// choose the segments from the same collection, channel, partition
+				segInfo.GetPartitionID() == segment.GetPartitionID() &&
 
-			// choose flushed/flushing segments,
-			// ignore compacting, importing, and, Level Zero segments ,
-			isFlush(segInfo) &&
-			!segInfo.isCompacting &&
-			!segInfo.GetIsImporting() &&
-			segInfo.GetLevel() != datapb.SegmentLevel_L0
-	})
+				// choose flushed/flushing segments,
+				// ignore compacting, importing, and, Level Zero segments ,
+				isFlush(segInfo) &&
+				!segInfo.isCompacting &&
+				!segInfo.GetIsImporting() &&
+				segInfo.GetLevel() != datapb.SegmentLevel_L0
+		}))
 	if Params.DataCoordCfg.IndexBasedCompaction.GetAsBool() {
 		segments = t.SelectIndexedSegments(coll, segments)
 	}
