@@ -356,6 +356,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(collectionID typeutil.UniqueID
 			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
 			log.Info(
 				"new replica recovery found",
+				zap.Int64("replicaID", assignment.GetReplicaID()),
 				zap.Int64s("newRONodes", roNodes),
 				zap.Int64s("roToRWNodes", recoverableNodes),
 				zap.Int64s("newIncomingNodes", incomingNode))

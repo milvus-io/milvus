@@ -526,7 +526,10 @@ func (suite *ServiceSuite) TestTransferNode() {
 
 	server.resourceObserver = observers.NewResourceObserver(server.meta)
 	server.resourceObserver.Start()
+	server.replicaObserver = observers.NewReplicaObserver(server.meta, server.dist)
+	server.replicaObserver.Start()
 	defer server.resourceObserver.Stop()
+	defer server.replicaObserver.Stop()
 
 	err := server.meta.ResourceManager.AddResourceGroup("rg1", &rgpb.ResourceGroupConfig{
 		Requests: &rgpb.ResourceGroupLimit{NodeNum: 0},
@@ -556,13 +559,15 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	time.Sleep(100 * time.Millisecond)
 
-	nodes, err := server.meta.ResourceManager.GetNodes("rg1")
-	suite.NoError(err)
-	suite.Len(nodes, 1)
-	nodesInReplica := server.meta.ReplicaManager.Get(1).GetNodes()
-	suite.Len(nodesInReplica, 1)
+	suite.Eventually(func() bool {
+		nodes, err := server.meta.ResourceManager.GetNodes("rg1")
+		if err != nil || len(nodes) != 1 {
+			return false
+		}
+		nodesInReplica := server.meta.ReplicaManager.Get(1).GetNodes()
+		return len(nodesInReplica) == 1
+	}, 5*time.Second, 100*time.Millisecond)
 
 	suite.meta.ReplicaManager.Put(meta.NewReplica(
 		&querypb.Replica{
@@ -632,14 +637,16 @@ func (suite *ServiceSuite) TestTransferNode() {
 	})
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, resp.ErrorCode)
-	time.Sleep(100 * time.Millisecond)
 
-	nodes, err = server.meta.ResourceManager.GetNodes("rg3")
-	suite.NoError(err)
-	suite.Len(nodes, 1)
-	nodes, err = server.meta.ResourceManager.GetNodes("rg4")
-	suite.NoError(err)
-	suite.Len(nodes, 3)
+	suite.Eventually(func() bool {
+		nodes, err := server.meta.ResourceManager.GetNodes("rg3")
+		if err != nil || len(nodes) != 1 {
+			return false
+		}
+		nodes, err = server.meta.ResourceManager.GetNodes("rg4")
+		return err == nil && len(nodes) == 3
+	}, 5*time.Second, 100*time.Millisecond)
+
 	resp, err = server.TransferNode(ctx, &milvuspb.TransferNodeRequest{
 		SourceResourceGroup: "rg3",
 		TargetResourceGroup: "rg4",
