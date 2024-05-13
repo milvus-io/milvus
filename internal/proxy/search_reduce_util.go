@@ -319,7 +319,7 @@ func reduceSearchResultDataNoGroupBy(ctx context.Context, subSearchResultData []
 			cursors = make([]int64, subSearchNum)
 
 			j     int64
-			idSet = make(map[interface{}]struct{})
+			idSet = make(map[interface{}]struct{}, limit)
 		)
 
 		// skip offset results
