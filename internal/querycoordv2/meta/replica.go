@@ -4,6 +4,7 @@ import (
 	"github.com/golang/protobuf/proto"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -38,7 +39,7 @@ func NewReplica(replica *querypb.Replica, nodes ...typeutil.UniqueSet) *Replica 
 }
 
 // newReplica creates a new replica from pb.
-func newReplica(replica *querypb.Replica) *Replica {
+func newReplica(replica *querypb.Replica, channels ...string) *Replica {
 	return &Replica{
 		replicaPB: proto.Clone(replica).(*querypb.Replica),
 		rwNodes:   typeutil.NewUniqueSet(replica.Nodes...),
@@ -122,20 +123,38 @@ func (replica *Replica) AddRWNode(nodes ...int64) {
 	replica.replicaPB.Nodes = replica.rwNodes.Collect()
 }
 
+func (replica *Replica) GetChannelRWNodes(channelName string) []int64 {
+	channelNodeInfos := replica.replicaPB.GetChannelNodeInfos()
+	if channelNodeInfos[channelName] == nil || len(channelNodeInfos[channelName].GetRwNodes()) == 0 {
+		return nil
+	}
+	return replica.replicaPB.ChannelNodeInfos[channelName].GetRwNodes()
+}
+
 // copyForWrite returns a mutable replica for write operations.
 func (replica *Replica) copyForWrite() *mutableReplica {
+	exclusiveRWNodeToChannel := make(map[int64]string)
+	for name, channelNodeInfo := range replica.replicaPB.GetChannelNodeInfos() {
+		for _, nodeID := range channelNodeInfo.GetRwNodes() {
+			exclusiveRWNodeToChannel[nodeID] = name
+		}
+	}
+
 	return &mutableReplica{
-		&Replica{
+		Replica: &Replica{
 			replicaPB: proto.Clone(replica.replicaPB).(*querypb.Replica),
 			rwNodes:   typeutil.NewUniqueSet(replica.replicaPB.Nodes...),
 			roNodes:   typeutil.NewUniqueSet(replica.replicaPB.RoNodes...),
 		},
+		exclusiveRWNodeToChannel: exclusiveRWNodeToChannel,
 	}
 }
 
 // mutableReplica is a mutable type (COW) for manipulating replica meta info for replica manager.
 type mutableReplica struct {
 	*Replica
+
+	exclusiveRWNodeToChannel map[int64]string
 }
 
 // SetResourceGroup sets the resource group name of the replica.
@@ -146,6 +165,9 @@ func (replica *mutableReplica) SetResourceGroup(resourceGroup string) {
 // AddRWNode adds the node to rw nodes of the replica.
 func (replica *mutableReplica) AddRWNode(nodes ...int64) {
 	replica.Replica.AddRWNode(nodes...)
+
+	// try to update node's assignment between channels
+	replica.tryBalanceNodeForChannel()
 }
 
 // AddRONode moves the node from rw nodes to ro nodes of the replica.
@@ -155,6 +177,12 @@ func (replica *mutableReplica) AddRONode(nodes ...int64) {
 	replica.replicaPB.Nodes = replica.rwNodes.Collect()
 	replica.roNodes.Insert(nodes...)
 	replica.replicaPB.RoNodes = replica.roNodes.Collect()
+
+	// remove node from channel's exclusive list
+	replica.removeChannelExclusiveNodes(nodes...)
+
+	// try to update node's assignment between channels
+	replica.tryBalanceNodeForChannel()
 }
 
 // RemoveNode removes the node from rw nodes and ro nodes of the replica.
@@ -164,6 +192,84 @@ func (replica *mutableReplica) RemoveNode(nodes ...int64) {
 	replica.replicaPB.RoNodes = replica.roNodes.Collect()
 	replica.rwNodes.Remove(nodes...)
 	replica.replicaPB.Nodes = replica.rwNodes.Collect()
+
+	// remove node from channel's exclusive list
+	replica.removeChannelExclusiveNodes(nodes...)
+
+	// try to update node's assignment between channels
+	replica.tryBalanceNodeForChannel()
+}
+
+func (replica *mutableReplica) removeChannelExclusiveNodes(nodes ...int64) {
+	channelNodeMap := make(map[string][]int64)
+	for _, nodeID := range nodes {
+		channelName, ok := replica.exclusiveRWNodeToChannel[nodeID]
+		if ok {
+			if channelNodeMap[channelName] == nil {
+				channelNodeMap[channelName] = make([]int64, 0)
+			}
+			channelNodeMap[channelName] = append(channelNodeMap[channelName], nodeID)
+		}
+		delete(replica.exclusiveRWNodeToChannel, nodeID)
+	}
+
+	for channelName, nodeIDs := range channelNodeMap {
+		channelNodeInfo, ok := replica.replicaPB.ChannelNodeInfos[channelName]
+		if ok {
+			channelUsedNodes := typeutil.NewUniqueSet()
+			channelUsedNodes.Insert(channelNodeInfo.GetRwNodes()...)
+			channelUsedNodes.Remove(nodeIDs...)
+			replica.replicaPB.ChannelNodeInfos[channelName].RwNodes = channelUsedNodes.Collect()
+		}
+	}
+}
+
+func (replica *mutableReplica) tryBalanceNodeForChannel() {
+	channelNodeInfos := replica.replicaPB.GetChannelNodeInfos()
+	if len(channelNodeInfos) == 0 {
+		return
+	}
+
+	channelExclusiveFactor := paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.GetAsInt()
+	// to do: if query node scale in happens, and the condition does not meet, should we exit channel's exclusive mode?
+	if len(replica.rwNodes) < len(channelNodeInfos)*channelExclusiveFactor {
+		for name := range replica.replicaPB.GetChannelNodeInfos() {
+			replica.replicaPB.ChannelNodeInfos[name] = &querypb.ChannelNodeInfo{}
+		}
+		return
+	}
+
+	if channelNodeInfos != nil {
+		average := replica.RWNodesCount() / len(channelNodeInfos)
+
+		// release node in channel
+		for channelName, channelNodeInfo := range channelNodeInfos {
+			currentNodes := channelNodeInfo.GetRwNodes()
+			if len(currentNodes) > average {
+				replica.replicaPB.ChannelNodeInfos[channelName].RwNodes = currentNodes[:average]
+				for _, nodeID := range currentNodes[average:] {
+					delete(replica.exclusiveRWNodeToChannel, nodeID)
+				}
+			}
+		}
+
+		// acquire node in channel
+		for channelName, channelNodeInfo := range channelNodeInfos {
+			currentNodes := channelNodeInfo.GetRwNodes()
+			if len(currentNodes) < average {
+				for _, nodeID := range replica.rwNodes.Collect() {
+					if _, ok := replica.exclusiveRWNodeToChannel[nodeID]; !ok {
+						currentNodes = append(currentNodes, nodeID)
+						replica.exclusiveRWNodeToChannel[nodeID] = channelName
+						if len(currentNodes) == average {
+							break
+						}
+					}
+				}
+				replica.replicaPB.ChannelNodeInfos[channelName].RwNodes = currentNodes
+			}
+		}
+	}
 }
 
 // IntoReplica returns the immutable replica, After calling this method, the mutable replica should not be used again.

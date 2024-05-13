@@ -128,6 +128,7 @@ func (ob *CollectionObserver) LoadCollection(ctx context.Context, collectionID i
 	}
 
 	ob.loadTasks.Insert(key, LoadTask{LoadType: querypb.LoadType_LoadCollection, CollectionID: collectionID})
+	ob.checkerController.Check()
 }
 
 func (ob *CollectionObserver) LoadPartitions(ctx context.Context, collectionID int64, partitionIDs []int64) {
@@ -140,6 +141,7 @@ func (ob *CollectionObserver) LoadPartitions(ctx context.Context, collectionID i
 	}
 
 	ob.loadTasks.Insert(key, LoadTask{LoadType: querypb.LoadType_LoadPartition, CollectionID: collectionID, PartitionIDs: partitionIDs})
+	ob.checkerController.Check()
 }
 
 func (ob *CollectionObserver) Observe(ctx context.Context) {

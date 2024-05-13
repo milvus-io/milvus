@@ -36,15 +36,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+type RetrieveSegmentResult struct {
+	Result  *segcorepb.RetrieveResults
+	Segment Segment
+}
+
 // retrieveOnSegments performs retrieve on listed segments
 // all segment ids are validated before calling this function
-func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]*segcorepb.RetrieveResults, []Segment, error) {
-	type segmentResult struct {
-		result  *segcorepb.RetrieveResults
-		segment Segment
-	}
-	resultCh := make(chan segmentResult, len(segments))
-	defer func() { close(resultCh) }()
+func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, error) {
+	resultCh := make(chan RetrieveSegmentResult, len(segments))
+	defer func ()  { close(resultCh) }()
 
 	plan.ignoreNonPk = len(segments) > 1 && req.GetReq().GetLimit() != typeutil.Unlimited && plan.ShouldIgnoreNonPk()
 
@@ -59,7 +60,7 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 		if err != nil {
 			return err
 		}
-		resultCh <- segmentResult{
+		resultCh <- RetrieveSegmentResult{
 			result,
 			s,
 		}
@@ -71,16 +72,12 @@ func retrieveOnSegments(ctx context.Context, mgr *Manager, segments []Segment, s
 	if err := doOnSegments(ctx, mgr, segments, retriever); err != nil {
 		return nil, nil, err
 	}
-	close(resultCh)
 
-	var retrieveSegments []Segment
-	var retrieveResults []*segcorepb.RetrieveResults
-	for result := range resultCh {
-		retrieveSegments = append(retrieveSegments, result.segment)
-		retrieveResults = append(retrieveResults, result.result)
+	results := make([]RetrieveSegmentResult, 0, len(segments))
+	for r := range resultCh {
+		results = append(results, r)
 	}
-
-	return retrieveResults, retrieveSegments, nil
+	return results, nil
 }
 
 func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []Segment, segType SegmentType, plan *RetrievePlan, svr streamrpc.QueryStreamServer) error {
@@ -134,7 +131,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, mgr *Manager, segments []
 }
 
 // retrieve will retrieve all the validate target segments
-func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]*segcorepb.RetrieveResults, []Segment, error) {
+func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *querypb.QueryRequest) ([]RetrieveSegmentResult, []Segment, error) {
 	if ctx.Err() != nil {
 		return nil, nil, ctx.Err()
 	}
@@ -156,10 +153,11 @@ func Retrieve(ctx context.Context, manager *Manager, plan *RetrievePlan, req *qu
 	}
 
 	if err != nil {
-		return nil, nil, err
+		return nil, retrieveSegments, err
 	}
 
-	return retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
+	result, err := retrieveOnSegments(ctx, manager, retrieveSegments, SegType, plan, req)
+	return result, retrieveSegments, err
 }
 
 // retrieveStreaming will retrieve all the validate target segments  and  return by stream

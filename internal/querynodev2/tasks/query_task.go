@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -113,8 +114,8 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
-	results, querySegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
-	defer t.segmentManager.Segment.Unpin(querySegments)
+	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err
 	}
@@ -125,7 +126,14 @@ func (t *QueryTask) Execute() error {
 		t.segmentManager,
 	)
 	beforeReduce := time.Now()
-	reducedResult, err := reducer.Reduce(t.ctx, results, querySegments, retrievePlan)
+
+	reduceResults := make([]*segcorepb.RetrieveResults, 0, len(results))
+	querySegments := make([]segments.Segment, 0, len(results))
+	for _, result := range results {
+		reduceResults = append(reduceResults, result.Result)
+		querySegments = append(querySegments, result.Segment)
+	}
+	reducedResult, err := reducer.Reduce(t.ctx, reduceResults, querySegments, retrievePlan)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),

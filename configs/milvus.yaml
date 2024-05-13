@@ -68,7 +68,7 @@ tikv:
     tlsCACert:  # path to your CACert file
 
 localStorage:
-  path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
+  path: /tmp/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -199,7 +199,6 @@ rootCoord:
 proxy:
   timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
-  healthCheckTimetout: 3000 # ms, the interval that to do component healthy check
   msgStream:
     timeTick:
       bufSize: 512
@@ -313,6 +312,8 @@ queryNode:
     publishInterval: 1000 # Interval for querynode to report node information (milliseconds)
   segcore:
     knowhereThreadPoolNumRatio: 4 # The number of threads in knowhere's thread pool. If disk is enabled, the pool size will multiply with knowhereThreadPoolNumRatio([1, 32]).
+    # used for zilliz-cloud ; please ignore it for open source.
+    knowhereScoreConsistency: false
     chunkRows: 128 # The number of vectors in a chunk.
     interimIndex:
       enableIndex: true # Enable segment build with index to accelerate vector search when segment is in growing or binlog.
@@ -336,11 +337,13 @@ queryNode:
     warmup: async
   mmap:
     mmapEnabled: false # Enable mmap for loading data
-  mmapEnabled: false # Enable mmap for loading data
-  lazyloadEnabled: false # Enable lazyload for loading data
-  lazyloadWaitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
-  lazyLoadRequestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
-  lazyLoadRequestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
+  lazyload:
+    enabled: false # Enable lazyload for loading data
+    waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
+    requestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
+    requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
+    maxRetryTimes: 1 # max retry times for lazy load, 1 by default
+    maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
   grouping:
     enabled: true
     maxNQ: 1000
@@ -406,9 +409,11 @@ indexNode:
 dataCoord:
   channel:
     watchTimeoutInterval: 300 # Timeout on watching channels (in seconds). Datanode tickler update watch progress will reset timeout timer.
+    balanceWithRpc: true # Whether to enable balance with RPC, default to use etcd watch
+    legacyVersionWithoutRPCWatch: 2.4.0 # Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels
     balanceSilentDuration: 300 # The duration after which the channel manager start background channel balancing
     balanceInterval: 360 # The interval with which the channel manager check dml channel balance status
-    checkInterval: 10 # The interval in seconds with which the channel manager advances channel states
+    checkInterval: 1 # The interval in seconds with which the channel manager advances channel states
     notifyChannelOperationTimeout: 5 # Timeout notifing channel operations (in seconds).
   segment:
     maxSize: 1024 # Maximum size of a segment in MB
@@ -539,8 +544,6 @@ log:
 grpc:
   log:
     level: WARNING
-  serverMaxSendSize: 536870912
-  serverMaxRecvSize: 268435456
   gracefulStopTimeout: 10 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
@@ -553,8 +556,6 @@ grpc:
     minResetInterval: 1000
     maxCancelError: 32
     minSessionCheckInterval: 200
-  clientMaxSendSize: 268435456
-  clientMaxRecvSize: 536870912
 
 # Configure the proxy tls enable.
 tls:
@@ -563,18 +564,6 @@ tls:
   caPemPath: configs/cert/ca.pem
 
 common:
-  chanNamePrefix:
-    cluster: by-dev
-    rootCoordTimeTick: rootcoord-timetick
-    rootCoordStatistics: rootcoord-statistics
-    rootCoordDml: rootcoord-dml
-    replicateMsg: replicate-msg
-    queryTimeTick: queryTimeTick
-    dataCoordTimeTick: datacoord-timetick-channel
-    dataCoordSegmentInfo: segment-info-channel
-  subNamePrefix:
-    dataCoordSubNamePrefix: dataCoord
-    dataNodeSubNamePrefix: dataNode
   defaultPartitionName: _default # default partition name for a collection
   defaultIndexName: _default_idx # default index name
   entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire

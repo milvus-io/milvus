@@ -12,6 +12,7 @@ on:
       - 'scripts/**'
       - 'internal/**'
       - 'pkg/**'
+      - 'client/**'
       - 'cmd/**'
       - 'build/**'
       - 'tests/integration/**'
