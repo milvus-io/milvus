@@ -68,7 +68,7 @@ tikv:
     tlsCACert:  # path to your CACert file
 
 localStorage:
-  path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
+  path: /tmp/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -199,7 +199,6 @@ rootCoord:
 proxy:
   timeTickInterval: 200 # ms, the interval that proxy synchronize the time tick
   healthCheckTimeout: 3000 # ms, the interval that to do component healthy check
-  healthCheckTimetout: 3000 # ms, the interval that to do component healthy check
   msgStream:
     timeTick:
       bufSize: 512
@@ -336,11 +335,13 @@ queryNode:
     warmup: async
   mmap:
     mmapEnabled: false # Enable mmap for loading data
-  mmapEnabled: false # Enable mmap for loading data
-  lazyloadEnabled: false # Enable lazyload for loading data
-  lazyloadWaitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
-  lazyLoadRequestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
-  lazyLoadRequestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
+  lazyload:
+    enabled: false # Enable lazyload for loading data
+    waitTimeout: 30000 # max wait timeout duration in milliseconds before start to do lazyload search and retrieve
+    requestResourceTimeout: 5000 # max timeout in milliseconds for waiting request resource for lazy load, 5s by default
+    requestResourceRetryInterval: 2000 # retry interval in milliseconds for waiting request resource for lazy load, 2s by default
+    maxRetryTimes: 1 # max retry times for lazy load, 1 by default
+    maxEvictPerRetry: 1 # max evict count for lazy load, 1 by default
   grouping:
     enabled: true
     maxNQ: 1000
@@ -541,8 +542,6 @@ log:
 grpc:
   log:
     level: WARNING
-  serverMaxSendSize: 536870912
-  serverMaxRecvSize: 268435456
   gracefulStopTimeout: 10 # second, time to wait graceful stop finish
   client:
     compressionEnabled: false
@@ -555,8 +554,6 @@ grpc:
     minResetInterval: 1000
     maxCancelError: 32
     minSessionCheckInterval: 200
-  clientMaxSendSize: 268435456
-  clientMaxRecvSize: 536870912
 
 # Configure the proxy tls enable.
 tls:
@@ -565,18 +562,6 @@ tls:
   caPemPath: configs/cert/ca.pem
 
 common:
-  chanNamePrefix:
-    cluster: by-dev
-    rootCoordTimeTick: rootcoord-timetick
-    rootCoordStatistics: rootcoord-statistics
-    rootCoordDml: rootcoord-dml
-    replicateMsg: replicate-msg
-    queryTimeTick: queryTimeTick
-    dataCoordTimeTick: datacoord-timetick-channel
-    dataCoordSegmentInfo: segment-info-channel
-  subNamePrefix:
-    dataCoordSubNamePrefix: dataCoord
-    dataNodeSubNamePrefix: dataNode
   defaultPartitionName: _default # default partition name for a collection
   defaultIndexName: _default_idx # default index name
   entityExpiration: -1 # Entity expiration in seconds, CAUTION -1 means never expire
