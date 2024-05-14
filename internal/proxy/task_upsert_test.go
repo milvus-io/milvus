@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestUpsertTask_CheckAligned(t *testing.T) {
@@ -96,8 +97,8 @@ func TestUpsertTask_CheckAligned(t *testing.T) {
 			NumRows:    uint32(numRows),
 			FieldsData: []*schemapb.FieldData{},
 		},
-		rowIDs:     generateInt64Array(numRows),
-		timestamps: generateUint64Array(numRows),
+		rowIDs:     testutils.GenerateInt64Array(numRows),
+		timestamps: testutils.GenerateUint64Array(numRows),
 		schema:     schema,
 		upsertMsg: &msgstream.UpsertMsg{
 			InsertMsg: &msgstream.InsertMsg{
