@@ -180,6 +180,9 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 }
 
 func (suite *ReplicaSuite) TestChannelExclusiveMode() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+
 	r := newReplica(&querypb.Replica{
 		ID:            1,
 		CollectionID:  2,
