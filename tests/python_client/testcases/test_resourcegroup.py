@@ -11,12 +11,6 @@ config_nodes = 8
 
 class TestResourceGroupParams(TestcaseBase):
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def invalid_names(self, request):
-        if request.param is None:
-            pytest.skip("None schema is valid")
-        yield request.param
-
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     def test_rg_default(self):
         """
@@ -110,44 +104,21 @@ class TestResourceGroupParams(TestcaseBase):
                                                   check_items=error)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("rg_name", ["", None])
-    def test_create_rg_empty(self, rg_name):
-        """
-        method: create a rg with an empty or null name
-        verify: fail with error msg
-        """
-        self._connect()
-        error = {ct.err_code: 999,
-                 ct.err_msg: "`resource_group_name` value {} is illegal".format(rg_name)}
-        self.init_resource_group(name=rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("rg_name", [[], 1, [1, "2", 3], (1,), {1: 1}, None])
-    def test_create_n_drop_rg_illegal_names(self, rg_name):
+    @pytest.mark.parametrize("rg_name", ct.invalid_resource_names)
+    def test_create_n_drop_rg_invalid_name(self, rg_name):
         """
         method: create a rg with an invalid name(what are invalid names? types, length, chinese,symbols)
         verify: fail with error msg
         """
         self._connect()
-        error = {ct.err_code: 999,
-                 ct.err_msg: "`resource_group_name` value {} is illegal".format(rg_name)}
-        self.init_resource_group(rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
-        # verify drop fail with error if illegal names
-        self.utility_wrap.drop_resource_group(rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("rg_name", [" ", "12-s", "12 s", "(mn)", "中文", "%$#", "qw$_o90", "1ns_", "a".join("a" for i in range(256))])
-    def test_create_n_drop_rg_invalid_names(self, rg_name):
-        """
-        method: create a rg with an invalid name(what are invalid names? types, length, chinese,symbols)
-        verify: fail with error msg
-        """
-        self._connect()
-        error = {ct.err_code: 999,
-                 ct.err_msg: "Invalid resource group name"}
-        self.init_resource_group(rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
-        # verify drop succ with invalid names
-        self.utility_wrap.drop_resource_group(rg_name)
+        error = {ct.err_code: 999, ct.err_msg: "Invalid resource group name"}
+        if rg_name is None or rg_name == "":
+            error = {ct.err_code: 999, ct.err_msg: "is illegal"}
+            self.init_resource_group(rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
+        else:
+            self.init_resource_group(rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
+            # verify drop succ with invalid names
+            self.utility_wrap.drop_resource_group(rg_name)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     def test_create_rg_max_length_name(self):
@@ -261,18 +232,6 @@ class TestResourceGroupParams(TestcaseBase):
         assert rgs_count == len(self.utility_wrap.list_resource_groups()[0])
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("rg_name", ["", None])
-    def test_drop_rg_empty_name(self, rg_name):
-        """
-        method: drop a rg with empty or None name
-        verify: drop successfully
-        """
-        self._connect()
-        error = {ct.err_code: 999,
-                ct.err_msg: "`resource_group_name` value {} is illegal".format(rg_name)}
-        self.utility_wrap.drop_resource_group(name=rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
     def test_drop_rg_twice(self):
         """
         method:
@@ -328,35 +287,17 @@ class TestResourceGroupParams(TestcaseBase):
                                                                   check_items=default_rg_info)
 
     @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    @pytest.mark.parametrize("rg_name", ["", None])
-    def test_describe_rg_empty_name(self, rg_name):
-        """
-        method: describe a rg with an empty name
-        verify: fail with error msg
-        """
-        self._connect()
-        error = {ct.err_code: 999,
-                 ct.err_msg: "`resource_group_name` value {} is illegal".format(rg_name)}
-        self.utility_wrap.drop_resource_group(name=rg_name, check_task=ct.CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    def test_describe_rg_invalid_names(self):
+    @pytest.mark.parametrize("rg_name", ct.invalid_resource_names)
+    def test_describe_rg_invalid_name(self, rg_name):
         """
         method: describe a rg with an invalid name(what are invalid names? types, length, chinese,symbols)
         verify: fail with error msg
         """
-        pass
-
-    @pytest.mark.tags(CaseLabel.MultiQueryNodes)
-    def test_describe_rg_non_existing(self):
-        """
-        method: describe a non-existing rg
-        verify: fail with error msg
-        """
         self._connect()
-        non_existing_rg = 'non_existing'
-        error = {ct.err_code: 999, ct.err_msg: "failed to describe resource group, err=resource group doesn't exist"}
-        self.utility_wrap.describe_resource_group(name=non_existing_rg,
+        error = {ct.err_code: 999, ct.err_msg: f"resource group not found[rg={rg_name}]"}
+        if rg_name is None or rg_name == "":
+            error = {ct.err_code: 999, ct.err_msg: f"`resource_group_name` value {rg_name} is illegal"}
+        self.utility_wrap.describe_resource_group(name=rg_name,
                                                   check_task=ct.CheckTasks.err_res,
                                                   check_items=error)
 
