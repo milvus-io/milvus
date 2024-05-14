@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -291,8 +292,8 @@ func Test_validateUtil_checkFloatVectorFieldData(t *testing.T) {
 func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 	nb := 5
 	dim := int64(8)
-	data := generateFloat16Vectors(nb, int(dim))
-	invalidData := generateFloat16VectorsWithInvalidData(nb, int(dim))
+	data := testutils.GenerateFloat16Vectors(nb, int(dim))
+	invalidData := testutils.GenerateFloat16VectorsWithInvalidData(nb, int(dim))
 
 	t.Run("not float16 vector", func(t *testing.T) {
 		f := &schemapb.FieldData{}
@@ -382,8 +383,8 @@ func Test_validateUtil_checkFloat16VectorFieldData(t *testing.T) {
 func Test_validateUtil_checkBfloatVectorFieldData(t *testing.T) {
 	nb := 5
 	dim := int64(8)
-	data := generateFloat16Vectors(nb, int(dim))
-	invalidData := generateBFloat16VectorsWithInvalidData(nb, int(dim))
+	data := testutils.GenerateFloat16Vectors(nb, int(dim))
+	invalidData := testutils.GenerateBFloat16VectorsWithInvalidData(nb, int(dim))
 	t.Run("not float vector", func(t *testing.T) {
 		f := &schemapb.FieldData{}
 		v := newValidateUtil()
@@ -1196,7 +1197,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
-								Data: generateFloatVectors(10, 8),
+								Data: testutils.GenerateFloatVectors(10, 8),
 							},
 						},
 						Dim: 8,
@@ -1209,7 +1210,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: generateBinaryVectors(10, 8),
+							BinaryVector: testutils.GenerateBinaryVectors(10, 8),
 						},
 						Dim: 8,
 					},
@@ -1222,7 +1223,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
-								Data: generateVarCharArray(10, 8),
+								Data: testutils.GenerateVarCharArray(10, 8),
 							},
 						},
 					},
@@ -1356,7 +1357,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: generateBinaryVectors(2, 8),
+							BinaryVector: testutils.GenerateBinaryVectors(2, 8),
 						},
 					},
 				},
@@ -1368,7 +1369,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
-								Data: generateVarCharArray(2, 8),
+								Data: testutils.GenerateVarCharArray(2, 8),
 							},
 						},
 					},
@@ -1380,7 +1381,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_Float16Vector{
-							Float16Vector: generateFloat16Vectors(2, 8),
+							Float16Vector: testutils.GenerateFloat16Vectors(2, 8),
 						},
 					},
 				},
@@ -1391,7 +1392,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_Bfloat16Vector{
-							Bfloat16Vector: generateBFloat16Vectors(2, 8),
+							Bfloat16Vector: testutils.GenerateBFloat16Vectors(2, 8),
 						},
 					},
 				},
@@ -1474,7 +1475,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
-								Data: generateFloatVectors(2, 1),
+								Data: testutils.GenerateFloatVectors(2, 1),
 							},
 						},
 					},
@@ -1486,7 +1487,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: generateBinaryVectors(2, 8),
+							BinaryVector: testutils.GenerateBinaryVectors(2, 8),
 						},
 					},
 				},
@@ -1497,7 +1498,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_Float16Vector{
-							Float16Vector: generateFloat16Vectors(2, 8),
+							Float16Vector: testutils.GenerateFloat16Vectors(2, 8),
 						},
 					},
 				},
@@ -1508,7 +1509,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 				Field: &schemapb.FieldData_Vectors{
 					Vectors: &schemapb.VectorField{
 						Data: &schemapb.VectorField_Bfloat16Vector{
-							Bfloat16Vector: generateBFloat16Vectors(2, 8),
+							Bfloat16Vector: testutils.GenerateBFloat16Vectors(2, 8),
 						},
 					},
 				},
@@ -2323,7 +2324,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 						Dim: 8,
 						Data: &schemapb.VectorField_FloatVector{
 							FloatVector: &schemapb.FloatArray{
-								Data: generateFloatVectors(2, 8),
+								Data: testutils.GenerateFloatVectors(2, 8),
 							},
 						},
 					},
@@ -2336,7 +2337,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Vectors: &schemapb.VectorField{
 						Dim: 8,
 						Data: &schemapb.VectorField_BinaryVector{
-							BinaryVector: generateBinaryVectors(2, 8),
+							BinaryVector: testutils.GenerateBinaryVectors(2, 8),
 						},
 					},
 				},
@@ -2348,7 +2349,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
-								Data: generateVarCharArray(2, 8),
+								Data: testutils.GenerateVarCharArray(2, 8),
 							},
 						},
 					},
@@ -2568,7 +2569,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_FloatData{
 							FloatData: &schemapb.FloatArray{
-								Data: generateFloat32Array(2),
+								Data: testutils.GenerateFloat32Array(2),
 							},
 						},
 					},
@@ -2581,7 +2582,7 @@ func Test_validateUtil_Validate(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_DoubleData{
 							DoubleData: &schemapb.DoubleArray{
-								Data: generateFloat64Array(2),
+								Data: testutils.GenerateFloat64Array(2),
 							},
 						},
 					},

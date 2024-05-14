@@ -457,9 +457,6 @@ func (s *Server) startQueryCoord() error {
 		log.Warn("querycoord failed to watch proxy", zap.Error(err))
 	}
 
-	// Recover dist, to avoid generate too much task when dist not ready after restart
-	s.distController.SyncAll(s.ctx)
-
 	s.startServerLoop()
 	s.afterStart()
 	s.UpdateStateCode(commonpb.StateCode_Healthy)
@@ -468,6 +465,11 @@ func (s *Server) startQueryCoord() error {
 }
 
 func (s *Server) startServerLoop() {
+	// leader cache observer shall be started before `SyncAll` call
+	s.leaderCacheObserver.Start(s.ctx)
+	// Recover dist, to avoid generate too much task when dist not ready after restart
+	s.distController.SyncAll(s.ctx)
+
 	// start the components from inside to outside,
 	// to make the dependencies ready for every component
 	log.Info("start cluster...")
@@ -478,7 +480,6 @@ func (s *Server) startServerLoop() {
 	s.targetObserver.Start()
 	s.replicaObserver.Start()
 	s.resourceObserver.Start()
-	s.leaderCacheObserver.Start(s.ctx)
 
 	log.Info("start task scheduler...")
 	s.taskScheduler.Start()

@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
@@ -1680,7 +1681,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
@@ -1874,7 +1875,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
@@ -1929,7 +1930,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
@@ -3339,7 +3340,7 @@ func TestPartitionKey(t *testing.T) {
 	})
 
 	t.Run("Upsert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),
