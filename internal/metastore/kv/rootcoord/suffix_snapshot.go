@@ -521,14 +521,17 @@ func (ss *SuffixSnapshot) MultiSaveAndRemoveWithPrefix(saves map[string]string, 
 
 	// load each removal, change execution to adding tombstones
 	for _, removal := range removals {
-		keys, _, err := ss.MetaKv.LoadWithPrefix(removal)
+		keys, values, err := ss.MetaKv.LoadWithPrefix(removal)
 		if err != nil {
 			log.Warn("SuffixSnapshot MetaKv LoadwithPrefix failed", zap.String("key", removal), zap.Error(err))
 			return err
 		}
 
 		// add tombstone to original key and add ts entry
-		for _, key := range keys {
+		for idx, key := range keys {
+			if IsTombstone(values[idx]) {
+				continue
+			}
 			key = ss.hideRootPrefix(key)
 			execute[key] = string(SuffixSnapshotTombstone)
 			execute[ss.composeTSKey(key, ts)] = string(SuffixSnapshotTombstone)
