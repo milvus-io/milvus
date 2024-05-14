@@ -97,7 +97,7 @@ func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, maxTxnNum int, sa
 	removeFn := func(partialKeys []string) error {
 		return snapshot.MultiSaveAndRemoveWithPrefix(nil, partialKeys, ts)
 	}
-	return etcd.RemoveByBatchWithLimit(removals, maxTxnNum, removeFn)
+	return etcd.RemoveByBatchWithLimit(removals, maxTxnNum/2, removeFn)
 }
 
 func (kc *Catalog) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
