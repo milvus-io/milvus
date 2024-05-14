@@ -25,8 +25,11 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -200,4 +203,39 @@ func PrintCurrentReplicaDist(replica *meta.Replica,
 	distInfo += "]"
 
 	log.Info(distInfo)
+}
+
+var balancerMap = typeutil.NewConcurrentMap[string, Balance]()
+
+func GetBalancer(
+	metaMgr *meta.Meta,
+	dist *meta.DistributionManager,
+	targetMgr *meta.TargetManager,
+	nodeMgr *session.NodeManager,
+	scheduler task.Scheduler,
+) Balance {
+	balanceKey := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
+
+	newBalancer := func() Balance {
+		log.Info("switch to new balancer", zap.String("name", balanceKey))
+		switch balanceKey {
+		case meta.RoundRobinBalancerName:
+			return NewRoundRobinBalancer(scheduler, nodeMgr)
+		case meta.RowCountBasedBalancerName:
+			return NewRowCountBasedBalancer(scheduler, nodeMgr, dist, metaMgr, targetMgr)
+		case meta.ScoreBasedBalancerName:
+			return NewScoreBasedBalancer(scheduler, nodeMgr, dist, metaMgr, targetMgr)
+		case meta.MultiTargetBalancerName:
+			return NewMultiTargetBalancer(scheduler, nodeMgr, dist, metaMgr, targetMgr)
+		case meta.ChannelLevelScoreBalancerName:
+			return NewChannelLevelScoreBalancer(scheduler, nodeMgr, dist, metaMgr, targetMgr)
+		default:
+			log.Info(fmt.Sprintf("default to use %s", meta.ScoreBasedBalancerName))
+			return NewScoreBasedBalancer(scheduler, nodeMgr, dist, metaMgr, targetMgr)
+		}
+	}
+
+	balancer, _ := balancerMap.GetOrInsert(balanceKey, newBalancer())
+
+	return balancer
 }

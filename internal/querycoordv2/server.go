@@ -115,7 +115,7 @@ type Server struct {
 	resourceObserver    *observers.ResourceObserver
 	leaderCacheObserver *observers.LeaderCacheObserver
 
-	balancer balance.Balance
+	getBalancerFunc checkers.GetBalancerFunc
 
 	// Active-standby
 	enableActiveStandBy bool
@@ -287,34 +287,19 @@ func (s *Server) initQueryCoord() error {
 		s.taskScheduler,
 	)
 
-	// Init balancer map and balancer
-	log.Info("init balancer")
-	switch params.Params.QueryCoordCfg.Balancer.GetValue() {
-	case meta.RoundRobinBalancerName:
-		s.balancer = balance.NewRoundRobinBalancer(s.taskScheduler, s.nodeMgr)
-	case meta.RowCountBasedBalancerName:
-		s.balancer = balance.NewRowCountBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-	case meta.ScoreBasedBalancerName:
-		s.balancer = balance.NewScoreBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-	case meta.MultiTargetBalancerName:
-		s.balancer = balance.NewMultiTargetBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-	case meta.ChannelLevelScoreBalancerName:
-		s.balancer = balance.NewChannelLevelScoreBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-	default:
-		log.Info(fmt.Sprintf("default to use %s", meta.ScoreBasedBalancerName))
-		s.balancer = balance.NewScoreBasedBalancer(s.taskScheduler, s.nodeMgr, s.dist, s.meta, s.targetMgr)
-	}
-
 	// Init checker controller
 	log.Info("init checker controller")
+	s.getBalancerFunc = func() balance.Balance {
+		return balance.GetBalancer(s.meta, s.dist, s.targetMgr, s.nodeMgr, s.taskScheduler)
+	}
 	s.checkerController = checkers.NewCheckerController(
 		s.meta,
 		s.dist,
 		s.targetMgr,
-		s.balancer,
 		s.nodeMgr,
 		s.taskScheduler,
 		s.broker,
+		s.getBalancerFunc,
 	)
 
 	// Init observers
