@@ -445,7 +445,6 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 		return err
 	}
 
-	metrics.CleanupDataCoordSegmentMetrics(segment.CollectionID, segment.ID)
 	return nil
 }
 

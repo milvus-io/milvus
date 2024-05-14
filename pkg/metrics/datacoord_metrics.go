@@ -322,34 +322,38 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(GarbageCollectorRunCount)
 }
 
-func CleanupDataCoordSegmentMetrics(collectionID int64, segmentID int64) {
+func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID int64) {
 	DataCoordSegmentBinLogFileCount.
 		Delete(
 			prometheus.Labels{
 				collectionIDLabelName: fmt.Sprint(collectionID),
 				segmentIDLabelName:    fmt.Sprint(segmentID),
 			})
-	DataCoordStoredBinlogSize.DeletePartialMatch(prometheus.Labels{
+	DataCoordStoredBinlogSize.Delete(prometheus.Labels{
+		databaseLabelName:     dbName,
 		collectionIDLabelName: fmt.Sprint(collectionID),
 		segmentIDLabelName:    fmt.Sprint(segmentID),
 	})
-	DataCoordStoredIndexFilesSize.DeletePartialMatch(prometheus.Labels{
+	DataCoordStoredIndexFilesSize.Delete(prometheus.Labels{
+		databaseLabelName:     dbName,
 		collectionIDLabelName: fmt.Sprint(collectionID),
 		segmentIDLabelName:    fmt.Sprint(segmentID),
 	})
 }
 
-func CleanupDataCoordNumStoredRows(collectionID int64) {
+func CleanupDataCoordNumStoredRows(dbName string, collectionID int64) {
 	for _, state := range commonpb.SegmentState_name {
-		DataCoordNumStoredRows.DeletePartialMatch(prometheus.Labels{
+		DataCoordNumStoredRows.Delete(prometheus.Labels{
+			databaseLabelName:     dbName,
 			collectionIDLabelName: fmt.Sprint(collectionID),
 			segmentStateLabelName: fmt.Sprint(state),
 		})
 	}
 }
 
-func CleanupDataCoordBulkInsertVectors(collectionID int64) {
-	DataCoordBulkVectors.DeletePartialMatch(prometheus.Labels{
+func CleanupDataCoordBulkInsertVectors(dbName string, collectionID int64) {
+	DataCoordBulkVectors.Delete(prometheus.Labels{
+		databaseLabelName:     dbName,
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }
