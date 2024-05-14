@@ -473,7 +473,6 @@ func (s *LocalSegment) InsertCount() int64 {
 func (s *LocalSegment) RowNum() int64 {
 	// if segment is not loaded, return 0 (maybe not loaded or release by lru)
 	if !s.ptrLock.RLockIf(state.IsDataLoaded) {
-		log.Warn("segment is not valid", zap.Int64("segmentID", s.ID()))
 		return 0
 	}
 	defer s.ptrLock.RUnlock()
