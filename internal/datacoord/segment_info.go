@@ -426,7 +426,7 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 
 		for _, statsLogs := range s.GetStatslogs() {
 			for _, l := range statsLogs.GetBinlogs() {
-				size += l.GetLogSize()
+				size += l.GetMemorySize()
 			}
 		}
 		if size > 0 {
