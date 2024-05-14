@@ -230,9 +230,11 @@ func (replica *mutableReplica) tryBalanceNodeForChannel() {
 		return
 	}
 
+	balancePolicy := paramtable.Get().QueryCoordCfg.Balancer.GetValue()
+	enableChannelExclusiveMode := balancePolicy == ChannelLevelScoreBalancerName
 	channelExclusiveFactor := paramtable.Get().QueryCoordCfg.ChannelExclusiveNodeFactor.GetAsInt()
-	// to do: if query node scale in happens, and the condition does not meet, should we exit channel's exclusive mode?
-	if len(replica.rwNodes) < len(channelNodeInfos)*channelExclusiveFactor {
+	// if balance policy or node count doesn't match condition, clean up channel node info
+	if !enableChannelExclusiveMode || len(replica.rwNodes) < len(channelNodeInfos)*channelExclusiveFactor {
 		for name := range replica.replicaPB.GetChannelNodeInfos() {
 			replica.replicaPB.ChannelNodeInfos[name] = &querypb.ChannelNodeInfo{}
 		}

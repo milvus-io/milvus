@@ -146,7 +146,7 @@ func retrieveOnSegmentsWithStream(ctx context.Context, segments []Segment, segTy
 					Ids:        result.GetIds(),
 					FieldsData: result.GetFieldsData(),
 					CostAggregation: &internalpb.CostAggregation{
-						TotalRelatedDataSize: segment.MemSize(),
+						TotalRelatedDataSize: GetSegmentRelatedDataSize(segment),
 					},
 					AllRetrieveCount: result.GetAllRetrieveCount(),
 				}); err != nil {

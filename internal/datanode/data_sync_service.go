@@ -357,6 +357,12 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 		log.Warn("failed to register channel buffer", zap.Error(err))
 		return nil, err
 	}
+	defer func() {
+		if err != nil {
+			defer node.writeBufferManager.RemoveChannel(channelName)
+		}
+	}()
+
 	ctx, cancel := context.WithCancel(node.ctx)
 	ds := &dataSyncService{
 		ctx:        ctx,

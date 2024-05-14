@@ -465,6 +465,7 @@ func (s *Server) init() error {
 		zap.String("externalAddress", Params.GetAddress()),
 	)
 
+	accesslog.InitAccessLogger(paramtable.Get())
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 

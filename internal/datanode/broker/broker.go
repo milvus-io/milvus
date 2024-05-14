@@ -3,7 +3,6 @@ package broker
 import (
 	"context"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/types"
@@ -11,34 +10,23 @@ import (
 )
 
 // Broker is the interface for datanode to interact with other components.
+//
+//go:generate mockery --name=Broker --structname=MockBroker --output=./  --filename=mock_broker.go --with-expecter --inpackage
 type Broker interface {
-	RootCoord
 	DataCoord
 }
 
 type coordBroker struct {
-	*rootCoordBroker
 	*dataCoordBroker
 }
 
-func NewCoordBroker(rc types.RootCoordClient, dc types.DataCoordClient, serverID int64) Broker {
+func NewCoordBroker(dc types.DataCoordClient, serverID int64) Broker {
 	return &coordBroker{
-		rootCoordBroker: &rootCoordBroker{
-			client:   rc,
-			serverID: serverID,
-		},
 		dataCoordBroker: &dataCoordBroker{
 			client:   dc,
 			serverID: serverID,
 		},
 	}
-}
-
-// RootCoord is the interface wraps `RootCoord` grpc call
-type RootCoord interface {
-	DescribeCollection(ctx context.Context, collectionID typeutil.UniqueID, ts typeutil.Timestamp) (*milvuspb.DescribeCollectionResponse, error)
-	ShowPartitions(ctx context.Context, dbName, collectionName string) (map[string]int64, error)
-	AllocTimestamp(ctx context.Context, num uint32) (ts uint64, count uint32, err error)
 }
 
 // DataCoord is the interface wraps `DataCoord` grpc call

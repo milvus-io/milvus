@@ -319,6 +319,22 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 	return total, collectionBinlogSize, partitionBinlogSize
 }
 
+// GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
+func (m *meta) GetCollectionIndexFilesSize() uint64 {
+	var total uint64
+	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
+		coll, ok := m.collections[segmentIdx.CollectionID]
+		if ok {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
+				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
+			total += segmentIdx.IndexSize
+		} else {
+			log.Warn("not found database name", zap.Int64("collectionID", segmentIdx.CollectionID))
+		}
+	}
+	return total
+}
+
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 	m.RLock()
 	defer m.RUnlock()

@@ -22,9 +22,9 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 const defaultDim = 128
@@ -164,9 +164,9 @@ func genFiledDataWithSchema(schema *schemapb.CollectionSchema, numRows int) []*s
 	fieldsData := make([]*schemapb.FieldData, 0)
 	for _, field := range schema.Fields {
 		if field.DataType < 100 {
-			fieldsData = append(fieldsData, segments.GenTestScalarFieldData(field.DataType, field.DataType.String(), field.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(field.DataType, field.DataType.String(), field.GetFieldID(), numRows))
 		} else {
-			fieldsData = append(fieldsData, segments.GenTestVectorFiledData(field.DataType, field.DataType.String(), field.GetFieldID(), numRows, defaultDim))
+			fieldsData = append(fieldsData, testutils.GenerateVectorFieldDataWithID(field.DataType, field.DataType.String(), field.GetFieldID(), numRows, defaultDim))
 		}
 	}
 	return fieldsData

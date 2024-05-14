@@ -267,7 +267,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		RunAndReturn(func(paths ...string) string {
 			return path.Join(paths...)
 		}).Times(2)
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
 	s.Require().Equal(plan.GetPlanID(), s.task.getPlanID())
 	s.Require().Equal(plan.GetChannel(), s.task.getChannelName())
@@ -383,7 +383,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		RunAndReturn(func(paths ...string) string {
 			return path.Join(paths...)
 		}).Times(2)
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Times(2)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
 	l0Segments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L0
