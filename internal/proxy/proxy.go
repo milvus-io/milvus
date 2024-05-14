@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -222,7 +221,6 @@ func (node *Proxy) Init() error {
 
 	node.factory.Init(Params)
 
-	accesslog.InitAccessLogger(Params)
 	log.Debug("init access log for Proxy done")
 
 	err := node.initRateCollector()

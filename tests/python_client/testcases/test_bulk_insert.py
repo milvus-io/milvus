@@ -1356,7 +1356,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             force=True,
         )
         self._connect()
-        c_name = cf.gen_unique_str("bulk_parkey")
+        c_name = cf.gen_unique_str("bulk_partition_key")
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
@@ -1550,7 +1550,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             force=True
         )
         self._connect()
-        c_name = cf.gen_unique_str("bulk_parkey")
+        c_name = cf.gen_unique_str("bulk_partition_key")
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),

@@ -615,6 +615,21 @@ func TestMeta_Basic(t *testing.T) {
 		assert.Equal(t, int64(size0+size1), total)
 	})
 
+	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
+		meta := createMetaTable(&datacoord.Catalog{})
+		ret := meta.GetCollectionIndexFilesSize()
+		assert.Equal(t, uint64(0), ret)
+
+		meta.collections = map[UniqueID]*collectionInfo{
+			100: {
+				ID:           100,
+				DatabaseName: "db",
+			},
+		}
+		ret = meta.GetCollectionIndexFilesSize()
+		assert.Equal(t, uint64(11), ret)
+	})
+
 	t.Run("Test AddAllocation", func(t *testing.T) {
 		meta, _ := newMemoryMeta()
 		err := meta.AddAllocation(1, &Allocation{
