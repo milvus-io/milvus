@@ -76,6 +76,27 @@ func NewChannelManager(dn *DataNode) *ChannelManagerImpl {
 
 func (m *ChannelManagerImpl) Submit(info *datapb.ChannelWatchInfo) error {
 	channel := info.GetVchan().GetChannelName()
+
+	// skip enqueue datacoord re-submit the same operations
+	if runner, ok := m.opRunners.Get(channel); ok {
+		if runner.Exist(info.GetOpID()) {
+			log.Warn("op already exist, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
+			return nil
+		}
+	}
+
+	if info.GetState() == datapb.ChannelWatchState_ToWatch &&
+		m.fgManager.HasFlowgraphWithOpID(channel, info.GetOpID()) {
+		log.Warn("Watch op already finished, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
+		return nil
+	}
+
+	if info.GetState() == datapb.ChannelWatchState_ToRelease &&
+		!m.fgManager.HasFlowgraph(channel) {
+		log.Warn("Release op already finished, skip", zap.Int64("opID", info.GetOpID()), zap.String("channel", channel))
+		return nil
+	}
+
 	runner := m.getOrCreateRunner(channel)
 	return runner.Enqueue(info)
 }
