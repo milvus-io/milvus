@@ -154,11 +154,11 @@ func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
 
 		for _, deltaLogs := range s.GetDeltalogs() {
 			for _, l := range deltaLogs.GetBinlogs() {
-				segmentSize += l.GetLogSize()
+				segmentSize += l.GetMemorySize()
 			}
 		}
 
-		for _, statsLogs := range s.GetDeltalogs() {
+		for _, statsLogs := range s.GetField2StatslogPaths() {
 			for _, l := range statsLogs.GetBinlogs() {
 				segmentSize += l.GetLogSize()
 			}
