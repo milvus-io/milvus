@@ -126,7 +126,7 @@ type compactionPlanHandler struct {
 	stopWg   sync.WaitGroup
 }
 
-func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator,
+func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
@@ -134,7 +134,7 @@ func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta C
 		meta:      meta,
 		sessions:  sessions,
 		allocator: allocator,
-		scheduler: NewCompactionScheduler(sessions),
+		scheduler: NewCompactionScheduler(cluster),
 	}
 }
 

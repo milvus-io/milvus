@@ -5,7 +5,6 @@ import (
 	"testing"
 
 	"github.com/samber/lo"
-	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -23,8 +22,8 @@ type SchedulerSuite struct {
 }
 
 func (s *SchedulerSuite) SetupTest() {
-	sessionMgr := NewMockSessionManager(s.T())
-	s.scheduler = NewCompactionScheduler(sessionMgr)
+	cluster := NewMockCluster(s.T())
+	s.scheduler = NewCompactionScheduler(cluster)
 	s.scheduler.parallelTasks = map[int64][]*compactionTask{
 		100: {
 			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
@@ -41,8 +40,8 @@ func (s *SchedulerSuite) SetupTest() {
 }
 
 func (s *SchedulerSuite) TestScheduleEmpty() {
-	sessionMgr := NewMockSessionManager(s.T())
-	emptySch := NewCompactionScheduler(sessionMgr)
+	cluster := NewMockCluster(s.T())
+	emptySch := NewCompactionScheduler(cluster)
 
 	tasks := emptySch.Schedule()
 	s.Empty(tasks)
@@ -76,10 +75,9 @@ func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
 			if len(test.tasks) > 0 {
-				sessionMgr := NewMockSessionManager(s.T())
-				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 100}}})
-				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
-				s.scheduler.sessions = sessionMgr
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{100: 0})
+				s.scheduler.cluster = cluster
 			}
 
 			// submit the testing tasks
@@ -122,10 +120,9 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
 			if len(test.tasks) > 0 {
-				sessionMgr := NewMockSessionManager(s.T())
-				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
-				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 2}, nil)
-				s.scheduler.sessions = sessionMgr
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 2})
+				s.scheduler.cluster = cluster
 			}
 
 			// submit the testing tasks
@@ -139,10 +136,9 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 
 			// the second schedule returns empty for no slot
 			if len(test.tasks) > 0 {
-				sessionMgr := NewMockSessionManager(s.T())
-				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
-				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
-				s.scheduler.sessions = sessionMgr
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 0})
+				s.scheduler.cluster = cluster
 			}
 			gotTasks = s.scheduler.Schedule()
 			s.Empty(gotTasks)
@@ -182,10 +178,9 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
 			if len(test.tasks) > 0 {
-				sessionMgr := NewMockSessionManager(s.T())
-				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 102}}})
-				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 2}, nil)
-				s.scheduler.sessions = sessionMgr
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{102: 2})
+				s.scheduler.cluster = cluster
 			}
 
 			// submit the testing tasks
@@ -199,10 +194,9 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 
 			// the second schedule returns empty for no slot
 			if len(test.tasks) > 0 {
-				sessionMgr := NewMockSessionManager(s.T())
-				sessionMgr.EXPECT().GetSessions().Return([]*Session{{info: &NodeInfo{NodeID: 101}}})
-				sessionMgr.EXPECT().QuerySlot(mock.Anything).Return(&datapb.QuerySlotResponse{NumSlots: 0}, nil)
-				s.scheduler.sessions = sessionMgr
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 0})
+				s.scheduler.cluster = cluster
 			}
 			if len(gotTasks) > 0 {
 				gotTasks = s.scheduler.Schedule()
