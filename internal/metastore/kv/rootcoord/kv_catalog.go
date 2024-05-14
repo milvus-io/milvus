@@ -4,11 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"go.uber.org/zap"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -24,6 +21,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"go.uber.org/zap"
+	"sort"
 )
 
 const (
@@ -93,6 +92,12 @@ func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, maxTxnNum int, sa
 	if err := etcd.SaveByBatchWithLimit(saves, maxTxnNum, saveFn); err != nil {
 		return err
 	}
+
+	// avoid a case that the former key is the prefix of the later key.
+	// for example, `root-coord/fields/collection_id/1` is the prefix of `root-coord/fields/collection_id/100`.
+	sort.Slice(removals, func(i, j int) bool {
+		return removals[i] > removals[j]
+	})
 
 	removeFn := func(partialKeys []string) error {
 		return snapshot.MultiSaveAndRemoveWithPrefix(nil, partialKeys, ts)
