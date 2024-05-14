@@ -996,8 +996,6 @@ func (s *Server) TransferNode(ctx context.Context, req *milvuspb.TransferNodeReq
 		log.Warn("failed to transfer node", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	// Recover all replica on the source and target resource group.
-	utils.RecoverAllCollection(s.meta)
 
 	return merr.Success(), nil
 }

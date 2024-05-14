@@ -212,9 +212,10 @@ func (c *metaCacheImpl) UpdateSegments(action SegmentAction, filters ...SegmentF
 
 func (c *metaCacheImpl) PredictSegments(pk storage.PrimaryKey, filters ...SegmentFilter) ([]int64, bool) {
 	var predicts []int64
+	lc := storage.NewLocationsCache(pk)
 	segments := c.GetSegmentsBy(filters...)
 	for _, segment := range segments {
-		if segment.GetBloomFilterSet().PkExists(pk) {
+		if segment.GetBloomFilterSet().PkExists(lc) {
 			predicts = append(predicts, segment.segmentID)
 		}
 	}

@@ -55,15 +55,15 @@ func NewBloomFilterSetWithBatchSize(batchSize uint, historyEntries ...*storage.P
 	}
 }
 
-func (bfs *BloomFilterSet) PkExists(pk storage.PrimaryKey) bool {
+func (bfs *BloomFilterSet) PkExists(lc storage.LocationsCache) bool {
 	bfs.mut.RLock()
 	defer bfs.mut.RUnlock()
-	if bfs.current != nil && bfs.current.PkExist(pk) {
+	if bfs.current != nil && bfs.current.TestLocationCache(lc) {
 		return true
 	}
 
 	for _, bf := range bfs.history {
-		if bf.PkExist(pk) {
+		if bf.TestLocationCache(lc) {
 			return true
 		}
 	}
