@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -45,6 +46,7 @@ type Cluster interface {
 	QueryPreImport(nodeID int64, in *datapb.QueryPreImportRequest) (*datapb.QueryPreImportResponse, error)
 	QueryImport(nodeID int64, in *datapb.QueryImportRequest) (*datapb.QueryImportResponse, error)
 	DropImport(nodeID int64, in *datapb.DropImportRequest) error
+	QuerySlots() map[int64]int64
 	GetSessions() []*Session
 	Close()
 }
@@ -175,6 +177,30 @@ func (c *ClusterImpl) QueryImport(nodeID int64, in *datapb.QueryImportRequest) (
 
 func (c *ClusterImpl) DropImport(nodeID int64, in *datapb.DropImportRequest) error {
 	return c.sessionManager.DropImport(nodeID, in)
+}
+
+func (c *ClusterImpl) QuerySlots() map[int64]int64 {
+	nodeIDs := c.sessionManager.GetSessionIDs()
+	nodeSlots := make(map[int64]int64)
+	mu := &sync.Mutex{}
+	wg := &sync.WaitGroup{}
+	for _, nodeID := range nodeIDs {
+		wg.Add(1)
+		go func(nodeID int64) {
+			defer wg.Done()
+			resp, err := c.sessionManager.QuerySlot(nodeID)
+			if err != nil {
+				log.Warn("query slot failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			nodeSlots[nodeID] = resp.GetNumSlots()
+		}(nodeID)
+	}
+	wg.Wait()
+	log.Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
+	return nodeSlots
 }
 
 // GetSessions returns all sessions

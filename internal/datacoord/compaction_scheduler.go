@@ -35,17 +35,17 @@ type CompactionScheduler struct {
 	taskGuard     sync.RWMutex
 
 	planHandler *compactionPlanHandler
-	sessions    SessionManager
+	cluster     Cluster
 }
 
 var _ Scheduler = (*CompactionScheduler)(nil)
 
-func NewCompactionScheduler(sessions SessionManager) *CompactionScheduler {
+func NewCompactionScheduler(cluster Cluster) *CompactionScheduler {
 	return &CompactionScheduler{
 		taskNumber:    atomic.NewInt32(0),
 		queuingTasks:  make([]*compactionTask, 0),
 		parallelTasks: make(map[int64][]*compactionTask),
-		sessions:      sessions,
+		cluster:       cluster,
 	}
 }
 
@@ -73,7 +73,7 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 		return nil // To mitigate the need for frequent slot querying
 	}
 
-	nodeSlots := s.querySlots()
+	nodeSlots := s.cluster.QuerySlots()
 
 	executable := make(map[int64]*compactionTask)
 
@@ -216,32 +216,6 @@ func (s *CompactionScheduler) LogStatus() {
 
 func (s *CompactionScheduler) GetTaskCount() int {
 	return int(s.taskNumber.Load())
-}
-
-func (s *CompactionScheduler) querySlots() map[int64]int64 {
-	nodeIDs := lo.Map(s.sessions.GetSessions(), func(s *Session, _ int) int64 {
-		return s.info.NodeID
-	})
-	nodeSlots := make(map[int64]int64)
-	mu := &sync.Mutex{}
-	wg := &sync.WaitGroup{}
-	for _, nodeID := range nodeIDs {
-		wg.Add(1)
-		go func(nodeID int64) {
-			defer wg.Done()
-			resp, err := s.sessions.QuerySlot(nodeID)
-			if err != nil {
-				log.Warn("query slot failed", zap.Error(err))
-				return
-			}
-			mu.Lock()
-			defer mu.Unlock()
-			nodeSlots[nodeID] = resp.GetNumSlots()
-		}(nodeID)
-	}
-	wg.Wait()
-	log.Debug("query slot done", zap.Any("nodeSlots", nodeSlots))
-	return nodeSlots
 }
 
 func (s *CompactionScheduler) pickAnyNode(nodeSlots map[int64]int64) int64 {

@@ -57,7 +57,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return().Once()
-	handler := newCompactionPlanHandler(nil, nil, nil, nil)
+	handler := newCompactionPlanHandler(nil, nil, nil, nil, nil)
 	handler.scheduler = s.mockSch
 
 	var ch string = "ch1"
@@ -87,13 +87,13 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 	s.mockSessMgr.EXPECT().SyncSegments(int64(100), mock.Anything).Return(nil).Once()
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(0, errors.New("mock")).Once()
-		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, s.mockSessMgr, nil, nil, s.mockAlloc)
 		handler.checkResult()
 	}
 
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(19530, nil).Once()
-		handler := newCompactionPlanHandler(s.mockSessMgr, nil, nil, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, s.mockSessMgr, nil, nil, s.mockAlloc)
 		handler.checkResult()
 	}
 }
@@ -195,7 +195,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
 		},
 	}
 
-	handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+	handler := newCompactionPlanHandler(nil, nil, nil, s.mockMeta, s.mockAlloc)
 	err := handler.handleL0CompactionResult(plan, result)
 	s.NoError(err)
 }
@@ -258,7 +258,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 			dataNodeID:  1,
 		}
 
-		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, nil, nil, s.mockMeta, s.mockAlloc)
 		err := handler.RefreshPlan(task)
 		s.Require().NoError(err)
 
@@ -293,7 +293,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 			dataNodeID:  1,
 		}
 
-		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, nil, nil, s.mockMeta, s.mockAlloc)
 		err := handler.RefreshPlan(task)
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)
@@ -337,7 +337,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshL0Plan() {
 			dataNodeID:  1,
 		}
 
-		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, nil, nil, s.mockMeta, s.mockAlloc)
 		err := handler.RefreshPlan(task)
 		s.Error(err)
 	})
@@ -382,7 +382,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshPlanMixCompaction() {
 			dataNodeID:  1,
 		}
 
-		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, nil, nil, s.mockMeta, s.mockAlloc)
 		err := handler.RefreshPlan(task)
 		s.Require().NoError(err)
 
@@ -423,7 +423,7 @@ func (s *CompactionPlanHandlerSuite) TestRefreshPlanMixCompaction() {
 			dataNodeID:  1,
 		}
 
-		handler := newCompactionPlanHandler(nil, nil, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, nil, nil, s.mockMeta, s.mockAlloc)
 		err := handler.RefreshPlan(task)
 		s.Error(err)
 		s.ErrorIs(err, merr.ErrSegmentNotFound)
@@ -449,7 +449,7 @@ func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
 		{"channel with no error", "ch-2", false},
 	}
 
-	handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 	handler.scheduler = s.mockSch
 
 	for idx, test := range tests {
@@ -482,7 +482,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 
 	s.Run("illegal nil result", func() {
 		s.SetupTest()
-		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		err := handler.handleMergeCompactionResult(nil, nil)
 		s.Error(err)
 	})
@@ -498,7 +498,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 			}).Once()
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 
-		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
 
 		compactionResult := &datapb.CompactionPlanResult{
@@ -518,7 +518,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			nil, nil, errors.New("mock error")).Once()
 
-		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
 		compactionResult := &datapb.CompactionPlanResult{
 			PlanID: plan.PlanID,
@@ -540,7 +540,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 			&segMetricMutation{}, nil).Once()
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
-		handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
 		compactionResult := &datapb.CompactionPlanResult{
 			PlanID: plan.PlanID,
@@ -556,7 +556,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 
 func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 	s.Run("test not exists compaction task", func() {
-		handler := newCompactionPlanHandler(nil, nil, nil, nil)
+		handler := newCompactionPlanHandler(nil, nil, nil, nil, nil)
 		err := handler.completeCompaction(&datapb.CompactionPlanResult{PlanID: 2})
 		s.Error(err)
 	})
@@ -636,7 +636,7 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 			},
 		}
 
-		c := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+		c := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		c.scheduler = s.mockSch
 		c.plans = plans
 
@@ -734,7 +734,7 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.mockCm.EXPECT().Match(int64(111), "ch-1").Return(true)
 	s.mockCm.EXPECT().Match(int64(111), "ch-2").Return(false).Once()
 
-	handler := newCompactionPlanHandler(s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
+	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 	handler.plans = inPlans
 
 	_, ok := handler.plans[5]
