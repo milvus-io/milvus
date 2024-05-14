@@ -51,9 +51,8 @@ var _ compactionPlanContext = (*spyCompactionHandler)(nil)
 func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
 
 // execCompactionPlan start to execute plan and return immediately
-func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
+func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
 	h.spyChan <- plan
-	return nil
 }
 
 // completeCompaction record the result of a compaction
@@ -2392,7 +2391,7 @@ func (s *CompactionTriggerSuite) TestHandleSignal() {
 				},
 			},
 		}, nil)
-		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return()
 		tr.handleSignal(&compactionSignal{
 			segmentID:    1,
 			collectionID: s.collectionID,
@@ -2523,7 +2522,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 				common.CollectionAutoCompactionKey: "false",
 			},
 		}, nil)
-		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return()
 		tr.handleGlobalSignal(&compactionSignal{
 			segmentID:    1,
 			collectionID: s.collectionID,

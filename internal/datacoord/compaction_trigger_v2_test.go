@@ -126,7 +126,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 
 			s.ElementsMatch(expectedSegs, gotSegs)
 			log.Info("generated plan", zap.Any("plan", plan))
-		}).Return(nil).Once()
+		}).Return().Once()
 
 	s.m.Notify(19530, TriggerTypeLevelZeroViewIDLE, levelZeroView)
 }
@@ -178,7 +178,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 
 			s.ElementsMatch(expectedSegs, gotSegs)
 			log.Info("generated plan", zap.Any("plan", plan))
-		}).Return(nil).Once()
+		}).Return().Once()
 
 	s.m.Notify(19530, TriggerTypeLevelZeroViewChange, levelZeroView)
 }

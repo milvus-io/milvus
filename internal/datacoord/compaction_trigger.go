@@ -436,16 +436,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 					zap.Error(err))
 				continue
 			}
-			err := t.compactionHandler.execCompactionPlan(signal, plan)
-			if err != nil {
-				log.Warn("failed to execute compaction plan",
-					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64("planID", plan.PlanID),
-					zap.Int64s("segmentIDs", segIDs),
-					zap.Error(err))
-				continue
-			}
-
+			t.compactionHandler.execCompactionPlan(signal, plan)
 			log.Info("time cost of generating global compaction",
 				zap.Int64("planID", plan.PlanID),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
@@ -533,14 +524,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			log.Warn("failed to fill plan", zap.Error(err))
 			continue
 		}
-		if err := t.compactionHandler.execCompactionPlan(signal, plan); err != nil {
-			log.Warn("failed to execute compaction plan",
-				zap.Int64("collection", signal.collectionID),
-				zap.Int64("planID", plan.PlanID),
-				zap.Int64s("segmentIDs", fetchSegIDs(plan.GetSegmentBinlogs())),
-				zap.Error(err))
-			continue
-		}
+		t.compactionHandler.execCompactionPlan(signal, plan)
 		log.Info("time cost of generating compaction",
 			zap.Int64("planID", plan.PlanID),
 			zap.Int64("time cost", time.Since(start).Milliseconds()),

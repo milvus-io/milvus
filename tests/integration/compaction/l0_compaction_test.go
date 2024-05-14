@@ -19,19 +19,14 @@ package compaction
 import (
 	"context"
 	"fmt"
-	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
-	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -40,46 +35,16 @@ import (
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
-type CompactionSuite struct {
-	integration.MiniClusterSuite
-}
-
-func waitingForCompacted(ctx context.Context, metaWatcher integration.MetaWatcher, t *testing.T) {
-	showSegments := func() bool {
-		segments, err := metaWatcher.ShowSegments()
-		assert.NoError(t, err)
-		assert.NotEmpty(t, segments)
-		compactFromSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-			return segment.GetState() == commonpb.SegmentState_Dropped
-		})
-		compactToSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-			return segment.GetState() == commonpb.SegmentState_Flushed
-		})
-		log.Info("ShowSegments result", zap.Int("len(compactFromSegments)", len(compactFromSegments)),
-			zap.Int("len(compactToSegments)", len(compactToSegments)))
-		return len(compactToSegments) == 1
-	}
-	for !showSegments() {
-		select {
-		case <-ctx.Done():
-			log.Fatal("waiting for compaction failed") // TODO: test timeout
-			t.FailNow()
-			return
-		case <-time.After(1 * time.Second):
-		}
-	}
-}
-
-func (s *CompactionSuite) TestCompaction() {
+func (s *CompactionSuite) TestL0Compaction() {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Minute*10)
 	defer cancel()
 	c := s.Cluster
 
 	const (
-		dim    = 128
-		dbName = ""
-		rowNum = 30000
-		batch  = 1000
+		dim       = 128
+		dbName    = ""
+		rowNum    = 100000
+		deleteCnt = 50000
 
 		indexType  = integration.IndexFaissIvfFlat
 		metricType = metric.L2
@@ -88,7 +53,7 @@ func (s *CompactionSuite) TestCompaction() {
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, true, vecType)
+	schema := integration.ConstructSchemaOfVecDataType(collectionName, dim, false, vecType)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -110,38 +75,35 @@ func (s *CompactionSuite) TestCompaction() {
 	s.NoError(err)
 	log.Info("ShowCollections result", zap.Any("showCollectionsResp", showCollectionsResp))
 
-	for i := 0; i < rowNum/batch; i++ {
-		// insert
-		fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, batch, dim)
-		hashKeys := integration.GenerateHashKeys(batch)
-		insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
-			DbName:         dbName,
-			CollectionName: collectionName,
-			FieldsData:     []*schemapb.FieldData{fVecColumn},
-			HashKeys:       hashKeys,
-			NumRows:        uint32(batch),
-		})
-		err = merr.CheckRPCCall(insertResult, err)
-		s.NoError(err)
-		s.Equal(int64(batch), insertResult.GetInsertCnt())
+	// insert
+	pkColumn := integration.NewInt64FieldData(integration.Int64Field, rowNum)
+	fVecColumn := integration.NewFloatVectorFieldData(integration.FloatVecField, rowNum, dim)
+	hashKeys := integration.GenerateHashKeys(rowNum)
+	insertResult, err := c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		FieldsData:     []*schemapb.FieldData{pkColumn, fVecColumn},
+		HashKeys:       hashKeys,
+		NumRows:        uint32(rowNum),
+	})
+	err = merr.CheckRPCCall(insertResult, err)
+	s.NoError(err)
+	s.Equal(int64(rowNum), insertResult.GetInsertCnt())
 
-		// flush
-		flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
-			DbName:          dbName,
-			CollectionNames: []string{collectionName},
-		})
-		err = merr.CheckRPCCall(flushResp, err)
-		s.NoError(err)
-		segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
-		ids := segmentIDs.GetData()
-		s.Require().NotEmpty(segmentIDs)
-		s.Require().True(has)
-		flushTs, has := flushResp.GetCollFlushTs()[collectionName]
-		s.True(has)
-		s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
-
-		log.Info("insert done", zap.Int("i", i))
-	}
+	// flush
+	flushResp, err := c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	err = merr.CheckRPCCall(flushResp, err)
+	s.NoError(err)
+	segmentIDs, has := flushResp.GetCollSegIDs()[collectionName]
+	ids := segmentIDs.GetData()
+	s.Require().NotEmpty(segmentIDs)
+	s.Require().True(has)
+	flushTs, has := flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
@@ -157,10 +119,17 @@ func (s *CompactionSuite) TestCompaction() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
-	s.Equal(rowNum/batch, len(segments))
-	for _, segment := range segments {
-		log.Info("show segment result", zap.String("segment", segment.String()))
-	}
+	s.Equal(1, len(segments))
+	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
+
+	// delete
+	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           integration.Int64Field + " < ",
+	})
+	err = merr.CheckRPCCall(deleteResult, err)
+	s.NoError(err)
 
 	// wait for compaction completed
 	waitingForCompacted(ctx, c.MetaWatcher, s.T())
@@ -214,8 +183,4 @@ func (s *CompactionSuite) TestCompaction() {
 	s.NoError(err)
 
 	log.Info("Test compaction succeed")
-}
-
-func TestCompaction(t *testing.T) {
-	suite.Run(t, new(CompactionSuite))
 }

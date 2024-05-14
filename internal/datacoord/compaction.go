@@ -44,11 +44,12 @@ const (
 	tsTimeout = uint64(1)
 )
 
+//go:generate mockery --name=compactionPlanContext --structname=MockCompactionPlanContext --output=./  --filename=mock_compaction_plan_context.go --with-expecter --inpackage
 type compactionPlanContext interface {
 	start()
 	stop()
 	// execCompactionPlan start to execute plan and return immediately
-	execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error
+	execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan)
 	// getCompaction return compaction task. If planId does not exist, return nil.
 	getCompaction(planID int64) *compactionTask
 	// updateCompaction set the compaction state to timeout or completed
@@ -276,7 +277,7 @@ func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskO
 	}
 }
 
-func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
+func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
 	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 	c.setSegmentsCompacting(plan, true)
 
@@ -293,8 +294,7 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 	c.mu.Unlock()
 
 	c.scheduler.Submit(task)
-	log.Info("Compaction plan submited")
-	return nil
+	log.Info("Compaction plan submitted")
 }
 
 func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
@@ -400,8 +400,8 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 }
 
 // execCompactionPlan start to execute plan and return immediately
-func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
-	return c.enqueuePlan(signal, plan)
+func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
+	c.enqueuePlan(signal, plan)
 }
 
 func (c *compactionPlanHandler) setSegmentsCompacting(plan *datapb.CompactionPlan, compacting bool) {
