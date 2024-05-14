@@ -157,8 +157,9 @@ var (
 	ErrInvalidStreamObj     = newMilvusError("invalid stream object", 1903, false)
 
 	// Segcore related
-	ErrSegcore            = newMilvusError("segcore error", 2000, false)
-	ErrSegcoreUnsupported = newMilvusError("segcore unsupported error", 2001, false)
+	ErrSegcore                = newMilvusError("segcore error", 2000, false)
+	ErrSegcoreUnsupported     = newMilvusError("segcore unsupported error", 2001, false)
+	ErrSegcorePretendFinished = newMilvusError("segcore pretend finished", 2002, false)
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
@@ -172,9 +173,14 @@ var (
 
 	// Compaction
 	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)
-	ErrClusteringCompactionClusterNotSupport      = newMilvusError("milvus cluster not support clustering compaction", 2301, false)
-	ErrClusteringCompactionCollectionNotSupport   = newMilvusError("collection not support clustering compaction", 2302, false)
-	ErrClusteringCompactionCollectionIsCompacting = newMilvusError("collection is compacting", 2303, false)
+	ErrIllegalCompactionPlan                      = newMilvusError("compaction plan illegal", 2301, false)
+	ErrCompactionPlanConflict                     = newMilvusError("compaction plan conflict", 2302, false)
+	ErrClusteringCompactionClusterNotSupport      = newMilvusError("milvus cluster not support clustering compaction", 2303, false)
+	ErrClusteringCompactionCollectionNotSupport   = newMilvusError("collection not support clustering compaction", 2304, false)
+	ErrClusteringCompactionCollectionIsCompacting = newMilvusError("collection is compacting", 2305, false)
+	ErrClusteringCompactionNotSupportVector       = newMilvusError("vector field clustering compaction is not supported", 2306, false)
+	ErrClusteringCompactionSubmitTaskFail         = newMilvusError("fail to submit task", 2307, true)
+	ErrClusteringCompactionMetaError              = newMilvusError("fail to update meta in clustering compaction", 2308, true)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)

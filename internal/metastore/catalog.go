@@ -148,6 +148,10 @@ type DataCoordCatalog interface {
 	DropImportTask(taskID int64) error
 
 	GcConfirm(ctx context.Context, collectionID, partitionID typeutil.UniqueID) bool
+
+	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
+	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 }
 
 type QueryCoordCatalog interface {

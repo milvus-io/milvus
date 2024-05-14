@@ -25,7 +25,7 @@ enum SegmentLevel {
   Legacy = 0; // zero value for legacy logic
   L0 = 1; // L0 segment, contains delta data for current channel
   L1 = 2; // L1 segment, normal segment, with no extra compaction attribute
-  L2 = 3; // L2 segemnt, segment with extra data distribution info
+  L2 = 3; // L2 segment, segment with extra data distribution info
 }
 
 service DataCoord {
@@ -494,6 +494,7 @@ enum CompactionType {
 
 message CompactionStateRequest {
   common.MsgBase base = 1;
+  int64 planID = 2;
 }
 
 message SyncSegmentInfo {
@@ -535,7 +536,7 @@ message CompactionSegmentBinlogs {
 message CompactionPlan {
   int64 planID = 1;
   repeated CompactionSegmentBinlogs segmentBinlogs = 2;
-  uint64 start_time = 3;
+  int64 start_time = 3;
   int32 timeout_in_seconds = 4;
   CompactionType type = 5;
   uint64 timetravel = 6;
@@ -855,4 +856,39 @@ message QuerySlotRequest {}
 message QuerySlotResponse {
   common.Status status = 1;
   int64 num_slots = 2;
+}
+
+enum CompactionTaskState {
+  unknown = 0;
+  executing = 1;
+  pipelining = 2;
+  completed = 3;
+  failed = 4;
+  timeout = 5;
+  analyzing = 6;
+  indexing = 7;
+  cleaned = 8;
+  meta_saved = 9;
+}
+
+message CompactionTask{
+  int64 planID = 1;
+  int64 triggerID = 2;
+  int64 collectionID = 3;
+  int64 partitionID = 4;
+  string channel = 5;
+  CompactionType type = 6;
+  CompactionTaskState state = 7;
+  string fail_reason = 8;
+  int64 start_time = 9;
+  int64 end_time = 10;
+  int32 timeout_in_seconds = 11;
+  int32 retry_times = 12;
+  int64 collection_ttl = 13;
+  int64 total_rows = 14;
+  repeated int64 inputSegments = 15;
+  repeated int64 resultSegments = 16;
+  msg.MsgPosition pos = 17;
+  int64 nodeID = 18;
+  schema.CollectionSchema schema = 19;
 }
