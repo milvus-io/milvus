@@ -1035,8 +1035,6 @@ func (m *meta) GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID Uni
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
 func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) int64 {
-	m.RLock()
-	defer m.RUnlock()
 	var ret int64
 	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
 		return isSegmentHealthy(si) && si.GetPartitionID() == partitionID
