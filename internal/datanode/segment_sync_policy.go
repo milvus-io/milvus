@@ -91,7 +91,7 @@ func syncSegmentsAtTs() segmentSyncPolicy {
 		flushTs := c.getFlushTs()
 		if flushTs != 0 && ts >= flushTs {
 			segmentsWithBuffer := lo.Filter(segments, func(segment *Segment, _ int) bool {
-				return !segment.isBufferEmpty()
+				return !segment.isBufferEmpty() && segment.minBufferTs() <= flushTs
 			})
 			segmentIDs := lo.Map(segmentsWithBuffer, func(segment *Segment, _ int) UniqueID {
 				return segment.segmentID
