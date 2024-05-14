@@ -245,7 +245,7 @@ func (node *DataNode) Init() error {
 		serverID := node.GetNodeID()
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
 
-		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, serverID)
+		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
 
 		err := node.initRateCollector()
 		if err != nil {

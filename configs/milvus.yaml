@@ -297,6 +297,7 @@ queryCoord:
   checkNodeSessionInterval: 60 # the interval(in seconds) of check querynode cluster session
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   enableStoppingBalance: true # whether enable stopping balance
+  channelExclusiveNodeFactor: 4 # the least node number for enable channel's exclusive mode
   cleanExcludeSegmentInterval: 60 # the time duration of clean pipeline exclude segment which used for filter invalid data, in seconds
   ip:  # if not specified, use the first unicastable address
   port: 19531
