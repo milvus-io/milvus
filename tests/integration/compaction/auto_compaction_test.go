@@ -19,12 +19,12 @@ package compaction
 import (
 	"context"
 	"fmt"
-	"github.com/samber/lo"
-	"github.com/stretchr/testify/assert"
 	"testing"
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 

@@ -674,7 +674,8 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 
 	s.Len(bfs, 1)
 	for _, pk := range s.dData.Pks {
-		s.True(bfs[201].PkExists(pk))
+		lc := storage.NewLocationsCache(pk)
+		s.True(bfs[201].PkExists(lc))
 	}
 }
 

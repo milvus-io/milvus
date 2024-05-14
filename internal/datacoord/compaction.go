@@ -476,13 +476,12 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
 		// Also prepare metric updates.
-		newSegments, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
+		_, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
 		if err != nil {
 			return err
 		}
 		// Apply metrics after successful meta update.
 		metricMutation.commit()
-		newSegmentInfo = newSegments[0]
 	}
 
 	nodeID := c.plans[plan.GetPlanID()].dataNodeID

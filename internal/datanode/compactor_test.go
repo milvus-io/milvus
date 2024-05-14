@@ -274,12 +274,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 		collectionID := int64(1)
 		meta := NewMetaFactory().GetCollectionMeta(collectionID, "test", schemapb.DataType_Int64)
 
-		broker := broker.NewMockBroker(t)
-		broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
-			Return(&milvuspb.DescribeCollectionResponse{
-				Schema: meta.GetSchema(),
-			}, nil).Maybe()
-
 		alloc := allocator.NewMockAllocator(t)
 		alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 		alloc.EXPECT().AllocOne().Return(0, nil)
@@ -746,15 +740,12 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 		alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
 		ctx, cancel := context.WithCancel(context.TODO())
 
-		mockSyncmgr := syncmgr.NewMockSyncManager(t)
-		mockSyncmgr.EXPECT().Block(mock.Anything).Return()
 		task := &compactionTask{
 			ctx:       ctx,
 			cancel:    cancel,
 			Allocator: alloc,
 			done:      make(chan struct{}, 1),
 			tr:        timerecord.NewTimeRecorder("test"),
-			syncMgr:   mockSyncmgr,
 			plan: &datapb.CompactionPlan{
 				PlanID:           999,
 				SegmentBinlogs:   []*datapb.CompactionSegmentBinlogs{{SegmentID: 100}},
@@ -909,7 +900,7 @@ func TestCompactorInterfaceMethods(t *testing.T) {
 						Deltalogs:           dPaths2,
 					},
 					{
-						SegmentID: seg3.SegmentID(), // empty segment
+						SegmentID: 104, // empty segment
 					},
 				},
 				StartTime:        0,

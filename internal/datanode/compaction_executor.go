@@ -110,10 +110,9 @@ func (c *compactionExecutor) executeTask(task compactor) {
 	if err != nil {
 		log.Warn("compaction task failed", zap.Error(err))
 		return
-	} else {
-		c.completed.Insert(result.GetPlanID(), result)
-		c.completedCompactor.Insert(result.GetPlanID(), task)
 	}
+	c.completed.Insert(result.GetPlanID(), result)
+	c.completedCompactor.Insert(result.GetPlanID(), task)
 
 	log.Info("end to execute compaction")
 }
