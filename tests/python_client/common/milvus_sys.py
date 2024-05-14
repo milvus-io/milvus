@@ -2,7 +2,7 @@ import ujson
 import json
 from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 from pymilvus import connections
-
+from utils.util_log import test_log as log
 sys_info_req = ujson.dumps({"metric_type": "system_info"})
 sys_statistics_req = ujson.dumps({"metric_type": "system_statistics"})
 sys_logs_req = ujson.dumps({"metric_type": "system_logs"})
@@ -17,11 +17,8 @@ class MilvusSys:
 
         # TODO: for now it only supports non_orm style API for getMetricsRequest
         req = milvus_types.GetMetricsRequest(request=sys_info_req)
-        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
-        req = milvus_types.GetMetricsRequest(request=sys_statistics_req)
-        self.sys_statistics = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
-        req = milvus_types.GetMetricsRequest(request=sys_logs_req)
-        self.sys_logs = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=60)
+        log.debug(f"sys_info: {self.sys_info}")
 
     @property
     def build_version(self):
