@@ -401,10 +401,12 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = get_invalid_value_collection_name
         new_collection_name = cf.gen_unique_str(prefix)
+        error = {"err_code": 4, "err_msg": "collection not found"}
+        if old_collection_name in [None, ""]:
+            error = {"err_code": 999, "err_msg": "is illegal"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 4,
-                                                         "err_msg": "collection not found"})
+                                            check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_new_invalid_type(self, get_invalid_type_collection_name):
