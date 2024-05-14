@@ -70,7 +70,7 @@ func (s *stepStack) Execute(ctx context.Context) *stepStack {
 			return nil
 		}
 		if err != nil {
-			s.steps = nil // let s can be collected.
+			s.steps = nil // let's can be collected.
 			if !skipLog {
 				log.Warn("failed to execute step, wait for reschedule", zap.Error(err), zap.String("step", todo.Desc()))
 			}
