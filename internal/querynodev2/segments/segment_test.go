@@ -78,7 +78,8 @@ func (suite *SegmentSuite) SetupTest() {
 					FieldID: 101,
 					Binlogs: []*datapb.Binlog{
 						{
-							LogSize: 10086,
+							LogSize:    10086,
+							MemorySize: 10086,
 						},
 					},
 				},
