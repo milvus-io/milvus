@@ -17,7 +17,6 @@
 #include "common/Utils.h"
 #include "common/VectorTrait.h"
 #include "common/EasyAssert.h"
-#include "query/Expr.h"
 #include "query/Utils.h"
 
 namespace milvus::query {

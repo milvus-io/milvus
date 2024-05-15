@@ -223,7 +223,7 @@ class SegmentInternalInterface : public SegmentInterface {
                   SearchResult& output) const = 0;
 
     virtual void
-    mask_with_delete(BitsetType& bitset,
+    mask_with_delete(BitsetTypeView& bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const = 0;
 
@@ -236,7 +236,7 @@ class SegmentInternalInterface : public SegmentInterface {
     num_chunk_data(FieldId field_id) const = 0;
 
     virtual void
-    mask_with_timestamps(BitsetType& bitset_chunk,
+    mask_with_timestamps(BitsetTypeView bitset_chunk,
                          Timestamp timestamp) const = 0;
 
     // count of chunks

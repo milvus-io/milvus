@@ -10,7 +10,7 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "SearchOnIndex.h"
-#include "query/GroupByOperator.h"
+#include "exec/operator/GroupByOperator.h"
 
 namespace milvus::query {
 void
@@ -26,12 +26,12 @@ SearchOnIndex(const dataset::SearchDataset& search_dataset,
     auto dataset =
         knowhere::GenDataSet(num_queries, dim, search_dataset.query_data);
     dataset->SetIsSparse(is_sparse);
-    if (!PrepareVectorIteratorsFromIndex(search_conf,
-                                         num_queries,
-                                         dataset,
-                                         search_result,
-                                         bitset,
-                                         indexing)) {
+    if (!milvus::exec::PrepareVectorIteratorsFromIndex(search_conf,
+                                                       num_queries,
+                                                       dataset,
+                                                       search_result,
+                                                       bitset,
+                                                       indexing)) {
         indexing.Query(dataset, search_conf, bitset, search_result);
     }
 }

@@ -712,7 +712,7 @@ SegmentSealedImpl::get_schema() const {
 }
 
 void
-SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
+SegmentSealedImpl::mask_with_delete(BitsetTypeView& bitset,
                                     int64_t ins_barrier,
                                     Timestamp timestamp) const {
     auto del_barrier = get_barrier(get_deleted_record(), timestamp);
@@ -1528,7 +1528,7 @@ SegmentSealedImpl::get_active_count(Timestamp ts) const {
 }
 
 void
-SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
+SegmentSealedImpl::mask_with_timestamps(BitsetTypeView bitset_chunk,
                                         Timestamp timestamp) const {
     // TODO change the
     AssertInfo(insert_record_.timestamps_.num_chunk() == 1,

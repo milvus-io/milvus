@@ -16,10 +16,10 @@
 #include "GroupByOperator.h"
 #include "common/Consts.h"
 #include "segcore/SegmentSealedImpl.h"
-#include "Utils.h"
+#include "query/Utils.h"
 
 namespace milvus {
-namespace query {
+namespace exec {
 
 void
 GroupBy(const std::vector<std::shared_ptr<VectorIterator>>& iterators,
@@ -197,5 +197,5 @@ GroupIteratorResult(const std::shared_ptr<VectorIterator>& iterator,
     }
 }
 
-}  // namespace query
+}  // namespace exec
 }  // namespace milvus

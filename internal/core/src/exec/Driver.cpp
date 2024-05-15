@@ -19,12 +19,14 @@
 #include <cassert>
 #include <memory>
 
-#include "exec/operator/CallbackSink.h"
-#include "exec/operator/FilterBits.h"
-#include "exec/operator/Operator.h"
-#include "exec/Task.h"
-
 #include "common/EasyAssert.h"
+#include "exec/operator/CallbackSink.h"
+#include "exec/operator/CountNode.h"
+#include "exec/operator/FilterBits.h"
+#include "exec/operator/MvccNode.h"
+#include "exec/operator/Operator.h"
+#include "exec/operator/VectorSearch.h"
+#include "exec/Task.h"
 
 namespace milvus {
 namespace exec {
@@ -52,6 +54,21 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
                     plannode)) {
             operators.push_back(
                 std::make_unique<FilterBits>(id, ctx.get(), filternode));
+        } else if (auto mvccnode =
+                       std::dynamic_pointer_cast<const plan::MvccNode>(
+                           plannode)) {
+            operators.push_back(
+                std::make_unique<PhyMvccNode>(id, ctx.get(), mvccnode));
+        } else if (auto countnode =
+                       std::dynamic_pointer_cast<const plan::CountNode>(
+                           plannode)) {
+            operators.push_back(
+                std::make_unique<PhyCountNode>(id, ctx.get(), countnode));
+        } else if (auto vectorsearchnode =
+                       std::dynamic_pointer_cast<const plan::VectorSearchNode>(
+                           plannode)) {
+            operators.push_back(std::make_unique<PhyVectorSearchNode>(
+                id, ctx.get(), vectorsearchnode));
         }
         // TODO: add more operators
     }
@@ -67,11 +84,12 @@ DriverFactory::CreateDriver(std::unique_ptr<DriverContext> ctx,
 
 void
 Driver::Enqueue(std::shared_ptr<Driver> driver) {
+    driver->EnqueueInternal();
     if (driver->closed_) {
         return;
     }
 
-    driver->get_task()->query_context()->executor()->add(
+    driver->task()->query_context()->executor()->add(
         [driver]() { Driver::Run(driver); });
 }
 
@@ -115,18 +133,52 @@ Driver::Init(std::unique_ptr<DriverContext> ctx,
 }
 
 void
+Driver::CloseOperators() {
+    for (auto& op : operators_) {
+        op->Close();
+    }
+
+    //TODO: update operator state
+}
+
+void
 Driver::Close() {
     if (closed_) {
         return;
     }
 
-    for (auto& op : operators_) {
-        op->Close();
-    }
+    // if (!IsOnThread() && !IsTerminated()) {
+    //     LOG_FATAL("Driver::Close is only allowed from driver's thread");
+    // }
 
+    CloseOperators();
     closed_ = true;
 
     Task::RemoveDriver(ctx_->task_, this);
+}
+
+void
+Driver::CloseByTask() {
+    Assert(IsOnThread());
+    Assert(IsTerminated());
+    CloseOperators();
+    closed_ = true;
+}
+
+std::string
+Driver::ToString() const {
+    std::stringstream ss;
+    ss << "{Driver: ";
+    if (state_.IsOnThread()) {
+        ss << "running ";
+    } else {
+        ss << "blocked " << BlockingReasonToString(blocking_reason_) << " ";
+    }
+
+    for (auto& op : operators_) {
+        ss << op->ToString() << " ";
+    }
+    return ss.str();
 }
 
 RowVectorPtr
@@ -210,10 +262,10 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                             if (result) {
                                 AssertInfo(
                                     result->size() > 0,
-                                    fmt::format(
-                                        "GetOutput must return nullptr or "
-                                        "a non-empty vector: {}",
-                                        op->get_operator_type()));
+                                    fmt::format("Operator::GetOutput must "
+                                                "return nullptr or "
+                                                "a non-empty vector: {}",
+                                                op->get_operator_type()));
                             }
                         }
                         if (result) {
@@ -222,6 +274,11 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
                             i += 2;
                             continue;
                         } else {
+                            auto stop = task()->ShouldStop();
+                            if (stop != StopReason::kNone) {
+                                return stop;
+                            }
+
                             CALL_OPERATOR(
                                 blocking_reason_ = op->IsBlocked(&future),
                                 op,
@@ -267,7 +324,7 @@ Driver::RunInternal(std::shared_ptr<Driver>& self,
             }
         }
     } catch (std::exception& e) {
-        get_task()->SetError(std::current_exception());
+        task()->SetError(std::current_exception());
         return StopReason::kAlreadyTerminated;
     }
 }
@@ -290,7 +347,18 @@ MakeConsumerSupplier(ConsumerSupplier supplier) {
 }
 
 uint32_t
+MaxDriversForConsumer(const std::shared_ptr<const plan::PlanNode>& node) {
+    //TODO: Support merge join
+    return std::numeric_limits<uint32_t>::max();
+}
+uint32_t
 MaxDrivers(const DriverFactory* factory, const QueryConfig& config) {
+    uint32_t count = MaxDriversForConsumer(factory->consumer_node_);
+    if (count == 1) {
+        return count;
+    }
+
+    // TODO: support multi node
     return 1;
 }
 

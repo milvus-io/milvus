@@ -17,7 +17,7 @@
 #include "query/SearchBruteForce.h"
 #include "query/SearchOnSealed.h"
 #include "query/helper.h"
-#include "query/GroupByOperator.h"
+#include "exec/operator/GroupByOperator.h"
 
 namespace milvus::query {
 
@@ -48,12 +48,12 @@ SearchOnSealedIndex(const Schema& schema,
     dataset->SetIsSparse(is_sparse);
     auto vec_index =
         dynamic_cast<index::VectorIndex*>(field_indexing->indexing_.get());
-    if (!PrepareVectorIteratorsFromIndex(search_info,
-                                         num_queries,
-                                         dataset,
-                                         search_result,
-                                         bitset,
-                                         *vec_index)) {
+    if (!milvus::exec::PrepareVectorIteratorsFromIndex(search_info,
+                                                       num_queries,
+                                                       dataset,
+                                                       search_result,
+                                                       bitset,
+                                                       *vec_index)) {
         auto index_type = vec_index->GetIndexType();
         vec_index->Query(dataset, search_info, bitset, search_result);
         float* distances = search_result.distances_.data();

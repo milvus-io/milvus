@@ -128,6 +128,16 @@ class RowVector : public BaseVector {
         }
     }
 
+    RowVector(std::vector<VectorPtr>&& children)
+        : BaseVector(DataType::ROW, 0) {
+        children_values_ = std::move(children);
+        for (auto& child : children_values_) {
+            if (child->size() > length_) {
+                length_ = child->size();
+            }
+        }
+    }
+
     const std::vector<VectorPtr>&
     childrens() {
         return children_values_;

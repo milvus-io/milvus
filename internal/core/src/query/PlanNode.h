@@ -18,7 +18,6 @@
 #include <string>
 
 #include "common/QueryInfo.h"
-#include "query/Expr.h"
 
 namespace milvus::plan {
 class PlanNode;
@@ -37,8 +36,7 @@ struct PlanNode {
 using PlanNodePtr = std::unique_ptr<PlanNode>;
 
 struct VectorPlanNode : PlanNode {
-    std::optional<ExprPtr> predicate_;
-    std::optional<std::shared_ptr<milvus::plan::PlanNode>> filter_plannode_;
+    std::shared_ptr<milvus::plan::PlanNode> plannodes_;
     SearchInfo search_info_;
     std::string placeholder_tag_;
 };
@@ -78,8 +76,7 @@ struct RetrievePlanNode : PlanNode {
     void
     accept(PlanNodeVisitor&) override;
 
-    std::optional<ExprPtr> predicate_;
-    std::optional<std::shared_ptr<milvus::plan::PlanNode>> filter_plannode_;
+    std::shared_ptr<milvus::plan::PlanNode> plannodes_;
     bool is_count_;
     int64_t limit_;
 };

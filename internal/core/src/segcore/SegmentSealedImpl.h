@@ -233,7 +233,7 @@ class SegmentSealedImpl : public SegmentSealed {
     }
 
     void
-    mask_with_timestamps(BitsetType& bitset_chunk,
+    mask_with_timestamps(BitsetTypeView bitset_chunk,
                          Timestamp timestamp) const override;
 
     void
@@ -245,7 +245,7 @@ class SegmentSealedImpl : public SegmentSealed {
                   SearchResult& output) const override;
 
     void
-    mask_with_delete(BitsetType& bitset,
+    mask_with_delete(BitsetTypeView& bitset,
                      int64_t ins_barrier,
                      Timestamp timestamp) const override;
 

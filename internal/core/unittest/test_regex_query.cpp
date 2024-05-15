@@ -33,6 +33,12 @@ using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
+extern BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp);
+
 SchemaPtr
 GenTestSchema() {
     auto schema = std::make_shared<Schema>();
@@ -125,11 +131,10 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnNonStringField) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
     ASSERT_ANY_THROW(
 
-        visitor.ExecuteExprNode(parsed, segpromote, N, final));
+        ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
 }
 
 TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnStringField) {
@@ -150,9 +155,8 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnStringField) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
     ASSERT_FALSE(final[0]);
     ASSERT_TRUE(final[1]);
     ASSERT_TRUE(final[2]);
@@ -177,9 +181,8 @@ TEST_F(GrowingSegmentRegexQueryTest, RegexQueryOnJsonField) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
     ASSERT_FALSE(final[0]);
     ASSERT_FALSE(final[1]);
     ASSERT_TRUE(final[2]);
@@ -333,9 +336,7 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnNonStringField) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
-    BitsetType final;
-    ASSERT_ANY_THROW(visitor.ExecuteExprNode(parsed, segpromote, N, final));
+    ASSERT_ANY_THROW(ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP));
 }
 
 TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
@@ -356,9 +357,8 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnStringField) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
     ASSERT_FALSE(final[0]);
     ASSERT_TRUE(final[1]);
     ASSERT_TRUE(final[2]);
@@ -383,9 +383,8 @@ TEST_F(SealedSegmentRegexQueryTest, BFRegexQueryOnJsonField) {
         std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, typed_expr);
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
     ASSERT_FALSE(final[0]);
     ASSERT_FALSE(final[1]);
     ASSERT_TRUE(final[2]);
@@ -411,11 +410,7 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnIndexedNonStringField) {
     LoadStlSortIndex();
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
-    BitsetType final;
-    ASSERT_ANY_THROW(
-
-        visitor.ExecuteExprNode(parsed, segpromote, N, final));
+    ASSERT_ANY_THROW(ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP););
 }
 
 TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnStlSortStringField) {
@@ -438,9 +433,8 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnStlSortStringField) {
     LoadStlSortIndex();
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
     ASSERT_FALSE(final[0]);
     ASSERT_TRUE(final[1]);
     ASSERT_TRUE(final[2]);
@@ -468,10 +462,8 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnInvertedIndexStringField) {
     LoadInvertedIndex();
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-
-    visitor.ExecuteExprNode(parsed, segpromote, N, final);
+    final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP);
     ASSERT_FALSE(final[0]);
     ASSERT_TRUE(final[1]);
     ASSERT_TRUE(final[2]);
@@ -499,7 +491,7 @@ TEST_F(SealedSegmentRegexQueryTest, RegexQueryOnUnsupportedIndex) {
     LoadMockIndex();
 
     auto segpromote = dynamic_cast<SegmentSealedImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*segpromote, MAX_TIMESTAMP);
     BitsetType final;
-    ASSERT_ANY_THROW(visitor.ExecuteExprNode(parsed, segpromote, N, final));
+    ASSERT_ANY_THROW(
+        final = ExecuteQueryExpr(parsed, segpromote, N, MAX_TIMESTAMP););
 }

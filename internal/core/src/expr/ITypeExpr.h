@@ -220,7 +220,7 @@ class CallTypeExpr : public ITypeExpr {
     CallTypeExpr(DataType type,
                  const std::vector<TypedExprPtr>& inputs,
                  std::string fun_name)
-        : ITypeExpr{type, std::move(inputs)} {
+        : ITypeExpr{type, std::move(inputs)}, name_(fun_name) {
     }
 
     virtual ~CallTypeExpr() = default;
@@ -230,6 +230,26 @@ class CallTypeExpr : public ITypeExpr {
         return name_;
     }
 
+    // bool
+    // operator==(const ITypeExpr& other) {
+    //     const auto* casted = std::dynamic_cast<const CallTypeExpr*>(&other);
+    //     if (!casted) {
+    //         return false;
+    //     }
+    //     return operator==(*casted);
+    // }
+
+    // bool
+    // operator==(const CallTypeExpr& other) {
+    //     if (other.name() != this->name()) {
+    //         return false;
+    //     }
+    //     if (*other.type() != this->type()) {
+    //         return false;
+    //     }
+
+    //     return std::equal(this->type(), other.type());
+    // }
     std::string
     ToString() const override {
         std::string str{};

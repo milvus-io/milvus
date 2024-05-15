@@ -90,6 +90,15 @@ class OperatorContext {
     mutable std::unique_ptr<ExecContext> exec_context_;
 };
 
+struct OperatorStats {
+    int32_t operator_id_{0};
+    int32_t pipeline_id_{0};
+    milvus::plan::PlanNodeId plannode_id_;
+
+    std::string operator_type_;
+    int32_t num_splits_{0};
+};
+
 class Operator {
  public:
     Operator(DriverContext* ctx,
@@ -152,6 +161,11 @@ class Operator {
         return operator_context_->get_plannode_id();
     }
 
+    virtual std::string
+    ToString() const {
+        return "Base Operator";
+    }
+
  protected:
     std::unique_ptr<OperatorContext> operator_context_;
 
@@ -190,6 +204,11 @@ class SourceOperator : public Operator {
     NoMoreInput() override {
         throw NotImplementedException(
             "SourceOperator does not support noMoreInput()");
+    }
+
+    virtual std::string
+    ToString() const override {
+        return "source operator";
     }
 };
 

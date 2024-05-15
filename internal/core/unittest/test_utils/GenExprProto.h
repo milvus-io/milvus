@@ -11,7 +11,13 @@
 
 #pragma once
 
+#include <memory>
+#include <vector>
+
+#include "common/Consts.h"
+#include "expr/ITypeExpr.h"
 #include "pb/plan.pb.h"
+#include "plan/PlanNode.h"
 
 namespace milvus::test {
 inline auto
@@ -59,4 +65,40 @@ inline auto
 GenExpr() {
     return std::make_unique<proto::plan::Expr>();
 }
+
+inline std::shared_ptr<milvus::plan::PlanNode>
+CreateRetrievePlanByExpr(std::shared_ptr<milvus::expr::ITypeExpr> expr) {
+    auto init_plannode_id = std::stoi(DEFAULT_PLANNODE_ID);
+    milvus::plan::PlanNodePtr plannode;
+    std::vector<milvus::plan::PlanNodePtr> sources;
+
+    plannode =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+    plannode = std::make_shared<milvus::plan::MvccNode>(
+        std::to_string(init_plannode_id++), sources);
+    return plannode;
+}
+
+inline std::shared_ptr<milvus::plan::PlanNode>
+CreateSearchPlanByExpr(std::shared_ptr<milvus::expr::ITypeExpr> expr) {
+    auto init_plannode_id = std::stoi(DEFAULT_PLANNODE_ID);
+    milvus::plan::PlanNodePtr plannode;
+    std::vector<milvus::plan::PlanNodePtr> sources;
+
+    plannode =
+        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+    plannode = std::make_shared<milvus::plan::MvccNode>(
+        std::to_string(init_plannode_id++), sources);
+    sources = std::vector<milvus::plan::PlanNodePtr>{plannode};
+
+    plannode = std::make_shared<milvus::plan::VectorSearchNode>(
+        std::to_string(init_plannode_id++), sources);
+
+    return plannode;
+}
+
 }  // namespace milvus::test

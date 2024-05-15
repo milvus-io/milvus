@@ -13,8 +13,8 @@
 
 #include "common/Types.h"
 #include "knowhere/comp/index_param.h"
-#include "query/Expr.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "plan/PlanNode.h"
 
 using namespace milvus;
@@ -77,8 +77,8 @@ TEST_P(RetrieveTest, AutoID) {
             fid_64, DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_fields_id{fid_64, fid_vec};
     plan->field_ids_ = target_fields_id;
 
@@ -137,8 +137,8 @@ TEST_P(RetrieveTest, AutoID2) {
             fid_64, DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -202,8 +202,8 @@ TEST_P(RetrieveTest, NotExist) {
             fid_64, DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -259,8 +259,8 @@ TEST_P(RetrieveTest, Empty) {
             fid_64, DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -302,9 +302,7 @@ TEST_P(RetrieveTest, Limit) {
         OpType::GreaterEqual,
         unary_val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-
+    plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(expr);
     // test query results exceed the limit size
     std::vector<FieldId> target_fields{TimestampFieldID, fid_64, fid_vec};
     plan->field_ids_ = target_fields;
@@ -350,9 +348,7 @@ TEST_P(RetrieveTest, FillEntry) {
         OpType::GreaterEqual,
         unary_val);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-
+    plan->plan_node_->plannodes_ = milvus::test::CreateRetrievePlanByExpr(expr);
     // test query results exceed the limit size
     std::vector<FieldId> target_fields{TimestampFieldID,
                                        fid_64,
@@ -403,8 +399,8 @@ TEST_P(RetrieveTest, LargeTimestamp) {
         values);
     ;
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_offsets{fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 
@@ -476,8 +472,8 @@ TEST_P(RetrieveTest, Delete) {
             fid_64, DataType::INT64, std::vector<std::string>()),
         values);
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
-    plan->plan_node_->filter_plannode_ =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, term_expr);
+    plan->plan_node_->plannodes_ =
+        milvus::test::CreateRetrievePlanByExpr(term_expr);
     std::vector<FieldId> target_offsets{fid_ts, fid_64, fid_vec};
     plan->field_ids_ = target_offsets;
 

@@ -16,15 +16,20 @@
 #include <vector>
 
 #include "common/Types.h"
-#include "query/Expr.h"
 #include "query/Plan.h"
-#include "query/generated/ExecExprVisitor.h"
+#include "query/generated/ExecPlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
 
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
+extern BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp);
 
 TEST(Expr, IntegerOverflow) {
     std::vector<std::tuple<std::string, std::function<bool(int8_t)>>> testcases = {
@@ -620,12 +625,14 @@ binary_arith_op_eval_range_expr: <
         auto plan_str = translate_text_plan_to_binary_plan(raw_plan.c_str());
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
-        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        // vectorsearch node => mvcc node => filter node
+        // just test filter node
+        final = ExecuteQueryExpr(
+            (plan->plan_node_->plannodes_->sources()[0])->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {

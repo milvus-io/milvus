@@ -12,12 +12,9 @@
 #include <gtest/gtest.h>
 
 #include "pb/schema.pb.h"
-#include "query/Expr.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
-#include "query/generated/ExprVisitor.h"
-#include "query/generated/ShowPlanNodeVisitor.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"
@@ -43,12 +40,6 @@ TEST(Query, ShowExecutor) {
     info.metric_type_ = metric_type;
     info.topk_ = 20;
     info.field_id_ = field_id;
-    node->predicate_ = std::nullopt;
-    ShowPlanNodeVisitor show_visitor;
-    PlanNodePtr base(node.release());
-    auto res = show_visitor.call_child(*base);
-    auto dup = res;
-    std::cout << dup.dump(4);
 }
 
 TEST(Query, ParsePlaceholderGroup) {

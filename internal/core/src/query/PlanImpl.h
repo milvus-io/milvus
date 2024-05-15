@@ -22,6 +22,7 @@
 #include "common/EasyAssert.h"
 #include "common/Json.h"
 #include "common/Consts.h"
+#include "common/Schema.h"
 
 namespace milvus::query {
 
@@ -53,8 +54,6 @@ struct Plan {
     std::unique_ptr<VectorPlanNode> plan_node_;
     std::map<std::string, FieldId> tag2field_;  // PlaceholderName -> FieldId
     std::vector<FieldId> target_entries_;
-    void
-    check_identical(Plan& other);
 
  public:
     std::optional<ExtractedPlanInfo> extra_info_opt_;
