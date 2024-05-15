@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -112,7 +113,7 @@ func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask 
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	mu    sync.RWMutex
+	mu    lock.RWMutex
 	plans map[int64]*compactionTask // planID -> task
 
 	meta      CompactionMeta

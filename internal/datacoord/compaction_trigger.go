@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -75,7 +76,7 @@ type compactionTrigger struct {
 	signals           chan *compactionSignal
 	compactionHandler compactionPlanContext
 	globalTrigger     *time.Ticker
-	forceMu           sync.Mutex
+	forceMu           lock.Mutex
 	quit              chan struct{}
 	wg                sync.WaitGroup
 
