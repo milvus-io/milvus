@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -75,7 +76,7 @@ type compactionTrigger struct {
 	signals           chan *compactionSignal
 	compactionHandler compactionPlanContext
 	globalTrigger     *time.Ticker
-	forceMu           sync.Mutex
+	forceMu           lock.Mutex
 	quit              chan struct{}
 	wg                sync.WaitGroup
 
@@ -798,7 +799,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 					zap.Uint64("binlogTimestampTo", l.TimestampTo),
 					zap.Uint64("compactExpireTime", compactTime.expireTime))
 				totalExpiredRows += int(l.GetEntriesNum())
-				totalExpiredSize += l.GetLogSize()
+				totalExpiredSize += l.GetMemorySize()
 			}
 		}
 	}
@@ -816,7 +817,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	for _, deltaLogs := range segment.GetDeltalogs() {
 		for _, l := range deltaLogs.GetBinlogs() {
 			totalDeletedRows += int(l.GetEntriesNum())
-			totalDeleteLogSize += l.GetLogSize()
+			totalDeleteLogSize += l.GetMemorySize()
 		}
 	}
 

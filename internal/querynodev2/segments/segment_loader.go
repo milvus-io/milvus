@@ -1612,10 +1612,10 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 		} else {
 			mmapEnabled = common.IsFieldMmapEnabled(schema, fieldID) ||
 				(!common.FieldHasMmapKey(schema, fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
-			binlogSize := uint64(getBinlogDataSize(fieldBinlog))
+			binlogSize := uint64(getBinlogDataMemorySize(fieldBinlog))
 			segmentMemorySize += binlogSize
 			if mmapEnabled {
-				segmentDiskSize += binlogSize
+				segmentDiskSize += uint64(getBinlogDataDiskSize(fieldBinlog))
 			} else {
 				if multiplyFactor.enableTempSegmentIndex {
 					segmentMemorySize += uint64(float64(binlogSize) * multiplyFactor.tempSegmentIndexFactor)
@@ -1629,7 +1629,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 	// get size of stats data
 	for _, fieldBinlog := range loadInfo.Statslogs {
-		segmentMemorySize += uint64(getBinlogDataSize(fieldBinlog))
+		segmentMemorySize += uint64(getBinlogDataMemorySize(fieldBinlog))
 	}
 
 	// binlog & statslog use general load factor
@@ -1637,7 +1637,7 @@ func getResourceUsageEstimateOfSegment(schema *schemapb.CollectionSchema, loadIn
 
 	// get size of delete data
 	for _, fieldBinlog := range loadInfo.Deltalogs {
-		segmentMemorySize += uint64(float64(getBinlogDataSize(fieldBinlog)) * multiplyFactor.deltaDataExpansionFactor)
+		segmentMemorySize += uint64(float64(getBinlogDataMemorySize(fieldBinlog)) * multiplyFactor.deltaDataExpansionFactor)
 	}
 	return &ResourceUsage{
 		MemorySize:     segmentMemorySize,
@@ -1725,10 +1725,19 @@ func (loader *segmentLoader) LoadIndex(ctx context.Context, segment *LocalSegmen
 	return loader.waitSegmentLoadDone(ctx, commonpb.SegmentState_SegmentStateNone, []int64{loadInfo.GetSegmentID()}, version)
 }
 
-func getBinlogDataSize(fieldBinlog *datapb.FieldBinlog) int64 {
+func getBinlogDataDiskSize(fieldBinlog *datapb.FieldBinlog) int64 {
 	fieldSize := int64(0)
 	for _, binlog := range fieldBinlog.Binlogs {
-		fieldSize += binlog.LogSize
+		fieldSize += binlog.GetLogSize()
+	}
+
+	return fieldSize
+}
+
+func getBinlogDataMemorySize(fieldBinlog *datapb.FieldBinlog) int64 {
+	fieldSize := int64(0)
+	for _, binlog := range fieldBinlog.Binlogs {
+		fieldSize += binlog.GetMemorySize()
 	}
 
 	return fieldSize

@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -61,7 +61,7 @@ type SubCluster interface {
 type ChannelManagerImplV2 struct {
 	ctx    context.Context
 	cancel context.CancelFunc
-	mu     sync.RWMutex
+	mu     lock.RWMutex
 
 	h          Handler
 	store      RWChannelStore

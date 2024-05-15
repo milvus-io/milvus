@@ -4,12 +4,10 @@ import (
 	"fmt"
 
 	"github.com/samber/lo"
-	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/log"
 )
 
 type CompactionView interface {
@@ -166,29 +164,11 @@ func GetBinlogCount(fieldBinlogs []*datapb.FieldBinlog) int {
 	return num
 }
 
-func GetExpiredSizeAsBytes(expireTime Timestamp, fieldBinlogs []*datapb.FieldBinlog) float64 {
-	var expireSize float64
-	for _, binlogs := range fieldBinlogs {
-		for _, l := range binlogs.GetBinlogs() {
-			// TODO, we should probably estimate expired log entries by total rows
-			// in binlog and the ralationship of timeTo, timeFrom and expire time
-			if l.TimestampTo < expireTime {
-				log.Info("mark binlog as expired",
-					zap.Int64("binlogID", l.GetLogID()),
-					zap.Uint64("binlogTimestampTo", l.TimestampTo),
-					zap.Uint64("compactExpireTime", expireTime))
-				expireSize += float64(l.GetLogSize())
-			}
-		}
-	}
-	return expireSize
-}
-
 func GetBinlogSizeAsBytes(deltaBinlogs []*datapb.FieldBinlog) float64 {
 	var deltaSize float64
 	for _, deltaLogs := range deltaBinlogs {
 		for _, l := range deltaLogs.GetBinlogs() {
-			deltaSize += float64(l.GetLogSize())
+			deltaSize += float64(l.GetMemorySize())
 		}
 	}
 	return deltaSize

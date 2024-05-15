@@ -898,7 +898,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									Binlogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+												{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 											},
 										},
 									},
@@ -918,7 +918,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									Binlogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
+												{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1, MemorySize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
 											},
 										},
 									},
@@ -1020,7 +1020,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: numRows, LogPath: "log1", LogSize: 100},
+						{EntriesNum: numRows, LogPath: "log1", LogSize: 100, MemorySize: 100},
 					},
 				},
 			},
@@ -1212,7 +1212,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024},
+						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024, MemorySize: numRows * 1024 * 1024},
 					},
 				},
 			},
@@ -1405,7 +1405,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024},
+						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024, MemorySize: numRows * 1024 * 1024},
 					},
 				},
 			},
@@ -1632,7 +1632,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				Binlogs: []*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
-							{EntriesNum: 5, LogPath: "log1", LogSize: size[i] * 2 * 1024 * 1024},
+							{EntriesNum: 5, LogPath: "log1", LogSize: size[i] * 2 * 1024 * 1024, MemorySize: size[i] * 2 * 1024 * 1024},
 						},
 					},
 				},
@@ -1771,7 +1771,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 1000; i++ {
 		binlogs = append(binlogs, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 			},
 		})
 	}
@@ -1815,7 +1815,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 100; i++ {
 		binlogs2 = append(binlogs2, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500, MemorySize: 100000},
 			},
 		})
 	}
@@ -1823,7 +1823,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 100; i++ {
 		binlogs2 = append(binlogs2, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 1000000, TimestampFrom: 300, TimestampTo: 1000},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 1000000, TimestampFrom: 300, TimestampTo: 1000, MemorySize: 1000000},
 			},
 		})
 	}
@@ -1858,7 +1858,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 100; i++ {
 		binlogs3 = append(binlogs2, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500, MemorySize: 100000},
 			},
 		})
 	}
@@ -2167,7 +2167,7 @@ func (s *CompactionTriggerSuite) genSeg(segID, numRows int64) *datapb.SegmentInf
 		Binlogs: []*datapb.FieldBinlog{
 			{
 				Binlogs: []*datapb.Binlog{
-					{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+					{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 				},
 			},
 		},

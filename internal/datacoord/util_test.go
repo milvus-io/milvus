@@ -194,7 +194,7 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 	logsize := int64(100)
 	fields := []*datapb.FieldBinlog{{
 		FieldID: 102,
-		Binlogs: []*datapb.Binlog{{LogSize: logsize}},
+		Binlogs: []*datapb.Binlog{{LogSize: logsize, MemorySize: logsize}},
 	}}
 
 	suite.Equal(calculateL0SegmentSize(fields), float64(logsize))

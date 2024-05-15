@@ -68,7 +68,7 @@ func (c *IndexAttrCache) GetIndexResourceUsage(indexInfo *querypb.FieldIndexInfo
 	if indexType == indexparamcheck.IndexINVERTED {
 		neededMemSize := 0
 		// we will mmap the binlog if the index type is inverted index.
-		neededDiskSize := indexInfo.IndexSize + getBinlogDataSize(fieldBinlog)
+		neededDiskSize := indexInfo.IndexSize + getBinlogDataDiskSize(fieldBinlog)
 		return uint64(neededMemSize), uint64(neededDiskSize), nil
 	}
 

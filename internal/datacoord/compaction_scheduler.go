@@ -2,7 +2,6 @@ package datacoord
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -11,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -32,7 +32,7 @@ type CompactionScheduler struct {
 
 	queuingTasks  []*compactionTask
 	parallelTasks map[int64][]*compactionTask // parallel by nodeID
-	taskGuard     sync.RWMutex
+	taskGuard     lock.RWMutex
 
 	planHandler *compactionPlanHandler
 	cluster     Cluster
