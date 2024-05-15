@@ -1,6 +1,7 @@
 package lock
 
 import (
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -16,7 +17,7 @@ type MetricsLockManager struct {
 }
 
 type MetricsRWMutex struct {
-	mutex          RWMutex
+	mutex          sync.RWMutex
 	lockName       string
 	acquireTimeMap map[string]time.Time
 }

@@ -25,7 +25,7 @@ import (
 )
 
 type RefLock struct {
-	mutex      RWMutex
+	mutex      sync.RWMutex
 	refCounter int
 }
 
@@ -39,7 +39,7 @@ func (m *RefLock) unref() {
 
 func newRefLock() *RefLock {
 	c := RefLock{
-		RWMutex{},
+		sync.RWMutex{},
 		0,
 	}
 	return &c
