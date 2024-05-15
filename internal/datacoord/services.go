@@ -128,7 +128,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	for _, segment := range segments {
 		if segment != nil &&
 			(isFlushState(segment.GetState())) &&
-			segment.GetLevel() == datapb.SegmentLevel_L1 &&
+			segment.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
 			!sealedSegmentsIDDict[segment.GetID()] {
 			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
 		}
