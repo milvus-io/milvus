@@ -198,50 +198,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 
 func (s *DataNodeServicesSuite) TestCompaction() {
 	dmChannelName := "by-dev-rootcoord-dml_0_100v0"
-	schema := &schemapb.CollectionSchema{
-		Name: "test_collection",
-		Fields: []*schemapb.FieldSchema{
-			{FieldID: common.RowIDField, Name: common.RowIDFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.TimeStampField, Name: common.TimeStampFieldName, DataType: schemapb.DataType_Int64},
-			{FieldID: common.StartOfUserFieldID, DataType: schemapb.DataType_Int64, IsPrimaryKey: true, Name: "pk"},
-			{FieldID: common.StartOfUserFieldID + 1, DataType: schemapb.DataType_FloatVector, TypeParams: []*commonpb.KeyValuePair{
-				{Key: common.DimKey, Value: "128"},
-			}},
-		},
-	}
-	flushedSegmentID := int64(100)
-	growingSegmentID := int64(101)
 
-	vchan := &datapb.VchannelInfo{
-		CollectionID:        1,
-		ChannelName:         dmChannelName,
-		UnflushedSegmentIds: []int64{},
-		FlushedSegmentIds:   []int64{},
-	}
-
-	err := s.node.flowgraphManager.AddandStartWithEtcdTickler(s.node, vchan, schema, genTestTickler())
-	s.Require().NoError(err)
-
-	fgservice, ok := s.node.flowgraphManager.GetFlowgraphService(dmChannelName)
-	s.Require().True(ok)
-
-	metaCache := metacache.NewMockMetaCache(s.T())
-	metaCache.EXPECT().Collection().Return(1).Maybe()
-	metaCache.EXPECT().Schema().Return(schema).Maybe()
-	s.node.writeBufferManager.Register(dmChannelName, metaCache, nil)
-
-	fgservice.metacache.AddSegment(&datapb.SegmentInfo{
-		ID:            flushedSegmentID,
-		CollectionID:  1,
-		PartitionID:   2,
-		StartPosition: &msgpb.MsgPosition{},
-	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
-	fgservice.metacache.AddSegment(&datapb.SegmentInfo{
-		ID:            growingSegmentID,
-		CollectionID:  1,
-		PartitionID:   2,
-		StartPosition: &msgpb.MsgPosition{},
-	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
 	s.Run("service_not_ready", func() {
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -257,40 +214,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		s.False(merr.Ok(resp))
 	})
 
-	s.Run("channel_not_match", func() {
-		node := s.node
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		req := &datapb.CompactionPlan{
-			PlanID:  1000,
-			Channel: dmChannelName + "other",
-		}
-
-		resp, err := node.Compaction(ctx, req)
-		s.NoError(err)
-		s.False(merr.Ok(resp))
-	})
-
-	s.Run("channel_dropped", func() {
-		node := s.node
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-
-		node.compactionExecutor.dropped.Insert(dmChannelName)
-		defer node.compactionExecutor.dropped.Remove(dmChannelName)
-
-		req := &datapb.CompactionPlan{
-			PlanID:  1000,
-			Channel: dmChannelName,
-		}
-
-		resp, err := node.Compaction(ctx, req)
-		s.NoError(err)
-		s.False(merr.Ok(resp))
-	})
-
-	s.Run("compact_growing_segment", func() {
+	s.Run("unknown CompactionType", func() {
 		node := s.node
 		ctx, cancel := context.WithCancel(context.Background())
 		defer cancel()
@@ -300,7 +224,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Channel: dmChannelName,
 			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
-				{SegmentID: growingSegmentID, Level: datapb.SegmentLevel_L1},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
 		}
 

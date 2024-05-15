@@ -423,6 +423,11 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("Compact-%d", t.getPlanID()))
 	defer span.End()
 
+	if len(t.plan.GetSegmentBinlogs()) < 1 {
+		log.Warn("compact wrong, there's no segments in segment binlogs")
+		return nil, errIllegalCompactionPlan
+	}
+
 	collectionID := t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 	partitionID := t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 
@@ -441,10 +446,6 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	compactStart := time.Now()
 	durInQueue := t.tr.RecordSpan()
 	log.Info("compact start")
-	if len(t.plan.GetSegmentBinlogs()) < 1 {
-		log.Warn("compact wrong, there's no segments in segment binlogs")
-		return nil, errIllegalCompactionPlan
-	}
 
 	targetSegID, err := t.AllocOne()
 	if err != nil {

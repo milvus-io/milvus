@@ -471,8 +471,6 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Type:             datapb.CompactionType_MixCompaction,
 					Channel:          "ch1",
 					TotalRows:        200,
-					CollectionID:     2,
-					PartitionID:      1,
 					Schema:           schema,
 				},
 			},

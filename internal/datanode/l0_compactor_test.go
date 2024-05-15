@@ -198,7 +198,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		Type:   datapb.CompactionType_Level0DeleteCompaction,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 			{
-				SegmentID: 100, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
+				CollectionID: 1,
+				SegmentID:    100, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
 							{LogPath: "a/b/c1", LogSize: 100},
@@ -210,7 +211,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 				},
 			},
 			{
-				SegmentID: 101, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
+				CollectionID: 1,
+				SegmentID:    101, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
 							{LogPath: "a/d/c1", LogSize: 100},
@@ -221,23 +223,27 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 					},
 				},
 			},
-			{SegmentID: 200, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{LogID: 9999, LogSize: 100},
+			{
+				CollectionID: 1,
+				SegmentID:    200, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogID: 9999, LogSize: 100},
+						},
 					},
 				},
-			}},
-			{SegmentID: 201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{LogID: 9999, LogSize: 100},
+			},
+			{
+				CollectionID: 1,
+				SegmentID:    201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogID: 9999, LogSize: 100},
+						},
 					},
 				},
-			}},
+			},
 		},
-		CollectionID: 1,
-		PartitionID:  10,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -352,8 +358,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 				},
 			}},
 		},
-		CollectionID: 1,
-		PartitionID:  10,
 		Schema: &schemapb.CollectionSchema{
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -422,8 +426,18 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 
 func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	ctx := context.Background()
+
+	plan := &datapb.CompactionPlan{
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID: 100,
+			},
+		},
+	}
+
 	s.Run("uploadByCheck directly composeDeltalog failed", func() {
 		s.SetupTest()
+		s.task.plan = plan
 		mockAlloc := allocator.NewMockAllocator(s.T())
 		mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
 		s.task.allocator = mockAlloc
@@ -436,6 +450,7 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 
 	s.Run("uploadByCheck directly Upload failed", func() {
 		s.SetupTest()
+		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
 
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
@@ -452,6 +467,7 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 
 	s.Run("upload directly", func() {
 		s.SetupTest()
+		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
@@ -483,6 +499,7 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 	})
 
 	s.Run("check with upload", func() {
+		s.task.plan = plan
 		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
 		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
 
@@ -513,6 +530,18 @@ func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestComposeDeltalog() {
+	plan := &datapb.CompactionPlan{
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID: 100,
+			},
+			{
+				SegmentID: 101,
+			},
+		},
+	}
+	s.task.plan = plan
+
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 
 	blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
