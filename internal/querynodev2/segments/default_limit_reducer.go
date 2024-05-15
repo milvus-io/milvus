@@ -44,18 +44,20 @@ func newDefaultLimitReducer(req *querypb.QueryRequest, schema *schemapb.Collecti
 }
 
 type defaultLimitReducerSegcore struct {
-	req    *querypb.QueryRequest
-	schema *schemapb.CollectionSchema
+	req     *querypb.QueryRequest
+	schema  *schemapb.CollectionSchema
+	manager *Manager
 }
 
 func (r *defaultLimitReducerSegcore) Reduce(ctx context.Context, results []*segcorepb.RetrieveResults, segments []Segment, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
 	mergeParam := NewMergeParam(r.req.GetReq().GetLimit(), r.req.GetReq().GetOutputFieldsId(), r.schema, r.req.GetReq().GetReduceStopForBest())
-	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, mergeParam, segments, plan)
+	return mergeSegcoreRetrieveResultsAndFillIfEmpty(ctx, results, mergeParam, segments, plan, r.manager)
 }
 
-func newDefaultLimitReducerSegcore(req *querypb.QueryRequest, schema *schemapb.CollectionSchema) *defaultLimitReducerSegcore {
+func newDefaultLimitReducerSegcore(req *querypb.QueryRequest, schema *schemapb.CollectionSchema, manager *Manager) *defaultLimitReducerSegcore {
 	return &defaultLimitReducerSegcore{
-		req:    req,
-		schema: schema,
+		req:     req,
+		schema:  schema,
+		manager: manager,
 	}
 }
