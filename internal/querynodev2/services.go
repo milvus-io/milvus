@@ -1430,9 +1430,14 @@ func (req *deleteRequestStringer) String() string {
 }
 
 func (node *QueryNode) updateDistributionModifyTS() {
-	node.lastModifyTs.Store(time.Now().UnixNano())
+	node.lastModifyLock.Lock()
+	defer node.lastModifyLock.Unlock()
+
+	node.lastModifyTs = time.Now().UnixNano()
 }
 
 func (node *QueryNode) getDistributionModifyTS() int64 {
-	return node.lastModifyTs.Load()
+	node.lastModifyLock.RLock()
+	defer node.lastModifyLock.RUnlock()
+	return node.lastModifyTs
 }

@@ -42,7 +42,6 @@ import (
 
 	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
-	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -68,6 +67,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/gc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -133,18 +133,18 @@ type QueryNode struct {
 	queryHook optimizers.QueryHook
 
 	// record the last modify ts of segment/channel distribution
-	lastModifyTs atomic.Int64
+	lastModifyLock lock.RWMutex
+	lastModifyTs   int64
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
 func NewQueryNode(ctx context.Context, factory dependency.Factory) *QueryNode {
 	ctx, cancel := context.WithCancel(ctx)
 	node := &QueryNode{
-		ctx:          ctx,
-		cancel:       cancel,
-		factory:      factory,
-		lifetime:     lifetime.NewLifetime(commonpb.StateCode_Abnormal),
-		lastModifyTs: *atomic.NewInt64(0),
+		ctx:      ctx,
+		cancel:   cancel,
+		factory:  factory,
+		lifetime: lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
 
 	node.tSafeManager = tsafe.NewTSafeReplica()
