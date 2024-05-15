@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -112,7 +112,7 @@ func getDmlChannelsFunc(ctx context.Context, rc types.RootCoordClient) getChanne
 
 type singleTypeChannelsMgr struct {
 	infos map[UniqueID]streamInfos // collection id -> stream infos
-	mu    sync.RWMutex
+	mu    lock.RWMutex
 
 	getChannelsFunc  getChannelsFuncType
 	repackFunc       repackFuncType

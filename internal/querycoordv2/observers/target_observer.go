@@ -65,7 +65,7 @@ type TargetObserver struct {
 	// nextTargetLastUpdate map[int64]time.Time
 	nextTargetLastUpdate *typeutil.ConcurrentMap[int64, time.Time]
 	updateChan           chan targetUpdateRequest
-	mut                  sync.Mutex                // Guard readyNotifiers
+	mut                  lock.Mutex                // Guard readyNotifiers
 	readyNotifiers       map[int64][]chan struct{} // CollectionID -> Notifiers
 
 	dispatcher *taskDispatcher[int64]

@@ -57,6 +57,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/contextutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -573,7 +574,7 @@ type loadResult struct {
 func newLoadResult() *loadResult {
 	return &loadResult{
 		status: atomic.NewInt32(loading),
-		cond:   sync.NewCond(&sync.Mutex{}),
+		cond:   sync.NewCond(&lock.Mutex{}),
 	}
 }
 
@@ -587,7 +588,7 @@ type segmentLoader struct {
 	manager *Manager
 	cm      storage.ChunkManager
 
-	mut sync.Mutex
+	mut lock.Mutex
 	// The channel will be closed as the segment loaded
 	loadingSegments           *typeutil.ConcurrentMap[int64, *loadResult]
 	committedResource         LoadResource

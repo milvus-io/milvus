@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -50,8 +51,8 @@ type TaskQueue interface {
 type IndexTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[string]task
-	utLock        sync.Mutex
-	atLock        sync.Mutex
+	utLock        lock.Mutex
+	atLock        lock.Mutex
 
 	// maxTaskNum should keep still
 	maxTaskNum int64

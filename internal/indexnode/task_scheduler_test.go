@@ -10,6 +10,7 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -25,7 +26,7 @@ const (
 )
 
 type stagectx struct {
-	mu           sync.Mutex
+	mu           lock.Mutex
 	curstate     fakeTaskState
 	state2cancel fakeTaskState
 	ch           chan struct{}
@@ -132,7 +133,7 @@ func (t *fakeTask) GetState() commonpb.IndexState {
 }
 
 var (
-	idLock sync.Mutex
+	idLock lock.Mutex
 	id     = 0
 )
 

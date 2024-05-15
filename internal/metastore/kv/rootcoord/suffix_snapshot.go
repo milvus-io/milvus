@@ -24,7 +24,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -62,7 +62,7 @@ type SuffixSnapshot struct {
 	// internal kv which SuffixSnapshot based on
 	kv.MetaKv
 	// rw mutex provided range lock
-	sync.RWMutex
+	lock.RWMutex
 	// lastestTS latest timestamp for each key
 	// note that this map is lazy loaded
 	// which means if a key is never used in current session, no ts related to the key is stored

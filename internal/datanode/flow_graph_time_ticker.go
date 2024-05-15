@@ -25,6 +25,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type sendTimeTick func(Timestamp, []int64) error
@@ -36,7 +37,7 @@ type mergedTimeTickerSender struct {
 	ts         uint64
 	segmentIDs map[int64]struct{}
 	lastSent   time.Time
-	mu         sync.Mutex
+	mu         lock.Mutex
 
 	cond *sync.Cond   // condition to send timeticker
 	send sendTimeTick // actual sender logic
@@ -55,7 +56,7 @@ func newUniqueMergedTimeTickerSender(send sendTimeTick) *mergedTimeTickerSender 
 	return &mergedTimeTickerSender{
 		ts:         0, // 0 for not tt send
 		segmentIDs: make(map[int64]struct{}),
-		cond:       sync.NewCond(&sync.Mutex{}),
+		cond:       sync.NewCond(&lock.Mutex{}),
 		send:       send,
 		closeCh:    make(chan struct{}),
 	}

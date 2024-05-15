@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -42,7 +43,7 @@ type ChannelManager interface {
 }
 
 type ChannelManagerImpl struct {
-	mu sync.RWMutex
+	mu lock.RWMutex
 	dn *DataNode
 
 	fgManager FlowgraphManager
@@ -229,7 +230,7 @@ type opRunner struct {
 	dn          *DataNode
 	releaseFunc releaseFunc
 
-	guard      sync.RWMutex
+	guard      lock.RWMutex
 	allOps     map[UniqueID]*opInfo // opID -> tickler
 	opsInQueue chan *datapb.ChannelWatchInfo
 	resultCh   chan *opState

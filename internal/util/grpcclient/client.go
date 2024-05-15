@@ -20,7 +20,6 @@ import (
 	"context"
 	"crypto/tls"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -45,6 +44,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/generic"
 	"github.com/milvus-io/milvus/pkg/util/interceptor"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -59,7 +59,7 @@ type GrpcComponent interface {
 type clientConnWrapper[T GrpcComponent] struct {
 	client T
 	conn   *grpc.ClientConn
-	mut    sync.RWMutex
+	mut    lock.RWMutex
 }
 
 func (c *clientConnWrapper[T]) Pin() {
@@ -106,7 +106,7 @@ type ClientBase[T interface {
 	encryption bool
 	addr       atomic.String
 	// conn                   *grpc.ClientConn
-	grpcClientMtx sync.RWMutex
+	grpcClientMtx lock.RWMutex
 	role          string
 	isNode        bool // pre-calculated is node flag
 

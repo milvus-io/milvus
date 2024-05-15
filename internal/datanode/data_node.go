@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
 	"github.com/milvus-io/milvus/pkg/util/expr"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -113,7 +114,7 @@ type DataNode struct {
 	startOnce    sync.Once
 	stopOnce     sync.Once
 	stopWaiter   sync.WaitGroup
-	sessionMu    sync.Mutex // to fix data race
+	sessionMu    lock.Mutex // to fix data race
 	session      *sessionutil.Session
 	watchKv      kv.WatchKV
 	chunkManager storage.ChunkManager

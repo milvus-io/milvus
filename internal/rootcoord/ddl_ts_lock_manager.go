@@ -17,11 +17,10 @@
 package rootcoord
 
 import (
-	"sync"
-
 	"go.uber.org/atomic"
 
 	"github.com/milvus-io/milvus/internal/tso"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type DdlTsLockManager interface {
@@ -36,7 +35,7 @@ type ddlTsLockManager struct {
 	lastTs        atomic.Uint64
 	inProgressCnt atomic.Int32
 	tsoAllocator  tso.Allocator
-	mu            sync.Mutex
+	mu            lock.Mutex
 }
 
 func (c *ddlTsLockManager) GetMinDdlTs() Timestamp {
@@ -75,6 +74,6 @@ func newDdlTsLockManager(tsoAllocator tso.Allocator) *ddlTsLockManager {
 		lastTs:        *atomic.NewUint64(0),
 		inProgressCnt: *atomic.NewInt32(0),
 		tsoAllocator:  tsoAllocator,
-		mu:            sync.Mutex{},
+		mu:            lock.Mutex{},
 	}
 }

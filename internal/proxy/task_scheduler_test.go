@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 func TestBaseTaskQueue(t *testing.T) {
@@ -314,7 +315,7 @@ func TestDmTaskQueue_TimestampStatistics2(t *testing.T) {
 	processWg.Add(1)
 	processCtx, processCancel := context.WithCancel(context.TODO())
 	processCount := insertNum
-	var processCountMut sync.RWMutex
+	var processCountMut lock.RWMutex
 	go func() {
 		defer processWg.Done()
 		var workerWg sync.WaitGroup

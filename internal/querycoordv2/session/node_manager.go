@@ -18,7 +18,6 @@ package session
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/blang/semver/v4"
@@ -27,6 +26,7 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -42,7 +42,7 @@ type Manager interface {
 }
 
 type NodeManager struct {
-	mu    sync.RWMutex
+	mu    lock.RWMutex
 	nodes map[int64]*NodeInfo
 }
 
@@ -170,7 +170,7 @@ func (s State) String() string {
 
 type NodeInfo struct {
 	stats
-	mu            sync.RWMutex
+	mu            lock.RWMutex
 	immutableInfo ImmutableNodeInfo
 	state         State
 	lastHeartbeat *atomic.Int64

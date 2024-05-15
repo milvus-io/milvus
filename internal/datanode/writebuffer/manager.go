@@ -14,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -57,7 +58,7 @@ func NewManager(syncMgr syncmgr.SyncManager) BufferManager {
 type bufferManager struct {
 	syncMgr syncmgr.SyncManager
 	buffers map[string]WriteBuffer
-	mut     sync.RWMutex
+	mut     lock.RWMutex
 
 	wg sync.WaitGroup
 	ch lifetime.SafeChan

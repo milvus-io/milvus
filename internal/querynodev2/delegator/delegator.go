@@ -51,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -110,10 +111,10 @@ type shardDelegator struct {
 	segmentManager  segments.SegmentManager
 	tsafeManager    tsafe.Manager
 	pkOracle        pkoracle.PkOracle
-	level0Mut       sync.RWMutex
+	level0Mut       lock.RWMutex
 	level0Deletions map[int64]*storage.DeleteData // partitionID -> deletions
 	// stream delete buffer
-	deleteMut    sync.RWMutex
+	deleteMut    lock.RWMutex
 	deleteBuffer deletebuffer.DeleteBuffer[*deletebuffer.Item]
 	// dispatcherClient msgdispatcher.Client
 	factory msgstream.Factory
@@ -130,8 +131,8 @@ type shardDelegator struct {
 	excludedSegments *ExcludedSegments
 	// cause growing segment meta has been stored in segmentManager/distribution/pkOracle/excludeSegments
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
-	growingSegmentLock sync.RWMutex
-	partitionStatsMut  sync.RWMutex
+	growingSegmentLock lock.RWMutex
+	partitionStatsMut  lock.RWMutex
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
@@ -888,7 +889,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
 	}
-	m := sync.Mutex{}
+	m := lock.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	if sd.lifetime.Add(lifetime.NotStopped) == nil {
 		go sd.watchTSafe()

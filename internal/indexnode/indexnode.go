@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -106,7 +107,7 @@ type IndexNode struct {
 	address string
 
 	initOnce  sync.Once
-	stateLock sync.Mutex
+	stateLock lock.Mutex
 	tasks     map[taskKey]*taskInfo
 }
 

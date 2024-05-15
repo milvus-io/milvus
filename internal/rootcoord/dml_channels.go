@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -31,13 +30,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type dmlMsgStream struct {
 	ms    msgstream.MsgStream
-	mutex sync.RWMutex
+	mutex lock.RWMutex
 
 	refcnt int64 // current in use count
 	used   int64 // total used counter in current run, not stored in meta so meant to be inaccurate
@@ -142,7 +142,7 @@ type dmlChannels struct {
 	// pool maintains channelName => dmlMsgStream mapping, stable
 	pool *typeutil.ConcurrentMap[string, *dmlMsgStream]
 	// mut protects channelsHeap only
-	mut sync.Mutex
+	mut lock.Mutex
 	// channelsHeap is the heap to pop next dms for use
 	channelsHeap channelsHeap
 }

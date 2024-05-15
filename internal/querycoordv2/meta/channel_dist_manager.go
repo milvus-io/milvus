@@ -17,12 +17,11 @@
 package meta
 
 import (
-	"sync"
-
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -163,7 +162,7 @@ func composeNodeChannels(channels ...*DmChannel) nodeChannels {
 }
 
 type ChannelDistManager struct {
-	rwmutex sync.RWMutex
+	rwmutex lock.RWMutex
 
 	// NodeID -> Channels
 	channels map[typeutil.UniqueID]nodeChannels

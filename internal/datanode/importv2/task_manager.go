@@ -16,9 +16,7 @@
 
 package importv2
 
-import (
-	"sync"
-)
+import "github.com/milvus-io/milvus/pkg/util/lock"
 
 type TaskManager interface {
 	Add(task Task)
@@ -29,7 +27,7 @@ type TaskManager interface {
 }
 
 type taskManager struct {
-	mu    sync.RWMutex // guards tasks
+	mu    lock.RWMutex // guards tasks
 	tasks map[int64]Task
 }
 

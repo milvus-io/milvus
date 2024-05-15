@@ -18,7 +18,6 @@ package pkoracle
 
 import (
 	"context"
-	"sync"
 
 	bloom "github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -35,7 +35,7 @@ var _ Candidate = (*BloomFilterSet)(nil)
 
 // BloomFilterSet is one implementation of Candidate with bloom filter in statslog.
 type BloomFilterSet struct {
-	statsMutex   sync.RWMutex
+	statsMutex   lock.RWMutex
 	segmentID    int64
 	paritionID   int64
 	segType      commonpb.SegmentState

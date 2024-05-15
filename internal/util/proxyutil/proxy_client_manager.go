@@ -19,7 +19,6 @@ package proxyutil
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -34,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -295,7 +295,7 @@ func (p *ProxyClientManager) GetProxyMetrics(ctx context.Context) ([]*milvuspb.G
 	}
 
 	group := &errgroup.Group{}
-	var metricRspsMu sync.Mutex
+	var metricRspsMu lock.Mutex
 	metricRsps := make([]*milvuspb.GetMetricsResponse, 0)
 	p.proxyClient.Range(func(key int64, value types.ProxyClient) bool {
 		k, v := key, value

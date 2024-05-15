@@ -19,7 +19,6 @@ package querycoordv2
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -35,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -889,7 +889,7 @@ func (s *Server) checkNodeHealth(ctx context.Context) ([]string, error) {
 	group, ctx := errgroup.WithContext(ctx)
 	errReasons := make([]string, 0)
 
-	mu := &sync.Mutex{}
+	mu := &lock.Mutex{}
 	for _, node := range s.nodeMgr.GetAll() {
 		node := node
 		group.Go(func() error {

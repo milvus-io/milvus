@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -44,7 +45,7 @@ type timeTickSender struct {
 
 	options []retry.Option
 
-	mu         sync.RWMutex
+	mu         lock.RWMutex
 	statsCache map[string]*channelStats // channel -> channelStats
 }
 

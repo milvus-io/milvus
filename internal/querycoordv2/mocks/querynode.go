@@ -19,7 +19,6 @@ package mocks
 import (
 	"context"
 	"net"
-	"sync"
 	"testing"
 	"time"
 
@@ -33,6 +32,7 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -47,7 +47,7 @@ type MockQueryNode struct {
 	session *sessionutil.Session
 	server  *grpc.Server
 
-	rwmutex        sync.RWMutex
+	rwmutex        lock.RWMutex
 	channels       map[int64][]string
 	channelVersion map[string]int64
 	segments       map[int64]map[string][]int64

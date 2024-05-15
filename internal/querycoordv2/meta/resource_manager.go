@@ -18,7 +18,6 @@ package meta
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/syncutil"
@@ -49,7 +49,7 @@ type ResourceManager struct {
 	// All function can get latest online node without checking with node manager.
 	// so node manager is a redundant type here.
 
-	rwmutex           sync.RWMutex
+	rwmutex           lock.RWMutex
 	rgChangedNotifier *syncutil.VersionedNotifier // used to notify that resource group has been changed.
 	// resource_observer will listen this notifier to do a resource group recovery.
 	nodeChangedNotifier *syncutil.VersionedNotifier // used to notify that node distribution in resource group has been changed.
@@ -68,7 +68,7 @@ func NewResourceManager(catalog metastore.QueryCoordCatalog, nodeMgr *session.No
 		catalog:      catalog,
 		nodeMgr:      nodeMgr,
 
-		rwmutex:             sync.RWMutex{},
+		rwmutex:             lock.RWMutex{},
 		rgChangedNotifier:   syncutil.NewVersionedNotifier(),
 		nodeChangedNotifier: syncutil.NewVersionedNotifier(),
 	}

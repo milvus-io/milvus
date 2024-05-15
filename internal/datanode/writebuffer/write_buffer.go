@@ -3,7 +3,6 @@ package writebuffer
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
@@ -24,6 +23,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -76,7 +76,7 @@ func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cach
 
 // writeBufferBase is the common component for buffering data
 type writeBufferBase struct {
-	mut sync.RWMutex
+	mut lock.RWMutex
 
 	collectionID int64
 	channelName  string

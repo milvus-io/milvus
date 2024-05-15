@@ -27,7 +27,6 @@ import "C"
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"go.uber.org/zap"
 	"golang.org/x/sync/singleflight"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/cache"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -285,7 +285,7 @@ var _ SegmentManager = (*segmentManager)(nil)
 
 // Manager manages all collections and segments
 type segmentManager struct {
-	mu sync.RWMutex // guards all
+	mu lock.RWMutex // guards all
 
 	growingSegments map[typeutil.UniqueID]Segment
 	sealedSegments  map[typeutil.UniqueID]Segment

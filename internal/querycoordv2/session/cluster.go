@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -273,7 +274,7 @@ func (c *QueryCluster) send(ctx context.Context, nodeID int64, fn func(cli types
 }
 
 type clients struct {
-	sync.RWMutex
+	lock.RWMutex
 	clients          map[int64]types.QueryNodeClient // nodeID -> client
 	queryNodeCreator QueryNodeCreator
 }

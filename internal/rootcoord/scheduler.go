@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/tso"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type IScheduler interface {
@@ -46,7 +47,7 @@ type scheduler struct {
 
 	taskChan chan task
 
-	lock sync.Mutex
+	lock lock.Mutex
 
 	minDdlTs atomic.Uint64
 }

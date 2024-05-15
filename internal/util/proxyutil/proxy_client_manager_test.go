@@ -19,7 +19,6 @@ package proxyutil
 import (
 	"context"
 	"fmt"
-	"sync"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -32,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -47,7 +47,7 @@ type proxyMock struct {
 	types.ProxyClient
 	collArray []string
 	collIDs   []UniqueID
-	mutex     sync.Mutex
+	mutex     lock.Mutex
 
 	returnError     bool
 	returnGrpcError bool

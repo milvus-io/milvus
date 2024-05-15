@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 )
 
@@ -398,7 +399,7 @@ func GetLiteChannelWatchInfo(watchInfo *datapb.ChannelWatchInfo) *datapb.Channel
 }
 
 type EventManager struct {
-	channelGuard    sync.Mutex
+	channelGuard    lock.Mutex
 	channelManagers map[string]*channelEventManager
 }
 

@@ -30,6 +30,7 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -117,7 +118,7 @@ type rocksmq struct {
 	cfh         []*gorocksdb.ColumnFamilyHandle
 	kv          kv.BaseKV
 	idAllocator allocator.Interface
-	storeMu     *sync.Mutex
+	storeMu     *lock.Mutex
 	topicLastID sync.Map
 	consumers   sync.Map
 	consumersID sync.Map
@@ -248,7 +249,7 @@ func NewRocksMQ(name string, idAllocator allocator.Interface) (*rocksmq, error) 
 		cfh:         cfHandles,
 		kv:          kv,
 		idAllocator: mqIDAllocator,
-		storeMu:     &sync.Mutex{},
+		storeMu:     &lock.Mutex{},
 		consumers:   sync.Map{},
 		readers:     sync.Map{},
 		topicLastID: sync.Map{},
@@ -400,7 +401,7 @@ func (rmq *rocksmq) CreateTopic(topicName string) error {
 	}
 
 	if _, ok := topicMu.Load(topicName); !ok {
-		topicMu.Store(topicName, new(sync.Mutex))
+		topicMu.Store(topicName, new(lock.Mutex))
 	}
 
 	// msgSizeKey -> msgSize
@@ -432,7 +433,7 @@ func (rmq *rocksmq) DestroyTopic(topicName string) error {
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -574,7 +575,7 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -609,7 +610,7 @@ func (rmq *rocksmq) Produce(topicName string, messages []ProducerMessage) ([]Uni
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -746,7 +747,7 @@ func (rmq *rocksmq) Consume(topicName string, groupName string, n int) ([]Consum
 		return nil, fmt.Errorf("topic name = %s not exist", topicName)
 	}
 
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return nil, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -905,7 +906,7 @@ func (rmq *rocksmq) Seek(topicName string, groupName string, msgID UniqueID) err
 	if !ok {
 		return merr.WrapErrMqTopicNotFound(topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -931,7 +932,7 @@ func (rmq *rocksmq) ForceSeek(topicName string, groupName string, msgID UniqueID
 	if !ok {
 		return merr.WrapErrMqTopicNotFound(topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}

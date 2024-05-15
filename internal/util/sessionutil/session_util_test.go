@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -55,7 +56,7 @@ func TestGetServerIDConcurrently(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	muList := sync.Mutex{}
+	muList := lock.Mutex{}
 
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli)
 	res := make([]int64, 0)
@@ -151,7 +152,7 @@ func TestUpdateSessions(t *testing.T) {
 	defer etcdKV.RemoveWithPrefix("")
 
 	var wg sync.WaitGroup
-	muList := sync.Mutex{}
+	muList := lock.Mutex{}
 
 	s := NewSessionWithEtcd(ctx, metaRoot, etcdCli, WithResueNodeID(false))
 

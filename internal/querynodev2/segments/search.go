@@ -19,7 +19,6 @@ package segments
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
@@ -125,7 +125,7 @@ func searchSegmentsStreamly(ctx context.Context,
 ) error {
 	searchLabel := metrics.SealedSegmentLabel
 	searchResultsToClear := make([]*SearchResult, 0)
-	var reduceMutex sync.Mutex
+	var reduceMutex lock.Mutex
 	var sumReduceDuration atomic.Duration
 	searcher := func(ctx context.Context, seg Segment) error {
 		// record search time

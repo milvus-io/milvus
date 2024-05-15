@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -150,7 +151,7 @@ type bgStepExecutor struct {
 	wg            sync.WaitGroup
 	bufferedSteps map[*stepStack]struct{}
 	selector      selectStepPolicy
-	mu            sync.Mutex
+	mu            lock.Mutex
 	notifyChan    chan struct{}
 	interval      time.Duration
 }
@@ -163,7 +164,7 @@ func newBgStepExecutor(ctx context.Context, opts ...bgOpt) *bgStepExecutor {
 		wg:            sync.WaitGroup{},
 		bufferedSteps: make(map[*stepStack]struct{}),
 		selector:      defaultSelectPolicy(),
-		mu:            sync.Mutex{},
+		mu:            lock.Mutex{},
 		notifyChan:    make(chan struct{}, 1),
 		interval:      defaultBgExecutingInterval,
 	}

@@ -17,12 +17,11 @@
 package metacache
 
 import (
-	"sync"
-
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -30,7 +29,7 @@ import (
 // it maintains bloom filter generated from segment primary keys.
 // it may be updated with new insert FieldData when serving growing segments.
 type BloomFilterSet struct {
-	mut       sync.RWMutex
+	mut       lock.RWMutex
 	batchSize uint
 	current   *storage.PkStatistics
 	history   []*storage.PkStatistics

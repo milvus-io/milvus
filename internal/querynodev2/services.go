@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
@@ -48,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -118,7 +118,7 @@ func (node *QueryNode) GetStatistics(ctx context.Context, req *querypb.GetStatis
 	}
 
 	var toReduceResults []*internalpb.GetStatisticsResponse
-	var mu sync.Mutex
+	var mu lock.Mutex
 	runningGp, runningCtx := errgroup.WithContext(ctx)
 	for _, ch := range req.GetDmlChannels() {
 		ch := ch

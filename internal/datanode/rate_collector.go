@@ -19,6 +19,7 @@ package datanode
 import (
 	"sync"
 
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -33,7 +34,7 @@ var (
 type rateCollector struct {
 	*ratelimitutil.RateCollector
 
-	flowGraphTtMu sync.Mutex
+	flowGraphTtMu lock.Mutex
 	flowGraphTt   map[string]Timestamp
 }
 

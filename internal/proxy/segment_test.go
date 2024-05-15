@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -120,7 +121,7 @@ func TestSegmentAllocator1(t *testing.T) {
 
 var curLastTick2 = Timestamp(200)
 
-var curLastTIck2Lock sync.Mutex
+var curLastTIck2Lock lock.Mutex
 
 func getLastTick2() Timestamp {
 	curLastTIck2Lock.Lock()
@@ -277,7 +278,7 @@ func TestSegmentAllocator6(t *testing.T) {
 		segAllocator.Close()
 	}(wg)
 	success := true
-	var sucLock sync.Mutex
+	var sucLock lock.Mutex
 	collNames := []string{"abc", "cba"}
 	reqFunc := func(i int, group *sync.WaitGroup) {
 		defer group.Done()

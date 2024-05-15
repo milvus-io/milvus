@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -80,7 +81,7 @@ type timetickSync struct {
 
 	dmlChannels *dmlChannels // used for insert
 
-	lock           sync.Mutex
+	lock           lock.Mutex
 	sess2ChanTsMap map[typeutil.UniqueID]*chanTsMsg
 	sendChan       chan map[typeutil.UniqueID]*chanTsMsg
 
@@ -132,7 +133,7 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 
 		dmlChannels: dmlChannels,
 
-		lock:           sync.Mutex{},
+		lock:           lock.Mutex{},
 		sess2ChanTsMap: make(map[typeutil.UniqueID]*chanTsMsg),
 
 		// 1 is the most reasonable capacity. In fact, Milvus can only focus on the latest time tick.

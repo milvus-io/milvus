@@ -2,7 +2,6 @@ package datanode
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/samber/lo"
 
@@ -12,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -25,7 +25,7 @@ type mqStatsUpdater struct {
 	producer msgstream.MsgStream
 	config   *nodeConfig
 
-	mut   sync.Mutex
+	mut   lock.Mutex
 	stats map[int64]int64 // segment id => row nums
 }
 

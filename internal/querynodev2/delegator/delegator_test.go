@@ -46,6 +46,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1138,7 +1139,7 @@ func TestDelegatorWatchTsafe(t *testing.T) {
 	}
 	defer sd.Close()
 
-	m := sync.Mutex{}
+	m := lock.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	if sd.lifetime.Add(lifetime.NotStopped) == nil {
 		go sd.watchTSafe()
@@ -1165,7 +1166,7 @@ func TestDelegatorTSafeListenerClosed(t *testing.T) {
 	}
 	defer sd.Close()
 
-	m := sync.Mutex{}
+	m := lock.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
 	signal := make(chan struct{})
 	if sd.lifetime.Add(lifetime.NotStopped) == nil {

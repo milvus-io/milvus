@@ -32,6 +32,7 @@ import (
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -89,7 +90,7 @@ func (rmq *rocksmq) produceBefore2(topicName string, messages []producerMessageB
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("topic name = %s not exist", topicName)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return []UniqueID{}, fmt.Errorf("get mutex failed, topic name = %s", topicName)
 	}
@@ -361,7 +362,7 @@ func TestRocksmq_Dummy(t *testing.T) {
 	assert.NoError(t, err)
 
 	channelName1 := "channel_dummy"
-	topicMu.Store(channelName1, new(sync.Mutex))
+	topicMu.Store(channelName1, new(lock.Mutex))
 	err = rmq.DestroyTopic(channelName1)
 	assert.NoError(t, err)
 
@@ -1003,7 +1004,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	err = rmq.CreateTopic(channelName2)
 	defer rmq.DestroyTopic(channelName2)
 	assert.NoError(t, err)
-	topicMu.Store(channelName2, new(sync.Mutex))
+	topicMu.Store(channelName2, new(lock.Mutex))
 
 	pMsgs := make([]ProducerMessage, 10)
 	for i := 0; i < 10; i++ {
@@ -1023,7 +1024,7 @@ func TestRocksmq_CheckPreTopicValid(t *testing.T) {
 	defer rmq.DestroyTopic(channelName3)
 	assert.NoError(t, err)
 
-	topicMu.Store(channelName3, new(sync.Mutex))
+	topicMu.Store(channelName3, new(lock.Mutex))
 	err = rmq.CheckTopicValid(channelName3)
 	assert.NoError(t, err)
 }

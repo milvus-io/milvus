@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lifetime"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -48,7 +49,7 @@ type ProxyWatcherInterface interface {
 // ProxyWatcher manages proxy clients
 type ProxyWatcher struct {
 	wg               errgroup.Group
-	lock             sync.Mutex
+	lock             lock.Mutex
 	etcdCli          *clientv3.Client
 	initSessionsFunc []func([]*sessionutil.Session)
 	addSessionsFunc  []func(*sessionutil.Session)
@@ -62,7 +63,7 @@ type ProxyWatcher struct {
 // fns are the custom getSessions function list
 func NewProxyWatcher(client *clientv3.Client, fns ...func([]*sessionutil.Session)) *ProxyWatcher {
 	p := &ProxyWatcher{
-		lock:    sync.Mutex{},
+		lock:    lock.Mutex{},
 		etcdCli: client,
 		closeCh: lifetime.NewSafeChan(),
 	}

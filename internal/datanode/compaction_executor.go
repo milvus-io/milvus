@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -42,7 +42,7 @@ type compactionExecutor struct {
 
 	// To prevent concurrency of release channel and compaction get results
 	// all released channel's compaction tasks will be discarded
-	resultGuard sync.RWMutex
+	resultGuard lock.RWMutex
 }
 
 func newCompactionExecutor() *compactionExecutor {

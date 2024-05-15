@@ -16,12 +16,10 @@
 
 package collector
 
-import (
-	"sync"
-)
+import "github.com/milvus-io/milvus/pkg/util/lock"
 
 type counter struct {
-	sync.Mutex
+	lock.Mutex
 	values map[string]int64
 }
 

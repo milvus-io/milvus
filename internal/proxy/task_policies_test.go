@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"sort"
 	"strings"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 func TestRoundRobinPolicy(t *testing.T) {
@@ -52,7 +52,7 @@ func TestRoundRobinPolicy(t *testing.T) {
 }
 
 type mockQuery struct {
-	mu       sync.Mutex
+	mu       lock.Mutex
 	queryset map[UniqueID][]string
 	failset  map[UniqueID]error
 }

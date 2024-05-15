@@ -18,7 +18,6 @@ package segments
 
 import (
 	"context"
-	"sync"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -37,7 +37,7 @@ var _ Segment = (*L0Segment)(nil)
 type L0Segment struct {
 	baseSegment
 
-	dataGuard sync.RWMutex
+	dataGuard lock.RWMutex
 	pks       []storage.PrimaryKey
 	tss       []uint64
 }

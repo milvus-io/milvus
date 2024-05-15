@@ -19,7 +19,6 @@ package datanode
 import (
 	"context"
 	"math/rand"
-	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/mock"
@@ -42,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -172,7 +172,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		s.Assert().NoError(err)
 		s.Assert().Equal(3, len(stat.GetResults()))
 
-		var mu sync.RWMutex
+		var mu lock.RWMutex
 		cnt := 0
 		for _, v := range stat.GetResults() {
 			if v.GetState() == commonpb.CompactionState_Completed {

@@ -17,8 +17,6 @@
 package segments
 
 import (
-	"sync"
-
 	bloom "github.com/bits-and-blooms/bloom/v3"
 	"go.uber.org/zap"
 
@@ -26,11 +24,12 @@ import (
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type bloomFilterSet struct {
-	statsMutex   sync.RWMutex
+	statsMutex   lock.RWMutex
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
 }

@@ -19,7 +19,6 @@ package mock
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/generic"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
@@ -38,7 +38,7 @@ type GRPCClientBase[T any] struct {
 
 	grpcClient       T
 	conn             *grpc.ClientConn
-	grpcClientMtx    sync.RWMutex
+	grpcClientMtx    lock.RWMutex
 	GetGrpcClientErr error
 	role             string
 	nodeID           int64

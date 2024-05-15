@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -51,7 +52,7 @@ var _ channelsTimeTicker = (*channelsTimeTickerImpl)(nil)
 type channelsTimeTickerImpl struct {
 	interval          time.Duration       // interval to synchronize
 	minTsStatistics   map[pChan]Timestamp // pchan -> min Timestamp
-	statisticsMtx     sync.RWMutex
+	statisticsMtx     lock.RWMutex
 	getStatisticsFunc getPChanStatisticsFuncType
 	tso               tsoAllocator
 	currents          map[pChan]Timestamp

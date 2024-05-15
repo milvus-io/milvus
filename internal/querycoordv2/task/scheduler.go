@@ -19,7 +19,6 @@ package task
 import (
 	"context"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -36,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -148,7 +148,7 @@ type Scheduler interface {
 }
 
 type taskScheduler struct {
-	rwmutex     sync.RWMutex
+	rwmutex     lock.RWMutex
 	ctx         context.Context
 	executors   map[int64]*Executor // NodeID -> Executor
 	idAllocator func() UniqueID

@@ -19,10 +19,10 @@ package pkoracle
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -44,7 +44,7 @@ var _ PkOracle = (*pkOracle)(nil)
 type pkOracle struct {
 	candidates *typeutil.ConcurrentMap[string, candidateWithWorker]
 
-	hashFuncNumMutex sync.RWMutex
+	hashFuncNumMutex lock.RWMutex
 	maxHashFuncNum   uint
 }
 

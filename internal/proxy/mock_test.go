@@ -18,7 +18,6 @@ package proxy
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"google.golang.org/grpc"
@@ -30,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -38,7 +38,7 @@ import (
 
 type mockTimestampAllocatorInterface struct {
 	lastTs Timestamp
-	mtx    sync.Mutex
+	mtx    lock.Mutex
 }
 
 func (tso *mockTimestampAllocatorInterface) AllocTimestamp(ctx context.Context, req *rootcoordpb.AllocTimestampRequest, opts ...grpc.CallOption) (*rootcoordpb.AllocTimestampResponse, error) {
@@ -65,7 +65,7 @@ func newMockTimestampAllocatorInterface() timestampAllocatorInterface {
 }
 
 type mockTsoAllocator struct {
-	mu        sync.Mutex
+	mu        lock.Mutex
 	logicPart uint32
 }
 
@@ -237,7 +237,7 @@ type simpleMockMsgStream struct {
 	msgChan chan *msgstream.MsgPack
 
 	msgCount    int
-	msgCountMtx sync.RWMutex
+	msgCountMtx lock.RWMutex
 }
 
 func (ms *simpleMockMsgStream) Close() {

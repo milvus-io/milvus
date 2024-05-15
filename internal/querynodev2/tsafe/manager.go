@@ -19,11 +19,11 @@ package tsafe
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	. "github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -42,7 +42,7 @@ type Manager interface {
 
 // tSafeManager implements `Manager` interface.
 type tSafeManager struct {
-	mu        sync.Mutex             // guards tSafes
+	mu        lock.Mutex             // guards tSafes
 	tSafes    map[string]*tSafe      // map[DMLChannel]*tSafe
 	listeners map[string][]*listener // map[DMLChannel][]*listener, key "" means all channels.
 }

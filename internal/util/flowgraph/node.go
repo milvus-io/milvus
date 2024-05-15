@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -158,7 +159,7 @@ type nodeCtx struct {
 	inputChannel chan []Msg
 	downstream   *nodeCtx
 
-	blockMutex sync.RWMutex
+	blockMutex lock.RWMutex
 }
 
 func (nodeCtx *nodeCtx) Block() {

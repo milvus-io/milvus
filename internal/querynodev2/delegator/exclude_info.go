@@ -17,17 +17,17 @@
 package delegator
 
 import (
-	"sync"
 	"time"
 
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type ExcludedSegments struct {
-	mu            sync.RWMutex
+	mu            lock.RWMutex
 	segments      map[int64]uint64 // segmentID -> Excluded TS
 	lastClean     atomic.Time
 	cleanInterval time.Duration

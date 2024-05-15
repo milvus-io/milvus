@@ -17,12 +17,12 @@
 package meta
 
 import (
-	"sync"
 	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -37,7 +37,7 @@ type failInfo struct {
 }
 
 type FailedLoadCache struct {
-	mu sync.RWMutex
+	mu lock.RWMutex
 	// CollectionID, ErrorCode -> error
 	records map[int64]map[int32]*failInfo
 }

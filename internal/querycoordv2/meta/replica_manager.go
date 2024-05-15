@@ -18,7 +18,6 @@ package meta
 
 import (
 	"fmt"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -27,13 +26,14 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type ReplicaManager struct {
-	rwmutex sync.RWMutex
+	rwmutex lock.RWMutex
 
 	idAllocator        func() (int64, error)
 	replicas           map[typeutil.UniqueID]*Replica

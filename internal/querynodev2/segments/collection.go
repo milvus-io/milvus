@@ -25,7 +25,6 @@ package segments
 import "C"
 
 import (
-	"sync"
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
@@ -41,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -57,7 +57,7 @@ type CollectionManager interface {
 }
 
 type collectionManager struct {
-	mut         sync.RWMutex
+	mut         lock.RWMutex
 	collections map[int64]*Collection
 }
 
@@ -132,7 +132,7 @@ func (m *collectionManager) Unref(collectionID int64, count uint32) bool {
 // Collection is a wrapper of the underlying C-structure C.CCollection
 // In a query node, `Collection` is a replica info of a collection in these query node.
 type Collection struct {
-	mu            sync.RWMutex // protects colllectionPtr
+	mu            lock.RWMutex // protects colllectionPtr
 	collectionPtr C.CCollection
 	id            int64
 	partitions    *typeutil.ConcurrentSet[int64]

@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
@@ -139,7 +140,7 @@ type QuotaCenter struct {
 	queryNodeMetrics map[UniqueID]*metricsinfo.QueryNodeQuotaMetrics
 	dataNodeMetrics  map[UniqueID]*metricsinfo.DataNodeQuotaMetrics
 	proxyMetrics     map[UniqueID]*metricsinfo.ProxyQuotaMetrics
-	diskMu           sync.Mutex // guards dataCoordMetrics and totalBinlogSize
+	diskMu           lock.Mutex // guards dataCoordMetrics and totalBinlogSize
 	dataCoordMetrics *metricsinfo.DataCoordQuotaMetrics
 	totalBinlogSize  int64
 

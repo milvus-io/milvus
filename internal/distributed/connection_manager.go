@@ -19,7 +19,6 @@ package distributed
 import (
 	"context"
 	"os"
-	"sync"
 	"syscall"
 	"time"
 
@@ -39,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -50,23 +50,23 @@ type ConnectionManager struct {
 	dependencies map[string]struct{}
 
 	rootCoord    rootcoordpb.RootCoordClient
-	rootCoordMu  sync.RWMutex
+	rootCoordMu  lock.RWMutex
 	queryCoord   querypb.QueryCoordClient
-	queryCoordMu sync.RWMutex
+	queryCoordMu lock.RWMutex
 	dataCoord    datapb.DataCoordClient
-	dataCoordMu  sync.RWMutex
+	dataCoordMu  lock.RWMutex
 	queryNodes   map[int64]querypb.QueryNodeClient
-	queryNodesMu sync.RWMutex
+	queryNodesMu lock.RWMutex
 	dataNodes    map[int64]datapb.DataNodeClient
-	dataNodesMu  sync.RWMutex
+	dataNodesMu  lock.RWMutex
 	indexNodes   map[int64]indexpb.IndexNodeClient
-	indexNodesMu sync.RWMutex
+	indexNodesMu lock.RWMutex
 
-	taskMu     sync.RWMutex
+	taskMu     lock.RWMutex
 	buildTasks map[int64]*buildClientTask
 	notify     chan int64
 
-	connMu      sync.RWMutex
+	connMu      lock.RWMutex
 	connections map[int64]*grpc.ClientConn
 
 	closeCh chan struct{}

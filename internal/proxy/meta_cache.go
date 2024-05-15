@@ -22,7 +22,6 @@ import (
 	"math/rand"
 	"strconv"
 	"strings"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -43,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -258,9 +258,9 @@ type MetaCache struct {
 	credMap          map[string]*internalpb.CredentialInfo   // cache for credential, lazy load
 	privilegeInfos   map[string]struct{}                     // privileges cache
 	userToRoles      map[string]map[string]struct{}          // user to role cache
-	mu               sync.RWMutex
-	credMut          sync.RWMutex
-	leaderMut        sync.RWMutex
+	mu               lock.RWMutex
+	credMut          lock.RWMutex
+	leaderMut        lock.RWMutex
 	shardMgr         shardClientMgr
 	sfGlobal         conc.Singleflight[*collectionInfo]
 	sfDB             conc.Singleflight[*databaseInfo]
@@ -268,7 +268,7 @@ type MetaCache struct {
 	IDStart int64
 	IDCount int64
 	IDIndex int64
-	IDLock  sync.RWMutex
+	IDLock  lock.RWMutex
 }
 
 // globalMetaCache is singleton instance of Cache

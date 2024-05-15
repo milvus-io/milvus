@@ -17,8 +17,7 @@
 package collector
 
 import (
-	"sync"
-
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -40,7 +39,7 @@ func (v *averageData) Value() float64 {
 }
 
 type averageCollector struct {
-	sync.Mutex
+	lock.Mutex
 	averages map[string]*averageData
 }
 

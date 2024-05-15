@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -74,7 +75,7 @@ type distribution struct {
 	// generated for each change of distribution
 	current *atomic.Pointer[snapshot]
 	// protects current & segments
-	mut sync.RWMutex
+	mut lock.RWMutex
 }
 
 // SegmentEntry stores the segment meta information.

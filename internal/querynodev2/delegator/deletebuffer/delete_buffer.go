@@ -18,9 +18,10 @@ package deletebuffer
 
 import (
 	"sort"
-	"sync"
 
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 var errBufferFull = errors.New("buffer full")
@@ -48,7 +49,7 @@ func NewDoubleCacheDeleteBuffer[T timed](startTs uint64, maxSize int64) DeleteBu
 
 // doubleCacheBuffer implements DeleteBuffer with fixed sized double cache.
 type doubleCacheBuffer[T timed] struct {
-	mut        sync.RWMutex
+	mut        lock.RWMutex
 	head, tail *cacheBlock[T]
 	maxSize    int64
 	ts         uint64
@@ -103,7 +104,7 @@ func newCacheBlock[T timed](ts uint64, maxSize int64, elements ...T) *cacheBlock
 }
 
 type cacheBlock[T timed] struct {
-	mut     sync.RWMutex
+	mut     lock.RWMutex
 	headTs  uint64
 	size    int64
 	maxSize int64

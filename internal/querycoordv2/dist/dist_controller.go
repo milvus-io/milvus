@@ -26,6 +26,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type Controller interface {
@@ -36,7 +37,7 @@ type Controller interface {
 }
 
 type ControllerImpl struct {
-	mu          sync.RWMutex
+	mu          lock.RWMutex
 	handlers    map[int64]*distHandler
 	client      session.Cluster
 	nodeManager *session.NodeManager

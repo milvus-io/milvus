@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -37,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
@@ -85,11 +85,11 @@ type RootCoordMock struct {
 	collName2ID  map[string]typeutil.UniqueID
 	collID2Meta  map[typeutil.UniqueID]collectionMeta
 	collAlias2ID map[string]typeutil.UniqueID
-	collMtx      sync.RWMutex
+	collMtx      lock.RWMutex
 
 	// TODO(dragondriver): need default partition?
 	collID2Partitions map[typeutil.UniqueID]partitionMap
-	partitionMtx      sync.RWMutex
+	partitionMtx      lock.RWMutex
 
 	describeCollectionFunc describeCollectionFuncType
 	showPartitionsFunc     showPartitionsFuncType
@@ -103,7 +103,7 @@ type RootCoordMock struct {
 	// TODO(dragondriver): TimeTick-related
 
 	lastTs          typeutil.Timestamp
-	lastTsMtx       sync.Mutex
+	lastTsMtx       lock.Mutex
 	checkHealthFunc func(ctx context.Context, req *milvuspb.CheckHealthRequest, opts ...grpc.CallOption) (*milvuspb.CheckHealthResponse, error)
 }
 

@@ -17,8 +17,6 @@
 package metacache
 
 import (
-	"sync"
-
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -27,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -62,7 +61,7 @@ type metaCacheImpl struct {
 	vChannelName string
 	segmentInfos map[int64]*SegmentInfo
 	schema       *schemapb.CollectionSchema
-	mu           sync.RWMutex
+	mu           lock.RWMutex
 }
 
 func NewMetaCache(info *datapb.ChannelWatchInfo, factory PkStatsFactory) MetaCache {

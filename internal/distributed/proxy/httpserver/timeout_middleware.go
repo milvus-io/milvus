@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/gin-gonic/gin"
+
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 func defaultResponse(c *gin.Context) {
@@ -47,7 +49,7 @@ type Writer struct {
 	gin.ResponseWriter
 	body         *bytes.Buffer
 	headers      http.Header
-	mu           sync.Mutex
+	mu           lock.Mutex
 	timeout      bool
 	wroteHeaders bool
 	code         int

@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type QueryStreamServer interface {
@@ -22,7 +23,7 @@ type QueryStreamClient interface {
 
 type ConcurrentQueryStreamServer struct {
 	server QueryStreamServer
-	mu     sync.Mutex
+	mu     lock.Mutex
 }
 
 func (s *ConcurrentQueryStreamServer) Send(result *internalpb.RetrieveResults) error {
@@ -38,7 +39,7 @@ func (s *ConcurrentQueryStreamServer) Context() context.Context {
 func NewConcurrentQueryStreamServer(srv QueryStreamServer) *ConcurrentQueryStreamServer {
 	return &ConcurrentQueryStreamServer{
 		server: srv,
-		mu:     sync.Mutex{},
+		mu:     lock.Mutex{},
 	}
 }
 
@@ -52,7 +53,7 @@ type LocalQueryServer struct {
 
 	finishOnce sync.Once
 	errCh      chan error
-	mu         sync.Mutex
+	mu         lock.Mutex
 }
 
 func (s *LocalQueryServer) Send(result *internalpb.RetrieveResults) error {
@@ -123,7 +124,7 @@ func (s *LocalQueryClient) CreateServer() *LocalQueryServer {
 	s.server = &LocalQueryServer{
 		resultCh: s.resultCh,
 		ctx:      s.ctx,
-		mu:       sync.Mutex{},
+		mu:       lock.Mutex{},
 		errCh:    make(chan error, 1),
 	}
 	return s.server

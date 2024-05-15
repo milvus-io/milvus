@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -33,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -44,7 +44,7 @@ type Collection struct {
 	CreatedAt      time.Time
 	UpdatedAt      time.Time
 
-	mut             sync.RWMutex
+	mut             lock.RWMutex
 	refreshNotifier chan struct{}
 	LoadSpan        trace.Span
 }
@@ -99,7 +99,7 @@ func (partition *Partition) Clone() *Partition {
 }
 
 type CollectionManager struct {
-	rwmutex sync.RWMutex
+	rwmutex lock.RWMutex
 
 	collections map[typeutil.UniqueID]*Collection
 	partitions  map[typeutil.UniqueID]*Partition

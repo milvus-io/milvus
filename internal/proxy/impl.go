@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"os"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -52,6 +51,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -5291,7 +5291,7 @@ func (node *Proxy) CheckHealth(ctx context.Context, request *milvuspb.CheckHealt
 	group, ctx := errgroup.WithContext(ctx)
 	errReasons := make([]string, 0)
 
-	mu := &sync.Mutex{}
+	mu := &lock.Mutex{}
 	fn := func(role string, resp *milvuspb.CheckHealthResponse, err error) error {
 		mu.Lock()
 		defer mu.Unlock()

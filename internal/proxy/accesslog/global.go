@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proxy/accesslog/info"
 	configEvent "github.com/milvus-io/milvus/pkg/config"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -39,7 +40,7 @@ type AccessLogger struct {
 	enable     atomic.Bool
 	writer     io.Writer
 	formatters *FormatterManger
-	mu         sync.RWMutex
+	mu         lock.RWMutex
 }
 
 func NewAccessLogger() *AccessLogger {

@@ -17,9 +17,9 @@
 package deletebuffer
 
 import (
-	"sync"
-
 	"github.com/cockroachdb/errors"
+
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 func NewListDeleteBuffer[T timed](startTs uint64, sizePerBlock int64) DeleteBuffer[T] {
@@ -34,7 +34,7 @@ func NewListDeleteBuffer[T timed](startTs uint64, sizePerBlock int64) DeleteBuff
 // head points to the earliest block.
 // tail points to the latest block which shall be written into.
 type listDeleteBuffer[T timed] struct {
-	mut sync.RWMutex
+	mut lock.RWMutex
 
 	list []*cacheBlock[T]
 

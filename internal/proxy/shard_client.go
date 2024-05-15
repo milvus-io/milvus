@@ -3,7 +3,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -11,6 +10,7 @@ import (
 	"github.com/milvus-io/milvus/internal/registry"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type queryNodeCreatorFunc func(ctx context.Context, addr string, nodeID int64) (types.QueryNodeClient, error)
@@ -27,7 +27,7 @@ func (n nodeInfo) String() string {
 var errClosed = errors.New("client is closed")
 
 type shardClient struct {
-	sync.RWMutex
+	lock.RWMutex
 	info     nodeInfo
 	client   types.QueryNodeClient
 	isClosed bool
@@ -105,7 +105,7 @@ type shardClientMgr interface {
 
 type shardClientMgrImpl struct {
 	clients struct {
-		sync.RWMutex
+		lock.RWMutex
 		data map[UniqueID]*shardClient
 	}
 	clientCreator queryNodeCreatorFunc
@@ -126,7 +126,7 @@ func defaultQueryNodeClientCreator(ctx context.Context, addr string, nodeID int6
 func newShardClientMgr(options ...shardClientMgrOpt) *shardClientMgrImpl {
 	s := &shardClientMgrImpl{
 		clients: struct {
-			sync.RWMutex
+			lock.RWMutex
 			data map[UniqueID]*shardClient
 		}{data: make(map[UniqueID]*shardClient)},
 		clientCreator: defaultQueryNodeClientCreator,

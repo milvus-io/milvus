@@ -18,13 +18,13 @@ package ratelimitutil
 
 import (
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -166,7 +166,7 @@ func (rln *RateLimiterNode) GetID() int64 {
 //				-> partition levelearl
 type RateLimiterTree struct {
 	root *RateLimiterNode
-	mu   sync.RWMutex
+	mu   lock.RWMutex
 }
 
 // NewRateLimiterTree returns a new RateLimiterTree.

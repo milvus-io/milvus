@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -32,6 +31,7 @@ import (
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -39,7 +39,7 @@ import (
 
 // SimpleLimiter is implemented based on Limiter interface
 type SimpleLimiter struct {
-	quotaStatesMu sync.RWMutex
+	quotaStatesMu lock.RWMutex
 	rateLimiter   *rlinternal.RateLimiterTree
 }
 

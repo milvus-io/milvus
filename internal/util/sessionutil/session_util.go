@@ -40,6 +40,7 @@ import (
 	kvfactory "github.com/milvus-io/milvus/internal/util/dependency/kv"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
@@ -123,7 +124,7 @@ type Session struct {
 	ctx context.Context
 	// When outside context done, Session cancels its goroutines first, then uses
 	// keepAliveCancel to cancel the etcd KeepAlive
-	keepAliveLock   sync.Mutex
+	keepAliveLock   lock.Mutex
 	keepAliveCancel context.CancelFunc
 	keepAliveCtx    context.Context
 
@@ -306,7 +307,7 @@ func (s *Session) Register() {
 	s.UpdateRegistered(true)
 }
 
-var serverIDMu sync.Mutex
+var serverIDMu lock.Mutex
 
 func (s *Session) getServerID() (int64, error) {
 	serverIDMu.Lock()

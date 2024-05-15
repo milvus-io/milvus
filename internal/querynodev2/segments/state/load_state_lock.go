@@ -6,6 +6,8 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type loadStateEnum int
@@ -49,7 +51,7 @@ func NewLoadStateLock(state loadStateEnum) *LoadStateLock {
 		panic(fmt.Sprintf("invalid state for construction of LoadStateLock, %s", state.String()))
 	}
 
-	mu := &sync.RWMutex{}
+	mu := &lock.RWMutex{}
 	return &LoadStateLock{
 		mu:     mu,
 		cv:     sync.Cond{L: mu},
@@ -60,7 +62,7 @@ func NewLoadStateLock(state loadStateEnum) *LoadStateLock {
 
 // LoadStateLock is the state of segment loading.
 type LoadStateLock struct {
-	mu     *sync.RWMutex
+	mu     *lock.RWMutex
 	cv     sync.Cond
 	state  loadStateEnum
 	refCnt *atomic.Int32

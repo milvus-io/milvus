@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -56,12 +57,12 @@ var _ taskQueue = (*baseTaskQueue)(nil)
 type baseTaskQueue struct {
 	unissuedTasks *list.List
 	activeTasks   map[UniqueID]task
-	utLock        sync.RWMutex
-	atLock        sync.RWMutex
+	utLock        lock.RWMutex
+	atLock        lock.RWMutex
 
 	// maxTaskNum should keep still
 	maxTaskNum    int64
-	maxTaskNumMtx sync.RWMutex
+	maxTaskNumMtx lock.RWMutex
 
 	utBufChan chan int // to block scheduler
 
@@ -211,8 +212,8 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {
 	return &baseTaskQueue{
 		unissuedTasks:   list.New(),
 		activeTasks:     make(map[UniqueID]task),
-		utLock:          sync.RWMutex{},
-		atLock:          sync.RWMutex{},
+		utLock:          lock.RWMutex{},
+		atLock:          lock.RWMutex{},
 		maxTaskNum:      Params.ProxyCfg.MaxTaskNum.GetAsInt64(),
 		utBufChan:       make(chan int, Params.ProxyCfg.MaxTaskNum.GetAsInt()),
 		tsoAllocatorIns: tsoAllocatorIns,
@@ -221,7 +222,7 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {
 
 type ddTaskQueue struct {
 	*baseTaskQueue
-	lock sync.Mutex
+	lock lock.Mutex
 }
 
 type pChanStatInfo struct {
@@ -232,7 +233,7 @@ type pChanStatInfo struct {
 type dmTaskQueue struct {
 	*baseTaskQueue
 
-	statsLock            sync.RWMutex
+	statsLock            lock.RWMutex
 	pChanStatisticsInfos map[pChan]*pChanStatInfo
 }
 

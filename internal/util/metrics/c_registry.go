@@ -31,7 +31,6 @@ import "C"
 import (
 	"sort"
 	"strings"
-	"sync"
 	"unsafe"
 
 	"github.com/prometheus/client_golang/prometheus"
@@ -41,6 +40,7 @@ import (
 	"golang.org/x/exp/maps"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 // metricSorter is a sortable slice of *dto.Metric.
@@ -117,7 +117,7 @@ func NewCRegistry() *CRegistry {
 // only re-write the implementation of Gather()
 type CRegistry struct {
 	*prometheus.Registry
-	mtx sync.RWMutex
+	mtx lock.RWMutex
 }
 
 // Gather implements Gatherer.

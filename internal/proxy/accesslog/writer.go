@@ -29,6 +29,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -40,7 +41,7 @@ var (
 )
 
 type CacheWriter struct {
-	mu     sync.Mutex
+	mu     lock.Mutex
 	writer io.Writer
 }
 
@@ -77,7 +78,7 @@ type RotateWriter struct {
 
 	size int64
 	file *os.File
-	mu   sync.Mutex
+	mu   lock.Mutex
 
 	millCh chan bool
 

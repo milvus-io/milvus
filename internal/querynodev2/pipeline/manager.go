@@ -18,7 +18,6 @@ package pipeline
 
 import (
 	"fmt"
-	"sync"
 
 	"go.uber.org/zap"
 
@@ -26,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -49,7 +49,7 @@ type manager struct {
 
 	tSafeManager TSafeManager
 	dispatcher   msgdispatcher.Client
-	mu           sync.RWMutex
+	mu           lock.RWMutex
 }
 
 func (m *manager) Num() int {

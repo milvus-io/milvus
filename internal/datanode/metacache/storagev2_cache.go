@@ -17,18 +17,17 @@
 package metacache
 
 import (
-	"sync"
-
 	"github.com/apache/arrow/go/v12/arrow"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type StorageV2Cache struct {
 	arrowSchema *arrow.Schema
-	spaceMu     sync.Mutex
+	spaceMu     lock.Mutex
 	spaces      map[int64]*milvus_storage.Space
 }
 

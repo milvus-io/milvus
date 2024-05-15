@@ -18,18 +18,18 @@ package memkv
 
 import (
 	"strings"
-	"sync"
 
 	"github.com/google/btree"
 
 	"github.com/milvus-io/milvus/internal/kv/predicates"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // MemoryKV implements BaseKv interface and relies on underling btree.BTree.
 // As its name implies, all data is stored in memory.
 type MemoryKV struct {
-	sync.RWMutex
+	lock.RWMutex
 	tree *btree.BTree
 }
 

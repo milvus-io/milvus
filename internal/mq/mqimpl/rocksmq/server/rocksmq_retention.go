@@ -23,6 +23,7 @@ import (
 
 	rocksdbkv "github.com/milvus-io/milvus/internal/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -35,7 +36,7 @@ const (
 type retentionInfo struct {
 	// key is topic name, value is last retention time
 	topicRetetionTime *typeutil.ConcurrentMap[string, int64]
-	mutex             sync.RWMutex
+	mutex             lock.RWMutex
 
 	kv *rocksdbkv.RocksdbKV
 	db *gorocksdb.DB
@@ -48,7 +49,7 @@ type retentionInfo struct {
 func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInfo, error) {
 	ri := &retentionInfo{
 		topicRetetionTime: typeutil.NewConcurrentMap[string, int64](),
-		mutex:             sync.RWMutex{},
+		mutex:             lock.RWMutex{},
 		kv:                kv,
 		db:                db,
 		closeCh:           make(chan struct{}),
@@ -62,7 +63,7 @@ func initRetentionInfo(kv *rocksdbkv.RocksdbKV, db *gorocksdb.DB) (*retentionInf
 	for _, key := range topicKeys {
 		topic := key[len(TopicIDTitle):]
 		ri.topicRetetionTime.Insert(topic, time.Now().Unix())
-		topicMu.Store(topic, new(sync.Mutex))
+		topicMu.Store(topic, new(lock.Mutex))
 	}
 	return ri, nil
 }
@@ -315,7 +316,7 @@ func (ri *retentionInfo) cleanData(topic string, pageEndID UniqueID) error {
 	if !ok {
 		return fmt.Errorf("topic name = %s not exist", topic)
 	}
-	lock, ok := ll.(*sync.Mutex)
+	lock, ok := ll.(*lock.Mutex)
 	if !ok {
 		return fmt.Errorf("get mutex failed, topic name = %s", topic)
 	}

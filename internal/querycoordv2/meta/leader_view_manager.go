@@ -17,11 +17,10 @@
 package meta
 
 import (
-	"sync"
-
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -196,7 +195,7 @@ func composeNodeViews(views ...*LeaderView) nodeViews {
 type NotifyDelegatorChanges = func(collectionID ...int64)
 
 type LeaderViewManager struct {
-	rwmutex    sync.RWMutex
+	rwmutex    lock.RWMutex
 	views      map[int64]nodeViews // LeaderID -> Views (one per shard)
 	notifyFunc NotifyDelegatorChanges
 }

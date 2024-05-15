@@ -2,11 +2,11 @@ package kvfactory
 
 import (
 	"fmt"
-	"sync"
 
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -15,7 +15,7 @@ var clientCreator = &etcdClientCreator{}
 var getEtcdAndPathFunction = getEtcdAndPath
 
 type etcdClientCreator struct {
-	mu       sync.Mutex
+	mu       lock.Mutex
 	client   *clientv3.Client
 	rootpath *string
 }

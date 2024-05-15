@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -48,7 +49,7 @@ type distHandler struct {
 	scheduler   task.Scheduler
 	dist        *meta.DistributionManager
 	target      *meta.TargetManager
-	mu          sync.Mutex
+	mu          lock.Mutex
 	stopOnce    sync.Once
 }
 
