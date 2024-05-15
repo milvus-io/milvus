@@ -60,9 +60,9 @@ Zilliz Cloud is a fully managed service on cloud and the simplest way to deploy 
 
 ### Install Milvus
 
-- [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.x/install_standalone-docker.md)
+- [Standalone Quick Start Guide](https://milvus.io/docs/install_standalone-docker.md)
 
-- [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.x/install_cluster-docker.md)
+- [Cluster Quick Start Guide](https://milvus.io/docs/install_cluster-docker.md)
 
 - [Advanced Deployment](https://github.com/milvus-io/milvus/wiki)
 

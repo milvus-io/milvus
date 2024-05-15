@@ -195,7 +195,13 @@ To build the Milvus project, run the following command:
 $ make
 ```
 
-If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
+If this command succeeds, you will now have an executable at `bin/milvus` in your Milvus project directory.
+
+If you want to run the `bin/milvus` executable on the host machine, you need to set `LD_LIBRARY_PATH` temporarily:
+
+```shell
+$ LD_LIBRARY_PATH=./internal/core/output/lib:lib:$LD_LIBRARY_PATH ./bin/milvus
+```
 
 If you want to update proto file before `make`, we can use the following command:
 
@@ -500,7 +506,6 @@ $ ./build/build_image.sh // build milvus latest docker image
 $ docker images // check if milvus latest image is ready
 REPOSITORY                 TAG                                 IMAGE ID       CREATED          SIZE
 milvusdb/milvus            latest                              63c62ff7c1b7   52 minutes ago   570MB
-$ install with docker compose
 ```
 
 ## GitHub Flow
