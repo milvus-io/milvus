@@ -124,6 +124,22 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 		return nil, nil, err
 	}
 
+	// fallback binlog memory size to log size when it is zero
+	fallbackBinlogMemorySize := func(binlogs []*datapb.FieldBinlog) {
+		for _, insertBinlogs := range binlogs {
+			for _, b := range insertBinlogs.GetBinlogs() {
+				if b.GetMemorySize() == 0 {
+					b.MemorySize = b.GetLogSize()
+				}
+			}
+		}
+	}
+	for _, segBinlogs := range recoveryInfo.GetBinlogs() {
+		fallbackBinlogMemorySize(segBinlogs.GetFieldBinlogs())
+		fallbackBinlogMemorySize(segBinlogs.GetStatslogs())
+		fallbackBinlogMemorySize(segBinlogs.GetDeltalogs())
+	}
+
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
 }
 

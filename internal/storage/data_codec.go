@@ -68,10 +68,10 @@ const InvalidUniqueID = UniqueID(-1)
 
 // Blob is a pack of key&value
 type Blob struct {
-	Key    string
-	Value  []byte
-	Size   int64
-	RowNum int64
+	Key        string
+	Value      []byte
+	MemorySize int64
+	RowNum     int64
 }
 
 // BlobList implements sort.Interface for a list of Blob
@@ -108,6 +108,11 @@ func (b Blob) GetKey() string {
 // GetValue returns the value of blob
 func (b Blob) GetValue() []byte {
 	return b.Value
+}
+
+// GetMemorySize returns the memory size of blob
+func (b Blob) GetMemorySize() int64 {
+	return b.MemorySize
 }
 
 // InsertCodec serializes and deserializes the insert data
@@ -418,9 +423,10 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		}
 		blobKey := fmt.Sprintf("%d", field.FieldID)
 		blobs = append(blobs, &Blob{
-			Key:    blobKey,
-			Value:  buffer,
-			RowNum: rowNum,
+			Key:        blobKey,
+			Value:      buffer,
+			RowNum:     rowNum,
+			MemorySize: int64(singleData.GetMemorySize()),
 		})
 		eventWriter.Close()
 		writer.Close()
@@ -1018,7 +1024,8 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 		return nil, err
 	}
 	blob := &Blob{
-		Value: buffer,
+		Value:      buffer,
+		MemorySize: data.Size(),
 	}
 	return blob, nil
 }

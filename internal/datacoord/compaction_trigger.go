@@ -813,7 +813,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 					zap.Uint64("binlogTimestampTo", l.TimestampTo),
 					zap.Uint64("compactExpireTime", compactTime.expireTime))
 				totalExpiredRows += int(l.GetEntriesNum())
-				totalExpiredSize += l.GetLogSize()
+				totalExpiredSize += l.GetMemorySize()
 			}
 		}
 	}
@@ -831,7 +831,7 @@ func (t *compactionTrigger) ShouldDoSingleCompaction(segment *SegmentInfo, compa
 	for _, deltaLogs := range segment.GetDeltalogs() {
 		for _, l := range deltaLogs.GetBinlogs() {
 			totalDeletedRows += int(l.GetEntriesNum())
-			totalDeleteLogSize += l.GetLogSize()
+			totalDeleteLogSize += l.GetMemorySize()
 		}
 	}
 

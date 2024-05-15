@@ -517,7 +517,8 @@ func (suite *SegmentLoaderSuite) TestLoadIndexWithLimitedResource() {
 				FieldID: 1,
 				Binlogs: []*datapb.Binlog{
 					{
-						LogSize: 1000000000,
+						LogSize:    1000000000,
+						MemorySize: 1000000000,
 					},
 				},
 			},
@@ -860,8 +861,8 @@ func (suite *SegmentLoaderDetailSuite) TestRequestResource() {
 		Deltalogs: []*datapb.FieldBinlog{
 			{
 				Binlogs: []*datapb.Binlog{
-					{LogSize: 10000},
-					{LogSize: 12000},
+					{LogSize: 10000, MemorySize: 10000},
+					{LogSize: 12000, MemorySize: 12000},
 				},
 			},
 		},
