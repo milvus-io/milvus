@@ -107,6 +107,7 @@ go test -race -cover -tags dynamic "${MILVUS_DIR}/util/typeutil/..." -failfast -
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/importutilv2/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/proxyutil/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 go test -race -cover -tags dynamic "${MILVUS_DIR}/util/initcore/..." -failfast -count=1  -ldflags="-r ${RPATH}"
+go test -race -cover -tags dynamic,test "${MILVUS_DIR}/util/cgo/..." -failfast -count=1  -ldflags="-r ${RPATH}"
 }
 
 function test_pkg()

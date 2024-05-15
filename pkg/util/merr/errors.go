@@ -157,8 +157,11 @@ var (
 	ErrInvalidStreamObj     = newMilvusError("invalid stream object", 1903, false)
 
 	// Segcore related
-	ErrSegcore            = newMilvusError("segcore error", 2000, false)
-	ErrSegcoreUnsupported = newMilvusError("segcore unsupported error", 2001, false)
+	ErrSegcore                    = newMilvusError("segcore error", 2000, false)
+	ErrSegcoreUnsupported         = newMilvusError("segcore unsupported error", 2001, false)
+	ErrSegcoreNotImplemented      = newMilvusError("segcore not implemented error", 2002, false)
+	ErrSegcoreFollyOtherException = newMilvusError("segcore folly other exception", 2200, false) // throw from segcore.
+	ErrSegcoreFollyCancel         = newMilvusError("segcore Future was canceled", 2201, false)   // throw from segcore.
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
