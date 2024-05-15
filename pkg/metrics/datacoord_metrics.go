@@ -21,7 +21,6 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -341,19 +340,26 @@ func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID
 	})
 }
 
-func CleanupDataCoordNumStoredRows(dbName string, collectionID int64) {
-	for _, state := range commonpb.SegmentState_name {
-		DataCoordNumStoredRows.Delete(prometheus.Labels{
-			databaseLabelName:     dbName,
-			collectionIDLabelName: fmt.Sprint(collectionID),
-			segmentStateLabelName: fmt.Sprint(state),
-		})
-	}
-}
-
-func CleanupDataCoordBulkInsertVectors(dbName string, collectionID int64) {
-	DataCoordBulkVectors.Delete(prometheus.Labels{
-		databaseLabelName:     dbName,
+func CleanupDataCoordWithCollectionID(collectionID int64) {
+	IndexTaskNum.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordNumStoredRows.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordBulkVectors.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordSegmentBinLogFileCount.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordStoredBinlogSize.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordStoredIndexFilesSize.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
+	DataCoordSizeStoredL0Segment.Delete(prometheus.Labels{
 		collectionIDLabelName: fmt.Sprint(collectionID),
 	})
 }
