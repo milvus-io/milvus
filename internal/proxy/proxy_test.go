@@ -627,7 +627,7 @@ func TestProxy(t *testing.T) {
 		}
 	}
 
-	constructCollectionUpsertRequest := func() *milvuspb.UpsertRequest {
+	constructCollectionUpsertRequestNoPK := func() *milvuspb.UpsertRequest {
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
 		hashKeys := testutils.GenerateHashKeys(rowNum)
@@ -637,6 +637,22 @@ func TestProxy(t *testing.T) {
 			CollectionName: collectionName,
 			PartitionName:  partitionName,
 			FieldsData:     []*schemapb.FieldData{fVecColumn, bVecColumn},
+			HashKeys:       hashKeys,
+			NumRows:        uint32(rowNum),
+		}
+	}
+
+	constructCollectionUpsertRequestWithPK := func() *milvuspb.UpsertRequest {
+		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
+		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
+		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
+		hashKeys := generateHashKeys(rowNum)
+		return &milvuspb.UpsertRequest{
+			Base:           nil,
+			DbName:         dbName,
+			CollectionName: collectionName,
+			PartitionName:  partitionName,
+			FieldsData:     []*schemapb.FieldData{pkFieldData, fVecColumn, bVecColumn},
 			HashKeys:       hashKeys,
 			NumRows:        uint32(rowNum),
 		}
@@ -2237,6 +2253,30 @@ func TestProxy(t *testing.T) {
 	})
 
 	wg.Add(1)
+	t.Run("upsert when autoID == true", func(t *testing.T) {
+		defer wg.Done()
+		// autoID==true but not pass pk in upsert, failed
+		req := constructCollectionUpsertRequestNoPK()
+
+		resp, err := proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
+		assert.Equal(t, 0, len(resp.SuccIndex))
+		assert.Equal(t, rowNum, len(resp.ErrIndex))
+		assert.Equal(t, int64(0), resp.UpsertCnt)
+
+		// autoID==true and pass pk in upsert, succeed
+		req = constructCollectionUpsertRequestWithPK()
+
+		resp, err = proxy.Upsert(ctx, req)
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, rowNum, len(resp.SuccIndex))
+		assert.Equal(t, 0, len(resp.ErrIndex))
+		assert.Equal(t, int64(rowNum), resp.UpsertCnt)
+	})
+
+	wg.Add(1)
 	t.Run("release partition", func(t *testing.T) {
 		defer wg.Done()
 		resp, err := proxy.ReleasePartitions(ctx, &milvuspb.ReleasePartitionsRequest{
@@ -2389,19 +2429,6 @@ func TestProxy(t *testing.T) {
 			Expr:           "",
 		})
 		assert.NoError(t, err)
-	})
-
-	wg.Add(1)
-	t.Run("upsert when autoID == true", func(t *testing.T) {
-		defer wg.Done()
-		req := constructCollectionUpsertRequest()
-
-		resp, err := proxy.Upsert(ctx, req)
-		assert.NoError(t, err)
-		assert.ErrorIs(t, merr.Error(resp.GetStatus()), merr.ErrParameterInvalid)
-		assert.Equal(t, 0, len(resp.SuccIndex))
-		assert.Equal(t, rowNum, len(resp.ErrIndex))
-		assert.Equal(t, int64(0), resp.UpsertCnt)
 	})
 
 	wg.Add(1)
