@@ -47,7 +47,7 @@ func downloadBlobs(ctx context.Context, b io.BinlogIO, paths []string) ([]*Blob,
 	log.Debug("down load", zap.Strings("path", paths))
 	bytes, err := b.Download(ctx, paths)
 	if err != nil {
-		log.Warn("ctx done when downloading kvs from blob storage", zap.Strings("paths", paths))
+		log.Warn("ctx done when downloading kvs from blob storage", zap.Strings("paths", paths), zap.Error(err))
 		return nil, errDownloadFromBlobStorage
 	}
 	resp := make([]*Blob, len(paths))

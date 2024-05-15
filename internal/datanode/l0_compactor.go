@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
@@ -100,7 +101,8 @@ func (t *levelZeroCompactionTask) getChannelName() string {
 }
 
 func (t *levelZeroCompactionTask) getCollection() int64 {
-	return t.plan.GetCollectionID()
+	// The length of SegmentBinlogs is checked before task enqueueing.
+	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
 func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
@@ -320,9 +322,16 @@ func (t *levelZeroCompactionTask) splitDelta(
 }
 
 func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storage.DeleteData) (map[string][]byte, *datapb.Binlog, error) {
+	segment, ok := lo.Find(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) bool {
+		return segment.GetSegmentID() == segmentID
+	})
+	if !ok {
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "cannot find segment in compaction plan")
+	}
+
 	var (
-		collectionID = t.plan.GetCollectionID()
-		partitionID  = t.plan.GetPartitionID()
+		collectionID = segment.GetCollectionID()
+		partitionID  = segment.GetPartitionID()
 		uploadKv     = make(map[string][]byte)
 	)
 

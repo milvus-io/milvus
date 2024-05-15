@@ -330,10 +330,14 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
-				SegmentID:    info.GetID(),
-				Level:        datapb.SegmentLevel_L1,
-				CollectionID: info.GetCollectionID(),
-				PartitionID:  info.GetPartitionID(),
+				SegmentID:           info.GetID(),
+				FieldBinlogs:        nil,
+				Field2StatslogPaths: info.GetStatslogs(),
+				Deltalogs:           nil,
+				InsertChannel:       info.GetInsertChannel(),
+				Level:               info.GetLevel(),
+				CollectionID:        info.GetCollectionID(),
+				PartitionID:         info.GetPartitionID(),
 			}
 		})
 

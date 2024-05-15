@@ -22,11 +22,13 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
@@ -128,7 +130,28 @@ func (s *CompactionSuite) TestMixCompaction() {
 	}
 
 	// wait for compaction completed
-	waitingForCompacted(ctx, c.MetaWatcher, s.T())
+	showSegments := func() bool {
+		segments, err = c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		s.NotEmpty(segments)
+		compactFromSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetState() == commonpb.SegmentState_Dropped
+		})
+		compactToSegments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetState() == commonpb.SegmentState_Flushed
+		})
+		log.Info("ShowSegments result", zap.Int("len(compactFromSegments)", len(compactFromSegments)),
+			zap.Int("len(compactToSegments)", len(compactToSegments)))
+		return len(compactToSegments) == 1
+	}
+	for !showSegments() {
+		select {
+		case <-ctx.Done():
+			s.Fail("waiting for compaction timeout")
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
 
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{

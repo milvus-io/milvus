@@ -29,7 +29,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -202,29 +201,9 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(err), nil
 	}
 
-	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannel())
-	if !ok {
-		log.Warn("illegel compaction plan, channel not in this DataNode", zap.String("channelName", req.GetChannel()))
-		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "illegel compaction plan")), nil
-	}
-
-	if !node.compactionExecutor.isValidChannel(req.GetChannel()) {
-		log.Warn("channel of compaction is marked invalid in compaction executor", zap.String("channelName", req.GetChannel()))
-		return merr.Status(merr.WrapErrChannelNotFound(req.GetChannel(), "channel is dropping")), nil
-	}
-
-	meta := ds.metacache
-	for _, segment := range req.GetSegmentBinlogs() {
-		if segment.GetLevel() == datapb.SegmentLevel_L0 {
-			continue
-		}
-		_, ok := meta.GetSegmentByID(segment.GetSegmentID(), metacache.WithSegmentState(commonpb.SegmentState_Flushed))
-		if !ok {
-			log.Warn("compaction plan contains segment which is not flushed",
-				zap.Int64("segmentID", segment.GetSegmentID()),
-			)
-			return merr.Status(merr.WrapErrSegmentNotFound(segment.GetSegmentID(), "segment with flushed state not found")), nil
-		}
+	if len(req.GetSegmentBinlogs()) == 0 {
+		log.Info("no segments to compact")
+		return merr.Success(), nil
 	}
 
 	/*

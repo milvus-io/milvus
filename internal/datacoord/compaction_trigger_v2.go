@@ -133,7 +133,7 @@ func (m *CompactionTriggerManager) buildL0CompactionPlan(view CompactionView) *d
 		Channel:        view.GetGroupLabel().Channel,
 	}
 
-	if err := fillOriginPlan(view.GetGroupLabel().CollectionID, view.GetGroupLabel().PartitionID, m.handler, m.allocator, plan); err != nil {
+	if err := fillOriginPlan(view.GetGroupLabel().CollectionID, m.handler, m.allocator, plan); err != nil {
 		return nil
 	}
 
@@ -148,7 +148,7 @@ type chanPartSegments struct {
 	segments     []*SegmentInfo
 }
 
-func fillOriginPlan(collectionID, partitionID int64, handler Handler, alloc allocator, plan *datapb.CompactionPlan) error {
+func fillOriginPlan(collectionID int64, handler Handler, alloc allocator, plan *datapb.CompactionPlan) error {
 	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
 	id, err := alloc.allocID(ctx)
@@ -158,8 +158,6 @@ func fillOriginPlan(collectionID, partitionID int64, handler Handler, alloc allo
 
 	plan.PlanID = id
 	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32()
-	plan.CollectionID = collectionID
-	plan.PartitionID = partitionID
 	collection, err := handler.GetCollection(ctx, collectionID)
 	if err != nil {
 		return err

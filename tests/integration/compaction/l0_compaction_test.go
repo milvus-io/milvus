@@ -22,16 +22,19 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -50,6 +53,9 @@ func (s *CompactionSuite) TestL0Compaction() {
 		metricType = metric.L2
 		vecType    = schemapb.DataType_FloatVector
 	)
+
+	paramtable.Get().Save(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.LevelZeroCompactionTriggerDeltalogMinNum.Key)
 
 	collectionName := "TestCompaction_" + funcutil.GenRandomStr()
 
@@ -122,18 +128,6 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.Equal(1, len(segments))
 	s.Equal(int64(rowNum), segments[0].GetNumOfRows())
 
-	// delete
-	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		Expr:           integration.Int64Field + " < ",
-	})
-	err = merr.CheckRPCCall(deleteResult, err)
-	s.NoError(err)
-
-	// wait for compaction completed
-	waitingForCompacted(ctx, c.MetaWatcher, s.T())
-
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
 		DbName:         dbName,
@@ -142,6 +136,64 @@ func (s *CompactionSuite) TestL0Compaction() {
 	err = merr.CheckRPCCall(loadStatus, err)
 	s.NoError(err)
 	s.WaitForLoad(ctx, collectionName)
+
+	// delete
+	deleteResult, err := c.Proxy.Delete(ctx, &milvuspb.DeleteRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           fmt.Sprintf("%s < %d", integration.Int64Field, deleteCnt),
+	})
+	err = merr.CheckRPCCall(deleteResult, err)
+	s.NoError(err)
+
+	// flush l0
+	flushResp, err = c.Proxy.Flush(ctx, &milvuspb.FlushRequest{
+		DbName:          dbName,
+		CollectionNames: []string{collectionName},
+	})
+	err = merr.CheckRPCCall(flushResp, err)
+	s.NoError(err)
+	flushTs, has = flushResp.GetCollFlushTs()[collectionName]
+	s.True(has)
+	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
+
+	// query
+	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		DbName:         dbName,
+		CollectionName: collectionName,
+		Expr:           "",
+		OutputFields:   []string{"count(*)"},
+	})
+	err = merr.CheckRPCCall(queryResult, err)
+	s.NoError(err)
+	s.Equal(int64(rowNum-deleteCnt), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+
+	// wait for l0 compaction completed
+	showSegments := func() bool {
+		segments, err = c.MetaWatcher.ShowSegments()
+		s.NoError(err)
+		s.NotEmpty(segments)
+		log.Info("ShowSegments result", zap.Any("segments", segments))
+		flushed := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+			return segment.GetState() == commonpb.SegmentState_Flushed
+		})
+		if len(flushed) == 1 &&
+			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
+			flushed[0].GetNumOfRows() == rowNum {
+			log.Info("l0 compaction done, wait for single compaction")
+		}
+		return len(flushed) == 1 &&
+			flushed[0].GetLevel() == datapb.SegmentLevel_L1 &&
+			flushed[0].GetNumOfRows() == rowNum-deleteCnt
+	}
+	for !showSegments() {
+		select {
+		case <-ctx.Done():
+			s.Fail("waiting for compaction timeout")
+			return
+		case <-time.After(1 * time.Second):
+		}
+	}
 
 	// search
 	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
@@ -158,7 +210,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 
 	// query
-	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
 		DbName:         dbName,
 		CollectionName: collectionName,
 		Expr:           "",
@@ -166,7 +218,7 @@ func (s *CompactionSuite) TestL0Compaction() {
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
-	s.Equal(int64(rowNum), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+	s.Equal(int64(rowNum-deleteCnt), queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
 
 	// release collection
 	status, err := c.Proxy.ReleaseCollection(ctx, &milvuspb.ReleaseCollectionRequest{

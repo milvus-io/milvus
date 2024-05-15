@@ -423,7 +423,13 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("Compact-%d", t.getPlanID()))
 	defer span.End()
 
-	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
+	collectionID := t.plan.GetSegmentBinlogs()[0].GetCollectionID()
+	partitionID := t.plan.GetSegmentBinlogs()[0].GetPartitionID()
+
+	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
 	if ok := funcutil.CheckCtxValid(ctx); !ok {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, errContext
@@ -518,11 +524,9 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	segmentBinlog := t.plan.GetSegmentBinlogs()[0]
-	partID := segmentBinlog.GetPartitionID()
-	meta := &etcdpb.CollectionMeta{ID: t.plan.GetCollectionID(), Schema: t.plan.GetSchema()}
+	meta := &etcdpb.CollectionMeta{ID: collectionID, Schema: t.plan.GetSchema()}
 
-	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPath, targetSegID, partID, meta, deltaPk2Ts)
+	inPaths, statsPaths, numRows, err := t.merge(ctxTimeout, allPath, targetSegID, partitionID, meta, deltaPk2Ts)
 	if err != nil {
 		log.Warn("compact wrong, fail to merge", zap.Error(err))
 		return nil, err
@@ -785,7 +789,8 @@ func interface2FieldData(schemaDataType schemapb.DataType, content []interface{}
 }
 
 func (t *compactionTask) getCollection() UniqueID {
-	return t.plan.GetCollectionID()
+	// The length of SegmentBinlogs is checked before task enqueueing.
+	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
 func (t *compactionTask) GetCurrentTime() typeutil.Timestamp {
