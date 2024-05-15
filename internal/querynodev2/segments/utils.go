@@ -23,7 +23,9 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -205,4 +207,40 @@ func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.C
 	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
 	// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
 	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
+}
+
+func GetSegmentRelatedDataSize(segment Segment) int64 {
+	if segment.Type() == SegmentTypeSealed {
+		return calculateSegmentLogSize(segment.LoadInfo())
+	}
+	return segment.MemSize()
+}
+
+func calculateSegmentLogSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
+	segmentSize := int64(0)
+
+	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	// Get size of state data
+	for _, fieldBinlog := range segmentLoadInfo.Statslogs {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	// Get size of delete data
+	for _, fieldBinlog := range segmentLoadInfo.Deltalogs {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	return segmentSize
+}
+
+func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
+	fieldSize := int64(0)
+	for _, binlog := range fieldBinlog.Binlogs {
+		fieldSize += binlog.LogSize
+	}
+
+	return fieldSize
 }

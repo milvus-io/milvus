@@ -207,6 +207,32 @@ func (s *ChannelManagerSuite) TestSubmitIdempotent() {
 	s.Equal(1, runner.UnfinishedOpSize())
 }
 
+func (s *ChannelManagerSuite) TestSubmitSkip() {
+	channel := "by-dev-rootcoord-dml-1"
+
+	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	s.Require().Equal(0, s.manager.opRunners.Len())
+
+	err := s.manager.Submit(info)
+	s.NoError(err)
+
+	s.Equal(1, s.manager.opRunners.Len())
+	s.True(s.manager.opRunners.Contain(channel))
+	opState := <-s.manager.communicateCh
+	s.NotNil(opState)
+	s.Equal(datapb.ChannelWatchState_WatchSuccess, opState.state)
+	s.NotNil(opState.fg)
+	s.Equal(info.GetOpID(), opState.fg.opID)
+	s.manager.handleOpState(opState)
+
+	err = s.manager.Submit(info)
+	s.NoError(err)
+
+	runner, ok := s.manager.opRunners.Get(channel)
+	s.False(ok)
+	s.Nil(runner)
+}
+
 func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	channel := "by-dev-rootcoord-dml-0"
 
@@ -253,4 +279,10 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	s.Equal(0, s.manager.fgManager.GetFlowgraphCount())
 	s.False(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
 	s.Equal(0, s.manager.opRunners.Len())
+
+	err = s.manager.Submit(info)
+	s.NoError(err)
+	runner, ok := s.manager.opRunners.Get(channel)
+	s.False(ok)
+	s.Nil(runner)
 }

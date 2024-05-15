@@ -363,7 +363,7 @@ func AvgBalanceChannelPolicy(cluster Assignments) *ChannelOpSet {
 	return opSet
 }
 
-func AvgAssignByCountPolicy(currentCluster Assignments, unassignedChannels []RWChannel, execlusiveNodes []int64) *ChannelOpSet {
+func AvgAssignByCountPolicy(currentCluster Assignments, toAssign *NodeChannelInfo, execlusiveNodes []int64) *ChannelOpSet {
 	var (
 		toCluster   Assignments
 		fromCluster Assignments
@@ -371,18 +371,21 @@ func AvgAssignByCountPolicy(currentCluster Assignments, unassignedChannels []RWC
 	)
 
 	nodeToAvg := typeutil.NewUniqueSet()
-
 	lo.ForEach(currentCluster, func(info *NodeChannelInfo, _ int) {
-		if !lo.Contains(execlusiveNodes, info.NodeID) {
-			toCluster = append(toCluster, info)
-			nodeToAvg.Insert(info.NodeID)
-		}
-
-		if len(info.Channels) > 0 {
+		// Get fromCluster
+		if toAssign == nil && len(info.Channels) > 0 {
 			fromCluster = append(fromCluster, info)
 			channelNum += len(info.Channels)
 			nodeToAvg.Insert(info.NodeID)
 		}
+
+		// Get toCluster by filtering out execlusive nodes
+		if lo.Contains(execlusiveNodes, info.NodeID) || (toAssign != nil && info.NodeID == toAssign.NodeID) {
+			return
+		}
+
+		toCluster = append(toCluster, info)
+		nodeToAvg.Insert(info.NodeID)
 	})
 
 	// If no datanode alive, do nothing
@@ -391,8 +394,8 @@ func AvgAssignByCountPolicy(currentCluster Assignments, unassignedChannels []RWC
 	}
 
 	// 1. assign unassigned channels first
-	if len(unassignedChannels) > 0 {
-		chPerNode := (len(unassignedChannels) + channelNum) / nodeToAvg.Len()
+	if toAssign != nil && len(toAssign.Channels) > 0 {
+		chPerNode := (len(toAssign.Channels) + channelNum) / nodeToAvg.Len()
 
 		// sort by assigned channels count ascsending
 		sort.Slice(toCluster, func(i, j int) bool {
@@ -408,7 +411,7 @@ func AvgAssignByCountPolicy(currentCluster Assignments, unassignedChannels []RWC
 		}
 
 		updates := make(map[int64][]RWChannel)
-		for i, newChannel := range unassignedChannels {
+		for i, newChannel := range toAssign.GetChannels() {
 			n := nodesLackOfChannels[i%len(nodesLackOfChannels)].NodeID
 			updates[n] = append(updates[n], newChannel)
 		}
@@ -416,12 +419,12 @@ func AvgAssignByCountPolicy(currentCluster Assignments, unassignedChannels []RWC
 		opSet := NewChannelOpSet()
 		for id, chs := range updates {
 			opSet.Append(id, Watch, chs...)
-			opSet.Delete(bufferID, chs...)
+			opSet.Delete(toAssign.NodeID, chs...)
 		}
 
 		log.Info("Assign channels to nodes by channel count",
-			zap.Int("channel count", len(unassignedChannels)),
-			zap.Int("cluster count", len(toCluster)),
+			zap.Int("toAssign channel count", len(toAssign.Channels)),
+			zap.Any("original nodeID", toAssign.NodeID),
 			zap.Int64s("exclusive nodes", execlusiveNodes),
 			zap.Any("operations", opSet),
 			zap.Int64s("nodesLackOfChannels", lo.Map(nodesLackOfChannels, func(info *NodeChannelInfo, _ int) int64 {

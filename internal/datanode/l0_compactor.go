@@ -156,7 +156,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
 				paths = append(paths, l.GetLogPath())
-				totalSize += l.GetLogSize()
+				totalSize += l.GetMemorySize()
 			}
 		}
 		if len(paths) > 0 {
@@ -375,6 +375,7 @@ func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storag
 		LogID:         logID,
 		TimestampFrom: minTs,
 		TimestampTo:   maxTs,
+		MemorySize:    dData.Size(),
 	}
 
 	return uploadKv, deltalog, nil

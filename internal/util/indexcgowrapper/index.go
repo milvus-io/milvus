@@ -284,9 +284,9 @@ func (index *CgoIndex) Serialize() ([]*Blob, error) {
 			return nil, err
 		}
 		blob := &Blob{
-			Key:   key,
-			Value: value,
-			Size:  size,
+			Key:        key,
+			Value:      value,
+			MemorySize: size,
 		}
 		ret = append(ret, blob)
 	}
