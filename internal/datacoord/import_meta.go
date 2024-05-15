@@ -17,9 +17,8 @@
 package datacoord
 
 import (
-	"sync"
-
 	"github.com/milvus-io/milvus/internal/metastore"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 type ImportMeta interface {
@@ -37,7 +36,7 @@ type ImportMeta interface {
 }
 
 type importMeta struct {
-	mu    sync.RWMutex // guards jobs and tasks
+	mu    lock.RWMutex // guards jobs and tasks
 	jobs  map[int64]ImportJob
 	tasks map[int64]ImportTask
 

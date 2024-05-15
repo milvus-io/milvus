@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -73,7 +74,7 @@ type indexBuilder struct {
 	cancel context.CancelFunc
 
 	wg               sync.WaitGroup
-	taskMutex        sync.RWMutex
+	taskMutex        lock.RWMutex
 	scheduleDuration time.Duration
 
 	// TODO @xiaocai2333: use priority queue
