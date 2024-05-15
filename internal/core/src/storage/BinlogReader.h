@@ -20,6 +20,7 @@
 #include <utility>
 
 #include "common/EasyAssert.h"
+#include "common/Utils.h"
 
 namespace milvus::storage {
 
@@ -32,6 +33,22 @@ class BinlogReader {
 
     SegcoreError
     Read(int64_t nbytes, void* out);
+
+    template <
+        typename T,
+        typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+    SegcoreError
+    ReadInt(T& out) {
+        auto nbytes = sizeof(T);
+        auto remain = size_ - tell_;
+        if (nbytes > remain) {
+            return SegcoreError(milvus::UnexpectedError,
+                                "out range of binlog data");
+        }
+        out = DeserializeFromBuffer<T>(data_.get() + tell_);
+        tell_ += nbytes;
+        return SegcoreError(milvus::Success, "");
+    }
 
     std::pair<SegcoreError, std::shared_ptr<uint8_t[]>>
     Read(int64_t nbytes);

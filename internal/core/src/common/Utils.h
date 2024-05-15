@@ -16,6 +16,7 @@
 #include <google/protobuf/text_format.h>
 #include <sys/mman.h>
 #include <unistd.h>
+#include <boost/endian/conversion.hpp>
 
 #include <cstring>
 #include <filesystem>
@@ -244,7 +245,8 @@ SparseBytesToRows(const Iterable& rows) {
 // SparseRowsToProto converts a list of knowhere::sparse::SparseRow<float> to
 // a milvus::proto::schema::SparseFloatArray. The resulting proto is a deep copy
 // of the source data. source(i) returns the i-th row to be copied.
-inline void SparseRowsToProto(
+inline void
+SparseRowsToProto(
     const std::function<const knowhere::sparse::SparseRow<float>*(size_t)>&
         source,
     int64_t rows,
@@ -261,6 +263,23 @@ inline void SparseRowsToProto(
         proto->add_contents(row->data(), row->data_byte_size());
     }
     proto->set_dim(max_dim);
+}
+
+template <typename T,
+          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+void
+SerializeToBuffer(uint8_t* buffer, T val) {
+    T little_endian_val = boost::endian::native_to_little(val);
+    std::memcpy(buffer, &little_endian_val, sizeof(T));
+}
+
+template <typename T,
+          typename std::enable_if<std::is_integral<T>::value, int>::type = 0>
+T
+DeserializeFromBuffer(uint8_t* buffer) {
+    T val;
+    std::memcpy(&val, buffer, sizeof(T));
+    return boost::endian::little_to_native(val);
 }
 
 }  // namespace milvus

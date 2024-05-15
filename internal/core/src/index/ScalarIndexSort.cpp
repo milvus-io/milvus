@@ -178,7 +178,7 @@ ScalarIndexSort<T>::Serialize(const Config& config) {
 
     std::shared_ptr<uint8_t[]> index_length(new uint8_t[sizeof(size_t)]);
     auto index_size = data_.size();
-    memcpy(index_length.get(), &index_size, sizeof(size_t));
+    SerializeToBuffer<size_t>(index_length.get(), index_size);
 
     BinarySet res_set;
     res_set.Append("index_data", index_data, index_data_size);
@@ -225,7 +225,7 @@ ScalarIndexSort<T>::LoadWithoutAssemble(const BinarySet& index_binary,
                                         const Config& config) {
     size_t index_size;
     auto index_length = index_binary.GetByName("index_length");
-    memcpy(&index_size, index_length->data.get(), (size_t)index_length->size);
+    index_size = DeserializeFromBuffer<size_t>(index_length->data.get());
 
     auto index_data = index_binary.GetByName("index_data");
     data_.resize(index_size);

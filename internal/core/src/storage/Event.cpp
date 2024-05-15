@@ -71,13 +71,15 @@ GetEventFixPartSize(EventType event_type) {
 }
 
 EventHeader::EventHeader(BinlogReaderPtr reader) {
-    auto ast = reader->Read(sizeof(timestamp_), &timestamp_);
+    auto ast = reader->ReadInt<milvus::Timestamp>(timestamp_);
     assert(ast.ok());
-    ast = reader->Read(sizeof(event_type_), &event_type_);
+    int8_t event_type;
+    ast = reader->ReadInt<int8_t>(event_type);
+    event_type_ = EventType(event_type);
     assert(ast.ok());
-    ast = reader->Read(sizeof(event_length_), &event_length_);
+    ast = reader->ReadInt<int32_t>(event_length_);
     assert(ast.ok());
-    ast = reader->Read(sizeof(next_position_), &next_position_);
+    ast = reader->ReadInt<int32_t>(next_position_);
     assert(ast.ok());
 }
 
@@ -87,32 +89,34 @@ EventHeader::Serialize() {
                        sizeof(event_length_) + sizeof(next_position_);
     std::vector<uint8_t> res(header_size);
     int offset = 0;
-    memcpy(res.data() + offset, &timestamp_, sizeof(timestamp_));
+    SerializeToBuffer<milvus::Timestamp>(res.data() + offset, timestamp_);
     offset += sizeof(timestamp_);
-    memcpy(res.data() + offset, &event_type_, sizeof(event_type_));
+    SerializeToBuffer<int8_t>(res.data() + offset, int8_t(event_type_));
     offset += sizeof(event_type_);
-    memcpy(res.data() + offset, &event_length_, sizeof(event_length_));
+    SerializeToBuffer<int32_t>(res.data() + offset, event_length_);
     offset += sizeof(event_length_);
-    memcpy(res.data() + offset, &next_position_, sizeof(next_position_));
+    SerializeToBuffer<int32_t>(res.data() + offset, next_position_);
 
     return res;
 }
 
 DescriptorEventDataFixPart::DescriptorEventDataFixPart(BinlogReaderPtr reader) {
-    auto ast = reader->Read(sizeof(collection_id), &collection_id);
+    auto ast = reader->ReadInt<int64_t>(collection_id);
     assert(ast.ok());
-    ast = reader->Read(sizeof(partition_id), &partition_id);
+    ast = reader->ReadInt<int64_t>(partition_id);
     assert(ast.ok());
-    ast = reader->Read(sizeof(segment_id), &segment_id);
+    ast = reader->ReadInt<int64_t>(segment_id);
     assert(ast.ok());
-    ast = reader->Read(sizeof(field_id), &field_id);
+    ast = reader->ReadInt<int64_t>(field_id);
     assert(ast.ok());
-    ast = reader->Read(sizeof(start_timestamp), &start_timestamp);
+    ast = reader->ReadInt<milvus::Timestamp>(start_timestamp);
     assert(ast.ok());
-    ast = reader->Read(sizeof(end_timestamp), &end_timestamp);
+    ast = reader->ReadInt<milvus::Timestamp>(end_timestamp);
     assert(ast.ok());
-    ast = reader->Read(sizeof(data_type), &data_type);
+    int32_t data_type_int;
+    ast = reader->ReadInt<int32_t>(data_type_int);
     assert(ast.ok());
+    data_type = milvus::proto::schema::DataType(data_type_int);
 }
 
 std::vector<uint8_t>
@@ -123,19 +127,19 @@ DescriptorEventDataFixPart::Serialize() {
                          sizeof(data_type);
     std::vector<uint8_t> res(fix_part_size);
     int offset = 0;
-    memcpy(res.data() + offset, &collection_id, sizeof(collection_id));
+    SerializeToBuffer<int64_t>(res.data() + offset, collection_id);
     offset += sizeof(collection_id);
-    memcpy(res.data() + offset, &partition_id, sizeof(partition_id));
+    SerializeToBuffer<int64_t>(res.data() + offset, partition_id);
     offset += sizeof(partition_id);
-    memcpy(res.data() + offset, &segment_id, sizeof(segment_id));
+    SerializeToBuffer<int64_t>(res.data() + offset, segment_id);
     offset += sizeof(segment_id);
-    memcpy(res.data() + offset, &field_id, sizeof(field_id));
+    SerializeToBuffer<int64_t>(res.data() + offset, field_id);
     offset += sizeof(field_id);
-    memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
+    SerializeToBuffer<milvus::Timestamp>(res.data() + offset, start_timestamp);
     offset += sizeof(start_timestamp);
-    memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
+    SerializeToBuffer<milvus::Timestamp>(res.data() + offset, end_timestamp);
     offset += sizeof(end_timestamp);
-    memcpy(res.data() + offset, &data_type, sizeof(data_type));
+    SerializeToBuffer<int32_t>(res.data() + offset, data_type);
 
     return res;
 }
@@ -150,7 +154,7 @@ DescriptorEventData::DescriptorEventData(BinlogReaderPtr reader) {
     auto ast =
         reader->Read(post_header_lengths.size(), post_header_lengths.data());
     assert(ast.ok());
-    ast = reader->Read(sizeof(extra_length), &extra_length);
+    ast = reader->ReadInt<int32_t>(extra_length);
     assert(ast.ok());
     extra_bytes = std::vector<uint8_t>(extra_length);
     ast = reader->Read(extra_length, extra_bytes.data());
@@ -187,7 +191,7 @@ DescriptorEventData::Serialize() {
            post_header_lengths.data(),
            post_header_lengths.size());
     offset += post_header_lengths.size();
-    memcpy(res.data() + offset, &extra_length, sizeof(extra_length));
+    SerializeToBuffer<int32_t>(res.data() + offset, extra_length);
     offset += sizeof(extra_length);
     memcpy(res.data() + offset, extra_bytes.data(), extra_bytes.size());
 
@@ -197,9 +201,9 @@ DescriptorEventData::Serialize() {
 BaseEventData::BaseEventData(BinlogReaderPtr reader,
                              int event_length,
                              DataType data_type) {
-    auto ast = reader->Read(sizeof(start_timestamp), &start_timestamp);
+    auto ast = reader->ReadInt<milvus::Timestamp>(start_timestamp);
     AssertInfo(ast.ok(), "read start timestamp failed");
-    ast = reader->Read(sizeof(end_timestamp), &end_timestamp);
+    ast = reader->ReadInt<milvus::Timestamp>(end_timestamp);
     AssertInfo(ast.ok(), "read end timestamp failed");
 
     int payload_length =
@@ -288,9 +292,9 @@ BaseEventData::Serialize() {
         sizeof(start_timestamp) + sizeof(end_timestamp) + payload_buffer.size();
     std::vector<uint8_t> res(len);
     int offset = 0;
-    memcpy(res.data() + offset, &start_timestamp, sizeof(start_timestamp));
+    SerializeToBuffer(res.data() + offset, start_timestamp);
     offset += sizeof(start_timestamp);
-    memcpy(res.data() + offset, &end_timestamp, sizeof(end_timestamp));
+    SerializeToBuffer(res.data() + offset, end_timestamp);
     offset += sizeof(end_timestamp);
     memcpy(res.data() + offset, payload_buffer.data(), payload_buffer.size());
 
@@ -342,7 +346,7 @@ DescriptorEvent::Serialize() {
     int len = header_size + data_size + sizeof(MAGIC_NUM);
     std::vector<uint8_t> res(len);
     int offset = 0;
-    memcpy(res.data(), &MAGIC_NUM, sizeof(MAGIC_NUM));
+    SerializeToBuffer<int32_t>(res.data() + offset, MAGIC_NUM);
     offset += sizeof(MAGIC_NUM);
     memcpy(res.data() + offset, header.data(), header_size);
     offset += header_size;
@@ -355,16 +359,16 @@ DescriptorEvent::Serialize() {
 
 std::vector<uint8_t>
 LocalInsertEvent::Serialize() {
-    int row_num = field_data->get_num_rows();
-    int dimension = field_data->get_dim();
-    int payload_size = field_data->Size();
+    int32_t row_num = field_data->get_num_rows();
+    int32_t dimension = field_data->get_dim();
+    int32_t payload_size = field_data->Size();
     int len = sizeof(row_num) + sizeof(dimension) + payload_size;
 
     std::vector<uint8_t> res(len);
     int offset = 0;
-    memcpy(res.data() + offset, &row_num, sizeof(row_num));
+    SerializeToBuffer<int32_t>(res.data() + offset, row_num);
     offset += sizeof(row_num);
-    memcpy(res.data() + offset, &dimension, sizeof(dimension));
+    SerializeToBuffer<int32_t>(res.data() + offset, dimension);
     offset += sizeof(dimension);
     memcpy(res.data() + offset, field_data->Data(), payload_size);
 
@@ -372,9 +376,9 @@ LocalInsertEvent::Serialize() {
 }
 
 LocalIndexEvent::LocalIndexEvent(BinlogReaderPtr reader) {
-    auto ret = reader->Read(sizeof(index_size), &index_size);
+    auto ret = reader->ReadInt<uint64_t>(index_size);
     AssertInfo(ret.ok(), "read binlog failed");
-    ret = reader->Read(sizeof(degree), &degree);
+    ret = reader->ReadInt<uint32_t>(degree);
     AssertInfo(ret.ok(), "read binlog failed");
 
     auto res = reader->Read(index_size);
@@ -391,9 +395,9 @@ LocalIndexEvent::Serialize() {
 
     std::vector<uint8_t> res(len);
     int offset = 0;
-    memcpy(res.data() + offset, &index_size, sizeof(index_size));
+    SerializeToBuffer<uint64_t>(res.data() + offset, index_size);
     offset += sizeof(index_size);
-    memcpy(res.data() + offset, &degree, sizeof(degree));
+    SerializeToBuffer<uint32_t>(res.data() + offset, degree);
     offset += sizeof(degree);
     memcpy(res.data() + offset, field_data->Data(), index_size);
 

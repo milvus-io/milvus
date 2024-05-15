@@ -11,6 +11,7 @@
 
 #include <google/protobuf/text_format.h>
 #include <gtest/gtest.h>
+#include <boost/endian/conversion.hpp>
 
 #include <array>
 #include <boost/format.hpp>
