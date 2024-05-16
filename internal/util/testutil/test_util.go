@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -333,23 +334,24 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_SparseFloatVector:
-			sparseFloatVecData := make([]byte, 0)
-			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+			builder := array.NewStringBuilder(mem)
 			contents := insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
 			rows := len(contents)
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0, rows)
-			currOffset := int32(0)
+			jsonBytesData := make([][]byte, 0)
 			for i := 0; i < rows; i++ {
 				rowVecData := contents[i]
-				sparseFloatVecData = append(sparseFloatVecData, rowVecData...)
-				offsets = append(offsets, currOffset)
-				currOffset = currOffset + int32(len(rowVecData))
-				valid = append(valid, true)
+				mapData := typeutil.SparseFloatBytesToMap(rowVecData)
+				// convert to JSON format
+				jsonBytes, err := json.Marshal(mapData)
+				if err != nil {
+					return nil, err
+				}
+				jsonBytesData = append(jsonBytesData, jsonBytes)
 			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(sparseFloatVecData, nil)
-			builder.AppendValues(offsets, valid)
-			columns = append(columns, builder.NewListArray())
+			builder.AppendValues(lo.Map(jsonBytesData, func(bs []byte, _ int) string {
+				return string(bs)
+			}), nil)
+			columns = append(columns, builder.NewStringArray())
 		case schemapb.DataType_JSON:
 			builder := array.NewStringBuilder(mem)
 			jsonData := insertData.Data[fieldID].(*storage.JSONFieldData).Data
@@ -481,4 +483,67 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 		}
 	}
 	return columns, nil
+}
+
+func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([]map[string]any, error) {
+	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+		return field.GetFieldID()
+	})
+
+	rowNum := insertData.GetRowNum()
+	rows := make([]map[string]any, 0, rowNum)
+	for i := 0; i < rowNum; i++ {
+		data := make(map[int64]interface{})
+		for fieldID, v := range insertData.Data {
+			field := fieldIDToField[fieldID]
+			dataType := field.GetDataType()
+			elemType := field.GetElementType()
+			if field.GetAutoID() {
+				continue
+			}
+			switch dataType {
+			case schemapb.DataType_Array:
+				switch elemType {
+				case schemapb.DataType_Bool:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetBoolData().GetData()
+				case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
+				case schemapb.DataType_Int64:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetLongData().GetData()
+				case schemapb.DataType_Float:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetFloatData().GetData()
+				case schemapb.DataType_Double:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetDoubleData().GetData()
+				case schemapb.DataType_String:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetStringData().GetData()
+				}
+			case schemapb.DataType_JSON:
+				data[fieldID] = string(v.GetRow(i).([]byte))
+			case schemapb.DataType_BinaryVector:
+				bytes := v.GetRow(i).([]byte)
+				ints := make([]int, 0, len(bytes))
+				for _, b := range bytes {
+					ints = append(ints, int(b))
+				}
+				data[fieldID] = ints
+			case schemapb.DataType_Float16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.Float16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_BFloat16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.BFloat16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_SparseFloatVector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.SparseFloatBytesToMap(bytes)
+			default:
+				data[fieldID] = v.GetRow(i)
+			}
+		}
+		row := lo.MapKeys(data, func(_ any, fieldID int64) string {
+			return fieldIDToField[fieldID].GetName()
+		})
+		rows = append(rows, row)
+	}
+
+	return rows, nil
 }

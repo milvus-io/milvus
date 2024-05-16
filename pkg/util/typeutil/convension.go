@@ -23,6 +23,7 @@ import (
 	"reflect"
 
 	"github.com/golang/protobuf/proto"
+	"github.com/x448/float16"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/common"
@@ -114,4 +115,53 @@ func SliceRemoveDuplicate(a interface{}) (ret []interface{}) {
 	}
 
 	return ret
+}
+
+func Float32ToFloat16Bytes(f float32) []byte {
+	ret := make([]byte, 2)
+	common.Endian.PutUint16(ret[:], float16.Fromfloat32(f).Bits())
+	return ret
+}
+
+func Float16BytesToFloat32(b []byte) float32 {
+	return float16.Frombits(common.Endian.Uint16(b)).Float32()
+}
+
+func Float16BytesToFloat32Vector(b []byte) []float32 {
+	dim := len(b) / 2
+	vec := make([]float32, 0, dim)
+	for j := 0; j < dim; j++ {
+		vec = append(vec, Float16BytesToFloat32(b[j*2:]))
+	}
+	return vec
+}
+
+func Float32ToBFloat16Bytes(f float32) []byte {
+	ret := make([]byte, 2)
+	common.Endian.PutUint16(ret[:], uint16(math.Float32bits(f)>>16))
+	return ret
+}
+
+func BFloat16BytesToFloat32(b []byte) float32 {
+	return math.Float32frombits(uint32(common.Endian.Uint16(b)) << 16)
+}
+
+func BFloat16BytesToFloat32Vector(b []byte) []float32 {
+	dim := len(b) / 2
+	vec := make([]float32, 0, dim)
+	for j := 0; j < dim; j++ {
+		vec = append(vec, BFloat16BytesToFloat32(b[j*2:]))
+	}
+	return vec
+}
+
+func SparseFloatBytesToMap(b []byte) map[uint32]float32 {
+	elemCount := len(b) / 8
+	values := make(map[uint32]float32)
+	for j := 0; j < elemCount; j++ {
+		idx := common.Endian.Uint32(b[j*8:])
+		f := BytesToFloat32(b[j*8+4:])
+		values[idx] = f
+	}
+	return values
 }
