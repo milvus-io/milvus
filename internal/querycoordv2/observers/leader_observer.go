@@ -141,6 +141,9 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 				}()
 				executableActions = append(executableActions, action)
 			}
+			if len(executableActions) == 0 {
+				continue
+			}
 			o.sync(ctx, replica.GetID(), leaderView, executableActions)
 		}
 	}
