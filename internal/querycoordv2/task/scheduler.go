@@ -137,8 +137,8 @@ type Scheduler interface {
 	GetNodeChannelDelta(nodeID int64) int
 	GetChannelTaskNum() int
 	GetSegmentTaskNum() int
-	Sync(task Task) bool
-	RemoveSync(task Task)
+	Sync(segmentID, replicaID int64) bool
+	RemoveSync(segmentID, replicaID int64)
 }
 
 type taskScheduler struct {
@@ -160,7 +160,7 @@ type taskScheduler struct {
 	processQueue *taskQueue
 	waitQueue    *taskQueue
 
-	syncTasks map[replicaSegmentIndex]Task
+	syncTasks map[replicaSegmentIndex]struct{}
 }
 
 func NewScheduler(ctx context.Context,
@@ -192,7 +192,7 @@ func NewScheduler(ctx context.Context,
 		channelTasks: make(map[replicaChannelIndex]Task),
 		processQueue: newTaskQueue(),
 		waitQueue:    newTaskQueue(),
-		syncTasks:    make(map[replicaSegmentIndex]Task),
+		syncTasks:    make(map[replicaSegmentIndex]struct{}),
 	}
 }
 
@@ -247,24 +247,32 @@ func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
 	}
 }
 
-func (scheduler *taskScheduler) Sync(task Task) bool {
+func (scheduler *taskScheduler) Sync(segmentID, replicaID int64) bool {
 	scheduler.rwmutex.Lock()
 	defer scheduler.rwmutex.Unlock()
 
-	t := NewReplicaSegmentIndex(task.(*SegmentTask))
+	t := replicaSegmentIndex{
+		ReplicaID: replicaID,
+		SegmentID: segmentID,
+		IsGrowing: false,
+	}
 	if _, ok := scheduler.segmentTasks[t]; ok {
 		return false
 	}
 
-	scheduler.syncTasks[t] = task
+	scheduler.syncTasks[t] = struct{}{}
 	return true
 }
 
-func (scheduler *taskScheduler) RemoveSync(task Task) {
+func (scheduler *taskScheduler) RemoveSync(segmentID, replicaID int64) {
 	scheduler.rwmutex.Lock()
 	defer scheduler.rwmutex.Unlock()
 
-	t := NewReplicaSegmentIndex(task.(*SegmentTask))
+	t := replicaSegmentIndex{
+		ReplicaID: replicaID,
+		SegmentID: segmentID,
+		IsGrowing: false,
+	}
 	delete(scheduler.syncTasks, t)
 }
 

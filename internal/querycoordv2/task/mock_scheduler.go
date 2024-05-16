@@ -357,9 +357,9 @@ func (_c *MockScheduler_RemoveExecutor_Call) RunAndReturn(run func(int64)) *Mock
 	return _c
 }
 
-// RemoveSync provides a mock function with given fields: task
-func (_m *MockScheduler) RemoveSync(task Task) {
-	_m.Called(task)
+// RemoveSync provides a mock function with given fields: segmentID, replicaID
+func (_m *MockScheduler) RemoveSync(segmentID int64, replicaID int64) {
+	_m.Called(segmentID, replicaID)
 }
 
 // MockScheduler_RemoveSync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveSync'
@@ -368,14 +368,15 @@ type MockScheduler_RemoveSync_Call struct {
 }
 
 // RemoveSync is a helper method to define mock.On call
-//   - task Task
-func (_e *MockScheduler_Expecter) RemoveSync(task interface{}) *MockScheduler_RemoveSync_Call {
-	return &MockScheduler_RemoveSync_Call{Call: _e.mock.On("RemoveSync", task)}
+//   - segmentID int64
+//   - replicaID int64
+func (_e *MockScheduler_Expecter) RemoveSync(segmentID interface{}, replicaID interface{}) *MockScheduler_RemoveSync_Call {
+	return &MockScheduler_RemoveSync_Call{Call: _e.mock.On("RemoveSync", segmentID, replicaID)}
 }
 
-func (_c *MockScheduler_RemoveSync_Call) Run(run func(task Task)) *MockScheduler_RemoveSync_Call {
+func (_c *MockScheduler_RemoveSync_Call) Run(run func(segmentID int64, replicaID int64)) *MockScheduler_RemoveSync_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(Task))
+		run(args[0].(int64), args[1].(int64))
 	})
 	return _c
 }
@@ -385,7 +386,7 @@ func (_c *MockScheduler_RemoveSync_Call) Return() *MockScheduler_RemoveSync_Call
 	return _c
 }
 
-func (_c *MockScheduler_RemoveSync_Call) RunAndReturn(run func(Task)) *MockScheduler_RemoveSync_Call {
+func (_c *MockScheduler_RemoveSync_Call) RunAndReturn(run func(int64, int64)) *MockScheduler_RemoveSync_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -454,13 +455,13 @@ func (_c *MockScheduler_Stop_Call) RunAndReturn(run func()) *MockScheduler_Stop_
 	return _c
 }
 
-// Sync provides a mock function with given fields: task
-func (_m *MockScheduler) Sync(task Task) bool {
-	ret := _m.Called(task)
+// Sync provides a mock function with given fields: segmentID, replicaID
+func (_m *MockScheduler) Sync(segmentID int64, replicaID int64) bool {
+	ret := _m.Called(segmentID, replicaID)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(Task) bool); ok {
-		r0 = rf(task)
+	if rf, ok := ret.Get(0).(func(int64, int64) bool); ok {
+		r0 = rf(segmentID, replicaID)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
@@ -474,14 +475,15 @@ type MockScheduler_Sync_Call struct {
 }
 
 // Sync is a helper method to define mock.On call
-//   - task Task
-func (_e *MockScheduler_Expecter) Sync(task interface{}) *MockScheduler_Sync_Call {
-	return &MockScheduler_Sync_Call{Call: _e.mock.On("Sync", task)}
+//   - segmentID int64
+//   - replicaID int64
+func (_e *MockScheduler_Expecter) Sync(segmentID interface{}, replicaID interface{}) *MockScheduler_Sync_Call {
+	return &MockScheduler_Sync_Call{Call: _e.mock.On("Sync", segmentID, replicaID)}
 }
 
-func (_c *MockScheduler_Sync_Call) Run(run func(task Task)) *MockScheduler_Sync_Call {
+func (_c *MockScheduler_Sync_Call) Run(run func(segmentID int64, replicaID int64)) *MockScheduler_Sync_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(Task))
+		run(args[0].(int64), args[1].(int64))
 	})
 	return _c
 }
@@ -491,7 +493,7 @@ func (_c *MockScheduler_Sync_Call) Return(_a0 bool) *MockScheduler_Sync_Call {
 	return _c
 }
 
-func (_c *MockScheduler_Sync_Call) RunAndReturn(run func(Task) bool) *MockScheduler_Sync_Call {
+func (_c *MockScheduler_Sync_Call) RunAndReturn(run func(int64, int64) bool) *MockScheduler_Sync_Call {
 	_c.Call.Return(run)
 	return _c
 }

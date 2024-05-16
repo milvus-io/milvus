@@ -383,16 +383,3 @@ func (task *ChannelTask) Index() string {
 func (task *ChannelTask) String() string {
 	return fmt.Sprintf("%s [channel=%s]", task.baseTask.String(), task.Channel())
 }
-
-type SyncTask struct {
-	*baseTask
-}
-
-func NewSyncTask(ctx context.Context, source Source, collectionID, replicaID typeutil.UniqueID, actions ...Action) *SyncTask {
-	base := newBaseTask(ctx, source, collectionID, replicaID, "", "SyncTask")
-	base.actions = actions
-	base.priority = TaskPriorityHigh
-	return &SyncTask{
-		baseTask: base,
-	}
-}
