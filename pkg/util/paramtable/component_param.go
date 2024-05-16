@@ -1014,12 +1014,14 @@ type AccessLogConfig struct {
 	LocalPath     ParamItem  `refreshable:"false"`
 	Filename      ParamItem  `refreshable:"false"`
 	MaxSize       ParamItem  `refreshable:"false"`
-	CacheSize     ParamItem  `refreshable:"false"`
 	RotatedTime   ParamItem  `refreshable:"false"`
 	MaxBackups    ParamItem  `refreshable:"false"`
 	RemotePath    ParamItem  `refreshable:"false"`
 	RemoteMaxTime ParamItem  `refreshable:"false"`
 	Formatter     ParamGroup `refreshable:"false"`
+
+	CacheSize          ParamItem `refreshable:"false"`
+	CacheFlushInterval ParamItem `refreshable:"false"`
 }
 
 type proxyConfig struct {
@@ -1276,10 +1278,18 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
 		DefaultValue: "10240",
-		Doc:          "Size of log of memory cache, in B",
+		Doc:          "Size of log of memory cache, in B. (Close write cache if szie was 0",
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
+
+	p.AccessLog.CacheFlushInterval = ParamItem{
+		Key:          "proxy.accessLog.cacheSize",
+		Version:      "2.4.0",
+		DefaultValue: "3",
+		Doc:          "time interval of auto flush memory cache, in Seconds. (Close auto flush if interval was 0)",
+	}
+	p.AccessLog.CacheFlushInterval.Init(base.mgr)
 
 	p.AccessLog.MaxBackups = ParamItem{
 		Key:          "proxy.accessLog.maxBackups",
