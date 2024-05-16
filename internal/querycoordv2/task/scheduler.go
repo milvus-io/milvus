@@ -137,6 +137,8 @@ type Scheduler interface {
 	GetNodeChannelDelta(nodeID int64) int
 	GetChannelTaskNum() int
 	GetSegmentTaskNum() int
+	Sync(task Task) bool
+	RemoveSync(task Task)
 }
 
 type taskScheduler struct {
@@ -157,6 +159,8 @@ type taskScheduler struct {
 	channelTasks map[replicaChannelIndex]Task
 	processQueue *taskQueue
 	waitQueue    *taskQueue
+
+	syncTasks map[replicaSegmentIndex]Task
 }
 
 func NewScheduler(ctx context.Context,
@@ -188,6 +192,7 @@ func NewScheduler(ctx context.Context,
 		channelTasks: make(map[replicaChannelIndex]Task),
 		processQueue: newTaskQueue(),
 		waitQueue:    newTaskQueue(),
+		syncTasks:    make(map[replicaSegmentIndex]Task),
 	}
 }
 
@@ -240,6 +245,27 @@ func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
 		delete(scheduler.executors, nodeID)
 		log.Info("remove executor of offline QueryNode", zap.Int64("nodeID", nodeID))
 	}
+}
+
+func (scheduler *taskScheduler) Sync(task Task) bool {
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	t := NewReplicaSegmentIndex(task.(*SegmentTask))
+	if _, ok := scheduler.segmentTasks[t]; ok {
+		return false
+	}
+
+	scheduler.syncTasks[t] = task
+	return true
+}
+
+func (scheduler *taskScheduler) RemoveSync(task Task) {
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	t := NewReplicaSegmentIndex(task.(*SegmentTask))
+	delete(scheduler.syncTasks, t)
 }
 
 func (scheduler *taskScheduler) Add(task Task) error {
@@ -311,6 +337,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
+		if _, ok := scheduler.syncTasks[index]; ok {
+			return merr.WrapErrServiceInternal("task with the same segment exists")
+		}
 		if old, ok := scheduler.segmentTasks[index]; ok {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",

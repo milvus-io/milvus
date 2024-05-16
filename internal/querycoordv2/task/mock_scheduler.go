@@ -357,6 +357,39 @@ func (_c *MockScheduler_RemoveExecutor_Call) RunAndReturn(run func(int64)) *Mock
 	return _c
 }
 
+// RemoveSync provides a mock function with given fields: task
+func (_m *MockScheduler) RemoveSync(task Task) {
+	_m.Called(task)
+}
+
+// MockScheduler_RemoveSync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RemoveSync'
+type MockScheduler_RemoveSync_Call struct {
+	*mock.Call
+}
+
+// RemoveSync is a helper method to define mock.On call
+//   - task Task
+func (_e *MockScheduler_Expecter) RemoveSync(task interface{}) *MockScheduler_RemoveSync_Call {
+	return &MockScheduler_RemoveSync_Call{Call: _e.mock.On("RemoveSync", task)}
+}
+
+func (_c *MockScheduler_RemoveSync_Call) Run(run func(task Task)) *MockScheduler_RemoveSync_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(Task))
+	})
+	return _c
+}
+
+func (_c *MockScheduler_RemoveSync_Call) Return() *MockScheduler_RemoveSync_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockScheduler_RemoveSync_Call) RunAndReturn(run func(Task)) *MockScheduler_RemoveSync_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Start provides a mock function with given fields:
 func (_m *MockScheduler) Start() {
 	_m.Called()
@@ -417,6 +450,48 @@ func (_c *MockScheduler_Stop_Call) Return() *MockScheduler_Stop_Call {
 }
 
 func (_c *MockScheduler_Stop_Call) RunAndReturn(run func()) *MockScheduler_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Sync provides a mock function with given fields: task
+func (_m *MockScheduler) Sync(task Task) bool {
+	ret := _m.Called(task)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(Task) bool); ok {
+		r0 = rf(task)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockScheduler_Sync_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Sync'
+type MockScheduler_Sync_Call struct {
+	*mock.Call
+}
+
+// Sync is a helper method to define mock.On call
+//   - task Task
+func (_e *MockScheduler_Expecter) Sync(task interface{}) *MockScheduler_Sync_Call {
+	return &MockScheduler_Sync_Call{Call: _e.mock.On("Sync", task)}
+}
+
+func (_c *MockScheduler_Sync_Call) Run(run func(task Task)) *MockScheduler_Sync_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(Task))
+	})
+	return _c
+}
+
+func (_c *MockScheduler_Sync_Call) Return(_a0 bool) *MockScheduler_Sync_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockScheduler_Sync_Call) RunAndReturn(run func(Task) bool) *MockScheduler_Sync_Call {
 	_c.Call.Return(run)
 	return _c
 }

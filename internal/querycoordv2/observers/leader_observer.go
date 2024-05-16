@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -44,6 +45,7 @@ type LeaderObserver struct {
 	cluster session.Cluster
 	nodeMgr *session.NodeManager
 
+	scheduler  task.Scheduler
 	dispatcher *taskDispatcher[int64]
 
 	stopOnce sync.Once
@@ -126,6 +128,16 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 
 			actions := o.findNeedLoadedSegments(leaderView, dists)
 			actions = append(actions, o.findNeedRemovedSegments(leaderView, dists)...)
+			// Try to add a sync task to scheduler and block concurrent segment tasks to avoid inconsistent state
+			for _, action := range actions {
+				task := task.NewSyncTask(ctx, nil, action.Info.CollectionID, replica.ID, nil)
+				if ok := o.scheduler.Sync(task); !ok {
+					return
+				}
+				defer func() {
+					o.scheduler.RemoveSync(task)
+				}()
+			}
 			o.sync(ctx, replica.GetID(), leaderView, actions)
 		}
 	}
