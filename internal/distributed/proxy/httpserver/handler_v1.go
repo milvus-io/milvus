@@ -216,7 +216,7 @@ func (h *HandlersV1) listCollections(c *gin.Context) {
 	} else {
 		collections = []string{}
 	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: collections})
+	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: collections})
 }
 
 func (h *HandlersV1) createCollection(c *gin.Context) {
@@ -326,7 +326,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return
 	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
+	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}})
 }
 
 func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
@@ -408,7 +408,7 @@ func (h *HandlersV1) getCollectionDetails(c *gin.Context) {
 	} else {
 		indexDesc = printIndexes(indexResp.IndexDescriptions)
 	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 		HTTPCollectionName:    coll.CollectionName,
 		HTTPReturnDescription: coll.Schema.Description,
 		"fields":              printFields(coll.Schema.Fields),
@@ -468,7 +468,7 @@ func (h *HandlersV1) dropCollection(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 	} else {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}})
 	}
 }
 
@@ -532,7 +532,7 @@ func (h *HandlersV1) query(c *gin.Context) {
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData})
 		}
 	}
 }
@@ -603,7 +603,7 @@ func (h *HandlersV1) get(c *gin.Context) {
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData})
 		}
 	}
 }
@@ -664,7 +664,7 @@ func (h *HandlersV1) delete(c *gin.Context) {
 	if err != nil {
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 	} else {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{}})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{}})
 	}
 }
 
@@ -744,12 +744,12 @@ func (h *HandlersV1) insert(c *gin.Context) {
 		case *schemapb.IDs_IntId:
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": formatInt64(insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": formatInt64(insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}})
 			}
 		case *schemapb.IDs_StrId:
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}})
 		default:
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -842,12 +842,12 @@ func (h *HandlersV1) upsert(c *gin.Context) {
 		case *schemapb.IDs_IntId:
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data}})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)}})
 			}
 		case *schemapb.IDs_StrId:
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data}})
 		default:
 			c.JSON(http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
@@ -933,7 +933,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 	} else {
 		searchResp := response.(*milvuspb.SearchResults)
 		if searchResp.Results.TopK == int64(0) {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(searchResp.Results.TopK, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
@@ -944,7 +944,7 @@ func (h *HandlersV1) search(c *gin.Context) {
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData})
 			}
 		}
 	}

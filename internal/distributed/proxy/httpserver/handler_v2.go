@@ -408,7 +408,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	if coll.Properties == nil {
 		coll.Properties = []*commonpb.KeyValuePair{}
 	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 		HTTPCollectionName:    coll.CollectionName,
 		HTTPCollectionID:      coll.CollectionID,
 		HTTPReturnDescription: coll.Schema.Description,
@@ -458,7 +458,7 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return resp, err
 	} else if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotLoad {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 			HTTPReturnLoadState: resp.(*milvuspb.GetLoadStateResponse).State.String(),
 		}})
 		return resp, err
@@ -483,7 +483,7 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	if progress >= 100 {
 		state = commonpb.LoadState_LoadStateLoaded.String()
 	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 		HTTPReturnLoadState:    state,
 		HTTPReturnLoadProgress: progress,
 	}, HTTPReturnMessage: errMessage})
@@ -587,7 +587,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 			})
 		} else {
 			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: outputData,
 				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
 			})
@@ -634,7 +634,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 			})
 		} else {
 			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: outputData,
 				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
 			})
@@ -721,20 +721,20 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
 				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
 					HTTPReturnCost: cost,
 				})
 			} else {
 				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": formatInt64(insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
 					HTTPReturnCost: cost,
 				})
 			}
 		case *schemapb.IDs_StrId:
 			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
 				HTTPReturnCost: cost,
 			})
@@ -796,20 +796,20 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
 				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
 					HTTPReturnCost: cost,
 				})
 			} else {
 				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
 					HTTPReturnCost: cost,
 				})
 			}
 		case *schemapb.IDs_StrId:
 			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
 				HTTPReturnCost: cost,
 			})
@@ -932,7 +932,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(searchResp.Results.TopK, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
@@ -943,7 +943,7 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData, HTTPReturnCost: cost})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost})
 			}
 		}
 	}
@@ -1010,7 +1010,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
+			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
@@ -1021,7 +1021,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData, HTTPReturnCost: cost})
+				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost})
 			}
 		}
 	}
@@ -1531,7 +1531,7 @@ func (h *HandlersV2) describeRole(ctx context.Context, c *gin.Context, anyReq an
 			}
 			privileges = append(privileges, privilege)
 		}
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: privileges})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: privileges})
 	}
 	return resp, err
 }
@@ -1661,7 +1661,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: indexInfos})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: indexInfos})
 	}
 	return resp, err
 }
@@ -1735,7 +1735,7 @@ func (h *HandlersV2) describeAlias(ctx context.Context, c *gin.Context, anyReq a
 	})
 	if err == nil {
 		response := resp.(*milvuspb.DescribeAliasResponse)
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 			HTTPDbName:         response.DbName,
 			HTTPCollectionName: response.Collection,
 			HTTPAliasName:      response.Alias,
@@ -1831,7 +1831,7 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 			records = append(records, jobDetail)
 		}
 		returnData["records"] = records
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
 }
@@ -1868,7 +1868,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 	if err == nil {
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = resp.(*internalpb.ImportResponse).GetJobID()
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
 }
@@ -1924,7 +1924,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		}
 		returnData["fileSize"] = totalFileSize
 		returnData["details"] = details
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
 }
