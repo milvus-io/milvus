@@ -1310,7 +1310,7 @@ func Test_validateUtil_checkAligned(t *testing.T) {
 					Scalars: &schemapb.ScalarField{
 						Data: &schemapb.ScalarField_StringData{
 							StringData: &schemapb.StringArray{
-								Data: generateVarCharArray(10, 8),
+								Data: testutils.GenerateVarCharArray(10, 8),
 							},
 						},
 					},
