@@ -291,14 +291,16 @@ func NewLeaderObserver(
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
+	scheduler task2.Scheduler,
 ) *LeaderObserver {
 	ob := &LeaderObserver{
-		dist:    dist,
-		meta:    meta,
-		target:  targetMgr,
-		broker:  broker,
-		cluster: cluster,
-		nodeMgr: nodeMgr,
+		dist:      dist,
+		meta:      meta,
+		target:    targetMgr,
+		broker:    broker,
+		cluster:   cluster,
+		nodeMgr:   nodeMgr,
+		scheduler: scheduler,
 	}
 
 	dispatcher := newTaskDispatcher[int64](ob.observeCollection)

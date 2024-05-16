@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -69,6 +70,7 @@ type CollectionObserverSuite struct {
 	targetObserver    *TargetObserver
 	leaderObserver    *LeaderObserver
 	checkerController *checkers.CheckerController
+	scheduler         *task.MockScheduler
 
 	// Test object
 	ob *CollectionObserver
@@ -201,7 +203,10 @@ func (suite *CollectionObserverSuite) SetupTest() {
 	suite.checkerController = &checkers.CheckerController{}
 
 	mockCluster := session.NewMockCluster(suite.T())
-	suite.leaderObserver = NewLeaderObserver(suite.dist, suite.meta, suite.targetMgr, suite.broker, mockCluster, nodeMgr)
+	suite.scheduler = task.NewMockScheduler(suite.T())
+	suite.scheduler.EXPECT().Sync(mock.Anything, mock.Anything).Return(true).Maybe()
+	suite.scheduler.EXPECT().RemoveSync(mock.Anything, mock.Anything).Maybe()
+	suite.leaderObserver = NewLeaderObserver(suite.dist, suite.meta, suite.targetMgr, suite.broker, mockCluster, nodeMgr, suite.scheduler)
 	mockCluster.EXPECT().SyncDistribution(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil).Maybe()
 
 	// Test object

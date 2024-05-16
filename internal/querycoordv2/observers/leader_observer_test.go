@@ -37,6 +37,7 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	task2 "github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -48,8 +49,9 @@ type LeaderObserverTestSuite struct {
 	kv          kv.MetaKv
 	mockCluster *session.MockCluster
 
-	meta   *meta.Meta
-	broker *meta.MockBroker
+	meta      *meta.Meta
+	broker    *meta.MockBroker
+	scheduler *task2.MockScheduler
 }
 
 func (suite *LeaderObserverTestSuite) SetupSuite() {
@@ -83,7 +85,10 @@ func (suite *LeaderObserverTestSuite) SetupTest() {
 	// }, nil).Maybe()
 	distManager := meta.NewDistributionManager()
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
-	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.broker, suite.mockCluster, nodeMgr)
+	suite.scheduler = task2.NewMockScheduler(suite.T())
+	suite.scheduler.EXPECT().Sync(mock.Anything, mock.Anything).Return(true).Maybe()
+	suite.scheduler.EXPECT().RemoveSync(mock.Anything, mock.Anything).Maybe()
+	suite.observer = NewLeaderObserver(distManager, suite.meta, targetManager, suite.broker, suite.mockCluster, nodeMgr, suite.scheduler)
 }
 
 func (suite *LeaderObserverTestSuite) TearDownTest() {
