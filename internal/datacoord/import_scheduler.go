@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 const (
@@ -147,7 +148,7 @@ func (s *importScheduler) peekSlots() map[int64]int64 {
 		return s.info.NodeID
 	})
 	nodeSlots := make(map[int64]int64)
-	mu := &sync.Mutex{}
+	mu := &lock.Mutex{}
 	wg := &sync.WaitGroup{}
 	for _, nodeID := range nodeIDs {
 		wg.Add(1)

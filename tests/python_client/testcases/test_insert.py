@@ -32,12 +32,6 @@ default_search_exp = "int64 >= 0"
 class TestInsertParams(TestcaseBase):
     """ Test case of Insert interface """
 
-    @pytest.fixture(scope="module", params=ct.get_invalid_strs)
-    def get_invalid_field_name(self, request):
-        if isinstance(request.param, (list, dict)):
-            pytest.skip()
-        yield request.param
-
     @pytest.mark.tags(CaseLabel.L0)
     def test_insert_dataframe_data(self):
         """
@@ -145,19 +139,20 @@ class TestInsertParams(TestcaseBase):
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_insert_invalid_field_name_dataframe(self, get_invalid_field_name):
+    def test_insert_invalid_field_name_dataframe(self):
         """
         target: test insert with invalid dataframe data
         method: insert with invalid field name dataframe
         expected: raise exception
         """
+        invalid_field_name = "non_existing"
         c_name = cf.gen_unique_str(prefix)
         collection_w = self.init_collection_wrap(name=c_name)
         df = cf.gen_default_dataframe_data(10)
         df.rename(
-            columns={ct.default_int64_field_name: get_invalid_field_name}, inplace=True)
+            columns={ct.default_int64_field_name: invalid_field_name}, inplace=True)
         error = {ct.err_code: 999,
-                 ct.err_msg: f"The name of field don't match, expected: int64, got {get_invalid_field_name}"}
+                 ct.err_msg: f"The name of field don't match, expected: int64, got {invalid_field_name}"}
         collection_w.insert(
             data=df, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1973,8 +1968,8 @@ class TestUpsertInvalid(TestcaseBase):
         collection_w.upsert(data=data, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("partition_name", ct.get_invalid_strs[7:13])
-    def test_upsert_partition_name_invalid(self, partition_name):
+    @pytest.mark.parametrize("partition_name", ct.invalid_resource_names[4:])
+    def test_upsert_partition_name_non_existing(self, partition_name):
         """
         target: test upsert partition name invalid
         method: 1. create a collection with partitions

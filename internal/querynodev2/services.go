@@ -422,6 +422,22 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		return merr.Status(err), nil
 	}
 
+	// fallback binlog memory size to log size when it is zero
+	fallbackBinlogMemorySize := func(binlogs []*datapb.FieldBinlog) {
+		for _, insertBinlogs := range binlogs {
+			for _, b := range insertBinlogs.GetBinlogs() {
+				if b.GetMemorySize() == 0 {
+					b.MemorySize = b.GetLogSize()
+				}
+			}
+		}
+	}
+	for _, s := range req.GetInfos() {
+		fallbackBinlogMemorySize(s.GetBinlogPaths())
+		fallbackBinlogMemorySize(s.GetStatslogs())
+		fallbackBinlogMemorySize(s.GetDeltalogs())
+	}
+
 	// Delegates request to workers
 	if req.GetNeedTransfer() {
 		delegator, ok := node.delegators.Get(segment.GetInsertChannel())

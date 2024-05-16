@@ -305,46 +305,58 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			vec[i] = float32(num)
 		}
 		return vec, nil
-	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+	case schemapb.DataType_Float16Vector:
+		// parse float string to Float16 bytes
 		arr, ok := obj.([]interface{})
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
-		if len(arr) != r.dim*2 {
-			return nil, r.wrapDimError(len(arr)/2, fieldID)
+		if len(arr) != r.dim {
+			return nil, r.wrapDimError(len(arr), fieldID)
 		}
-		vec := make([]byte, len(arr))
+		vec := make([]byte, len(arr)*2)
 		for i := 0; i < len(arr); i++ {
 			value, ok := arr[i].(json.Number)
 			if !ok {
 				return nil, r.wrapTypeError(arr[i], fieldID)
 			}
-			num, err := strconv.ParseUint(value.String(), 0, 8)
+			num, err := strconv.ParseFloat(value.String(), 32)
 			if err != nil {
 				return nil, err
 			}
-			vec[i] = byte(num)
+			copy(vec[i*2:], typeutil.Float32ToFloat16Bytes(float32(num)))
+		}
+		return vec, nil
+	case schemapb.DataType_BFloat16Vector:
+		// parse float string to BFloat16 bytes
+		arr, ok := obj.([]interface{})
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		if len(arr) != r.dim {
+			return nil, r.wrapDimError(len(arr), fieldID)
+		}
+		vec := make([]byte, len(arr)*2)
+		for i := 0; i < len(arr); i++ {
+			value, ok := arr[i].(json.Number)
+			if !ok {
+				return nil, r.wrapTypeError(arr[i], fieldID)
+			}
+			num, err := strconv.ParseFloat(value.String(), 32)
+			if err != nil {
+				return nil, err
+			}
+			copy(vec[i*2:], typeutil.Float32ToBFloat16Bytes(float32(num)))
 		}
 		return vec, nil
 	case schemapb.DataType_SparseFloatVector:
-		arr, ok := obj.([]interface{})
+		arr, ok := obj.(map[string]interface{})
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
-		if len(arr)%8 != 0 {
-			return nil, r.wrapDimError(len(arr), fieldID)
-		}
-		vec := make([]byte, len(arr))
-		for i := 0; i < len(arr); i++ {
-			value, ok := arr[i].(json.Number)
-			if !ok {
-				return nil, r.wrapTypeError(arr[i], fieldID)
-			}
-			num, err := strconv.ParseUint(value.String(), 0, 8)
-			if err != nil {
-				return nil, err
-			}
-			vec[i] = byte(num)
+		vec, err := typeutil.CreateSparseFloatRowFromJSON(arr)
+		if err != nil {
+			return nil, err
 		}
 		return vec, nil
 	case schemapb.DataType_String, schemapb.DataType_VarChar:

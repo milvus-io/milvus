@@ -519,9 +519,7 @@ func (s *AssignByCountPolicySuite) TestWithoutUnassignedChannels() {
 
 func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 	s.Run("one unassigned channel", func() {
-		unassigned := []RWChannel{
-			getChannel("new-ch-1", 1),
-		}
+		unassigned := NewNodeChannelInfo(bufferID, getChannel("new-ch-1", 1))
 
 		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, nil)
 		s.NotNil(opSet)
@@ -537,11 +535,11 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 	})
 
 	s.Run("three unassigned channel", func() {
-		unassigned := []RWChannel{
+		unassigned := NewNodeChannelInfo(bufferID,
 			getChannel("new-ch-1", 1),
 			getChannel("new-ch-2", 1),
 			getChannel("new-ch-3", 1),
-		}
+		)
 
 		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, nil)
 		s.NotNil(opSet)
@@ -561,11 +559,11 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 	})
 
 	s.Run("three unassigned channel with execlusiveNodes", func() {
-		unassigned := []RWChannel{
+		unassigned := NewNodeChannelInfo(bufferID,
 			getChannel("new-ch-1", 1),
 			getChannel("new-ch-2", 1),
 			getChannel("new-ch-3", 1),
-		}
+		)
 
 		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, []int64{1, 2})
 		s.NotNil(opSet)
@@ -584,13 +582,13 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 		s.ElementsMatch([]int64{3}, nodeIDs)
 	})
 	s.Run("67 unassigned with 33 in node1, none in node2,3", func() {
-		var unassigned []RWChannel
+		var unassignedChannels []RWChannel
 		m1 := make(map[string]int64)
 		for i := 0; i < 33; i++ {
 			m1[fmt.Sprintf("ch-%d", i)] = 1
 		}
 		for i := 33; i < 100; i++ {
-			unassigned = append(unassigned, getChannel(fmt.Sprintf("ch-%d", i), 1))
+			unassignedChannels = append(unassignedChannels, getChannel(fmt.Sprintf("ch-%d", i), 1))
 		}
 		s.curCluster = []*NodeChannelInfo{
 			{NodeID: 1, Channels: getChannels(m1)},
@@ -598,6 +596,7 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 			{NodeID: 3, Channels: map[string]RWChannel{}},
 		}
 
+		unassigned := NewNodeChannelInfo(bufferID, unassignedChannels...)
 		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, nil)
 		s.NotNil(opSet)
 
@@ -613,5 +612,31 @@ func (s *AssignByCountPolicySuite) TestWithUnassignedChannels() {
 			return op.NodeID, op.NodeID != bufferID
 		})
 		s.ElementsMatch([]int64{3, 2}, nodeIDs)
+	})
+
+	s.Run("toAssign from nodeID = 1", func() {
+		var unassigned *NodeChannelInfo
+		for _, info := range s.curCluster {
+			if info.NodeID == int64(1) {
+				unassigned = info
+			}
+		}
+		s.Require().NotNil(unassigned)
+
+		opSet := AvgAssignByCountPolicy(s.curCluster, unassigned, []int64{1, 2})
+		s.NotNil(opSet)
+
+		s.Equal(3, opSet.GetChannelNumber())
+		for _, op := range opSet.Collect() {
+			if op.NodeID == int64(1) {
+				s.Equal(Delete, op.Type)
+			}
+		}
+		s.Equal(2, opSet.Len())
+
+		nodeIDs := lo.FilterMap(opSet.Collect(), func(op *ChannelOp, _ int) (int64, bool) {
+			return op.NodeID, true
+		})
+		s.ElementsMatch([]int64{3, 1}, nodeIDs)
 	})
 }

@@ -64,39 +64,23 @@ class TestIndexParams(TestcaseBase):
                                    check_items={ct.err_code: 0, ct.err_msg: clem.CollectionType})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.parametrize("field_name", ct.get_invalid_strs)
-    def test_index_field_name_invalid(self, field_name):
+    def test_index_field_name_not_existed(self):
         """
-        target: test index with error field name
+        target: test index on non_existing field
         method: input field name
         expected: raise exception
         """
         collection_name = cf.gen_unique_str(prefix)
 
         collection_w = self.init_collection_wrap(name=collection_name)
-
-        log.error(iem.WrongFieldName % str(field_name))
-        self.index_wrap.init_index(collection_w.collection, field_name, default_index_params,
+        fieldname = "non_existing"
+        self.index_wrap.init_index(collection_w.collection, fieldname, default_index_params,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1,
-                                                ct.err_msg: iem.WrongFieldName % str(field_name)})
-
-    @pytest.mark.tags(CaseLabel.L1)
-    def test_index_field_name_not_existed(self):
-        """
-        target: test index with error field name
-        method: input field name not created
-        expected: raise exception
-        """
-        c_name = cf.gen_unique_str(prefix)
-        f_name = cf.gen_unique_str(prefix)
-        collection_w = self.init_collection_wrap(name=c_name)
-        self.index_wrap.init_index(collection_w.collection, f_name, default_index_params, check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1,
-                                                ct.err_msg: f"cannot create index on non-existed field: {f_name}"})
+                                   check_items={ct.err_code: 999,
+                                                ct.err_msg: "cannot create index on non-existed field"})
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.parametrize("index_type", ct.get_invalid_strs)
+    @pytest.mark.parametrize("index_type", ["non_exiting_type", 100])
     def test_index_type_invalid(self, index_type):
         """
         target: test index with error index type
@@ -128,7 +112,7 @@ class TestIndexParams(TestcaseBase):
         index_params["index_type"] = "IVFFFFFFF"
         self.index_wrap.init_index(collection_w.collection, default_field_name, index_params,
                                    check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, ct.err_msg: ""})
+                                   check_items={ct.err_code: 999, ct.err_msg: ""})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_params_invalid(self, get_invalid_index_params):

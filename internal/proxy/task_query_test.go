@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -195,7 +196,7 @@ func TestQueryTask_all(t *testing.T) {
 		Status: merr.Success(),
 		Ids: &schemapb.IDs{
 			IdField: &schemapb.IDs_IntId{
-				IntId: &schemapb.LongArray{Data: generateInt64Array(hitNum)},
+				IntId: &schemapb.LongArray{Data: testutils.GenerateInt64Array(hitNum)},
 			},
 		},
 	}

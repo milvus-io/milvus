@@ -32,11 +32,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestRepackInsertData(t *testing.T) {
 	nb := 10
-	hash := generateHashKeys(nb)
+	hash := testutils.GenerateHashKeys(nb)
 	prefix := "TestRepackInsertData"
 	dbName := ""
 	collectionName := prefix + funcutil.GenRandomStr()
@@ -143,7 +144,7 @@ func TestRepackInsertData(t *testing.T) {
 
 func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 	nb := 10
-	hash := generateHashKeys(nb)
+	hash := testutils.GenerateHashKeys(nb)
 	prefix := "TestRepackInsertData"
 	collectionName := prefix + funcutil.GenRandomStr()
 

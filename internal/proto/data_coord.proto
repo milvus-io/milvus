@@ -405,6 +405,10 @@ message Binlog {
   string log_path = 4;
   int64 log_size = 5;
   int64 logID = 6;
+  // memory_size represents the size occupied by loading data into memory.
+  // log_size represents the size after data serialized.
+  // for stats_log, the memory_size always equal log_size.
+  int64 memory_size = 7;
 }
 
 message GetRecoveryInfoResponse {

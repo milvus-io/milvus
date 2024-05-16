@@ -148,19 +148,19 @@ func getCompactedSegmentSize(s *datapb.CompactionSegment) int64 {
 	if s != nil {
 		for _, binlogs := range s.GetInsertLogs() {
 			for _, l := range binlogs.GetBinlogs() {
-				segmentSize += l.GetLogSize()
+				segmentSize += l.GetMemorySize()
 			}
 		}
 
 		for _, deltaLogs := range s.GetDeltalogs() {
 			for _, l := range deltaLogs.GetBinlogs() {
-				segmentSize += l.GetLogSize()
+				segmentSize += l.GetMemorySize()
 			}
 		}
 
-		for _, statsLogs := range s.GetDeltalogs() {
+		for _, statsLogs := range s.GetField2StatslogPaths() {
 			for _, l := range statsLogs.GetBinlogs() {
-				segmentSize += l.GetLogSize()
+				segmentSize += l.GetMemorySize()
 			}
 		}
 	}
@@ -232,7 +232,7 @@ func calculateL0SegmentSize(fields []*datapb.FieldBinlog) float64 {
 	size := int64(0)
 	for _, field := range fields {
 		for _, binlog := range field.GetBinlogs() {
-			size += binlog.GetLogSize()
+			size += binlog.GetMemorySize()
 		}
 	}
 	return float64(size)

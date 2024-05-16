@@ -6083,12 +6083,12 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 			return resp, nil
 		}
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
-		partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		partitionIDs = lo.Values(partitions)
+		partitionIDs = []UniqueID{partitionID}
 	} else {
 		if hasPartitionKey {
 			if req.GetPartitionName() != "" {

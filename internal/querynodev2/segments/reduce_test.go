@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -128,7 +129,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	nq := int64(10)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
-	vec := generateFloatVectors(1, defaultDim)
+	vec := testutils.GenerateFloatVectors(1, defaultDim)
 	var searchRawData []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)

@@ -128,7 +128,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	for _, segment := range segments {
 		if segment != nil &&
 			(isFlushState(segment.GetState())) &&
-			segment.GetLevel() == datapb.SegmentLevel_L1 &&
+			segment.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
 			!sealedSegmentsIDDict[segment.GetID()] {
 			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
 		}
@@ -586,7 +586,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		return resp, nil
 	}
 
-	var collectionID int64
 	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
 	for _, seg2Drop := range req.GetSegments() {
 		info := &datapb.SegmentInfo{
@@ -602,7 +601,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		}
 		segment := NewSegmentInfo(info)
 		segments = append(segments, segment)
-		collectionID = seg2Drop.GetCollectionID()
 	}
 
 	err := s.meta.UpdateDropChannelSegmentInfo(channel, segments)
@@ -619,11 +617,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionHandler.removeTasksByChannel(channel)
-
-	metrics.CleanupDataCoordNumStoredRows(collectionID)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
-	metrics.CleanupDataCoordBulkInsertVectors(collectionID)
-
 	// no compaction triggered in Drop procedure
 	return resp, nil
 }
