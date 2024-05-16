@@ -14,9 +14,18 @@ FROM amazonlinux:2023
 ARG TARGETARCH
 
 RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
-    autoconf automake golang python3 python3-pip perl-FindBin texinfo \
+    autoconf automake python3 python3-pip perl-FindBin texinfo \
     pkg-config libuuid-devel libaio perl-IPC-Cmd libasan openblas-devel && \
     rm -rf /var/cache/yum/*
+
+ENV GOPATH /go
+ENV GOROOT /usr/local/go
+ENV GO111MODULE on
+ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.21.10.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+    mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
+    go clean --modcache && \
+    chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
 RUN pip3 install conan==1.61.0
 
@@ -35,9 +44,9 @@ RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr
 RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest --only-downloads
 
 RUN mkdir /tmp/ccache && cd /tmp/ccache &&\
-    wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/h/hiredis-1.0.2-1.el9.`uname -m`.rpm &&\
+    wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/h/hiredis-1.0.2-2.el9.`uname -m`.rpm &&\
     wget https://dl.fedoraproject.org/pub/epel/9/Everything/`uname -m`/Packages/c/ccache-4.5.1-2.el9.`uname -m`.rpm &&\
-    rpm -i hiredis-1.0.2-1.el9.`uname -m`.rpm ccache-4.5.1-2.el9.`uname -m`.rpm &&\
+    rpm -i hiredis-1.0.2-2.el9.`uname -m`.rpm ccache-4.5.1-2.el9.`uname -m`.rpm &&\
     rm -rf /tmp/ccache
 
 
