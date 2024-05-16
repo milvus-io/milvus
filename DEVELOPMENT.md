@@ -104,7 +104,7 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 Linux systems (Recommend Ubuntu 20.04 or later):
 
 ```bash
-go: >= 1.20
+go: >= 1.21
 cmake: >= 3.18
 gcc: 7.5
 conan: 1.61
@@ -113,7 +113,7 @@ conan: 1.61
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 
 ```bash
-go: >= 1.20
+go: >= 1.21
 cmake: >= 3.18
 llvm: >= 15
 conan: 1.61
@@ -122,7 +122,7 @@ conan: 1.61
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 
 ```bash
-go: >= 1.20 (Arch=ARM64)
+go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
 conan: 1.61
@@ -178,7 +178,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
-Note: go >= 1.20 is required to build Milvus.
+Note: go >= 1.21 is required to build Milvus.
 
 #### Docker & Docker Compose
 
@@ -239,8 +239,8 @@ pip3 install conan==1.61.0
 #### Install GO 1.80
 
 ```bash
-wget https://go.dev/dl/go1.18.10.linux-arm64.tar.gz
-tar zxf go1.18.10.linux-arm64.tar.gz
+wget https://go.dev/dl/go1.21.10.linux-arm64.tar.gz
+tar zxf go1.21.10.linux-arm64.tar.gz
 mv ./go /usr/local
 vi /etc/profile
 export PATH=$PATH:/usr/local/go/bin
