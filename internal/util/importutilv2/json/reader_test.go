@@ -143,14 +143,7 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 				data[fieldID] = typeutil.BFloat16BytesToFloat32Vector(bytes)
 			case schemapb.DataType_SparseFloatVector:
 				bytes := v.GetRow(i).([]byte)
-				elemCount := len(bytes) / 8
-				values := make(map[uint32]float32)
-				for j := 0; j < elemCount; j++ {
-					idx := common.Endian.Uint32(bytes[j*8:])
-					f := typeutil.BytesToFloat32(bytes[j*8+4:])
-					values[idx] = f
-				}
-				data[fieldID] = values
+				data[fieldID] = typeutil.SparseFloatBytesToMap(bytes)
 			default:
 				data[fieldID] = v.GetRow(i)
 			}
