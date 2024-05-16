@@ -397,7 +397,7 @@ func (s *DataSyncServiceSuite) SetupTest() {
 		},
 	}
 	s.node.ctx = context.Background()
-	s.node.channelCheckpointUpdater = newChannelCheckpointUpdater(s.node)
+	s.node.channelCheckpointUpdater = newChannelCheckpointUpdater(s.node.broker)
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "0.01")
 	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "10")
 	go s.node.channelCheckpointUpdater.start()
