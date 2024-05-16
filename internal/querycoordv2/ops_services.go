@@ -276,7 +276,7 @@ func (s *Server) TransferSegment(ctx context.Context, req *querypb.TransferSegme
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
 		if req.GetToAllNodes() {
-			dstNodeSet.Insert(replica.GetNodes()...)
+			dstNodeSet.Insert(replica.GetRWNodes()...)
 		} else {
 			// check whether dstNode is healthy
 			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {
@@ -348,7 +348,7 @@ func (s *Server) TransferChannel(ctx context.Context, req *querypb.TransferChann
 		// when no dst node specified, default to use all other nodes in same
 		dstNodeSet := typeutil.NewUniqueSet()
 		if req.GetToAllNodes() {
-			dstNodeSet.Insert(replica.GetNodes()...)
+			dstNodeSet.Insert(replica.GetRWNodes()...)
 		} else {
 			// check whether dstNode is healthy
 			if err := s.isStoppingNode(req.GetTargetNodeID()); err != nil {

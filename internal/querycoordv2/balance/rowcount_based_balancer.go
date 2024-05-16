@@ -182,7 +182,7 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
 	}
 
-	for _, nid := range replica.GetNodes() {
+	for _, nid := range replica.GetRWNodes() {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue

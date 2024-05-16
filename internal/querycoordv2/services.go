@@ -686,7 +686,7 @@ func (s *Server) LoadBalance(ctx context.Context, req *querypb.LoadBalanceReques
 	// when no dst node specified, default to use all other nodes in same
 	dstNodeSet := typeutil.NewUniqueSet()
 	if len(req.GetDstNodeIDs()) == 0 {
-		dstNodeSet.Insert(replica.GetNodes()...)
+		dstNodeSet.Insert(replica.GetRWNodes()...)
 	} else {
 		for _, dstNode := range req.GetDstNodeIDs() {
 			if !replica.Contains(dstNode) {
@@ -1075,7 +1075,7 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 	replicasInRG := s.meta.GetByResourceGroup(req.GetResourceGroup())
 	for _, replica := range replicasInRG {
 		loadedReplicas[replica.GetCollectionID()]++
-		for _, node := range replica.GetNodes() {
+		for _, node := range replica.GetRONodes() {
 			if !s.meta.ContainsNode(replica.GetResourceGroup(), node) {
 				outgoingNodes[replica.GetCollectionID()]++
 			}
@@ -1090,7 +1090,7 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 			if replica.GetResourceGroup() == req.GetResourceGroup() {
 				continue
 			}
-			for _, node := range replica.GetNodes() {
+			for _, node := range replica.GetRONodes() {
 				if s.meta.ContainsNode(req.GetResourceGroup(), node) {
 					incomingNodes[collection]++
 				}

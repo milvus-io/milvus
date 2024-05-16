@@ -476,7 +476,7 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAs
 		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
 	}
 
-	for _, nid := range replica.GetNodes() {
+	for _, nid := range replica.GetRWNodes() {
 		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
 			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
 			continue
@@ -515,18 +515,18 @@ func (b *MultiTargetBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAs
 		}
 
 		if len(channelPlans) == 0 {
-			segmentPlans = b.genSegmentPlan(replica)
+			segmentPlans = b.genSegmentPlan(replica, onlineNodes)
 		}
 	}
 
 	return segmentPlans, channelPlans
 }
 
-func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica) []SegmentAssignPlan {
+func (b *MultiTargetBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes []int64) []SegmentAssignPlan {
 	// get segments distribution on replica level and global level
 	nodeSegments := make(map[int64][]*meta.Segment)
 	globalNodeSegments := make(map[int64][]*meta.Segment)
-	for _, node := range replica.GetNodes() {
+	for _, node := range onlineNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&

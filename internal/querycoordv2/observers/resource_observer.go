@@ -98,10 +98,6 @@ func (ob *ResourceObserver) checkAndRecoverResourceGroup() {
 		manager.AssignPendingIncomingNode()
 	}
 
-	// Remove all down nodes in resource group manager.
-	log.Debug("remove all down nodes in resource group manager...")
-	ob.meta.RemoveAllDownNode()
-
 	log.Debug("recover resource groups...")
 	// Recover all resource group into expected configuration.
 	for _, rgName := range rgNames {

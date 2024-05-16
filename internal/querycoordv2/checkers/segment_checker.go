@@ -204,7 +204,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		log.Info("replica does not exist, skip it")
 		return
 	}
-	dist := c.getSealedSegmentsDist(replica)
+	dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	sort.Slice(dist, func(i, j int) bool {
 		return dist[i].Version < dist[j].Version
 	})
@@ -293,14 +293,6 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	return
 }
 
-func (c *SegmentChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
-	ret := make([]*meta.Segment, 0)
-	for _, node := range replica.GetNodes() {
-		ret = append(ret, c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))...)
-	}
-	return ret
-}
-
 func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Segment {
 	segments := make([]*meta.Segment, 0)
 	replica := c.meta.Get(replicaID)
@@ -308,7 +300,7 @@ func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Seg
 		log.Info("replica does not exist, skip it")
 		return segments
 	}
-	dist := c.getSealedSegmentsDist(replica)
+	dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	versions := make(map[int64]*meta.Segment)
 	for _, s := range dist {
 		// l0 segment should be release with channel together
@@ -398,7 +390,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 
 		rwNodes := replica.GetChannelRWNodes(shard)
 		if len(rwNodes) == 0 {
-			rwNodes = replica.GetNodes()
+			rwNodes = replica.GetRWNodes()
 		}
 
 		// filter out stopping nodes.
