@@ -289,7 +289,7 @@ func (node *DataNode) Init() error {
 
 		node.importTaskMgr = importv2.NewTaskManager()
 		node.importScheduler = importv2.NewScheduler(node.importTaskMgr, node.syncMgr, node.chunkManager)
-		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
+		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node.broker)
 		node.flowgraphManager = newFlowgraphManager()
 
 		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
