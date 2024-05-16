@@ -35,23 +35,23 @@ import (
 type ChannelCPUpdaterSuite struct {
 	suite.Suite
 
+	broker  *broker.MockBroker
 	updater *channelCheckpointUpdater
 }
 
 func (s *ChannelCPUpdaterSuite) SetupTest() {
-	s.updater = newChannelCheckpointUpdater(&DataNode{})
+	s.broker = broker.NewMockBroker(s.T())
+	s.updater = newChannelCheckpointUpdater(s.broker)
 }
 
 func (s *ChannelCPUpdaterSuite) TestUpdate() {
 	paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "0.01")
 	defer paramtable.Get().Save(paramtable.Get().DataNodeCfg.ChannelCheckpointUpdateTickInSeconds.Key, "10")
 
-	b := broker.NewMockBroker(s.T())
-	b.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, positions []*msgpb.MsgPosition) error {
+	s.broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, positions []*msgpb.MsgPosition) error {
 		time.Sleep(10 * time.Millisecond)
 		return nil
 	})
-	s.updater.dn.broker = b
 
 	go s.updater.start()
 	defer s.updater.close()
@@ -75,10 +75,10 @@ func (s *ChannelCPUpdaterSuite) TestUpdate() {
 			}
 		}
 	}()
+	wg.Wait()
 	s.Eventually(func() bool {
 		return counter.Load() == int64(tasksNum)
 	}, time.Second*10, time.Millisecond*100)
-	wg.Wait()
 }
 
 func TestChannelCPUpdater(t *testing.T) {
