@@ -130,11 +130,13 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 			actions = append(actions, o.findNeedRemovedSegments(leaderView, dists)...)
 			// Try to add a sync task to scheduler and block concurrent segment tasks to avoid inconsistent state
 			for _, action := range actions {
-				if ok := o.scheduler.Sync(action.SegmentID, replica.ID); !ok {
+				segmentID := action.SegmentID
+				replicaID := replica.ID
+				if ok := o.scheduler.Sync(segmentID, replicaID); !ok {
 					return
 				}
 				defer func() {
-					o.scheduler.RemoveSync(action.SegmentID, replica.ID)
+					o.scheduler.RemoveSync(segmentID, replicaID)
 				}()
 			}
 			o.sync(ctx, replica.GetID(), leaderView, actions)
