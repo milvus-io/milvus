@@ -3,6 +3,7 @@ import os
 import time
 from benedict import benedict
 from utils.util_log import test_log as log
+from utils.util_k8s import get_pod_ip_name_pairs
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 
 template_yaml = os.path.join(os.path.dirname(__file__), 'template/default.yaml')
@@ -186,4 +187,24 @@ class MilvusOperator(object):
             endpoint = res_object['status']['endpoint']
 
         return endpoint
+
+    def etcd_endpoints(self, release_name, namespace='default'):
+        """
+        Method: get etcd endpoints by name and namespace
+        Return: a string type etcd endpoints. e.g: host:port
+        """
+        etcd_endpoints = None
+        cus_res = CusResource(kind=self.plural, group=self.group,
+                              version=self.version, namespace=namespace)
+        res_object = cus_res.get(release_name)
+        try:
+            etcd_endpoints = res_object['spec']['dependencies']['etcd']['endpoints']
+        except KeyError:
+            log.info("etcd endpoints not found")
+        # get pod ip by pod name
+        label_selector = f"app.kubernetes.io/instance={release_name}-etcd, app.kubernetes.io/name=etcd"
+        res = get_pod_ip_name_pairs(namespace, label_selector)
+        if res:
+            etcd_endpoints = [f"{pod_ip}:2379" for pod_ip in res.keys()]
+        return etcd_endpoints[0]
 

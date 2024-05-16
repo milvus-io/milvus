@@ -1,16 +1,11 @@
 import pytest
 import time
-from typing import Union, List
 from pymilvus import connections, utility, Collection
-from pymilvus.client.constants import DEFAULT_RESOURCE_GROUP
-from pymilvus.client.types import ResourceGroupConfig, ResourceGroupInfo
 from utils.util_log import test_log as log
 from base.client_base import TestcaseBase
 from chaos.checker import (InsertChecker,
+                           FlushChecker,
                            UpsertChecker,
-                           SearchChecker,
-                           HybridSearchChecker,
-                           QueryChecker,
                            DeleteChecker,
                            Op,
                            ResultAnalyzer
@@ -18,12 +13,11 @@ from chaos.checker import (InsertChecker,
 from chaos import chaos_commons as cc
 from common import common_func as cf
 from utils.util_k8s import get_querynode_id_pod_pairs
-from common import common_type as ct
+from utils.util_birdwatcher import BirdWatcher
 from customize.milvus_operator import MilvusOperator
 from common.milvus_sys import MilvusSys
 from common.common_type import CaseLabel
 from chaos.chaos_commons import assert_statistic
-from delayed_assert import assert_expectations
 
 namespace = 'chaos-testing'
 prefix = "test_rg"
@@ -32,50 +26,7 @@ from rich.table import Table
 from rich.console import Console
 
 
-def display_resource_group_info(info: Union[ResourceGroupInfo, List[ResourceGroupInfo]]):
-    table = Table(title="Resource Group Info")
-    table.width = 200
-    table.add_column("Name", style="cyan")
-    table.add_column("Capacity", style="cyan")
-    table.add_column("Available Node", style="cyan")
-    table.add_column("Loaded Replica", style="cyan")
-    table.add_column("Outgoing Node", style="cyan")
-    table.add_column("Incoming Node", style="cyan")
-    table.add_column("Request", style="cyan")
-    table.add_column("Limit", style="cyan")
-    table.add_column("Nodes", style="cyan")
-    if isinstance(info, list):
-        for i in info:
-            table.add_row(
-                i.name,
-                str(i.capacity),
-                str(i.num_available_node),
-                str(i.num_loaded_replica),
-                str(i.num_outgoing_node),
-                str(i.num_incoming_node),
-                str(i.config.requests.node_num),
-                str(i.config.limits.node_num),
-                "\n".join([str(node.hostname) for node in i.nodes])
-            )
-    else:
-        table.add_row(
-            info.name,
-            str(info.capacity),
-            str(info.num_available_node),
-            str(info.num_loaded_replica),
-            str(info.num_outgoing_node),
-            str(info.num_incoming_node),
-            str(info.config.requests.node_num),
-            str(info.config.limits.node_num),
-            "\n".join([str(node.hostname) for node in info.nodes])
-        )
-
-    console = Console()
-    console.width = 300
-    console.print(table)
-
-
-def display_segment_distribution_info(collection_name, release_name):
+def display_segment_distribution_info(collection_name, release_name, segment_info=None):
     table = Table(title=f"{collection_name} Segment Distribution Info")
     table.width = 200
     table.add_column("Segment ID", style="cyan")
@@ -83,6 +34,7 @@ def display_segment_distribution_info(collection_name, release_name):
     table.add_column("Partition ID", style="cyan")
     table.add_column("Num Rows", style="cyan")
     table.add_column("State", style="cyan")
+    table.add_column("Channel", style="cyan")
     table.add_column("Node ID", style="cyan")
     table.add_column("Node Name", style="cyan")
     res = utility.get_query_segment_info(collection_name)
@@ -90,12 +42,16 @@ def display_segment_distribution_info(collection_name, release_name):
     querynode_id_pod_pair = get_querynode_id_pod_pairs("chaos-testing", label)
 
     for r in res:
+        channel = "unknown"
+        if segment_info and str(r.segmentID) in segment_info:
+            channel = segment_info[str(r.segmentID)]["Insert Channel"]
         table.add_row(
             str(r.segmentID),
             str(r.collectionID),
             str(r.partitionID),
             str(r.num_rows),
             str(r.state),
+            str(channel),
             str(r.nodeIds),
             str([querynode_id_pod_pair.get(node_id) for node_id in r.nodeIds])
         )
@@ -104,13 +60,53 @@ def display_segment_distribution_info(collection_name, release_name):
     console.print(table)
 
 
-def list_all_resource_groups():
-    rg_names = utility.list_resource_groups()
-    resource_groups = []
-    for rg_name in rg_names:
-        resource_group = utility.describe_resource_group(rg_name)
-        resource_groups.append(resource_group)
-    display_resource_group_info(resource_groups)
+def display_channel_on_qn_distribution_info(collection_name, release_name, segment_info=None):
+    """
+    node id, node name, channel, segment id
+    1, rg-test-613938-querynode-0, [rg-test-613938-rootcoord-dml_3_449617770820133536v0], [449617770820133655]
+    2, rg-test-613938-querynode-1, [rg-test-613938-rootcoord-dml_3_449617770820133537v0], [449617770820133656]
+
+    """
+    m = {}
+    res = utility.get_query_segment_info(collection_name)
+    for r in res:
+        if r.nodeIds:
+            for node_id in r.nodeIds:
+                if node_id not in m:
+                    m[node_id] = {
+                        "node_name": "",
+                        "channel": [],
+                        "segment_id": []
+                    }
+                m[node_id]["segment_id"].append(r.segmentID)
+    # get channel info
+    for node_id in m.keys():
+        for seg in m[node_id]["segment_id"]:
+            if segment_info and str(seg) in segment_info:
+                m[node_id]["channel"].append(segment_info[str(seg)]["Insert Channel"])
+
+    # get node name
+    label = f"app.kubernetes.io/instance={release_name}, app.kubernetes.io/component=querynode"
+    querynode_id_pod_pair = get_querynode_id_pod_pairs("chaos-testing", label)
+    for node_id in m.keys():
+        m[node_id]["node_name"] = querynode_id_pod_pair.get(node_id)
+
+    table = Table(title=f"{collection_name} Channel Distribution Info")
+    table.width = 200
+    table.add_column("Node ID", style="cyan")
+    table.add_column("Node Name", style="cyan")
+    table.add_column("Channel", style="cyan")
+    table.add_column("Segment ID", style="cyan")
+    for node_id, v in m.items():
+        table.add_row(
+            str(node_id),
+            str(v["node_name"]),
+            "\n".join([str(x) for x in set(v["channel"])]),
+            "\n".join([str(x) for x in v["segment_id"]])
+        )
+    console = Console()
+    console.width = 300
+    console.print(table)
 
 
 def _install_milvus(image_tag="master-latest"):
@@ -121,6 +117,8 @@ def _install_milvus(image_tag="master-latest"):
                    'metadata.namespace': namespace,
                    'metadata.name': release_name,
                    'spec.components.proxy.serviceType': 'LoadBalancer',
+                   'spec.config.queryCoord.balancer': 'ChannelLevelScoreBalancer'
+                                                      'spec.config.queryCoord.channelExclusiveNodeFactor: 2'
                    }
     milvus_op = MilvusOperator()
     log.info(f"install milvus with configs: {cus_configs}")
@@ -149,100 +147,103 @@ class TestChannelExclusiveBalance(TestcaseBase):
 
     def init_health_checkers(self, collection_name=None):
         c_name = collection_name
-        shards_num = 5
+        shards_num = 2
         checkers = {
             Op.insert: InsertChecker(collection_name=c_name, shards_num=shards_num),
+            Op.flush: FlushChecker(collection_name=c_name, shards_num=shards_num),
             Op.upsert: UpsertChecker(collection_name=c_name, shards_num=shards_num),
-            Op.search: SearchChecker(collection_name=c_name, shards_num=shards_num),
-            Op.hybrid_search: HybridSearchChecker(collection_name=c_name, shards_num=shards_num),
-            Op.query: QueryChecker(collection_name=c_name, shards_num=shards_num),
             Op.delete: DeleteChecker(collection_name=c_name, shards_num=shards_num),
         }
         self.health_checkers = checkers
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_scale_up(self, image_tag):
+    def test_channel_exclusive_balance_during_qn_scale_up(self, image_tag):
         """
        steps
        """
         milvus_op = MilvusOperator()
+        image_tag = "master-20240515-7c60d725-amd64"
         release_name, host, port = _install_milvus(image_tag=image_tag)
         milvus_op.scale(release_name, 'queryNode', 5, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
+        etcd_endpoint = milvus_op.etcd_endpoints(release_name, namespace)
+        bw = BirdWatcher(etcd_endpoints=etcd_endpoint, root_path=release_name)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
-        utility.update_resource_groups(
-            {DEFAULT_RESOURCE_GROUP: ResourceGroupConfig(requests={"node_num": 0}, limits={"node_num": 10})})
-        # create rg
-        resource_groups = []
-        for i in range(2):
-            name = cf.gen_unique_str("rg")
-            self.utility = utility
-            self.utility.create_resource_group(name, config=ResourceGroupConfig(
-                requests={"node_num": 1},
-                limits={"node_num": 1},
-            ))
-            resource_groups.append(name)
-        list_all_resource_groups()
         c_name = cf.gen_unique_str("Checker_")
         self.init_health_checkers(collection_name=c_name)
-        self.health_checkers[Op.search].c_wrap.release()
-        self.health_checkers[Op.search].c_wrap.load(_resource_groups=resource_groups[0:1])
+        c = Collection(name=c_name)
+        res = c.describe()
+        collection_id = res["collection_id"]
         cc.start_monitor_threads(self.health_checkers)
-        list_all_resource_groups()
-        display_segment_distribution_info(c_name, release_name)
+        seg_res = bw.show_segment_info(collection_id)
+        display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
+        display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         log.info("*********************Load Start**********************")
         request_duration = 360
         for i in range(10):
-            time.sleep(request_duration//10)
+            time.sleep(request_duration // 10)
             for k, v in self.health_checkers.items():
                 v.check_result()
-            # transfer replicas from default to another
-            if i == 3:
-                # transfer replicas from default rg to another rg
-                list_all_resource_groups()
-                display_segment_distribution_info(c_name, release_name)
-                self.utility.transfer_replica(source_group=resource_groups[0], target_group=resource_groups[1],
-                                              collection_name=c_name, num_replicas=1)
-            list_all_resource_groups()
-            display_segment_distribution_info(c_name, release_name)
+            seg_res = bw.show_segment_info(collection_id)
+            display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
+            display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
+        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        seg_res = bw.show_segment_info(collection_id)
+        display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
+        display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         time.sleep(60)
         ra = ResultAnalyzer()
         ra.get_stage_success_rate()
         assert_statistic(self.health_checkers)
         for k, v in self.health_checkers.items():
             v.terminate()
+            time.sleep(60)
 
     @pytest.mark.tags(CaseLabel.L3)
-    def test_resource_group_scale_down(self, image_tag):
+    def test_channel_exclusive_balance_during_qn_scale_down(self, image_tag):
         """
         steps
         """
         milvus_op = MilvusOperator()
+        image_tag = "master-20240515-7c60d725-amd64"
         release_name, host, port = _install_milvus(image_tag=image_tag)
-        milvus_op.scale(release_name, 'queryNode', 8, namespace)
+        milvus_op.scale(release_name, 'queryNode', 5, namespace)
         self.release_name = release_name
         assert host is not None
         connections.connect("default", host=host, port=port)
+        etcd_endpoint = milvus_op.etcd_endpoints(release_name, namespace)
+        bw = BirdWatcher(etcd_endpoints=etcd_endpoint, root_path=release_name)
         mil = MilvusSys(alias="default")
         log.info(f"milvus build version: {mil.build_version}")
-        # create rg1 with request node_num=4, limit node_num=6
-        name = cf.gen_unique_str("rg")
-        self.utility = utility
-        self.utility.create_resource_group(name, config=ResourceGroupConfig(
-            requests={"node_num": 4},
-            limits={"node_num": 6},
-        ))
-        # scale down rg1 from 8 to 1 node one by one
-        for replicas in range(8, 1, -1):
-            milvus_op.scale(release_name, 'queryNode', replicas, namespace)
-            time.sleep(10)
-            resource_group = self.utility.describe_resource_group(name)
-            log.info(f"Resource group {name} info:\n {display_resource_group_info(resource_group)}")
-            list_all_resource_groups()
-        # assert the node in rg <= 1
-        resource_group = self.utility.describe_resource_group(name)
-        assert resource_group.num_available_node <= 1
-
+        c_name = cf.gen_unique_str("Checker_")
+        self.init_health_checkers(collection_name=c_name)
+        c = Collection(name=c_name)
+        res = c.describe()
+        collection_id = res["collection_id"]
+        cc.start_monitor_threads(self.health_checkers)
+        seg_res = bw.show_segment_info(collection_id)
+        display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
+        display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
+        log.info("*********************Load Start**********************")
+        request_duration = 360
+        for i in range(10):
+            time.sleep(request_duration // 10)
+            for k, v in self.health_checkers.items():
+                v.check_result()
+            seg_res = bw.show_segment_info(collection_id)
+            display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
+            display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
+        milvus_op.scale(release_name, 'queryNode', 1, namespace)
+        seg_res = bw.show_segment_info(collection_id)
+        display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
+        display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
+        time.sleep(60)
+        ra = ResultAnalyzer()
+        ra.get_stage_success_rate()
+        assert_statistic(self.health_checkers)
+        for k, v in self.health_checkers.items():
+            v.terminate()
+            time.sleep(60)
