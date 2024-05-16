@@ -2,7 +2,7 @@
 apiVersion: milvus.io/v1beta1
 kind: Milvus
 metadata:
-  name: resource-group-test
+  name: operator-demo
   namespace: chaos-testing
   labels:
     app: milvus

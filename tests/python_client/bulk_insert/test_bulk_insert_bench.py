@@ -224,11 +224,6 @@ class TestcaseBaseBulkInsert(TestcaseBase):
         self.import_job_client = ImportJobClient(f"http://{host}:{port}", f"{user}:{password}")
 
 
-    def teardown_method(self, method):
-        log.info(("*" * 35) + " teardown " + ("*" * 35))
-        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
-        log.info("not delete collection")
-
 class TestBulkInsertPerf(TestcaseBaseBulkInsert):
 
     @pytest.mark.tags(CaseLabel.L3)
