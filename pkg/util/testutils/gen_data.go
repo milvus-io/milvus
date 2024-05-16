@@ -248,27 +248,20 @@ func GenerateFloatVectors(numRows, dim int) []float32 {
 
 func GenerateFloat16Vectors(numRows, dim int) []byte {
 	total := numRows * dim
-	ret := make([]byte, total*2)
+	ret := make([]byte, 0, total*2)
 	for i := 0; i < total; i++ {
-		v := float16.Fromfloat32(rand.Float32()).Bits()
-		binary.LittleEndian.PutUint16(ret[i*2:], v)
+		f := (rand.Float32() - 0.5) * 100
+		ret = append(ret, typeutil.Float32ToFloat16Bytes(f)...)
 	}
 	return ret
 }
 
 func GenerateBFloat16Vectors(numRows, dim int) []byte {
 	total := numRows * dim
-	ret16 := make([]uint16, 0, total)
+	ret := make([]byte, 0, total*2)
 	for i := 0; i < total; i++ {
-		f := rand.Float32()
-		bits := math.Float32bits(f)
-		bits >>= 16
-		bits &= 0x7FFF
-		ret16 = append(ret16, uint16(bits))
-	}
-	ret := make([]byte, len(ret16)*2)
-	for i, value := range ret16 {
-		binary.LittleEndian.PutUint16(ret[i*2:], value)
+		f := (rand.Float32() - 0.5) * 100
+		ret = append(ret, typeutil.Float32ToBFloat16Bytes(f)...)
 	}
 	return ret
 }

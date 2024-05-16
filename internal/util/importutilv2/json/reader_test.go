@@ -128,13 +128,29 @@ func (suite *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.Data
 				}
 			case schemapb.DataType_JSON:
 				data[fieldID] = string(v.GetRow(i).([]byte))
-			case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
+			case schemapb.DataType_BinaryVector:
 				bytes := v.GetRow(i).([]byte)
 				ints := make([]int, 0, len(bytes))
 				for _, b := range bytes {
 					ints = append(ints, int(b))
 				}
 				data[fieldID] = ints
+			case schemapb.DataType_Float16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.Float16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_BFloat16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.BFloat16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_SparseFloatVector:
+				bytes := v.GetRow(i).([]byte)
+				elemCount := len(bytes) / 8
+				values := make(map[uint32]float32)
+				for j := 0; j < elemCount; j++ {
+					idx := common.Endian.Uint32(bytes[j*8:])
+					f := typeutil.BytesToFloat32(bytes[j*8+4:])
+					values[idx] = f
+				}
+				data[fieldID] = values
 			default:
 				data[fieldID] = v.GetRow(i)
 			}

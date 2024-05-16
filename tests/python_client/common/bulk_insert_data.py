@@ -93,7 +93,7 @@ def gen_binary_vectors(nb, dim):
     return vectors
 
 
-def gen_fp16_vectors(num, dim):
+def gen_fp16_vectors(num, dim, for_json=False):
     """
     generate float16 vector data
     raw_vectors : the vectors
@@ -105,13 +105,16 @@ def gen_fp16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        fp16_vector = np.array(raw_vector, dtype=np.float16).view(np.uint8).tolist()
+        if for_json:
+            fp16_vector = np.array(raw_vector, dtype=np.float16).tolist()
+        else:
+            fp16_vector = np.array(raw_vector, dtype=np.float16).view(np.uint8).tolist()
         fp16_vectors.append(fp16_vector)
 
     return raw_vectors, fp16_vectors
 
 
-def gen_bf16_vectors(num, dim):
+def gen_bf16_vectors(num, dim, for_json=False):
     """
     generate brain float16 vector data
     raw_vectors : the vectors
@@ -123,7 +126,10 @@ def gen_bf16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
+        if for_json:
+            bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).tolist()
+        else:
+            bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
         bf16_vectors.append(bf16_vector)
 
     return raw_vectors, bf16_vectors
@@ -603,9 +609,9 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     float_vector = False
                     d[data_field] = gen_vectors(float_vector=float_vector, rows=1, dim=dim)[0]
                 if "bf16" in data_field:
-                    d[data_field] = gen_bf16_vectors(1, dim)[1][0]
+                    d[data_field] = gen_bf16_vectors(1, dim, True)[1][0]
                 if "fp16" in data_field:
-                    d[data_field] = gen_fp16_vectors(1, dim)[1][0]
+                    d[data_field] = gen_fp16_vectors(1, dim, True)[1][0]
             elif data_field == DataField.float_field:
                 d[data_field] = random.random()
             elif data_field == DataField.double_field:
