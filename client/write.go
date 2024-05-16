@@ -22,53 +22,90 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
-func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ...grpc.CallOption) error {
+type InsertResult struct {
+	InsertCount int64
+	IDs         column.Column
+}
+
+func (c *Client) Insert(ctx context.Context, option InsertOption, callOptions ...grpc.CallOption) (InsertResult, error) {
+	result := InsertResult{}
 	collection, err := c.getCollection(ctx, option.CollectionName())
 	if err != nil {
-		return err
+		return result, err
 	}
 	req, err := option.InsertRequest(collection)
 	if err != nil {
-		return err
+		return result, err
 	}
+
 	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Insert(ctx, req, callOptions...)
 
-		return merr.CheckRPCCall(resp, err)
+		err = merr.CheckRPCCall(resp, err)
+		if err != nil {
+			return err
+		}
+
+		result.InsertCount = resp.GetInsertCnt()
+		result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
+		if err != nil {
+			return err
+		}
+
+		return nil
 	})
-	return err
+	return result, err
 }
 
-func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ...grpc.CallOption) error {
+type DeleteResult struct {
+	DeleteCount int64
+}
+
+func (c *Client) Delete(ctx context.Context, option DeleteOption, callOptions ...grpc.CallOption) (DeleteResult, error) {
 	req := option.Request()
 
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	result := DeleteResult{}
+	err := c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Delete(ctx, req, callOptions...)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
+		result.DeleteCount = resp.GetDeleteCnt()
 		return nil
 	})
+	return result, err
 }
 
-func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ...grpc.CallOption) error {
+type UpsertResult struct {
+	UpsertCount int64
+	IDs         column.Column
+}
+
+func (c *Client) Upsert(ctx context.Context, option UpsertOption, callOptions ...grpc.CallOption) (UpsertResult, error) {
+	result := UpsertResult{}
 	collection, err := c.getCollection(ctx, option.CollectionName())
 	if err != nil {
-		return err
+		return result, err
 	}
 	req, err := option.UpsertRequest(collection)
 	if err != nil {
-		return err
+		return result, err
 	}
-
-	return c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
+	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.Upsert(ctx, req, callOptions...)
 		if err = merr.CheckRPCCall(resp, err); err != nil {
 			return err
 		}
+		result.UpsertCount = resp.GetUpsertCnt()
+		result.IDs, err = column.IDColumns(collection.Schema, resp.GetIDs(), 0, -1)
+		if err != nil {
+			return err
+		}
 		return nil
 	})
+	return result, err
 }
