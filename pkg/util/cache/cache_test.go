@@ -1,7 +1,7 @@
 package cache
 
 import (
-	"math/rand"
+	"context"
 	"sync"
 	"testing"
 	"time"
@@ -9,11 +9,16 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
 	"go.uber.org/atomic"
+
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
+var errTimeout = errors.New("timeout")
+
 func TestLRUCache(t *testing.T) {
-	cacheBuilder := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
-		return key, true
+	cacheBuilder := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+		return key, nil
 	})
 
 	t.Run("test loader", func(t *testing.T) {
@@ -21,7 +26,7 @@ func TestLRUCache(t *testing.T) {
 		cache := cacheBuilder.WithCapacity(int64(size)).Build()
 
 		for i := 0; i < size; i++ {
-			missing, err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -33,13 +38,13 @@ func TestLRUCache(t *testing.T) {
 	t.Run("test finalizer", func(t *testing.T) {
 		size := 10
 		finalizeSeq := make([]int, 0)
-		cache := cacheBuilder.WithCapacity(int64(size)).WithFinalizer(func(key, value int) error {
+		cache := cacheBuilder.WithCapacity(int64(size)).WithFinalizer(func(ctx context.Context, key, value int) error {
 			finalizeSeq = append(finalizeSeq, key)
 			return nil
 		}).Build()
 
 		for i := 0; i < size*2; i++ {
-			missing, err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -50,7 +55,7 @@ func TestLRUCache(t *testing.T) {
 
 		// Hit the cache again, there should be no swap-out
 		for i := size; i < size*2; i++ {
-			missing, err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -65,13 +70,13 @@ func TestLRUCache(t *testing.T) {
 		sumCapacity := 20 // inserting 1 to 19, capacity is set to sum of 20, expecting (19) at last.
 		cache := cacheBuilder.WithLazyScavenger(func(key int) int64 {
 			return int64(key)
-		}, int64(sumCapacity)).WithFinalizer(func(key, value int) error {
+		}, int64(sumCapacity)).WithFinalizer(func(ctx context.Context, key, value int) error {
 			finalizeSeq = append(finalizeSeq, key)
 			return nil
 		}).Build()
 
 		for i := 0; i < 20; i++ {
-			missing, err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -84,7 +89,7 @@ func TestLRUCache(t *testing.T) {
 	t.Run("test do negative", func(t *testing.T) {
 		cache := cacheBuilder.Build()
 		theErr := errors.New("error")
-		missing, err := cache.Do(-1, func(v int) error {
+		missing, err := cache.Do(context.Background(), -1, func(_ context.Context, v int) error {
 			return theErr
 		})
 		assert.True(t, missing)
@@ -96,13 +101,13 @@ func TestLRUCache(t *testing.T) {
 		sumCapacity := 20 // inserting 1 to 19, capacity is set to sum of 20, expecting (19) at last.
 		cache := cacheBuilder.WithLazyScavenger(func(key int) int64 {
 			return int64(key)
-		}, int64(sumCapacity)).WithFinalizer(func(key, value int) error {
+		}, int64(sumCapacity)).WithFinalizer(func(ctx context.Context, key, value int) error {
 			finalizeSeq = append(finalizeSeq, key)
 			return nil
 		}).Build()
 
 		for i := 0; i < 20; i++ {
-			missing, err := cache.Do(i, func(v int) error {
+			missing, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -110,36 +115,64 @@ func TestLRUCache(t *testing.T) {
 			assert.NoError(t, err)
 		}
 		assert.Equal(t, []int{0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18}, finalizeSeq)
-		missing, err := cache.Do(100, func(v int) error {
+		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), time.Second, errTimeout)
+		defer cancel()
+
+		missing, err := cache.Do(ctx, 100, func(_ context.Context, v int) error {
 			return nil
 		})
 		assert.True(t, missing)
-		assert.Equal(t, ErrNotEnoughSpace, err)
+		assert.ErrorIs(t, err, errTimeout)
+		assert.ErrorIs(t, context.Cause(ctx), errTimeout)
 	})
 
 	t.Run("test load negative", func(t *testing.T) {
-		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
 			if key < 0 {
-				return 0, false
+				return 0, merr.ErrParameterInvalid
 			}
-			return key, true
+			return key, nil
 		}).Build()
-		missing, err := cache.Do(0, func(v int) error {
+		missing, err := cache.Do(context.Background(), 0, func(_ context.Context, v int) error {
 			return nil
 		})
 		assert.True(t, missing)
 		assert.NoError(t, err)
-		missing, err = cache.Do(-1, func(v int) error {
+		missing, err = cache.Do(context.Background(), -1, func(_ context.Context, v int) error {
 			return nil
 		})
 		assert.True(t, missing)
-		assert.Equal(t, ErrNoSuchItem, err)
+		assert.ErrorIs(t, err, merr.ErrParameterInvalid)
+	})
+
+	t.Run("test reloader", func(t *testing.T) {
+		cache := cacheBuilder.WithReloader(func(ctx context.Context, key int) (int, error) {
+			return -key, nil
+		}).Build()
+		_, err := cache.Do(context.Background(), 1, func(_ context.Context, i int) error { return nil })
+		assert.NoError(t, err)
+		exist := cache.MarkItemNeedReload(context.Background(), 1)
+		assert.True(t, exist)
+		cache.Do(context.Background(), 1, func(_ context.Context, i int) error {
+			assert.Equal(t, -1, i)
+			return nil
+		})
+	})
+
+	t.Run("test mark", func(t *testing.T) {
+		cache := cacheBuilder.WithCapacity(1).Build()
+		exist := cache.MarkItemNeedReload(context.Background(), 1)
+		assert.False(t, exist)
+		_, err := cache.Do(context.Background(), 1, func(_ context.Context, i int) error { return nil })
+		assert.NoError(t, err)
+		exist = cache.MarkItemNeedReload(context.Background(), 1)
+		assert.True(t, exist)
 	})
 }
 
 func TestStats(t *testing.T) {
-	cacheBuilder := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
-		return key, true
+	cacheBuilder := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+		return key, nil
 	})
 
 	t.Run("test loader", func(t *testing.T) {
@@ -155,7 +188,7 @@ func TestStats(t *testing.T) {
 		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
 
 		for i := 0; i < size; i++ {
-			_, err := cache.Do(i, func(v int) error {
+			_, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -170,7 +203,7 @@ func TestStats(t *testing.T) {
 		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
 
 		for i := 0; i < size; i++ {
-			_, err := cache.Do(i, func(v int) error {
+			_, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -184,7 +217,7 @@ func TestStats(t *testing.T) {
 		assert.Equal(t, uint64(0), stats.LoadFailCount.Load())
 
 		for i := size; i < size*2; i++ {
-			_, err := cache.Do(i, func(v int) error {
+			_, err := cache.Do(context.Background(), i, func(_ context.Context, v int) error {
 				assert.Equal(t, i, v)
 				return nil
 			})
@@ -202,9 +235,9 @@ func TestStats(t *testing.T) {
 func TestLRUCacheConcurrency(t *testing.T) {
 	t.Run("test race condition", func(t *testing.T) {
 		numEvict := new(atomic.Int32)
-		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
-			return key, true
-		}).WithCapacity(10).WithFinalizer(func(key, value int) error {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).WithCapacity(10).WithFinalizer(func(ctx context.Context, key, value int) error {
 			numEvict.Add(1)
 			return nil
 		}).Build()
@@ -215,7 +248,7 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			go func(i int) {
 				defer wg.Done()
 				for j := 0; j < 100; j++ {
-					_, err := cache.Do(j, func(v int) error {
+					_, err := cache.Do(context.Background(), j, func(_ context.Context, v int) error {
 						return nil
 					})
 					assert.NoError(t, err)
@@ -226,9 +259,9 @@ func TestLRUCacheConcurrency(t *testing.T) {
 	})
 
 	t.Run("test not enough space", func(t *testing.T) {
-		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
-			return key, true
-		}).WithCapacity(1).WithFinalizer(func(key, value int) error {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).WithCapacity(1).WithFinalizer(func(ctx context.Context, key, value int) error {
 			return nil
 		}).Build()
 
@@ -236,23 +269,27 @@ func TestLRUCacheConcurrency(t *testing.T) {
 		var wg1 sync.WaitGroup // Make sure goroutine is started
 		wg.Add(1)
 		wg1.Add(1)
-		go cache.Do(1000, func(v int) error {
+		go cache.Do(context.Background(), 1000, func(_ context.Context, v int) error {
 			wg1.Done()
 			wg.Wait()
 			return nil
 		})
 		wg1.Wait()
-		_, err := cache.Do(1001, func(v int) error {
+
+		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), time.Second, errTimeout)
+		defer cancel()
+		_, err := cache.Do(ctx, 1001, func(_ context.Context, v int) error {
 			return nil
 		})
 		wg.Done()
-		assert.Equal(t, ErrNotEnoughSpace, err)
+		assert.ErrorIs(t, err, errTimeout)
+		assert.ErrorIs(t, context.Cause(ctx), errTimeout)
 	})
 
 	t.Run("test time out", func(t *testing.T) {
-		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
-			return key, true
-		}).WithCapacity(1).WithFinalizer(func(key, value int) error {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).WithCapacity(1).WithFinalizer(func(ctx context.Context, key, value int) error {
 			return nil
 		}).Build()
 
@@ -260,37 +297,44 @@ func TestLRUCacheConcurrency(t *testing.T) {
 		var wg1 sync.WaitGroup // Make sure goroutine is started
 		wg.Add(1)
 		wg1.Add(1)
-		go cache.Do(1000, func(v int) error {
+		go cache.Do(context.Background(), 1000, func(_ context.Context, v int) error {
 			wg1.Done()
 			wg.Wait()
 			return nil
 		})
 		wg1.Wait()
-		missing, err := cache.DoWait(1001, time.Nanosecond, func(v int) error {
+
+		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), time.Nanosecond, errTimeout)
+		defer cancel()
+		missing, err := cache.Do(ctx, 1001, func(ctx context.Context, v int) error {
 			return nil
 		})
 		wg.Done()
 		assert.True(t, missing)
-		assert.Equal(t, ErrTimeOut, err)
+		assert.ErrorIs(t, err, errTimeout)
+		assert.ErrorIs(t, context.Cause(ctx), errTimeout)
 	})
 
 	t.Run("test wait", func(t *testing.T) {
-		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
-			return key, true
-		}).WithCapacity(1).WithFinalizer(func(key, value int) error {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).WithCapacity(1).WithFinalizer(func(ctx context.Context, key, value int) error {
 			return nil
 		}).Build()
 
 		var wg1 sync.WaitGroup // Make sure goroutine is started
 
 		wg1.Add(1)
-		go cache.Do(1000, func(v int) error {
+		go cache.Do(context.Background(), 1000, func(_ context.Context, v int) error {
 			wg1.Done()
 			time.Sleep(time.Second)
 			return nil
 		})
 		wg1.Wait()
-		missing, err := cache.DoWait(1001, time.Second*2, func(v int) error {
+
+		ctx, cancel := contextutil.WithTimeoutCause(context.Background(), time.Second*2, errTimeout)
+		defer cancel()
+		missing, err := cache.Do(ctx, 1001, func(ctx context.Context, v int) error {
 			return nil
 		})
 		assert.True(t, missing)
@@ -299,9 +343,9 @@ func TestLRUCacheConcurrency(t *testing.T) {
 
 	t.Run("test wait race condition", func(t *testing.T) {
 		numEvict := new(atomic.Int32)
-		cache := NewCacheBuilder[int, int]().WithLoader(func(key int) (int, bool) {
-			return key, true
-		}).WithCapacity(5).WithFinalizer(func(key, value int) error {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).WithCapacity(5).WithFinalizer(func(ctx context.Context, key, value int) error {
 			numEvict.Add(1)
 			return nil
 		}).Build()
@@ -311,9 +355,10 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			wg.Add(1)
 			go func(i int) {
 				defer wg.Done()
-				for j := 0; j < 20; j++ {
-					_, err := cache.DoWait(j, time.Second, func(v int) error {
-						time.Sleep(time.Duration(rand.Intn(3)))
+				for j := 0; j < 100; j++ {
+					ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 2*time.Second, errTimeout)
+					defer cancel()
+					_, err := cache.Do(ctx, j, func(_ context.Context, v int) error {
 						return nil
 					})
 					assert.NoError(t, err)
@@ -321,5 +366,113 @@ func TestLRUCacheConcurrency(t *testing.T) {
 			}(i)
 		}
 		wg.Wait()
+	})
+
+	t.Run("test concurrent reload and mark", func(t *testing.T) {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).WithCapacity(5).WithFinalizer(func(ctx context.Context, key, value int) error {
+			return nil
+		}).WithReloader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).Build()
+
+		for i := 0; i < 100; i++ {
+			ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 2*time.Second, errTimeout)
+			defer cancel()
+			cache.Do(ctx, i, func(ctx context.Context, v int) error { return nil })
+		}
+		var wg sync.WaitGroup
+		wg.Add(2)
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				for j := 0; j < 100; j++ {
+					cache.MarkItemNeedReload(context.Background(), j)
+				}
+			}
+		}()
+
+		go func() {
+			defer wg.Done()
+			for i := 0; i < 10; i++ {
+				for j := 0; j < 100; j++ {
+					ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 2*time.Second, errTimeout)
+					defer cancel()
+					cache.Do(ctx, j, func(ctx context.Context, v int) error { return nil })
+				}
+			}
+		}()
+		wg.Wait()
+	})
+
+	t.Run("test remove", func(t *testing.T) {
+		cache := NewCacheBuilder[int, int]().WithLoader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).WithCapacity(5).WithFinalizer(func(ctx context.Context, key, value int) error {
+			return nil
+		}).WithReloader(func(ctx context.Context, key int) (int, error) {
+			return key, nil
+		}).Build()
+
+		for i := 0; i < 100; i++ {
+			ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 2*time.Second, errTimeout)
+			defer cancel()
+			cache.Do(ctx, i, func(ctx context.Context, v int) error { return nil })
+		}
+
+		evicted := 0
+		for i := 0; i < 100; i++ {
+			if cache.Remove(context.Background(), i) == nil {
+				evicted++
+			}
+		}
+		assert.Equal(t, 100, evicted)
+
+		for i := 0; i < 5; i++ {
+			ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 2*time.Second, errTimeout)
+			defer cancel()
+			cache.Do(ctx, i, func(ctx context.Context, v int) error { return nil })
+		}
+		wg := sync.WaitGroup{}
+		wg.Add(5)
+		for i := 0; i < 5; i++ {
+			go func(i int) {
+				defer wg.Done()
+				cache.Do(context.Background(), i, func(ctx context.Context, v int) error {
+					time.Sleep(3 * time.Second)
+					return nil
+				})
+			}(i)
+		}
+		// wait for all goroutine to start
+		time.Sleep(1 * time.Second)
+
+		// all item shouldn't be evicted if they are in-used in 500ms.
+		evictedCount := atomic.NewInt32(0)
+		wgEvict := sync.WaitGroup{}
+		wgEvict.Add(5)
+		for i := 0; i < 5; i++ {
+			go func(i int) {
+				defer wgEvict.Done()
+				ctx, cancel := contextutil.WithTimeoutCause(context.Background(), 500*time.Millisecond, errTimeout)
+				defer cancel()
+
+				if cache.Remove(ctx, i) == nil {
+					evictedCount.Inc()
+				}
+			}(i)
+		}
+		wgEvict.Wait()
+		assert.Zero(t, evictedCount.Load())
+
+		// given enough time, all item should be evicted.
+		evicted = 0
+		for i := 0; i < 5; i++ {
+			if cache.Remove(context.Background(), i) == nil {
+				evicted++
+			}
+		}
+		assert.Equal(t, 5, evicted)
 	})
 }

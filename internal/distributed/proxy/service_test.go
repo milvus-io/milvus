@@ -229,6 +229,12 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 	})
 
+	t.Run("InvalidateShardLeaderCache", func(t *testing.T) {
+		mockProxy.EXPECT().InvalidateShardLeaderCache(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.InvalidateShardLeaderCache(ctx, nil)
+		assert.NoError(t, err)
+	})
+
 	t.Run("CreateCollection", func(t *testing.T) {
 		mockProxy.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.CreateCollection(ctx, nil)
@@ -654,6 +660,18 @@ func Test_NewServer(t *testing.T) {
 	t.Run("ListDatabase", func(t *testing.T) {
 		mockProxy.EXPECT().ListDatabases(mock.Anything, mock.Anything).Return(nil, nil)
 		_, err := server.ListDatabases(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("AlterDatabase", func(t *testing.T) {
+		mockProxy.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.AlterDatabase(ctx, nil)
+		assert.Nil(t, err)
+	})
+
+	t.Run("DescribeDatabase", func(t *testing.T) {
+		mockProxy.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, nil)
+		_, err := server.DescribeDatabase(ctx, nil)
 		assert.Nil(t, err)
 	})
 

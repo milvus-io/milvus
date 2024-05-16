@@ -28,3 +28,52 @@ func SetMaxRowCount(maxRow int64) SegmentOperator {
 		return true
 	}
 }
+
+type segmentCriterion struct {
+	collectionID int64
+	others       []SegmentFilter
+}
+
+func (sc *segmentCriterion) Match(segment *SegmentInfo) bool {
+	for _, filter := range sc.others {
+		if !filter.Match(segment) {
+			return false
+		}
+	}
+	return true
+}
+
+type SegmentFilter interface {
+	Match(segment *SegmentInfo) bool
+	AddFilter(*segmentCriterion)
+}
+
+type CollectionFilter int64
+
+func (f CollectionFilter) Match(segment *SegmentInfo) bool {
+	return segment.GetCollectionID() == int64(f)
+}
+
+func (f CollectionFilter) AddFilter(criterion *segmentCriterion) {
+	criterion.collectionID = int64(f)
+}
+
+func WithCollection(collectionID int64) SegmentFilter {
+	return CollectionFilter(collectionID)
+}
+
+type SegmentFilterFunc func(*SegmentInfo) bool
+
+func (f SegmentFilterFunc) Match(segment *SegmentInfo) bool {
+	return f(segment)
+}
+
+func (f SegmentFilterFunc) AddFilter(criterion *segmentCriterion) {
+	criterion.others = append(criterion.others, f)
+}
+
+func WithChannel(channel string) SegmentFilter {
+	return SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return si.GetInsertChannel() == channel
+	})
+}

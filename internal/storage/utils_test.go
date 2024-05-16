@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/json"
-	"fmt"
 	"math/rand"
 	"strconv"
 	"testing"
@@ -435,93 +434,6 @@ func genAllFieldsSchema(fVecDim, bVecDim, f16VecDim, bf16VecDim int, withSparse 
 	return schema, pkFieldID, fieldIDs
 }
 
-func generateFloatVectors(numRows, dim int) []float32 {
-	total := numRows * dim
-	ret := make([]float32, 0, total)
-	for i := 0; i < total; i++ {
-		ret = append(ret, rand.Float32())
-	}
-	return ret
-}
-
-func generateBinaryVectors(numRows, dim int) []byte {
-	total := (numRows * dim) / 8
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
-func generateFloat16Vectors(numRows, dim int) []byte {
-	total := (numRows * dim) * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
-func generateBFloat16Vectors(numRows, dim int) []byte {
-	total := (numRows * dim) * 2
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
-func generateBoolArray(numRows int) []bool {
-	ret := make([]bool, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Int()%2 == 0)
-	}
-	return ret
-}
-
-func generateInt32Array(numRows int) []int32 {
-	ret := make([]int32, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int32(rand.Int()))
-	}
-	return ret
-}
-
-func generateInt64Array(numRows int) []int64 {
-	ret := make([]int64, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int64(rand.Int()))
-	}
-	return ret
-}
-
-func generateFloat32Array(numRows int) []float32 {
-	ret := make([]float32, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Float32())
-	}
-	return ret
-}
-
-func generateFloat64Array(numRows int) []float64 {
-	ret := make([]float64, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Float64())
-	}
-	return ret
-}
-
-func generateBytesArray(numRows int) [][]byte {
-	ret := make([][]byte, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, []byte(fmt.Sprint(rand.Int())))
-	}
-	return ret
-}
-
 func generateInt32ArrayList(numRows int) []*schemapb.ScalarField {
 	ret := make([]*schemapb.ScalarField, 0, numRows)
 	for i := 0; i < numRows; i++ {
@@ -546,22 +458,22 @@ func genRowWithAllFields(fVecDim, bVecDim, f16VecDim, bf16VecDim int) (blob *com
 		var buffer bytes.Buffer
 		switch field.DataType {
 		case schemapb.DataType_FloatVector:
-			fVec := generateFloatVectors(1, fVecDim)
+			fVec := testutils.GenerateFloatVectors(1, fVecDim)
 			_ = binary.Write(&buffer, common.Endian, fVec)
 			ret.Value = append(ret.Value, buffer.Bytes()...)
 			row = append(row, fVec)
 		case schemapb.DataType_BinaryVector:
-			bVec := generateBinaryVectors(1, bVecDim)
+			bVec := testutils.GenerateBinaryVectors(1, bVecDim)
 			_ = binary.Write(&buffer, common.Endian, bVec)
 			ret.Value = append(ret.Value, buffer.Bytes()...)
 			row = append(row, bVec)
 		case schemapb.DataType_Float16Vector:
-			f16Vec := generateFloat16Vectors(1, f16VecDim)
+			f16Vec := testutils.GenerateFloat16Vectors(1, f16VecDim)
 			_ = binary.Write(&buffer, common.Endian, f16Vec)
 			ret.Value = append(ret.Value, buffer.Bytes()...)
 			row = append(row, f16Vec)
 		case schemapb.DataType_BFloat16Vector:
-			bf16Vec := generateBFloat16Vectors(1, bf16VecDim)
+			bf16Vec := testutils.GenerateBFloat16Vectors(1, bf16VecDim)
 			_ = binary.Write(&buffer, common.Endian, bf16Vec)
 			ret.Value = append(ret.Value, buffer.Bytes()...)
 			row = append(row, bf16Vec)
@@ -689,7 +601,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 	for idx, field := range schema.Fields {
 		switch field.DataType {
 		case schemapb.DataType_Bool:
-			data := generateBoolArray(numRows)
+			data := testutils.GenerateBoolArray(numRows)
 			f := &schemapb.FieldData{
 				Type:      field.DataType,
 				FieldName: field.Name,
@@ -709,7 +621,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], d)
 			}
 		case schemapb.DataType_Int8:
-			data := generateInt32Array(numRows)
+			data := testutils.GenerateInt32Array(numRows)
 			f := &schemapb.FieldData{
 				Type:      field.DataType,
 				FieldName: field.Name,
@@ -729,7 +641,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], int8(d))
 			}
 		case schemapb.DataType_Int16:
-			data := generateInt32Array(numRows)
+			data := testutils.GenerateInt32Array(numRows)
 			f := &schemapb.FieldData{
 				Type:      field.DataType,
 				FieldName: field.Name,
@@ -749,7 +661,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], int16(d))
 			}
 		case schemapb.DataType_Int32:
-			data := generateInt32Array(numRows)
+			data := testutils.GenerateInt32Array(numRows)
 			f := &schemapb.FieldData{
 				Type:      field.DataType,
 				FieldName: field.Name,
@@ -769,7 +681,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], d)
 			}
 		case schemapb.DataType_Int64:
-			data := generateInt64Array(numRows)
+			data := testutils.GenerateInt64Array(numRows)
 			f := &schemapb.FieldData{
 				Type:      field.DataType,
 				FieldName: field.Name,
@@ -790,7 +702,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			}
 			pks = data
 		case schemapb.DataType_Float:
-			data := generateFloat32Array(numRows)
+			data := testutils.GenerateFloat32Array(numRows)
 			f := &schemapb.FieldData{
 				Type:      field.DataType,
 				FieldName: field.Name,
@@ -810,7 +722,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], d)
 			}
 		case schemapb.DataType_Double:
-			data := generateFloat64Array(numRows)
+			data := testutils.GenerateFloat64Array(numRows)
 			f := &schemapb.FieldData{
 				Type:      field.DataType,
 				FieldName: field.Name,
@@ -830,7 +742,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], d)
 			}
 		case schemapb.DataType_FloatVector:
-			data := generateFloatVectors(numRows, fVecDim)
+			data := testutils.GenerateFloatVectors(numRows, fVecDim)
 			f := &schemapb.FieldData{
 				Type:      schemapb.DataType_FloatVector,
 				FieldName: field.Name,
@@ -851,7 +763,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], data[nrows*fVecDim:(nrows+1)*fVecDim])
 			}
 		case schemapb.DataType_BinaryVector:
-			data := generateBinaryVectors(numRows, bVecDim)
+			data := testutils.GenerateBinaryVectors(numRows, bVecDim)
 			f := &schemapb.FieldData{
 				Type:      schemapb.DataType_BinaryVector,
 				FieldName: field.Name,
@@ -870,7 +782,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], data[nrows*bVecDim/8:(nrows+1)*bVecDim/8])
 			}
 		case schemapb.DataType_Float16Vector:
-			data := generateFloat16Vectors(numRows, f16VecDim)
+			data := testutils.GenerateFloat16Vectors(numRows, f16VecDim)
 			f := &schemapb.FieldData{
 				Type:      schemapb.DataType_Float16Vector,
 				FieldName: field.Name,
@@ -889,7 +801,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 				columns[idx] = append(columns[idx], data[nrows*f16VecDim*2:(nrows+1)*f16VecDim*2])
 			}
 		case schemapb.DataType_BFloat16Vector:
-			data := generateBFloat16Vectors(numRows, bf16VecDim)
+			data := testutils.GenerateBFloat16Vectors(numRows, bf16VecDim)
 			f := &schemapb.FieldData{
 				Type:      schemapb.DataType_BFloat16Vector,
 				FieldName: field.Name,
@@ -950,7 +862,7 @@ func genColumnBasedInsertMsg(schema *schemapb.CollectionSchema, numRows, fVecDim
 			}
 
 		case schemapb.DataType_JSON:
-			data := generateBytesArray(numRows)
+			data := testutils.GenerateBytesArray(numRows)
 			f := &schemapb.FieldData{
 				Type:      schemapb.DataType_Array,
 				FieldName: field.GetName(),

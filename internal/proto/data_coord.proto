@@ -145,6 +145,7 @@ message FlushResponse {
   repeated int64 flushSegmentIDs = 5; // old flushed segment
   int64 timeOfSeal = 6;
   uint64 flush_ts = 7;
+  map<string, msg.MsgPosition> channel_cps = 8;
 }
 
 message FlushChannelsRequest {
@@ -404,6 +405,10 @@ message Binlog {
   string log_path = 4;
   int64 log_size = 5;
   int64 logID = 6;
+  // memory_size represents the size occupied by loading data into memory.
+  // log_size represents the size after data serialized.
+  // for stats_log, the memory_size always equal log_size.
+  int64 memory_size = 7;
 }
 
 message GetRecoveryInfoResponse {
@@ -635,6 +640,7 @@ message AlterCollectionRequest {
   repeated common.KeyDataPair start_positions = 4;
   repeated common.KeyValuePair properties = 5;
   int64  dbID = 6;
+  repeated string vChannels = 7;
 }
 
 message GcConfirmRequest {

@@ -93,9 +93,9 @@ func (s *Server) createIndexesForSegment(segment *SegmentInfo) error {
 }
 
 func (s *Server) getUnIndexTaskSegments() []*SegmentInfo {
-	flushedSegments := s.meta.SelectSegments(func(seg *SegmentInfo) bool {
+	flushedSegments := s.meta.SelectSegments(SegmentFilterFunc(func(seg *SegmentInfo) bool {
 		return isFlush(seg)
-	})
+	}))
 
 	unindexedSegments := make([]*SegmentInfo, 0)
 	for _, segment := range flushedSegments {
@@ -127,9 +127,9 @@ func (s *Server) createIndexForSegmentLoop(ctx context.Context) {
 			}
 		case collectionID := <-s.notifyIndexChan:
 			log.Info("receive create index notify", zap.Int64("collectionID", collectionID))
-			segments := s.meta.SelectSegments(func(info *SegmentInfo) bool {
-				return isFlush(info) && collectionID == info.CollectionID
-			})
+			segments := s.meta.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+				return isFlush(info)
+			}))
 			for _, segment := range segments {
 				if err := s.createIndexesForSegment(segment); err != nil {
 					log.Warn("create index for segment fail, wait for retry", zap.Int64("segmentID", segment.ID))
@@ -208,14 +208,8 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	// merge with previous params because create index would not pass mmap params
 	indexes := s.meta.indexMeta.GetFieldIndexes(req.GetCollectionID(), req.GetFieldID(), req.GetIndexName())
 	if len(indexes) == 1 {
-		req.UserIndexParams, err = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
-		req.IndexParams, err = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
+		req.UserIndexParams = UpdateParams(indexes[0], indexes[0].UserIndexParams, req.GetUserIndexParams())
+		req.IndexParams = UpdateParams(indexes[0], indexes[0].IndexParams, req.GetIndexParams())
 	}
 
 	if indexID == 0 {
@@ -246,6 +240,11 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 		UserIndexParams: req.GetUserIndexParams(),
 	}
 
+	if err := ValidateIndexParams(index); err != nil {
+		metrics.IndexRequestCounter.WithLabelValues(metrics.FailLabel).Inc()
+		return merr.Status(err), nil
+	}
+
 	// Get flushed segments and create index
 	err = s.meta.indexMeta.CreateIndex(index)
 	if err != nil {
@@ -267,22 +266,27 @@ func (s *Server) CreateIndex(ctx context.Context, req *indexpb.CreateIndexReques
 	return merr.Success(), nil
 }
 
-func ValidateIndexParams(index *model.Index, key, value string) error {
-	switch key {
-	case common.MmapEnabledKey:
-		indexType := GetIndexType(index.IndexParams)
-		if !indexparamcheck.IsMmapSupported(indexType) {
-			return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
-		}
+func ValidateIndexParams(index *model.Index) error {
+	for _, paramSet := range [][]*commonpb.KeyValuePair{index.IndexParams, index.UserIndexParams} {
+		for _, param := range paramSet {
+			switch param.GetKey() {
+			case common.MmapEnabledKey:
+				indexType := GetIndexType(index.IndexParams)
+				if !indexparamcheck.IsMmapSupported(indexType) {
+					return merr.WrapErrParameterInvalidMsg("index type %s does not support mmap", indexType)
+				}
 
-		if _, err := strconv.ParseBool(value); err != nil {
-			return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", key, value)
+				if _, err := strconv.ParseBool(param.GetValue()); err != nil {
+					return merr.WrapErrParameterInvalidMsg("invalid %s value: %s, expected: true, false", param.GetKey(), param.GetValue())
+				}
+			}
 		}
 	}
+
 	return nil
 }
 
-func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) ([]*commonpb.KeyValuePair, error) {
+func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*commonpb.KeyValuePair) []*commonpb.KeyValuePair {
 	params := make(map[string]string)
 	for _, param := range from {
 		params[param.GetKey()] = param.GetValue()
@@ -290,10 +294,6 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 
 	// update the params
 	for _, param := range updates {
-		if err := ValidateIndexParams(index, param.GetKey(), param.GetValue()); err != nil {
-			log.Warn("failed to alter index params", zap.Error(err))
-			return nil, err
-		}
 		params[param.GetKey()] = param.GetValue()
 	}
 
@@ -302,7 +302,7 @@ func UpdateParams(index *model.Index, from []*commonpb.KeyValuePair, updates []*
 			Key:   k,
 			Value: v,
 		}
-	}), nil
+	})
 }
 
 func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest) (*commonpb.Status, error) {
@@ -329,10 +329,7 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 
 	for _, index := range indexes {
 		// update user index params
-		newUserIndexParams, err := UpdateParams(index, index.UserIndexParams, req.GetParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
+		newUserIndexParams := UpdateParams(index, index.UserIndexParams, req.GetParams())
 		log.Info("alter index user index params",
 			zap.String("indexName", index.IndexName),
 			zap.Any("params", newUserIndexParams),
@@ -340,15 +337,16 @@ func (s *Server) AlterIndex(ctx context.Context, req *indexpb.AlterIndexRequest)
 		index.UserIndexParams = newUserIndexParams
 
 		// update index params
-		newIndexParams, err := UpdateParams(index, index.IndexParams, req.GetParams())
-		if err != nil {
-			return merr.Status(err), nil
-		}
+		newIndexParams := UpdateParams(index, index.IndexParams, req.GetParams())
 		log.Info("alter index user index params",
 			zap.String("indexName", index.IndexName),
 			zap.Any("params", newIndexParams),
 		)
 		index.IndexParams = newIndexParams
+
+		if err := ValidateIndexParams(index); err != nil {
+			return merr.Status(err), nil
+		}
 	}
 
 	err := s.meta.indexMeta.AlterIndex(ctx, indexes...)
@@ -398,9 +396,9 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 
 	indexInfo := &indexpb.IndexInfo{}
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
+	}))
 
 	s.completeIndexInfo(indexInfo, indexes[0], segments, false, indexes[0].CreateTime)
 	ret.State = indexInfo.State
@@ -450,10 +448,10 @@ func (s *Server) GetSegmentIndexState(ctx context.Context, req *indexpb.GetSegme
 	return ret, nil
 }
 
-func (s *Server) selectSegmentIndexesStats(selector SegmentInfoSelector) map[int64]*indexStats {
+func (s *Server) selectSegmentIndexesStats(filters ...SegmentFilter) map[int64]*indexStats {
 	ret := make(map[int64]*indexStats)
 
-	segments := s.meta.SelectSegments(selector)
+	segments := s.meta.SelectSegments(filters...)
 	segmentIDs := lo.Map(segments, func(info *SegmentInfo, i int) int64 {
 		return info.GetID()
 	})
@@ -602,7 +600,7 @@ func (s *Server) completeIndexInfo(indexInfo *indexpb.IndexInfo, index *model.In
 		indexInfo.State = commonpb.IndexState_Finished
 	}
 
-	log.Info("completeIndexInfo success", zap.Int64("collectionID", index.CollectionID), zap.Int64("indexID", index.IndexID),
+	log.RatedInfo(60, "completeIndexInfo success", zap.Int64("collectionID", index.CollectionID), zap.Int64("indexID", index.IndexID),
 		zap.Int64("totalRows", indexInfo.TotalRows), zap.Int64("indexRows", indexInfo.IndexedRows),
 		zap.Int64("pendingIndexRows", indexInfo.PendingIndexRows),
 		zap.String("state", indexInfo.State.String()), zap.String("failReason", indexInfo.IndexStateFailReason))
@@ -649,9 +647,9 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
+	}))
 
 	s.completeIndexInfo(indexInfo, indexes[0], segments, false, indexes[0].CreateTime)
 	log.Info("GetIndexBuildProgress success", zap.Int64("collectionID", req.GetCollectionID()),
@@ -680,11 +678,8 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("indexName", req.GetIndexName()),
-	)
-	log.Info("receive DescribeIndex request",
 		zap.Uint64("timestamp", req.GetTimestamp()),
 	)
-
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		log.Warn(msgDataCoordIsUnhealthy(paramtable.GetNodeID()), zap.Error(err))
 		return &indexpb.DescribeIndexResponse{
@@ -702,9 +697,9 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped
+	}))
 
 	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {
@@ -729,7 +724,6 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 		s.completeIndexInfo(indexInfo, index, segments, false, createTs)
 		indexInfos = append(indexInfos, indexInfo)
 	}
-	log.Info("DescribeIndex success")
 	return &indexpb.DescribeIndexResponse{
 		Status:     merr.Success(),
 		IndexInfos: indexInfos,
@@ -761,9 +755,9 @@ func (s *Server) GetIndexStatistics(ctx context.Context, req *indexpb.GetIndexSt
 	}
 
 	// The total rows of all indexes should be based on the current perspective
-	segments := s.selectSegmentIndexesStats(func(info *SegmentInfo) bool {
-		return info.GetCollectionID() == req.GetCollectionID() && (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
-	})
+	segments := s.selectSegmentIndexesStats(WithCollection(req.GetCollectionID()), SegmentFilterFunc(func(info *SegmentInfo) bool {
+		return (isFlush(info) || info.GetState() == commonpb.SegmentState_Dropped)
+	}))
 
 	indexInfos := make([]*indexpb.IndexInfo, 0)
 	for _, index := range indexes {

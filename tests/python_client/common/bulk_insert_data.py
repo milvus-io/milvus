@@ -93,7 +93,7 @@ def gen_binary_vectors(nb, dim):
     return vectors
 
 
-def gen_fp16_vectors(num, dim):
+def gen_fp16_vectors(num, dim, for_json=False):
     """
     generate float16 vector data
     raw_vectors : the vectors
@@ -105,13 +105,16 @@ def gen_fp16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        fp16_vector = np.array(raw_vector, dtype=np.float16).view(np.uint8).tolist()
+        if for_json:
+            fp16_vector = np.array(raw_vector, dtype=np.float16).tolist()
+        else:
+            fp16_vector = np.array(raw_vector, dtype=np.float16).view(np.uint8).tolist()
         fp16_vectors.append(fp16_vector)
 
     return raw_vectors, fp16_vectors
 
 
-def gen_bf16_vectors(num, dim):
+def gen_bf16_vectors(num, dim, for_json=False):
     """
     generate brain float16 vector data
     raw_vectors : the vectors
@@ -123,7 +126,10 @@ def gen_bf16_vectors(num, dim):
     for _ in range(num):
         raw_vector = [random.random() for _ in range(dim)]
         raw_vectors.append(raw_vector)
-        bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
+        if for_json:
+            bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).tolist()
+        else:
+            bf16_vector = np.array(jnp.array(raw_vector, dtype=jnp.bfloat16)).view(np.uint8).tolist()
         bf16_vectors.append(bf16_vector)
 
     return raw_vectors, bf16_vectors
@@ -603,9 +609,9 @@ def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, d
                     float_vector = False
                     d[data_field] = gen_vectors(float_vector=float_vector, rows=1, dim=dim)[0]
                 if "bf16" in data_field:
-                    d[data_field] = gen_bf16_vectors(1, dim)[1][0]
+                    d[data_field] = gen_bf16_vectors(1, dim, True)[1][0]
                 if "fp16" in data_field:
-                    d[data_field] = gen_fp16_vectors(1, dim)[1][0]
+                    d[data_field] = gen_fp16_vectors(1, dim, True)[1][0]
             elif data_field == DataField.float_field:
                 d[data_field] = random.random()
             elif data_field == DataField.double_field:
@@ -674,7 +680,7 @@ def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_
     return files
 
 
-def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_nums=1, err_type="", force=False, enable_dynamic_field=False):
+def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_nums=1, err_type="", force=False, enable_dynamic_field=False, include_meta=True):
     # gen numpy files
     files = []
     start_uid = 0
@@ -707,7 +713,7 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                 file_name = gen_int_or_float_in_numpy_file(dir=data_source, data_field=data_field,
                                                            rows=rows, force=force)
             files.append(file_name)
-        if enable_dynamic_field:
+        if enable_dynamic_field and include_meta:
             file_name = gen_dynamic_field_in_numpy_file(dir=data_source, rows=rows, force=force)
             files.append(file_name)
         if file_size is not None:
@@ -756,7 +762,7 @@ def gen_dynamic_field_data_in_parquet_file(rows, start=0):
     return data
 
 
-def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_group_size=None, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False):
+def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_group_size=None, file_nums=1, array_length=None, err_type="", enable_dynamic_field=False, include_meta=True):
     # gen numpy files
     if err_type == "":
         err_type = "none"
@@ -771,7 +777,7 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
             data = gen_data_by_data_field(data_field=data_field, rows=rows, start=0,
                                           float_vector=float_vector, dim=dim, array_length=array_length)
             all_field_data[data_field] = data
-        if enable_dynamic_field:
+        if enable_dynamic_field and include_meta:
             all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
         df = pd.DataFrame(all_field_data)
         log.info(f"df: \n{df}")
@@ -903,7 +909,7 @@ def prepare_bulk_insert_new_json_files(minio_endpoint="", bucket_name="milvus-bu
 
 
 def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, enable_dynamic_field=False, file_size=None,
-                                    data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
+                                    data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False, include_meta=True):
     """
     Generate column based files based on params in numpy format and copy them to the minio
     Note: each field in data_fields would be generated one numpy file.
@@ -935,14 +941,14 @@ def prepare_bulk_insert_numpy_files(minio_endpoint="", bucket_name="milvus-bucke
     """
     files = gen_npy_files(rows=rows, dim=dim, float_vector=float_vector, file_size=file_size,
                           data_fields=data_fields, enable_dynamic_field=enable_dynamic_field,
-                          file_nums=file_nums, force=force)
+                          file_nums=file_nums, force=force, include_meta=include_meta)
 
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 
 
 def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-bucket", rows=100, dim=128, array_length=None, file_size=None, row_group_size=None,
-                                    enable_dynamic_field=False, data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False):
+                                    enable_dynamic_field=False, data_fields=[DataField.vec_field], float_vector=True, file_nums=1, force=False, include_meta=True):
     """
     Generate column based files based on params in parquet format and copy them to the minio
     Note: each field in data_fields would be generated one parquet file.
@@ -974,7 +980,7 @@ def prepare_bulk_insert_parquet_files(minio_endpoint="", bucket_name="milvus-buc
     """
     files = gen_parquet_files(rows=rows, dim=dim, float_vector=float_vector, enable_dynamic_field=enable_dynamic_field,
                               data_fields=data_fields, array_length=array_length, file_size=file_size, row_group_size=row_group_size,
-                              file_nums=file_nums)
+                              file_nums=file_nums, include_meta=include_meta)
     copy_files_to_minio(host=minio_endpoint, r_source=data_source, files=files, bucket_name=bucket_name, force=force)
     return files
 

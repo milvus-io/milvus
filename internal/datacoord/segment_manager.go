@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -109,7 +110,7 @@ var _ Manager = (*SegmentManager)(nil)
 // SegmentManager handles L1 segment related logic
 type SegmentManager struct {
 	meta                *meta
-	mu                  sync.RWMutex
+	mu                  lock.RWMutex
 	allocator           allocator
 	helper              allocHelper
 	segments            []UniqueID

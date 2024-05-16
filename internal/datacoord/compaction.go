@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -76,7 +77,7 @@ var (
 )
 
 type CompactionMeta interface {
-	SelectSegments(selector SegmentInfoSelector) []*SegmentInfo
+	SelectSegments(filters ...SegmentFilter) []*SegmentInfo
 	GetHealthySegment(segID UniqueID) *SegmentInfo
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
@@ -112,7 +113,7 @@ func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask 
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	mu    sync.RWMutex
+	mu    lock.RWMutex
 	plans map[int64]*compactionTask // planID -> task
 
 	meta      CompactionMeta
@@ -322,16 +323,15 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 		// Select sealed L1 segments for LevelZero compaction that meets the condition:
 		// dmlPos < triggerInfo.pos
 		// TODO: select L2 segments too
-		sealedSegments := c.meta.SelectSegments(func(info *SegmentInfo) bool {
-			return info.GetCollectionID() == task.triggerInfo.collectionID &&
-				(task.triggerInfo.partitionID == -1 || info.GetPartitionID() == task.triggerInfo.partitionID) &&
+		sealedSegments := c.meta.SelectSegments(WithCollection(task.triggerInfo.collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
+			return (task.triggerInfo.partitionID == -1 || info.GetPartitionID() == task.triggerInfo.partitionID) &&
 				info.GetInsertChannel() == plan.GetChannel() &&
 				isFlushState(info.GetState()) &&
 				!info.isCompacting &&
 				!info.GetIsImporting() &&
 				info.GetLevel() != datapb.SegmentLevel_L0 &&
 				info.GetDmlPosition().GetTimestamp() < task.triggerInfo.pos.GetTimestamp()
-		})
+		}))
 		if len(sealedSegments) == 0 {
 			return errors.Errorf("Selected zero L1/L2 segments for the position=%v", task.triggerInfo.pos)
 		}

@@ -621,7 +621,8 @@ TEST(GroupBY, Reduce) {
     auto slice_nqs = std::vector<int64_t>{num_queries / 2, num_queries / 2};
     auto slice_topKs = std::vector<int64_t>{topK / 2, topK};
     CSearchResultDataBlobs cSearchResultData;
-    status = ReduceSearchResultsAndFillData(&cSearchResultData,
+    status = ReduceSearchResultsAndFillData({},
+                                            &cSearchResultData,
                                             c_plan,
                                             results.data(),
                                             results.size(),

@@ -466,6 +466,7 @@ func (s *Server) init() error {
 		zap.String("externalAddress", Params.GetAddress()),
 	)
 
+	accesslog.InitAccessLogger(paramtable.Get())
 	serviceName := fmt.Sprintf("Proxy ip: %s, port: %d", Params.IP, Params.Port.GetAsInt())
 	log.Debug("init Proxy's tracer done", zap.String("service name", serviceName))
 
@@ -1226,4 +1227,16 @@ func (s *Server) GetImportProgress(ctx context.Context, req *internalpb.GetImpor
 
 func (s *Server) ListImports(ctx context.Context, req *internalpb.ListImportsRequest) (*internalpb.ListImportsResponse, error) {
 	return s.proxy.ListImports(ctx, req)
+}
+
+func (s *Server) AlterDatabase(ctx context.Context, req *milvuspb.AlterDatabaseRequest) (*commonpb.Status, error) {
+	return s.proxy.AlterDatabase(ctx, req)
+}
+
+func (s *Server) InvalidateShardLeaderCache(ctx context.Context, req *proxypb.InvalidateShardLeaderCacheRequest) (*commonpb.Status, error) {
+	return s.proxy.InvalidateShardLeaderCache(ctx, req)
+}
+
+func (s *Server) DescribeDatabase(ctx context.Context, req *milvuspb.DescribeDatabaseRequest) (*milvuspb.DescribeDatabaseResponse, error) {
+	return s.proxy.DescribeDatabase(ctx, req)
 }

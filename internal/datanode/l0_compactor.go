@@ -19,6 +19,7 @@ package datanode
 import (
 	"context"
 	"fmt"
+	"math"
 	"time"
 
 	"github.com/samber/lo"
@@ -153,7 +154,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 		for _, d := range s.GetDeltalogs() {
 			for _, l := range d.GetBinlogs() {
 				paths = append(paths, l.GetLogPath())
-				totalSize += l.GetLogSize()
+				totalSize += l.GetMemorySize()
 			}
 		}
 		if len(paths) > 0 {
@@ -278,8 +279,9 @@ func (t *levelZeroCompactionTask) splitDelta(
 	// segments shall be safe to read outside
 	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
 	split := func(pk storage.PrimaryKey) []int64 {
+		lc := storage.NewLocationsCache(pk)
 		return lo.FilterMap(segments, func(segment *metacache.SegmentInfo, _ int) (int64, bool) {
-			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(pk)
+			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(lc)
 		})
 	}
 
@@ -329,17 +331,33 @@ func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storag
 
 	uploadKv[blobPath] = blob.GetValue()
 
-	// TODO Timestamp?
+	minTs := uint64(math.MaxUint64)
+	maxTs := uint64(0)
+	for _, ts := range dData.Tss {
+		if ts > maxTs {
+			maxTs = ts
+		}
+		if ts < minTs {
+			minTs = ts
+		}
+	}
+
 	deltalog := &datapb.Binlog{
-		LogSize: int64(len(blob.GetValue())),
-		LogPath: blobPath,
-		LogID:   logID,
+		EntriesNum:    dData.RowCount,
+		LogSize:       int64(len(blob.GetValue())),
+		LogPath:       blobPath,
+		LogID:         logID,
+		TimestampFrom: minTs,
+		TimestampTo:   maxTs,
+		MemorySize:    dData.Size(),
 	}
 
 	return uploadKv, deltalog, nil
 }
 
 func (t *levelZeroCompactionTask) uploadByCheck(ctx context.Context, requireCheck bool, alteredSegments map[int64]*storage.DeleteData, resultSegments map[int64]*datapb.CompactionSegment) error {
+	allBlobs := make(map[string][]byte)
+	tmpResults := make(map[int64]*datapb.CompactionSegment)
 	for segID, dData := range alteredSegments {
 		if !requireCheck || (dData.Size() >= paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()) {
 			blobs, binlog, err := t.composeDeltalog(segID, dData)
@@ -347,24 +365,33 @@ func (t *levelZeroCompactionTask) uploadByCheck(ctx context.Context, requireChec
 				log.Warn("L0 compaction composeDelta fail", zap.Int64("segmentID", segID), zap.Error(err))
 				return err
 			}
-			err = t.Upload(ctx, blobs)
-			if err != nil {
-				log.Warn("L0 compaction upload blobs fail", zap.Int64("segmentID", segID), zap.Any("binlog", binlog), zap.Error(err))
-				return err
+			allBlobs = lo.Assign(blobs, allBlobs)
+			tmpResults[segID] = &datapb.CompactionSegment{
+				SegmentID: segID,
+				Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{binlog}}},
+				Channel:   t.plan.GetChannel(),
 			}
-
-			if _, ok := resultSegments[segID]; !ok {
-				resultSegments[segID] = &datapb.CompactionSegment{
-					SegmentID: segID,
-					Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{binlog}}},
-					Channel:   t.plan.GetChannel(),
-				}
-			} else {
-				resultSegments[segID].Deltalogs[0].Binlogs = append(resultSegments[segID].Deltalogs[0].Binlogs, binlog)
-			}
-
 			delete(alteredSegments, segID)
 		}
 	}
+
+	if len(allBlobs) == 0 {
+		return nil
+	}
+
+	if err := t.Upload(ctx, allBlobs); err != nil {
+		log.Warn("L0 compaction upload blobs fail", zap.Error(err))
+		return err
+	}
+
+	for segID, compSeg := range tmpResults {
+		if _, ok := resultSegments[segID]; !ok {
+			resultSegments[segID] = compSeg
+		} else {
+			binlog := compSeg.Deltalogs[0].Binlogs[0]
+			resultSegments[segID].Deltalogs[0].Binlogs = append(resultSegments[segID].Deltalogs[0].Binlogs, binlog)
+		}
+	}
+
 	return nil
 }

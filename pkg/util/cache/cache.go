@@ -18,31 +18,35 @@ package cache
 
 import (
 	"container/list"
-	"fmt"
+	"context"
 	"sync"
 	"time"
 
 	"go.uber.org/atomic"
-	"golang.org/x/sync/singleflight"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/syncutil"
 )
 
 var (
 	ErrNoSuchItem     = merr.WrapErrServiceInternal("no such item")
 	ErrNotEnoughSpace = merr.WrapErrServiceInternal("not enough space")
-	ErrTimeOut        = merr.WrapErrServiceInternal("time out")
 )
 
 type cacheItem[K comparable, V any] struct {
-	key      K
-	value    V
-	pinCount atomic.Int32
+	key        K
+	value      V
+	pinCount   atomic.Int32
+	needReload bool
 }
 
 type (
-	Loader[K comparable, V any]    func(key K) (V, bool)
-	Finalizer[K comparable, V any] func(key K, value V) error
+	Loader[K comparable, V any]    func(ctx context.Context, key K) (V, error)
+	Finalizer[K comparable, V any] func(ctx context.Context, key K, value V) error
 )
 
 // Scavenger records occupation of cache and decide whether to evict if necessary.
@@ -57,18 +61,26 @@ type Scavenger[K comparable] interface {
 	Collect(key K) (bool, func(K) bool)
 	// Throw records entry removals.
 	Throw(key K)
+	// Spare returns a collector function based on given key.
+	//	The collector is a function which can be invoked repetedly, each invocation will test if there is enough
+	//	room for all the pending entries if the thrown entry is evicted. Typically, the collector will get multiple true
+	//	before it gets a false.
+	Spare(key K) func(K) bool
+	Replace(key K) (bool, func(K) bool, func())
 }
 
 type LazyScavenger[K comparable] struct {
 	capacity int64
 	size     int64
 	weight   func(K) int64
+	weights  map[K]int64
 }
 
 func NewLazyScavenger[K comparable](weight func(K) int64, capacity int64) *LazyScavenger[K] {
 	return &LazyScavenger[K]{
 		capacity: capacity,
 		weight:   weight,
+		weights:  make(map[K]int64),
 	}
 }
 
@@ -77,16 +89,47 @@ func (s *LazyScavenger[K]) Collect(key K) (bool, func(K) bool) {
 	if s.size+w > s.capacity {
 		needCollect := s.size + w - s.capacity
 		return false, func(key K) bool {
-			needCollect -= s.weight(key)
+			needCollect -= s.weights[key]
 			return needCollect <= 0
 		}
 	}
 	s.size += w
+	s.weights[key] = w
 	return true, nil
 }
 
+func (s *LazyScavenger[K]) Replace(key K) (bool, func(K) bool, func()) {
+	pw := s.weights[key]
+	w := s.weight(key)
+	if s.size-pw+w > s.capacity {
+		needCollect := s.size - pw + w - s.capacity
+		return false, func(key K) bool {
+			needCollect -= s.weights[key]
+			return needCollect <= 0
+		}, nil
+	}
+	s.size += w - pw
+	s.weights[key] = w
+	return true, nil, func() {
+		s.size -= w - pw
+		s.weights[key] = pw
+	}
+}
+
 func (s *LazyScavenger[K]) Throw(key K) {
-	s.size -= s.weight(key)
+	if w, ok := s.weights[key]; ok {
+		s.size -= w
+		delete(s.weights, key)
+	}
+}
+
+func (s *LazyScavenger[K]) Spare(key K) func(K) bool {
+	w := s.weight(key)
+	available := s.capacity - s.size + w
+	return func(k K) bool {
+		available -= s.weight(k)
+		return available >= 0
+	}
 }
 
 type Stats struct {
@@ -103,49 +146,40 @@ type Cache[K comparable, V any] interface {
 	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
 	// completes.
 	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
-	// Throws `ErrNotEnoughSpace` if there is no room for the operation.
-	Do(key K, doer func(V) error) (missing bool, err error)
-	// Do the operation `doer` on the given key `key`. The key is kept in the cache until the operation
-	// completes. The function waits for `timeout` if there is not enough space for the given key.
-	// Throws `ErrNoSuchItem` if the key is not found or not able to be loaded from given loader.
-	// Throws `ErrTimeOut` if timed out.
-	DoWait(key K, timeout time.Duration, doer func(V) error) (missing bool, err error)
+	Do(ctx context.Context, key K, doer func(context.Context, V) error) (missing bool, err error)
 
 	// Get stats
 	Stats() *Stats
-}
 
-type Waiter[K comparable] struct {
-	key K
-	c   *sync.Cond
-}
+	MarkItemNeedReload(ctx context.Context, key K) bool
 
-func newWaiter[K comparable](key K) Waiter[K] {
-	return Waiter[K]{
-		key: key,
-		c:   sync.NewCond(&sync.Mutex{}),
-	}
+	// Remove removes the item from the cache.
+	// Return nil if the item is removed.
+	// Return error if the Remove operation is canceled.
+	Remove(ctx context.Context, key K) error
 }
 
 // lruCache extends the ccache library to provide pinning and unpinning of items.
 type lruCache[K comparable, V any] struct {
 	rwlock sync.RWMutex
 	// the value is *cacheItem[V]
-	items              map[K]*list.Element
-	accessList         *list.List
-	loaderSingleFlight singleflight.Group
-	stats              *Stats
-	waitQueue          *list.List
+	items          map[K]*list.Element
+	accessList     *list.List
+	loaderKeyLocks *lock.KeyLock[K]
+	stats          *Stats
+	waitNotifier   *syncutil.VersionedNotifier
 
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
 	scavenger Scavenger[K]
+	reloader  Loader[K, V]
 }
 
 type CacheBuilder[K comparable, V any] struct {
 	loader    Loader[K, V]
 	finalizer Finalizer[K, V]
 	scavenger Scavenger[K]
+	reloader  Loader[K, V]
 }
 
 func NewCacheBuilder[K comparable, V any]() *CacheBuilder[K, V] {
@@ -186,80 +220,53 @@ func (b *CacheBuilder[K, V]) WithCapacity(capacity int64) *CacheBuilder[K, V] {
 	return b
 }
 
+func (b *CacheBuilder[K, V]) WithReloader(reloader Loader[K, V]) *CacheBuilder[K, V] {
+	b.reloader = reloader
+	return b
+}
+
 func (b *CacheBuilder[K, V]) Build() Cache[K, V] {
-	return newLRUCache(b.loader, b.finalizer, b.scavenger)
+	return newLRUCache(b.loader, b.finalizer, b.scavenger, b.reloader)
 }
 
 func newLRUCache[K comparable, V any](
 	loader Loader[K, V],
 	finalizer Finalizer[K, V],
 	scavenger Scavenger[K],
+	reloader Loader[K, V],
 ) Cache[K, V] {
 	return &lruCache[K, V]{
-		items:              make(map[K]*list.Element),
-		accessList:         list.New(),
-		waitQueue:          list.New(),
-		loaderSingleFlight: singleflight.Group{},
-		stats:              new(Stats),
-		loader:             loader,
-		finalizer:          finalizer,
-		scavenger:          scavenger,
+		items:          make(map[K]*list.Element),
+		accessList:     list.New(),
+		waitNotifier:   syncutil.NewVersionedNotifier(),
+		loaderKeyLocks: lock.NewKeyLock[K](),
+		stats:          new(Stats),
+		loader:         loader,
+		finalizer:      finalizer,
+		scavenger:      scavenger,
+		reloader:       reloader,
 	}
 }
 
-// Do picks up an item from cache and executes doer. The entry of interest is garented in the cache when doer is executing.
-func (c *lruCache[K, V]) Do(key K, doer func(V) error) (bool, error) {
-	item, missing, err := c.getAndPin(key)
-	if err != nil {
-		return missing, err
-	}
-	defer c.Unpin(key)
-	return missing, doer(item.value)
-}
-
-func (c *lruCache[K, V]) DoWait(key K, timeout time.Duration, doer func(V) error) (bool, error) {
-	timedWait := func(cond *sync.Cond, timeout time.Duration) bool {
-		c := make(chan struct{})
-		go func() {
-			cond.L.Lock()
-			defer cond.L.Unlock()
-			defer close(c)
-			cond.Wait()
-		}()
-		select {
-		case <-c:
-			return false // completed normally
-		case <-time.After(timeout):
-			return true // timed out
-		}
-	}
-
-	var ele *list.Element
-	start := time.Now()
+func (c *lruCache[K, V]) Do(ctx context.Context, key K, doer func(context.Context, V) error) (bool, error) {
+	log := log.Ctx(ctx).With(zap.Any("key", key))
 	for {
-		item, missing, err := c.getAndPin(key)
+		// Get a listener before getAndPin to avoid missing the notification.
+		listener := c.waitNotifier.Listen(syncutil.VersionedListenAtLatest)
+
+		item, missing, err := c.getAndPin(ctx, key)
 		if err == nil {
-			if ele != nil {
-				c.rwlock.Lock()
-				c.waitQueue.Remove(ele)
-				c.rwlock.Unlock()
-			}
 			defer c.Unpin(key)
-			return missing, doer(item.value)
+			return missing, doer(ctx, item.value)
 		} else if err != ErrNotEnoughSpace {
 			return true, err
 		}
-		if ele == nil {
-			// If no enough space, enqueue the key
-			c.rwlock.Lock()
-			waiter := newWaiter(key)
-			ele = c.waitQueue.PushBack(&waiter)
-			c.rwlock.Unlock()
-		}
-		// Wait for the key to be available
-		timeLeft := time.Until(start.Add(timeout))
-		if timeLeft <= 0 || timedWait(ele.Value.(*Waiter[K]).c, timeLeft) {
-			return true, ErrTimeOut
+		log.Warn("Failed to get disk cache for segment, wait and try again", zap.Error(err))
+
+		// wait for the listener to be notified.
+		if err := listener.Wait(ctx); err != nil {
+			log.Warn("failed to get item for key with timeout", zap.Error(context.Cause(ctx)))
+			return true, err
 		}
 	}
 }
@@ -277,77 +284,93 @@ func (c *lruCache[K, V]) Unpin(key K) {
 	}
 	item := e.Value.(*cacheItem[K, V])
 	item.pinCount.Dec()
+
+	log := log.With(zap.Any("UnPinedKey", key))
 	if item.pinCount.Load() == 0 {
-		c.notifyWaiters()
+		log.Debug("Unpin item to zero ref, trigger activating waiters")
+		c.waitNotifier.NotifyAll()
+	} else {
+		log.Debug("Miss to trigger activating waiters", zap.Int32("PinCount", item.pinCount.Load()))
 	}
 }
 
-func (c *lruCache[K, V]) notifyWaiters() {
-	if c.waitQueue.Len() > 0 {
-		for e := c.waitQueue.Front(); e != nil; e = e.Next() {
-			w := e.Value.(*Waiter[K])
-			w.c.Broadcast()
-		}
-	}
-}
-
-func (c *lruCache[K, V]) peekAndPin(key K) *cacheItem[K, V] {
+func (c *lruCache[K, V]) peekAndPin(ctx context.Context, key K) *cacheItem[K, V] {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
 	e, ok := c.items[key]
+	log := log.Ctx(ctx)
 	if ok {
 		item := e.Value.(*cacheItem[K, V])
+		if item.needReload && item.pinCount.Load() == 0 {
+			ok, _, retback := c.scavenger.Replace(key)
+			if ok {
+				// there is room for reload and no one is using the item
+				if c.reloader != nil {
+					reloaded, err := c.reloader(ctx, key)
+					if err == nil {
+						item.value = reloaded
+					} else if retback != nil {
+						retback()
+					}
+				}
+				item.needReload = false
+			}
+		}
 		c.accessList.MoveToFront(e)
 		item.pinCount.Inc()
+		log.Debug("peeked item success",
+			zap.Int32("PinCount", item.pinCount.Load()),
+			zap.Any("key", key))
 		return item
 	}
+	log.Debug("failed to peek item", zap.Any("key", key))
 	return nil
 }
 
 // GetAndPin gets and pins the given key if it exists
-func (c *lruCache[K, V]) getAndPin(key K) (*cacheItem[K, V], bool, error) {
-	if item := c.peekAndPin(key); item != nil {
+func (c *lruCache[K, V]) getAndPin(ctx context.Context, key K) (*cacheItem[K, V], bool, error) {
+	if item := c.peekAndPin(ctx, key); item != nil {
 		c.stats.HitCount.Inc()
 		return item, false, nil
 	}
-
+	log := log.Ctx(ctx)
 	c.stats.MissCount.Inc()
 	if c.loader != nil {
 		// Try scavenge if there is room. If not, fail fast.
 		//	Note that the test is not accurate since we are not locking `loader` here.
 		if _, ok := c.tryScavenge(key); !ok {
+			log.Warn("getAndPin ran into scavenge failure, return", zap.Any("key", key))
 			return nil, true, ErrNotEnoughSpace
 		}
-
-		strKey := fmt.Sprint(key)
-		item, err, _ := c.loaderSingleFlight.Do(strKey, func() (interface{}, error) {
-			if item := c.peekAndPin(key); item != nil {
-				return item, nil
-			}
-
-			timer := time.Now()
-			value, ok := c.loader(key)
-			c.stats.TotalLoadTimeMs.Add(uint64(time.Since(timer).Milliseconds()))
-
-			if !ok {
-				c.stats.LoadFailCount.Inc()
-				return nil, ErrNoSuchItem
-			}
-
-			c.stats.LoadSuccessCount.Inc()
-			item, err := c.setAndPin(key, value)
-			if err != nil {
-				return nil, err
-			}
-			return item, nil
-		})
-
-		if err == nil {
-			return item.(*cacheItem[K, V]), true, nil
+		c.loaderKeyLocks.Lock(key)
+		defer c.loaderKeyLocks.Unlock(key)
+		if item := c.peekAndPin(ctx, key); item != nil {
+			return item, false, nil
 		}
-		return nil, true, err
-	}
+		timer := time.Now()
+		value, err := c.loader(ctx, key)
 
+		for retryAttempt := 0; merr.ErrServiceDiskLimitExceeded.Is(err) && retryAttempt < paramtable.Get().QueryNodeCfg.LazyLoadMaxRetryTimes.GetAsInt(); retryAttempt++ {
+			// Try to evict one item if there is not enough disk space, then retry.
+			c.evictItems(ctx, paramtable.Get().QueryNodeCfg.LazyLoadMaxEvictPerRetry.GetAsInt())
+			value, err = c.loader(ctx, key)
+		}
+
+		if err != nil {
+			c.stats.LoadFailCount.Inc()
+			log.Debug("loader failed for key", zap.Any("key", key))
+			return nil, true, err
+		}
+
+		c.stats.TotalLoadTimeMs.Add(uint64(time.Since(timer).Milliseconds()))
+		c.stats.LoadSuccessCount.Inc()
+		item, err := c.setAndPin(ctx, key, value)
+		if err != nil {
+			log.Debug("setAndPin failed for key", zap.Any("key", key), zap.Error(err))
+			return nil, true, err
+		}
+		return item, true, nil
+	}
 	return nil, true, ErrNoSuchItem
 }
 
@@ -381,7 +404,7 @@ func (c *lruCache[K, V]) lockfreeTryScavenge(key K) ([]K, bool) {
 }
 
 // for cache miss
-func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
+func (c *lruCache[K, V]) setAndPin(ctx context.Context, key K, value V) (*cacheItem[K, V], error) {
 	c.rwlock.Lock()
 	defer c.rwlock.Unlock()
 
@@ -390,32 +413,101 @@ func (c *lruCache[K, V]) setAndPin(key K, value V) (*cacheItem[K, V], error) {
 
 	// tryScavenge is done again since the load call is lock free.
 	toEvict, ok := c.lockfreeTryScavenge(key)
-
+	log := log.Ctx(ctx)
 	if !ok {
 		if c.finalizer != nil {
-			c.finalizer(key, value)
+			log.Warn("setAndPin ran into scavenge failure, release data for", zap.Any("key", key))
+			c.finalizer(ctx, key, value)
 		}
 		return nil, ErrNotEnoughSpace
 	}
 
 	for _, ek := range toEvict {
-		e := c.items[ek]
-		delete(c.items, ek)
-		c.accessList.Remove(e)
-		c.scavenger.Throw(ek)
-		c.stats.EvictionCount.Inc()
-
-		if c.finalizer != nil {
-			item := e.Value.(*cacheItem[K, V])
-			timer := time.Now()
-			c.finalizer(ek, item.value)
-			c.stats.TotalFinalizeTimeMs.Add(uint64(time.Since(timer).Milliseconds()))
-		}
+		c.evict(ctx, ek)
+		log.Debug("cache evicting", zap.Any("key", ek), zap.Any("by", key))
 	}
 
 	c.scavenger.Collect(key)
 	e := c.accessList.PushFront(item)
 	c.items[item.key] = e
-
+	log.Debug("setAndPin set up item", zap.Any("item.key", item.key),
+		zap.Int32("pinCount", item.pinCount.Load()))
 	return item, nil
+}
+
+func (c *lruCache[K, V]) Remove(ctx context.Context, key K) error {
+	for {
+		listener := c.waitNotifier.Listen(syncutil.VersionedListenAtLatest)
+
+		if c.tryToRemoveKey(ctx, key) {
+			return nil
+		}
+
+		if err := listener.Wait(ctx); err != nil {
+			log.Warn("failed to remove item for key with timeout", zap.Error(err))
+			return err
+		}
+	}
+}
+
+func (c *lruCache[K, V]) tryToRemoveKey(ctx context.Context, key K) (removed bool) {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+
+	e, ok := c.items[key]
+	if !ok {
+		return true
+	}
+
+	item := e.Value.(*cacheItem[K, V])
+	if item.pinCount.Load() == 0 {
+		c.evict(ctx, key)
+		return true
+	}
+	return false
+}
+
+func (c *lruCache[K, V]) evict(ctx context.Context, key K) {
+	c.stats.EvictionCount.Inc()
+	e := c.items[key]
+	delete(c.items, key)
+	c.accessList.Remove(e)
+	c.scavenger.Throw(key)
+
+	if c.finalizer != nil {
+		item := e.Value.(*cacheItem[K, V])
+		c.finalizer(ctx, key, item.value)
+	}
+}
+
+func (c *lruCache[K, V]) evictItems(ctx context.Context, n int) {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+
+	toEvict := make([]K, 0)
+	for p := c.accessList.Back(); p != nil && n > 0; p = p.Prev() {
+		evictItem := p.Value.(*cacheItem[K, V])
+		if evictItem.pinCount.Load() > 0 {
+			continue
+		}
+		toEvict = append(toEvict, evictItem.key)
+		n--
+	}
+
+	for _, key := range toEvict {
+		c.evict(ctx, key)
+	}
+}
+
+func (c *lruCache[K, V]) MarkItemNeedReload(ctx context.Context, key K) bool {
+	c.rwlock.Lock()
+	defer c.rwlock.Unlock()
+
+	if e, ok := c.items[key]; ok {
+		item := e.Value.(*cacheItem[K, V])
+		item.needReload = true
+		return true
+	}
+
+	return false
 }

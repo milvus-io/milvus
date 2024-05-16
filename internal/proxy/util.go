@@ -901,6 +901,17 @@ func NewContextWithMetadata(ctx context.Context, username string, dbName string)
 	return contextutil.AppendToIncomingContext(ctx, authKey, authValue, dbKey, dbName)
 }
 
+func AppendUserInfoForRPC(ctx context.Context) context.Context {
+	curUser, _ := GetCurUserFromContext(ctx)
+	if curUser != "" {
+		originValue := fmt.Sprintf("%s%s%s", curUser, util.CredentialSeperator, curUser)
+		authKey := strings.ToLower(util.HeaderAuthorize)
+		authValue := crypto.Base64Encode(originValue)
+		ctx = metadata.AppendToOutgoingContext(ctx, authKey, authValue)
+	}
+	return ctx
+}
+
 func GetRole(username string) ([]string, error) {
 	if globalMetaCache == nil {
 		return []string{}, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
@@ -1112,9 +1123,10 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 	return false, nil
 }
 
-func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	requiredFieldsNum := 0
+func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
+	autoGenFieldNum := 0
 
 	dataNameSet := typeutil.NewSet[string]()
 	for _, data := range insertMsg.FieldsData {
@@ -1130,20 +1142,24 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			log.Warn("not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
+		if fieldSchema.IsPrimaryKey {
+			primaryKeyNum++
+		}
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if !fieldSchema.AutoID {
-			requiredFieldsNum++
-		}
-		// if has no field pass in, consider use default value
-		// so complete it with field schema
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			// primary key can not use default value
-			if fieldSchema.IsPrimaryKey {
-				primaryKeyNum++
+			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() {
+				// no need to pass when pk is autoid and SkipAutoIDCheck is false
+				autoGenFieldNum++
 				continue
 			}
+			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+			}
+			// when use default_value or has set Nullable
+			// it's ok that no corresponding fieldData found
 			dataToAppend := &schemapb.FieldData{
 				Type:      fieldSchema.GetDataType(),
 				FieldName: fieldSchema.GetName(),
@@ -1154,17 +1170,15 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 
 	if primaryKeyNum > 1 {
 		log.Warn("more than 1 primary keys not supported",
-			zap.Int64("primaryKeyNum", int64(primaryKeyNum)),
-			zap.String("collection", schema.GetName()))
+			zap.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
 
-	if len(insertMsg.FieldsData) != requiredFieldsNum {
-		log.Warn("the number of fields is not the same as needed",
-			zap.Int("fieldNum", len(insertMsg.FieldsData)),
-			zap.Int("requiredFieldNum", requiredFieldsNum),
-			zap.String("collection", schema.GetName()))
-		return merr.WrapErrParameterInvalid(requiredFieldsNum, len(insertMsg.FieldsData), "the number of fields is less than needed")
+	expectedNum := len(schema.Fields)
+	actualNum := autoGenFieldNum + len(insertMsg.FieldsData)
+	if expectedNum != actualNum {
+		log.Warn("the number of fields is not the same as needed", zap.Int("expected", expectedNum), zap.Int("actual", actualNum))
+		return merr.WrapErrParameterInvalid(expectedNum, actualNum, "more fieldData has pass in")
 	}
 
 	return nil
@@ -1177,7 +1191,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := fillFieldsDataBySchema(schema, insertMsg); err != nil {
+	if err := checkFieldsDataBySchema(schema, insertMsg); err != nil {
 		return nil, err
 	}
 
@@ -1186,11 +1200,19 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		log.Error("get primary field schema failed", zap.String("collectionName", insertMsg.CollectionName), zap.Any("schema", schema), zap.Error(err))
 		return nil, err
 	}
+	if primaryFieldSchema.GetNullable() {
+		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
+	}
 	// get primaryFieldData whether autoID is true or not
 	var primaryFieldData *schemapb.FieldData
 	if inInsert {
 		// when checkPrimaryFieldData in insert
-		if !primaryFieldSchema.AutoID {
+
+		skipAutoIDCheck := Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() &&
+			primaryFieldSchema.AutoID &&
+			typeutil.IsPrimaryFieldDataExist(insertMsg.GetFieldsData(), primaryFieldSchema)
+
+		if !primaryFieldSchema.AutoID || skipAutoIDCheck {
 			primaryFieldData, err = typeutil.GetPrimaryFieldData(insertMsg.GetFieldsData(), primaryFieldSchema)
 			if err != nil {
 				log.Info("get primary field data failed", zap.String("collectionName", insertMsg.CollectionName), zap.Error(err))
@@ -1239,7 +1261,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 }
 
 func getPartitionKeyFieldData(fieldSchema *schemapb.FieldSchema, insertMsg *msgstream.InsertMsg) (*schemapb.FieldData, error) {
-	if len(insertMsg.GetPartitionName()) > 0 {
+	if len(insertMsg.GetPartitionName()) > 0 && !Params.ProxyCfg.SkipPartitionKeyCheck.GetAsBool() {
 		return nil, errors.New("not support manually specifying the partition names if partition key mode is used")
 	}
 
@@ -1452,15 +1474,6 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 	return hashedPartitionNames, err
 }
 
-func memsetLoop[T any](v T, numRows int) []T {
-	ret := make([]T, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, v)
-	}
-
-	return ret
-}
-
 func ErrWithLog(logger *log.MLogger, msg string, err error) error {
 	wrapErr := errors.Wrap(err, msg)
 	if logger != nil {
@@ -1621,4 +1634,15 @@ func SetReportValue(status *commonpb.Status, value int) {
 		status.ExtraInfo = make(map[string]string)
 	}
 	status.ExtraInfo["report_value"] = strconv.Itoa(value)
+}
+
+func GetCostValue(status *commonpb.Status) int {
+	if status == nil || status.ExtraInfo == nil {
+		return 0
+	}
+	value, err := strconv.Atoi(status.ExtraInfo["report_value"])
+	if err != nil {
+		return 0
+	}
+	return value
 }

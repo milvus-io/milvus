@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type ReplicaSuite struct {
@@ -15,6 +16,7 @@ type ReplicaSuite struct {
 }
 
 func (suite *ReplicaSuite) SetupSuite() {
+	paramtable.Init()
 	suite.replicaPB = &querypb.Replica{
 		ID:            1,
 		CollectionID:  2,
@@ -96,8 +98,8 @@ func (suite *ReplicaSuite) TestWriteOperation() {
 	suite.True(mr.Contains(6))
 
 	// test add ro node.
-	suite.False(mr.Contains(4))
-	suite.False(mr.Contains(7))
+	suite.False(mr.ContainRWNode(4))
+	suite.False(mr.ContainRWNode(7))
 	mr.AddRWNode(4, 7)
 	suite.Equal(3, r.RWNodesCount())
 	suite.Equal(1, r.RONodesCount())
@@ -116,8 +118,10 @@ func (suite *ReplicaSuite) TestWriteOperation() {
 	suite.Equal(5, mr.RWNodesCount())
 	suite.Equal(2, mr.RONodesCount())
 	suite.Equal(7, mr.NodesCount())
-	suite.False(mr.Contains(4))
-	suite.False(mr.Contains(7))
+	suite.False(mr.ContainRWNode(4))
+	suite.False(mr.ContainRWNode(7))
+	suite.True(mr.ContainRONode(4))
+	suite.True(mr.ContainRONode(7))
 
 	// test remove node.
 	mr.RemoveNode(4, 5, 7, 8)
@@ -164,10 +168,72 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 
 	// Test Contains()
 	suite.True(r.Contains(1))
-	suite.False(r.Contains(4))
+	suite.True(r.Contains(4))
 
 	// Test ContainRONode()
+	suite.False(r.ContainRONode(1))
 	suite.True(r.ContainRONode(4))
+
+	// Test ContainsRWNode()
+	suite.True(r.ContainRWNode(1))
+	suite.False(r.ContainRWNode(4))
+}
+
+func (suite *ReplicaSuite) TestChannelExclusiveMode() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+
+	r := newReplica(&querypb.Replica{
+		ID:            1,
+		CollectionID:  2,
+		ResourceGroup: DefaultResourceGroupName,
+		ChannelNodeInfos: map[string]*querypb.ChannelNodeInfo{
+			"channel1": {},
+			"channel2": {},
+			"channel3": {},
+			"channel4": {},
+		},
+	})
+
+	mutableReplica := r.copyForWrite()
+	// add 10 rw nodes, exclusive mode is false.
+	for i := 0; i < 10; i++ {
+		mutableReplica.AddRWNode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(0, len(channelNodeInfo.GetRwNodes()))
+	}
+
+	mutableReplica = r.copyForWrite()
+	// add 10 rw nodes, exclusive mode is true.
+	for i := 10; i < 20; i++ {
+		mutableReplica.AddRWNode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(5, len(channelNodeInfo.GetRwNodes()))
+	}
+
+	// 4 node become read only, exclusive mode still be true
+	mutableReplica = r.copyForWrite()
+	for i := 0; i < 4; i++ {
+		mutableReplica.AddRONode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(4, len(channelNodeInfo.GetRwNodes()))
+	}
+
+	// 4 node has been removed, exclusive mode back to false
+	mutableReplica = r.copyForWrite()
+	for i := 4; i < 8; i++ {
+		mutableReplica.RemoveNode(int64(i))
+	}
+	r = mutableReplica.IntoReplica()
+	for _, channelNodeInfo := range r.replicaPB.GetChannelNodeInfos() {
+		suite.Equal(0, len(channelNodeInfo.GetRwNodes()))
+	}
 }
 
 func TestReplica(t *testing.T) {

@@ -6,6 +6,7 @@ mod index_reader_c;
 mod index_writer;
 mod index_writer_c;
 mod linkedlist_collector;
+mod log;
 mod util;
 mod util_c;
 mod vec_collector;

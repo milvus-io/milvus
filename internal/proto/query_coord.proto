@@ -352,7 +352,7 @@ message SegmentLoadInfo {
     repeated data.FieldBinlog deltalogs = 9;
     repeated int64 compactionFrom = 10;  // segmentIDs compacted from
     repeated FieldIndexInfo index_infos = 11;
-    int64 segment_size = 12;
+    int64 segment_size = 12 [deprecated = true];
     string insert_channel = 13;
     msg.MsgPosition start_position = 14;
     msg.MsgPosition delta_position = 15;
@@ -658,6 +658,10 @@ message PartitionLoadInfo {
     int32 recover_times = 7;
 }
 
+message ChannelNodeInfo {
+    repeated int64 rw_nodes =6;
+}
+
 message Replica {
     int64 ID = 1;
     int64 collectionID = 2;
@@ -665,6 +669,7 @@ message Replica {
     string resource_group = 4;
     repeated int64 ro_nodes = 5; // the in-using node but should not be assigned to these replica.
     // can not load new channel or segment on it anymore.
+   map<string, ChannelNodeInfo> channel_node_infos = 6;
 }
 
 enum SyncType {

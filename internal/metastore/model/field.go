@@ -21,6 +21,7 @@ type Field struct {
 	IsClusteringKey bool
 	DefaultValue    *schemapb.ValueField
 	ElementType     schemapb.DataType
+	Nullable        bool
 }
 
 func (f *Field) Available() bool {
@@ -43,6 +44,7 @@ func (f *Field) Clone() *Field {
 		IsClusteringKey: f.IsClusteringKey,
 		DefaultValue:    f.DefaultValue,
 		ElementType:     f.ElementType,
+		Nullable:        f.Nullable,
 	}
 }
 
@@ -72,7 +74,8 @@ func (f *Field) Equal(other Field) bool {
 		f.IsDynamic == other.IsDynamic &&
 		f.IsClusteringKey == other.IsClusteringKey &&
 		f.DefaultValue == other.DefaultValue &&
-		f.ElementType == other.ElementType
+		f.ElementType == other.ElementType &&
+		f.Nullable == other.Nullable
 }
 
 func CheckFieldsEqual(fieldsA, fieldsB []*Field) bool {
@@ -107,6 +110,7 @@ func MarshalFieldModel(field *Field) *schemapb.FieldSchema {
 		IsClusteringKey: field.IsClusteringKey,
 		DefaultValue:    field.DefaultValue,
 		ElementType:     field.ElementType,
+		Nullable:        field.Nullable,
 	}
 }
 
@@ -141,6 +145,7 @@ func UnmarshalFieldModel(fieldSchema *schemapb.FieldSchema) *Field {
 		IsClusteringKey: fieldSchema.IsClusteringKey,
 		DefaultValue:    fieldSchema.DefaultValue,
 		ElementType:     fieldSchema.ElementType,
+		Nullable:        fieldSchema.Nullable,
 	}
 }
 

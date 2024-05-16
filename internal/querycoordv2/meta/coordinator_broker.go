@@ -124,6 +124,22 @@ func (broker *CoordinatorBroker) GetRecoveryInfo(ctx context.Context, collection
 		return nil, nil, err
 	}
 
+	// fallback binlog memory size to log size when it is zero
+	fallbackBinlogMemorySize := func(binlogs []*datapb.FieldBinlog) {
+		for _, insertBinlogs := range binlogs {
+			for _, b := range insertBinlogs.GetBinlogs() {
+				if b.GetMemorySize() == 0 {
+					b.MemorySize = b.GetLogSize()
+				}
+			}
+		}
+	}
+	for _, segBinlogs := range recoveryInfo.GetBinlogs() {
+		fallbackBinlogMemorySize(segBinlogs.GetFieldBinlogs())
+		fallbackBinlogMemorySize(segBinlogs.GetStatslogs())
+		fallbackBinlogMemorySize(segBinlogs.GetDeltalogs())
+	}
+
 	return recoveryInfo.Channels, recoveryInfo.Binlogs, nil
 }
 
@@ -229,7 +245,7 @@ func (broker *CoordinatorBroker) GetIndexInfo(ctx context.Context, collectionID 
 	for _, info := range segmentInfo.GetIndexInfos() {
 		indexes = append(indexes, &querypb.FieldIndexInfo{
 			FieldID:             info.GetFieldID(),
-			EnableIndex:         true,
+			EnableIndex:         true, // deprecated, but keep it for compatibility
 			IndexName:           info.GetIndexName(),
 			IndexID:             info.GetIndexID(),
 			BuildID:             info.GetBuildID(),

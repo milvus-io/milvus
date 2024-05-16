@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/collector"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -91,6 +92,10 @@ func (t *QueryTask) PreExecute() error {
 	return nil
 }
 
+func (t *QueryTask) SearchResult() *internalpb.SearchResults {
+	return nil
+}
+
 // Execute the task, only call once.
 func (t *QueryTask) Execute() error {
 	if t.scheduleSpan != nil {
@@ -109,8 +114,8 @@ func (t *QueryTask) Execute() error {
 		return err
 	}
 	defer retrievePlan.Delete()
-	results, querySegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
-	defer t.segmentManager.Segment.Unpin(querySegments)
+	results, pinnedSegments, err := segments.Retrieve(t.ctx, t.segmentManager, retrievePlan, t.req)
+	defer t.segmentManager.Segment.Unpin(pinnedSegments)
 	if err != nil {
 		return err
 	}
@@ -118,20 +123,29 @@ func (t *QueryTask) Execute() error {
 	reducer := segments.CreateSegCoreReducer(
 		t.req,
 		t.collection.Schema(),
+		t.segmentManager,
 	)
 	beforeReduce := time.Now()
-	reducedResult, err := reducer.Reduce(t.ctx, results, querySegments, retrievePlan)
+
+	reduceResults := make([]*segcorepb.RetrieveResults, 0, len(results))
+	querySegments := make([]segments.Segment, 0, len(results))
+	for _, result := range results {
+		reduceResults = append(reduceResults, result.Result)
+		querySegments = append(querySegments, result.Segment)
+	}
+	reducedResult, err := reducer.Reduce(t.ctx, reduceResults, querySegments, retrievePlan)
 
 	metrics.QueryNodeReduceLatency.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
 		metrics.QueryLabel,
-		metrics.ReduceSegments).Observe(float64(time.Since(beforeReduce).Milliseconds()))
+		metrics.ReduceSegments,
+		metrics.BatchReduce).Observe(float64(time.Since(beforeReduce).Milliseconds()))
 	if err != nil {
 		return err
 	}
 
 	relatedDataSize := lo.Reduce(querySegments, func(acc int64, seg segments.Segment, _ int) int64 {
-		return acc + seg.MemSize()
+		return acc + segments.GetSegmentRelatedDataSize(seg)
 	}, 0)
 
 	t.result = &internalpb.RetrieveResults{

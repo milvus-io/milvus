@@ -81,6 +81,25 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		}, nil
 	}
 
+	channelCPs := make(map[string]*msgpb.MsgPosition, 0)
+	coll, err := s.handler.GetCollection(ctx, req.GetCollectionID())
+	if err != nil {
+		log.Warn("fail to get collection", zap.Error(err))
+		return &datapb.FlushResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+	if coll == nil {
+		return &datapb.FlushResponse{
+			Status: merr.Status(merr.WrapErrCollectionNotFound(req.GetCollectionID())),
+		}, nil
+	}
+	// channel checkpoints must be gotten before sealSegment, make sure checkpoints is earlier than segment's endts
+	for _, vchannel := range coll.VChannelNames {
+		cp := s.meta.GetChannelCheckpoint(vchannel)
+		channelCPs[vchannel] = cp
+	}
+
 	// generate a timestamp timeOfSeal, all data before timeOfSeal is guaranteed to be sealed or flushed
 	ts, err := s.allocator.allocTimestamp(ctx)
 	if err != nil {
@@ -109,7 +128,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 	for _, segment := range segments {
 		if segment != nil &&
 			(isFlushState(segment.GetState())) &&
-			segment.GetLevel() == datapb.SegmentLevel_L1 &&
+			segment.GetLevel() != datapb.SegmentLevel_L0 && // SegmentLevel_Legacy, SegmentLevel_L1, SegmentLevel_L2
 			!sealedSegmentsIDDict[segment.GetID()] {
 			flushSegmentIDs = append(flushSegmentIDs, segment.GetID())
 		}
@@ -159,6 +178,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 		TimeOfSeal:      timeOfSeal.Unix(),
 		FlushSegmentIDs: flushSegmentIDs,
 		FlushTs:         ts,
+		ChannelCps:      channelCPs,
 	}, nil
 }
 
@@ -566,7 +586,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		return resp, nil
 	}
 
-	var collectionID int64
 	segments := make([]*SegmentInfo, 0, len(req.GetSegments()))
 	for _, seg2Drop := range req.GetSegments() {
 		info := &datapb.SegmentInfo{
@@ -582,7 +601,6 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 		}
 		segment := NewSegmentInfo(info)
 		segments = append(segments, segment)
-		collectionID = seg2Drop.GetCollectionID()
 	}
 
 	err := s.meta.UpdateDropChannelSegmentInfo(channel, segments)
@@ -599,11 +617,7 @@ func (s *Server) DropVirtualChannel(ctx context.Context, req *datapb.DropVirtual
 	}
 	s.segmentManager.DropSegmentsOfChannel(ctx, channel)
 	s.compactionHandler.removeTasksByChannel(channel)
-
-	metrics.CleanupDataCoordNumStoredRows(collectionID)
 	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
-	metrics.CleanupDataCoordBulkInsertVectors(collectionID)
-
 	// no compaction triggered in Drop procedure
 	return resp, nil
 }
@@ -1229,20 +1243,14 @@ func (s *Server) WatchChannels(ctx context.Context, req *datapb.WatchChannelsReq
 		}, nil
 	}
 	for _, channelName := range req.GetChannelNames() {
-		ch := &channelMeta{
-			Name:            channelName,
-			CollectionID:    req.GetCollectionID(),
-			StartPositions:  req.GetStartPositions(),
-			Schema:          req.GetSchema(),
-			CreateTimestamp: req.GetCreateTimestamp(),
-		}
+		ch := NewRWChannel(channelName, req.GetCollectionID(), req.GetStartPositions(), req.GetSchema(), req.GetCreateTimestamp())
 		err := s.channelManager.Watch(ctx, ch)
 		if err != nil {
 			log.Warn("fail to watch channelName", zap.Error(err))
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		if err := s.meta.catalog.MarkChannelAdded(ctx, ch.Name); err != nil {
+		if err := s.meta.catalog.MarkChannelAdded(ctx, channelName); err != nil {
 			// TODO: add background task to periodically cleanup the orphaned channel add marks.
 			log.Error("failed to mark channel added", zap.Error(err))
 			resp.Status = merr.Status(err)
@@ -1558,6 +1566,7 @@ func (s *Server) BroadcastAlteredCollection(ctx context.Context, req *datapb.Alt
 			StartPositions: req.GetStartPositions(),
 			Properties:     properties,
 			DatabaseID:     req.GetDbID(),
+			VChannelNames:  req.GetVChannels(),
 		}
 		s.meta.AddCollection(collInfo)
 		return merr.Success(), nil

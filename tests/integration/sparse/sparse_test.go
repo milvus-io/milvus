@@ -170,21 +170,6 @@ func (s *SparseTestSuite) TestSparse_invalid_insert() {
 
 	sparseVecs := fVecColumn.Field.(*schemapb.FieldData_Vectors).Vectors.GetSparseFloatVector()
 
-	// negative column index is not allowed
-	oldIdx := typeutil.SparseFloatRowIndexAt(sparseVecs.Contents[0], 0)
-	var newIdx int32 = -10
-	binary.LittleEndian.PutUint32(sparseVecs.Contents[0][0:], uint32(newIdx))
-	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-		FieldsData:     []*schemapb.FieldData{fVecColumn},
-		HashKeys:       hashKeys,
-		NumRows:        uint32(rowNum),
-	})
-	s.NoError(err)
-	s.NotEqual(insertResult.GetStatus().GetErrorCode(), commonpb.ErrorCode_Success)
-	binary.LittleEndian.PutUint32(sparseVecs.Contents[0][0:], oldIdx)
-
 	// of each row, length of indices and data must equal
 	sparseVecs.Contents[0] = append(sparseVecs.Contents[0], make([]byte, 4)...)
 	insertResult, err = c.Proxy.Insert(ctx, &milvuspb.InsertRequest{

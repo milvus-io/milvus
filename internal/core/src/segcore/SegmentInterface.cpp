@@ -80,18 +80,13 @@ SegmentInternalInterface::Search(
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
-                                   Timestamp timestamp,
-                                   int64_t limit_size) const {
-    return Retrieve(plan, timestamp, limit_size, false);
-}
-
-std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
+SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
+                                   const query::RetrievePlan* plan,
                                    Timestamp timestamp,
                                    int64_t limit_size,
                                    bool ignore_non_pk) const {
     std::shared_lock lck(mutex_);
+    tracer::AutoSpan span("Retrieve", trace_ctx, false);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
@@ -118,7 +113,8 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
 
     results->mutable_offset()->Add(retrieve_results.result_offsets_.begin(),
                                    retrieve_results.result_offsets_.end());
-    FillTargetEntry(plan,
+    FillTargetEntry(trace_ctx,
+                    plan,
                     results,
                     retrieve_results.result_offsets_.data(),
                     retrieve_results.result_offsets_.size(),
@@ -130,12 +126,15 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
 
 void
 SegmentInternalInterface::FillTargetEntry(
+    tracer::TraceContext* trace_ctx,
     const query::RetrievePlan* plan,
     const std::unique_ptr<proto::segcore::RetrieveResults>& results,
     const int64_t* offsets,
     int64_t size,
     bool ignore_non_pk,
     bool fill_ids) const {
+    tracer::AutoSpan span("FillTargetEntry", trace_ctx, false);
+
     auto fields_data = results->mutable_fields_data();
     auto ids = results->mutable_ids();
     auto pk_field_id = plan->schema_.get_primary_field_id();
@@ -215,12 +214,14 @@ SegmentInternalInterface::FillTargetEntry(
 }
 
 std::unique_ptr<proto::segcore::RetrieveResults>
-SegmentInternalInterface::Retrieve(const query::RetrievePlan* Plan,
+SegmentInternalInterface::Retrieve(tracer::TraceContext* trace_ctx,
+                                   const query::RetrievePlan* Plan,
                                    const int64_t* offsets,
                                    int64_t size) const {
     std::shared_lock lck(mutex_);
+    tracer::AutoSpan span("RetrieveByOffsets", trace_ctx, false);
     auto results = std::make_unique<proto::segcore::RetrieveResults>();
-    FillTargetEntry(Plan, results, offsets, size, false, false);
+    FillTargetEntry(trace_ctx, Plan, results, offsets, size, false, false);
     return results;
 }
 
@@ -236,7 +237,7 @@ SegmentInternalInterface::get_real_count() const {
     auto plan = std::make_unique<query::RetrievePlan>(get_schema());
     plan->plan_node_ = std::make_unique<query::RetrievePlanNode>();
     plan->plan_node_->is_count_ = true;
-    auto res = Retrieve(plan.get(), MAX_TIMESTAMP, INT64_MAX);
+    auto res = Retrieve(nullptr, plan.get(), MAX_TIMESTAMP, INT64_MAX, false);
     AssertInfo(res->fields_data().size() == 1,
                "count result should only have one column");
     AssertInfo(res->fields_data()[0].has_scalars(),

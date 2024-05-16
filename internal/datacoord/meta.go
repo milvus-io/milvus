@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -48,7 +48,7 @@ import (
 )
 
 type meta struct {
-	sync.RWMutex
+	lock.RWMutex
 	ctx          context.Context
 	catalog      metastore.DataCoordCatalog
 	collections  map[UniqueID]*collectionInfo // collection id to collection info
@@ -60,7 +60,7 @@ type meta struct {
 }
 
 type channelCPs struct {
-	sync.RWMutex
+	lock.RWMutex
 	checkpoints map[string]*msgpb.MsgPosition
 }
 
@@ -86,6 +86,7 @@ type collectionInfo struct {
 	CreatedAt      Timestamp
 	DatabaseName   string
 	DatabaseID     int64
+	VChannelNames  []string
 }
 
 // NewMeta creates meta from provided `kv.TxnKV`
@@ -175,8 +176,20 @@ func (m *meta) AddCollection(collection *collectionInfo) {
 // DropCollection drop a collection from meta
 func (m *meta) DropCollection(collectionID int64) {
 	log.Info("meta update: drop collection", zap.Int64("collectionID", collectionID))
+	segments := m.SelectSegments(WithCollection(collectionID))
 	m.Lock()
 	defer m.Unlock()
+	coll, ok := m.collections[collectionID]
+	if ok {
+		metrics.CleanupDataCoordNumStoredRows(coll.DatabaseName, collectionID)
+		metrics.CleanupDataCoordBulkInsertVectors(coll.DatabaseName, collectionID)
+		for _, seg := range segments {
+			metrics.CleanupDataCoordSegmentMetrics(coll.DatabaseName, collectionID, seg.ID)
+		}
+	} else {
+		log.Warn("not found database name", zap.Int64("collectionID", collectionID))
+	}
+
 	delete(m.collections, collectionID)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
@@ -212,6 +225,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 		Properties:     clonedProperties,
 		DatabaseName:   coll.DatabaseName,
 		DatabaseID:     coll.DatabaseID,
+		VChannelNames:  coll.VChannelNames,
 	}
 
 	return cloneColl
@@ -317,6 +331,24 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 	return total, collectionBinlogSize, partitionBinlogSize
 }
 
+// GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
+func (m *meta) GetCollectionIndexFilesSize() uint64 {
+	m.RLock()
+	defer m.RUnlock()
+	var total uint64
+	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
+		coll, ok := m.collections[segmentIdx.CollectionID]
+		if ok {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
+				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
+			total += segmentIdx.IndexSize
+		} else {
+			log.Warn("not found database name", zap.Int64("collectionID", segmentIdx.CollectionID))
+		}
+	}
+	return total
+}
+
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
 	m.RLock()
 	defer m.RUnlock()
@@ -367,6 +399,11 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 		return err
 	}
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Dec()
+	coll, ok := m.collections[segment.CollectionID]
+	if ok {
+		metrics.CleanupDataCoordSegmentMetrics(coll.DatabaseName, segment.CollectionID, segment.ID)
+	}
+
 	m.segments.DropSegment(segmentID)
 	log.Info("meta update: dropping segment - complete",
 		zap.Int64("segmentID", segmentID))
@@ -960,23 +997,17 @@ func (m *meta) batchSaveDropSegments(channel string, modSegments map[int64]*Segm
 
 // GetSegmentsByChannel returns all segment info which insert channel equals provided `dmlCh`
 func (m *meta) GetSegmentsByChannel(channel string) []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) && segment.InsertChannel == channel
-	})
+	return m.SelectSegments(SegmentFilterFunc(isSegmentHealthy), WithChannel(channel))
 }
 
 // GetSegmentsOfCollection get all segments of collection
 func (m *meta) GetSegmentsOfCollection(collectionID UniqueID) []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) && segment.GetCollectionID() == collectionID
-	})
+	return m.SelectSegments(SegmentFilterFunc(isSegmentHealthy), WithCollection(collectionID))
 }
 
 // GetSegmentsIDOfCollection returns all segment ids which collection equals to provided `collectionID`
 func (m *meta) GetSegmentsIDOfCollection(collectionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
-		return isSegmentHealthy(segment) && segment.CollectionID == collectionID
-	})
+	segments := m.SelectSegments(SegmentFilterFunc(isSegmentHealthy), WithCollection(collectionID))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -985,12 +1016,11 @@ func (m *meta) GetSegmentsIDOfCollection(collectionID UniqueID) []UniqueID {
 
 // GetSegmentsIDOfCollection returns all segment ids which collection equals to provided `collectionID`
 func (m *meta) GetSegmentsIDOfCollectionWithDropped(collectionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment != nil &&
 			segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
-			segment.GetState() != commonpb.SegmentState_NotExist &&
-			segment.CollectionID == collectionID
-	})
+			segment.GetState() != commonpb.SegmentState_NotExist
+	}))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -999,11 +1029,10 @@ func (m *meta) GetSegmentsIDOfCollectionWithDropped(collectionID UniqueID) []Uni
 
 // GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
 func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
-			segment.CollectionID == collectionID &&
 			segment.PartitionID == partitionID
-	})
+	}))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -1012,12 +1041,11 @@ func (m *meta) GetSegmentsIDOfPartition(collectionID, partitionID UniqueID) []Un
 
 // GetSegmentsIDOfPartition returns all segments ids which collection & partition equals to provided `collectionID`, `partitionID`
 func (m *meta) GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID UniqueID) []UniqueID {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() != commonpb.SegmentState_SegmentStateNone &&
 			segment.GetState() != commonpb.SegmentState_NotExist &&
-			segment.CollectionID == collectionID &&
 			segment.PartitionID == partitionID
-	})
+	}))
 
 	return lo.Map(segments, func(segment *SegmentInfo, _ int) int64 {
 		return segment.ID
@@ -1026,37 +1054,35 @@ func (m *meta) GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID Uni
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
 func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) int64 {
-	m.RLock()
-	defer m.RUnlock()
 	var ret int64
-	segments := m.segments.GetSegments()
+	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return isSegmentHealthy(si) && si.GetPartitionID() == partitionID
+	}))
 	for _, segment := range segments {
-		if isSegmentHealthy(segment) && segment.CollectionID == collectionID && segment.PartitionID == partitionID {
-			ret += segment.NumOfRows
-		}
+		ret += segment.NumOfRows
 	}
 	return ret
 }
 
 // GetUnFlushedSegments get all segments which state is not `Flushing` nor `Flushed`
 func (m *meta) GetUnFlushedSegments() []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
+	return m.SelectSegments(SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Growing || segment.GetState() == commonpb.SegmentState_Sealed
-	})
+	}))
 }
 
 // GetFlushingSegments get all segments which state is `Flushing`
 func (m *meta) GetFlushingSegments() []*SegmentInfo {
-	return m.SelectSegments(func(segment *SegmentInfo) bool {
+	return m.SelectSegments(SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Flushing
-	})
+	}))
 }
 
 // SelectSegments select segments with selector
-func (m *meta) SelectSegments(selector SegmentInfoSelector) []*SegmentInfo {
+func (m *meta) SelectSegments(filters ...SegmentFilter) []*SegmentInfo {
 	m.RLock()
 	defer m.RUnlock()
-	return m.segments.GetSegmentsBySelector(selector)
+	return m.segments.GetSegmentsBySelector(filters...)
 }
 
 // AddAllocation add allocation in segment
@@ -1395,7 +1421,7 @@ func (m *meta) DropChannelCheckpoint(vChannel string) error {
 		return err
 	}
 	delete(m.channelCPs.checkpoints, vChannel)
-	log.Debug("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
+	log.Info("DropChannelCheckpoint done", zap.String("vChannel", vChannel))
 	return nil
 }
 
@@ -1404,12 +1430,12 @@ func (m *meta) GcConfirm(ctx context.Context, collectionID, partitionID UniqueID
 }
 
 func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo {
-	allSegs := m.SelectSegments(func(segment *SegmentInfo) bool {
+	allSegs := m.SelectSegments(SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return isSegmentHealthy(segment) &&
 			isFlush(segment) && // sealed segment
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() // not importing now
-	})
+	}))
 
 	ret := make(map[int64][]*SegmentInfo)
 	for _, seg := range allSegs {
@@ -1424,12 +1450,11 @@ func (m *meta) GetCompactableSegmentGroupByCollection() map[int64][]*SegmentInfo
 }
 
 func (m *meta) GetEarliestStartPositionOfGrowingSegments(label *CompactionGroupLabel) *msgpb.MsgPosition {
-	segments := m.SelectSegments(func(segment *SegmentInfo) bool {
+	segments := m.SelectSegments(WithCollection(label.CollectionID), SegmentFilterFunc(func(segment *SegmentInfo) bool {
 		return segment.GetState() == commonpb.SegmentState_Growing &&
-			segment.GetCollectionID() == label.CollectionID &&
 			segment.GetPartitionID() == label.PartitionID &&
 			segment.GetInsertChannel() == label.Channel
-	})
+	}))
 
 	earliest := &msgpb.MsgPosition{Timestamp: math.MaxUint64}
 	for _, seg := range segments {

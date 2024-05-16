@@ -244,6 +244,7 @@ type commonConfig struct {
 	TraceLogMode          ParamItem `refreshable:"true"`
 	BloomFilterSize       ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive ParamItem `refreshable:"true"`
+	PanicWhenPluginFail   ParamItem `refreshable:"false"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -272,6 +273,7 @@ func (p *commonConfig) init(base *BaseTable) {
 	// --- rootcoord ---
 	p.RootCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordTimeTick",
+		DefaultValue: "rootcoord-timetick",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordTimeTick"},
 		PanicIfEmpty: true,
@@ -282,6 +284,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.RootCoordStatistics = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordStatistics",
+		DefaultValue: "rootcoord-statistics",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordStatistics"},
 		PanicIfEmpty: true,
@@ -292,6 +295,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.RootCoordDml = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.rootCoordDml",
+		DefaultValue: "rootcoord-dml",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.rootCoordDml"},
 		PanicIfEmpty: true,
@@ -302,6 +306,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.ReplicateMsgChannel = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.replicateMsg",
+		DefaultValue: "replicate-msg",
 		Version:      "2.3.2",
 		FallbackKeys: []string{"common.chanNamePrefix.replicateMsg"},
 		PanicIfEmpty: true,
@@ -312,6 +317,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.QueryCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.queryTimeTick",
+		DefaultValue: "queryTimeTick",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.queryTimeTick"},
 		PanicIfEmpty: true,
@@ -322,6 +328,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordTimeTick = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.dataCoordTimeTick",
+		DefaultValue: "datacoord-timetick-channel",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordTimeTick"},
 		PanicIfEmpty: true,
@@ -332,6 +339,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordSegmentInfo = ParamItem{
 		Key:          "msgChannel.chanNamePrefix.dataCoordSegmentInfo",
+		DefaultValue: "segment-info-channel",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.chanNamePrefix.dataCoordSegmentInfo"},
 		PanicIfEmpty: true,
@@ -342,6 +350,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataCoordSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataCoordSubNamePrefix",
+		DefaultValue: "dataCoord",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataCoordSubNamePrefix"},
 		PanicIfEmpty: true,
@@ -368,6 +377,7 @@ func (p *commonConfig) init(base *BaseTable) {
 
 	p.DataNodeSubName = ParamItem{
 		Key:          "msgChannel.subNamePrefix.dataNodeSubNamePrefix",
+		DefaultValue: "dataNode",
 		Version:      "2.1.0",
 		FallbackKeys: []string{"common.subNamePrefix.dataNodeSubNamePrefix"},
 		PanicIfEmpty: true,
@@ -723,6 +733,14 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
+
+	p.PanicWhenPluginFail = ParamItem{
+		Key:          "common.panicWhenPluginFail",
+		Version:      "2.4.2",
+		DefaultValue: "true",
+		Doc:          "panic or not when plugin fail to init",
+	}
+	p.PanicWhenPluginFail.Init(base.mgr)
 }
 
 type gpuConfig struct {
@@ -761,8 +779,8 @@ func (t *traceConfig) init(base *BaseTable) {
 		Key:     "trace.exporter",
 		Version: "2.3.0",
 		Doc: `trace exporter type, default is stdout,
-optional values: ['stdout', 'jaeger', 'otlp']`,
-		DefaultValue: "stdout",
+optional values: ['noop','stdout', 'jaeger', 'otlp']`,
+		DefaultValue: "noop",
 		Export:       true,
 	}
 	t.Exporter.Init(base.mgr)
@@ -976,12 +994,14 @@ type AccessLogConfig struct {
 	LocalPath     ParamItem  `refreshable:"false"`
 	Filename      ParamItem  `refreshable:"false"`
 	MaxSize       ParamItem  `refreshable:"false"`
-	CacheSize     ParamItem  `refreshable:"false"`
 	RotatedTime   ParamItem  `refreshable:"false"`
 	MaxBackups    ParamItem  `refreshable:"false"`
 	RemotePath    ParamItem  `refreshable:"false"`
 	RemoteMaxTime ParamItem  `refreshable:"false"`
 	Formatter     ParamGroup `refreshable:"false"`
+
+	CacheSize          ParamItem `refreshable:"false"`
+	CacheFlushInterval ParamItem `refreshable:"false"`
 }
 
 type proxyConfig struct {
@@ -1012,6 +1032,8 @@ type proxyConfig struct {
 	RetryTimesOnHealthCheck      ParamItem `refreshable:"true"`
 	PartitionNameRegexp          ParamItem `refreshable:"true"`
 	MustUsePartitionKey          ParamItem `refreshable:"true"`
+	SkipAutoIDCheck              ParamItem `refreshable:"true"`
+	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
 
 	AccessLog AccessLogConfig
 
@@ -1235,10 +1257,18 @@ please adjust in embedded Milvus: false`,
 		Key:          "proxy.accessLog.cacheSize",
 		Version:      "2.3.2",
 		DefaultValue: "10240",
-		Doc:          "Size of log of memory cache, in B",
+		Doc:          "Size of log of memory cache, in B. (Close write cache if szie was 0",
 		Export:       true,
 	}
 	p.AccessLog.CacheSize.Init(base.mgr)
+
+	p.AccessLog.CacheFlushInterval = ParamItem{
+		Key:          "proxy.accessLog.cacheSize",
+		Version:      "2.4.0",
+		DefaultValue: "3",
+		Doc:          "time interval of auto flush memory cache, in Seconds. (Close auto flush if interval was 0)",
+	}
+	p.AccessLog.CacheFlushInterval.Init(base.mgr)
 
 	p.AccessLog.MaxBackups = ParamItem{
 		Key:          "proxy.accessLog.maxBackups",
@@ -1347,6 +1377,22 @@ please adjust in embedded Milvus: false`,
 		Export:       true,
 	}
 	p.MustUsePartitionKey.Init(base.mgr)
+
+	p.SkipAutoIDCheck = ParamItem{
+		Key:          "proxy.skipAutoIDCheck",
+		Version:      "2.4.1",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy shall skip auto id check when inserting data",
+	}
+	p.SkipAutoIDCheck.Init(base.mgr)
+
+	p.SkipPartitionKeyCheck = ParamItem{
+		Key:          "proxy.skipPartitionKeyCheck",
+		Version:      "2.4.1",
+		DefaultValue: "false",
+		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
+	}
+	p.SkipPartitionKeyCheck.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
@@ -1464,6 +1510,7 @@ type queryCoordConfig struct {
 	CheckNodeSessionInterval       ParamItem `refreshable:"false"`
 	GracefulStopTimeout            ParamItem `refreshable:"true"`
 	EnableStoppingBalance          ParamItem `refreshable:"true"`
+	ChannelExclusiveNodeFactor     ParamItem `refreshable:"true"`
 }
 
 func (p *queryCoordConfig) init(base *BaseTable) {
@@ -1940,6 +1987,15 @@ func (p *queryCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableStoppingBalance.Init(base.mgr)
+
+	p.ChannelExclusiveNodeFactor = ParamItem{
+		Key:          "queryCoord.channelExclusiveNodeFactor",
+		Version:      "2.4.2",
+		DefaultValue: "4",
+		Doc:          "the least node number for enable channel's exclusive mode",
+		Export:       true,
+	}
+	p.ChannelExclusiveNodeFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -1960,6 +2016,8 @@ type queryNodeConfig struct {
 	InterimIndexMemExpandRate     ParamItem `refreshable:"false"`
 	InterimIndexBuildParallelRate ParamItem `refreshable:"false"`
 
+	KnowhereScoreConsistency ParamItem `refreshable:"false"`
+
 	// memory limit
 	LoadMemoryUsageFactor               ParamItem `refreshable:"true"`
 	OverloadedMemoryThresholdPercentage ParamItem `refreshable:"false"`
@@ -1976,7 +2034,12 @@ type queryNodeConfig struct {
 	MmapDirPath      ParamItem `refreshable:"false"`
 	MmapEnabled      ParamItem `refreshable:"false"`
 
-	LazyLoadEnabled ParamItem `refreshable:"false"`
+	LazyLoadEnabled                      ParamItem `refreshable:"false"`
+	LazyLoadWaitTimeout                  ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceTimeout       ParamItem `refreshable:"true"`
+	LazyLoadRequestResourceRetryInterval ParamItem `refreshable:"true"`
+	LazyLoadMaxRetryTimes                ParamItem `refreshable:"true"`
+	LazyLoadMaxEvictPerRetry             ParamItem `refreshable:"true"`
 
 	// chunk cache
 	ReadAheadPolicy     ParamItem `refreshable:"false"`
@@ -2027,6 +2090,7 @@ type queryNodeConfig struct {
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	UseStreamComputing                      ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2106,6 +2170,16 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.EnableTempSegmentIndex.Init(base.mgr)
+
+	p.KnowhereScoreConsistency = ParamItem{
+		Key:          "queryNode.segcore.knowhereScoreConsistency",
+		Version:      "2.3.15",
+		DefaultValue: "false",
+		Doc:          "Enable knowhere strong consistency score computation logic",
+		Export:       true,
+	}
+
+	p.KnowhereScoreConsistency.Init(base.mgr)
 
 	p.InterimIndexNlist = ParamItem{
 		Key:          "queryNode.segcore.interimIndex.nlist",
@@ -2212,13 +2286,55 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.MmapEnabled.Init(base.mgr)
 
 	p.LazyLoadEnabled = ParamItem{
-		Key:          "queryNode.lazyloadEnabled",
-		Version:      "2.4.0",
+		Key:          "queryNode.lazyload.enabled",
+		Version:      "2.4.2",
 		DefaultValue: "false",
 		Doc:          "Enable lazyload for loading data",
 		Export:       true,
 	}
 	p.LazyLoadEnabled.Init(base.mgr)
+	p.LazyLoadWaitTimeout = ParamItem{
+		Key:          "queryNode.lazyload.waitTimeout",
+		Version:      "2.4.2",
+		DefaultValue: "30000",
+		Doc:          "max wait timeout duration in milliseconds before start to do lazyload search and retrieve",
+		Export:       true,
+	}
+	p.LazyLoadWaitTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceTimeout = ParamItem{
+		Key:          "queryNode.lazyload.requestResourceTimeout",
+		Version:      "2.4.2",
+		DefaultValue: "5000",
+		Doc:          "max timeout in milliseconds for waiting request resource for lazy load, 5s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceTimeout.Init(base.mgr)
+	p.LazyLoadRequestResourceRetryInterval = ParamItem{
+		Key:          "queryNode.lazyload.requestResourceRetryInterval",
+		Version:      "2.4.2",
+		DefaultValue: "2000",
+		Doc:          "retry interval in milliseconds for waiting request resource for lazy load, 2s by default",
+		Export:       true,
+	}
+	p.LazyLoadRequestResourceRetryInterval.Init(base.mgr)
+
+	p.LazyLoadMaxRetryTimes = ParamItem{
+		Key:          "queryNode.lazyload.maxRetryTimes",
+		Version:      "2.4.2",
+		DefaultValue: "1",
+		Doc:          "max retry times for lazy load, 1 by default",
+		Export:       true,
+	}
+	p.LazyLoadMaxRetryTimes.Init(base.mgr)
+
+	p.LazyLoadMaxEvictPerRetry = ParamItem{
+		Key:          "queryNode.lazyload.maxEvictPerRetry",
+		Version:      "2.4.2",
+		DefaultValue: "1",
+		Doc:          "max evict count for lazy load, 1 by default",
+		Export:       true,
+	}
+	p.LazyLoadMaxEvictPerRetry.Init(base.mgr)
 
 	p.ReadAheadPolicy = ParamItem{
 		Key:          "queryNode.cache.readAheadPolicy",
@@ -2551,6 +2667,13 @@ user-task-polling:
 		Doc:          "filter ratio used for pruning segments when searching",
 	}
 	p.DefaultSegmentFilterRatio.Init(base.mgr)
+	p.UseStreamComputing = ParamItem{
+		Key:          "queryNode.useStreamComputing",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          "use stream search mode when searching or querying",
+	}
+	p.UseStreamComputing.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2558,6 +2681,8 @@ user-task-polling:
 type dataCoordConfig struct {
 	// --- CHANNEL ---
 	WatchTimeoutInterval         ParamItem `refreshable:"false"`
+	EnableBalanceChannelWithRPC  ParamItem `refreshable:"false"`
+	LegacyVersionWithoutRPCWatch ParamItem `refreshable:"false"`
 	ChannelBalanceSilentDuration ParamItem `refreshable:"true"`
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
@@ -2649,6 +2774,24 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	}
 	p.WatchTimeoutInterval.Init(base.mgr)
 
+	p.EnableBalanceChannelWithRPC = ParamItem{
+		Key:          "dataCoord.channel.balanceWithRpc",
+		Version:      "2.4.0",
+		DefaultValue: "true",
+		Doc:          "Whether to enable balance with RPC, default to use etcd watch",
+		Export:       true,
+	}
+	p.EnableBalanceChannelWithRPC.Init(base.mgr)
+
+	p.LegacyVersionWithoutRPCWatch = ParamItem{
+		Key:          "dataCoord.channel.legacyVersionWithoutRPCWatch",
+		Version:      "2.4.0",
+		DefaultValue: "2.4.0",
+		Doc:          "Datanodes <= this version are considered as legacy nodes, which doesn't have rpc based watch(). This is only used during rolling upgrade where legacy nodes won't get new channels",
+		Export:       true,
+	}
+	p.LegacyVersionWithoutRPCWatch.Init(base.mgr)
+
 	p.ChannelBalanceSilentDuration = ParamItem{
 		Key:          "dataCoord.channel.balanceSilentDuration",
 		Version:      "2.2.3",
@@ -2670,7 +2813,7 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 	p.ChannelCheckInterval = ParamItem{
 		Key:          "dataCoord.channel.checkInterval",
 		Version:      "2.4.0",
-		DefaultValue: "10",
+		DefaultValue: "1",
 		Doc:          "The interval in seconds with which the channel manager advances channel states",
 		Export:       true,
 	}

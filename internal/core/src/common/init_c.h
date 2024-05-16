@@ -45,6 +45,9 @@ InitCpuNum(const int);
 void
 InitTrace(CTraceConfig* config);
 
+void
+SetTrace(CTraceConfig* config);
+
 #ifdef __cplusplus
 };
 #endif

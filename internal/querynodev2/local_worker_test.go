@@ -18,6 +18,7 @@ package querynodev2
 
 import (
 	"context"
+	"fmt"
 	"testing"
 
 	"github.com/samber/lo"
@@ -121,9 +122,10 @@ func (suite *LocalWorkerTestSuite) TestLoadSegment() {
 		CollectionID: suite.collectionID,
 		Infos: lo.Map(suite.segmentIDs, func(segID int64, _ int) *querypb.SegmentLoadInfo {
 			return &querypb.SegmentLoadInfo{
-				CollectionID: suite.collectionID,
-				PartitionID:  suite.partitionIDs[segID%2],
-				SegmentID:    segID,
+				CollectionID:  suite.collectionID,
+				PartitionID:   suite.partitionIDs[segID%2],
+				SegmentID:     segID,
+				InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			}
 		}),
 		Schema:        schema,

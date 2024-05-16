@@ -169,14 +169,14 @@ func checkResourceGroup(m *meta.Meta, resourceGroups []string, replicaNumber int
 }
 
 // SpawnReplicasWithRG spawns replicas in rgs one by one for given collection.
-func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32) ([]*meta.Replica, error) {
+func SpawnReplicasWithRG(m *meta.Meta, collection int64, resourceGroups []string, replicaNumber int32, channels []string) ([]*meta.Replica, error) {
 	replicaNumInRG, err := checkResourceGroup(m, resourceGroups, replicaNumber)
 	if err != nil {
 		return nil, err
 	}
 
 	// Spawn it in replica manager.
-	replicas, err := m.ReplicaManager.Spawn(collection, replicaNumInRG)
+	replicas, err := m.ReplicaManager.Spawn(collection, replicaNumInRG, channels)
 	if err != nil {
 		return nil, err
 	}

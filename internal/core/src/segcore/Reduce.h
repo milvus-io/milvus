@@ -22,6 +22,8 @@
 #include "common/QueryResult.h"
 #include "query/PlanImpl.h"
 #include "ReduceStructure.h"
+#include "common/Tracer.h"
+#include "segment_c.h"
 
 namespace milvus::segcore {
 
@@ -36,11 +38,13 @@ class ReduceHelper {
                           milvus::query::Plan* plan,
                           int64_t* slice_nqs,
                           int64_t* slice_topKs,
-                          int64_t slice_num)
+                          int64_t slice_num,
+                          tracer::TraceContext* trace_ctx)
         : search_results_(search_results),
           plan_(plan),
           slice_nqs_(slice_nqs, slice_nqs + slice_num),
-          slice_topKs_(slice_topKs, slice_topKs + slice_num) {
+          slice_topKs_(slice_topKs, slice_topKs + slice_num),
+          trace_ctx_(trace_ctx) {
         Initialize();
     }
 
@@ -55,18 +59,22 @@ class ReduceHelper {
         return search_result_data_blobs_.release();
     }
 
- private:
-    void
-    Initialize();
-
+ protected:
     void
     FilterInvalidSearchResult(SearchResult* search_result);
+
+    void
+    RefreshSearchResult();
 
     void
     FillPrimaryKey();
 
     void
-    RefreshSearchResult();
+    ReduceResultData();
+
+ private:
+    void
+    Initialize();
 
     void
     FillEntryData();
@@ -76,44 +84,36 @@ class ReduceHelper {
                                int64_t topk,
                                int64_t& result_offset);
 
-    void
-    ReduceResultData();
-
     std::vector<char>
     GetSearchResultDataSlice(int slice_index_);
 
-    void
-    AssembleGroupByValues(
-        std::unique_ptr<milvus::proto::schema::SearchResultData>& search_result,
-        const std::vector<GroupByValueType>& group_by_vals);
-
- private:
+ protected:
     std::vector<SearchResult*>& search_results_;
     milvus::query::Plan* plan_;
-
-    std::vector<int64_t> slice_nqs_;
-    std::vector<int64_t> slice_topKs_;
-    int64_t total_nq_;
-    int64_t num_segments_;
     int64_t num_slices_;
-
     std::vector<int64_t> slice_nqs_prefix_sum_;
-
-    // dim0: num_segments_; dim1: total_nq_; dim2: offset
-    std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
-
-    // output
-    std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
-
-    // Used for merge results,
-    // define these here to avoid allocating them for each query
-    std::vector<SearchResultPair> pairs_;
+    int64_t num_segments_;
+    std::vector<int64_t> slice_topKs_;
     std::priority_queue<SearchResultPair*,
                         std::vector<SearchResultPair*>,
                         SearchResultPairComparator>
         heap_;
+    // Used for merge results,
+    // define these here to avoid allocating them for each query
+    std::vector<SearchResultPair> pairs_;
     std::unordered_set<milvus::PkType> pk_set_;
     std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
+    // dim0: num_segments_; dim1: total_nq_; dim2: offset
+    std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
+
+ private:
+    std::vector<int64_t> slice_nqs_;
+    int64_t total_nq_;
+
+    // output
+    std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
+
+    tracer::TraceContext* trace_ctx_;
 };
 
 }  // namespace milvus::segcore

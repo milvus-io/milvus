@@ -25,7 +25,6 @@ import (
 	"path"
 	"strconv"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -51,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -361,7 +361,7 @@ func createMetaForRecycleUnusedIndexes(catalog metastore.DataCoordCatalog) *meta
 		indexID = UniqueID(400)
 	)
 	return &meta{
-		RWMutex:      sync.RWMutex{},
+		RWMutex:      lock.RWMutex{},
 		ctx:          ctx,
 		catalog:      catalog,
 		collections:  nil,
@@ -453,28 +453,27 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 		indexID = UniqueID(400)
 		segID   = UniqueID(500)
 	)
-	return &meta{
-		RWMutex:     sync.RWMutex{},
+	segments := map[int64]*SegmentInfo{
+		segID: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "",
+				NumOfRows:     1026,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		segID + 1: {
+			SegmentInfo: nil,
+		},
+	}
+	meta := &meta{
+		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "",
-						NumOfRows:     1026,
-						State:         commonpb.SegmentState_Flushed,
-					},
-				},
-				segID + 1: {
-					SegmentInfo: nil,
-				},
-			},
-		},
+		segments:    NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog: catalog,
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
@@ -558,6 +557,10 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 		channelCPs:   nil,
 		chunkManager: nil,
 	}
+	for id, segment := range segments {
+		meta.segments.SetSegment(id, segment)
+	}
+	return meta
 }
 
 func TestGarbageCollector_recycleUnusedSegIndexes(t *testing.T) {
@@ -608,35 +611,34 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 		segID   = UniqueID(500)
 		buildID = UniqueID(600)
 	)
-	return &meta{
-		RWMutex:     sync.RWMutex{},
+	segments := map[UniqueID]*SegmentInfo{
+		segID: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "",
+				NumOfRows:     1026,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+		segID + 1: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 1,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "",
+				NumOfRows:     1026,
+				State:         commonpb.SegmentState_Flushed,
+			},
+		},
+	}
+	meta := &meta{
+		RWMutex:     lock.RWMutex{},
 		ctx:         ctx,
 		catalog:     catalog,
 		collections: nil,
-		segments: &SegmentsInfo{
-			segments: map[UniqueID]*SegmentInfo{
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "",
-						NumOfRows:     1026,
-						State:         commonpb.SegmentState_Flushed,
-					},
-				},
-				segID + 1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID + 1,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "",
-						NumOfRows:     1026,
-						State:         commonpb.SegmentState_Flushed,
-					},
-				},
-			},
-		},
+		segments:    NewSegmentsInfo(),
 		indexMeta: &indexMeta{
 			catalog: catalog,
 			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
@@ -734,6 +736,12 @@ func createMetaTableForRecycleUnusedIndexFiles(catalog *datacoord.Catalog) *meta
 			},
 		},
 	}
+
+	for id, segment := range segments {
+		meta.segments.SetSegment(id, segment)
+	}
+
+	return meta
 }
 
 func TestGarbageCollector_recycleUnusedIndexFiles(t *testing.T) {
@@ -847,322 +855,7 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 		Timestamp: 1000,
 	}
 
-	m := &meta{
-		catalog:    catalog,
-		channelCPs: channelCPs,
-		segments: &SegmentsInfo{
-			compactionTo: make(map[int64]int64),
-			segments: map[UniqueID]*SegmentInfo{
-				segID: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "dmlChannel",
-						NumOfRows:     5000,
-						State:         commonpb.SegmentState_Dropped,
-						MaxRowNum:     65536,
-						DroppedAt:     0,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 900,
-						},
-						Binlogs: []*datapb.FieldBinlog{
-							{
-								FieldID: 1,
-								Binlogs: []*datapb.Binlog{
-									{
-										LogPath: "log1",
-										LogSize: 1024,
-									},
-								},
-							},
-							{
-								FieldID: 2,
-								Binlogs: []*datapb.Binlog{
-									{
-										LogPath: "log2",
-										LogSize: 1024,
-									},
-								},
-							},
-						},
-						Deltalogs: []*datapb.FieldBinlog{
-							{
-								FieldID: 1,
-								Binlogs: []*datapb.Binlog{
-									{
-										LogPath: "del_log1",
-										LogSize: 1024,
-									},
-								},
-							},
-							{
-								FieldID: 2,
-								Binlogs: []*datapb.Binlog{
-									{
-										LogPath: "del_log2",
-										LogSize: 1024,
-									},
-								},
-							},
-						},
-						Statslogs: []*datapb.FieldBinlog{
-							{
-								FieldID: 1,
-								Binlogs: []*datapb.Binlog{
-									{
-										LogPath: "stats_log1",
-										LogSize: 1024,
-									},
-								},
-							},
-						},
-					},
-				},
-				segID + 1: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID + 1,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "dmlChannel",
-						NumOfRows:     5000,
-						State:         commonpb.SegmentState_Dropped,
-						MaxRowNum:     65536,
-						DroppedAt:     0,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 900,
-						},
-					},
-				},
-				segID + 2: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID + 2,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "dmlChannel",
-						NumOfRows:     10000,
-						State:         commonpb.SegmentState_Dropped,
-						MaxRowNum:     65536,
-						DroppedAt:     10,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 900,
-						},
-						CompactionFrom: []int64{segID, segID + 1},
-					},
-				},
-				segID + 3: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID + 3,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "dmlChannel",
-						NumOfRows:     2000,
-						State:         commonpb.SegmentState_Dropped,
-						MaxRowNum:     65536,
-						DroppedAt:     10,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 900,
-						},
-						CompactionFrom: nil,
-					},
-				},
-				segID + 4: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:            segID + 4,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						InsertChannel: "dmlChannel",
-						NumOfRows:     12000,
-						State:         commonpb.SegmentState_Flushed,
-						MaxRowNum:     65536,
-						DroppedAt:     10,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 900,
-						},
-						CompactionFrom: []int64{segID + 2, segID + 3},
-					},
-				},
-				segID + 5: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 5,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "dmlChannel",
-						NumOfRows:      2000,
-						State:          commonpb.SegmentState_Dropped,
-						MaxRowNum:      65535,
-						DroppedAt:      0,
-						CompactionFrom: nil,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 1200,
-						},
-					},
-				},
-				segID + 6: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 6,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "dmlChannel",
-						NumOfRows:      2000,
-						State:          commonpb.SegmentState_Dropped,
-						MaxRowNum:      65535,
-						DroppedAt:      uint64(time.Now().Add(time.Hour).UnixNano()),
-						CompactionFrom: nil,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 900,
-						},
-						Compacted: true,
-					},
-				},
-				// compacted and child is GCed, dml pos is big than channel cp
-				segID + 7: {
-					SegmentInfo: &datapb.SegmentInfo{
-						ID:             segID + 7,
-						CollectionID:   collID,
-						PartitionID:    partID,
-						InsertChannel:  "dmlChannel",
-						NumOfRows:      2000,
-						State:          commonpb.SegmentState_Dropped,
-						MaxRowNum:      65535,
-						DroppedAt:      0,
-						CompactionFrom: nil,
-						DmlPosition: &msgpb.MsgPosition{
-							Timestamp: 1200,
-						},
-						Compacted: true,
-					},
-				},
-			},
-		},
-
-		indexMeta: &indexMeta{
-			catalog: catalog,
-			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
-				segID: {
-					indexID: {
-						SegmentID:     segID,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       5000,
-						IndexID:       indexID,
-						BuildID:       buildID,
-						NodeID:        0,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_Finished,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    0,
-						IndexFileKeys: []string{"file1", "file2"},
-						IndexSize:     1024,
-						WriteHandoff:  false,
-					},
-				},
-				segID + 1: {
-					indexID: {
-						SegmentID:     segID + 1,
-						CollectionID:  collID,
-						PartitionID:   partID,
-						NumRows:       5000,
-						IndexID:       indexID,
-						BuildID:       buildID + 1,
-						NodeID:        0,
-						IndexVersion:  1,
-						IndexState:    commonpb.IndexState_Finished,
-						FailReason:    "",
-						IsDeleted:     false,
-						CreateTime:    0,
-						IndexFileKeys: []string{"file3", "file4"},
-						IndexSize:     1024,
-						WriteHandoff:  false,
-					},
-				},
-			},
-
-			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
-				buildID: {
-					SegmentID:     segID,
-					CollectionID:  collID,
-					PartitionID:   partID,
-					NumRows:       5000,
-					IndexID:       indexID,
-					BuildID:       buildID,
-					NodeID:        0,
-					IndexVersion:  1,
-					IndexState:    commonpb.IndexState_Finished,
-					FailReason:    "",
-					IsDeleted:     false,
-					CreateTime:    0,
-					IndexFileKeys: []string{"file1", "file2"},
-					IndexSize:     1024,
-					WriteHandoff:  false,
-				},
-				buildID + 1: {
-					SegmentID:     segID + 1,
-					CollectionID:  collID,
-					PartitionID:   partID,
-					NumRows:       5000,
-					IndexID:       indexID,
-					BuildID:       buildID + 1,
-					NodeID:        0,
-					IndexVersion:  1,
-					IndexState:    commonpb.IndexState_Finished,
-					FailReason:    "",
-					IsDeleted:     false,
-					CreateTime:    0,
-					IndexFileKeys: []string{"file3", "file4"},
-					IndexSize:     1024,
-					WriteHandoff:  false,
-				},
-			},
-			indexes: map[UniqueID]map[UniqueID]*model.Index{
-				collID: {
-					indexID: {
-						TenantID:        "",
-						CollectionID:    collID,
-						FieldID:         fieldID,
-						IndexID:         indexID,
-						IndexName:       indexName,
-						IsDeleted:       false,
-						CreateTime:      0,
-						TypeParams:      nil,
-						IndexParams:     nil,
-						IsAutoIndex:     false,
-						UserIndexParams: nil,
-					},
-				},
-			},
-		},
-
-		collections: map[UniqueID]*collectionInfo{
-			collID: {
-				ID: collID,
-				Schema: &schemapb.CollectionSchema{
-					Name:        "",
-					Description: "",
-					AutoID:      false,
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:      fieldID,
-							Name:         "",
-							IsPrimaryKey: false,
-							Description:  "",
-							DataType:     schemapb.DataType_FloatVector,
-							TypeParams:   nil,
-							IndexParams:  nil,
-							AutoID:       false,
-							State:        0,
-						},
-					},
-				},
-				Partitions:     nil,
-				StartPositions: nil,
-				Properties:     nil,
-			},
-		},
-	}
-
-	for segID, segment := range map[UniqueID]*SegmentInfo{
+	segments := map[UniqueID]*SegmentInfo{
 		segID: {
 			SegmentInfo: &datapb.SegmentInfo{
 				ID:            segID,
@@ -1343,6 +1036,341 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 				Compacted: true,
 			},
 		},
+	}
+	m := &meta{
+		catalog:    catalog,
+		channelCPs: channelCPs,
+		segments:   NewSegmentsInfo(),
+		indexMeta: &indexMeta{
+			catalog: catalog,
+			segmentIndexes: map[UniqueID]map[UniqueID]*model.SegmentIndex{
+				segID: {
+					indexID: {
+						SegmentID:     segID,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						NumRows:       5000,
+						IndexID:       indexID,
+						BuildID:       buildID,
+						NodeID:        0,
+						IndexVersion:  1,
+						IndexState:    commonpb.IndexState_Finished,
+						FailReason:    "",
+						IsDeleted:     false,
+						CreateTime:    0,
+						IndexFileKeys: []string{"file1", "file2"},
+						IndexSize:     1024,
+						WriteHandoff:  false,
+					},
+				},
+				segID + 1: {
+					indexID: {
+						SegmentID:     segID + 1,
+						CollectionID:  collID,
+						PartitionID:   partID,
+						NumRows:       5000,
+						IndexID:       indexID,
+						BuildID:       buildID + 1,
+						NodeID:        0,
+						IndexVersion:  1,
+						IndexState:    commonpb.IndexState_Finished,
+						FailReason:    "",
+						IsDeleted:     false,
+						CreateTime:    0,
+						IndexFileKeys: []string{"file3", "file4"},
+						IndexSize:     1024,
+						WriteHandoff:  false,
+					},
+				},
+			},
+
+			buildID2SegmentIndex: map[UniqueID]*model.SegmentIndex{
+				buildID: {
+					SegmentID:     segID,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       5000,
+					IndexID:       indexID,
+					BuildID:       buildID,
+					NodeID:        0,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_Finished,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    0,
+					IndexFileKeys: []string{"file1", "file2"},
+					IndexSize:     1024,
+					WriteHandoff:  false,
+				},
+				buildID + 1: {
+					SegmentID:     segID + 1,
+					CollectionID:  collID,
+					PartitionID:   partID,
+					NumRows:       5000,
+					IndexID:       indexID,
+					BuildID:       buildID + 1,
+					NodeID:        0,
+					IndexVersion:  1,
+					IndexState:    commonpb.IndexState_Finished,
+					FailReason:    "",
+					IsDeleted:     false,
+					CreateTime:    0,
+					IndexFileKeys: []string{"file3", "file4"},
+					IndexSize:     1024,
+					WriteHandoff:  false,
+				},
+			},
+			indexes: map[UniqueID]map[UniqueID]*model.Index{
+				collID: {
+					indexID: {
+						TenantID:        "",
+						CollectionID:    collID,
+						FieldID:         fieldID,
+						IndexID:         indexID,
+						IndexName:       indexName,
+						IsDeleted:       false,
+						CreateTime:      0,
+						TypeParams:      nil,
+						IndexParams:     nil,
+						IsAutoIndex:     false,
+						UserIndexParams: nil,
+					},
+				},
+			},
+		},
+
+		collections: map[UniqueID]*collectionInfo{
+			collID: {
+				ID: collID,
+				Schema: &schemapb.CollectionSchema{
+					Name:        "",
+					Description: "",
+					AutoID:      false,
+					Fields: []*schemapb.FieldSchema{
+						{
+							FieldID:      fieldID,
+							Name:         "",
+							IsPrimaryKey: false,
+							Description:  "",
+							DataType:     schemapb.DataType_FloatVector,
+							TypeParams:   nil,
+							IndexParams:  nil,
+							AutoID:       false,
+							State:        0,
+						},
+					},
+				},
+				Partitions:     nil,
+				StartPositions: nil,
+				Properties:     nil,
+			},
+		},
+	}
+
+	for id, segment := range segments {
+		m.segments.SetSegment(id, segment)
+	}
+
+	for segID, segment := range map[UniqueID]*SegmentInfo{
+		segID: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     5000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     0,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				Binlogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "log1",
+								LogSize: 1024,
+							},
+						},
+					},
+					{
+						FieldID: 2,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "log2",
+								LogSize: 1024,
+							},
+						},
+					},
+				},
+				Deltalogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "del_log1",
+								LogSize: 1024,
+							},
+						},
+					},
+					{
+						FieldID: 2,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "del_log2",
+								LogSize: 1024,
+							},
+						},
+					},
+				},
+				Statslogs: []*datapb.FieldBinlog{
+					{
+						FieldID: 1,
+						Binlogs: []*datapb.Binlog{
+							{
+								LogPath: "stats_log1",
+								LogSize: 1024,
+							},
+						},
+					},
+				},
+			},
+		},
+		segID + 1: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 1,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     5000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     0,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+			},
+		},
+		segID + 2: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 2,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     10000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     10,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				CompactionFrom: []int64{segID, segID + 1},
+			},
+		},
+		segID + 3: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 3,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     2000,
+				State:         commonpb.SegmentState_Dropped,
+				MaxRowNum:     65536,
+				DroppedAt:     10,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				CompactionFrom: nil,
+			},
+		},
+		segID + 4: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 4,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "dmlChannel",
+				NumOfRows:     12000,
+				State:         commonpb.SegmentState_Flushed,
+				MaxRowNum:     65536,
+				DroppedAt:     10,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				CompactionFrom: []int64{segID + 2, segID + 3},
+			},
+		},
+		segID + 5: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 5,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      0,
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 1200,
+				},
+			},
+		},
+		// cannot dropped for not expired.
+		segID + 6: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 6,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      uint64(time.Now().Add(time.Hour).UnixNano()),
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				Compacted: true,
+			},
+		},
+		// compacted and child is GCed, dml pos is big than channel cp
+		segID + 7: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 7,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      0,
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 1200,
+				},
+				Compacted: true,
+			},
+		},
+		// can be dropped for expired and compacted
+		segID + 8: {
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:             segID + 8,
+				CollectionID:   collID,
+				PartitionID:    partID,
+				InsertChannel:  "dmlChannel",
+				NumOfRows:      2000,
+				State:          commonpb.SegmentState_Dropped,
+				MaxRowNum:      65535,
+				DroppedAt:      uint64(time.Now().Add(-7 * 24 * time.Hour).UnixNano()),
+				CompactionFrom: nil,
+				DmlPosition: &msgpb.MsgPosition{
+					Timestamp: 900,
+				},
+				Compacted: true,
+			},
+		},
 	} {
 		m.segments.SetSegment(segID, segment)
 	}
@@ -1390,9 +1418,11 @@ func TestGarbageCollector_clearETCD(t *testing.T) {
 	segF := gc.meta.GetSegment(segID + 5)
 	assert.NotNil(t, segF)
 	segG := gc.meta.GetSegment(segID + 6)
-	assert.Nil(t, segG)
+	assert.NotNil(t, segG)
 	segH := gc.meta.GetSegment(segID + 7)
 	assert.NotNil(t, segH)
+	segG = gc.meta.GetSegment(segID + 8)
+	assert.Nil(t, segG)
 	err := gc.meta.indexMeta.AddSegmentIndex(&model.SegmentIndex{
 		SegmentID:    segID + 4,
 		CollectionID: collID,
@@ -1612,6 +1642,26 @@ func (s *GarbageCollectorSuite) TestPauseResume() {
 
 		s.Zero(gc.pauseUntil.Load())
 	})
+}
+
+func (s *GarbageCollectorSuite) TestRunRecycleTaskWithPauser() {
+	gc := newGarbageCollector(s.meta, newMockHandler(), GcOption{
+		cli:              s.cli,
+		enabled:          true,
+		checkInterval:    time.Millisecond * 10,
+		scanInterval:     time.Hour * 7 * 24,
+		missingTolerance: time.Hour * 24,
+		dropTolerance:    time.Hour * 24,
+	})
+
+	ctx, cancel := context.WithTimeout(context.Background(), time.Millisecond*2500)
+	defer cancel()
+
+	cnt := 0
+	gc.runRecycleTaskWithPauser(ctx, "test", time.Second, func(ctx context.Context) {
+		cnt++
+	})
+	s.Equal(cnt, 2)
 }
 
 func TestGarbageCollector(t *testing.T) {

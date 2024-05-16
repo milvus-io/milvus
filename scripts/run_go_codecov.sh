@@ -36,20 +36,30 @@ fi
 # starting the timer
 beginTime=`date +%s`
 for d in $(go list ./internal/... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
-    $TEST_CMD -race -tags dynamic -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    $TEST_CMD -race -tags dynamic,test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
     if [ -f profile.out ]; then
         grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ${FILE_COVERAGE_INFO}
         rm profile.out
     fi
 done
 for d in $(go list ./cmd/tools/... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
-    $TEST_CMD -race -tags dynamic -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    $TEST_CMD -race -tags dynamic,test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
     if [ -f profile.out ]; then
         grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ../${FILE_COVERAGE_INFO}
         rm profile.out
     fi
 done
 pushd pkg
+for d in $(go list ./... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
+    $TEST_CMD -race -tags dynamic,test -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
+    if [ -f profile.out ]; then
+        grep -v kafka profile.out | grep -v planparserv2/generated | grep -v mocks | sed '1d' >> ../${FILE_COVERAGE_INFO}
+        rm profile.out
+    fi
+done
+popd
+# milvusclient
+pushd client
 for d in $(go list ./... | grep -v -e vendor -e kafka -e planparserv2/generated -e mocks); do
     $TEST_CMD -race -tags dynamic -v -coverpkg=./... -coverprofile=profile.out -covermode=atomic "$d"
     if [ -f profile.out ]; then

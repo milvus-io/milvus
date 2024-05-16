@@ -79,30 +79,16 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
 
     auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
     auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
+    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        base_dataset->SetIsSparse(true);
+        query_dataset->SetIsSparse(true);
+    }
     auto search_cfg = PrepareBFSearchParams(search_info);
 
     sub_result.mutable_seg_offsets().resize(nq * topk);
     sub_result.mutable_distances().resize(nq * topk);
 
-    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
-        // TODO(SPARSE): support sparse brute force range search
-        AssertInfo(
-            !search_cfg.contains(RADIUS) && !search_cfg.contains(RANGE_FILTER),
-            "sparse vector not support range search");
-        base_dataset->SetIsSparse(true);
-        query_dataset->SetIsSparse(true);
-        auto stat = knowhere::BruteForce::SearchSparseWithBuf(
-            base_dataset,
-            query_dataset,
-            sub_result.mutable_seg_offsets().data(),
-            sub_result.mutable_distances().data(),
-            search_cfg,
-            bitset);
-        milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
-        if (stat != knowhere::Status::success) {
-            throw SegcoreError(KnowhereError, KnowhereStatusString(stat));
-        }
-    } else if (search_cfg.contains(RADIUS)) {
+    if (search_cfg.contains(RADIUS)) {
         if (search_cfg.contains(RANGE_FILTER)) {
             CheckRangeSearchParam(search_cfg[RADIUS],
                                   search_cfg[RANGE_FILTER],
@@ -121,6 +107,15 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
         } else if (data_type == DataType::VECTOR_BINARY) {
             res = knowhere::BruteForce::RangeSearch<uint8_t>(
                 base_dataset, query_dataset, search_cfg, bitset);
+        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+            res = knowhere::BruteForce::RangeSearch<
+                knowhere::sparse::SparseRow<float>>(
+                base_dataset, query_dataset, search_cfg, bitset);
+        } else {
+            PanicInfo(
+                ErrorCode::Unsupported,
+                "Unsupported dataType for chunk brute force range search:{}",
+                data_type);
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_RangeSearch");
         if (!res.has_value()) {
@@ -170,6 +165,18 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
                 sub_result.mutable_distances().data(),
                 search_cfg,
                 bitset);
+        } else if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+            stat = knowhere::BruteForce::SearchSparseWithBuf(
+                base_dataset,
+                query_dataset,
+                sub_result.mutable_seg_offsets().data(),
+                sub_result.mutable_distances().data(),
+                search_cfg,
+                bitset);
+        } else {
+            PanicInfo(ErrorCode::Unsupported,
+                      "Unsupported dataType for chunk brute force search:{}",
+                      data_type);
         }
         milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
         if (stat != knowhere::Status::success) {
@@ -193,6 +200,10 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
     auto dim = dataset.dim;
     auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
     auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
+    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        base_dataset->SetIsSparse(true);
+        query_dataset->SetIsSparse(true);
+    }
     auto search_cfg = PrepareBFSearchParams(search_info);
 
     knowhere::expected<
@@ -211,8 +222,12 @@ BruteForceSearchIterators(const dataset::SearchDataset& dataset,
             iterators_val = knowhere::BruteForce::AnnIterator<bfloat16>(
                 base_dataset, query_dataset, search_cfg, bitset);
             break;
+        case DataType::VECTOR_SPARSE_FLOAT:
+            iterators_val = knowhere::BruteForce::AnnIterator<
+                knowhere::sparse::SparseRow<float>>(
+                base_dataset, query_dataset, search_cfg, bitset);
+            break;
         default:
-            // TODO(SPARSE): support sparse brute force iterator
             PanicInfo(ErrorCode::Unsupported,
                       "Unsupported dataType for chunk brute force iterator:{}",
                       data_type);

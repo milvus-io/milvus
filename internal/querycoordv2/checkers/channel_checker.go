@@ -191,7 +191,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 			continue
 		}
 
-		if err := CheckLeaderAvailable(c.nodeMgr, leaderView, targets); err != nil {
+		if err := utils.CheckLeaderAvailable(c.nodeMgr, leaderView, targets); err != nil {
 			log.RatedInfo(10, "replica has unavailable shard leader",
 				zap.Int64("collectionID", replica.GetCollectionID()),
 				zap.Int64("replicaID", replicaID),
@@ -217,7 +217,16 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 }
 
 func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*meta.DmChannel, replica *meta.Replica) []task.Task {
-	plans := c.balancer.AssignChannel(channels, replica.GetNodes(), false)
+	plans := make([]balance.ChannelAssignPlan, 0)
+	for _, ch := range channels {
+		rwNodes := replica.GetChannelRWNodes(ch.GetChannelName())
+		if len(rwNodes) == 0 {
+			rwNodes = replica.GetNodes()
+		}
+		plan := c.balancer.AssignChannel([]*meta.DmChannel{ch}, rwNodes, false)
+		plans = append(plans, plan...)
+	}
+
 	for i := range plans {
 		plans[i].Replica = replica
 	}

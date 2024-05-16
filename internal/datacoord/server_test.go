@@ -55,6 +55,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -2424,7 +2425,7 @@ func TestOptions(t *testing.T) {
 		defer kv.RemoveWithPrefix("")
 
 		sessionManager := NewSessionManagerImpl()
-		channelManager, err := NewChannelManager(kv, newMockHandler())
+		channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator())
 		assert.NoError(t, err)
 
 		cluster := NewClusterImpl(sessionManager, channelManager)
@@ -2479,7 +2480,7 @@ func TestHandleSessionEvent(t *testing.T) {
 	defer cancel()
 
 	sessionManager := NewSessionManagerImpl()
-	channelManager, err := NewChannelManager(kv, newMockHandler(), withFactory(&mockPolicyFactory{}))
+	channelManager, err := NewChannelManagerV2(kv, newMockHandler(), sessionManager, newMockAllocator(), withFactoryV2(&mockPolicyFactory{}))
 	assert.NoError(t, err)
 
 	cluster := NewClusterImpl(sessionManager, channelManager)
@@ -3113,7 +3114,7 @@ func Test_CheckHealth(t *testing.T) {
 		}
 		sm := NewSessionManagerImpl()
 		sm.sessions = struct {
-			sync.RWMutex
+			lock.RWMutex
 			data map[int64]*Session
 		}{data: map[int64]*Session{1: {
 			client: healthClient,
@@ -3139,7 +3140,7 @@ func Test_CheckHealth(t *testing.T) {
 		}
 		sm := NewSessionManagerImpl()
 		sm.sessions = struct {
-			sync.RWMutex
+			lock.RWMutex
 			data map[int64]*Session
 		}{data: map[int64]*Session{1: {
 			client: unhealthClient,

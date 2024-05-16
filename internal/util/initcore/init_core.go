@@ -64,6 +64,26 @@ func InitTraceConfig(params *paramtable.ComponentParam) {
 	C.InitTrace(&config)
 }
 
+func ResetTraceConfig(params *paramtable.ComponentParam) {
+	sampleFraction := C.float(params.TraceCfg.SampleFraction.GetAsFloat())
+	nodeID := C.int(paramtable.GetNodeID())
+	exporter := C.CString(params.TraceCfg.Exporter.GetValue())
+	jaegerURL := C.CString(params.TraceCfg.JaegerURL.GetValue())
+	endpoint := C.CString(params.TraceCfg.OtlpEndpoint.GetValue())
+	defer C.free(unsafe.Pointer(exporter))
+	defer C.free(unsafe.Pointer(jaegerURL))
+	defer C.free(unsafe.Pointer(endpoint))
+
+	config := C.CTraceConfig{
+		exporter:       exporter,
+		sampleFraction: sampleFraction,
+		jaegerURL:      jaegerURL,
+		otlpEndpoint:   endpoint,
+		nodeID:         nodeID,
+	}
+	C.SetTrace(&config)
+}
+
 func InitRemoteChunkManager(params *paramtable.ComponentParam) error {
 	cAddress := C.CString(params.MinioCfg.Address.GetValue())
 	cBucketName := C.CString(params.MinioCfg.BucketName.GetValue())

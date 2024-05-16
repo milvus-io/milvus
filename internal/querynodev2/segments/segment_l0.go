@@ -58,13 +58,16 @@ func NewL0Segment(collection *Collection,
 		zap.Int64("segmentID", loadInfo.GetSegmentID()),
 		zap.String("segmentType", segmentType.String()))
 
+	base, err := newBaseSegment(collection, segmentType, version, loadInfo)
+	if err != nil {
+		return nil, err
+	}
+
 	segment := &L0Segment{
-		baseSegment: newBaseSegment(collection, segmentType, version, loadInfo),
+		baseSegment: base,
 	}
 
 	// level 0 segments are always in memory
-	segment.loadStatus.Store(string(LoadStatusInMemory))
-
 	return segment, nil
 }
 
@@ -164,10 +167,14 @@ func (s *L0Segment) DeleteRecords() ([]storage.PrimaryKey, []uint64) {
 	return s.pks, s.tss
 }
 
-func (s *L0Segment) Release(opts ...releaseOption) {
+func (s *L0Segment) Release(ctx context.Context, opts ...releaseOption) {
 	s.dataGuard.Lock()
 	defer s.dataGuard.Unlock()
 
 	s.pks = nil
 	s.tss = nil
+}
+
+func (s *L0Segment) RemoveUnusedFieldFiles() error {
+	panic("not implemented")
 }

@@ -65,18 +65,15 @@ class SegmentInterface {
            Timestamp timestamp) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
-             Timestamp timestamp,
-             int64_t limit_size) const = 0;
-
-    virtual std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
+    Retrieve(tracer::TraceContext* trace_ctx,
+             const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size,
              bool ignore_non_pk) const = 0;
 
     virtual std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
+    Retrieve(tracer::TraceContext* trace_ctx,
+             const query::RetrievePlan* Plan,
              const int64_t* offsets,
              int64_t size) const = 0;
 
@@ -166,18 +163,15 @@ class SegmentInternalInterface : public SegmentInterface {
                     SearchResult& results) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
-             Timestamp timestamp,
-             int64_t limit_size) const override;
-
-    std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
+    Retrieve(tracer::TraceContext* trace_ctx,
+             const query::RetrievePlan* Plan,
              Timestamp timestamp,
              int64_t limit_size,
              bool ignore_non_pk) const override;
 
     std::unique_ptr<proto::segcore::RetrieveResults>
-    Retrieve(const query::RetrievePlan* Plan,
+    Retrieve(tracer::TraceContext* trace_ctx,
+             const query::RetrievePlan* Plan,
              const int64_t* offsets,
              int64_t size) const override;
 
@@ -303,6 +297,7 @@ class SegmentInternalInterface : public SegmentInterface {
 
     void
     FillTargetEntry(
+        tracer::TraceContext* trace_ctx,
         const query::RetrievePlan* plan,
         const std::unique_ptr<proto::segcore::RetrieveResults>& results,
         const int64_t* offsets,

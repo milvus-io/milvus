@@ -73,6 +73,7 @@ type Cache interface {
 	GetCollectionSchema(ctx context.Context, database, collectionName string) (*schemaInfo, error)
 	GetShards(ctx context.Context, withCache bool, database, collectionName string, collectionID int64) (map[string][]nodeInfo, error)
 	DeprecateShardCache(database, collectionName string)
+	InvalidateShardLeaderCache(collections []int64)
 	RemoveCollection(ctx context.Context, database, collectionName string)
 	RemoveCollectionsByID(ctx context.Context, collectionID UniqueID) []string
 	RemovePartition(ctx context.Context, database, collectionName string, partitionName string)
@@ -201,6 +202,7 @@ type shardLeaders struct {
 	idx        *atomic.Int64
 	deprecated *atomic.Bool
 
+	collectionID int64
 	shardLeaders map[string][]nodeInfo
 }
 
@@ -944,6 +946,7 @@ func (m *MetaCache) GetShards(ctx context.Context, withCache bool, database, col
 
 	shards := parseShardLeaderList2QueryNode(resp.GetShards())
 	newShardLeaders := &shardLeaders{
+		collectionID: info.collID,
 		shardLeaders: shards,
 		deprecated:   atomic.NewBool(false),
 		idx:          atomic.NewInt64(0),
@@ -994,6 +997,21 @@ func (m *MetaCache) DeprecateShardCache(database, collectionName string) {
 	log.Info("clearing shard cache for collection", zap.String("collectionName", collectionName))
 	if shards, ok := m.getCollectionShardLeader(database, collectionName); ok {
 		shards.deprecated.Store(true)
+	}
+}
+
+func (m *MetaCache) InvalidateShardLeaderCache(collections []int64) {
+	log.Info("Invalidate shard cache for collections", zap.Int64s("collectionIDs", collections))
+	m.leaderMut.Lock()
+	defer m.leaderMut.Unlock()
+
+	collectionSet := typeutil.NewUniqueSet(collections...)
+	for _, db := range m.collLeader {
+		for _, shardLeaders := range db {
+			if collectionSet.Contain(shardLeaders.collectionID) {
+				shardLeaders.deprecated.Store(true)
+			}
+		}
 	}
 }
 

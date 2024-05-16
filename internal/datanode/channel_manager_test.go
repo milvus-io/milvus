@@ -27,11 +27,50 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestChannelManagerSuite(t *testing.T) {
 	suite.Run(t, new(ChannelManagerSuite))
+}
+
+func TestOpRunnerSuite(t *testing.T) {
+	suite.Run(t, new(OpRunnerSuite))
+}
+
+func (s *OpRunnerSuite) SetupTest() {
+	ctx := context.Background()
+	s.mockAlloc = allocator.NewMockAllocator(s.T())
+
+	s.node = newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
+	s.node.allocator = s.mockAlloc
+}
+
+func (s *OpRunnerSuite) TestWatchWithTimer() {
+	var (
+		channel string = "ch-1"
+		commuCh        = make(chan *opState)
+	)
+	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	mockReleaseFunc := func(channel string) {
+		log.Info("mock release func")
+	}
+	runner := NewOpRunner(channel, s.node, mockReleaseFunc, commuCh)
+	err := runner.Enqueue(info)
+	s.Require().NoError(err)
+
+	opState := runner.watchWithTimer(info)
+	s.NotNil(opState.fg)
+	s.Equal(channel, opState.channel)
+
+	runner.FinishOp(100)
+}
+
+type OpRunnerSuite struct {
+	suite.Suite
+	node      *DataNode
+	mockAlloc *allocator.MockAllocator
 }
 
 type ChannelManagerSuite struct {
@@ -45,6 +84,8 @@ func (s *ChannelManagerSuite) SetupTest() {
 	ctx := context.Background()
 	s.node = newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
 	s.node.allocator = allocator.NewMockAllocator(s.T())
+	s.node.flowgraphManager = newFlowgraphManager()
+
 	s.manager = NewChannelManager(s.node)
 }
 
@@ -80,7 +121,9 @@ func getWatchInfoByOpID(opID UniqueID, channel string, state datapb.ChannelWatch
 }
 
 func (s *ChannelManagerSuite) TearDownTest() {
-	s.manager.Close()
+	if s.manager != nil {
+		s.manager.Close()
+	}
 }
 
 func (s *ChannelManagerSuite) TestWatchFail() {
@@ -164,14 +207,41 @@ func (s *ChannelManagerSuite) TestSubmitIdempotent() {
 	s.Equal(1, runner.UnfinishedOpSize())
 }
 
-func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
-	channel := "by-dev-rootcoord-dml-0"
+func (s *ChannelManagerSuite) TestSubmitSkip() {
+	channel := "by-dev-rootcoord-dml-1"
 
 	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	s.Require().Equal(0, s.manager.opRunners.Len())
 
 	err := s.manager.Submit(info)
 	s.NoError(err)
 
+	s.Equal(1, s.manager.opRunners.Len())
+	s.True(s.manager.opRunners.Contain(channel))
+	opState := <-s.manager.communicateCh
+	s.NotNil(opState)
+	s.Equal(datapb.ChannelWatchState_WatchSuccess, opState.state)
+	s.NotNil(opState.fg)
+	s.Equal(info.GetOpID(), opState.fg.opID)
+	s.manager.handleOpState(opState)
+
+	err = s.manager.Submit(info)
+	s.NoError(err)
+
+	runner, ok := s.manager.opRunners.Get(channel)
+	s.False(ok)
+	s.Nil(runner)
+}
+
+func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
+	channel := "by-dev-rootcoord-dml-0"
+
+	// watch
+	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	err := s.manager.Submit(info)
+	s.NoError(err)
+
+	// wait for result
 	opState := <-s.manager.communicateCh
 	s.NotNil(opState)
 	s.Equal(datapb.ChannelWatchState_WatchSuccess, opState.state)
@@ -184,8 +254,8 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 
 	s.manager.handleOpState(opState)
 	s.Equal(1, s.manager.fgManager.GetFlowgraphCount())
-	s.True(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
-	s.Equal(1, s.manager.opRunners.Len())
+	s.False(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
+	s.Equal(0, s.manager.opRunners.Len())
 
 	resp = s.manager.GetProgress(info)
 	s.Equal(info.GetOpID(), resp.GetOpID())
@@ -193,10 +263,10 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 
 	// release
 	info = getWatchInfoByOpID(101, channel, datapb.ChannelWatchState_ToRelease)
-
 	err = s.manager.Submit(info)
 	s.NoError(err)
 
+	// wait for result
 	opState = <-s.manager.communicateCh
 	s.NotNil(opState)
 	s.Equal(datapb.ChannelWatchState_ReleaseSuccess, opState.state)
@@ -209,4 +279,10 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	s.Equal(0, s.manager.fgManager.GetFlowgraphCount())
 	s.False(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
 	s.Equal(0, s.manager.opRunners.Len())
+
+	err = s.manager.Submit(info)
+	s.NoError(err)
+	runner, ok := s.manager.opRunners.Get(channel)
+	s.False(ok)
+	s.Nil(runner)
 }

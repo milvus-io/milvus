@@ -27,8 +27,8 @@ default_mix_expr = "int64 >= 0 && varchar >= \"0\""
 default_expr = f'{ct.default_int64_field_name} >= 0'
 default_invalid_expr = "varchar >= 0"
 default_string_term_expr = f'{ct.default_string_field_name} in [\"0\", \"1\"]'
-default_index_params = {"index_type": "IVF_SQ8", "metric_type": "L2", "params": {"nlist": 64}}
-binary_index_params = {"index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD", "params": {"nlist": 64}}
+default_index_params = ct.default_index
+binary_index_params = ct.default_binary_index
 
 default_entities = ut.gen_entities(ut.default_nb, is_normal=True)
 default_pos = 5
@@ -988,16 +988,11 @@ class TestQueryParams(TestcaseBase):
         expression = f"{expr_prefix}({json_field}['list'], {ids})"
         collection_w.query(expression, check_task=CheckTasks.check_query_empty)
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_not_list(self, request):
-        if request.param == [1, "2", 3]:
-            pytest.skip('[1, "2", 3] is valid type for list')
-        yield request.param
-
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("expr_prefix", ["json_contains_any", "JSON_CONTAINS_ANY",
                                              "json_contains_all", "JSON_CONTAINS_ALL"])
-    def test_query_expr_json_contains_invalid_type(self, expr_prefix, enable_dynamic_field, get_not_list):
+    @pytest.mark.parametrize("not_list", ["str", {1, 2, 3}, (1, 2, 3), 10])
+    def test_query_expr_json_contains_invalid_type(self, expr_prefix, enable_dynamic_field, not_list):
         """
         target: test query with expression using json_contains_any
         method: query with expression using json_contains_any
@@ -1007,8 +1002,9 @@ class TestQueryParams(TestcaseBase):
         collection_w = self.init_collection_general(prefix, enable_dynamic_field=enable_dynamic_field)[0]
 
         # 2. insert data
-        array = cf.gen_default_rows_data()
-        for i in range(ct.default_nb):
+        nb = 10
+        array = cf.gen_default_rows_data(nb=nb)
+        for i in range(nb):
             array[i][json_field] = {"number": i,
                                     "list": [m for m in range(i, i + 10)]}
 
@@ -1016,7 +1012,7 @@ class TestQueryParams(TestcaseBase):
 
         # 3. query
         collection_w.load()
-        expression = f"{expr_prefix}({json_field}['list'], {get_not_list})"
+        expression = f"{expr_prefix}({json_field}['list'], {not_list})"
         error = {ct.err_code: 1100, ct.err_msg: f"failed to create query plan: cannot parse expression: {expression}"}
         collection_w.query(expression, check_task=CheckTasks.err_res, check_items=error)
 
@@ -1329,7 +1325,7 @@ class TestQueryParams(TestcaseBase):
         assert set(res[0].keys()) == {ct.default_int64_field_name, ct.default_float_field_name}
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 30437")
+    @pytest.mark.skip(reason="issue 30437")
     def test_query_output_all_fields(self, enable_dynamic_field, random_primary_key):
         """
         target: test query with none output field
@@ -1505,7 +1501,7 @@ class TestQueryParams(TestcaseBase):
                                check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.xfail(reason="exception not MilvusException")
+    @pytest.mark.skip(reason="exception not MilvusException")
     def test_query_invalid_output_fields(self):
         """
         target: test query with invalid output fields
@@ -1520,7 +1516,7 @@ class TestQueryParams(TestcaseBase):
                                check_items=error)
 
     @pytest.mark.tags(CaseLabel.L0)
-    @pytest.mark.xfail(reason="issue 24637")
+    @pytest.mark.skip(reason="issue 24637")
     def test_query_output_fields_simple_wildcard(self):
         """
         target: test query output_fields with simple wildcard (* and %)
@@ -1539,7 +1535,7 @@ class TestQueryParams(TestcaseBase):
                            check_items={exp_res: res3, "with_vec": True})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 24637")
+    @pytest.mark.skip(reason="issue 24637")
     def test_query_output_fields_part_scale_wildcard(self):
         """
         target: test query output_fields with part wildcard
@@ -1713,7 +1709,7 @@ class TestQueryParams(TestcaseBase):
         assert len(res2) == ct.default_nb
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("ignore_growing", ct.get_invalid_strs[:8])
+    @pytest.mark.parametrize("ignore_growing", [2.3, "str"])
     def test_query_invalid_ignore_growing_param(self, ignore_growing):
         """
         target: test query ignoring growing segment param invalid
@@ -1722,17 +1718,15 @@ class TestQueryParams(TestcaseBase):
                 3. query with ignore_growing type invalid
         expected: raise exception
         """
-        if ignore_growing == 1:
-            pytest.skip("number is valid")
         # 1. create a collection
         collection_w = self.init_collection_general(prefix, True)[0]
 
         # 2. insert data again
-        data = cf.gen_default_dataframe_data(start=10000)
+        data = cf.gen_default_dataframe_data(start=100)
         collection_w.insert(data)
 
         # 3. query with param ignore_growing invalid
-        error = {ct.err_code: 1, ct.err_msg: "parse search growing failed"}
+        error = {ct.err_code: 999, ct.err_msg: "parse search growing failed"}
         collection_w.query('int64 >= 0', ignore_growing=ignore_growing,
                            check_task=CheckTasks.err_res, check_items=error)
 
@@ -2679,7 +2673,7 @@ class TestQueryString(TestcaseBase):
                                         f"error: comparisons between VarChar and Int64 are not supported: invalid parameter"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue 24637")
+    @pytest.mark.skip(reason="issue 24637")
     def test_query_after_insert_multi_threading(self):
         """
         target: test data consistency after multi threading insert

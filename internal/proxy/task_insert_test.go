@@ -13,6 +13,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestInsertTask_CheckAligned(t *testing.T) {
@@ -32,7 +33,7 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 	err = case1.insertMsg.CheckAligned()
 	assert.NoError(t, err)
 
-	// fillFieldsDataBySchema was already checked by TestInsertTask_fillFieldsDataBySchema
+	// checkFieldsDataBySchema was already checked by TestInsertTask_checkFieldsDataBySchema
 
 	boolFieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Bool}
 	int8FieldSchema := &schemapb.FieldSchema{DataType: schemapb.DataType_Int8}
@@ -56,8 +57,8 @@ func TestInsertTask_CheckAligned(t *testing.T) {
 					MsgType: commonpb.MsgType_Insert,
 				},
 				Version:    msgpb.InsertDataVersion_ColumnBased,
-				RowIDs:     generateInt64Array(numRows),
-				Timestamps: generateUint64Array(numRows),
+				RowIDs:     testutils.GenerateInt64Array(numRows),
+				Timestamps: testutils.GenerateUint64Array(numRows),
 			},
 		},
 		schema: &schemapb.CollectionSchema{

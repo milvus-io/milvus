@@ -19,6 +19,7 @@
 #include "Utils.h"
 #include "common/EasyAssert.h"
 #include "pkVisitor.h"
+#include "ReduceUtils.h"
 
 namespace milvus::segcore {
 
@@ -61,6 +62,7 @@ ReduceHelper::Reduce() {
 
 void
 ReduceHelper::Marshal() {
+    tracer::AutoSpan span("ReduceHelper::Marshal", trace_ctx_, false);
     // get search result data blobs of slices
     search_result_data_blobs_ =
         std::make_unique<milvus::segcore::SearchResultDataBlobs>();
@@ -130,7 +132,7 @@ ReduceHelper::FilterInvalidSearchResult(SearchResult* search_result) {
 
 void
 ReduceHelper::FillPrimaryKey() {
-    std::vector<SearchResult*> valid_search_results;
+    tracer::AutoSpan span("ReduceHelper::FillPrimaryKey", trace_ctx_, false);
     // get primary keys for duplicates removal
     uint32_t valid_index = 0;
     for (auto& search_result : search_results_) {
@@ -153,6 +155,8 @@ ReduceHelper::FillPrimaryKey() {
 
 void
 ReduceHelper::RefreshSearchResult() {
+    tracer::AutoSpan span(
+        "ReduceHelper::RefreshSearchResult", trace_ctx_, false);
     for (int i = 0; i < num_segments_; i++) {
         std::vector<int64_t> real_topks(total_nq_, 0);
         auto search_result = search_results_[i];
@@ -212,6 +216,7 @@ ReduceHelper::RefreshSearchResult() {
 
 void
 ReduceHelper::FillEntryData() {
+    tracer::AutoSpan span("ReduceHelper::FillEntryData", trace_ctx_, false);
     for (auto search_result : search_results_) {
         auto segment = static_cast<milvus::segcore::SegmentInterface*>(
             search_result->segment_);
@@ -312,6 +317,7 @@ ReduceHelper::ReduceSearchResultForOneNQ(int64_t qi,
 
 void
 ReduceHelper::ReduceResultData() {
+    tracer::AutoSpan span("ReduceHelper::ReduceResultData", trace_ctx_, false);
     for (int i = 0; i < num_segments_; i++) {
         auto search_result = search_results_[i];
         auto result_count = search_result->get_total_result_count();
@@ -368,7 +374,7 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
     search_result_data->set_all_search_count(all_search_count);
 
     // `result_pairs` contains the SearchResult and result_offset info, used for filling output fields
-    std::vector<std::pair<SearchResult*, int64_t>> result_pairs(result_count);
+    std::vector<MergeBase> result_pairs(result_count);
 
     // reserve space for pks
     auto primary_field_id =
@@ -461,14 +467,14 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
                     group_by_values[loc] =
                         search_result->group_by_values_.value()[ki];
                 // set result offset to fill output fields data
-                result_pairs[loc] = std::make_pair(search_result, ki);
+                result_pairs[loc] = {&search_result->output_fields_data_, ki};
             }
         }
 
         // update result topKs
         search_result_data->mutable_topks()->Set(qi - nq_begin, topk_count);
     }
-    AssembleGroupByValues(search_result_data, group_by_values);
+    AssembleGroupByValues(search_result_data, group_by_values, plan_);
 
     AssertInfo(search_result_data->scores_size() == result_count,
                "wrong scores size, size = " +
@@ -496,91 +502,6 @@ ReduceHelper::GetSearchResultDataSlice(int slice_index) {
     search_result_data->SerializePartialToArray(buffer.data(), size);
 
     return buffer;
-}
-
-void
-ReduceHelper::AssembleGroupByValues(
-    std::unique_ptr<milvus::proto::schema::SearchResultData>& search_result,
-    const std::vector<GroupByValueType>& group_by_vals) {
-    auto group_by_field_id = plan_->plan_node_->search_info_.group_by_field_id_;
-    if (group_by_field_id.has_value() && group_by_vals.size() > 0) {
-        auto group_by_values_field =
-            std::make_unique<milvus::proto::schema::ScalarField>();
-        auto group_by_field =
-            plan_->schema_.operator[](group_by_field_id.value());
-        DataType group_by_data_type = group_by_field.get_data_type();
-
-        int group_by_val_size = group_by_vals.size();
-        switch (group_by_data_type) {
-            case DataType::INT8: {
-                auto field_data = group_by_values_field->mutable_int_data();
-                field_data->mutable_data()->Resize(group_by_val_size, 0);
-                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
-                    int8_t val = std::get<int8_t>(group_by_vals[idx]);
-                    field_data->mutable_data()->Set(idx, val);
-                }
-                break;
-            }
-            case DataType::INT16: {
-                auto field_data = group_by_values_field->mutable_int_data();
-                field_data->mutable_data()->Resize(group_by_val_size, 0);
-                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
-                    int16_t val = std::get<int16_t>(group_by_vals[idx]);
-                    field_data->mutable_data()->Set(idx, val);
-                }
-                break;
-            }
-            case DataType::INT32: {
-                auto field_data = group_by_values_field->mutable_int_data();
-                field_data->mutable_data()->Resize(group_by_val_size, 0);
-                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
-                    int32_t val = std::get<int32_t>(group_by_vals[idx]);
-                    field_data->mutable_data()->Set(idx, val);
-                }
-                break;
-            }
-            case DataType::INT64: {
-                auto field_data = group_by_values_field->mutable_long_data();
-                field_data->mutable_data()->Resize(group_by_val_size, 0);
-                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
-                    int64_t val = std::get<int64_t>(group_by_vals[idx]);
-                    field_data->mutable_data()->Set(idx, val);
-                }
-                break;
-            }
-            case DataType::BOOL: {
-                auto field_data = group_by_values_field->mutable_bool_data();
-                field_data->mutable_data()->Resize(group_by_val_size, 0);
-                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
-                    bool val = std::get<bool>(group_by_vals[idx]);
-                    field_data->mutable_data()->Set(idx, val);
-                }
-                break;
-            }
-            case DataType::VARCHAR: {
-                auto field_data = group_by_values_field->mutable_string_data();
-                for (std::size_t idx = 0; idx < group_by_val_size; idx++) {
-                    std::string val =
-                        std::move(std::get<std::string>(group_by_vals[idx]));
-                    *(field_data->mutable_data()->Add()) = val;
-                }
-                break;
-            }
-            default: {
-                PanicInfo(
-                    DataTypeInvalid,
-                    fmt::format("unsupported datatype for group_by operations ",
-                                group_by_data_type));
-            }
-        }
-
-        search_result->mutable_group_by_field_value()->set_type(
-            milvus::proto::schema::DataType(group_by_data_type));
-        search_result->mutable_group_by_field_value()
-            ->mutable_scalars()
-            ->MergeFrom(*group_by_values_field.get());
-        return;
-    }
 }
 
 }  // namespace milvus::segcore

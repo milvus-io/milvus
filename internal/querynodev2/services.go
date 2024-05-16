@@ -293,18 +293,22 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 	})
 	delegator.AddExcludedSegments(growingInfo)
 
+	defer func() {
+		if err != nil {
+			// remove legacy growing
+			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
+				segments.WithType(segments.SegmentTypeGrowing))
+			// remove legacy l0 segments
+			node.manager.Segment.RemoveBy(ctx, segments.WithChannel(channel.GetChannelName()),
+				segments.WithLevel(datapb.SegmentLevel_L0))
+		}
+	}()
+
 	err = loadL0Segments(ctx, delegator, req)
 	if err != nil {
 		log.Warn("failed to load l0 segments", zap.Error(err))
 		return merr.Status(err), nil
 	}
-	defer func() {
-		if err != nil {
-			// remove legacy growing
-			node.manager.Segment.RemoveBy(segments.WithChannel(channel.GetChannelName()),
-				segments.WithType(segments.SegmentTypeGrowing))
-		}
-	}()
 	err = loadGrowingSegments(ctx, delegator, req)
 	if err != nil {
 		msg := "failed to load growing segments"
@@ -357,8 +361,8 @@ func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmC
 		delegator.Close()
 
 		node.pipelineManager.Remove(req.GetChannelName())
-		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
-		node.manager.Segment.RemoveBy(segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
+		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithType(segments.SegmentTypeGrowing))
+		node.manager.Segment.RemoveBy(ctx, segments.WithChannel(req.GetChannelName()), segments.WithLevel(datapb.SegmentLevel_L0))
 		node.tSafeManager.Remove(ctx, req.GetChannelName())
 
 		node.manager.Collection.Unref(req.GetCollectionID(), 1)
@@ -416,6 +420,22 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 	if len(req.GetIndexInfoList()) == 0 {
 		err := merr.WrapErrIndexNotFoundForCollection(req.GetSchema().GetName())
 		return merr.Status(err), nil
+	}
+
+	// fallback binlog memory size to log size when it is zero
+	fallbackBinlogMemorySize := func(binlogs []*datapb.FieldBinlog) {
+		for _, insertBinlogs := range binlogs {
+			for _, b := range insertBinlogs.GetBinlogs() {
+				if b.GetMemorySize() == 0 {
+					b.MemorySize = b.GetLogSize()
+				}
+			}
+		}
+	}
+	for _, s := range req.GetInfos() {
+		fallbackBinlogMemorySize(s.GetBinlogPaths())
+		fallbackBinlogMemorySize(s.GetStatslogs())
+		fallbackBinlogMemorySize(s.GetDeltalogs())
 	}
 
 	// Delegates request to workers
@@ -547,7 +567,7 @@ func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.Release
 	log.Info("start to release segments")
 	sealedCount := 0
 	for _, id := range req.GetSegmentIDs() {
-		_, count := node.manager.Segment.Remove(id, req.GetScope())
+		_, count := node.manager.Segment.Remove(ctx, id, req.GetScope())
 		sealedCount += count
 	}
 	node.manager.Collection.Unref(req.GetCollectionID(), uint32(sealedCount))
@@ -594,7 +614,7 @@ func (node *QueryNode) GetSegmentInfo(ctx context.Context, in *querypb.GetSegmen
 		info := &querypb.SegmentInfo{
 			SegmentID:    segment.ID(),
 			SegmentState: segment.Type(),
-			DmChannel:    segment.Shard(),
+			DmChannel:    segment.Shard().VirtualName(),
 			PartitionID:  segment.Partition(),
 			CollectionID: segment.Collection(),
 			NodeID:       node.GetNodeID(),
@@ -660,7 +680,13 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 		return resp, nil
 	}
 
-	task := tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
+	var task tasks.Task
+	if paramtable.Get().QueryNodeCfg.UseStreamComputing.GetAsBool() {
+		task = tasks.NewStreamingSearchTask(searchCtx, collection, node.manager, req, node.serverID)
+	} else {
+		task = tasks.NewSearchTask(searchCtx, collection, node.manager, req, node.serverID)
+	}
+
 	if err := node.scheduler.Add(task); err != nil {
 		log.Warn("failed to search channel", zap.Error(err))
 		resp.Status = merr.Status(err)
@@ -683,7 +709,7 @@ func (node *QueryNode) SearchSegments(ctx context.Context, req *querypb.SearchRe
 	metrics.QueryNodeSQReqLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.FromLeader).Observe(float64(latency.Milliseconds()))
 	metrics.QueryNodeSQCount.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.SuccessLabel, metrics.FromLeader).Inc()
 
-	resp = task.Result()
+	resp = task.SearchResult()
 	resp.GetCostAggregation().ResponseTime = tr.ElapseSpan().Milliseconds()
 	resp.GetCostAggregation().TotalNQ = node.scheduler.GetWaitingTaskTotalNQ()
 	return resp, nil
@@ -767,7 +793,8 @@ func (node *QueryNode) Search(ctx context.Context, req *querypb.SearchRequest) (
 	}
 
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.
+		WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.SearchLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, float64(req.GetReq().GetNq()))
@@ -914,7 +941,8 @@ func (node *QueryNode) Query(ctx context.Context, req *querypb.QueryRequest) (*i
 		}, nil
 	}
 	reduceLatency := tr.RecordSpan()
-	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()), metrics.QueryLabel, metrics.ReduceShards).
+	metrics.QueryNodeReduceLatency.WithLabelValues(fmt.Sprint(node.GetNodeID()),
+		metrics.QueryLabel, metrics.ReduceShards, metrics.BatchReduce).
 		Observe(float64(reduceLatency.Milliseconds()))
 
 	collector.Rate.Add(metricsinfo.NQPerSecond, 1)
@@ -1153,7 +1181,7 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 			ID:                 s.ID(),
 			Collection:         s.Collection(),
 			Partition:          s.Partition(),
-			Channel:            s.Shard(),
+			Channel:            s.Shard().VirtualName(),
 			Version:            s.Version(),
 			LastDeltaTimestamp: s.LastDeltaTimestamp(),
 			IndexInfo: lo.SliceToMap(s.Indexes(), func(info *segments.IndexedFieldInfo) (int64, *querypb.FieldIndexInfo) {

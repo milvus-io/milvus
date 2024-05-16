@@ -11,8 +11,12 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/mocks"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -154,11 +158,50 @@ func TestListDatabaseTask(t *testing.T) {
 		assert.Equal(t, paramtable.GetNodeID(), task.GetBase().GetSourceID())
 		assert.Equal(t, UniqueID(0), task.ID())
 
-		md, ok := metadata.FromOutgoingContext(task.ctx)
+		taskCtx := AppendUserInfoForRPC(ctx)
+		md, ok := metadata.FromOutgoingContext(taskCtx)
 		assert.True(t, ok)
 		authorization, ok := md[strings.ToLower(util.HeaderAuthorize)]
 		assert.True(t, ok)
 		expectAuth := crypto.Base64Encode("root:root")
 		assert.Equal(t, expectAuth, authorization[0])
 	})
+}
+
+func TestAlterDatabase(t *testing.T) {
+	rc := mocks.NewMockRootCoordClient(t)
+
+	rc.EXPECT().AlterDatabase(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	task := &alterDatabaseTask{
+		AlterDatabaseRequest: &milvuspb.AlterDatabaseRequest{
+			Base:       &commonpb.MsgBase{},
+			DbName:     "test_alter_database",
+			Properties: []*commonpb.KeyValuePair{{Key: common.MmapEnabledKey, Value: "true"}},
+		},
+		rootCoord: rc,
+	}
+	err := task.PreExecute(context.Background())
+	assert.Nil(t, err)
+
+	err = task.Execute(context.Background())
+	assert.Nil(t, err)
+}
+
+func TestDescribeDatabase(t *testing.T) {
+	rc := mocks.NewMockRootCoordClient(t)
+
+	rc.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(&rootcoordpb.DescribeDatabaseResponse{}, nil)
+	task := &describeDatabaseTask{
+		DescribeDatabaseRequest: &milvuspb.DescribeDatabaseRequest{
+			Base:   &commonpb.MsgBase{},
+			DbName: "test_describe_database",
+		},
+		rootCoord: rc,
+	}
+
+	err := task.PreExecute(context.Background())
+	assert.Nil(t, err)
+
+	err = task.Execute(context.Background())
+	assert.Nil(t, err)
 }

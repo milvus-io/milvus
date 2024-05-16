@@ -455,7 +455,14 @@ func (rm *ResourceManager) HandleNodeDown(node int64) {
 
 	// failure of node down can be ignored, node down can be done by `RemoveAllDownNode`.
 	rm.incomingNode.Remove(node)
+
+	// for stopping query node becomes offline, node change won't be triggered,
+	// cause when it becomes stopping, it already remove from resource manager
+	// then `unassignNode` will do nothing
 	rgName, err := rm.unassignNode(node)
+
+	// trigger node changes, expected to remove ro node from replica immediately
+	rm.nodeChangedNotifier.NotifyAll()
 	log.Info("HandleNodeDown: remove node from resource group",
 		zap.String("rgName", rgName),
 		zap.Int64("node", node),

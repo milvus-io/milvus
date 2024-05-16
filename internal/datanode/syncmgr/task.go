@@ -109,7 +109,7 @@ func (t *SyncTask) getLogger() *log.MLogger {
 	)
 }
 
-func (t *SyncTask) handleError(err error) {
+func (t *SyncTask) HandleError(err error) {
 	if errors.Is(err, errTargetSegmentNotMatch) {
 		return
 	}
@@ -129,7 +129,7 @@ func (t *SyncTask) Run() (err error) {
 	log := t.getLogger()
 	defer func() {
 		if err != nil {
-			t.handleError(err)
+			t.HandleError(err)
 		}
 	}()
 
@@ -138,7 +138,6 @@ func (t *SyncTask) Run() (err error) {
 	if !has {
 		log.Warn("failed to sync data, segment not found in metacache")
 		err := merr.WrapErrSegmentNotFound(t.segmentID)
-		t.handleError(err)
 		return err
 	}
 
@@ -175,7 +174,6 @@ func (t *SyncTask) Run() (err error) {
 	err = t.writeLogs()
 	if err != nil {
 		log.Warn("failed to save serialized data into storage", zap.Error(err))
-		t.handleError(err)
 		return err
 	}
 
@@ -195,7 +193,6 @@ func (t *SyncTask) Run() (err error) {
 		err = t.writeMeta()
 		if err != nil {
 			log.Warn("failed to save serialized data into storage", zap.Error(err))
-			t.handleError(err)
 			return err
 		}
 	}
@@ -262,7 +259,8 @@ func (t *SyncTask) processInsertBlobs() {
 			TimestampFrom: t.tsFrom,
 			TimestampTo:   t.tsTo,
 			LogPath:       key,
-			LogSize:       t.binlogMemsize[fieldID],
+			LogSize:       int64(len(blob.GetValue())),
+			MemorySize:    t.binlogMemsize[fieldID],
 		})
 	}
 }
@@ -291,6 +289,7 @@ func (t *SyncTask) processDeltaBlob() {
 		data.TimestampFrom = t.tsFrom
 		data.TimestampTo = t.tsTo
 		data.EntriesNum = t.deltaRowCount
+		data.MemorySize = t.deltaBlob.GetMemorySize()
 		t.appendDeltalog(data)
 	}
 }
@@ -307,6 +306,7 @@ func (t *SyncTask) convertBlob2StatsBinlog(blob *storage.Blob, fieldID, logID in
 		TimestampTo:   t.tsTo,
 		LogPath:       key,
 		LogSize:       int64(len(value)),
+		MemorySize:    int64(len(value)),
 	})
 }
 

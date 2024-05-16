@@ -29,13 +29,15 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 // IndexNodeManager is used to manage the client of IndexNode.
 type IndexNodeManager struct {
 	nodeClients      map[UniqueID]types.IndexNodeClient
 	stoppingNodes    map[UniqueID]struct{}
-	lock             sync.RWMutex
+	lock             lock.RWMutex
 	ctx              context.Context
 	indexNodeCreator indexNodeCreatorFunc
 }
@@ -45,7 +47,7 @@ func NewNodeManager(ctx context.Context, indexNodeCreator indexNodeCreatorFunc) 
 	return &IndexNodeManager{
 		nodeClients:      make(map[UniqueID]types.IndexNodeClient),
 		stoppingNodes:    make(map[UniqueID]struct{}),
-		lock:             sync.RWMutex{},
+		lock:             lock.RWMutex{},
 		ctx:              ctx,
 		indexNodeCreator: indexNodeCreator,
 	}
@@ -108,7 +110,7 @@ func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, type
 	ctx, cancel := context.WithCancel(nm.ctx)
 	var (
 		peekNodeID = UniqueID(0)
-		nodeMutex  = sync.Mutex{}
+		nodeMutex  = lock.Mutex{}
 		wg         = sync.WaitGroup{}
 	)
 
@@ -164,7 +166,7 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 	ctx, cancel := context.WithCancel(nm.ctx)
 	var (
 		enableDisk = false
-		nodeMutex  = sync.Mutex{}
+		nodeMutex  = lock.Mutex{}
 		wg         = sync.WaitGroup{}
 	)
 
@@ -175,13 +177,8 @@ func (nm *IndexNodeManager) ClientSupportDisk() bool {
 		go func() {
 			defer wg.Done()
 			resp, err := client.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
-			if err != nil {
+			if err := merr.CheckRPCCall(resp, err); err != nil {
 				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-				return
-			}
-			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
-					zap.String("reason", resp.GetStatus().GetReason()))
 				return
 			}
 			log.Debug("get job stats success", zap.Int64("nodeID", nodeID), zap.Bool("enable disk", resp.GetEnableDisk()))

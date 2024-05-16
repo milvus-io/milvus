@@ -109,7 +109,7 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 }
 
 func newWriteNode(
-	ctx context.Context,
+	_ context.Context,
 	writeBufferManager writebuffer.BufferManager,
 	updater statsUpdater,
 	config *nodeConfig,

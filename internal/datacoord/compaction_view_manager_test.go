@@ -80,9 +80,11 @@ func (s *CompactionViewManagerSuite) SetupTest() {
 		Channel:      "ch-1",
 	}
 
-	meta := &meta{segments: &SegmentsInfo{
-		segments: genSegmentsForMeta(s.testLabel),
-	}}
+	segments := genSegmentsForMeta(s.testLabel)
+	meta := &meta{segments: NewSegmentsInfo()}
+	for id, segment := range segments {
+		meta.segments.SetSegment(id, segment)
+	}
 
 	s.m = NewCompactionViewManager(meta, s.mockTriggerManager, s.mockAlloc)
 }
@@ -327,7 +329,8 @@ func genTestDeltalogs(logCount int, logSize int64) []*datapb.FieldBinlog {
 
 	for i := 0; i < logCount; i++ {
 		binlog := &datapb.Binlog{
-			LogSize: logSize,
+			LogSize:    logSize,
+			MemorySize: logSize,
 		}
 		binlogs = append(binlogs, binlog)
 	}

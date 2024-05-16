@@ -200,6 +200,11 @@ func (node *QueryNode) InitSegcore() error {
 	C.SegcoreSetSimdType(cSimdType)
 	C.free(unsafe.Pointer(cSimdType))
 
+	enableKnowhereScoreConsistency := paramtable.Get().QueryNodeCfg.KnowhereScoreConsistency.GetAsBool()
+	if enableKnowhereScoreConsistency {
+		C.SegcoreEnableKnowhereScoreConsistency()
+	}
+
 	// override segcore index slice size
 	cIndexSliceSize := C.int64_t(paramtable.Get().CommonCfg.IndexSliceSize.GetAsInt64())
 	C.InitIndexSliceSize(cIndexSliceSize)
@@ -438,7 +443,7 @@ func (node *QueryNode) Stop() error {
 
 				select {
 				case <-timeoutCh:
-					log.Warn("migrate data timed out", zap.Int64("ServerID", paramtable.GetNodeID()),
+					log.Warn("migrate data timed out", zap.Int64("ServerID", node.GetNodeID()),
 						zap.Int64s("sealedSegments", lo.Map(sealedSegments, func(s segments.Segment, i int) int64 {
 							return s.ID()
 						})),
@@ -484,7 +489,7 @@ func (node *QueryNode) Stop() error {
 			node.dispClient.Close()
 		}
 		if node.manager != nil {
-			node.manager.Segment.Clear()
+			node.manager.Segment.Clear(context.Background())
 		}
 
 		node.CloseSegcore()

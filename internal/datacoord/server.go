@@ -343,6 +343,7 @@ func (s *Server) initDataCoord() error {
 	log.Info("init rootcoord client done")
 
 	s.broker = broker.NewCoordinatorBroker(s.rootCoordClient)
+	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
 	storageCli, err := s.newChunkManagerFactory()
 	if err != nil {
@@ -363,8 +364,6 @@ func (s *Server) initDataCoord() error {
 		return err
 	}
 	log.Info("init datanode cluster done")
-
-	s.allocator = newRootCoordAllocator(s.rootCoordClient)
 
 	s.initIndexNodeManager()
 
@@ -466,6 +465,13 @@ func (s *Server) startDataCoord() {
 	sessionutil.SaveServerInfo(typeutil.DataCoordRole, s.session.GetServerID())
 }
 
+func (s *Server) GetServerID() int64 {
+	if s.session != nil {
+		return s.session.GetServerID()
+	}
+	return paramtable.GetNodeID()
+}
+
 func (s *Server) afterStart() {}
 
 func (s *Server) initCluster() error {
@@ -473,13 +479,20 @@ func (s *Server) initCluster() error {
 		return nil
 	}
 
-	var err error
-	s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory),
-		withStateChecker(), withBgChecker())
-	if err != nil {
-		return err
-	}
 	s.sessionManager = NewSessionManagerImpl(withSessionCreator(s.dataNodeCreator))
+
+	var err error
+	if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
+		s.channelManager, err = NewChannelManagerV2(s.watchClient, s.handler, s.sessionManager, s.allocator, withCheckerV2())
+		if err != nil {
+			return err
+		}
+	} else {
+		s.channelManager, err = NewChannelManager(s.watchClient, s.handler, withMsgstreamFactory(s.factory), withStateChecker(), withBgChecker())
+		if err != nil {
+			return err
+		}
+	}
 	s.cluster = NewClusterImpl(s.sessionManager, s.channelManager)
 	return nil
 }
@@ -559,11 +572,21 @@ func (s *Server) initServiceDiscovery() error {
 	log.Info("DataCoord success to get DataNode sessions", zap.Any("sessions", sessions))
 
 	datanodes := make([]*NodeInfo, 0, len(sessions))
+	legacyVersion, err := semver.Parse(paramtable.Get().DataCoordCfg.LegacyVersionWithoutRPCWatch.GetValue())
+	if err != nil {
+		log.Warn("DataCoord failed to init service discovery", zap.Error(err))
+	}
+
 	for _, session := range sessions {
 		info := &NodeInfo{
 			NodeID:  session.ServerID,
 			Address: session.Address,
 		}
+
+		if session.Version.LTE(legacyVersion) {
+			info.IsLegacy = true
+		}
+
 		datanodes = append(datanodes, info)
 	}
 
@@ -878,6 +901,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 	if event == nil {
 		return nil
 	}
+	log := log.Ctx(ctx)
 	switch role {
 	case typeutil.DataNodeRole:
 		info := &datapb.DataNodeInfo{
@@ -996,6 +1020,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 // 2. notify RootCoord segment is flushed
 // 3. change segment state to `Flushed` in meta
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
+	log := log.Ctx(ctx)
 	segment := s.meta.GetHealthySegment(segmentID)
 	if segment == nil {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")
@@ -1160,6 +1185,7 @@ func (s *Server) loadCollectionFromRootCoord(ctx context.Context, collectionID i
 		CreatedAt:      resp.GetCreatedTimestamp(),
 		DatabaseName:   resp.GetDbName(),
 		DatabaseID:     resp.GetDbId(),
+		VChannelNames:  resp.GetVirtualChannelNames(),
 	}
 	s.meta.AddCollection(collInfo)
 	return nil

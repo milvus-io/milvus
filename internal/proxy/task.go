@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -86,9 +87,11 @@ const (
 	ListResourceGroupsTaskName    = "ListResourceGroupsTask"
 	DescribeResourceGroupTaskName = "DescribeResourceGroupTask"
 
-	CreateDatabaseTaskName = "CreateCollectionTask"
-	DropDatabaseTaskName   = "DropDatabaseTaskName"
-	ListDatabaseTaskName   = "ListDatabaseTaskName"
+	CreateDatabaseTaskName   = "CreateCollectionTask"
+	DropDatabaseTaskName     = "DropDatabaseTaskName"
+	ListDatabaseTaskName     = "ListDatabaseTaskName"
+	AlterDatabaseTaskName    = "AlterDatabaseTaskName"
+	DescribeDatabaseTaskName = "DescribeDatabaseTaskName"
 
 	// minFloat32 minimum float.
 	minFloat32 = -1 * float32(math.MaxFloat32)
@@ -203,9 +206,19 @@ func (t *createCollectionTask) validatePartitionKey() error {
 				return errors.New("the specified partitions should be greater than 0 if partition key is used")
 			}
 
+			maxPartitionNum := Params.RootCoordCfg.MaxPartitionNum.GetAsInt64()
+			if t.GetNumPartitions() > maxPartitionNum {
+				return merr.WrapErrParameterInvalidMsg("partition number (%d) exceeds max configuration (%d)",
+					t.GetNumPartitions(), maxPartitionNum)
+			}
+
 			// set default physical partitions num if enable partition key mode
 			if t.GetNumPartitions() == 0 {
-				t.NumPartitions = common.DefaultPartitionsWithPartitionKey
+				defaultNum := common.DefaultPartitionsWithPartitionKey
+				if defaultNum > maxPartitionNum {
+					defaultNum = maxPartitionNum
+				}
+				t.NumPartitions = defaultNum
 			}
 
 			idx = i
@@ -648,6 +661,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 				IsClusteringKey: field.IsClusteringKey,
 				DefaultValue:    field.DefaultValue,
 				ElementType:     field.ElementType,
+				Nullable:        field.Nullable,
 			})
 		}
 	}
@@ -720,6 +734,7 @@ func (t *showCollectionsTask) PreExecute(ctx context.Context) error {
 }
 
 func (t *showCollectionsTask) Execute(ctx context.Context) error {
+	ctx = AppendUserInfoForRPC(ctx)
 	respFromRootCoord, err := t.rootCoord.ShowCollections(ctx, t.ShowCollectionsRequest)
 	if err != nil {
 		return err
@@ -1422,6 +1437,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 	flushColl2Segments := make(map[string]*schemapb.LongArray)
 	coll2SealTimes := make(map[string]int64)
 	coll2FlushTs := make(map[string]Timestamp)
+	channelCps := make(map[string]*msgpb.MsgPosition)
 	for _, collName := range t.CollectionNames {
 		collID, err := globalMetaCache.GetCollectionID(ctx, t.GetDbName(), collName)
 		if err != nil {
@@ -1445,6 +1461,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		flushColl2Segments[collName] = &schemapb.LongArray{Data: resp.GetFlushSegmentIDs()}
 		coll2SealTimes[collName] = resp.GetTimeOfSeal()
 		coll2FlushTs[collName] = resp.GetFlushTs()
+		channelCps = resp.GetChannelCps()
 	}
 	SendReplicateMessagePack(ctx, t.replicateMsgStream, t.FlushRequest)
 	t.result = &milvuspb.FlushResponse{
@@ -1454,6 +1471,7 @@ func (t *flushTask) Execute(ctx context.Context) error {
 		FlushCollSegIDs: flushColl2Segments,
 		CollSealTimes:   coll2SealTimes,
 		CollFlushTs:     coll2FlushTs,
+		ChannelCps:      channelCps,
 	}
 	return nil
 }

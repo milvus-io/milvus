@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
@@ -1680,7 +1681,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
@@ -1874,7 +1875,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
@@ -1929,7 +1930,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
@@ -2964,6 +2965,7 @@ func TestDescribeResourceGroupTaskFailed(t *testing.T) {
 
 func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	rc := NewRootCoordMock()
+	paramtable.Init()
 
 	defer rc.Close()
 	ctx := context.Background()
@@ -3029,12 +3031,20 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 	}
 
 	t.Run("PreExecute", func(t *testing.T) {
+		defer Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 		var err error
 
 		// test default num partitions
 		err = task.PreExecute(ctx)
 		assert.NoError(t, err)
 		assert.Equal(t, common.DefaultPartitionsWithPartitionKey, task.GetNumPartitions())
+
+		Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "16")
+		task.NumPartitions = 0
+		err = task.PreExecute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, int64(16), task.GetNumPartitions())
+		Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 
 		// test specify num partition without partition key field
 		partitionKeyField.IsPartitionKey = false
@@ -3082,6 +3092,15 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		primaryField.IsPartitionKey = false
+
+		// test partition num too large
+		Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "16")
+		marshaledSchema, err = proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.Schema = marshaledSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+		Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 
 		marshaledSchema, err = proto.Marshal(schema)
 		assert.NoError(t, err)
@@ -3321,7 +3340,7 @@ func TestPartitionKey(t *testing.T) {
 	})
 
 	t.Run("Upsert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),

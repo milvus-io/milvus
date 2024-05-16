@@ -238,6 +238,112 @@ class TestInsertVector(TestBase):
         assert rsp['code'] == 200
         assert len(rsp['data']) == 50
 
+    @pytest.mark.parametrize("insert_round", [1])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("is_partition_key", [True, False])
+    @pytest.mark.parametrize("enable_dynamic_schema", [True, False])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("dim", [128])
+    def test_insert_entities_with_all_json_datatype(self, nb, dim, insert_round, auto_id,
+                                                      is_partition_key, enable_dynamic_schema):
+        """
+        Insert a vector with a simple payload
+        """
+        # create a collection
+        name = gen_collection_name()
+        payload = {
+            "collectionName": name,
+            "schema": {
+                "autoId": auto_id,
+                "enableDynamicField": enable_dynamic_schema,
+                "fields": [
+                    {"fieldName": "book_id", "dataType": "Int64", "isPrimary": True, "elementTypeParams": {}},
+                    {"fieldName": "user_id", "dataType": "Int64", "isPartitionKey": is_partition_key,
+                     "elementTypeParams": {}},
+                    {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                    {"fieldName": "book_describe", "dataType": "VarChar", "elementTypeParams": {"max_length": "256"}},
+                    {"fieldName": "bool", "dataType": "Bool", "elementTypeParams": {}},
+                    {"fieldName": "json", "dataType": "JSON", "elementTypeParams": {}},
+                    {"fieldName": "int_array", "dataType": "Array", "elementDataType": "Int64",
+                     "elementTypeParams": {"max_capacity": "1024"}},
+                    {"fieldName": "varchar_array", "dataType": "Array", "elementDataType": "VarChar",
+                     "elementTypeParams": {"max_capacity": "1024", "max_length": "256"}},
+                    {"fieldName": "bool_array", "dataType": "Array", "elementDataType": "Bool",
+                     "elementTypeParams": {"max_capacity": "1024"}},
+                    {"fieldName": "text_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                    {"fieldName": "image_emb", "dataType": "FloatVector", "elementTypeParams": {"dim": f"{dim}"}},
+                ]
+            },
+            "indexParams": [
+                {"fieldName": "text_emb", "indexName": "text_emb", "metricType": "L2"},
+                {"fieldName": "image_emb", "indexName": "image_emb", "metricType": "L2"}
+            ]
+        }
+        rsp = self.collection_client.collection_create(payload)
+        assert rsp['code'] == 200
+        rsp = self.collection_client.collection_describe(name)
+        logger.info(f"rsp: {rsp}")
+        assert rsp['code'] == 200
+        json_value = [
+            1,
+            1.0,
+            "1",
+            [1, 2, 3],
+            ["1", "2", "3"],
+            [1, 2, "3"],
+            {"key": "value"},
+        ]
+        # insert data
+        for i in range(insert_round):
+            data = []
+            for i in range(nb):
+                if auto_id:
+                    tmp = {
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "bool": random.choice([True, False]),
+                        "json": json_value[i%len(json_value)],
+                        "int_array": [i],
+                        "varchar_array": [f"varchar_{i}"],
+                        "bool_array": [random.choice([True, False])],
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
+                        "image_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
+                    }
+                else:
+                    tmp = {
+                        "book_id": i,
+                        "user_id": i,
+                        "word_count": i,
+                        "book_describe": f"book_{i}",
+                        "bool": random.choice([True, False]),
+                        "json": json_value[i%len(json_value)],
+                        "int_array": [i],
+                        "varchar_array": [f"varchar_{i}"],
+                        "bool_array": [random.choice([True, False])],
+                        "text_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
+                        "image_emb": preprocessing.normalize([np.array([random.random() for _ in range(dim)])])[
+                            0].tolist(),
+                    }
+                if enable_dynamic_schema:
+                    tmp.update({f"dynamic_field_{i}": i})
+                data.append(tmp)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 200
+            assert rsp['data']['insertCount'] == nb
+        # query data to make sure the data is inserted
+        rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
+        assert rsp['code'] == 200
+        assert len(rsp['data']) == 50
+
+
 
 @pytest.mark.L1
 class TestInsertVectorNegative(TestBase):

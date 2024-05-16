@@ -36,9 +36,11 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		PartitionID:  10,
 		Channel:      "ch-1",
 	}
-	s.meta = &meta{segments: &SegmentsInfo{
-		segments: genSegmentsForMeta(s.testLabel),
-	}}
+	segments := genSegmentsForMeta(s.testLabel)
+	s.meta = &meta{segments: NewSegmentsInfo()}
+	for id, segment := range segments {
+		s.meta.segments.SetSegment(id, segment)
+	}
 
 	s.m = NewCompactionTriggerManager(s.mockAlloc, s.mockPlanContext)
 }

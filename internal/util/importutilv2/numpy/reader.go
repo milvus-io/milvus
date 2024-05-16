@@ -28,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -43,7 +44,7 @@ type reader struct {
 	frs   map[int64]*FieldReader // fieldID -> FieldReader
 }
 
-func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, paths []string, cm storage.ChunkManager, bufferSize int) (*reader, error) {
+func NewReader(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string, bufferSize int) (*reader, error) {
 	fields := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
 		return field.GetFieldID()
 	})
@@ -52,7 +53,7 @@ func NewReader(ctx context.Context, schema *schemapb.CollectionSchema, paths []s
 		return nil, err
 	}
 	crs := make(map[int64]*FieldReader)
-	readers, err := CreateReaders(ctx, paths, cm, schema)
+	readers, err := CreateReaders(ctx, cm, schema, paths)
 	if err != nil {
 		return nil, err
 	}
@@ -93,7 +94,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 			return nil, err
 		}
 	}
-	err = fillDynamicData(insertData, r.schema)
+	err = common.FillDynamicData(insertData, r.schema)
 	if err != nil {
 		return nil, err
 	}
@@ -118,7 +119,7 @@ func (r *reader) Close() {
 	}
 }
 
-func CreateReaders(ctx context.Context, paths []string, cm storage.ChunkManager, schema *schemapb.CollectionSchema) (map[int64]io.Reader, error) {
+func CreateReaders(ctx context.Context, cm storage.ChunkManager, schema *schemapb.CollectionSchema, paths []string) (map[int64]io.Reader, error) {
 	readers := make(map[int64]io.Reader)
 	nameToPath := lo.SliceToMap(paths, func(path string) (string, string) {
 		nameWithExt := filepath.Base(path)
@@ -127,9 +128,16 @@ func CreateReaders(ctx context.Context, paths []string, cm storage.ChunkManager,
 	})
 	for _, field := range schema.GetFields() {
 		if field.GetIsPrimaryKey() && field.GetAutoID() {
+			if _, ok := nameToPath[field.GetName()]; ok {
+				return nil, merr.WrapErrImportFailed(
+					fmt.Sprintf("the primary key '%s' is auto-generated, no need to provide", field.GetName()))
+			}
 			continue
 		}
 		if _, ok := nameToPath[field.GetName()]; !ok {
+			if field.GetIsDynamic() {
+				continue
+			}
 			return nil, merr.WrapErrImportFailed(
 				fmt.Sprintf("no file for field: %s, files: %v", field.GetName(), lo.Values(nameToPath)))
 		}

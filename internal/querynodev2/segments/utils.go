@@ -13,22 +13,31 @@ import "C"
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"strconv"
+	"time"
 
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util/contextutil"
+	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
+
+var errLazyLoadTimeout = merr.WrapErrServiceInternal("lazy load time out")
 
 func GetPkField(schema *schemapb.CollectionSchema) *schemapb.FieldSchema {
 	for _, field := range schema.GetFields() {
@@ -181,4 +190,57 @@ func getSegmentMetricLabel(segment Segment) metricsutil.SegmentLabel {
 		DatabaseName:  segment.DatabaseName(),
 		ResourceGroup: segment.ResourceGroup(),
 	}
+}
+
+func FilterZeroValuesFromSlice(intVals []int64) []int64 {
+	var result []int64
+	for _, value := range intVals {
+		if value != 0 {
+			result = append(result, value)
+		}
+	}
+	return result
+}
+
+// withLazyLoadTimeoutContext returns a new context with lazy load timeout.
+func withLazyLoadTimeoutContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	lazyLoadTimeout := paramtable.Get().QueryNodeCfg.LazyLoadWaitTimeout.GetAsDuration(time.Millisecond)
+	// TODO: use context.WithTimeoutCause instead of contextutil.WithTimeoutCause in go1.21
+	return contextutil.WithTimeoutCause(ctx, lazyLoadTimeout, errLazyLoadTimeout)
+}
+
+func GetSegmentRelatedDataSize(segment Segment) int64 {
+	if segment.Type() == SegmentTypeSealed {
+		return calculateSegmentLogSize(segment.LoadInfo())
+	}
+	return segment.MemSize()
+}
+
+func calculateSegmentLogSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
+	segmentSize := int64(0)
+
+	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	// Get size of state data
+	for _, fieldBinlog := range segmentLoadInfo.Statslogs {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	// Get size of delete data
+	for _, fieldBinlog := range segmentLoadInfo.Deltalogs {
+		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
+	}
+
+	return segmentSize
+}
+
+func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
+	fieldSize := int64(0)
+	for _, binlog := range fieldBinlog.Binlogs {
+		fieldSize += binlog.LogSize
+	}
+
+	return fieldSize
 }

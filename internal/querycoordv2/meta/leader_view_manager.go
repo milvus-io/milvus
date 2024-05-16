@@ -22,6 +22,7 @@ import (
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type lvCriterion struct {
@@ -192,9 +193,12 @@ func composeNodeViews(views ...*LeaderView) nodeViews {
 	}
 }
 
+type NotifyDelegatorChanges = func(collectionID ...int64)
+
 type LeaderViewManager struct {
-	rwmutex sync.RWMutex
-	views   map[int64]nodeViews // LeaderID -> Views (one per shard)
+	rwmutex    sync.RWMutex
+	views      map[int64]nodeViews // LeaderID -> Views (one per shard)
+	notifyFunc NotifyDelegatorChanges
 }
 
 func NewLeaderViewManager() *LeaderViewManager {
@@ -203,11 +207,45 @@ func NewLeaderViewManager() *LeaderViewManager {
 	}
 }
 
+func (mgr *LeaderViewManager) SetNotifyFunc(notifyFunc NotifyDelegatorChanges) {
+	mgr.notifyFunc = notifyFunc
+}
+
 // Update updates the leader's views, all views have to be with the same leader ID
 func (mgr *LeaderViewManager) Update(leaderID int64, views ...*LeaderView) {
 	mgr.rwmutex.Lock()
 	defer mgr.rwmutex.Unlock()
+
+	oldViews := make(map[string]*LeaderView, 0)
+	if _, ok := mgr.views[leaderID]; ok {
+		oldViews = mgr.views[leaderID].channelView
+	}
+
+	newViews := lo.SliceToMap(views, func(v *LeaderView) (string, *LeaderView) {
+		return v.Channel, v
+	})
+
+	// update leader views
 	mgr.views[leaderID] = composeNodeViews(views...)
+
+	// compute leader location change, find it's correspond collection
+	if mgr.notifyFunc != nil {
+		viewChanges := typeutil.NewUniqueSet()
+		for channel, oldView := range oldViews {
+			// if channel released from current node
+			if _, ok := newViews[channel]; !ok {
+				viewChanges.Insert(oldView.CollectionID)
+			}
+		}
+
+		for channel, newView := range newViews {
+			// if channel loaded to current node
+			if _, ok := oldViews[channel]; !ok {
+				viewChanges.Insert(newView.CollectionID)
+			}
+		}
+		mgr.notifyFunc(viewChanges.Collect()...)
+	}
 }
 
 func (mgr *LeaderViewManager) GetLeaderShardView(id int64, shard string) *LeaderView {

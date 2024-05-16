@@ -41,10 +41,10 @@ class ThreadSafeVector {
     template <typename... Args>
     void
     emplace_to_at_least(int64_t size, Args... args) {
+        std::lock_guard lck(mutex_);
         if (size <= size_) {
             return;
         }
-        std::lock_guard lck(mutex_);
         while (vec_.size() < size) {
             vec_.emplace_back(std::forward<Args...>(args...));
             ++size_;
@@ -52,24 +52,25 @@ class ThreadSafeVector {
     }
     const Type&
     operator[](int64_t index) const {
+        std::shared_lock lck(mutex_);
         AssertInfo(index < size_,
                    fmt::format(
                        "index out of range, index={}, size_={}", index, size_));
-        std::shared_lock lck(mutex_);
         return vec_[index];
     }
 
     Type&
     operator[](int64_t index) {
+        std::shared_lock lck(mutex_);
         AssertInfo(index < size_,
                    fmt::format(
                        "index out of range, index={}, size_={}", index, size_));
-        std::shared_lock lck(mutex_);
         return vec_[index];
     }
 
     int64_t
     size() const {
+        std::lock_guard lck(mutex_);
         return size_;
     }
 
@@ -81,7 +82,7 @@ class ThreadSafeVector {
     }
 
  private:
-    std::atomic<int64_t> size_ = 0;
+    int64_t size_ = 0;
     std::deque<Type> vec_;
     mutable std::shared_mutex mutex_;
 };

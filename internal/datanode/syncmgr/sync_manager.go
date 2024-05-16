@@ -44,7 +44,7 @@ type SyncMeta struct {
 // it processes the sync tasks inside and changes the meta.
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
-	SyncData(ctx context.Context, task Task) *conc.Future[error]
+	SyncData(ctx context.Context, task Task) *conc.Future[struct{}]
 	// GetEarliestPosition returns the earliest position (normally start position) of the processing sync task of provided channel.
 	GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition)
 	// Block allows caller to block tasks of provided segment id.
@@ -104,7 +104,7 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 	}
 }
 
-func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[error] {
+func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[struct{}] {
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
@@ -118,33 +118,50 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[er
 // safeSubmitTask handles submitting task logic with optimistic target check logic
 // when task returns errTargetSegmentNotMatch error
 // perform refetch then retry logic
-func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[error] {
+func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
+	defer mgr.tasks.Remove(taskKey)
 
-	return conc.Go[error](func() (error, error) {
-		defer mgr.tasks.Remove(taskKey)
-		for {
-			targetID, err := task.CalcTargetSegment()
-			if err != nil {
-				return err, err
-			}
-			log.Info("task calculated target segment id",
-				zap.Int64("targetID", targetID),
-				zap.Int64("segmentID", task.SegmentID()),
-			)
+	key, err := task.CalcTargetSegment()
+	if err != nil {
+		task.HandleError(err)
+		return conc.Go(func() (struct{}, error) { return struct{}{}, err })
+	}
 
-			// make sync for same segment execute in sequence
-			// if previous sync task is not finished, block here
-			f := mgr.Submit(targetID, task)
-			err, _ = f.Await()
-			if errors.Is(err, errTargetSegmentNotMatch) {
-				log.Info("target updated during submitting", zap.Error(err))
-				continue
-			}
-			return err, err
+	return mgr.submit(key, task)
+}
+
+func (mgr *syncManager) submit(key int64, task Task) *conc.Future[struct{}] {
+	handler := func(err error) error {
+		if err == nil {
+			return nil
 		}
-	})
+		// unexpected error
+		if !errors.Is(err, errTargetSegmentNotMatch) {
+			task.HandleError(err)
+			return err
+		}
+
+		targetID, err := task.CalcTargetSegment()
+		// shall not reach, segment meta lost during sync
+		if err != nil {
+			task.HandleError(err)
+			return err
+		}
+		if targetID == key {
+			err = merr.WrapErrServiceInternal("recaluated with same key", fmt.Sprint(targetID))
+			task.HandleError(err)
+			return err
+		}
+		log.Info("task calculated target segment id",
+			zap.Int64("targetID", targetID),
+			zap.Int64("segmentID", task.SegmentID()),
+		)
+		return mgr.submit(targetID, task).Err()
+	}
+	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
+	return mgr.Submit(key, task, handler)
 }
 
 func (mgr *syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {

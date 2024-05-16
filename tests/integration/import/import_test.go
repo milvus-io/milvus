@@ -81,11 +81,17 @@ func (s *BulkInsertSuite) run() {
 
 	collectionName := "TestBulkInsert" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchema(collectionName, dim, s.autoID,
-		&schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: s.autoID},
-		&schemapb.FieldSchema{FieldID: 101, Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}},
-		&schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}},
-	)
+	var schema *schemapb.CollectionSchema
+	fieldSchema1 := &schemapb.FieldSchema{FieldID: 100, Name: "id", DataType: s.pkType, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "128"}}, IsPrimaryKey: true, AutoID: s.autoID}
+	fieldSchema2 := &schemapb.FieldSchema{FieldID: 101, Name: "image_path", DataType: schemapb.DataType_VarChar, TypeParams: []*commonpb.KeyValuePair{{Key: common.MaxLengthKey, Value: "65535"}}}
+	fieldSchema3 := &schemapb.FieldSchema{FieldID: 102, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{{Key: common.DimKey, Value: "128"}}}
+	fieldSchema4 := &schemapb.FieldSchema{FieldID: 103, Name: "embeddings", DataType: s.vecType, TypeParams: []*commonpb.KeyValuePair{}}
+	if s.vecType != schemapb.DataType_SparseFloatVector {
+		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema3)
+	} else {
+		schema = integration.ConstructSchema(collectionName, dim, s.autoID, fieldSchema1, fieldSchema2, fieldSchema4)
+	}
+
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -213,6 +219,14 @@ func (s *BulkInsertSuite) TestMultiFileTypes() {
 		s.indexType = indexparamcheck.IndexHNSW
 		s.metricType = metric.L2
 		s.run()
+
+		// TODO: not support numpy for SparseFloatVector by now
+		if fileType != importutilv2.Numpy {
+			s.vecType = schemapb.DataType_SparseFloatVector
+			s.indexType = indexparamcheck.IndexSparseWand
+			s.metricType = metric.IP
+			s.run()
+		}
 	}
 }
 

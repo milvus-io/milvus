@@ -18,6 +18,7 @@ package segments
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"math"
 	"testing"
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -82,7 +84,8 @@ func (suite *ReduceSuite) SetupTest() {
 			SegmentID:     suite.segmentID,
 			CollectionID:  suite.collectionID,
 			PartitionID:   suite.partitionID,
-			InsertChannel: "dml",
+			NumOfRows:     int64(msgLength),
+			InsertChannel: fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", suite.collectionID),
 			Level:         datapb.SegmentLevel_Legacy,
 		},
 	)
@@ -104,7 +107,7 @@ func (suite *ReduceSuite) SetupTest() {
 }
 
 func (suite *ReduceSuite) TearDownTest() {
-	suite.segment.Release()
+	suite.segment.Release(context.Background())
 	DeleteCollection(suite.collection)
 	ctx := context.Background()
 	suite.chunkManager.RemoveWithPrefix(ctx, suite.rootPath)
@@ -126,7 +129,7 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
 	nq := int64(10)
 
 	// TODO: replace below by genPlaceholderGroup(nq)
-	vec := generateFloatVectors(1, defaultDim)
+	vec := testutils.GenerateFloatVectors(1, defaultDim)
 	var searchRawData []byte
 	for i, ele := range vec {
 		buf := make([]byte, 4)

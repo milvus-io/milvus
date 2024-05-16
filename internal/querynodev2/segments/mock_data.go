@@ -28,7 +28,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
-	"github.com/x448/float16"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -397,338 +396,6 @@ func GenTestIndexMeta(collectionID int64, schema *schemapb.CollectionSchema) *se
 	return &indexMeta
 }
 
-// ---------- unittest util functions ----------
-// gen field data
-func generateBoolArray(numRows int) []bool {
-	ret := make([]bool, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Int()%2 == 0)
-	}
-	return ret
-}
-
-func generateInt8Array(numRows int) []int8 {
-	ret := make([]int8, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int8(rand.Int()))
-	}
-	return ret
-}
-
-func generateInt16Array(numRows int) []int16 {
-	ret := make([]int16, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int16(rand.Int()))
-	}
-	return ret
-}
-
-func generateInt32Array(numRows int) []int32 {
-	ret := make([]int32, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Int31())
-	}
-	return ret
-}
-
-func generateInt64Array(numRows int) []int64 {
-	ret := make([]int64, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, int64(i))
-	}
-	return ret
-}
-
-func generateFloat32Array(numRows int) []float32 {
-	ret := make([]float32, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Float32())
-	}
-	return ret
-}
-
-func generateStringArray(numRows int) []string {
-	ret := make([]string, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, strconv.Itoa(rand.Int()))
-	}
-	return ret
-}
-
-func generateArrayArray(numRows int) []*schemapb.ScalarField {
-	ret := make([]*schemapb.ScalarField, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, &schemapb.ScalarField{
-			Data: &schemapb.ScalarField_IntData{
-				IntData: &schemapb.IntArray{
-					Data: generateInt32Array(10),
-				},
-			},
-		})
-	}
-	return ret
-}
-
-func generateJSONArray(numRows int) [][]byte {
-	ret := make([][]byte, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, []byte(fmt.Sprintf(`{"key":%d}`, i+1)))
-	}
-	return ret
-}
-
-func generateFloat64Array(numRows int) []float64 {
-	ret := make([]float64, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, rand.Float64())
-	}
-	return ret
-}
-
-func generateFloatVectors(numRows, dim int) []float32 {
-	total := numRows * dim
-	ret := make([]float32, 0, total)
-	for i := 0; i < total; i++ {
-		ret = append(ret, rand.Float32())
-	}
-	return ret
-}
-
-func generateBinaryVectors(numRows, dim int) []byte {
-	total := (numRows * dim) / 8
-	ret := make([]byte, total)
-	_, err := rand.Read(ret)
-	if err != nil {
-		panic(err)
-	}
-	return ret
-}
-
-func generateFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim
-	ret := make([]byte, total*2)
-	for i := 0; i < total; i++ {
-		v := float16.Fromfloat32(rand.Float32()).Bits()
-		binary.LittleEndian.PutUint16(ret[i*2:], v)
-	}
-	return ret
-}
-
-func generateBFloat16Vectors(numRows, dim int) []byte {
-	total := numRows * dim
-	ret16 := make([]uint16, 0, total)
-	for i := 0; i < total; i++ {
-		f := rand.Float32()
-		bits := math.Float32bits(f)
-		bits >>= 16
-		bits &= 0x7FFF
-		ret16 = append(ret16, uint16(bits))
-	}
-	ret := make([]byte, len(ret16)*2)
-	for i, value := range ret16 {
-		binary.LittleEndian.PutUint16(ret[i*2:], value)
-	}
-	return ret
-}
-
-func GenTestScalarFieldData(dType schemapb.DataType, fieldName string, fieldID int64, numRows int) *schemapb.FieldData {
-	ret := &schemapb.FieldData{
-		Type:      dType,
-		FieldName: fieldName,
-		Field:     nil,
-	}
-
-	switch dType {
-	case schemapb.DataType_Bool:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_BoolData{
-					BoolData: &schemapb.BoolArray{
-						Data: generateBoolArray(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int8:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int16:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int32:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_IntData{
-					IntData: &schemapb.IntArray{
-						Data: generateInt32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Int64:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_LongData{
-					LongData: &schemapb.LongArray{
-						Data: generateInt64Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Float:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_FloatData{
-					FloatData: &schemapb.FloatArray{
-						Data: generateFloat32Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Double:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_DoubleData{
-					DoubleData: &schemapb.DoubleArray{
-						Data: generateFloat64Array(numRows),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_VarChar:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_StringData{
-					StringData: &schemapb.StringArray{
-						Data: generateStringArray(numRows),
-					},
-				},
-			},
-		}
-
-	case schemapb.DataType_Array:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_ArrayData{
-					ArrayData: &schemapb.ArrayArray{
-						Data: generateArrayArray(numRows),
-					},
-				},
-			},
-		}
-
-	case schemapb.DataType_JSON:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Scalars{
-			Scalars: &schemapb.ScalarField{
-				Data: &schemapb.ScalarField_JsonData{
-					JsonData: &schemapb.JSONArray{
-						Data: generateJSONArray(numRows),
-					},
-				},
-			},
-		}
-
-	default:
-		panic("data type not supported")
-	}
-
-	return ret
-}
-
-// dim is ignored for sparse
-func GenTestVectorFiledData(dType schemapb.DataType, fieldName string, fieldID int64, numRows int, dim int) *schemapb.FieldData {
-	ret := &schemapb.FieldData{
-		Type:      dType,
-		FieldName: fieldName,
-		Field:     nil,
-	}
-	switch dType {
-	case schemapb.DataType_BinaryVector:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_BinaryVector{
-					BinaryVector: generateBinaryVectors(numRows, dim),
-				},
-			},
-		}
-	case schemapb.DataType_FloatVector:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{
-						Data: generateFloatVectors(numRows, dim),
-					},
-				},
-			},
-		}
-	case schemapb.DataType_Float16Vector:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_Float16Vector{
-					Float16Vector: generateFloat16Vectors(numRows, dim),
-				},
-			},
-		}
-	case schemapb.DataType_BFloat16Vector:
-		ret.FieldId = fieldID
-		ret.Field = &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: int64(dim),
-				Data: &schemapb.VectorField_Bfloat16Vector{
-					Bfloat16Vector: generateBFloat16Vectors(numRows, dim),
-				},
-			},
-		}
-	case schemapb.DataType_SparseFloatVector:
-		ret.FieldId = fieldID
-		sparseData := testutils.GenerateSparseFloatVectors(numRows)
-		ret.Field = &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: sparseData.Dim,
-				Data: &schemapb.VectorField_SparseFloatVector{
-					SparseFloatVector: &schemapb.SparseFloatArray{
-						Dim:      sparseData.Dim,
-						Contents: sparseData.Contents,
-					},
-				},
-			},
-		}
-	default:
-		panic("data type not supported")
-	}
-	return ret
-}
-
 func NewTestChunkManagerFactory(params *paramtable.ComponentParam, rootPath string) *storage.ChunkManagerFactory {
 	return storage.NewChunkManagerFactory("minio",
 		storage.RootPath(rootPath),
@@ -854,67 +521,67 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 		switch f.DataType {
 		case schemapb.DataType_Bool:
 			insertData.Data[f.FieldID] = &storage.BoolFieldData{
-				Data: generateBoolArray(msgLength),
+				Data: testutils.GenerateBoolArray(msgLength),
 			}
 		case schemapb.DataType_Int8:
 			insertData.Data[f.FieldID] = &storage.Int8FieldData{
-				Data: generateInt8Array(msgLength),
+				Data: testutils.GenerateInt8Array(msgLength),
 			}
 		case schemapb.DataType_Int16:
 			insertData.Data[f.FieldID] = &storage.Int16FieldData{
-				Data: generateInt16Array(msgLength),
+				Data: testutils.GenerateInt16Array(msgLength),
 			}
 		case schemapb.DataType_Int32:
 			insertData.Data[f.FieldID] = &storage.Int32FieldData{
-				Data: generateInt32Array(msgLength),
+				Data: testutils.GenerateInt32Array(msgLength),
 			}
 		case schemapb.DataType_Int64:
 			insertData.Data[f.FieldID] = &storage.Int64FieldData{
-				Data: generateInt64Array(msgLength),
+				Data: testutils.GenerateInt64Array(msgLength),
 			}
 		case schemapb.DataType_Float:
 			insertData.Data[f.FieldID] = &storage.FloatFieldData{
-				Data: generateFloat32Array(msgLength),
+				Data: testutils.GenerateFloat32Array(msgLength),
 			}
 		case schemapb.DataType_Double:
 			insertData.Data[f.FieldID] = &storage.DoubleFieldData{
-				Data: generateFloat64Array(msgLength),
+				Data: testutils.GenerateFloat64Array(msgLength),
 			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			insertData.Data[f.FieldID] = &storage.StringFieldData{
-				Data: generateStringArray(msgLength),
+				Data: testutils.GenerateStringArray(msgLength),
 			}
 		case schemapb.DataType_Array:
 			insertData.Data[f.FieldID] = &storage.ArrayFieldData{
 				ElementType: schemapb.DataType_Int32,
-				Data:        generateArrayArray(msgLength),
+				Data:        testutils.GenerateArrayOfIntArray(msgLength),
 			}
 		case schemapb.DataType_JSON:
 			insertData.Data[f.FieldID] = &storage.JSONFieldData{
-				Data: generateJSONArray(msgLength),
+				Data: testutils.GenerateJSONArray(msgLength),
 			}
 		case schemapb.DataType_FloatVector:
 			dim := simpleFloatVecField.dim // if no dim specified, use simpleFloatVecField's dim
 			insertData.Data[f.FieldID] = &storage.FloatVectorFieldData{
-				Data: generateFloatVectors(msgLength, dim),
+				Data: testutils.GenerateFloatVectors(msgLength, dim),
 				Dim:  dim,
 			}
 		case schemapb.DataType_Float16Vector:
 			dim := simpleFloat16VecField.dim
 			insertData.Data[f.FieldID] = &storage.Float16VectorFieldData{
-				Data: generateFloat16Vectors(msgLength, dim),
+				Data: testutils.GenerateFloat16Vectors(msgLength, dim),
 				Dim:  dim,
 			}
 		case schemapb.DataType_BFloat16Vector:
 			dim := simpleFloat16VecField.dim
 			insertData.Data[f.FieldID] = &storage.BFloat16VectorFieldData{
-				Data: generateBFloat16Vectors(msgLength, dim),
+				Data: testutils.GenerateBFloat16Vectors(msgLength, dim),
 				Dim:  dim,
 			}
 		case schemapb.DataType_BinaryVector:
 			dim := simpleBinVecField.dim
 			insertData.Data[f.FieldID] = &storage.BinaryVectorFieldData{
-				Data: generateBinaryVectors(msgLength, dim),
+				Data: testutils.GenerateBinaryVectors(msgLength, dim),
 				Dim:  dim,
 			}
 		case schemapb.DataType_SparseFloatVector:
@@ -929,7 +596,7 @@ func genInsertData(msgLength int, schema *schemapb.CollectionSchema) (*storage.I
 	}
 	// set data for rowID field
 	insertData.Data[rowIDFieldID] = &storage.Int64FieldData{
-		Data: generateInt64Array(msgLength),
+		Data: testutils.GenerateInt64Array(msgLength),
 	}
 	// set data for ts field
 	insertData.Data[timestampFieldID] = &storage.Int64FieldData{
@@ -1018,13 +685,13 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 	var dataset *indexcgowrapper.Dataset
 	switch fieldSchema.DataType {
 	case schemapb.DataType_BinaryVector:
-		dataset = indexcgowrapper.GenBinaryVecDataset(generateBinaryVectors(msgLength, defaultDim))
+		dataset = indexcgowrapper.GenBinaryVecDataset(testutils.GenerateBinaryVectors(msgLength, defaultDim))
 	case schemapb.DataType_FloatVector:
-		dataset = indexcgowrapper.GenFloatVecDataset(generateFloatVectors(msgLength, defaultDim))
+		dataset = indexcgowrapper.GenFloatVecDataset(testutils.GenerateFloatVectors(msgLength, defaultDim))
 	case schemapb.DataType_Float16Vector:
-		dataset = indexcgowrapper.GenFloat16VecDataset(generateFloat16Vectors(msgLength, defaultDim))
+		dataset = indexcgowrapper.GenFloat16VecDataset(testutils.GenerateFloat16Vectors(msgLength, defaultDim))
 	case schemapb.DataType_BFloat16Vector:
-		dataset = indexcgowrapper.GenBFloat16VecDataset(generateBFloat16Vectors(msgLength, defaultDim))
+		dataset = indexcgowrapper.GenBFloat16VecDataset(testutils.GenerateBFloat16Vectors(msgLength, defaultDim))
 	case schemapb.DataType_SparseFloatVector:
 		data := testutils.GenerateSparseFloatVectors(msgLength)
 		dataset = indexcgowrapper.GenSparseFloatVecDataset(&storage.SparseFloatVectorFieldData{
@@ -1075,7 +742,6 @@ func GenAndSaveIndexV2(collectionID, partitionID, segmentID, buildID int64,
 
 	return &querypb.FieldIndexInfo{
 		FieldID:             fieldSchema.GetFieldID(),
-		EnableIndex:         true,
 		IndexName:           indexInfo.GetIndexName(),
 		IndexParams:         indexInfo.GetIndexParams(),
 		IndexFilePaths:      indexPaths,
@@ -1092,7 +758,7 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 	}
 	defer index.Delete()
 
-	err = index.Build(indexcgowrapper.GenFloatVecDataset(generateFloatVectors(msgLength, defaultDim)))
+	err = index.Build(indexcgowrapper.GenFloatVecDataset(testutils.GenerateFloatVectors(msgLength, defaultDim)))
 	if err != nil {
 		return nil, err
 	}
@@ -1136,7 +802,6 @@ func GenAndSaveIndex(collectionID, partitionID, segmentID, fieldID int64, msgLen
 
 	return &querypb.FieldIndexInfo{
 		FieldID:             fieldID,
-		EnableIndex:         true,
 		IndexName:           "querynode-test",
 		IndexParams:         funcutil.Map2KeyValuePair(indexParams),
 		IndexFilePaths:      indexPaths,
@@ -1389,7 +1054,7 @@ func genSearchPlanAndRequests(collection *Collection, segments []int64, indexTyp
 	iReq, _ := genSearchRequest(nq, indexType, collection)
 	queryReq := &querypb.SearchRequest{
 		Req:         iReq,
-		DmlChannels: []string{"dml"},
+		DmlChannels: []string{fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collection.ID())},
 		SegmentIDs:  segments,
 		Scope:       querypb.DataScope_Historical,
 	}
@@ -1402,39 +1067,39 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 	for _, f := range collection.Schema().Fields {
 		switch f.DataType {
 		case schemapb.DataType_Bool:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleBoolField.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleBoolField.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_Int8:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleInt8Field.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleInt8Field.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_Int16:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleInt16Field.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleInt16Field.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_Int32:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleInt32Field.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleInt32Field.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_Int64:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleInt64Field.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleInt64Field.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_Float:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleFloatField.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleFloatField.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_Double:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleDoubleField.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleDoubleField.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_VarChar:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleVarCharField.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleVarCharField.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_Array:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleArrayField.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleArrayField.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_JSON:
-			fieldsData = append(fieldsData, GenTestScalarFieldData(f.DataType, simpleJSONField.fieldName, f.GetFieldID(), numRows))
+			fieldsData = append(fieldsData, testutils.GenerateScalarFieldDataWithID(f.DataType, simpleJSONField.fieldName, f.GetFieldID(), numRows))
 		case schemapb.DataType_FloatVector:
 			dim := simpleFloatVecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, testutils.GenerateVectorFieldDataWithID(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_BinaryVector:
 			dim := simpleBinVecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, testutils.GenerateVectorFieldDataWithID(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_Float16Vector:
 			dim := simpleFloat16VecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, testutils.GenerateVectorFieldDataWithID(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_BFloat16Vector:
 			dim := simpleBFloat16VecField.dim // if no dim specified, use simpleFloatVecField's dim
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, dim))
+			fieldsData = append(fieldsData, testutils.GenerateVectorFieldDataWithID(f.DataType, f.Name, f.FieldID, numRows, dim))
 		case schemapb.DataType_SparseFloatVector:
-			fieldsData = append(fieldsData, GenTestVectorFiledData(f.DataType, f.Name, f.FieldID, numRows, 0))
+			fieldsData = append(fieldsData, testutils.GenerateVectorFieldDataWithID(f.DataType, f.Name, f.FieldID, numRows, 0))
 		default:
 			err := errors.New("data type not supported")
 			return nil, err
@@ -1450,7 +1115,7 @@ func genInsertMsg(collection *Collection, partitionID, segment int64, numRows in
 			CollectionID:   collection.ID(),
 			PartitionID:    partitionID,
 			SegmentID:      segment,
-			ShardName:      "dml",
+			ShardName:      fmt.Sprintf("by-dev-rootcoord-dml_0_%dv0", collection.ID()),
 			Timestamps:     genSimpleTimestampFieldData(numRows),
 			RowIDs:         genSimpleRowIDField(numRows),
 			FieldsData:     fieldsData,
@@ -1546,192 +1211,10 @@ func genSimpleRetrievePlanExpr(schema *schemapb.CollectionSchema) ([]byte, error
 }
 
 func genFieldData(fieldName string, fieldID int64, fieldType schemapb.DataType, fieldValue interface{}, dim int64) *schemapb.FieldData {
-	var fieldData *schemapb.FieldData
-	switch fieldType {
-	case schemapb.DataType_Bool:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Bool,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_BoolData{
-						BoolData: &schemapb.BoolArray{
-							Data: fieldValue.([]bool),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_Int32:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Int32,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{
-						IntData: &schemapb.IntArray{
-							Data: fieldValue.([]int32),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_Int64:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Int64,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{
-						LongData: &schemapb.LongArray{
-							Data: fieldValue.([]int64),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_Float:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Float,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_FloatData{
-						FloatData: &schemapb.FloatArray{
-							Data: fieldValue.([]float32),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_Double:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Double,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_DoubleData{
-						DoubleData: &schemapb.DoubleArray{
-							Data: fieldValue.([]float64),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_VarChar:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_VarChar,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{
-							Data: fieldValue.([]string),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-
-	case schemapb.DataType_BinaryVector:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_BinaryVector,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: dim,
-					Data: &schemapb.VectorField_BinaryVector{
-						BinaryVector: fieldValue.([]byte),
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_FloatVector:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_FloatVector,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: dim,
-					Data: &schemapb.VectorField_FloatVector{
-						FloatVector: &schemapb.FloatArray{
-							Data: fieldValue.([]float32),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_Float16Vector:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Float16Vector,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: dim,
-					Data: &schemapb.VectorField_Float16Vector{
-						Float16Vector: fieldValue.([]byte),
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_BFloat16Vector:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_BFloat16Vector,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Vectors{
-				Vectors: &schemapb.VectorField{
-					Dim: dim,
-					Data: &schemapb.VectorField_Bfloat16Vector{
-						Bfloat16Vector: fieldValue.([]byte),
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_JSON:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_JSON,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_JsonData{
-						JsonData: &schemapb.JSONArray{
-							Data: fieldValue.([][]byte),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	case schemapb.DataType_Array:
-		fieldData = &schemapb.FieldData{
-			Type:      schemapb.DataType_Array,
-			FieldName: fieldName,
-			Field: &schemapb.FieldData_Scalars{
-				Scalars: &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_ArrayData{
-						ArrayData: &schemapb.ArrayArray{
-							Data: fieldValue.([]*schemapb.ScalarField),
-						},
-					},
-				},
-			},
-			FieldId: fieldID,
-		}
-	default:
-		log.Error("not supported field type", zap.String("field type", fieldType.String()))
+	if fieldType < 100 {
+		return testutils.GenerateScalarFieldDataWithValue(fieldType, fieldName, fieldID, fieldValue)
 	}
-
-	return fieldData
+	return testutils.GenerateVectorFieldDataWithValue(fieldType, fieldName, fieldID, fieldValue, int(dim))
 }
 
 func genSearchResultData(nq int64, topk int64, ids []int64, scores []float32, topks []int64) *schemapb.SearchResultData {

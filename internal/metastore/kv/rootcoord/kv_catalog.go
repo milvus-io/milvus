@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -94,10 +95,16 @@ func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, maxTxnNum int, sa
 		return err
 	}
 
+	// avoid a case that the former key is the prefix of the later key.
+	// for example, `root-coord/fields/collection_id/1` is the prefix of `root-coord/fields/collection_id/100`.
+	sort.Slice(removals, func(i, j int) bool {
+		return removals[i] > removals[j]
+	})
+
 	removeFn := func(partialKeys []string) error {
 		return snapshot.MultiSaveAndRemoveWithPrefix(nil, partialKeys, ts)
 	}
-	return etcd.RemoveByBatchWithLimit(removals, maxTxnNum, removeFn)
+	return etcd.RemoveByBatchWithLimit(removals, maxTxnNum/2, removeFn)
 }
 
 func (kc *Catalog) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {

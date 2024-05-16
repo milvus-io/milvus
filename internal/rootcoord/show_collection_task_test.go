@@ -20,14 +20,21 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 func Test_showCollectionTask_Prepare(t *testing.T) {
+	paramtable.Init()
 	t.Run("invalid msg type", func(t *testing.T) {
 		task := &showCollectionTask{
 			Req: &milvuspb.ShowCollectionsRequest{
@@ -54,6 +61,7 @@ func Test_showCollectionTask_Prepare(t *testing.T) {
 }
 
 func Test_showCollectionTask_Execute(t *testing.T) {
+	paramtable.Init()
 	t.Run("failed to list collections", func(t *testing.T) {
 		core := newTestCore(withInvalidMeta())
 		task := &showCollectionTask{
@@ -95,5 +103,327 @@ func Test_showCollectionTask_Execute(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, task.Rsp.GetStatus().GetErrorCode())
 		assert.Equal(t, 2, len(task.Rsp.GetCollectionNames()))
+	})
+}
+
+func TestShowCollectionsAuth(t *testing.T) {
+	paramtable.Init()
+
+	t.Run("no auth", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "false")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
+			{
+				DBID:         1,
+				CollectionID: 100,
+				Name:         "foo",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+		}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+
+		err := task.Execute(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, "foo", task.Rsp.GetCollectionNames()[0])
+	})
+
+	t.Run("empty ctx", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
+			{
+				DBID:         1,
+				CollectionID: 100,
+				Name:         "foo",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+		}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+
+		err := task.Execute(context.Background())
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, "foo", task.Rsp.GetCollectionNames()[0])
+	})
+
+	t.Run("fail to select user", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, errors.New("mock error: select user")).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+
+		ctx := GetContext(context.Background(), "foo:root")
+		err := task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("no user", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			Return([]*milvuspb.UserResult{}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+
+		ctx := GetContext(context.Background(), "foo:root")
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 0, len(task.Rsp.GetCollectionNames()))
+	})
+
+	t.Run("admin role", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			Return([]*milvuspb.UserResult{
+				{
+					User: &milvuspb.UserEntity{
+						Name: "foo",
+					},
+					Roles: []*milvuspb.RoleEntity{
+						{
+							Name: "admin",
+						},
+					},
+				},
+			}, nil).Once()
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
+			{
+				DBID:         1,
+				CollectionID: 100,
+				Name:         "foo",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+		}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+		ctx := GetContext(context.Background(), "foo:root")
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, "foo", task.Rsp.GetCollectionNames()[0])
+	})
+
+	t.Run("select grant error", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			Return([]*milvuspb.UserResult{
+				{
+					User: &milvuspb.UserEntity{
+						Name: "foo",
+					},
+					Roles: []*milvuspb.RoleEntity{
+						{
+							Name: "hoooo",
+						},
+					},
+				},
+			}, nil).Once()
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return(nil, errors.New("mock error: select grant")).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+		ctx := GetContext(context.Background(), "foo:root")
+		err := task.Execute(ctx)
+		assert.Error(t, err)
+	})
+
+	t.Run("global all privilege", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			Return([]*milvuspb.UserResult{
+				{
+					User: &milvuspb.UserEntity{
+						Name: "foo",
+					},
+					Roles: []*milvuspb.RoleEntity{
+						{
+							Name: "hoooo",
+						},
+					},
+				},
+			}, nil).Once()
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
+			{
+				Object: &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+				Grantor: &milvuspb.GrantorEntity{
+					Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeAll.String()},
+				},
+			},
+		}, nil).Once()
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
+			{
+				DBID:         1,
+				CollectionID: 100,
+				Name:         "foo",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+		}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+		ctx := GetContext(context.Background(), "foo:root")
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, "foo", task.Rsp.GetCollectionNames()[0])
+	})
+
+	t.Run("all collection", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			Return([]*milvuspb.UserResult{
+				{
+					User: &milvuspb.UserEntity{
+						Name: "foo",
+					},
+					Roles: []*milvuspb.RoleEntity{
+						{
+							Name: "hoooo",
+						},
+					},
+				},
+			}, nil).Once()
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
+			{
+				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+				ObjectName: util.AnyWord,
+			},
+		}, nil).Once()
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
+			{
+				DBID:         1,
+				CollectionID: 100,
+				Name:         "foo",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+		}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+		ctx := GetContext(context.Background(), "foo:root")
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, "foo", task.Rsp.GetCollectionNames()[0])
+	})
+	t.Run("normal", func(t *testing.T) {
+		Params.Save(Params.CommonCfg.AuthorizationEnabled.Key, "true")
+		defer Params.Reset(Params.CommonCfg.AuthorizationEnabled.Key)
+		meta := mockrootcoord.NewIMetaTable(t)
+		core := newTestCore(withMeta(meta))
+
+		meta.EXPECT().SelectUser(mock.Anything, mock.Anything, mock.Anything).
+			Return([]*milvuspb.UserResult{
+				{
+					User: &milvuspb.UserEntity{
+						Name: "foo",
+					},
+					Roles: []*milvuspb.RoleEntity{
+						{
+							Name: "hoooo",
+						},
+					},
+				},
+			}, nil).Once()
+		meta.EXPECT().SelectGrant(mock.Anything, mock.Anything).Return([]*milvuspb.GrantEntity{
+			{
+				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+				ObjectName: "a",
+			},
+			{
+				Object: &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
+			},
+			{
+				Object:     &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Collection.String()},
+				ObjectName: "b",
+			},
+		}, nil).Once()
+		meta.EXPECT().ListCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return([]*model.Collection{
+			{
+				DBID:         1,
+				CollectionID: 100,
+				Name:         "foo",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+			{
+				DBID:         1,
+				CollectionID: 200,
+				Name:         "a",
+				CreateTime:   tsoutil.GetCurrentTime(),
+			},
+		}, nil).Once()
+
+		task := &showCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req:      &milvuspb.ShowCollectionsRequest{DbName: "default"},
+			Rsp:      &milvuspb.ShowCollectionsResponse{},
+		}
+		ctx := GetContext(context.Background(), "foo:root")
+		err := task.Execute(ctx)
+		assert.NoError(t, err)
+		assert.Equal(t, 1, len(task.Rsp.GetCollectionNames()))
+		assert.Equal(t, "a", task.Rsp.GetCollectionNames()[0])
 	})
 }

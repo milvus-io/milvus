@@ -59,14 +59,14 @@ func (s *BloomFilterSetSuite) GetFieldData(ids []int64) storage.FieldData {
 func (s *BloomFilterSetSuite) TestWriteRead() {
 	ids := []int64{1, 2, 3, 4, 5}
 	for _, id := range ids {
-		s.False(s.bfs.PkExists(storage.NewInt64PrimaryKey(id)), "pk shall not exist before update")
+		s.False(s.bfs.PkExists(storage.NewLocationsCache(storage.NewInt64PrimaryKey(id))), "pk shall not exist before update")
 	}
 
 	err := s.bfs.UpdatePKRange(s.GetFieldData(ids))
 	s.NoError(err)
 
 	for _, id := range ids {
-		s.True(s.bfs.PkExists(storage.NewInt64PrimaryKey(id)), "pk shall return exist after update")
+		s.True(s.bfs.PkExists(storage.NewLocationsCache(storage.NewInt64PrimaryKey(id))), "pk shall return exist after update")
 	}
 }
 

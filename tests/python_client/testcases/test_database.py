@@ -46,15 +46,6 @@ class TestDatabaseParams(TestcaseBase):
 
         super().teardown_method(method)
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_string(self, request):
-        """
-        get invalid string
-        :param request:
-        :type request:
-        """
-        yield request.param
-
     def test_db_default(self):
         """
         target: test normal db interface
@@ -105,28 +96,18 @@ class TestDatabaseParams(TestcaseBase):
         dbs_afrer_drop, _ = self.database_wrap.list_database()
         assert db_name not in dbs_afrer_drop
 
-    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[6:])
-    def test_create_db_invalid_name_value(self, get_invalid_string):
+    @pytest.mark.parametrize("db_name", ct.invalid_resource_names)
+    def test_create_db_invalid_name_value(self, db_name):
         """
         target: test create db with invalid name
         method: create db with invalid name
         expected: error
         """
         self._connect()
-        error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % get_invalid_string}
-        self.database_wrap.create_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
-                                           check_items=error)
-
-    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[:6])
-    def test_create_db_invalid_name_type(self, get_invalid_string):
-        """
-        target: test create db with invalid name
-        method: create db with invalid name
-        expected: error
-        """
-        self._connect()
-        error = {ct.err_code: 1, ct.err_msg: "invalid database name[database=%s]" % get_invalid_string}
-        self.database_wrap.create_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
+        error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % db_name}
+        if db_name is None:
+            error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
+        self.database_wrap.create_database(db_name=db_name, check_task=CheckTasks.err_res,
                                            check_items=error)
 
     def test_create_db_without_connection(self):
@@ -150,54 +131,26 @@ class TestDatabaseParams(TestcaseBase):
         error = {ct.err_code: 1, ct.err_msg: "database already exist: default"}
         self.database_wrap.create_database(ct.default_db, check_task=CheckTasks.err_res, check_items=error)
 
-    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[6:])
-    def test_drop_db_invalid_name_value(self, get_invalid_string):
+    @pytest.mark.parametrize("invalid_name", ct.invalid_resource_names)
+    def test_drop_db_invalid_name(self, invalid_name):
         """
         target: test drop db with invalid name
         method: drop db with invalid name
         expected: exception
         """
         self._connect()
-
         # create db
         db_name = cf.gen_unique_str(prefix)
         self.database_wrap.create_database(db_name)
-
         # drop db
-        self.database_wrap.drop_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 802, ct.err_msg: "invalid database name"})
-
-        # created db is exist
+        error = {ct.err_code: 802, ct.err_msg: "invalid database name[database=%s]" % db_name}
+        if db_name is None:
+            error = {ct.err_code: 999, ct.err_msg: f"`db_name` value {db_name} is illegal"}
+        self.database_wrap.drop_database(db_name=invalid_name, check_task=CheckTasks.err_res, check_items=error)
+        # created db is existing
         self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res,
                                            check_items={ct.err_code: 65535,
                                                         ct.err_msg: "database already exist: %s" % db_name})
-
-        self.database_wrap.drop_database(db_name)
-        dbs, _ = self.database_wrap.list_database()
-        assert db_name not in dbs
-
-    @pytest.mark.parametrize("get_invalid_string", ct.get_invalid_strs[:6])
-    def test_drop_db_invalid_name_type(self, get_invalid_string):
-        """
-        target: test drop db with invalid name
-        method: drop db with invalid name
-        expected: exception
-        """
-        self._connect()
-
-        # create db
-        db_name = cf.gen_unique_str(prefix)
-        self.database_wrap.create_database(db_name)
-
-        # drop db
-        self.database_wrap.drop_database(db_name=get_invalid_string, check_task=CheckTasks.err_res,
-                                         check_items={ct.err_code: 1, ct.err_msg: "is illegal"})
-
-        # created db is exist
-        self.database_wrap.create_database(db_name, check_task=CheckTasks.err_res,
-                                           check_items={ct.err_code: 65535,
-                                                        ct.err_msg: "database already exist: %s" % db_name})
-
         self.database_wrap.drop_database(db_name)
         dbs, _ = self.database_wrap.list_database()
         assert db_name not in dbs

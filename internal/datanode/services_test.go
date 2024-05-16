@@ -21,7 +21,6 @@ import (
 	"math/rand"
 	"sync"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
@@ -46,7 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
 type DataNodeServicesSuite struct {
@@ -94,21 +92,12 @@ func (s *DataNodeServicesSuite) SetupTest() {
 		}, nil).Maybe()
 	s.node.allocator = alloc
 
-	meta := NewMetaFactory().GetCollectionMeta(1, "collection", schemapb.DataType_Int64)
 	broker := broker.NewMockBroker(s.T())
 	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).
 		Return([]*datapb.SegmentInfo{}, nil).Maybe()
-	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
-		Return(&milvuspb.DescribeCollectionResponse{
-			Status:    merr.Status(nil),
-			Schema:    meta.GetSchema(),
-			ShardsNum: common.DefaultShardsNum,
-		}, nil).Maybe()
 	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().AllocTimestamp(mock.Anything, mock.Anything).Call.Return(tsoutil.ComposeTSByTime(time.Now(), 0),
-		func(_ context.Context, num uint32) uint32 { return num }, nil).Maybe()
 
 	s.broker = broker
 	s.node.broker = broker
@@ -635,40 +624,6 @@ func (s *DataNodeServicesSuite) TestResendSegmentStats() {
 	s.Assert().True(merr.Ok(resp.GetStatus()), "empty call, status shall be OK")
 }
 
-/*
-func (s *DataNodeServicesSuite) TestFlushChannels() {
-	dmChannelName := "fake-by-dev-rootcoord-dml-channel-TestFlushChannels"
-
-	vChan := &datapb.VchannelInfo{
-		CollectionID:        1,
-		ChannelName:         dmChannelName,
-		UnflushedSegmentIds: []int64{},
-		FlushedSegmentIds:   []int64{},
-	}
-
-	err := s.node.flowgraphManager.addAndStartWithEtcdTickler(s.node, vChan, nil, genTestTickler())
-	s.Require().NoError(err)
-
-	fgService, ok := s.node.flowgraphManager.getFlowgraphService(dmChannelName)
-	s.Require().True(ok)
-
-	flushTs := Timestamp(100)
-
-	req := &datapb.FlushChannelsRequest{
-		Base: &commonpb.MsgBase{
-			TargetID: s.node.GetSession().ServerID,
-		},
-		FlushTs:  flushTs,
-		Channels: []string{dmChannelName},
-	}
-
-	status, err := s.node.FlushChannels(s.ctx, req)
-	s.Assert().NoError(err)
-	s.Assert().True(merr.Ok(status))
-
-	s.Assert().True(fgService.channel.getFlushTs() == flushTs)
-}*/
-
 func (s *DataNodeServicesSuite) TestRPCWatch() {
 	s.Run("node not healthy", func() {
 		s.SetupTest()
@@ -686,22 +641,16 @@ func (s *DataNodeServicesSuite) TestRPCWatch() {
 		s.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 	})
 
-	s.Run("node healthy", func() {
+	s.Run("submit error", func() {
 		s.SetupTest()
-		mockChManager := NewMockChannelManager(s.T())
-		s.node.channelManager = mockChManager
-		mockChManager.EXPECT().Submit(mock.Anything).Return(nil).Once()
 		ctx := context.Background()
 		status, err := s.node.NotifyChannelOperation(ctx, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{{OpID: 19530}}})
 		s.NoError(err)
-		s.True(merr.Ok(status))
-
-		mockChManager.EXPECT().GetProgress(mock.Anything).Return(
-			&datapb.ChannelOperationProgressResponse{Status: merr.Status(nil)},
-		).Once()
+		s.False(merr.Ok(status))
+		s.NotErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 
 		resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
 		s.NoError(err)
-		s.True(merr.Ok(resp.GetStatus()))
+		s.False(merr.Ok(resp.GetStatus()))
 	})
 }

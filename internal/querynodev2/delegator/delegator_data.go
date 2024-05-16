@@ -138,14 +138,14 @@ func (sd *shardDelegator) ProcessInsert(insertRecords map[int64]*InsertData) {
 			if ok := sd.VerifyExcludedSegments(segmentID, typeutil.MaxTimestamp); !ok {
 				log.Warn("try to insert data into released segment, skip it", zap.Int64("segmentID", segmentID))
 				sd.growingSegmentLock.Unlock()
-				growing.Release()
+				growing.Release(context.Background())
 				continue
 			}
 
 			if !sd.pkOracle.Exists(growing, paramtable.GetNodeID()) {
 				// register created growing segment after insert, avoid to add empty growing to delegator
 				sd.pkOracle.Register(growing, paramtable.GetNodeID())
-				sd.segmentManager.Put(segments.SegmentTypeGrowing, growing)
+				sd.segmentManager.Put(context.Background(), segments.SegmentTypeGrowing, growing)
 				sd.addGrowing(SegmentEntry{
 					NodeID:        paramtable.GetNodeID(),
 					SegmentID:     segmentID,
@@ -283,12 +283,13 @@ func (sd *shardDelegator) applyDelete(ctx context.Context, nodeID int64, worker 
 
 	var futures []*conc.Future[struct{}]
 	for _, segmentEntry := range entries {
+		segmentEntry := segmentEntry
+		delRecord, ok := delRecords[segmentEntry.SegmentID]
 		log := log.With(
 			zap.Int64("segmentID", segmentEntry.SegmentID),
 			zap.Int64("workerID", nodeID),
+			zap.Int("forwardRowCount", len(delRecord.PrimaryKeys)),
 		)
-		segmentEntry := segmentEntry
-		delRecord, ok := delRecords[segmentEntry.SegmentID]
 		if ok {
 			future := pool.Submit(func() (struct{}, error) {
 				log.Debug("delegator plan to applyDelete via worker")
@@ -378,7 +379,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 
 			// clear loaded growing segments
 			for _, segment := range loaded {
-				segment.Release()
+				segment.Release(ctx)
 			}
 			return err
 		}
@@ -504,7 +505,9 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	lo.ForEach(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) {
 		partStatsToReload = append(partStatsToReload, info.PartitionID)
 	})
-	sd.maybeReloadPartitionStats(ctx, partStatsToReload...)
+	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
+		sd.maybeReloadPartitionStats(ctx, partStatsToReload...)
+	}
 
 	return nil
 }
@@ -906,7 +909,9 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 			partitionsToReload = append(partitionsToReload, segment.Partition())
 		}
 	})
-	sd.maybeReloadPartitionStats(ctx, partitionsToReload...)
+	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
+		sd.maybeReloadPartitionStats(ctx, partitionsToReload...)
+	}
 	return nil
 }
 

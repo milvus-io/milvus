@@ -41,7 +41,7 @@ class MilvusConan(ConanFile):
         "google-cloud-cpp/2.5.0@milvus/dev",
         "opentelemetry-cpp/1.8.1.1@milvus/dev",
         "librdkafka/1.9.1",
-        "abseil/20230125.3"
+        "abseil/20230125.3",
     )
     generators = ("cmake", "cmake_find_package")
     default_options = {
@@ -75,8 +75,6 @@ class MilvusConan(ConanFile):
         "fmt:header_only": True,
         "onetbb:tbbmalloc": False,
         "onetbb:tbbproxy": False,
-        "openblas:shared": True,
-        "openblas:dynamic_arch": True,
     }
 
     def configure(self):
@@ -86,13 +84,9 @@ class MilvusConan(ConanFile):
             # By default abseil use static link but can not be compatible with macos X86
             self.options["abseil"].shared = True
             self.options["arrow"].with_jemalloc = False
-        if self.settings.arch == "armv8":
-            self.options["openblas"].dynamic_arch = False
 
     def requirements(self):
         if self.settings.os != "Macos":
-            # MacOS does not need openblas
-            # self.requires("openblas/0.3.23@milvus/dev")
             self.requires("libunwind/1.7.2")
 
     def imports(self):

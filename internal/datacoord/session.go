@@ -19,24 +19,25 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"sync"
 
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 )
 
 var errDisposed = errors.New("client is disposed")
 
 // NodeInfo contains node base info
 type NodeInfo struct {
-	NodeID  int64
-	Address string
+	NodeID   int64
+	Address  string
+	IsLegacy bool
 }
 
 // Session contains session info of a node
 type Session struct {
-	sync.Mutex
+	lock.Mutex
 	info          *NodeInfo
 	client        types.DataNodeClient
 	clientCreator dataNodeCreatorFunc

@@ -174,7 +174,7 @@ func (gc *garbageCollector) work(ctx context.Context) {
 }
 
 // startControlLoop start a control loop for garbageCollector.
-func (gc *garbageCollector) startControlLoop(ctx context.Context) {
+func (gc *garbageCollector) startControlLoop(_ context.Context) {
 	for {
 		select {
 		case cmd := <-gc.cmdCh:
@@ -203,7 +203,7 @@ func (gc *garbageCollector) startControlLoop(ctx context.Context) {
 // runRecycleTaskWithPauser is a helper function to create a task with pauser
 func (gc *garbageCollector) runRecycleTaskWithPauser(ctx context.Context, name string, interval time.Duration, task func(ctx context.Context)) {
 	logger := log.With(zap.String("gcType", name)).With(zap.Duration("interval", interval))
-	timer := time.NewTimer(interval)
+	timer := time.NewTicker(interval)
 	defer timer.Stop()
 
 	for {
@@ -371,6 +371,9 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 ) bool {
 	log := log.With(zap.Int64("segmentID", segment.ID))
 
+	if !gc.isExpire(segment.GetDroppedAt()) {
+		return false
+	}
 	isCompacted := childSegment != nil || segment.GetCompacted()
 	if isCompacted {
 		// For compact A, B -> C, don't GC A or B if C is not indexed,
@@ -380,10 +383,6 @@ func (gc *garbageCollector) checkDroppedSegmentGC(segment *SegmentInfo,
 			log.WithRateGroup("GC_FAIL_COMPACT_TO_NOT_INDEXED", 1, 60).
 				RatedInfo(60, "skipping GC when compact target segment is not indexed",
 					zap.Int64("child segment ID", childSegment.GetID()))
-			return false
-		}
-	} else {
-		if !gc.isExpire(segment.GetDroppedAt()) {
 			return false
 		}
 	}
@@ -411,7 +410,7 @@ func (gc *garbageCollector) recycleDroppedSegments(ctx context.Context) {
 	log.Info("start clear dropped segments...")
 	defer func() { log.Info("clear dropped segments done", zap.Duration("timeCost", time.Since(start))) }()
 
-	all := gc.meta.SelectSegments(func(si *SegmentInfo) bool { return true })
+	all := gc.meta.SelectSegments()
 	drops := make(map[int64]*SegmentInfo, 0)
 	compactTo := make(map[int64]*SegmentInfo)
 	channels := typeutil.NewSet[string]()

@@ -156,6 +156,9 @@ Delete(CSegmentInterface c_segment,
        const uint64_t ids_size,
        const uint64_t* timestamps);
 
+void
+RemoveFieldFile(CSegmentInterface c_segment, int64_t field_id);
+
 #ifdef __cplusplus
 }
 #endif

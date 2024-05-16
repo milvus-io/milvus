@@ -60,19 +60,14 @@ func MergeMetaSegmentIntoSegmentInfo(info *querypb.SegmentInfo, segments ...*met
 // packSegmentLoadInfo packs SegmentLoadInfo for given segment,
 // packs with index if withIndex is true, this fetch indexes from IndexCoord
 func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.MsgPosition, indexes []*querypb.FieldIndexInfo) *querypb.SegmentLoadInfo {
-	checkpoint := segment.GetDmlPosition()
-	if channelCheckpoint.GetTimestamp() > checkpoint.GetTimestamp() {
-		checkpoint = channelCheckpoint
-	}
-
-	posTime := tsoutil.PhysicalTime(checkpoint.GetTimestamp())
+	posTime := tsoutil.PhysicalTime(channelCheckpoint.GetTimestamp())
 	tsLag := time.Since(posTime)
 	if tsLag >= 10*time.Minute {
 		log.Warn("delta position is quite stale",
 			zap.Int64("collectionID", segment.GetCollectionID()),
 			zap.Int64("segmentID", segment.GetID()),
 			zap.String("channel", segment.InsertChannel),
-			zap.Uint64("posTs", checkpoint.GetTimestamp()),
+			zap.Uint64("posTs", channelCheckpoint.GetTimestamp()),
 			zap.Time("posTime", posTime),
 			zap.Duration("tsLag", tsLag))
 	}
@@ -87,54 +82,11 @@ func PackSegmentLoadInfo(segment *datapb.SegmentInfo, channelCheckpoint *msgpb.M
 		InsertChannel:  segment.InsertChannel,
 		IndexInfos:     indexes,
 		StartPosition:  segment.GetStartPosition(),
-		DeltaPosition:  checkpoint,
+		DeltaPosition:  channelCheckpoint,
 		Level:          segment.GetLevel(),
 		StorageVersion: segment.GetStorageVersion(),
 	}
-	loadInfo.SegmentSize = calculateSegmentSize(loadInfo)
 	return loadInfo
-}
-
-func calculateSegmentSize(segmentLoadInfo *querypb.SegmentLoadInfo) int64 {
-	segmentSize := int64(0)
-
-	fieldIndex := make(map[int64]*querypb.FieldIndexInfo)
-	for _, index := range segmentLoadInfo.IndexInfos {
-		if index.EnableIndex {
-			fieldID := index.FieldID
-			fieldIndex[fieldID] = index
-		}
-	}
-
-	for _, fieldBinlog := range segmentLoadInfo.BinlogPaths {
-		fieldID := fieldBinlog.FieldID
-		if index, ok := fieldIndex[fieldID]; ok {
-			segmentSize += index.IndexSize
-		} else {
-			segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
-		}
-	}
-
-	// Get size of state data
-	for _, fieldBinlog := range segmentLoadInfo.Statslogs {
-		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
-	}
-
-	// Get size of delete data
-	for _, fieldBinlog := range segmentLoadInfo.Deltalogs {
-		segmentSize += getFieldSizeFromFieldBinlog(fieldBinlog)
-	}
-
-	return segmentSize
-}
-
-func getFieldSizeFromFieldBinlog(fieldBinlog *datapb.FieldBinlog) int64 {
-	fieldSize := int64(0)
-	for _, binlog := range fieldBinlog.Binlogs {
-		fieldSize += binlog.LogSize
-	}
-
-	return fieldSize
 }
 
 func MergeDmChannelInfo(infos []*datapb.VchannelInfo) *meta.DmChannel {
