@@ -18,6 +18,24 @@ package client
 
 import "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 
+type UsingDatabaseOption interface {
+	DbName() string
+}
+
+type usingDatabaseNameOpt struct {
+	dbName string
+}
+
+func (opt *usingDatabaseNameOpt) DbName() string {
+	return opt.dbName
+}
+
+func NewUsingDatabaseOption(dbName string) *usingDatabaseNameOpt {
+	return &usingDatabaseNameOpt{
+		dbName: dbName,
+	}
+}
+
 // ListDatabaseOption is a builder interface for ListDatabase request.
 type ListDatabaseOption interface {
 	Request() *milvuspb.ListDatabasesRequest

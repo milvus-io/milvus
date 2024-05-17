@@ -60,6 +60,8 @@ type Schema struct {
 	AutoID             bool
 	Fields             []*Field
 	EnableDynamicField bool
+
+	pkField *Field
 }
 
 // NewSchema creates an empty schema object.
@@ -91,6 +93,9 @@ func (s *Schema) WithDynamicFieldEnabled(dynamicEnabled bool) *Schema {
 
 // WithField adds a field into schema and returns schema itself.
 func (s *Schema) WithField(f *Field) *Schema {
+	if f.PrimaryKey {
+		s.pkField = f
+	}
 	s.Fields = append(s.Fields, f)
 	return s
 }
@@ -116,10 +121,14 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 	s.CollectionName = p.GetName()
 	s.Fields = make([]*Field, 0, len(p.GetFields()))
 	for _, fp := range p.GetFields() {
+		field := NewField().ReadProto(fp)
 		if fp.GetAutoID() {
 			s.AutoID = true
 		}
-		s.Fields = append(s.Fields, NewField().ReadProto(fp))
+		if field.PrimaryKey {
+			s.pkField = field
+		}
+		s.Fields = append(s.Fields, field)
 	}
 	s.EnableDynamicField = p.GetEnableDynamicField()
 	return s
@@ -127,12 +136,15 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 
 // PKFieldName returns pk field name for this schemapb.
 func (s *Schema) PKFieldName() string {
-	for _, field := range s.Fields {
-		if field.PrimaryKey {
-			return field.Name
-		}
+	if s.pkField == nil {
+		return ""
 	}
-	return ""
+	return s.pkField.Name
+}
+
+// PKField returns PK Field schema for this schema.
+func (s *Schema) PKField() *Field {
+	return s.pkField
 }
 
 // Field represent field schema in milvus

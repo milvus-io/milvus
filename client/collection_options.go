@@ -140,6 +140,7 @@ func SimpleCreateCollectionOptions(name string, dim int64) *createCollectionOpti
 		autoID:               true,
 		dim:                  dim,
 		enabledDynamicSchema: true,
+		consistencyLevel:     entity.DefaultConsistencyLevel,
 
 		isFast:     true,
 		metricType: entity.COSINE,
@@ -149,9 +150,10 @@ func SimpleCreateCollectionOptions(name string, dim int64) *createCollectionOpti
 // NewCreateCollectionOption returns a CreateCollectionOption with customized collection schema
 func NewCreateCollectionOption(name string, collectionSchema *entity.Schema) *createCollectionOption {
 	return &createCollectionOption{
-		name:     name,
-		shardNum: 1,
-		schema:   collectionSchema,
+		name:             name,
+		shardNum:         1,
+		schema:           collectionSchema,
+		consistencyLevel: entity.DefaultConsistencyLevel,
 
 		metricType: entity.COSINE,
 	}

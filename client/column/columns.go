@@ -64,26 +64,38 @@ var errFieldDataTypeNotMatch = errors.New("FieldData type not matched")
 
 // IDColumns converts schemapb.IDs to corresponding column
 // currently Int64 / string may be in IDs
-func IDColumns(idField *schemapb.IDs, begin, end int) (Column, error) {
+func IDColumns(schema *entity.Schema, ids *schemapb.IDs, begin, end int) (Column, error) {
 	var idColumn Column
-	if idField == nil {
+	pkField := schema.PKField()
+	if pkField == nil {
+		return nil, errors.New("PK Field not found")
+	}
+	if ids == nil {
 		return nil, errors.New("nil Ids from response")
 	}
-	switch field := idField.GetIdField().(type) {
-	case *schemapb.IDs_IntId:
-		if end >= 0 {
-			idColumn = NewColumnInt64("", field.IntId.GetData()[begin:end])
-		} else {
-			idColumn = NewColumnInt64("", field.IntId.GetData()[begin:])
+	switch pkField.DataType {
+	case entity.FieldTypeInt64:
+		data := ids.GetIntId().GetData()
+		if data == nil {
+			return NewColumnInt64(pkField.Name, nil), nil
 		}
-	case *schemapb.IDs_StrId:
 		if end >= 0 {
-			idColumn = NewColumnVarChar("", field.StrId.GetData()[begin:end])
+			idColumn = NewColumnInt64(pkField.Name, data[begin:end])
 		} else {
-			idColumn = NewColumnVarChar("", field.StrId.GetData()[begin:])
+			idColumn = NewColumnInt64(pkField.Name, data[begin:])
+		}
+	case entity.FieldTypeVarChar, entity.FieldTypeString:
+		data := ids.GetStrId().GetData()
+		if data == nil {
+			return NewColumnVarChar(pkField.Name, nil), nil
+		}
+		if end >= 0 {
+			idColumn = NewColumnVarChar(pkField.Name, data[begin:end])
+		} else {
+			idColumn = NewColumnVarChar(pkField.Name, data[begin:])
 		}
 	default:
-		return nil, fmt.Errorf("unsupported id type %v", field)
+		return nil, fmt.Errorf("unsupported id type %v", pkField.DataType)
 	}
 	return idColumn, nil
 }

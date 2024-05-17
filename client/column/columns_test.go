@@ -24,18 +24,34 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/client/v2/entity"
 )
 
 func TestIDColumns(t *testing.T) {
 	dataLen := rand.Intn(100) + 1
 	base := rand.Intn(5000) // id start point
 
+	intPKCol := entity.NewSchema().WithField(
+		entity.NewField().WithName("pk").WithIsPrimaryKey(true).WithDataType(entity.FieldTypeInt64),
+	)
+	strPKCol := entity.NewSchema().WithField(
+		entity.NewField().WithName("pk").WithIsPrimaryKey(true).WithDataType(entity.FieldTypeVarChar),
+	)
+
 	t.Run("nil id", func(t *testing.T) {
-		_, err := IDColumns(nil, 0, -1)
-		assert.NotNil(t, err)
+		col, err := IDColumns(intPKCol, nil, 0, -1)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, col.Len())
+		col, err = IDColumns(strPKCol, nil, 0, -1)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, col.Len())
 		idField := &schemapb.IDs{}
-		_, err = IDColumns(idField, 0, -1)
-		assert.NotNil(t, err)
+		col, err = IDColumns(intPKCol, idField, 0, -1)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, col.Len())
+		col, err = IDColumns(strPKCol, idField, 0, -1)
+		assert.NoError(t, err)
+		assert.EqualValues(t, 0, col.Len())
 	})
 
 	t.Run("int ids", func(t *testing.T) {
@@ -50,12 +66,12 @@ func TestIDColumns(t *testing.T) {
 				},
 			},
 		}
-		column, err := IDColumns(idField, 0, dataLen)
+		column, err := IDColumns(intPKCol, idField, 0, dataLen)
 		assert.Nil(t, err)
 		assert.NotNil(t, column)
 		assert.Equal(t, dataLen, column.Len())
 
-		column, err = IDColumns(idField, 0, -1) // test -1 method
+		column, err = IDColumns(intPKCol, idField, 0, -1) // test -1 method
 		assert.Nil(t, err)
 		assert.NotNil(t, column)
 		assert.Equal(t, dataLen, column.Len())
@@ -72,12 +88,12 @@ func TestIDColumns(t *testing.T) {
 				},
 			},
 		}
-		column, err := IDColumns(idField, 0, dataLen)
+		column, err := IDColumns(strPKCol, idField, 0, dataLen)
 		assert.Nil(t, err)
 		assert.NotNil(t, column)
 		assert.Equal(t, dataLen, column.Len())
 
-		column, err = IDColumns(idField, 0, -1) // test -1 method
+		column, err = IDColumns(strPKCol, idField, 0, -1) // test -1 method
 		assert.Nil(t, err)
 		assert.NotNil(t, column)
 		assert.Equal(t, dataLen, column.Len())
