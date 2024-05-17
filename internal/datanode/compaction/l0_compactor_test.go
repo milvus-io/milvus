@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"github.com/milvus-io/milvus/pkg/common"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -26,9 +27,11 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -59,7 +62,7 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
 	s.mockMeta = metacache.NewMockMetaCache(s.T())
 	// plan of the task is unset
-	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil)
+	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -103,7 +106,9 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
 	s.task.tr = timerecord.NewTimeRecorder("test")
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock download fail")).Once()
 
-	targetSegments := []int64{200}
+	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
+		return s.Level == datapb.SegmentLevel_L1
+	})
 	deltaLogs := map[int64][]string{100: {"a/b/c1"}}
 
 	segments, err := s.task.process(context.Background(), 1, targetSegments, lo.Values(deltaLogs)...)
@@ -128,9 +133,25 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadFail() {
 					},
 				},
 			},
-			{SegmentID: 200, Level: datapb.SegmentLevel_L1},
+			{SegmentID: 200, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogID: 9999, LogSize: 100},
+					},
+				},
+			}},
 		},
 	}
+
+	data := &storage.Int64FieldData{
+		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &storage.StatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
+	s.NoError(err)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
+	s.task.cm = cm
 
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
@@ -138,15 +159,18 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadFail() {
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload fail")).Once()
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Once()
 	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).RunAndReturn(
-		func(filters ...metacache.SegmentFilter) []*metacache.SegmentInfo {
-			bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
-			bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2}})
-			segment1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 200}, bfs1)
-			return []*metacache.SegmentInfo{segment1}
-		}).Once()
 
-	targetSegments := []int64{200}
+	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				IsPrimaryKey: true,
+			},
+		},
+	})
+
+	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
+		return s.Level == datapb.SegmentLevel_L1
+	})
 	deltaLogs := map[int64][]string{100: {"a/b/c1"}}
 
 	segments, err := s.task.process(context.Background(), 2, targetSegments, lo.Values(deltaLogs)...)
@@ -183,41 +207,47 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 					},
 				},
 			},
-			{SegmentID: 200, Level: datapb.SegmentLevel_L1},
-			{SegmentID: 201, Level: datapb.SegmentLevel_L1},
+			{SegmentID: 200, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogID: 9999, LogSize: 100},
+					},
+				},
+			}},
+			{SegmentID: 201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogID: 9999, LogSize: 100},
+					},
+				},
+			}},
 		},
 	}
 
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
 
-	bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
-	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2}})
-	segment1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 200}, bfs1)
-	bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
-	bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2}})
-	segment2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 201}, bfs2)
+	data := &storage.Int64FieldData{
+		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &storage.StatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
+	s.NoError(err)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
+	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Twice()
 
-	times := 1
-	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).RunAndReturn(
-		func(filters ...metacache.SegmentFilter) []*metacache.SegmentInfo {
-			if times == 1 {
-				times += 1
-				return []*metacache.SegmentInfo{segment1}
-			}
-
-			if times == 2 {
-				times += 1
-				return []*metacache.SegmentInfo{segment2}
-			}
-
-			return []*metacache.SegmentInfo{segment1, segment2}
-		}).Twice()
-
 	s.mockMeta.EXPECT().Collection().Return(1)
+	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				IsPrimaryKey: true,
+			},
+		},
+	})
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 
 	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
@@ -228,11 +258,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		return s.Level == datapb.SegmentLevel_L0
 	})
 
-	targetSegIDs := lo.FilterMap(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) (int64, bool) {
-		if s.Level == datapb.SegmentLevel_L1 {
-			return s.GetSegmentID(), true
-		}
-		return 0, false
+	targetSegments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
+		return s.Level == datapb.SegmentLevel_L1
 	})
 	totalDeltalogs := make(map[int64][]string)
 
@@ -247,7 +274,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 			totalDeltalogs[s.GetSegmentID()] = paths
 		}
 	}
-	segments, err := s.task.process(context.Background(), 1, targetSegIDs, lo.Values(totalDeltalogs)...)
+	segments, err := s.task.process(context.Background(), 1, targetSegments, lo.Values(totalDeltalogs)...)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -255,6 +282,9 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		lo.Map(segments, func(seg *datapb.CompactionSegment, _ int) int64 {
 			return seg.GetSegmentID()
 		}))
+	for _, segment := range segments {
+		s.NotNil(segment.GetDeltalogs())
+	}
 
 	log.Info("test segment results", zap.Any("result", segments))
 }
@@ -288,28 +318,45 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 					},
 				},
 			},
-			{SegmentID: 200, Level: datapb.SegmentLevel_L1},
-			{SegmentID: 201, Level: datapb.SegmentLevel_L1},
+			{SegmentID: 200, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogID: 9999, LogSize: 100},
+					},
+				},
+			}},
+			{SegmentID: 201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogID: 9999, LogSize: 100},
+					},
+				},
+			}},
 		},
 	}
 
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
 
-	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).RunAndReturn(
-		func(filters ...metacache.SegmentFilter) []*metacache.SegmentInfo {
-			bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
-			bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2, 3}})
-			segment1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 200}, bfs1)
-			bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
-			bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2, 3}})
-			segment2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 201}, bfs2)
-
-			return []*metacache.SegmentInfo{segment1, segment2}
-		})
+	data := &storage.Int64FieldData{
+		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &storage.StatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
+	s.NoError(err)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
+	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
 	s.mockMeta.EXPECT().Collection().Return(1)
+	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				IsPrimaryKey: true,
+			},
+		},
+	})
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
@@ -317,11 +364,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		return s.Level == datapb.SegmentLevel_L0
 	})
 
-	targetSegIDs := lo.FilterMap(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) (int64, bool) {
-		if s.Level == datapb.SegmentLevel_L1 {
-			return s.GetSegmentID(), true
-		}
-		return 0, false
+	targetSegments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
+		return s.Level == datapb.SegmentLevel_L1
 	})
 
 	totalDeltalogs := make(map[int64][]string)
@@ -336,7 +380,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 			totalDeltalogs[s.GetSegmentID()] = paths
 		}
 	}
-	segments, err := s.task.process(context.TODO(), 2, targetSegIDs, lo.Values(totalDeltalogs)...)
+	segments, err := s.task.process(context.TODO(), 2, targetSegments, lo.Values(totalDeltalogs)...)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -344,6 +388,9 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		lo.Map(segments, func(seg *datapb.CompactionSegment, _ int) int64 {
 			return seg.GetSegmentID()
 		}))
+	for _, segment := range segments {
+		s.NotNil(segment.GetDeltalogs())
+	}
 
 	log.Info("test segment results", zap.Any("result", segments))
 }
@@ -396,20 +443,20 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 	bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
 	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 3}})
-	segment1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100}, bfs1)
 	bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
 	bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
-	segment2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 101}, bfs2)
 	bfs3 := metacache.NewBloomFilterSetWithBatchSize(100)
 	bfs3.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
-	segment3 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 102}, bfs3)
 
 	predicted := []int64{100, 101, 102}
-	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{segment1, segment2, segment3})
 	s.mockMeta.EXPECT().Collection().Return(1)
 
-	targetSegIDs := predicted
-	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, targetSegIDs)
+	segmentBfs := map[int64]*metacache.BloomFilterSet{
+		100: bfs1,
+		101: bfs2,
+		102: bfs3,
+	}
+	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, segmentBfs)
 
 	s.NotEmpty(deltaWriters)
 	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
@@ -464,4 +511,95 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
 			s.Equal(s.dData.RowCount, dData.RowCount)
 		}
 	}
+}
+
+func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
+	plan := &datapb.CompactionPlan{
+		PlanID: 19530,
+		Type:   datapb.CompactionType_Level0DeleteCompaction,
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{SegmentID: 201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+				{
+					Binlogs: []*datapb.Binlog{
+						{LogID: 9999, LogSize: 100},
+					},
+				},
+			}},
+		},
+	}
+
+	s.task.plan = plan
+
+	data := &storage.Int64FieldData{
+		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
+	}
+	sw := &storage.StatsWriter{}
+	err := sw.GenerateByData(common.RowIDField, schemapb.DataType_Int64, data)
+	s.NoError(err)
+	cm := mocks.NewChunkManager(s.T())
+	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
+	s.task.cm = cm
+
+	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				IsPrimaryKey: true,
+			},
+		},
+	})
+
+	bfs, err := s.task.loadBF(plan.SegmentBinlogs)
+	s.NoError(err)
+
+	s.Len(bfs, 1)
+	for _, pk := range s.dData.Pks {
+		lc := storage.NewLocationsCache(pk)
+		s.True(bfs[201].PkExists(lc))
+	}
+}
+
+func (s *LevelZeroCompactionTaskSuite) TestFailed() {
+	s.Run("no primary key", func() {
+		plan := &datapb.CompactionPlan{
+			PlanID: 19530,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogID: 9999, LogSize: 100},
+						},
+					},
+				}},
+			},
+		}
+
+		s.task.plan = plan
+
+		s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: false,
+				},
+			},
+		})
+
+		_, err := s.task.loadBF(plan.SegmentBinlogs)
+		s.Error(err)
+	})
+
+	s.Run("no l1 segments", func() {
+		plan := &datapb.CompactionPlan{
+			PlanID: 19530,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 201, Level: datapb.SegmentLevel_L0},
+			},
+		}
+
+		s.task.plan = plan
+
+		_, err := s.task.Compact()
+		s.Error(err)
+	})
 }
