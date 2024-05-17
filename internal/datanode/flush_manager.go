@@ -22,6 +22,7 @@ import (
 	"path"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -63,6 +64,7 @@ type flushManager interface {
 	notifyAllFlushed()
 	// close handles resource clean up
 	close()
+	start()
 }
 
 // segmentFlushPack contains result to save into meta
@@ -221,6 +223,14 @@ func (q *orderFlushQueue) getTailChan() chan struct{} {
 	return q.tailCh
 }
 
+func (q *orderFlushQueue) checkEmpty() bool {
+	if q.taskMut.TryLock() {
+		defer q.taskMut.Unlock()
+		return q.runningTasks == 0
+	}
+	return false
+}
+
 // injectTask handles injection for empty flush queue
 type injectTask struct {
 	startSignal, finishSignal chan struct{}
@@ -281,6 +291,16 @@ type rendezvousFlushManager struct {
 
 	dropping    atomic.Bool
 	dropHandler dropHandler
+	ctx         context.Context
+	cancel      context.CancelFunc
+	cleanLock   sync.RWMutex
+	wg          sync.WaitGroup
+}
+
+// start the cleanLoop
+func (m *rendezvousFlushManager) start() {
+	m.wg.Add(1)
+	go m.cleanLoop()
 }
 
 // getFlushQueue gets or creates an orderFlushQueue for segment id if not found
@@ -315,6 +335,8 @@ func (m *rendezvousFlushManager) handleInsertTask(segmentID UniqueID, task flush
 		return
 	}
 	// normal mode
+	m.cleanLock.RLock()
+	defer m.cleanLock.RUnlock()
 	m.getFlushQueue(segmentID).enqueueInsertFlush(task, binlogs, statslogs, flushed, dropped, pos)
 }
 
@@ -323,8 +345,10 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 	// in dropping mode
 	if m.dropping.Load() {
 		// preventing separate delete, check position exists in queue first
+		m.cleanLock.RLock()
 		q := m.getFlushQueue(segmentID)
 		_, ok := q.working.Get(getSyncTaskID(pos))
+		m.cleanLock.RUnlock()
 		// if ok, means position insert data already in queue, just handle task in normal mode
 		// if not ok, means the insert buf should be handle in drop mode
 		if !ok {
@@ -343,6 +367,8 @@ func (m *rendezvousFlushManager) handleDeleteTask(segmentID UniqueID, task flush
 		}
 	}
 	// normal mode
+	m.cleanLock.RLock()
+	defer m.cleanLock.RUnlock()
 	m.getFlushQueue(segmentID).enqueueDelFlush(task, deltaLogs, pos)
 }
 
@@ -574,8 +600,45 @@ func (m *rendezvousFlushManager) flushDelData(data *DelDataBuf, segmentID Unique
 // injectFlush inject process before task finishes
 func (m *rendezvousFlushManager) injectFlush(injection *taskInjection, segments ...UniqueID) {
 	go injection.waitForInjected()
+	m.cleanLock.RLock()
+	defer m.cleanLock.RUnlock()
 	for _, segmentID := range segments {
 		m.getFlushQueue(segmentID).inject(injection)
+	}
+}
+
+// tryRemoveFlushQueue try to remove queue which running task is zero
+func (m *rendezvousFlushManager) tryRemoveFlushQueue() {
+	m.cleanLock.Lock()
+	defer m.cleanLock.Unlock()
+	m.dispatcher.Range(func(segmentID int64, queue *orderFlushQueue) bool {
+		if queue.checkEmpty() {
+			m.dispatcher.Remove(segmentID)
+		}
+		return true
+	})
+}
+
+// segmentNum return the number of segment in dispatcher
+func (m *rendezvousFlushManager) segmentNum() int {
+	return m.dispatcher.Len()
+}
+
+// cleanLoop calls tryRemoveFlushQueue periodically
+func (m *rendezvousFlushManager) cleanLoop() {
+	defer m.wg.Done()
+	ticker := time.NewTicker(Params.DataNodeCfg.FlushMgrCleanInterval.GetAsDuration(time.Second))
+	defer ticker.Stop()
+	for {
+		select {
+		case <-m.ctx.Done():
+			log.Info("rendezvousFlushManager quit clean loop")
+			return
+
+		case <-ticker.C:
+			m.tryRemoveFlushQueue()
+			ticker.Reset(Params.DataNodeCfg.FlushMgrCleanInterval.GetAsDuration(time.Second))
+		}
 	}
 }
 
@@ -627,6 +690,8 @@ func (m *rendezvousFlushManager) startDropping() {
 		m.dropHandler.Lock()
 		defer m.dropHandler.Unlock()
 		// apply injection if any
+		m.cleanLock.RLock()
+		defer m.cleanLock.RUnlock()
 		for _, pack := range m.dropHandler.packs {
 			q := m.getFlushQueue(pack.segmentID)
 			// queue will never be nil, sincde getFlushQueue will initialize one if not found
@@ -651,6 +716,7 @@ func getSyncTaskID(pos *msgpb.MsgPosition) string {
 
 // close cleans up all the left members
 func (m *rendezvousFlushManager) close() {
+	m.cancel()
 	m.dispatcher.Range(func(segmentID int64, queue *orderFlushQueue) bool {
 		// assertion ok
 		queue.taskMut.Lock()
@@ -659,6 +725,7 @@ func (m *rendezvousFlushManager) close() {
 		return true
 	})
 	m.waitForAllFlushQueue()
+	m.wg.Wait()
 	log.Ctx(context.Background()).Info("flush manager closed", zap.Int64("collectionID", m.Channel.getCollectionID()))
 }
 
@@ -720,6 +787,7 @@ func (t *flushBufferDeleteTask) flushDeleteData() error {
 
 // NewRendezvousFlushManager create rendezvousFlushManager with provided allocator and kv
 func NewRendezvousFlushManager(allocator allocator.Allocator, cm storage.ChunkManager, channel Channel, f notifyMetaFunc, drop flushAndDropFunc) *rendezvousFlushManager {
+	ctx, cancel := context.WithCancel(context.Background())
 	fm := &rendezvousFlushManager{
 		Allocator:    allocator,
 		ChunkManager: cm,
@@ -729,6 +797,8 @@ func NewRendezvousFlushManager(allocator allocator.Allocator, cm storage.ChunkMa
 			flushAndDrop: drop,
 		},
 		dispatcher: typeutil.NewConcurrentMap[int64, *orderFlushQueue](),
+		ctx:        ctx,
+		cancel:     cancel,
 	}
 	// start with normal mode
 	fm.dropping.Store(false)
