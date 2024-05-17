@@ -154,3 +154,14 @@ func BFloat16BytesToFloat32Vector(b []byte) []float32 {
 	}
 	return vec
 }
+
+func SparseFloatBytesToMap(b []byte) map[uint32]float32 {
+	elemCount := len(b) / 8
+	values := make(map[uint32]float32)
+	for j := 0; j < elemCount; j++ {
+		idx := common.Endian.Uint32(b[j*8:])
+		f := BytesToFloat32(b[j*8+4:])
+		values[idx] = f
+	}
+	return values
+}

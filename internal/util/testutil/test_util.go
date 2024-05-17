@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"encoding/json"
 	"fmt"
 	"math/rand"
 	"strconv"
@@ -333,23 +334,24 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_SparseFloatVector:
-			sparseFloatVecData := make([]byte, 0)
-			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+			builder := array.NewStringBuilder(mem)
 			contents := insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
 			rows := len(contents)
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0, rows)
-			currOffset := int32(0)
+			jsonBytesData := make([][]byte, 0)
 			for i := 0; i < rows; i++ {
 				rowVecData := contents[i]
-				sparseFloatVecData = append(sparseFloatVecData, rowVecData...)
-				offsets = append(offsets, currOffset)
-				currOffset = currOffset + int32(len(rowVecData))
-				valid = append(valid, true)
+				mapData := typeutil.SparseFloatBytesToMap(rowVecData)
+				// convert to JSON format
+				jsonBytes, err := json.Marshal(mapData)
+				if err != nil {
+					return nil, err
+				}
+				jsonBytesData = append(jsonBytesData, jsonBytes)
 			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(sparseFloatVecData, nil)
-			builder.AppendValues(offsets, valid)
-			columns = append(columns, builder.NewListArray())
+			builder.AppendValues(lo.Map(jsonBytesData, func(bs []byte, _ int) string {
+				return string(bs)
+			}), nil)
+			columns = append(columns, builder.NewStringArray())
 		case schemapb.DataType_JSON:
 			builder := array.NewStringBuilder(mem)
 			jsonData := insertData.Data[fieldID].(*storage.JSONFieldData).Data

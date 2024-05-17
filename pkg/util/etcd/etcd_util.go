@@ -33,8 +33,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-var maxTxnNum = 128
-
 // GetEtcdClient returns etcd client
 // should only used for test
 func GetEtcdClient(
@@ -191,11 +189,6 @@ func SaveByBatchWithLimit(kvs map[string]string, limit int, op func(partialKvs m
 	return nil
 }
 
-// SaveByBatch there will not guarantee atomicity.
-func SaveByBatch(kvs map[string]string, op func(partialKvs map[string]string) error) error {
-	return SaveByBatchWithLimit(kvs, maxTxnNum, op)
-}
-
 func RemoveByBatchWithLimit(removals []string, limit int, op func(partialKeys []string) error) error {
 	if len(removals) == 0 {
 		return nil
@@ -209,10 +202,6 @@ func RemoveByBatchWithLimit(removals []string, limit int, op func(partialKeys []
 		}
 	}
 	return nil
-}
-
-func RemoveByBatch(removals []string, op func(partialKeys []string) error) error {
-	return RemoveByBatchWithLimit(removals, maxTxnNum, op)
 }
 
 func buildKvGroup(keys, values []string) (map[string]string, error) {

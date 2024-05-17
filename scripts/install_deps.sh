@@ -22,7 +22,7 @@ function install_linux_deps() {
     sudo apt install -y wget curl ca-certificates gnupg2  \
       g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
       clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python3 python3-pip \
-      pkg-config uuid-dev libaio-dev libgoogle-perftools-dev
+      pkg-config uuid-dev libaio-dev libopenblas-dev libgoogle-perftools-dev
 
     sudo pip3 install conan==1.61.0
   elif [[ -x "$(command -v yum)" ]]; then
@@ -31,7 +31,7 @@ function install_linux_deps() {
     sudo yum install -y wget curl which \
       git make automake python3-devel \
       devtoolset-11-gcc devtoolset-11-gcc-c++ devtoolset-11-gcc-gfortran devtoolset-11-libatomic-devel \
-      llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra \
+      llvm-toolset-11.0-clang llvm-toolset-11.0-clang-tools-extra openblas-devel \
       libaio libuuid-devel zip unzip \
       ccache lcov libtool m4 autoconf automake
 

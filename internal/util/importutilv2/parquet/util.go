@@ -183,7 +183,7 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 			Nullable: true,
 			Metadata: arrow.Metadata{},
 		}), nil
-	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
+	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return arrow.ListOfField(arrow.Field{
 			Name:     "item",
 			Type:     &arrow.Uint8Type{},
@@ -197,6 +197,8 @@ func convertToArrowDataType(field *schemapb.FieldSchema, isArray bool) (arrow.Da
 			Nullable: true,
 			Metadata: arrow.Metadata{},
 		}), nil
+	case schemapb.DataType_SparseFloatVector:
+		return &arrow.StringType{}, nil
 	default:
 		return nil, merr.WrapErrParameterInvalidMsg("unsupported data type %v", dataType.String())
 	}

@@ -34,7 +34,7 @@ RUN /opt/vcpkg/bootstrap-vcpkg.sh -disableMetrics && ln -s /opt/vcpkg/vcpkg /usr
 
 RUN vcpkg install azure-identity-cpp azure-storage-blobs-cpp gtest
 
-# Instal openblas
+# Install openblas
 # RUN wget https://github.com/xianyi/OpenBLAS/archive/v0.3.21.tar.gz && \
 #    tar zxvf v0.3.21.tar.gz && cd OpenBLAS-0.3.21 && \
 #    make NO_STATIC=1 NO_LAPACK=1 NO_LAPACKE=1 NO_CBLAS=1 NO_AFFINITY=1 USE_OPENMP=1 \

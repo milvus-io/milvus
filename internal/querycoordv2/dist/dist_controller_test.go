@@ -48,6 +48,8 @@ type DistControllerTestSuite struct {
 	kv     kv.MetaKv
 	meta   *meta.Meta
 	broker *meta.MockBroker
+
+	nodeMgr *session.NodeManager
 }
 
 func (suite *DistControllerTestSuite) SetupTest() {
@@ -69,15 +71,16 @@ func (suite *DistControllerTestSuite) SetupTest() {
 	// meta
 	store := querycoord.NewCatalog(suite.kv)
 	idAllocator := RandomIncrementIDAllocator()
-	suite.meta = meta.NewMeta(idAllocator, store, session.NewNodeManager())
+
+	suite.nodeMgr = session.NewNodeManager()
+	suite.meta = meta.NewMeta(idAllocator, store, suite.nodeMgr)
 
 	suite.mockCluster = session.NewMockCluster(suite.T())
-	nodeManager := session.NewNodeManager()
 	distManager := meta.NewDistributionManager()
 	suite.broker = meta.NewMockBroker(suite.T())
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 	suite.mockScheduler = task.NewMockScheduler(suite.T())
-	suite.controller = NewDistController(suite.mockCluster, nodeManager, distManager, targetManager, suite.mockScheduler)
+	suite.controller = NewDistController(suite.mockCluster, suite.nodeMgr, distManager, targetManager, suite.mockScheduler)
 }
 
 func (suite *DistControllerTestSuite) TearDownSuite() {
@@ -85,6 +88,11 @@ func (suite *DistControllerTestSuite) TearDownSuite() {
 }
 
 func (suite *DistControllerTestSuite) TestStart() {
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	dispatchCalled := atomic.NewBool(false)
 	suite.mockCluster.EXPECT().GetDataDistribution(mock.Anything, mock.Anything, mock.Anything).Return(
 		&querypb.GetDataDistributionResponse{Status: merr.Success(), NodeID: 1},
@@ -133,6 +141,17 @@ func (suite *DistControllerTestSuite) TestStop() {
 }
 
 func (suite *DistControllerTestSuite) TestSyncAll() {
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   1,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
+
+	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
+		NodeID:   2,
+		Address:  "localhost",
+		Hostname: "localhost",
+	}))
 	suite.controller.StartDistInstance(context.TODO(), 1)
 	suite.controller.StartDistInstance(context.TODO(), 2)
 

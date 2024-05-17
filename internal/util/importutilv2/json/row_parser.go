@@ -354,7 +354,7 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
-		vec, err := typeutil.CreateSparseFloatRowFromJSON(arr)
+		vec, err := typeutil.CreateSparseFloatRowFromMap(arr)
 		if err != nil {
 			return nil, err
 		}

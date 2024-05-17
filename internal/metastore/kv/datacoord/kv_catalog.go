@@ -45,8 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var maxEtcdTxnNum = 128
-
 var paginationSize = 2000
 
 type Catalog struct {
@@ -341,32 +339,10 @@ func (kc *Catalog) SaveByBatch(kvs map[string]string) error {
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
-	if len(kvs) <= maxEtcdTxnNum {
-		if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
-			log.Error("failed to save by batch", zap.Error(err))
-			return err
-		}
-	} else {
-		// Split kvs into multiple operations to avoid over-sized operations.
-		// Also make sure kvs of the same segment are not split into different operations.
-		batch := make(map[string]string)
-		for k, v := range kvs {
-			if len(batch) == maxEtcdTxnNum {
-				if err := etcd.SaveByBatch(batch, saveFn); err != nil {
-					log.Error("failed to save by batch", zap.Error(err))
-					return err
-				}
-				maps.Clear(batch)
-			}
-			batch[k] = v
-		}
-
-		if len(batch) > 0 {
-			if err := etcd.SaveByBatch(batch, saveFn); err != nil {
-				log.Error("failed to save by batch", zap.Error(err))
-				return err
-			}
-		}
+	err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn)
+	if err != nil {
+		log.Error("failed to save by batch", zap.Error(err))
+		return err
 	}
 	return nil
 }
@@ -434,7 +410,7 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
-	if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
+	if err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn); err != nil {
 		return err
 	}
 

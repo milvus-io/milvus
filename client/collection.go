@@ -98,6 +98,7 @@ func (c *Client) DescribeCollection(ctx context.Context, option *describeCollect
 			VirtualChannels:  resp.GetVirtualChannelNames(),
 			ConsistencyLevel: entity.ConsistencyLevel(resp.ConsistencyLevel),
 			ShardNum:         resp.GetShardsNum(),
+			Properties:       entity.KvPairsMap(resp.GetProperties()),
 		}
 		collection.Name = collection.Schema.CollectionName
 		return nil

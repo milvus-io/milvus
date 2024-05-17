@@ -124,21 +124,17 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 		f := &MetaFactory{}
 		meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", schemapb.DataType_Int64)
 
-		t.Run("empty insert", func(t *testing.T) {
-			alloc := allocator.NewMockAllocator(t)
-			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
-			iCodec := storage.NewInsertCodecWithSchema(meta)
-			paths, err := uploadInsertLog(context.Background(), binlogIO, alloc, meta.GetID(), 10, 1, genEmptyInsertData(), iCodec)
-			assert.NoError(t, err)
-			assert.Nil(t, paths)
-		})
-
 		t.Run("gen insert blob failed", func(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 			iCodec := storage.NewInsertCodecWithSchema(meta)
+			var partId int64 = 10
+			var segId int64 = 1
+			iData := genInsertData(2)
+			blobs, err := iCodec.Serialize(10, 1, iData)
+			assert.NoError(t, err)
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(nil, fmt.Errorf("mock err"))
-			_, err := uploadInsertLog(context.Background(), binlogIO, alloc, meta.GetID(), 10, 1, genInsertData(2), iCodec)
+			_, err = uploadInsertLog(context.Background(), binlogIO, alloc, meta.GetID(), partId, segId, blobs)
 			assert.Error(t, err)
 		})
 
@@ -147,13 +143,18 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 			alloc := allocator.NewMockAllocator(t)
 			binlogIO := io.NewBinlogIO(mkc, getOrCreateIOPool())
 			iCodec := storage.NewInsertCodecWithSchema(meta)
+			var partId int64 = 1
+			var segId int64 = 10
+			iData := genInsertData(2)
+			blobs, err := iCodec.Serialize(10, 1, iData)
+			assert.NoError(t, err)
 
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Call.Return(validGeneratorFn, nil)
 
 			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
 			defer cancel()
 
-			_, err := uploadInsertLog(ctx, binlogIO, alloc, meta.GetID(), 1, 10, genInsertData(2), iCodec)
+			_, err = uploadInsertLog(ctx, binlogIO, alloc, meta.GetID(), partId, segId, blobs)
 			assert.Error(t, err)
 		})
 	})
@@ -256,9 +257,13 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 			t.Run(test.description, func(t *testing.T) {
 				meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", test.pkType)
 				iCodec := storage.NewInsertCodecWithSchema(meta)
-
+				var partId int64 = 10
+				var segId int64 = 1
+				iData := genInsertData(2)
+				blobs, err := iCodec.Serialize(10, 1, iData)
+				assert.NoError(t, err)
 				kvs := make(map[string][]byte)
-				pin, err := genInsertBlobs(binlogIO, alloc, genInsertData(2), meta.GetID(), 10, 1, iCodec, kvs)
+				pin, err := genInsertBlobs(binlogIO, alloc, blobs, meta.GetID(), partId, segId, kvs)
 
 				assert.NoError(t, err)
 				assert.Equal(t, 12, len(pin))
@@ -277,30 +282,22 @@ func TestBinlogIOInnerMethods(t *testing.T) {
 		cm := storage.NewLocalChunkManager(storage.RootPath(binlogTestDir))
 		defer cm.RemoveWithPrefix(ctx, cm.RootPath())
 
-		t.Run("serialize error", func(t *testing.T) {
-			iCodec := storage.NewInsertCodecWithSchema(nil)
-
-			alloc := allocator.NewMockAllocator(t)
-			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
-			kvs := make(map[string][]byte)
-			pin, err := genInsertBlobs(binlogIO, alloc, genEmptyInsertData(), 0, 10, 1, iCodec, kvs)
-
-			assert.Error(t, err)
-			assert.Empty(t, kvs)
-			assert.Empty(t, pin)
-		})
-
 		t.Run("GetGenerator error", func(t *testing.T) {
 			f := &MetaFactory{}
 			meta := f.GetCollectionMeta(UniqueID(10001), "test_gen_blobs", schemapb.DataType_Int64)
 			iCodec := storage.NewInsertCodecWithSchema(meta)
+			var partId int64 = 10
+			var segId int64 = 1
+			iData := genInsertData(2)
+			blobs, err := iCodec.Serialize(partId, segId, iData)
+			assert.NoError(t, err)
 
 			alloc := allocator.NewMockAllocator(t)
 			alloc.EXPECT().GetGenerator(mock.Anything, mock.Anything).Return(nil, fmt.Errorf("mock GetGenerator error"))
 			binlogIO := io.NewBinlogIO(cm, getOrCreateIOPool())
 			kvs := make(map[string][]byte)
 
-			pin, err := genInsertBlobs(binlogIO, alloc, genInsertData(2), meta.GetID(), 10, 1, iCodec, kvs)
+			pin, err := genInsertBlobs(binlogIO, alloc, blobs, meta.GetID(), partId, segId, kvs)
 
 			assert.Error(t, err)
 			assert.Empty(t, kvs)

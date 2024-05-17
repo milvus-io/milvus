@@ -124,7 +124,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 	})
 
 	t.Run("test serialize", func(t *testing.T) {
-		size := 3
+		size := 16
 		blobs, err := generateTestData(size)
 		assert.NoError(t, err)
 		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
@@ -134,7 +134,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 		schema := generateTestSchema()
 		// Copy write the generated data
 		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
-		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 1024)
+		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 7)
 		assert.NoError(t, err)
 
 		for i := 1; i <= size; i++ {
@@ -143,7 +143,8 @@ func TestBinlogSerializeWriter(t *testing.T) {
 
 			value := reader.Value()
 			assertTestData(t, i, value)
-			writer.Write(value)
+			err := writer.Write(value)
+			assert.NoError(t, err)
 		}
 
 		err = reader.Next()
