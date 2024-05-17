@@ -25,6 +25,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
+func (c *Client) UsingDatabase(ctx context.Context, option UsingDatabaseOption) error {
+	dbName := option.DbName()
+	c.usingDatabase(dbName)
+	return c.connectInternal(ctx)
+}
+
 func (c *Client) ListDatabase(ctx context.Context, option ListDatabaseOption, callOptions ...grpc.CallOption) (databaseNames []string, err error) {
 	req := option.Request()
 
