@@ -245,6 +245,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 			node.allocator,
 			ds.metacache,
 			node.syncMgr,
+			node.chunkManager,
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
