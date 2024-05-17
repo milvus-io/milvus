@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -596,7 +597,7 @@ func (ss *SuffixSnapshot) batchRemoveExpiredKvs(keyGroup []string, originalKey s
 	removeFn := func(partialKeys []string) error {
 		return ss.MetaKv.MultiRemove(keyGroup)
 	}
-	return etcd.RemoveByBatch(keyGroup, removeFn)
+	return etcd.RemoveByBatchWithLimit(keyGroup, util.MaxEtcdTxnNum, removeFn)
 }
 
 func (ss *SuffixSnapshot) removeExpiredKvs(now time.Time) error {
