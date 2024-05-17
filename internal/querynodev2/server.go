@@ -130,6 +130,10 @@ type QueryNode struct {
 
 	// parameter turning hook
 	queryHook optimizers.QueryHook
+
+	// record the last modify ts of segment/channel distribution
+	lastModifyLock sync.RWMutex
+	lastModifyTs   int64
 }
 
 // NewQueryNode will return a QueryNode with abnormal state.
