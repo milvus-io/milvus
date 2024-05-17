@@ -1042,14 +1042,20 @@ func TestSTream_MqMsgStream_SeekBadMessageID(t *testing.T) {
 		seekPosition = result.EndPositions[0]
 	}
 
+	// produce timetick for mqtt msgstream seek
+	msgPack = &MsgPack{}
+	msgPack.Msgs = append(msgPack.Msgs, getTimeTickMsg(1000))
+	err = inputStream.Produce(msgPack)
+	assert.NoError(t, err)
+
 	factory := ProtoUDFactory{}
 	pulsarClient, _ := pulsarwrapper.NewClient(DefaultPulsarTenant, DefaultPulsarNamespace, pulsar.ClientOptions{URL: pulsarAddress})
 	outputStream2, _ := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
 	outputStream2.AsConsumer(ctx, consumerChannels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionLatest)
 	defer outputStream2.Close()
 
-	outputStream3, err := NewMqMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
-	outputStream3.AsConsumer(ctx, consumerChannels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionLatest)
+	outputStream3, err := NewMqTtMsgStream(ctx, 100, 100, pulsarClient, factory.NewUnmarshalDispatcher())
+	outputStream3.AsConsumer(ctx, consumerChannels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionEarliest)
 	require.NoError(t, err)
 
 	defer paramtable.Get().Reset(paramtable.Get().MQCfg.IgnoreBadPosition.Key)

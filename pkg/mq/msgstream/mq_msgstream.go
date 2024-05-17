@@ -839,24 +839,24 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 	var consumer mqwrapper.Consumer
 	var mp *MsgPosition
 	var err error
-	fn := func() error {
+	fn := func() (bool, error) {
 		var ok bool
 		consumer, ok = ms.consumers[mp.ChannelName]
 		if !ok {
-			return fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
+			return false, fmt.Errorf("please subcribe the channel, channel name =%s", mp.ChannelName)
 		}
 
 		if consumer == nil {
-			return fmt.Errorf("consumer is nil")
+			return false, fmt.Errorf("consumer is nil")
 		}
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
 			if paramtable.Get().MQCfg.IgnoreBadPosition.GetAsBool() {
 				log.Ctx(ctx).Warn("Ignoring bad message id", zap.Error(err))
-				return nil
+				return false, nil
 			}
-			return err
+			return false, err
 		}
 		log.Info("MsgStream begin to seek start msg: ", zap.String("channel", mp.ChannelName), zap.Any("MessageID", mp.MsgID))
 		err = consumer.Seek(seekMsgID, true)
@@ -864,13 +864,13 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 			log.Warn("Failed to seek", zap.String("channel", mp.ChannelName), zap.Error(err))
 			// stop retry if consumer topic not exist
 			if errors.Is(err, merr.ErrMqTopicNotFound) {
-				return retry.Unrecoverable(err)
+				return false, err
 			}
-			return err
+			return true, err
 		}
 		log.Info("MsgStream seek finished", zap.String("channel", mp.ChannelName))
 
-		return nil
+		return false, nil
 	}
 
 	ms.consumerLock.Lock()
@@ -881,7 +881,8 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 		if len(mp.MsgID) == 0 {
 			return fmt.Errorf("when msgID's length equal to 0, please use AsConsumer interface")
 		}
-		err = retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		err = retry.Handle(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
+		// err = retry.Do(ctx, fn, retry.Attempts(20), retry.Sleep(time.Millisecond*200), retry.MaxSleepTime(5*time.Second))
 		if err != nil {
 			return fmt.Errorf("failed to seek, error %s", err.Error())
 		}
