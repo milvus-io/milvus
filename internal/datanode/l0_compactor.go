@@ -183,7 +183,7 @@ func (t *levelZeroCompactionTask) linearProcess(ctx context.Context, targetSegme
 	log := log.Ctx(t.ctx).With(
 		zap.Int64("planID", t.plan.GetPlanID()),
 		zap.String("type", t.plan.GetType().String()),
-		zap.Int("target segment counts", len(l1Segments)),
+		zap.Int("target segment counts", len(targetSegments)),
 	)
 
 	// just for logging
@@ -232,7 +232,7 @@ func (t *levelZeroCompactionTask) batchProcess(ctx context.Context, targetSegmen
 	log := log.Ctx(t.ctx).With(
 		zap.Int64("planID", t.plan.GetPlanID()),
 		zap.String("type", t.plan.GetType().String()),
-		zap.Int("target segment counts", len(l1Segments)),
+		zap.Int("target segment counts", len(targetSegments)),
 	)
 
 	// just for logging

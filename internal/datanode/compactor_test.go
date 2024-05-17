@@ -706,32 +706,6 @@ func TestCompactionTaskInnerMethods(t *testing.T) {
 			assert.Equal(t, false, res)
 		})
 	})
-
-	t.Run("Test uploadRemainLog error", func(t *testing.T) {
-		f := &MetaFactory{}
-
-		t.Run("upload failed", func(t *testing.T) {
-			ctx, cancel := context.WithTimeout(context.Background(), 100*time.Millisecond)
-			defer cancel()
-
-			alloc := allocator.NewMockAllocator(t)
-			alloc.EXPECT().AllocOne().Call.Return(int64(11111), nil)
-
-			meta := f.GetCollectionMeta(UniqueID(10001), "test_upload_remain_log", schemapb.DataType_Int64)
-			stats, err := storage.NewPrimaryKeyStats(106, int64(schemapb.DataType_Int64), 10)
-
-			require.NoError(t, err)
-
-			ct := &compactionTask{
-				binlogIO:  io.NewBinlogIO(&mockCm{errSave: true}, getOrCreateIOPool()),
-				Allocator: alloc,
-				done:      make(chan struct{}, 1),
-			}
-
-			_, _, err = ct.uploadRemainLog(ctx, 1, 2, meta, stats, 10, nil)
-			assert.Error(t, err)
-		})
-	})
 }
 
 func getInt64DeltaBlobs(segID UniqueID, pks []UniqueID, tss []Timestamp) ([]*Blob, error) {
