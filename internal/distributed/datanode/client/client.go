@@ -255,3 +255,9 @@ func (c *Client) DropImport(ctx context.Context, req *datapb.DropImportRequest, 
 		return client.DropImport(ctx, req)
 	})
 }
+
+func (c *Client) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest, opts ...grpc.CallOption) (*datapb.QuerySlotResponse, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataNodeClient) (*datapb.QuerySlotResponse, error) {
+		return client.QuerySlot(ctx, req)
+	})
+}
