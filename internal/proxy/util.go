@@ -1123,9 +1123,10 @@ func isPartitionLoaded(ctx context.Context, qc types.QueryCoordClient, collID in
 	return false, nil
 }
 
-func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
-	requiredFieldsNum := 0
+func checkFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstream.InsertMsg) error {
+	log := log.With(zap.String("collection", schema.GetName()))
 	primaryKeyNum := 0
+	autoGenFieldNum := 0
 
 	dataNameSet := typeutil.NewSet[string]()
 	for _, data := range insertMsg.FieldsData {
@@ -1141,24 +1142,24 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 			log.Warn("not primary key field, but set autoID true", zap.String("field", fieldSchema.GetName()))
 			return merr.WrapErrParameterInvalidMsg("only primary key could be with AutoID enabled")
 		}
+		if fieldSchema.IsPrimaryKey {
+			primaryKeyNum++
+		}
 		if fieldSchema.GetDefaultValue() != nil && fieldSchema.IsPrimaryKey {
 			return merr.WrapErrParameterInvalidMsg("primary key can't be with default value")
 		}
-		if !fieldSchema.AutoID {
-			requiredFieldsNum++
-		}
-
-		if fieldSchema.AutoID && Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() {
-			requiredFieldsNum++
-		}
-		// if has no field pass in, consider use default value
-		// so complete it with field schema
 		if _, ok := dataNameSet[fieldSchema.GetName()]; !ok {
-			// primary key can not use default value
-			if fieldSchema.IsPrimaryKey {
-				primaryKeyNum++
+			if fieldSchema.IsPrimaryKey && fieldSchema.AutoID && !Params.ProxyCfg.SkipAutoIDCheck.GetAsBool() {
+				// no need to pass when pk is autoid and SkipAutoIDCheck is false
+				autoGenFieldNum++
 				continue
 			}
+			if fieldSchema.GetDefaultValue() == nil && !fieldSchema.GetNullable() {
+				log.Warn("no corresponding fieldData pass in", zap.String("fieldSchema", fieldSchema.GetName()))
+				return merr.WrapErrParameterInvalidMsg("fieldSchema(%s) has no corresponding fieldData pass in", fieldSchema.GetName())
+			}
+			// when use default_value or has set Nullable
+			// it's ok that no corresponding fieldData found
 			dataToAppend := &schemapb.FieldData{
 				Type:      fieldSchema.GetDataType(),
 				FieldName: fieldSchema.GetName(),
@@ -1169,17 +1170,15 @@ func fillFieldsDataBySchema(schema *schemapb.CollectionSchema, insertMsg *msgstr
 
 	if primaryKeyNum > 1 {
 		log.Warn("more than 1 primary keys not supported",
-			zap.Int64("primaryKeyNum", int64(primaryKeyNum)),
-			zap.String("collection", schema.GetName()))
+			zap.Int64("primaryKeyNum", int64(primaryKeyNum)))
 		return merr.WrapErrParameterInvalidMsg("more than 1 primary keys not supported, got %d", primaryKeyNum)
 	}
 
-	if len(insertMsg.FieldsData) != requiredFieldsNum {
-		log.Warn("the number of fields is not the same as needed",
-			zap.Int("fieldNum", len(insertMsg.FieldsData)),
-			zap.Int("requiredFieldNum", requiredFieldsNum),
-			zap.String("collection", schema.GetName()))
-		return merr.WrapErrParameterInvalid(requiredFieldsNum, len(insertMsg.FieldsData), "the number of fields is less than needed")
+	expectedNum := len(schema.Fields)
+	actualNum := autoGenFieldNum + len(insertMsg.FieldsData)
+	if expectedNum != actualNum {
+		log.Warn("the number of fields is not the same as needed", zap.Int("expected", expectedNum), zap.Int("actual", actualNum))
+		return merr.WrapErrParameterInvalid(expectedNum, actualNum, "more fieldData has pass in")
 	}
 
 	return nil
@@ -1192,7 +1191,7 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 		return nil, merr.WrapErrParameterInvalid("invalid num_rows", fmt.Sprint(rowNums), "num_rows should be greater than 0")
 	}
 
-	if err := fillFieldsDataBySchema(schema, insertMsg); err != nil {
+	if err := checkFieldsDataBySchema(schema, insertMsg); err != nil {
 		return nil, err
 	}
 
@@ -1200,6 +1199,9 @@ func checkPrimaryFieldData(schema *schemapb.CollectionSchema, result *milvuspb.M
 	if err != nil {
 		log.Error("get primary field schema failed", zap.String("collectionName", insertMsg.CollectionName), zap.Any("schema", schema), zap.Error(err))
 		return nil, err
+	}
+	if primaryFieldSchema.GetNullable() {
+		return nil, merr.WrapErrParameterInvalidMsg("primary field not support null")
 	}
 	// get primaryFieldData whether autoID is true or not
 	var primaryFieldData *schemapb.FieldData
@@ -1470,15 +1472,6 @@ func assignPartitionKeys(ctx context.Context, dbName string, collName string, ke
 
 	hashedPartitionNames, err := typeutil2.HashKey2Partitions(partitionKeyFieldSchema, keys, partitionNames)
 	return hashedPartitionNames, err
-}
-
-func memsetLoop[T any](v T, numRows int) []T {
-	ret := make([]T, 0, numRows)
-	for i := 0; i < numRows; i++ {
-		ret = append(ret, v)
-	}
-
-	return ret
 }
 
 func ErrWithLog(logger *log.MLogger, msg string, err error) error {

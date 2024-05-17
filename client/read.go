@@ -33,7 +33,7 @@ type ResultSets struct{}
 
 type ResultSet struct {
 	ResultCount  int // the returning entry count
-	GroupByValue any
+	GroupByValue column.Column
 	IDs          column.Column // auto generated id, can be mapped to the columns from `Insert` API
 	Fields       DataSet       // output field data
 	Scores       []float32     // distance to the target vector
@@ -67,34 +67,31 @@ func (c *Client) Search(ctx context.Context, option SearchOption, callOptions ..
 }
 
 func (c *Client) handleSearchResult(schema *entity.Schema, outputFields []string, nq int, resp *milvuspb.SearchResults) ([]ResultSet, error) {
-	var err error
 	sr := make([]ResultSet, 0, nq)
 	results := resp.GetResults()
 	offset := 0
 	fieldDataList := results.GetFieldsData()
 	gb := results.GetGroupByFieldValue()
-	var gbc column.Column
-	if gb != nil {
-		gbc, err = column.FieldDataColumn(gb, 0, -1)
-		if err != nil {
-			return nil, err
-		}
-	}
 	for i := 0; i < int(results.GetNumQueries()); i++ {
 		rc := int(results.GetTopks()[i]) // result entry count for current query
 		entry := ResultSet{
 			ResultCount: rc,
 			Scores:      results.GetScores()[offset : offset+rc],
 		}
-		if gbc != nil {
-			entry.GroupByValue, _ = gbc.Get(i)
-		}
 		// parse result set if current nq is not empty
 		if rc > 0 {
-			entry.IDs, entry.Err = column.IDColumns(results.GetIds(), offset, offset+rc)
+			entry.IDs, entry.Err = column.IDColumns(schema, results.GetIds(), offset, offset+rc)
 			if entry.Err != nil {
 				offset += rc
 				continue
+			}
+			// parse group-by values
+			if gb != nil {
+				entry.GroupByValue, entry.Err = column.FieldDataColumn(gb, offset, offset+rc)
+				if entry.Err != nil {
+					offset += rc
+					continue
+				}
 			}
 			entry.Fields, entry.Err = c.parseSearchResult(schema, outputFields, fieldDataList, i, offset, offset+rc)
 			sr = append(sr, entry)

@@ -131,6 +131,7 @@ func TestAccessLogger_Basic(t *testing.T) {
 	Params.Init(paramtable.NewBaseTable(paramtable.SkipRemote(true)))
 	testPath := "/tmp/accesstest"
 	Params.Save(Params.ProxyCfg.AccessLog.Enable.Key, "true")
+	Params.Save(Params.ProxyCfg.AccessLog.CacheSize.Key, "1024")
 	Params.Save(Params.ProxyCfg.AccessLog.LocalPath.Key, testPath)
 	defer os.RemoveAll(testPath)
 

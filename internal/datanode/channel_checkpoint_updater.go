@@ -25,6 +25,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -41,7 +42,7 @@ type channelCPUpdateTask struct {
 }
 
 type channelCheckpointUpdater struct {
-	dn *DataNode
+	broker broker.Broker
 
 	mu         sync.RWMutex
 	tasks      map[string]*channelCPUpdateTask
@@ -51,9 +52,9 @@ type channelCheckpointUpdater struct {
 	closeOnce sync.Once
 }
 
-func newChannelCheckpointUpdater(dn *DataNode) *channelCheckpointUpdater {
+func newChannelCheckpointUpdater(broker broker.Broker) *channelCheckpointUpdater {
 	return &channelCheckpointUpdater{
-		dn:         dn,
+		broker:     broker,
 		tasks:      make(map[string]*channelCPUpdateTask),
 		closeCh:    make(chan struct{}),
 		notifyChan: make(chan struct{}, 1),
@@ -124,7 +125,7 @@ func (ccu *channelCheckpointUpdater) updateCheckpoints(tasks []*channelCPUpdateT
 				channelCPs := lo.Map(tasks, func(t *channelCPUpdateTask, _ int) *msgpb.MsgPosition {
 					return t.pos
 				})
-				err := ccu.dn.broker.UpdateChannelCheckpoint(ctx, channelCPs)
+				err := ccu.broker.UpdateChannelCheckpoint(ctx, channelCPs)
 				if err != nil {
 					log.Warn("update channel checkpoint failed", zap.Error(err))
 					return

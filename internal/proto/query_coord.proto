@@ -589,6 +589,7 @@ message SealedSegmentsChangeInfo {
 message GetDataDistributionRequest {
     common.MsgBase base = 1;
     map<string, msg.MsgPosition> checkpoints = 2;
+    int64 lastUpdateTs = 3;
 }
 
 message GetDataDistributionResponse {
@@ -597,6 +598,7 @@ message GetDataDistributionResponse {
     repeated SegmentVersionInfo segments = 3;
     repeated ChannelVersionInfo channels = 4;
     repeated LeaderView leader_views = 5;
+    int64 lastModifyTs = 6;
 }
 
 message LeaderView {

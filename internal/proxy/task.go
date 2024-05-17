@@ -661,6 +661,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 				IsClusteringKey: field.IsClusteringKey,
 				DefaultValue:    field.DefaultValue,
 				ElementType:     field.ElementType,
+				Nullable:        field.Nullable,
 			})
 		}
 	}
