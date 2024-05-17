@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -40,16 +39,17 @@ import (
 )
 
 type distHandler struct {
-	nodeID      int64
-	c           chan struct{}
-	wg          sync.WaitGroup
-	client      session.Cluster
-	nodeManager *session.NodeManager
-	scheduler   task.Scheduler
-	dist        *meta.DistributionManager
-	target      *meta.TargetManager
-	mu          sync.Mutex
-	stopOnce    sync.Once
+	nodeID       int64
+	c            chan struct{}
+	wg           sync.WaitGroup
+	client       session.Cluster
+	nodeManager  *session.NodeManager
+	scheduler    task.Scheduler
+	dist         *meta.DistributionManager
+	target       meta.TargetManagerInterface
+	mu           sync.Mutex
+	stopOnce     sync.Once
+	lastUpdateTs int64
 }
 
 func (dh *distHandler) start(ctx context.Context) {
@@ -87,21 +87,31 @@ func (dh *distHandler) start(ctx context.Context) {
 
 func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse) {
 	node := dh.nodeManager.Get(resp.GetNodeID())
-	if node != nil {
+	if node == nil {
+		return
+	}
+
+	if time.Since(node.LastHeartbeat()) > paramtable.Get().QueryCoordCfg.HeartBeatWarningLag.GetAsDuration(time.Millisecond) {
+		log.Warn("node last heart beat time lag too behind", zap.Time("now", time.Now()),
+			zap.Time("lastHeartBeatTime", node.LastHeartbeat()), zap.Int64("nodeID", node.ID()))
+	}
+	node.SetLastHeartbeat(time.Now())
+
+	// skip  update dist if no distribution change happens in query node
+	if resp.GetLastModifyTs() <= dh.lastUpdateTs {
+		log.RatedInfo(30, "skip update dist due to no distribution change", zap.Int64("lastModifyTs", resp.GetLastModifyTs()), zap.Int64("lastUpdateTs", dh.lastUpdateTs))
+	} else {
+		dh.lastUpdateTs = resp.GetLastModifyTs()
+
 		node.UpdateStats(
 			session.WithSegmentCnt(len(resp.GetSegments())),
 			session.WithChannelCnt(len(resp.GetChannels())),
 		)
-		if time.Since(node.LastHeartbeat()) > paramtable.Get().QueryCoordCfg.HeartBeatWarningLag.GetAsDuration(time.Millisecond) {
-			log.Warn("node last heart beat time lag too behind", zap.Time("now", time.Now()),
-				zap.Time("lastHeartBeatTime", node.LastHeartbeat()), zap.Int64("nodeID", node.ID()))
-		}
-		node.SetLastHeartbeat(time.Now())
-	}
 
-	dh.updateSegmentsDistribution(resp)
-	dh.updateChannelsDistribution(resp)
-	dh.updateLeaderView(resp)
+		dh.updateSegmentsDistribution(resp)
+		dh.updateChannelsDistribution(resp)
+		dh.updateLeaderView(resp)
+	}
 
 	dh.scheduler.Dispatch(dh.nodeID)
 }
@@ -214,23 +224,13 @@ func (dh *distHandler) getDistribution(ctx context.Context) (*querypb.GetDataDis
 	dh.mu.Lock()
 	defer dh.mu.Unlock()
 
-	channels := make(map[string]*msgpb.MsgPosition)
-	for _, channel := range dh.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(dh.nodeID)) {
-		targetChannel := dh.target.GetDmChannel(channel.GetCollectionID(), channel.GetChannelName(), meta.CurrentTarget)
-		if targetChannel == nil {
-			continue
-		}
-
-		channels[channel.GetChannelName()] = targetChannel.GetSeekPosition()
-	}
-
 	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.DistributionRequestTimeout.GetAsDuration(time.Millisecond))
 	defer cancel()
 	resp, err := dh.client.GetDataDistribution(ctx, dh.nodeID, &querypb.GetDataDistributionRequest{
 		Base: commonpbutil.NewMsgBase(
 			commonpbutil.WithMsgType(commonpb.MsgType_GetDistribution),
 		),
-		Checkpoints: channels,
+		LastUpdateTs: dh.lastUpdateTs,
 	})
 	if err != nil {
 		return nil, err
@@ -259,7 +259,7 @@ func newDistHandler(
 	nodeManager *session.NodeManager,
 	scheduler task.Scheduler,
 	dist *meta.DistributionManager,
-	targetMgr *meta.TargetManager,
+	targetMgr meta.TargetManagerInterface,
 ) *distHandler {
 	h := &distHandler{
 		nodeID:      nodeID,
