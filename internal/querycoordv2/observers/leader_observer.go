@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	task2 "github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -44,6 +45,7 @@ type LeaderObserver struct {
 	cluster session.Cluster
 	nodeMgr *session.NodeManager
 
+	scheduler  task2.Scheduler
 	dispatcher *taskDispatcher[int64]
 
 	stopOnce sync.Once
@@ -126,7 +128,23 @@ func (o *LeaderObserver) observeCollection(ctx context.Context, collection int64
 
 			actions := o.findNeedLoadedSegments(leaderView, dists)
 			actions = append(actions, o.findNeedRemovedSegments(leaderView, dists)...)
-			o.sync(ctx, replica.GetID(), leaderView, actions)
+			// Try to add a sync task to scheduler and block concurrent segment tasks to avoid inconsistent state
+			executableActions := make([]*querypb.SyncAction, 0)
+			for _, action := range actions {
+				segmentID := action.SegmentID
+				replicaID := replica.ID
+				if ok := o.scheduler.Sync(segmentID, replicaID); !ok {
+					continue
+				}
+				defer func() {
+					o.scheduler.RemoveSync(segmentID, replicaID)
+				}()
+				executableActions = append(executableActions, action)
+			}
+			if len(executableActions) == 0 {
+				continue
+			}
+			o.sync(ctx, replica.GetID(), leaderView, executableActions)
 		}
 	}
 }
@@ -273,14 +291,16 @@ func NewLeaderObserver(
 	broker meta.Broker,
 	cluster session.Cluster,
 	nodeMgr *session.NodeManager,
+	scheduler task2.Scheduler,
 ) *LeaderObserver {
 	ob := &LeaderObserver{
-		dist:    dist,
-		meta:    meta,
-		target:  targetMgr,
-		broker:  broker,
-		cluster: cluster,
-		nodeMgr: nodeMgr,
+		dist:      dist,
+		meta:      meta,
+		target:    targetMgr,
+		broker:    broker,
+		cluster:   cluster,
+		nodeMgr:   nodeMgr,
+		scheduler: scheduler,
 	}
 
 	dispatcher := newTaskDispatcher[int64](ob.observeCollection)

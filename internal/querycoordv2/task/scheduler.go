@@ -137,6 +137,8 @@ type Scheduler interface {
 	GetNodeChannelDelta(nodeID int64) int
 	GetChannelTaskNum() int
 	GetSegmentTaskNum() int
+	Sync(segmentID, replicaID int64) bool
+	RemoveSync(segmentID, replicaID int64)
 }
 
 type taskScheduler struct {
@@ -157,6 +159,8 @@ type taskScheduler struct {
 	channelTasks map[replicaChannelIndex]Task
 	processQueue *taskQueue
 	waitQueue    *taskQueue
+
+	syncTasks map[replicaSegmentIndex]struct{}
 }
 
 func NewScheduler(ctx context.Context,
@@ -188,6 +192,7 @@ func NewScheduler(ctx context.Context,
 		channelTasks: make(map[replicaChannelIndex]Task),
 		processQueue: newTaskQueue(),
 		waitQueue:    newTaskQueue(),
+		syncTasks:    make(map[replicaSegmentIndex]struct{}),
 	}
 }
 
@@ -240,6 +245,35 @@ func (scheduler *taskScheduler) RemoveExecutor(nodeID int64) {
 		delete(scheduler.executors, nodeID)
 		log.Info("remove executor of offline QueryNode", zap.Int64("nodeID", nodeID))
 	}
+}
+
+func (scheduler *taskScheduler) Sync(segmentID, replicaID int64) bool {
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	t := replicaSegmentIndex{
+		ReplicaID: replicaID,
+		SegmentID: segmentID,
+		IsGrowing: false,
+	}
+	if _, ok := scheduler.segmentTasks[t]; ok {
+		return false
+	}
+
+	scheduler.syncTasks[t] = struct{}{}
+	return true
+}
+
+func (scheduler *taskScheduler) RemoveSync(segmentID, replicaID int64) {
+	scheduler.rwmutex.Lock()
+	defer scheduler.rwmutex.Unlock()
+
+	t := replicaSegmentIndex{
+		ReplicaID: replicaID,
+		SegmentID: segmentID,
+		IsGrowing: false,
+	}
+	delete(scheduler.syncTasks, t)
 }
 
 func (scheduler *taskScheduler) Add(task Task) error {
@@ -311,6 +345,9 @@ func (scheduler *taskScheduler) preAdd(task Task) error {
 	switch task := task.(type) {
 	case *SegmentTask:
 		index := NewReplicaSegmentIndex(task)
+		if _, ok := scheduler.syncTasks[index]; ok {
+			return merr.WrapErrServiceInternal("task with the same segment exists")
+		}
 		if old, ok := scheduler.segmentTasks[index]; ok {
 			if task.Priority() > old.Priority() {
 				log.Info("replace old task, the new one with higher priority",
