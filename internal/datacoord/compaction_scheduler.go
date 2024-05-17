@@ -64,12 +64,12 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 
 // Schedule pick 1 or 0 tasks for 1 node
 func (s *CompactionScheduler) Schedule() []*compactionTask {
-	s.taskGuard.Lock()
+	s.taskGuard.RLock()
 	if len(s.queuingTasks) == 0 {
-		s.taskGuard.Unlock()
+		s.taskGuard.RUnlock()
 		return nil // To mitigate the need for frequent slot querying
 	}
-	s.taskGuard.Unlock()
+	s.taskGuard.RUnlock()
 
 	nodeSlots := s.cluster.QuerySlots()
 
