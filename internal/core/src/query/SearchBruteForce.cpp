@@ -80,29 +80,14 @@ BruteForceSearch(const dataset::SearchDataset& dataset,
     auto base_dataset = knowhere::GenDataSet(chunk_rows, dim, chunk_data_raw);
     auto query_dataset = knowhere::GenDataSet(nq, dim, dataset.query_data);
     auto search_cfg = PrepareBFSearchParams(search_info);
-
+if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
+        base_dataset->SetIsSparse(true);
+        query_dataset->SetIsSparse(true);
+    }
     sub_result.mutable_seg_offsets().resize(nq * topk);
     sub_result.mutable_distances().resize(nq * topk);
 
-    if (data_type == DataType::VECTOR_SPARSE_FLOAT) {
-        // TODO(SPARSE): support sparse brute force range search
-        AssertInfo(
-            !search_cfg.contains(RADIUS) && !search_cfg.contains(RANGE_FILTER),
-            "sparse vector not support range search");
-        base_dataset->SetIsSparse(true);
-        query_dataset->SetIsSparse(true);
-        auto stat = knowhere::BruteForce::SearchSparseWithBuf(
-            base_dataset,
-            query_dataset,
-            sub_result.mutable_seg_offsets().data(),
-            sub_result.mutable_distances().data(),
-            search_cfg,
-            bitset);
-        milvus::tracer::AddEvent("knowhere_finish_BruteForce_SearchWithBuf");
-        if (stat != knowhere::Status::success) {
-            throw SegcoreError(KnowhereError, KnowhereStatusString(stat));
-        }
-    } else if (search_cfg.contains(RADIUS)) {
+
         if (search_cfg.contains(RANGE_FILTER)) {
             CheckRangeSearchParam(search_cfg[RADIUS],
                                   search_cfg[RANGE_FILTER],
