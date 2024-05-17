@@ -17,6 +17,7 @@
 package typeutil
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/json"
 	"fmt"
@@ -1535,18 +1536,13 @@ func CreateSparseFloatRow(indices []uint32, values []float32) []byte {
 	return row
 }
 
-type sparseFloatVectorJSONRepresentation struct {
-	Indices []uint32  `json:"indices"`
-	Values  []float32 `json:"values"`
-}
-
 // accepted format:
 //   - {"indices": [1, 2, 3], "values": [0.1, 0.2, 0.3]}    # format1
 //   - {"1": 0.1, "2": 0.2, "3": 0.3}                       # format2
 //
 // we don't require the indices to be sorted from user input, but the returned
 // byte representation must have indices sorted
-func CreateSparseFloatRowFromJSON(input map[string]interface{}) ([]byte, error) {
+func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 	var indices []uint32
 	var values []float32
 
@@ -1599,6 +1595,17 @@ func CreateSparseFloatRowFromJSON(input map[string]interface{}) ([]byte, error) 
 		return nil, err
 	}
 	return row, nil
+}
+
+func CreateSparseFloatRowFromJSON(input []byte) ([]byte, error) {
+	var vec map[string]interface{}
+	decoder := json.NewDecoder(bytes.NewReader(input))
+	decoder.DisallowUnknownFields()
+	err := decoder.Decode(&vec)
+	if err != nil {
+		return nil, err
+	}
+	return CreateSparseFloatRowFromMap(vec)
 }
 
 // dim of a sparse float vector is the maximum/last index + 1
