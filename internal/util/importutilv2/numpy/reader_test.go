@@ -19,6 +19,7 @@ package numpy
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"math"
@@ -171,6 +172,23 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 				copy(chunkedRows[i][:], innerSlice[:])
 			}
 			reader, err := CreateReader(chunkedRows)
+			suite.NoError(err)
+			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+				Reader: reader,
+			}, nil)
+		case schemapb.DataType_SparseFloatVector:
+			jsonStrs := make([]string, 0, fieldData.RowNum())
+			for i := 0; i < fieldData.RowNum(); i++ {
+				row := fieldData.GetRow(i)
+				mapData := typeutil.SparseFloatBytesToMap(row.([]byte))
+				// convert to JSON format
+				jsonBytes, err := json.Marshal(mapData)
+				if err != nil {
+					panic(err)
+				}
+				jsonStrs = append(jsonStrs, string(jsonBytes))
+			}
+			reader, err := CreateReader(jsonStrs)
 			suite.NoError(err)
 			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
 				Reader: reader,
@@ -357,8 +375,8 @@ func (suite *ReaderSuite) TestVector() {
 	suite.run(schemapb.DataType_Int32)
 	suite.vecDataType = schemapb.DataType_BFloat16Vector
 	suite.run(schemapb.DataType_Int32)
-	// suite.vecDataType = schemapb.DataType_SparseFloatVector
-	// suite.run(schemapb.DataType_Int32)
+	suite.vecDataType = schemapb.DataType_SparseFloatVector
+	suite.run(schemapb.DataType_Int32)
 }
 
 func TestUtil(t *testing.T) {

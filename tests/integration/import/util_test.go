@@ -105,6 +105,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 		path := fmt.Sprintf("%s/%s.npy", cm.RootPath(), field.GetName())
 
 		fieldID := field.GetFieldID()
+		fieldData := insertData.Data[fieldID]
 		dType := field.GetDataType()
 		switch dType {
 		case schemapb.DataType_Bool:
@@ -179,7 +180,18 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			}
 			data = bfloat16VecData
 		case schemapb.DataType_SparseFloatVector:
-			data = insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
+			jsonStrs := make([]string, 0, fieldData.RowNum())
+			for i := 0; i < fieldData.RowNum(); i++ {
+				row := fieldData.GetRow(i)
+				mapData := typeutil.SparseFloatBytesToMap(row.([]byte))
+				// convert to JSON format
+				jsonBytes, err := json.Marshal(mapData)
+				if err != nil {
+					panic(err)
+				}
+				jsonStrs = append(jsonStrs, string(jsonBytes))
+			}
+			data = jsonStrs
 		case schemapb.DataType_JSON:
 			data = insertData.Data[fieldID].(*storage.JSONFieldData).Data
 		case schemapb.DataType_Array:

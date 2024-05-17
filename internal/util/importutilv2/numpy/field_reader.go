@@ -29,6 +29,7 @@ import (
 	"github.com/sbinet/npyio/npy"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -236,6 +237,33 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		data, err = ReadN[byte](c.reader, c.order, readCount)
 		if err != nil {
 			return nil, err
+		}
+		c.readPosition += int(readCount)
+	case schemapb.DataType_SparseFloatVector:
+		var strs []string
+		strs, err = c.ReadString(readCount)
+		if err != nil {
+			return nil, err
+		}
+		byteArr := make([][]byte, 0)
+		maxDim := uint32(0)
+		for _, str := range strs {
+			rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
+			if err != nil {
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s'", str))
+			}
+			byteArr = append(byteArr, rowVec)
+			elemCount := len(rowVec) / 8
+			maxIdx := typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1)
+			if maxIdx+1 > maxDim {
+				maxDim = maxIdx + 1
+			}
+		}
+		data = &storage.SparseFloatVectorFieldData{
+			SparseFloatArray: schemapb.SparseFloatArray{
+				Dim:      int64(maxDim),
+				Contents: byteArr,
+			},
 		}
 		c.readPosition += int(readCount)
 	default:

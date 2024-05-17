@@ -214,6 +214,13 @@ func validateHeader(npyReader *npy.Reader, field *schemapb.FieldSchema, dim int)
 		if shape[1] != dim*2 {
 			return wrapDimError(shape[1], dim, field)
 		}
+	case schemapb.DataType_SparseFloatVector:
+		if elementType != schemapb.DataType_VarChar {
+			return wrapElementTypeError(elementType, field)
+		}
+		if len(shape) != 1 {
+			return wrapShapeError(len(shape), 1, field)
+		}
 	case schemapb.DataType_BinaryVector:
 		if elementType != schemapb.DataType_BinaryVector {
 			return wrapElementTypeError(elementType, field)
