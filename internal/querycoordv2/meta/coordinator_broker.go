@@ -30,7 +30,9 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/types"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -47,6 +49,8 @@ type Broker interface {
 	GetSegmentInfo(ctx context.Context, segmentID ...UniqueID) (*datapb.GetSegmentInfoResponse, error)
 	GetIndexInfo(ctx context.Context, collectionID UniqueID, segmentID UniqueID) ([]*querypb.FieldIndexInfo, error)
 	GetRecoveryInfoV2(ctx context.Context, collectionID UniqueID, partitionIDs ...UniqueID) ([]*datapb.VchannelInfo, []*datapb.SegmentInfo, error)
+	DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error)
+	GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error)
 }
 
 type CoordinatorBroker struct {
@@ -81,6 +85,48 @@ func (broker *CoordinatorBroker) DescribeCollection(ctx context.Context, collect
 		return nil, err
 	}
 	return resp, nil
+}
+
+func (broker *CoordinatorBroker) DescribeDatabase(ctx context.Context, dbName string) (*rootcoordpb.DescribeDatabaseResponse, error) {
+	ctx, cancel := context.WithTimeout(ctx, paramtable.Get().QueryCoordCfg.BrokerTimeout.GetAsDuration(time.Millisecond))
+	defer cancel()
+
+	req := &rootcoordpb.DescribeDatabaseRequest{
+		Base: commonpbutil.NewMsgBase(
+			commonpbutil.WithMsgType(commonpb.MsgType_DescribeCollection),
+		),
+		DbName: dbName,
+	}
+	resp, err := broker.rootCoord.DescribeDatabase(ctx, req)
+	if err := merr.CheckRPCCall(resp, err); err != nil {
+		log.Ctx(ctx).Warn("failed to describe database", zap.Error(err))
+		return nil, err
+	}
+	return resp, nil
+}
+
+// try to get database level replica_num and resource groups, return (resource_groups, replica_num, error)
+func (broker *CoordinatorBroker) GetCollectionLoadInfo(ctx context.Context, collectionID UniqueID) ([]string, int64, error) {
+	// to do by weiliu1031: querycoord should cache mappings: collectionID->dbName
+	collectionInfo, err := broker.DescribeCollection(ctx, collectionID)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	dbInfo, err := broker.DescribeDatabase(ctx, collectionInfo.GetDbName())
+	if err != nil {
+		return nil, 0, err
+	}
+	replicaNum, err := common.DatabaseLevelReplicaNumber(dbInfo.GetProperties())
+	if err != nil {
+		return nil, 0, err
+	}
+	rgs, err := common.DatabaseLevelResourceGroups(dbInfo.GetProperties())
+	if err != nil {
+		return nil, 0, err
+	}
+
+	return rgs, replicaNum, nil
 }
 
 func (broker *CoordinatorBroker) GetPartitions(ctx context.Context, collectionID UniqueID) ([]UniqueID, error) {
