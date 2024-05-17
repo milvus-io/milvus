@@ -3347,3 +3347,19 @@ func Test_validateUtil_checkDoubleFieldData(t *testing.T) {
 		},
 	}, nil))
 }
+
+func TestCheckArrayElementNilData(t *testing.T) {
+	data := &schemapb.ArrayArray{
+		Data: []*schemapb.ScalarField{nil},
+	}
+
+	fieldSchema := &schemapb.FieldSchema{
+		Name:        "test",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	}
+
+	v := newValidateUtil()
+	err := v.checkArrayElement(data, fieldSchema)
+	assert.True(t, merr.ErrParameterInvalid.Is(err))
+}
