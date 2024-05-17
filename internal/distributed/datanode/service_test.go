@@ -177,6 +177,10 @@ func (m *MockDataNode) DropImport(ctx context.Context, req *datapb.DropImportReq
 	return m.status, m.err
 }
 
+func (m *MockDataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
+	return &datapb.QuerySlotResponse{}, m.err
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	paramtable.Init()

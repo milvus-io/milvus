@@ -127,6 +127,8 @@ service DataNode {
   rpc QueryPreImport(QueryPreImportRequest) returns(QueryPreImportResponse) {}
   rpc QueryImport(QueryImportRequest) returns(QueryImportResponse) {}
   rpc DropImport(DropImportRequest) returns(common.Status) {}
+
+  rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
 }
 
 message FlushRequest {
@@ -832,4 +834,11 @@ message GcControlRequest {
   common.MsgBase base = 1;
   GcCommand command = 2;
   repeated common.KeyValuePair params = 3;
+}
+
+message QuerySlotRequest {}
+
+message QuerySlotResponse {
+  common.Status status = 1;
+  int64 num_slots = 2;
 }
