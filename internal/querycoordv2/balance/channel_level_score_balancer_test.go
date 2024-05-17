@@ -1162,8 +1162,13 @@ func (suite *ChannelLevelScoreBalancerTestSuite) TestExclusiveChannelBalance_Nod
 		},
 	}...)
 
-	suite.balancer.nodeManager.Stopping(ch1Nodes[0])
-	suite.balancer.nodeManager.Stopping(ch2Nodes[0])
+	balancer.nodeManager.Stopping(ch1Nodes[0])
+	balancer.nodeManager.Stopping(ch2Nodes[0])
+	suite.balancer.meta.ResourceManager.HandleNodeStopping(ch1Nodes[0])
+	suite.balancer.meta.ResourceManager.HandleNodeStopping(ch2Nodes[0])
+	utils.RecoverAllCollection(balancer.meta)
+
+	replica = balancer.meta.ReplicaManager.Get(replica.GetID())
 	sPlans, cPlans := balancer.BalanceReplica(replica)
 	suite.Len(sPlans, 0)
 	suite.Len(cPlans, 2)

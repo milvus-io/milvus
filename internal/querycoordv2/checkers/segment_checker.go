@@ -393,22 +393,9 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 			rwNodes = replica.GetRWNodes()
 		}
 
-		// filter out stopping nodes.
-		availableNodes := lo.Filter(rwNodes, func(node int64, _ int) bool {
-			stop, err := c.nodeMgr.IsStoppingNode(node)
-			if err != nil {
-				return false
-			}
-			return !stop
-		})
-
-		if len(availableNodes) == 0 {
-			return nil
-		}
-
 		// L0 segment can only be assign to shard leader's node
 		if isLevel0 {
-			availableNodes = []int64{leader.ID}
+			rwNodes = []int64{leader.ID}
 		}
 
 		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
@@ -416,7 +403,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.balancer.AssignSegment(replica.GetCollectionID(), segmentInfos, availableNodes, false)
+		shardPlans := c.balancer.AssignSegment(replica.GetCollectionID(), segmentInfos, rwNodes, false)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 		}

@@ -1101,8 +1101,7 @@ func (s *Server) DescribeResourceGroup(ctx context.Context, req *querypb.Describ
 	nodes := make([]*commonpb.NodeInfo, 0, len(rg.GetNodes()))
 	for _, nodeID := range rg.GetNodes() {
 		nodeSessionInfo := s.nodeMgr.Get(nodeID)
-		// Filter offline nodes and nodes in stopping state
-		if nodeSessionInfo != nil && !nodeSessionInfo.IsStoppingState() {
+		if nodeSessionInfo != nil {
 			nodes = append(nodes, &commonpb.NodeInfo{
 				NodeId:   nodeSessionInfo.ID(),
 				Address:  nodeSessionInfo.Addr(),

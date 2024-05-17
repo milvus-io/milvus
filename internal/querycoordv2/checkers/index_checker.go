@@ -105,10 +105,11 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	segments := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	idSegments := make(map[int64]*meta.Segment)
 
+	roNodeSet := typeutil.NewUniqueSet(replica.GetRONodes()...)
 	targets := make(map[int64][]int64) // segmentID => FieldID
 	for _, segment := range segments {
-		// skip update index in stopping node
-		if ok, _ := c.nodeMgr.IsStoppingNode(segment.Node); ok {
+		// skip update index in read only node
+		if roNodeSet.Contain(segment.Node) {
 			continue
 		}
 		missing := c.checkSegment(segment, indexInfos)
