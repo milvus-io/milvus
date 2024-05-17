@@ -32,7 +32,10 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type releaseFunc func(channel string)
+type (
+	releaseFunc func(channel string)
+	watchFunc   func(ctx context.Context, dn *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error)
+)
 
 type ChannelManager interface {
 	Submit(info *datapb.ChannelWatchInfo) error
@@ -206,7 +209,7 @@ func (m *ChannelManagerImpl) handleOpState(opState *opState) {
 }
 
 func (m *ChannelManagerImpl) getOrCreateRunner(channel string) *opRunner {
-	runner, loaded := m.opRunners.GetOrInsert(channel, NewOpRunner(channel, m.dn, m.releaseFunc, m.communicateCh))
+	runner, loaded := m.opRunners.GetOrInsert(channel, NewOpRunner(channel, m.dn, m.releaseFunc, executeWatch, m.communicateCh))
 	if !loaded {
 		runner.Start()
 	}
@@ -228,6 +231,7 @@ type opRunner struct {
 	channel     string
 	dn          *DataNode
 	releaseFunc releaseFunc
+	watchFunc   watchFunc
 
 	guard      sync.RWMutex
 	allOps     map[UniqueID]*opInfo // opID -> tickler
@@ -238,11 +242,12 @@ type opRunner struct {
 	closeWg sync.WaitGroup
 }
 
-func NewOpRunner(channel string, dn *DataNode, f releaseFunc, resultCh chan *opState) *opRunner {
+func NewOpRunner(channel string, dn *DataNode, releaseF releaseFunc, watchF watchFunc, resultCh chan *opState) *opRunner {
 	return &opRunner{
 		channel:     channel,
 		dn:          dn,
-		releaseFunc: f,
+		releaseFunc: releaseF,
+		watchFunc:   watchF,
 		opsInQueue:  make(chan *datapb.ChannelWatchInfo, 10),
 		allOps:      make(map[UniqueID]*opInfo),
 		resultCh:    resultCh,
@@ -333,16 +338,16 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 	opInfo.tickler = tickler
 
 	var (
-		successSig = make(chan struct{}, 1)
-		waiter     sync.WaitGroup
+		successSig   = make(chan struct{}, 1)
+		finishWaiter sync.WaitGroup
 	)
 
 	watchTimeout := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
 	ctx, cancel := context.WithTimeout(context.Background(), watchTimeout)
 	defer cancel()
 
-	startTimer := func(wg *sync.WaitGroup) {
-		defer wg.Done()
+	startTimer := func(finishWg *sync.WaitGroup) {
+		defer finishWg.Done()
 
 		timer := time.NewTimer(watchTimeout)
 		defer timer.Stop()
@@ -377,11 +382,12 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		}
 	}
 
-	waiter.Add(2)
-	go startTimer(&waiter)
+	finishWaiter.Add(2)
+	go startTimer(&finishWaiter)
+
 	go func() {
-		defer waiter.Done()
-		fg, err := executeWatch(ctx, r.dn, info, tickler)
+		defer finishWaiter.Done()
+		fg, err := r.watchFunc(ctx, r.dn, info, tickler)
 		if err != nil {
 			opState.state = datapb.ChannelWatchState_WatchFailure
 		} else {
@@ -391,7 +397,7 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 		}
 	}()
 
-	waiter.Wait()
+	finishWaiter.Wait()
 	return opState
 }
 
@@ -402,13 +408,14 @@ func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opI
 		opID:    opID,
 	}
 	var (
-		successSig = make(chan struct{}, 1)
-		waiter     sync.WaitGroup
+		successSig   = make(chan struct{}, 1)
+		finishWaiter sync.WaitGroup
 	)
 
 	log := log.With(zap.Int64("opID", opID), zap.String("channel", channel))
-	startTimer := func(wg *sync.WaitGroup) {
-		defer wg.Done()
+	startTimer := func(finishWaiter *sync.WaitGroup) {
+		defer finishWaiter.Done()
+
 		releaseTimeout := Params.DataCoordCfg.WatchTimeoutInterval.GetAsDuration(time.Second)
 		timer := time.NewTimer(releaseTimeout)
 		defer timer.Stop()
@@ -435,8 +442,8 @@ func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opI
 		}
 	}
 
-	waiter.Add(1)
-	go startTimer(&waiter)
+	finishWaiter.Add(1)
+	go startTimer(&finishWaiter)
 	go func() {
 		// TODO: failure should panic this DN, but we're not sure how
 		//   to recover when releaseFunc stuck.
@@ -450,7 +457,7 @@ func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opI
 		successSig <- struct{}{}
 	}()
 
-	waiter.Wait()
+	finishWaiter.Wait()
 	return opState
 }
 
