@@ -481,6 +481,10 @@ func (ms *mqMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPositi
 		}
 		messageID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
+			if paramtable.Get().MQCfg.IgnoreBadPosition.GetAsBool() {
+				log.Ctx(ctx).Warn("Ignoring bad message id", zap.Error(err))
+				continue
+			}
 			return err
 		}
 
@@ -848,6 +852,10 @@ func (ms *MqTtMsgStream) Seek(ctx context.Context, msgPositions []*msgpb.MsgPosi
 
 		seekMsgID, err := ms.client.BytesToMsgID(mp.MsgID)
 		if err != nil {
+			if paramtable.Get().MQCfg.IgnoreBadPosition.GetAsBool() {
+				log.Ctx(ctx).Warn("Ignoring bad message id", zap.Error(err))
+				return nil
+			}
 			return err
 		}
 		log.Info("MsgStream begin to seek start msg: ", zap.String("channel", mp.ChannelName), zap.Any("MessageID", mp.MsgID))
