@@ -56,7 +56,7 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 ## Quick start
 
 ### Start with Zilliz Cloud
-Zilliz Cloud is a fully managed service on cloud and the simplest way to deploy LF AI Milvus®, See [Zilliz Cloud]([https://zilliz.com/])) and start your [free trial](https://cloud.zilliz.com/signup). 
+Zilliz Cloud is a fully managed service on cloud and the simplest way to deploy LF AI Milvus®, See [Zilliz Cloud](https://zilliz.com/) and start your [free trial](https://cloud.zilliz.com/signup). 
 
 ### Install Milvus
 
