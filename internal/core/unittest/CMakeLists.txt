@@ -32,6 +32,7 @@ set(MILVUS_TEST_FILES
         test_growing.cpp
         test_growing_index.cpp
         test_indexing.cpp
+        test_bitmap_index.cpp
         test_index_c_api.cpp
         test_index_wrapper.cpp
         test_init.cpp
