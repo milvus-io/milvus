@@ -10,10 +10,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/crypto"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/milvus-io/milvus/pkg/util/crypto"
 )
 
 const (
