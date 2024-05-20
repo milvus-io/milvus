@@ -100,6 +100,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 		replicas := ob.meta.ReplicaManager.GetByCollection(collectionID)
 		for _, replica := range replicas {
 			roNodes := replica.GetRONodes()
+			rwNodes := replica.GetRWNodes()
 			if len(roNodes) == 0 {
 				continue
 			}
@@ -124,7 +125,7 @@ func (ob *ReplicaObserver) checkNodesInReplica() {
 				zap.Int64("replicaID", replica.GetID()),
 				zap.Int64s("removedNodes", removeNodes),
 				zap.Int64s("roNodes", roNodes),
-				zap.Int64s("availableNodes", replica.GetNodes()),
+				zap.Int64s("rwNodes", rwNodes),
 			)
 			if err := ob.meta.ReplicaManager.RemoveNode(replica.GetID(), removeNodes...); err != nil {
 				logger.Warn("fail to remove node from replica", zap.Error(err))

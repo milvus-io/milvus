@@ -134,9 +134,12 @@ func (suite *IndexCheckerSuite) TestLoadIndex() {
 	suite.Equal(task.ActionTypeUpdate, action.Type())
 	suite.EqualValues(2, action.SegmentID())
 
-	// test skip load index for stopping node
+	// test skip load index for read only node
 	suite.nodeMgr.Stopping(1)
 	suite.nodeMgr.Stopping(2)
+	suite.meta.ResourceManager.HandleNodeStopping(1)
+	suite.meta.ResourceManager.HandleNodeStopping(2)
+	utils.RecoverAllCollection(suite.meta)
 	tasks = checker.Check(context.Background())
 	suite.Require().Len(tasks, 0)
 }

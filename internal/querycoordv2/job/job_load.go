@@ -159,15 +159,11 @@ func (job *LoadCollectionJob) Execute() error {
 
 		// API of LoadCollection is wired, we should use map[resourceGroupNames]replicaNumber as input, to keep consistency with `TransferReplica` API.
 		// Then we can implement dynamic replica changed in different resource group independently.
-		replicas, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
+		_, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
-		}
-		for _, replica := range replicas {
-			log.Info("replica created", zap.Int64("replicaID", replica.GetID()),
-				zap.Int64s("nodes", replica.GetNodes()), zap.String("resourceGroup", replica.GetResourceGroup()))
 		}
 		job.undo.IsReplicaCreated = true
 	}
@@ -346,15 +342,11 @@ func (job *LoadPartitionJob) Execute() error {
 		if err != nil {
 			return err
 		}
-		replicas, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
+		_, err = utils.SpawnReplicasWithRG(job.meta, req.GetCollectionID(), req.GetResourceGroups(), req.GetReplicaNumber(), collectionInfo.GetVirtualChannelNames())
 		if err != nil {
 			msg := "failed to spawn replica for collection"
 			log.Warn(msg, zap.Error(err))
 			return errors.Wrap(err, msg)
-		}
-		for _, replica := range replicas {
-			log.Info("replica created", zap.Int64("replicaID", replica.GetID()),
-				zap.Int64s("nodes", replica.GetNodes()), zap.String("resourceGroup", replica.GetResourceGroup()))
 		}
 		job.undo.IsReplicaCreated = true
 	}

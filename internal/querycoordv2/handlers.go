@@ -46,7 +46,7 @@ import (
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 	for _, replica := range s.meta.ReplicaManager.GetByCollection(collectionID) {
 		isAvailable := true
-		for _, node := range replica.GetNodes() {
+		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {
 				isAvailable = false
 				break

@@ -101,12 +101,8 @@ func (b *BalanceChecker) replicasToBalance() []int64 {
 			}
 			replicas := b.meta.ReplicaManager.GetByCollection(cid)
 			for _, replica := range replicas {
-				for _, nodeID := range replica.GetNodes() {
-					isStopping, _ := b.nodeManager.IsStoppingNode(nodeID)
-					if isStopping {
-						stoppingReplicas = append(stoppingReplicas, replica.GetID())
-						break
-					}
+				if replica.RONodesCount() > 0 {
+					stoppingReplicas = append(stoppingReplicas, replica.GetID())
 				}
 			}
 		}

@@ -93,12 +93,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 
 		replicas := c.meta.ReplicaManager.GetByCollection(collectionID)
 		for _, replica := range replicas {
-			for _, node := range replica.GetNodes() {
-				if ok, _ := c.nodeMgr.IsStoppingNode(node); ok {
-					// no need to correct leader's view which is loaded on stopping node
-					continue
-				}
-
+			for _, node := range replica.GetRWNodes() {
 				leaderViews := c.dist.LeaderViewManager.GetByFilter(meta.WithCollectionID2LeaderView(replica.GetCollectionID()), meta.WithNodeID2LeaderView(node))
 				for _, leaderView := range leaderViews {
 					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))

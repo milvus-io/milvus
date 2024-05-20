@@ -22,7 +22,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
-	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -34,19 +33,6 @@ var (
 	ErrReplicasInconsistent = errors.New("all replicas should belong to same collection during assign nodes")
 	ErrUseWrongNumRG        = errors.New("resource group num can only be 0, 1 or same as replica number")
 )
-
-func GetReplicaNodesInfo(replicaMgr *meta.ReplicaManager, nodeMgr *session.NodeManager, replicaID int64) []*session.NodeInfo {
-	replica := replicaMgr.Get(replicaID)
-	if replica == nil {
-		return nil
-	}
-
-	nodes := make([]*session.NodeInfo, 0, len(replica.GetNodes()))
-	for _, node := range replica.GetNodes() {
-		nodes = append(nodes, nodeMgr.Get(node))
-	}
-	return nodes
-}
 
 func GetPartitions(collectionMgr *meta.CollectionManager, collectionID int64) ([]int64, error) {
 	collection := collectionMgr.GetCollection(collectionID)

@@ -195,7 +195,7 @@ func (m *ReplicaManager) TransferReplica(collectionID typeutil.UniqueID, srcRGNa
 	// Node Change will be executed by replica_observer in background.
 	replicas := make([]*Replica, 0, replicaNum)
 	for i := 0; i < replicaNum; i++ {
-		mutableReplica := srcReplicas[i].copyForWrite()
+		mutableReplica := srcReplicas[i].CopyForWrite()
 		mutableReplica.SetResourceGroup(dstRGName)
 		replicas = append(replicas, mutableReplica.IntoReplica())
 	}
@@ -350,7 +350,7 @@ func (m *ReplicaManager) RecoverNodesInCollection(collectionID typeutil.UniqueID
 				// nothing to do.
 				return
 			}
-			mutableReplica := m.replicas[assignment.GetReplicaID()].copyForWrite()
+			mutableReplica := m.replicas[assignment.GetReplicaID()].CopyForWrite()
 			mutableReplica.AddRONode(roNodes...)          // rw -> ro
 			mutableReplica.AddRWNode(recoverableNodes...) // ro -> rw
 			mutableReplica.AddRWNode(incomingNode...)     // unused -> rw
@@ -414,7 +414,7 @@ func (m *ReplicaManager) RemoveNode(replicaID typeutil.UniqueID, nodes ...typeut
 		return merr.WrapErrReplicaNotFound(replicaID)
 	}
 
-	mutableReplica := replica.copyForWrite()
+	mutableReplica := replica.CopyForWrite()
 	mutableReplica.RemoveNode(nodes...) // ro -> unused
 	return m.put(mutableReplica.IntoReplica())
 }

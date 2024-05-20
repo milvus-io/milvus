@@ -441,7 +441,6 @@ func (s *Server) startQueryCoord() error {
 			s.nodeMgr.Stopping(node.ServerID)
 		}
 	}
-	s.checkReplicas()
 	for _, node := range sessions {
 		s.handleNodeUp(node.ServerID)
 	}
@@ -685,6 +684,7 @@ func (s *Server) watchNodes(revision int64) {
 				)
 				s.nodeMgr.Stopping(nodeID)
 				s.checkerController.Check()
+				s.meta.ResourceManager.HandleNodeStopping(nodeID)
 
 			case sessionutil.SessionDelEvent:
 				nodeID := event.Session.ServerID
@@ -748,7 +748,6 @@ func (s *Server) handleNodeUp(node int64) {
 }
 
 func (s *Server) handleNodeDown(node int64) {
-	log := log.With(zap.Int64("nodeID", node))
 	s.taskScheduler.RemoveExecutor(node)
 	s.distController.Remove(node)
 
@@ -757,55 +756,10 @@ func (s *Server) handleNodeDown(node int64) {
 	s.dist.ChannelDistManager.Update(node)
 	s.dist.SegmentDistManager.Update(node)
 
-	// Clear meta
-	for _, collection := range s.meta.CollectionManager.GetAll() {
-		log := log.With(zap.Int64("collectionID", collection))
-		replica := s.meta.ReplicaManager.GetByCollectionAndNode(collection, node)
-		if replica == nil {
-			continue
-		}
-		err := s.meta.ReplicaManager.RemoveNode(replica.GetID(), node)
-		if err != nil {
-			log.Warn("failed to remove node from collection's replicas",
-				zap.Int64("replicaID", replica.GetID()),
-				zap.Error(err),
-			)
-		}
-		log.Info("remove node from replica",
-			zap.Int64("replicaID", replica.GetID()))
-	}
-
 	// Clear tasks
 	s.taskScheduler.RemoveByNode(node)
 
 	s.meta.ResourceManager.HandleNodeDown(node)
-}
-
-// checkReplicas checks whether replica contains offline node, and remove those nodes
-func (s *Server) checkReplicas() {
-	for _, collection := range s.meta.CollectionManager.GetAll() {
-		log := log.With(zap.Int64("collectionID", collection))
-		replicas := s.meta.ReplicaManager.GetByCollection(collection)
-		for _, replica := range replicas {
-			toRemove := make([]int64, 0)
-			for _, node := range replica.GetNodes() {
-				if s.nodeMgr.Get(node) == nil {
-					toRemove = append(toRemove, node)
-				}
-			}
-
-			if len(toRemove) > 0 {
-				log := log.With(
-					zap.Int64("replicaID", replica.GetID()),
-					zap.Int64s("offlineNodes", toRemove),
-				)
-				log.Info("some nodes are offline, remove them from replica", zap.Any("toRemove", toRemove))
-				if err := s.meta.ReplicaManager.RemoveNode(replica.GetID(), toRemove...); err != nil {
-					log.Warn("failed to remove offline nodes from replica")
-				}
-			}
-		}
-	}
 }
 
 func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
