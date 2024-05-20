@@ -437,8 +437,9 @@ type MQConfig struct {
 	PursuitLag        ParamItem `refreshable:"true"`
 	PursuitBufferSize ParamItem `refreshable:"true"`
 
-	MQBufSize      ParamItem `refreshable:"false"`
-	ReceiveBufSize ParamItem `refreshable:"false"`
+	MQBufSize         ParamItem `refreshable:"false"`
+	ReceiveBufSize    ParamItem `refreshable:"false"`
+	IgnoreBadPosition ParamItem `refreshable:"true"`
 }
 
 // Init initializes the MQConfig object with a BaseTable.
@@ -496,6 +497,14 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 		Doc:          "MQ consumer chan buffer length",
 	}
 	p.ReceiveBufSize.Init(base.mgr)
+
+	p.IgnoreBadPosition = ParamItem{
+		Key:          "mq.ignoreBadPosition",
+		Version:      "2.3.16",
+		DefaultValue: "false",
+		Doc:          "A switch for ignoring message queue failing to parse message ID from checkpoint position. Usually caused by switching among different mq implementations. May caused data loss when used by mistake",
+	}
+	p.IgnoreBadPosition.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
