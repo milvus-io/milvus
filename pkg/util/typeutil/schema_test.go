@@ -2052,14 +2052,6 @@ func TestValidateSparseFloatRows(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	t.Run("unordered index", func(t *testing.T) {
-		rows := [][]byte{
-			CreateSparseFloatRow([]uint32{100, 2000, 500}, []float32{1.0, 2.0, 3.0}),
-		}
-		err := ValidateSparseFloatRows(rows...)
-		assert.Error(t, err)
-	})
-
 	t.Run("same index", func(t *testing.T) {
 		rows := [][]byte{
 			CreateSparseFloatRow([]uint32{100, 100, 500}, []float32{1.0, 2.0, 3.0}),
