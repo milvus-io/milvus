@@ -202,7 +202,7 @@ func initLimiter(rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[interna
 	for rt, p := range rateLimiterConfigs {
 		limit := ratelimitutil.Limit(p.GetAsFloat())
 		burst := p.GetAsFloat() // use rate as burst, because SimpleLimiter is with punishment mechanism, burst is insignificant.
-		rln.GetLimiters().GetOrInsert(rt, ratelimitutil.NewLimiter(limit, burst))
+		rln.GetLimiters().Insert(rt, ratelimitutil.NewLimiter(limit, burst))
 		log.RatedDebug(30, "RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[(int32(rt))]),
 			zap.String("rateLimit", ratelimitutil.Limit(p.GetAsFloat()).String()),
