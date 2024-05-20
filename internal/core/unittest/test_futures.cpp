@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 #include "futures/Future.h"
-#include "folly/init/Init.h"
+#include <folly/executors/ThreadedExecutor.h>
 #include <stdlib.h>
 #include <mutex>
 
@@ -77,17 +77,13 @@ TEST(Futures, Ready) {
 }
 
 TEST(Futures, Future) {
-    auto opts = folly::InitOptions{};
-    opts.useGFlags(false);
-    folly::Init initializer(nullptr, nullptr, opts);
+    folly::ThreadedExecutor executor;
 
     // success path.
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            folly::getGlobalCPUExecutor(),
-            0,
-            [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](milvus::futures::CancellationToken token) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 return new int(1);
             });
@@ -113,9 +109,7 @@ TEST(Futures, Future) {
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            folly::getGlobalCPUExecutor(),
-            0,
-            [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](milvus::futures::CancellationToken token) {
                 std::this_thread::sleep_for(std::chrono::milliseconds(1000));
                 throw milvus::SegcoreError(milvus::NotImplemented,
                                            "unimplemented");
@@ -141,9 +135,7 @@ TEST(Futures, Future) {
     {
         // try a async function
         auto future = milvus::futures::Future<int>::async(
-            folly::getGlobalCPUExecutor(),
-            0,
-            [](milvus::futures::CancellationToken token) {
+            &executor, 0, [](milvus::futures::CancellationToken token) {
                 for (int i = 0; i < 10; i++) {
                     token.throwIfCancelled();
                     std::this_thread::sleep_for(std::chrono::milliseconds(100));
