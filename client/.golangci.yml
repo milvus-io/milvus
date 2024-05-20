@@ -91,7 +91,7 @@ linters-settings:
     settings:
       ruleguard:
         failOnError: true
-        rules: "../rules.go"
+        rules: "ruleguard/rules.go"
   depguard:
     rules:
       main:
