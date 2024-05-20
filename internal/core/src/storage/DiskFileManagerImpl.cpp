@@ -746,11 +746,11 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
             field_datas.emplace_back(field_data);
         }
         if (WriteOptFieldIvfData(field_type,
-                                  field_id,
-                                  local_chunk_manager,
-                                  local_data_path,
-                                  field_datas,
-                                  write_offset)) {
+                                 field_id,
+                                 local_chunk_manager,
+                                 local_data_path,
+                                 field_datas,
+                                 write_offset)) {
             actual_field_ids.insert(field_id);
         }
     }
@@ -761,6 +761,9 @@ DiskFileManagerImpl::CacheOptFieldToDisk(
                               local_data_path,
                               actual_field_ids.size(),
                               write_offset);
+        if (actual_field_ids.empty()) {
+            return "";
+        }
     }
     return local_data_path;
 }
@@ -824,11 +827,11 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
             FetchRawData();
         }
         if (WriteOptFieldIvfData(field_type,
-                                  field_id,
-                                  local_chunk_manager,
-                                  local_data_path,
-                                  field_datas,
-                                  write_offset)) {
+                                 field_id,
+                                 local_chunk_manager,
+                                 local_data_path,
+                                 field_datas,
+                                 write_offset)) {
             actual_field_ids.insert(field_id);
         }
     }
@@ -839,6 +842,9 @@ DiskFileManagerImpl::CacheOptFieldToDisk(OptFieldT& fields_map) {
                               local_data_path,
                               actual_field_ids.size(),
                               write_offset);
+        if (actual_field_ids.empty()) {
+            return "";
+        }
     }
 
     return local_data_path;

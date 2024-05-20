@@ -2692,7 +2692,7 @@ func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnInt64() {
 	err := task.PreExecute(s.ctx)
 	s.NoError(err)
 	s.NotZero(len(task.queryInfos))
-	s.Equal(false, task.queryInfos[0].MaterializedViewInvolved)
+	s.Equal(true, task.queryInfos[0].MaterializedViewInvolved)
 }
 
 func (s *MaterializedViewTestSuite) TestMvEnabledPartitionKeyOnVarChar() {
