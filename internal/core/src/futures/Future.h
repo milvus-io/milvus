@@ -46,7 +46,9 @@ class IFuture {
 
     /// @brief block until the future can be released (the underlying async operation is done).
     virtual void
-    registerReleasableCallback(CUnlockGoMutexFn unlockFn,
+    registerReleasableCallback(folly::Executor::KeepAlive<> executor,
+                               int priority,
+                               CUnlockGoMutexFn unlockFn,
                                CLockedGoMutex* mutex) = 0;
 
     /// @brief get the result of the future. it must be called if future is ready.
@@ -139,10 +141,12 @@ class Future : public IFuture {
 
     /// @brief see `IFuture::registerReleasableCallback`
     void
-    registerReleasableCallback(CUnlockGoMutexFn unlockFn,
+    registerReleasableCallback(folly::Executor::KeepAlive<> executor,
+                               int priority,
+                               CUnlockGoMutexFn unlockFn,
                                CLockedGoMutex* mutex) noexcept override {
         promise_->getSemiFuture()
-            .via(folly::getGlobalCPUExecutor(), 0)
+            .via(executor, priority)
             .then([unlockFn = unlockFn, mutex = mutex](auto&&) {
                 unlockFn(mutex);
             });

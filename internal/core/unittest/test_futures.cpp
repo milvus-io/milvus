@@ -11,7 +11,7 @@
 
 #include <gtest/gtest.h>
 #include "futures/Future.h"
-#include <folly/executors/ThreadedExecutor.h>
+#include <folly/executors/CPUThreadPoolExecutor.h>
 #include <stdlib.h>
 #include <mutex>
 
@@ -38,7 +38,7 @@ TEST(Futures, LeakyResult) {
         ASSERT_EQ(*(int*)(r), 1);
         ASSERT_EQ(s.error_code, 0);
         ASSERT_EQ(s.error_msg, nullptr);
-        delete r;
+        delete (int*)(r);
     }
     {
         LeakyResult<int> leaky_result(1, "error");
@@ -77,7 +77,7 @@ TEST(Futures, Ready) {
 }
 
 TEST(Futures, Future) {
-    folly::ThreadedExecutor executor;
+    folly::CPUThreadPoolExecutor executor(2);
 
     // success path.
     {
@@ -102,7 +102,7 @@ TEST(Futures, Future) {
         ASSERT_EQ(*(int*)(r), 1);
         ASSERT_EQ(s.error_code, 0);
         ASSERT_EQ(s.error_msg, nullptr);
-        delete r;
+        delete (int*)(r);
     }
 
     // error path.
@@ -158,6 +158,8 @@ TEST(Futures, Future) {
         ASSERT_EQ(s.error_code, milvus::FollyCancel);
 
         future->registerReleasableCallback(
+            &executor,
+            0,
             [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
             (CLockedGoMutex*)(&mu));
         mu.lock();
