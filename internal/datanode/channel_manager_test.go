@@ -79,10 +79,8 @@ func (s *OpRunnerSuite) TestWatchTimeout() {
 
 	mockReleaseFunc := func(channel string) { log.Info("mock release func") }
 	mockWatchFunc := func(ctx context.Context, dn *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
-		select {
-		case <-ctx.Done():
-			sig <- struct{}{}
-		}
+		<-ctx.Done()
+		sig <- struct{}{}
 		return nil, errors.New("timeout")
 	}
 
