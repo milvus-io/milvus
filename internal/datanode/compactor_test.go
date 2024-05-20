@@ -1085,6 +1085,9 @@ type mockFlushManager struct {
 	}
 }
 
+func (mfm *mockFlushManager) start() {
+}
+
 var _ flushManager = (*mockFlushManager)(nil)
 
 func (mfm *mockFlushManager) flushBufferData(data *BufferData, segmentID UniqueID, flushed bool, dropped bool, pos *msgpb.MsgPosition) (*storage.PrimaryKeyStats, error) {

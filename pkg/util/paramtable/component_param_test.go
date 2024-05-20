@@ -445,6 +445,8 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+		params.Save("datanode.flushMgrCleanInterval", "200")
+		assert.Equal(t, 200*time.Second, Params.FlushMgrCleanInterval.GetAsDuration(time.Second))
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

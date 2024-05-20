@@ -91,6 +91,9 @@ func (dsService *dataSyncService) start() {
 		log.Warn("dataSyncService starting flow graph is nil", zap.Int64("collectionID", dsService.collectionID),
 			zap.String("vChanName", dsService.vchannelName))
 	}
+	if dsService.flushManager != nil {
+		dsService.flushManager.start()
+	}
 }
 
 func (dsService *dataSyncService) GracefullyClose() {

@@ -35,6 +35,7 @@ const (
 	DefaultConsistencyLevelUsedInDelete        = commonpb.ConsistencyLevel_Bounded
 	DefaultGracefulTime                        = 5000 // ms
 	DefaultGracefulStopTimeout                 = 1800 // s, for node
+	DefaultFlushMgrCleanInterval               = 300  // s
 	DefaultProxyGracefulStopTimeout            = 30   // s，for proxy
 	DefaultCoordGracefulStopTimeout            = 5    // s，for coord
 	DefaultHighPriorityThreadCoreCoefficient   = 10
@@ -2845,7 +2846,8 @@ type dataNodeConfig struct {
 	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
-	GracefulStopTimeout ParamItem `refreshable:"true"`
+	GracefulStopTimeout   ParamItem `refreshable:"true"`
+	FlushMgrCleanInterval ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3103,6 +3105,15 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.FlushMgrCleanInterval = ParamItem{
+		Key:          "datanode.flushMgrCleanInterval",
+		Version:      "2.3.16",
+		DefaultValue: strconv.Itoa(DefaultFlushMgrCleanInterval),
+		Doc:          "seconds. flush manager clean check interval",
+		Export:       true,
+	}
+	p.FlushMgrCleanInterval.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
