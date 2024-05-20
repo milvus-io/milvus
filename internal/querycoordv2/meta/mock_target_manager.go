@@ -562,41 +562,41 @@ func (_c *MockTargetManager_IsNextTargetExist_Call) RunAndReturn(run func(int64)
 	return _c
 }
 
-// PullNextTargetV1 provides a mock function with given fields: broker, collectionID, chosenPartitionIDs
-func (_m *MockTargetManager) PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
+// PullNextTargetV1 provides a mock function with given fields: collectionID, chosenPartitionIDs
+func (_m *MockTargetManager) PullNextTargetV1(collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
 	_va := make([]interface{}, len(chosenPartitionIDs))
 	for _i := range chosenPartitionIDs {
 		_va[_i] = chosenPartitionIDs[_i]
 	}
 	var _ca []interface{}
-	_ca = append(_ca, broker, collectionID)
+	_ca = append(_ca, collectionID)
 	_ca = append(_ca, _va...)
 	ret := _m.Called(_ca...)
 
 	var r0 map[int64]*datapb.SegmentInfo
 	var r1 map[string]*DmChannel
 	var r2 error
-	if rf, ok := ret.Get(0).(func(Broker, int64, ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)); ok {
-		return rf(broker, collectionID, chosenPartitionIDs...)
+	if rf, ok := ret.Get(0).(func(int64, ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)); ok {
+		return rf(collectionID, chosenPartitionIDs...)
 	}
-	if rf, ok := ret.Get(0).(func(Broker, int64, ...int64) map[int64]*datapb.SegmentInfo); ok {
-		r0 = rf(broker, collectionID, chosenPartitionIDs...)
+	if rf, ok := ret.Get(0).(func(int64, ...int64) map[int64]*datapb.SegmentInfo); ok {
+		r0 = rf(collectionID, chosenPartitionIDs...)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64]*datapb.SegmentInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(Broker, int64, ...int64) map[string]*DmChannel); ok {
-		r1 = rf(broker, collectionID, chosenPartitionIDs...)
+	if rf, ok := ret.Get(1).(func(int64, ...int64) map[string]*DmChannel); ok {
+		r1 = rf(collectionID, chosenPartitionIDs...)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(map[string]*DmChannel)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(Broker, int64, ...int64) error); ok {
-		r2 = rf(broker, collectionID, chosenPartitionIDs...)
+	if rf, ok := ret.Get(2).(func(int64, ...int64) error); ok {
+		r2 = rf(collectionID, chosenPartitionIDs...)
 	} else {
 		r2 = ret.Error(2)
 	}
@@ -610,23 +610,22 @@ type MockTargetManager_PullNextTargetV1_Call struct {
 }
 
 // PullNextTargetV1 is a helper method to define mock.On call
-//   - broker Broker
 //   - collectionID int64
 //   - chosenPartitionIDs ...int64
-func (_e *MockTargetManager_Expecter) PullNextTargetV1(broker interface{}, collectionID interface{}, chosenPartitionIDs ...interface{}) *MockTargetManager_PullNextTargetV1_Call {
+func (_e *MockTargetManager_Expecter) PullNextTargetV1(collectionID interface{}, chosenPartitionIDs ...interface{}) *MockTargetManager_PullNextTargetV1_Call {
 	return &MockTargetManager_PullNextTargetV1_Call{Call: _e.mock.On("PullNextTargetV1",
-		append([]interface{}{broker, collectionID}, chosenPartitionIDs...)...)}
+		append([]interface{}{collectionID}, chosenPartitionIDs...)...)}
 }
 
-func (_c *MockTargetManager_PullNextTargetV1_Call) Run(run func(broker Broker, collectionID int64, chosenPartitionIDs ...int64)) *MockTargetManager_PullNextTargetV1_Call {
+func (_c *MockTargetManager_PullNextTargetV1_Call) Run(run func(collectionID int64, chosenPartitionIDs ...int64)) *MockTargetManager_PullNextTargetV1_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]int64, len(args)-2)
-		for i, a := range args[2:] {
+		variadicArgs := make([]int64, len(args)-1)
+		for i, a := range args[1:] {
 			if a != nil {
 				variadicArgs[i] = a.(int64)
 			}
 		}
-		run(args[0].(Broker), args[1].(int64), variadicArgs...)
+		run(args[0].(int64), variadicArgs...)
 	})
 	return _c
 }
@@ -636,51 +635,53 @@ func (_c *MockTargetManager_PullNextTargetV1_Call) Return(_a0 map[int64]*datapb.
 	return _c
 }
 
-func (_c *MockTargetManager_PullNextTargetV1_Call) RunAndReturn(run func(Broker, int64, ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)) *MockTargetManager_PullNextTargetV1_Call {
+func (_c *MockTargetManager_PullNextTargetV1_Call) RunAndReturn(run func(int64, ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)) *MockTargetManager_PullNextTargetV1_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// PullNextTargetV2 provides a mock function with given fields: broker, collectionID, chosenPartitionIDs
-func (_m *MockTargetManager) PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error) {
-	_va := make([]interface{}, len(chosenPartitionIDs))
-	for _i := range chosenPartitionIDs {
-		_va[_i] = chosenPartitionIDs[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, broker, collectionID)
-	_ca = append(_ca, _va...)
-	ret := _m.Called(_ca...)
+// PullNextTargetV2 provides a mock function with given fields: collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate
+func (_m *MockTargetManager) PullNextTargetV2(collectionID int64, chosenPartitionIDs []int64, lastUpdateVersion []byte, forceUpdate bool) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, []byte, error) {
+	ret := _m.Called(collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)
 
 	var r0 map[int64]*datapb.SegmentInfo
 	var r1 map[string]*DmChannel
-	var r2 error
-	if rf, ok := ret.Get(0).(func(Broker, int64, ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)); ok {
-		return rf(broker, collectionID, chosenPartitionIDs...)
+	var r2 []byte
+	var r3 error
+	if rf, ok := ret.Get(0).(func(int64, []int64, []byte, bool) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, []byte, error)); ok {
+		return rf(collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)
 	}
-	if rf, ok := ret.Get(0).(func(Broker, int64, ...int64) map[int64]*datapb.SegmentInfo); ok {
-		r0 = rf(broker, collectionID, chosenPartitionIDs...)
+	if rf, ok := ret.Get(0).(func(int64, []int64, []byte, bool) map[int64]*datapb.SegmentInfo); ok {
+		r0 = rf(collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64]*datapb.SegmentInfo)
 		}
 	}
 
-	if rf, ok := ret.Get(1).(func(Broker, int64, ...int64) map[string]*DmChannel); ok {
-		r1 = rf(broker, collectionID, chosenPartitionIDs...)
+	if rf, ok := ret.Get(1).(func(int64, []int64, []byte, bool) map[string]*DmChannel); ok {
+		r1 = rf(collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)
 	} else {
 		if ret.Get(1) != nil {
 			r1 = ret.Get(1).(map[string]*DmChannel)
 		}
 	}
 
-	if rf, ok := ret.Get(2).(func(Broker, int64, ...int64) error); ok {
-		r2 = rf(broker, collectionID, chosenPartitionIDs...)
+	if rf, ok := ret.Get(2).(func(int64, []int64, []byte, bool) []byte); ok {
+		r2 = rf(collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)
 	} else {
-		r2 = ret.Error(2)
+		if ret.Get(2) != nil {
+			r2 = ret.Get(2).([]byte)
+		}
 	}
 
-	return r0, r1, r2
+	if rf, ok := ret.Get(3).(func(int64, []int64, []byte, bool) error); ok {
+		r3 = rf(collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // MockTargetManager_PullNextTargetV2_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'PullNextTargetV2'
@@ -689,33 +690,27 @@ type MockTargetManager_PullNextTargetV2_Call struct {
 }
 
 // PullNextTargetV2 is a helper method to define mock.On call
-//   - broker Broker
 //   - collectionID int64
-//   - chosenPartitionIDs ...int64
-func (_e *MockTargetManager_Expecter) PullNextTargetV2(broker interface{}, collectionID interface{}, chosenPartitionIDs ...interface{}) *MockTargetManager_PullNextTargetV2_Call {
-	return &MockTargetManager_PullNextTargetV2_Call{Call: _e.mock.On("PullNextTargetV2",
-		append([]interface{}{broker, collectionID}, chosenPartitionIDs...)...)}
+//   - chosenPartitionIDs []int64
+//   - lastUpdateVersion []byte
+//   - forceUpdate bool
+func (_e *MockTargetManager_Expecter) PullNextTargetV2(collectionID interface{}, chosenPartitionIDs interface{}, lastUpdateVersion interface{}, forceUpdate interface{}) *MockTargetManager_PullNextTargetV2_Call {
+	return &MockTargetManager_PullNextTargetV2_Call{Call: _e.mock.On("PullNextTargetV2", collectionID, chosenPartitionIDs, lastUpdateVersion, forceUpdate)}
 }
 
-func (_c *MockTargetManager_PullNextTargetV2_Call) Run(run func(broker Broker, collectionID int64, chosenPartitionIDs ...int64)) *MockTargetManager_PullNextTargetV2_Call {
+func (_c *MockTargetManager_PullNextTargetV2_Call) Run(run func(collectionID int64, chosenPartitionIDs []int64, lastUpdateVersion []byte, forceUpdate bool)) *MockTargetManager_PullNextTargetV2_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]int64, len(args)-2)
-		for i, a := range args[2:] {
-			if a != nil {
-				variadicArgs[i] = a.(int64)
-			}
-		}
-		run(args[0].(Broker), args[1].(int64), variadicArgs...)
+		run(args[0].(int64), args[1].([]int64), args[2].([]byte), args[3].(bool))
 	})
 	return _c
 }
 
-func (_c *MockTargetManager_PullNextTargetV2_Call) Return(_a0 map[int64]*datapb.SegmentInfo, _a1 map[string]*DmChannel, _a2 error) *MockTargetManager_PullNextTargetV2_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *MockTargetManager_PullNextTargetV2_Call) Return(_a0 map[int64]*datapb.SegmentInfo, _a1 map[string]*DmChannel, _a2 []byte, _a3 error) *MockTargetManager_PullNextTargetV2_Call {
+	_c.Call.Return(_a0, _a1, _a2, _a3)
 	return _c
 }
 
-func (_c *MockTargetManager_PullNextTargetV2_Call) RunAndReturn(run func(Broker, int64, ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)) *MockTargetManager_PullNextTargetV2_Call {
+func (_c *MockTargetManager_PullNextTargetV2_Call) RunAndReturn(run func(int64, []int64, []byte, bool) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, []byte, error)) *MockTargetManager_PullNextTargetV2_Call {
 	_c.Call.Return(run)
 	return _c
 }

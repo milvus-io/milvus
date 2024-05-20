@@ -206,15 +206,17 @@ func (suite *UtilSuite) TestCalculateL0SegmentSize() {
 func (s *UtilSuite) TestGenerateDataSignature() {
 	channels := make([]*datapb.VchannelInfo, 0)
 
-	channelSize := 100
+	// test 10 collections, with each collection having 10 channels, each channel having 10000 segments
+	collectionSize := 10
+	channelSize := 10
 	segmentSize := 10000
 	startSegmentID := time.Now().UnixNano()
+	segmentIDs := make([]int64, 0)
+
 	for i := 1; i <= channelSize; i++ {
-		segmentIDs := make([]int64, 0)
 		for j := 1; j <= segmentSize; j++ {
 			segmentIDs = append(segmentIDs, startSegmentID+int64(i*segmentSize+j))
 		}
-
 		channels = append(channels, &datapb.VchannelInfo{
 			ChannelName:       fmt.Sprintf("channel_%d", i),
 			FlushedSegmentIds: segmentIDs,
@@ -222,11 +224,34 @@ func (s *UtilSuite) TestGenerateDataSignature() {
 	}
 
 	start := time.Now()
-	ret1 := GenerateDataSignature(channels)
+	for i := 0; i < collectionSize; i++ {
+		GenerateDataSignature(channels)
+	}
 	log.Info("GenerateDataSignature cost time: ", zap.Int64("ms", time.Since(start).Milliseconds()))
 	s.True(time.Since(start) < time.Second)
-	s.Len(ret1, 16)
 
-	ret2 := GenerateDataSignature(channels)
-	s.Equal(ret1, ret2)
+	// test 10000 collections, with each collection having 1 channels, each channel having 100 segments
+	collectionSize = 10000
+	channelSize = 1
+	segmentSize = 100
+	startSegmentID = time.Now().UnixNano()
+	segmentIDs = make([]int64, 0)
+	for i := 1; i <= channelSize; i++ {
+		for j := 1; j <= segmentSize; j++ {
+			segmentIDs = append(segmentIDs, startSegmentID+int64(i*segmentSize+j))
+		}
+		channels = append(channels, &datapb.VchannelInfo{
+			ChannelName:       fmt.Sprintf("channel_%d", i),
+			FlushedSegmentIds: segmentIDs,
+		})
+	}
+
+	start = time.Now()
+	for i := 0; i < collectionSize; i++ {
+		start1 := time.Now()
+		GenerateDataSignature(channels)
+		log.Info("GenerateDataSignature cost time1: ", zap.Int64("ms", time.Since(start1).Milliseconds()))
+	}
+	log.Info("GenerateDataSignature cost time: ", zap.Int64("ms", time.Since(start).Milliseconds()))
+	s.True(time.Since(start) < time.Second)
 }

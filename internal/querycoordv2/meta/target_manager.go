@@ -54,8 +54,8 @@ const (
 type TargetManagerInterface interface {
 	UpdateCollectionCurrentTarget(collectionID int64) bool
 	UpdateCollectionNextTarget(collectionID int64) error
-	PullNextTargetV1(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
-	PullNextTargetV2(broker Broker, collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
+	PullNextTargetV1(collectionID int64, chosenPartitionIDs ...int64) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, error)
+	PullNextTargetV2(collectionID int64, chosenPartitionIDs []int64, lastUpdateVersion []byte, forceUpdate bool) (map[int64]*datapb.SegmentInfo, map[string]*DmChannel, []byte, error)
 	RemoveCollection(collectionID int64)
 	RemovePartition(collectionID int64, partitionIDs ...int64)
 	GetGrowingSegmentsByCollection(collectionID int64, scope TargetScope) typeutil.UniqueSet

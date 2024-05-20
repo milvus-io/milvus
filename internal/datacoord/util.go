@@ -18,13 +18,12 @@ package datacoord
 
 import (
 	"context"
-	"crypto/md5" // #nosec
-	"sort"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/samber/lo"
+	"github.com/twmb/murmur3"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -241,7 +240,7 @@ func calculateL0SegmentSize(fields []*datapb.FieldBinlog) float64 {
 }
 
 func GenerateDataSignature(channels []*datapb.VchannelInfo) []byte {
-	d := md5.New() // #nosec
+	d := murmur3.New128()
 
 	for _, ch := range channels {
 		// write channel name
@@ -250,10 +249,6 @@ func GenerateDataSignature(channels []*datapb.VchannelInfo) []byte {
 		segmentIDs := make([]int64, 0)
 		segmentIDs = append(segmentIDs, ch.GetFlushedSegmentIds()...)
 		segmentIDs = append(segmentIDs, ch.GetLevelZeroSegmentIds()...)
-
-		sort.Slice(segmentIDs, func(i, j int) bool {
-			return segmentIDs[i] < segmentIDs[j]
-		})
 
 		// write flushed and l0 segment id
 		idInByte := make([]byte, 8)
