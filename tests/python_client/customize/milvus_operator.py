@@ -116,6 +116,7 @@ class MilvusOperator(object):
                               version=self.version, namespace=namespace)
         log.debug(f"upgrade milvus with configs: {d_configs}")
         cus_res.patch(release_name, d_configs)
+        self.wait_for_healthy(release_name, namespace=namespace)
 
     def rolling_update(self, release_name, new_image_name, namespace='default'):
         """
@@ -131,6 +132,7 @@ class MilvusOperator(object):
                            'spec.components.image': new_image_name}
         log.debug(f"rolling update milvus with configs: {rolling_configs}")
         cus_res.patch(release_name, rolling_configs)
+        self.wait_for_healthy(release_name, namespace=namespace)
 
     def scale(self, release_name, component, replicas, namespace='default'):
         """
