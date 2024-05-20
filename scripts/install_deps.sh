@@ -21,7 +21,7 @@ function install_linux_deps() {
     # for Ubuntu 20.04
     sudo apt install -y wget curl ca-certificates gnupg2  \
       g++ gcc gfortran git make ccache libssl-dev zlib1g-dev zip unzip \
-      clang-format-10 clang-tidy-10 lcov libtool m4 autoconf automake python3 python3-pip \
+      clang-format-12 clang-tidy-12 lcov libtool m4 autoconf automake python3 python3-pip \
       pkg-config uuid-dev libaio-dev libopenblas-dev libgoogle-perftools-dev
 
     sudo pip3 install conan==1.61.0
