@@ -297,7 +297,7 @@ func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	for _, str := range data.([]string) {
 		rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s'", str))
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
 		}
 		byteArr = append(byteArr, rowVec)
 		elemCount := len(rowVec) / 8
