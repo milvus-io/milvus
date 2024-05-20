@@ -432,7 +432,8 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	server.meta.ReplicaManager.Put(meta.NewReplica(&querypb.Replica{
 		ID:            1,
 		CollectionID:  1,
-		Nodes:         []int64{1011, 1013},
+		Nodes:         []int64{1011},
+		RoNodes:       []int64{1013},
 		ResourceGroup: "rg11",
 	},
 		typeutil.NewUniqueSet(1011, 1013)),
@@ -440,7 +441,8 @@ func (suite *ServiceSuite) TestResourceGroup() {
 	server.meta.ReplicaManager.Put(meta.NewReplica(&querypb.Replica{
 		ID:            2,
 		CollectionID:  2,
-		Nodes:         []int64{1012, 1014},
+		Nodes:         []int64{1014},
+		RoNodes:       []int64{1012},
 		ResourceGroup: "rg12",
 	},
 		typeutil.NewUniqueSet(1012, 1014)),
