@@ -36,12 +36,16 @@ func TestFutureWithSuccessCase(t *testing.T) {
 	future.BlockUntilReady() // test block until ready too.
 	result, err := future.BlockAndLeakyGet()
 	assert.NoError(t, err)
-	assert.Equal(t, 100, int(*result))
+	assert.Equal(t, 100, getCInt(result))
 	// The inner function sleep 1 seconds, so the future cost must be greater than 0.5 seconds.
 	assert.Greater(t, time.Since(start).Seconds(), 0.5)
 	// free the result after used.
 	freeCInt(result)
 	runtime.GC()
+
+	assert.Eventually(t, func() bool {
+		return unreleasedCnt.Load() == 0
+	}, time.Second, time.Millisecond*100)
 }
 
 func TestFutureWithCaseNoInterrupt(t *testing.T) {
@@ -55,7 +59,7 @@ func TestFutureWithCaseNoInterrupt(t *testing.T) {
 	future.BlockUntilReady() // test block until ready too.
 	result, err := future.BlockAndLeakyGet()
 	assert.NoError(t, err)
-	assert.Equal(t, 0, int(*result))
+	assert.Equal(t, 0, getCInt(result))
 	// The inner function sleep 1 seconds, so the future cost must be greater than 0.5 seconds.
 	assert.Greater(t, time.Since(start).Seconds(), 0.5)
 	// free the result after used.
@@ -78,9 +82,13 @@ func TestFutureWithCaseNoInterrupt(t *testing.T) {
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 	assert.Nil(t, result)
 
-	future.blockUntilReleasable()
-	assert.Greater(t, time.Since(start).Seconds(), 2.0)
+	// wait for the future to be done.
+	time.Sleep(2 * time.Second)
+
 	runtime.GC()
+	assert.Eventually(t, func() bool {
+		return unreleasedCnt.Load() == 0
+	}, time.Second, time.Millisecond*100)
 }
 
 // TestFutures test the future implementation.
@@ -171,6 +179,10 @@ func TestFutures(t *testing.T) {
 	assert.True(t, errors.Is(err, context.DeadlineExceeded))
 	assert.Nil(t, result)
 	runtime.GC()
+
+	assert.Eventually(t, func() bool {
+		return unreleasedCnt.Load() == 0
+	}, time.Second, time.Millisecond*100)
 }
 
 func TestConcurrent(t *testing.T) {
@@ -188,7 +200,7 @@ func TestConcurrent(t *testing.T) {
 			})
 			result, err := future.BlockAndLeakyGet()
 			assert.NoError(t, err)
-			assert.Equal(t, 100, int(*result))
+			assert.Equal(t, 100, getCInt(result))
 			freeCInt(result)
 		}()
 
@@ -247,4 +259,8 @@ func TestConcurrent(t *testing.T) {
 		return stat.ActiveCount == 0 && stat.GCCount == 0
 	}, 5*time.Second, 100*time.Millisecond)
 	runtime.GC()
+
+	assert.Eventually(t, func() bool {
+		return unreleasedCnt.Load() == 0
+	}, time.Second, time.Millisecond*100)
 }

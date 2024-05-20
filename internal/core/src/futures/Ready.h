@@ -24,7 +24,7 @@ namespace milvus::futures {
 template <class T>
 class Ready {
  public:
-    Ready() = default;
+    Ready() : is_ready_(false){};
 
     Ready(const Ready<T>&) = delete;
 

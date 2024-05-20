@@ -16,6 +16,8 @@ import (
 	"context"
 	"time"
 	"unsafe"
+
+	"go.uber.org/atomic"
 )
 
 const (
@@ -25,20 +27,29 @@ const (
 	caseNoThrowSegcoreException int = 3
 )
 
+var unreleasedCnt = atomic.NewInt32(0)
+
 type testCase struct {
 	interval time.Duration
 	loopCnt  int
 	caseNo   int
 }
 
-func createFutureWithTestCase(ctx context.Context, testCase testCase) Future[C.int] {
-	f := func() *C.CFuture {
-		return C.future_create_test_case(C.int(testCase.interval.Milliseconds()), C.int(testCase.loopCnt), C.int(testCase.caseNo))
+func createFutureWithTestCase(ctx context.Context, testCase testCase) Future {
+	f := func() CFuturePtr {
+		return (CFuturePtr)(C.future_create_test_case(C.int(testCase.interval.Milliseconds()), C.int(testCase.loopCnt), C.int(testCase.caseNo)))
 	}
-	future := Async[C.int](ctx, f)
+	future := Async(ctx, f, WithReleaser(func() {
+		unreleasedCnt.Dec()
+	}))
+	unreleasedCnt.Inc()
 	return future
 }
 
-func freeCInt(p *C.int) {
-	C.free(unsafe.Pointer(p))
+func getCInt(p unsafe.Pointer) int {
+	return int(*(*C.int)(p))
+}
+
+func freeCInt(p unsafe.Pointer) {
+	C.free(p)
 }

@@ -54,11 +54,11 @@ type basicFuture interface {
 	// cancel the future with error.
 	cancel(error)
 
-	// blockUntilReleasable block until the future is releasable.
-	blockUntilReleasable()
+	// releaseWhenUnderlyingDone release the resources of the future when underlying cgo function is done.
+	releaseWhenUnderlyingDone()
 }
 
-type Future[T any] interface {
+type Future interface {
 	basicFuture
 
 	// BlockAndLeakyGet block until the future is ready or canceled, and return the leaky result.
@@ -66,24 +66,32 @@ type Future[T any] interface {
 	//   Caller will get the merr.ErrSegcoreCancel or merr.ErrSegcoreTimeout respectively if the future is canceled or timeout.
 	//   Caller will get other error if the underlying cgo function throws, otherwise caller will get result.
 	//   Caller should free the result after used (defined by caller), otherwise the memory of result is leaked.
-	BlockAndLeakyGet() (*T, error)
+	BlockAndLeakyGet() (unsafe.Pointer, error)
 }
 
-type CGOAsyncFunction = func() *C.CFuture
+type (
+	CFuturePtr       unsafe.Pointer
+	CGOAsyncFunction = func() CFuturePtr
+)
 
 // Async is a helper function to call a C async function that returns a future.
-func Async[T any](ctx context.Context, f CGOAsyncFunction) Future[T] {
+func Async(ctx context.Context, f CGOAsyncFunction, opts ...Opt) Future {
 	// create a future for caller to use.
 	ctx, cancel := context.WithCancel(ctx)
-	future := &futureImpl[T]{
+	future := &futureImpl{
 		closure:   f,
 		ctx:       ctx,
 		ctxCancel: cancel,
 		once:      sync.Once{},
-		future:    f(),
+		future:    (*C.CFuture)(f()),
+		opts:      &options{},
+	}
+	// apply options.
+	for _, opt := range opts {
+		opt(future.opts)
 	}
 
-	runtime.SetFinalizer(future, func(future *futureImpl[T]) {
+	runtime.SetFinalizer(future, func(future *futureImpl) {
 		C.future_destroy(future.future)
 	})
 
@@ -92,23 +100,24 @@ func Async[T any](ctx context.Context, f CGOAsyncFunction) Future[T] {
 	return future
 }
 
-type futureImpl[T any] struct {
+type futureImpl struct {
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 	once      sync.Once
 	future    *C.CFuture
 	closure   CGOAsyncFunction
+	opts      *options
 }
 
-func (f *futureImpl[T]) Context() context.Context {
+func (f *futureImpl) Context() context.Context {
 	return f.ctx
 }
 
-func (f *futureImpl[T]) BlockUntilReady() {
+func (f *futureImpl) BlockUntilReady() {
 	f.blockUntilReady()
 }
 
-func (f *futureImpl[T]) BlockAndLeakyGet() (*T, error) {
+func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 	f.blockUntilReady()
 
 	var ptr unsafe.Pointer
@@ -119,10 +128,10 @@ func (f *futureImpl[T]) BlockAndLeakyGet() (*T, error) {
 		// mark the error with context error.
 		return nil, errors.Mark(err, f.ctx.Err())
 	}
-	return (*T)(ptr), err
+	return ptr, err
 }
 
-func (f *futureImpl[T]) cancel(err error) {
+func (f *futureImpl) cancel(err error) {
 	if errors.IsAny(err, context.DeadlineExceeded, context.Canceled) {
 		C.future_cancel(f.future)
 		return
@@ -130,7 +139,7 @@ func (f *futureImpl[T]) cancel(err error) {
 	panic("unreachable: invalid cancel error type")
 }
 
-func (f *futureImpl[T]) blockUntilReady() {
+func (f *futureImpl) blockUntilReady() {
 	mu := &sync.Mutex{}
 	mu.Lock()
 	C.future_go_register_ready_callback(f.future, (*C.CLockedGoMutex)(unsafe.Pointer(mu)))
@@ -139,11 +148,14 @@ func (f *futureImpl[T]) blockUntilReady() {
 	f.ctxCancel()
 }
 
-func (f *futureImpl[T]) blockUntilReleasable() {
+func (f *futureImpl) releaseWhenUnderlyingDone() {
 	mu := &sync.Mutex{}
 	mu.Lock()
 	C.future_go_register_releasable_callback(f.future, (*C.CLockedGoMutex)(unsafe.Pointer(mu)))
 	mu.Lock()
 
+	if f.opts.releaser != nil {
+		f.opts.releaser()
+	}
 	f.ctxCancel()
 }

@@ -61,7 +61,7 @@ func (m *gcFutureManager) doGC() {
 
 func (m *gcFutureManager) gcWork() {
 	for f := range m.publisher {
-		f.blockUntilReleasable()
+		f.releaseWhenUnderlyingDone()
 		m.pendingCount.Dec()
 	}
 }
