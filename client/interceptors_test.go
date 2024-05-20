@@ -28,9 +28,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
 
-var mockInvokerError error
-var mockInvokerReply interface{}
-var mockInvokeTimes = 0
+var (
+	mockInvokerError error
+	mockInvokerReply interface{}
+	mockInvokeTimes  = 0
+)
 
 var mockInvoker grpc.UnaryInvoker = func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, opts ...grpc.CallOption) error {
 	mockInvokeTimes++
