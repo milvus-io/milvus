@@ -371,6 +371,8 @@ func (s *ChannelManagerSuite) TestFindWatcher() {
 }
 
 func (s *ChannelManagerSuite) TestAdvanceChannelState() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
 	s.Run("advance statndby with no available nodes", func() {
 		chNodes := map[string]int64{
 			"ch1": bufferID,
@@ -383,7 +385,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, bufferID, "ch1", Standby)
 		s.checkAssignment(m, bufferID, "ch2", Standby)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, bufferID, "ch1", Standby)
 		s.checkAssignment(m, bufferID, "ch2", Standby)
 	})
@@ -402,7 +404,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, bufferID, "ch2", Standby)
 		s.checkAssignment(m, 1, "ch3", Watched)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 	})
@@ -418,7 +420,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Watching)
 		s.checkAssignment(m, 1, "ch2", Watching)
 	})
@@ -434,13 +436,13 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Watching)
 		s.checkAssignment(m, 1, "ch2", Watching)
 
 		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
 			Return(&datapb.ChannelOperationProgressResponse{State: datapb.ChannelWatchState_ToWatch}, nil).Twice()
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Watching)
 		s.checkAssignment(m, 1, "ch2", Watching)
 	})
@@ -456,13 +458,13 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Watching)
 		s.checkAssignment(m, 1, "ch2", Watching)
 
 		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
 			Return(&datapb.ChannelOperationProgressResponse{State: datapb.ChannelWatchState_WatchSuccess}, nil).Twice()
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Watched)
 		s.checkAssignment(m, 1, "ch2", Watched)
 	})
@@ -478,18 +480,18 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Watching)
 		s.checkAssignment(m, 1, "ch2", Watching)
 
 		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
 			Return(&datapb.ChannelOperationProgressResponse{State: datapb.ChannelWatchState_WatchFailure}, nil).Twice()
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Standby)
 		s.checkAssignment(m, 1, "ch2", Standby)
 
 		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 	})
@@ -505,13 +507,13 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Releasing)
 		s.checkAssignment(m, 1, "ch2", Releasing)
 
 		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
 			Return(&datapb.ChannelOperationProgressResponse{State: datapb.ChannelWatchState_ToRelease}, nil).Twice()
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Releasing)
 		s.checkAssignment(m, 1, "ch2", Releasing)
 	})
@@ -527,18 +529,18 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Releasing)
 		s.checkAssignment(m, 1, "ch2", Releasing)
 
 		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
 			Return(&datapb.ChannelOperationProgressResponse{State: datapb.ChannelWatchState_ReleaseSuccess}, nil).Twice()
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Standby)
 		s.checkAssignment(m, 1, "ch2", Standby)
 
 		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 	})
@@ -554,18 +556,18 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Releasing)
 		s.checkAssignment(m, 1, "ch2", Releasing)
 
 		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
 			Return(&datapb.ChannelOperationProgressResponse{State: datapb.ChannelWatchState_ReleaseFailure}, nil).Twice()
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Standby)
 		s.checkAssignment(m, 1, "ch2", Standby)
 
 		s.mockHandler.EXPECT().CheckShouldDropChannel(mock.Anything).Return(false)
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		// TODO, donot assign to abnormal nodes
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
@@ -583,7 +585,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", ToWatch)
 		s.checkAssignment(m, 1, "ch2", ToWatch)
 	})
@@ -599,7 +601,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Releasing)
 		s.checkAssignment(m, 1, "ch2", Releasing)
 	})
@@ -616,7 +618,7 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
 
-		m.AdvanceChannelState()
+		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", ToRelease)
 		s.checkAssignment(m, 1, "ch2", ToRelease)
 	})
