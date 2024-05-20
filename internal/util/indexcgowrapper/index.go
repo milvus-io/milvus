@@ -94,9 +94,12 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	return index, nil
 }
 
-func CreateIndex(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIndex, error) {
+func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexParams) (CodecIndex, error) {
+	buildIndexInfoStr := proto.MarshalTextString(buildIndexInfo)
 	var indexPtr C.CIndex
-	status := C.CreateIndex(&indexPtr, buildIndexInfo.cBuildIndexInfo)
+	cBuildIndexInfo := C.CString(buildIndexInfoStr)
+	defer C.free(unsafe.Pointer(cBuildIndexInfo))
+	status := C.CreateIndex(&indexPtr, cBuildIndexInfo)
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}
@@ -109,9 +112,12 @@ func CreateIndex(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecInde
 	return index, nil
 }
 
-func CreateIndexV2(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIndex, error) {
+func CreateIndexV2(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexParams) (CodecIndex, error) {
+	buildIndexInfoStr := proto.MarshalTextString(buildIndexInfo)
 	var indexPtr C.CIndex
-	status := C.CreateIndexV2(&indexPtr, buildIndexInfo.cBuildIndexInfo)
+	cBuildIndexInfo := C.CString(buildIndexInfoStr)
+	defer C.free(unsafe.Pointer(cBuildIndexInfo))
+	status := C.CreateIndexV2(&indexPtr, cBuildIndexInfo)
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}

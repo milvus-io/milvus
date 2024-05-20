@@ -84,29 +84,90 @@ CreateIndexV0(enum CDataType dtype,
     return status;
 }
 
+milvus::storage::StorageConfig
+get_storage_config(const milvus::proto::indexcgo::StorageConfig& config) {
+    auto storage_config = milvus::storage::StorageConfig();
+    storage_config.address = std::string(config.address());
+    storage_config.bucket_name = std::string(config.bucket_name());
+    storage_config.access_key_id = std::string(config.access_keyid());
+    storage_config.access_key_value = std::string(config.secret_access_key());
+    storage_config.root_path = std::string(config.root_path());
+    storage_config.storage_type = std::string(config.storage_type());
+    storage_config.cloud_provider = std::string(config.cloud_provider());
+    storage_config.iam_endpoint = std::string(config.iamendpoint());
+    storage_config.cloud_provider = std::string(config.cloud_provider());
+    storage_config.useSSL = config.usessl();
+    storage_config.sslCACert = config.sslcacert();
+    storage_config.useIAM = config.useiam();
+    storage_config.region = config.region();
+    storage_config.useVirtualHost = config.use_virtual_host();
+    storage_config.requestTimeoutMs = config.request_timeout_ms();
+    return storage_config;
+}
+
+milvus::OptFieldT
+get_opt_field(const ::google::protobuf::RepeatedPtrField<
+              milvus::proto::indexcgo::OptionalFieldInfo>& field_infos) {
+    milvus::OptFieldT opt_fields_map;
+    for (const auto& field_info : field_infos) {
+        auto field_id = field_info.fieldid();
+        if (opt_fields_map.find(field_id) == opt_fields_map.end()) {
+            opt_fields_map[field_id] = {
+                field_info.field_name(),
+                static_cast<milvus::DataType>(field_info.field_type()),
+                {}};
+        }
+        for (const auto& str : field_info.data_paths()) {
+            std::get<2>(opt_fields_map[field_id]).emplace_back(str);
+        }
+    }
+
+    return opt_fields_map;
+}
+
+milvus::Config
+get_config(const milvus::proto::indexcgo::BuildIndexParams& info) {
+    milvus::Config config;
+    for (auto i = 0; i < info.index_params().size(); ++i) {
+        const auto& param = info.index_params(i);
+        config[param.key()] = param.value();
+    }
+
+    for (auto i = 0; i < info.type_params().size(); ++i) {
+        const auto& param = info.type_params(i);
+        config[param.key()] = param.value();
+    }
+
+    config["insert_files"] = info.insert_files();
+    if (info.opt_fields().size()) {
+        config["opt_fields"] = get_opt_field(info.opt_fields());
+    }
+
+    return config;
+}
+
 CStatus
-CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
+CreateIndex(CIndex* res_index, const char* serialized_build_index_info) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
-        auto field_type = build_index_info->field_type;
+        milvus::proto::indexcgo::BuildIndexParams build_index_info;
+        milvus::index::ParseFromString(build_index_info,
+                                       serialized_build_index_info);
+        auto field_type =
+            static_cast<DataType>(build_index_info.field_schema().data_type());
 
         milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = build_index_info->field_type;
+        index_info.field_type = field_type;
 
-        auto& config = build_index_info->config;
-        config["insert_files"] = build_index_info->insert_files;
-        if (build_index_info->opt_fields.size()) {
-            config["opt_fields"] = build_index_info->opt_fields;
-        }
-
+        auto storage_config =
+            get_storage_config(build_index_info.storage_config());
+        auto config = get_config(build_index_info);
         // get index type
         auto index_type = milvus::index::GetValueFromConfig<std::string>(
             config, "index_type");
         AssertInfo(index_type.has_value(), "index type is empty");
         index_info.index_type = index_type.value();
 
-        auto engine_version = build_index_info->index_engine_version;
-
+        auto engine_version = build_index_info.current_index_version();
         index_info.index_engine_version = engine_version;
         config[milvus::index::INDEX_ENGINE_VERSION] =
             std::to_string(engine_version);
@@ -121,24 +182,30 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
-            build_index_info->collection_id,
-            build_index_info->partition_id,
-            build_index_info->segment_id,
-            build_index_info->field_id};
+            build_index_info.collectionid(),
+            build_index_info.partitionid(),
+            build_index_info.segmentid(),
+            build_index_info.field_schema().fieldid()};
 
-        milvus::storage::IndexMeta index_meta{build_index_info->segment_id,
-                                              build_index_info->field_id,
-                                              build_index_info->index_build_id,
-                                              build_index_info->index_version};
-        auto chunk_manager = milvus::storage::CreateChunkManager(
-            build_index_info->storage_config);
+        milvus::storage::IndexMeta index_meta{
+            build_index_info.segmentid(),
+            build_index_info.field_schema().fieldid(),
+            build_index_info.buildid(),
+            build_index_info.index_version(),
+            "",
+            build_index_info.field_schema().name(),
+            field_type,
+            build_index_info.dim(),
+        };
+        auto chunk_manager =
+            milvus::storage::CreateChunkManager(storage_config);
 
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta, index_meta, chunk_manager);
 
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
-                build_index_info->field_type, config, fileManagerContext);
+                field_type, config, fileManagerContext);
         index->Build();
         *res_index = index.release();
         auto status = CStatus();
@@ -159,22 +226,28 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
 }
 
 CStatus
-CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
+CreateIndexV2(CIndex* res_index, const char* serialized_build_index_info) {
     try {
-        auto build_index_info = (BuildIndexInfo*)c_build_index_info;
-        auto field_type = build_index_info->field_type;
-        milvus::index::CreateIndexInfo index_info;
-        index_info.field_type = build_index_info->field_type;
-        index_info.dim = build_index_info->dim;
+        milvus::proto::indexcgo::BuildIndexParams build_index_info;
+        milvus::index::ParseFromString(build_index_info,
+                                       serialized_build_index_info);
+        auto field_type =
+            static_cast<DataType>(build_index_info.field_schema().data_type());
 
-        auto& config = build_index_info->config;
+        milvus::index::CreateIndexInfo index_info;
+        index_info.field_type = field_type;
+        index_info.dim = build_index_info.dim();
+
+        auto storage_config =
+            get_storage_config(build_index_info.storage_config());
+        auto config = get_config(build_index_info);
         // get index type
         auto index_type = milvus::index::GetValueFromConfig<std::string>(
             config, "index_type");
         AssertInfo(index_type.has_value(), "index type is empty");
         index_info.index_type = index_type.value();
 
-        auto engine_version = build_index_info->index_engine_version;
+        auto engine_version = build_index_info.current_index_version();
         index_info.index_engine_version = engine_version;
         config[milvus::index::INDEX_ENGINE_VERSION] =
             std::to_string(engine_version);
@@ -188,39 +261,38 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
         }
 
         milvus::storage::FieldDataMeta field_meta{
-            build_index_info->collection_id,
-            build_index_info->partition_id,
-            build_index_info->segment_id,
-            build_index_info->field_id};
+            build_index_info.collectionid(),
+            build_index_info.partitionid(),
+            build_index_info.segmentid(),
+            build_index_info.field_schema().fieldid()};
         milvus::storage::IndexMeta index_meta{
-            build_index_info->segment_id,
-            build_index_info->field_id,
-            build_index_info->index_build_id,
-            build_index_info->index_version,
-            build_index_info->field_name,
+            build_index_info.segmentid(),
+            build_index_info.field_schema().fieldid(),
+            build_index_info.buildid(),
+            build_index_info.index_version(),
             "",
-            build_index_info->field_type,
-            build_index_info->dim,
+            build_index_info.field_schema().name(),
+            field_type,
+            build_index_info.dim(),
         };
 
         auto store_space = milvus_storage::Space::Open(
-            build_index_info->data_store_path,
-            milvus_storage::Options{nullptr,
-                                    build_index_info->data_store_version});
+            build_index_info.store_path(),
+            milvus_storage::Options{nullptr, build_index_info.store_version()});
         AssertInfo(store_space.ok() && store_space.has_value(),
                    "create space failed: {}",
                    store_space.status().ToString());
 
         auto index_space = milvus_storage::Space::Open(
-            build_index_info->index_store_path,
+            build_index_info.index_store_path(),
             milvus_storage::Options{.schema = store_space.value()->schema()});
         AssertInfo(index_space.ok() && index_space.has_value(),
                    "create space failed: {}",
                    index_space.status().ToString());
 
         LOG_INFO("init space success");
-        auto chunk_manager = milvus::storage::CreateChunkManager(
-            build_index_info->storage_config);
+        auto chunk_manager =
+            milvus::storage::CreateChunkManager(storage_config);
         milvus::storage::FileManagerContext fileManagerContext(
             field_meta,
             index_meta,
@@ -229,9 +301,9 @@ CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
 
         auto index =
             milvus::indexbuilder::IndexFactory::GetInstance().CreateIndex(
-                build_index_info->field_type,
-                build_index_info->field_name,
-                build_index_info->dim,
+                field_type,
+                build_index_info.field_schema().name(),
+                build_index_info.dim(),
                 config,
                 fileManagerContext,
                 std::move(store_space.value()));

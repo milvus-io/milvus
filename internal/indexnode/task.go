@@ -18,7 +18,6 @@ package indexnode
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"runtime/debug"
 	"strconv"
@@ -30,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
@@ -84,12 +84,21 @@ type indexBuildTaskV2 struct {
 }
 
 func (it *indexBuildTaskV2) parseParams(ctx context.Context) error {
-	it.collectionID = it.req.CollectionID
-	it.partitionID = it.req.PartitionID
-	it.segmentID = it.req.SegmentID
-	it.fieldType = it.req.FieldType
-	it.fieldID = it.req.FieldID
-	it.fieldName = it.req.FieldName
+	it.collectionID = it.req.GetCollectionID()
+	it.partitionID = it.req.GetPartitionID()
+	it.segmentID = it.req.GetSegmentID()
+	it.fieldType = it.req.GetFieldType()
+	if it.fieldType == schemapb.DataType_None {
+		it.fieldType = it.req.GetField().GetDataType()
+	}
+	it.fieldID = it.req.GetFieldID()
+	if it.fieldID == 0 {
+		it.fieldID = it.req.GetField().GetFieldID()
+	}
+	it.fieldName = it.req.GetFieldName()
+	if it.fieldName == "" {
+		it.fieldName = it.req.GetField().GetName()
+	}
 	return nil
 }
 
@@ -138,61 +147,57 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	var buildIndexInfo *indexcgowrapper.BuildIndexInfo
-	buildIndexInfo, err = indexcgowrapper.NewBuildIndexInfo(it.req.GetStorageConfig())
-	defer indexcgowrapper.DeleteBuildIndexInfo(buildIndexInfo)
-	if err != nil {
-		log.Ctx(ctx).Warn("create build index info failed", zap.Error(err))
-		return err
-	}
-	err = buildIndexInfo.AppendFieldMetaInfoV2(it.collectionID, it.partitionID, it.segmentID, it.fieldID, it.fieldType, it.fieldName, it.req.Dim)
-	if err != nil {
-		log.Ctx(ctx).Warn("append field meta failed", zap.Error(err))
-		return err
-	}
-
-	err = buildIndexInfo.AppendIndexMetaInfo(it.req.IndexID, it.req.BuildID, it.req.IndexVersion)
-	if err != nil {
-		log.Ctx(ctx).Warn("append index meta failed", zap.Error(err))
-		return err
+	storageConfig := &indexcgopb.StorageConfig{
+		Address:          it.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:      it.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:  it.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:           it.req.GetStorageConfig().GetUseSSL(),
+		BucketName:       it.req.GetStorageConfig().GetBucketName(),
+		RootPath:         it.req.GetStorageConfig().GetRootPath(),
+		UseIAM:           it.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:      it.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:      it.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:   it.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:           it.req.GetStorageConfig().GetRegion(),
+		CloudProvider:    it.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs: it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		SslCACert:        it.req.GetStorageConfig().GetSslCACert(),
 	}
 
-	err = buildIndexInfo.AppendBuildIndexParam(it.newIndexParams)
-	if err != nil {
-		log.Ctx(ctx).Warn("append index params failed", zap.Error(err))
-		return err
-	}
-
-	err = buildIndexInfo.AppendIndexStorageInfo(it.req.StorePath, it.req.IndexStorePath, it.req.StoreVersion)
-	if err != nil {
-		log.Ctx(ctx).Warn("append storage info failed", zap.Error(err))
-		return err
-	}
-
-	jsonIndexParams, err := json.Marshal(it.newIndexParams)
-	if err != nil {
-		log.Ctx(ctx).Error("failed to json marshal index params", zap.Error(err))
-		return err
-	}
-
-	log.Ctx(ctx).Info("index params are ready",
-		zap.Int64("buildID", it.BuildID),
-		zap.String("index params", string(jsonIndexParams)))
-
-	err = buildIndexInfo.AppendBuildTypeParam(it.newTypeParams)
-	if err != nil {
-		log.Ctx(ctx).Warn("append type params failed", zap.Error(err))
-		return err
-	}
-
+	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
 	for _, optField := range it.req.GetOptionalScalarFields() {
-		if err := buildIndexInfo.AppendOptionalField(optField); err != nil {
-			log.Ctx(ctx).Warn("append optional field failed", zap.Error(err))
-			return err
-		}
+		optFields = append(optFields, &indexcgopb.OptionalFieldInfo{
+			FieldID:   optField.GetFieldID(),
+			FieldName: optField.GetFieldName(),
+			FieldType: optField.GetFieldType(),
+			DataPaths: optField.GetDataPaths(),
+		})
 	}
 
-	it.index, err = indexcgowrapper.CreateIndexV2(ctx, buildIndexInfo)
+	it.currentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
+	buildIndexParams := &indexcgopb.BuildIndexParams{
+		ClusterID:           it.req.GetClusterID(),
+		BuildID:             it.req.GetBuildID(),
+		CollectionID:        it.req.GetCollectionID(),
+		PartitionID:         it.req.GetPartitionID(),
+		SegmentID:           it.req.GetSegmentID(),
+		IndexVersion:        it.req.GetIndexVersion(),
+		CurrentIndexVersion: it.currentIndexVersion,
+		NumRows:             it.req.GetNumRows(),
+		Dim:                 it.req.GetDim(),
+		IndexFilePrefix:     it.req.GetIndexFilePrefix(),
+		InsertFiles:         it.req.GetDataPaths(),
+		FieldSchema:         it.req.GetField(),
+		StorageConfig:       storageConfig,
+		IndexParams:         mapToKVPairs(it.newIndexParams),
+		TypeParams:          mapToKVPairs(it.newTypeParams),
+		StorePath:           it.req.GetStorePath(),
+		StoreVersion:        it.req.GetStoreVersion(),
+		IndexStorePath:      it.req.GetIndexStorePath(),
+		OptFields:           optFields,
+	}
+
+	it.index, err = indexcgowrapper.CreateIndexV2(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
 			log.Ctx(ctx).Error("failed to clean cached data on disk after build index failed",
@@ -328,7 +333,7 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 
 	if len(it.req.DataPaths) == 0 {
 		for _, id := range it.req.GetDataIds() {
-			path := metautil.BuildInsertLogPath(it.req.GetStorageConfig().RootPath, it.req.GetCollectionID(), it.req.GetPartitionID(), it.req.GetSegmentID(), it.req.GetFieldID(), id)
+			path := metautil.BuildInsertLogPath(it.req.GetStorageConfig().RootPath, it.req.GetCollectionID(), it.req.GetPartitionID(), it.req.GetSegmentID(), it.req.GetField().GetFieldID(), id)
 			it.req.DataPaths = append(it.req.DataPaths, path)
 		}
 	}
@@ -362,16 +367,10 @@ func (it *indexBuildTask) Prepare(ctx context.Context) error {
 	}
 	it.newTypeParams = typeParams
 	it.newIndexParams = indexParams
+
 	it.statistic.IndexParams = it.req.GetIndexParams()
-	// ugly codes to get dimension
-	if dimStr, ok := typeParams[common.DimKey]; ok {
-		var err error
-		it.statistic.Dim, err = strconv.ParseInt(dimStr, 10, 64)
-		if err != nil {
-			log.Ctx(ctx).Error("parse dimesion failed", zap.Error(err))
-			// ignore error
-		}
-	}
+	it.statistic.Dim = it.req.GetDim()
+
 	log.Ctx(ctx).Info("Successfully prepare indexBuildTask", zap.Int64("buildID", it.BuildID),
 		zap.Int64("Collection", it.collectionID), zap.Int64("SegmentID", it.segmentID))
 	return nil
@@ -482,69 +481,57 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 		}
 	}
 
-	var buildIndexInfo *indexcgowrapper.BuildIndexInfo
-	buildIndexInfo, err = indexcgowrapper.NewBuildIndexInfo(it.req.GetStorageConfig())
-	defer indexcgowrapper.DeleteBuildIndexInfo(buildIndexInfo)
-	if err != nil {
-		log.Ctx(ctx).Warn("create build index info failed", zap.Error(err))
-		return err
-	}
-	err = buildIndexInfo.AppendFieldMetaInfo(it.collectionID, it.partitionID, it.segmentID, it.fieldID, it.fieldType)
-	if err != nil {
-		log.Ctx(ctx).Warn("append field meta failed", zap.Error(err))
-		return err
-	}
-
-	err = buildIndexInfo.AppendIndexMetaInfo(it.req.IndexID, it.req.BuildID, it.req.IndexVersion)
-	if err != nil {
-		log.Ctx(ctx).Warn("append index meta failed", zap.Error(err))
-		return err
+	storageConfig := &indexcgopb.StorageConfig{
+		Address:          it.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:      it.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:  it.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:           it.req.GetStorageConfig().GetUseSSL(),
+		BucketName:       it.req.GetStorageConfig().GetBucketName(),
+		RootPath:         it.req.GetStorageConfig().GetRootPath(),
+		UseIAM:           it.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:      it.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:      it.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:   it.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:           it.req.GetStorageConfig().GetRegion(),
+		CloudProvider:    it.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs: it.req.GetStorageConfig().GetRequestTimeoutMs(),
+		SslCACert:        it.req.GetStorageConfig().GetSslCACert(),
 	}
 
-	err = buildIndexInfo.AppendBuildIndexParam(it.newIndexParams)
-	if err != nil {
-		log.Ctx(ctx).Warn("append index params failed", zap.Error(err))
-		return err
-	}
-
-	jsonIndexParams, err := json.Marshal(it.newIndexParams)
-	if err != nil {
-		log.Ctx(ctx).Error("failed to json marshal index params", zap.Error(err))
-		return err
-	}
-
-	log.Ctx(ctx).Info("index params are ready",
-		zap.Int64("buildID", it.BuildID),
-		zap.String("index params", string(jsonIndexParams)))
-
-	err = buildIndexInfo.AppendBuildTypeParam(it.newTypeParams)
-	if err != nil {
-		log.Ctx(ctx).Warn("append type params failed", zap.Error(err))
-		return err
-	}
-
-	for _, path := range it.req.GetDataPaths() {
-		err = buildIndexInfo.AppendInsertFile(path)
-		if err != nil {
-			log.Ctx(ctx).Warn("append insert binlog path failed", zap.Error(err))
-			return err
-		}
+	optFields := make([]*indexcgopb.OptionalFieldInfo, 0, len(it.req.GetOptionalScalarFields()))
+	for _, optField := range it.req.GetOptionalScalarFields() {
+		optFields = append(optFields, &indexcgopb.OptionalFieldInfo{
+			FieldID:   optField.GetFieldID(),
+			FieldName: optField.GetFieldName(),
+			FieldType: optField.GetFieldType(),
+			DataPaths: optField.GetDataPaths(),
+		})
 	}
 
 	it.currentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
-	if err := buildIndexInfo.AppendIndexEngineVersion(it.currentIndexVersion); err != nil {
-		log.Ctx(ctx).Warn("append index engine version failed", zap.Error(err))
-		return err
+	buildIndexParams := &indexcgopb.BuildIndexParams{
+		ClusterID:           it.req.GetClusterID(),
+		BuildID:             it.req.GetBuildID(),
+		CollectionID:        it.req.GetCollectionID(),
+		PartitionID:         it.req.GetPartitionID(),
+		SegmentID:           it.req.GetSegmentID(),
+		IndexVersion:        it.req.GetIndexVersion(),
+		CurrentIndexVersion: it.currentIndexVersion,
+		NumRows:             it.req.GetNumRows(),
+		Dim:                 it.req.GetDim(),
+		IndexFilePrefix:     it.req.GetIndexFilePrefix(),
+		InsertFiles:         it.req.GetDataPaths(),
+		FieldSchema:         it.req.GetField(),
+		StorageConfig:       storageConfig,
+		IndexParams:         mapToKVPairs(it.newIndexParams),
+		TypeParams:          mapToKVPairs(it.newTypeParams),
+		StorePath:           it.req.GetStorePath(),
+		StoreVersion:        it.req.GetStoreVersion(),
+		IndexStorePath:      it.req.GetIndexStorePath(),
+		OptFields:           optFields,
 	}
 
-	for _, optField := range it.req.GetOptionalScalarFields() {
-		if err := buildIndexInfo.AppendOptionalField(optField); err != nil {
-			log.Ctx(ctx).Warn("append optional field failed", zap.Error(err))
-			return err
-		}
-	}
-
-	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexInfo)
+	it.index, err = indexcgowrapper.CreateIndex(ctx, buildIndexParams)
 	if err != nil {
 		if it.index != nil && it.index.CleanLocalData() != nil {
 			log.Ctx(ctx).Error("failed to clean cached data on disk after build index failed",
@@ -653,8 +640,6 @@ func (it *indexBuildTask) decodeBlobs(ctx context.Context, blobs []*storage.Blob
 	deserializeDur := it.tr.RecordSpan()
 
 	log.Ctx(ctx).Info("IndexNode deserialize data success",
-		zap.Int64("index id", it.req.IndexID),
-		zap.String("index name", it.req.IndexName),
 		zap.Int64("collectionID", it.collectionID),
 		zap.Int64("partitionID", it.partitionID),
 		zap.Int64("segmentID", it.segmentID),

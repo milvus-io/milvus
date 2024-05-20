@@ -348,28 +348,31 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 		var req *indexpb.CreateJobRequest
+		collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
+		if err != nil {
+			log.Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+			return false
+		}
+
+		schema := collectionInfo.Schema
+		var field *schemapb.FieldSchema
+
+		for _, f := range schema.Fields {
+			if f.FieldID == fieldID {
+				field = f
+				break
+			}
+		}
+
+		var dim int
+		if typeutil.IsVectorType(field.GetDataType()) {
+			dim, err = storage.GetDimFromParams(field.TypeParams)
+			if err != nil {
+				log.Ctx(ib.ctx).Warn("failed to get dim from field type params", zap.Error(err))
+				return false
+			}
+		}
 		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-			collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
-			if err != nil {
-				log.Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
-				return false
-			}
-
-			schema := collectionInfo.Schema
-			var field *schemapb.FieldSchema
-
-			for _, f := range schema.Fields {
-				if f.FieldID == fieldID {
-					field = f
-					break
-				}
-			}
-
-			dim, err := storage.GetDimFromParams(field.TypeParams)
-			if err != nil {
-				return false
-			}
-
 			storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
 			if err != nil {
 				log.Ctx(ib.ctx).Warn("failed to get storage uri", zap.Error(err))
@@ -403,6 +406,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				CurrentIndexVersion:  ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
 				DataIds:              binlogIDs,
 				OptionalScalarFields: optionalFields,
+				Field:                field,
 			}
 		} else {
 			req = &indexpb.CreateJobRequest{
@@ -421,6 +425,8 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				SegmentID:            segment.GetID(),
 				FieldID:              fieldID,
 				OptionalScalarFields: optionalFields,
+				Dim:                  int64(dim),
+				Field:                field,
 			}
 		}
 
