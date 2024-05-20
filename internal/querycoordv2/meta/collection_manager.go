@@ -555,6 +555,7 @@ func (m *CollectionManager) RemoveCollection(collectionID typeutil.UniqueID) err
 		}
 		delete(m.collectionPartitions, collectionID)
 	}
+	metrics.CleanQueryCoordMetricsWithCollectionID(collectionID)
 	return nil
 }
 
