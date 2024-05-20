@@ -190,9 +190,10 @@ func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanR
 		return true
 	})
 
-	// remote level zero results
+	// remove level zero results
 	lo.ForEach(completedLevelZero, func(planID int64, _ int) {
 		c.completed.Remove(planID)
+		c.completedCompactor.Remove(planID)
 	})
 
 	if len(results) > 0 {
