@@ -592,7 +592,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; j++ {
+	for j := 0; j < loopEnd; {
 		sel, drainOneResult := typeutil.SelectMinPK(retrieveLimit, validRetrieveResults, cursors)
 		if sel == -1 || (reduceStopForBest && drainOneResult) {
 			break
@@ -602,6 +602,7 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 		if _, ok := idSet[pk]; !ok {
 			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			idSet[pk] = struct{}{}
+			j++
 		} else {
 			// primary keys duplicate
 			skipDupCnt++

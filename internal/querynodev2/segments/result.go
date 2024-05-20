@@ -386,9 +386,10 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	idSet := make(map[interface{}]struct{})
 	cursors := make([]int64, len(validRetrieveResults))
 
+	var availableCount int64
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for j := 0; j < loopEnd; j++ {
+	for j := 0; j < loopEnd && (param.limit == -1 || availableCount < param.limit); j++ {
 		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
@@ -399,6 +400,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			typeutil.AppendPKs(ret.Ids, pk)
 			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			idSet[pk] = struct{}{}
+			availableCount++
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
