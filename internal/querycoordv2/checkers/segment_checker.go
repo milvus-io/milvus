@@ -204,7 +204,7 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 		log.Info("replica does not exist, skip it")
 		return
 	}
-	dist := c.getSealedSegmentsDist(replica)
+	dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	sort.Slice(dist, func(i, j int) bool {
 		return dist[i].Version < dist[j].Version
 	})
@@ -293,14 +293,6 @@ func (c *SegmentChecker) getSealedSegmentDiff(
 	return
 }
 
-func (c *SegmentChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
-	ret := make([]*meta.Segment, 0)
-	for _, node := range replica.GetNodes() {
-		ret = append(ret, c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))...)
-	}
-	return ret
-}
-
 func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Segment {
 	segments := make([]*meta.Segment, 0)
 	replica := c.meta.Get(replicaID)
@@ -308,7 +300,7 @@ func (c *SegmentChecker) findRepeatedSealedSegments(replicaID int64) []*meta.Seg
 		log.Info("replica does not exist, skip it")
 		return segments
 	}
-	dist := c.getSealedSegmentsDist(replica)
+	dist := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	versions := make(map[int64]*meta.Segment)
 	for _, s := range dist {
 		// l0 segment should be release with channel together
@@ -398,25 +390,12 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 
 		rwNodes := replica.GetChannelRWNodes(shard)
 		if len(rwNodes) == 0 {
-			rwNodes = replica.GetNodes()
-		}
-
-		// filter out stopping nodes.
-		availableNodes := lo.Filter(rwNodes, func(node int64, _ int) bool {
-			stop, err := c.nodeMgr.IsStoppingNode(node)
-			if err != nil {
-				return false
-			}
-			return !stop
-		})
-
-		if len(availableNodes) == 0 {
-			return nil
+			rwNodes = replica.GetRWNodes()
 		}
 
 		// L0 segment can only be assign to shard leader's node
 		if isLevel0 {
-			availableNodes = []int64{leader.ID}
+			rwNodes = []int64{leader.ID}
 		}
 
 		segmentInfos := lo.Map(segments, func(s *datapb.SegmentInfo, _ int) *meta.Segment {
@@ -424,7 +403,7 @@ func (c *SegmentChecker) createSegmentLoadTasks(ctx context.Context, segments []
 				SegmentInfo: s,
 			}
 		})
-		shardPlans := c.balancer.AssignSegment(replica.GetCollectionID(), segmentInfos, availableNodes, false)
+		shardPlans := c.balancer.AssignSegment(replica.GetCollectionID(), segmentInfos, rwNodes, false)
 		for i := range shardPlans {
 			shardPlans[i].Replica = replica
 		}

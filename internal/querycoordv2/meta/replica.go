@@ -39,7 +39,7 @@ func NewReplica(replica *querypb.Replica, nodes ...typeutil.UniqueSet) *Replica 
 }
 
 // newReplica creates a new replica from pb.
-func newReplica(replica *querypb.Replica, channels ...string) *Replica {
+func newReplica(replica *querypb.Replica) *Replica {
 	return &Replica{
 		replicaPB: proto.Clone(replica).(*querypb.Replica),
 		rwNodes:   typeutil.NewUniqueSet(replica.Nodes...),
@@ -65,13 +65,22 @@ func (replica *Replica) GetResourceGroup() string {
 // GetNodes returns the rw nodes of the replica.
 // readonly, don't modify the returned slice.
 func (replica *Replica) GetNodes() []int64 {
-	return replica.replicaPB.GetNodes()
+	nodes := make([]int64, 0)
+	nodes = append(nodes, replica.replicaPB.GetRoNodes()...)
+	nodes = append(nodes, replica.replicaPB.GetNodes()...)
+	return nodes
 }
 
 // GetRONodes returns the ro nodes of the replica.
 // readonly, don't modify the returned slice.
 func (replica *Replica) GetRONodes() []int64 {
 	return replica.replicaPB.GetRoNodes()
+}
+
+// GetRONodes returns the rw nodes of the replica.
+// readonly, don't modify the returned slice.
+func (replica *Replica) GetRWNodes() []int64 {
+	return replica.replicaPB.GetNodes()
 }
 
 // RangeOverRWNodes iterates over the read and write nodes of the replica.
@@ -131,8 +140,8 @@ func (replica *Replica) GetChannelRWNodes(channelName string) []int64 {
 	return replica.replicaPB.ChannelNodeInfos[channelName].GetRwNodes()
 }
 
-// copyForWrite returns a mutable replica for write operations.
-func (replica *Replica) copyForWrite() *mutableReplica {
+// CopyForWrite returns a mutable replica for write operations.
+func (replica *Replica) CopyForWrite() *mutableReplica {
 	exclusiveRWNodeToChannel := make(map[int64]string)
 	for name, channelNodeInfo := range replica.replicaPB.GetChannelNodeInfos() {
 		for _, nodeID := range channelNodeInfo.GetRwNodes() {

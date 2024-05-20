@@ -141,8 +141,7 @@ func (b *ScoreBasedBalancer) hasEnoughBenefit(sourceNode *nodeItem, targetNode *
 
 func (b *ScoreBasedBalancer) convertToNodeItems(collectionID int64, nodeIDs []int64) []*nodeItem {
 	ret := make([]*nodeItem, 0, len(nodeIDs))
-	for _, nodeInfo := range b.getNodes(nodeIDs) {
-		node := nodeInfo.ID()
+	for _, node := range nodeIDs {
 		priority := b.calculateScore(collectionID, node)
 		nodeItem := newNodeItem(priority, node)
 		ret = append(ret, &nodeItem)
@@ -195,56 +194,38 @@ func (b *ScoreBasedBalancer) BalanceReplica(replica *meta.Replica) ([]SegmentAss
 		return nil, nil
 	}
 
-	onlineNodes := make([]int64, 0)
-	offlineNodes := make([]int64, 0)
+	rwNodes := replica.GetRWNodes()
+	roNodes := replica.GetRONodes()
 
-	// read only nodes is offline in current replica.
-	if replica.RONodesCount() > 0 {
-		// if node is stop or transfer to other rg
-		log.RatedInfo(10, "meet read only node, try to move out all segment/channel", zap.Int64s("node", replica.GetRONodes()))
-		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
-	}
-
-	for _, nid := range replica.GetNodes() {
-		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
-			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
-			continue
-		} else if isStopping {
-			offlineNodes = append(offlineNodes, nid)
-		} else {
-			onlineNodes = append(onlineNodes, nid)
-		}
-	}
-
-	if len(onlineNodes) == 0 {
+	if len(rwNodes) == 0 {
 		// no available nodes to balance
 		return nil, nil
 	}
 
 	// print current distribution before generating plans
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
-	if len(offlineNodes) != 0 {
+	if len(roNodes) != 0 {
 		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", offlineNodes))
+			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
 			return nil, nil
 		}
 
 		log.Info("Handle stopping nodes",
-			zap.Any("stopping nodes", offlineNodes),
-			zap.Any("available nodes", onlineNodes),
+			zap.Any("stopping nodes", roNodes),
+			zap.Any("available nodes", rwNodes),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, onlineNodes, offlineNodes)...)
+		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
 		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes)...)
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, rwNodes, roNodes)...)
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
-			channelPlans = append(channelPlans, b.genChannelPlan(replica, onlineNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, onlineNodes)...)
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, rwNodes)...)
 		}
 	}
 
