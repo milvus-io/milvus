@@ -456,7 +456,7 @@ func (s *Server) startQueryCoord() error {
 			s.nodeMgr.Stopping(node.ServerID)
 		}
 	}
-	s.checkReplicas()
+	s.checkNodeStateInRG()
 	for _, node := range sessions {
 		s.handleNodeUp(node.ServerID)
 	}
@@ -778,28 +778,15 @@ func (s *Server) handleNodeDown(node int64) {
 	s.meta.ResourceManager.HandleNodeDown(node)
 }
 
-// checkReplicas checks whether replica contains offline node, and remove those nodes
-func (s *Server) checkReplicas() {
-	for _, collection := range s.meta.CollectionManager.GetAll() {
-		log := log.With(zap.Int64("collectionID", collection))
-		replicas := s.meta.ReplicaManager.GetByCollection(collection)
-		for _, replica := range replicas {
-			toRemove := make([]int64, 0)
-			for _, node := range replica.GetNodes() {
-				if s.nodeMgr.Get(node) == nil {
-					toRemove = append(toRemove, node)
-				}
-			}
-
-			if len(toRemove) > 0 {
-				log := log.With(
-					zap.Int64("replicaID", replica.GetID()),
-					zap.Int64s("offlineNodes", toRemove),
-				)
-				log.Info("some nodes are offline, remove them from replica", zap.Any("toRemove", toRemove))
-				if err := s.meta.ReplicaManager.RemoveNode(replica.GetID(), toRemove...); err != nil {
-					log.Warn("failed to remove offline nodes from replica")
-				}
+func (s *Server) checkNodeStateInRG() {
+	for _, rgName := range s.meta.ListResourceGroups() {
+		rg := s.meta.ResourceManager.GetResourceGroup(rgName)
+		for _, node := range rg.GetNodes() {
+			info := s.nodeMgr.Get(node)
+			if info == nil {
+				s.meta.ResourceManager.HandleNodeDown(node)
+			} else if info.IsStoppingState() {
+				s.meta.ResourceManager.HandleNodeStopping(node)
 			}
 		}
 	}
