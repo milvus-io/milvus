@@ -36,27 +36,27 @@ import (
 // TODO(sunby): have too much similar codes with SegmentChecker
 type ChannelChecker struct {
 	*checkerActivation
-	meta      *meta.Meta
-	dist      *meta.DistributionManager
-	targetMgr *meta.TargetManager
-	nodeMgr   *session.NodeManager
-	balancer  balance.Balance
+	meta            *meta.Meta
+	dist            *meta.DistributionManager
+	targetMgr       *meta.TargetManager
+	nodeMgr         *session.NodeManager
+	getBalancerFunc GetBalancerFunc
 }
 
 func NewChannelChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
-	balancer balance.Balance,
 	nodeMgr *session.NodeManager,
+	getBalancerFunc GetBalancerFunc,
 ) *ChannelChecker {
 	return &ChannelChecker{
 		checkerActivation: newCheckerActivation(),
 		meta:              meta,
 		dist:              dist,
 		targetMgr:         targetMgr,
-		balancer:          balancer,
 		nodeMgr:           nodeMgr,
+		getBalancerFunc:   getBalancerFunc,
 	}
 }
 
@@ -215,7 +215,7 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 		if len(rwNodes) == 0 {
 			rwNodes = replica.GetRWNodes()
 		}
-		plan := c.balancer.AssignChannel([]*meta.DmChannel{ch}, rwNodes, false)
+		plan := c.getBalancerFunc().AssignChannel([]*meta.DmChannel{ch}, rwNodes, false)
 		plans = append(plans, plan...)
 	}
 

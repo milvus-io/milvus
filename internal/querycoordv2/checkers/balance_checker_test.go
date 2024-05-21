@@ -78,7 +78,7 @@ func (suite *BalanceCheckerTestSuite) SetupTest() {
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
-	suite.checker = NewBalanceChecker(suite.meta, suite.targetMgr, suite.balancer, suite.nodeMgr, suite.scheduler)
+	suite.checker = NewBalanceChecker(suite.meta, suite.targetMgr, suite.nodeMgr, suite.scheduler, func() balance.Balance { return suite.balancer })
 }
 
 func (suite *BalanceCheckerTestSuite) TearDownTest() {

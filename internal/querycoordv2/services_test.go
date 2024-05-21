@@ -201,7 +201,7 @@ func (suite *ServiceSuite) SetupTest() {
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
-		balancer:            suite.balancer,
+		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 	}
