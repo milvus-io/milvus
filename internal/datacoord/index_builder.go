@@ -350,7 +350,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 		var req *indexpb.CreateJobRequest
 		collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
 		if err != nil {
-			log.Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+			log.Ctx(ib.ctx).Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
 			return false
 		}
 
