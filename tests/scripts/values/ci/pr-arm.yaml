@@ -1,0 +1,202 @@
+metrics:
+  serviceMonitor:
+    enabled: true
+log:
+  level: debug
+
+nodeSelector:
+  "kubernetes.io/arch": "arm64"
+tolerations:
+  - key: "node-role.kubernetes.io/arm"
+    operator: "Exists"
+    effect: "NoSchedule"
+
+proxy:
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+rootCoordinator:
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: "256Mi"
+    limits:
+      cpu: "1"
+queryCoordinator:
+  resources:
+    requests:
+      cpu: "0.2"
+      memory: "100Mi"
+    limits:
+      cpu: "1"
+queryNode:
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: "500Mi"
+    limits:
+      cpu: "2"
+indexCoordinator:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "50Mi"
+    limits:
+      cpu: "1"
+indexNode:
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: "500Mi"
+    limits:
+      cpu: "2"
+dataCoordinator:
+  resources:
+    requests:
+      cpu: "0.1"
+      memory: "50Mi"
+    limits:
+      cpu: "1"
+dataNode:
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: "500Mi"
+    limits:
+      cpu: "2"
+
+pulsar:
+  components:
+    autorecovery: false
+  proxy:
+    configData:
+      PULSAR_MEM: >
+        -Xms1024m -Xmx1024m
+      PULSAR_GC: >
+        -XX:MaxDirectMemorySize=2048m
+      httpNumThreads: "50"
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: "1Gi"
+  # Resources for the websocket proxy
+    wsResources:
+      requests:
+        memory: "100Mi"
+        cpu: "0.1"
+  broker:
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: "4Gi"
+    configData:
+      PULSAR_MEM: >
+        -Xms4096m
+        -Xmx4096m
+        -XX:MaxDirectMemorySize=8192m
+      PULSAR_GC: >
+        -Dio.netty.leakDetectionLevel=disabled
+        -Dio.netty.recycler.linkCapacity=1024
+        -XX:+ParallelRefProcEnabled
+        -XX:+UnlockExperimentalVMOptions
+        -XX:+DoEscapeAnalysis
+        -XX:ParallelGCThreads=32
+        -XX:ConcGCThreads=32
+        -XX:G1NewSizePercent=50
+        -XX:+DisableExplicitGC
+        -XX:-ResizePLAB
+        -XX:+ExitOnOutOfMemoryError
+      maxMessageSize: "104857600"
+      defaultRetentionTimeInMinutes: "10080"
+      defaultRetentionSizeInMB: "8192"
+      backlogQuotaDefaultLimitGB: "8"
+      backlogQuotaDefaultRetentionPolicy: producer_exception
+
+  bookkeeper:
+    configData:
+      PULSAR_MEM: >
+        -Xms4096m
+        -Xmx4096m
+        -XX:MaxDirectMemorySize=8192m
+      PULSAR_GC: >
+        -Dio.netty.leakDetectionLevel=disabled
+        -Dio.netty.recycler.linkCapacity=1024
+        -XX:+UseG1GC -XX:MaxGCPauseMillis=10
+        -XX:+ParallelRefProcEnabled
+        -XX:+UnlockExperimentalVMOptions
+        -XX:+DoEscapeAnalysis
+        -XX:ParallelGCThreads=32
+        -XX:ConcGCThreads=32
+        -XX:G1NewSizePercent=50
+        -XX:+DisableExplicitGC
+        -XX:-ResizePLAB
+        -XX:+ExitOnOutOfMemoryError
+        -XX:+PerfDisableSharedMem
+        -XX:+PrintGCDetails
+      nettyMaxFrameSizeBytes: "104867840"
+    resources:
+      requests:
+        cpu: "0.5"
+        memory: "4Gi"
+
+  zookeeper:
+
+    replicaCount: 1
+    configData:
+      PULSAR_MEM: >
+        -Xms1024m
+        -Xmx1024m
+      PULSAR_GC: >
+         -Dcom.sun.management.jmxremote
+         -Djute.maxbuffer=10485760
+         -XX:+ParallelRefProcEnabled
+         -XX:+UnlockExperimentalVMOptions
+         -XX:+DoEscapeAnalysis
+         -XX:+DisableExplicitGC
+         -XX:+PerfDisableSharedMem
+         -Dzookeeper.forceSync=no
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: "512Mi"
+kafka:
+
+  resources:
+    requests:
+      cpu: "0.5"
+      memory: "1Gi"
+  zookeeper:
+
+    replicaCount: 1
+    resources:
+      requests:
+        cpu: "0.3"
+        memory: "512Mi"
+etcd:
+
+
+  replicaCount: 1
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "100Mi"
+minio:
+
+  resources:
+    requests:
+      cpu: "0.3"
+      memory: "512Mi"
+standalone:
+  persistence:
+    persistentVolumeClaim:
+      storageClass: local-path
+  resources:
+    requests:
+      cpu: "1"
+      memory: "3.5Gi"
+    limits:
+      cpu: "4"
+
