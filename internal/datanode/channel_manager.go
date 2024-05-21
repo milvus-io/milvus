@@ -351,7 +351,6 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 
 		timer := time.NewTimer(watchTimeout)
 		defer timer.Stop()
-		startWg.Done()
 
 		log := log.With(zap.Duration("timeout", watchTimeout))
 		log.Info("Start timer for ToWatch operation")
@@ -385,7 +384,6 @@ func (r *opRunner) watchWithTimer(info *datapb.ChannelWatchInfo) *opState {
 
 	finishWaiter.Add(2)
 	go startTimer(&finishWaiter)
-
 	go func() {
 		defer finishWaiter.Done()
 		fg, err := r.watchFunc(ctx, r.dn, info, tickler)
@@ -446,7 +444,6 @@ func (r *opRunner) releaseWithTimer(releaseFunc releaseFunc, channel string, opI
 	finishWaiter.Add(1)
 	go startTimer(&finishWaiter)
 	go func() {
-		timerStartedWaiter.Wait()
 		// TODO: failure should panic this DN, but we're not sure how
 		//   to recover when releaseFunc stuck.
 		// Whenever we see a stuck, it's a bug need to be fixed.

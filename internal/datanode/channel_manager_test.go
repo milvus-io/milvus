@@ -156,29 +156,6 @@ func (s *ChannelManagerSuite) TearDownTest() {
 	}
 }
 
-<<<<<<< HEAD
-func (s *ChannelManagerSuite) TestWatchFail() {
-	channel := "by-dev-rootcoord-dml-1000"
-	paramtable.Get().Save(Params.DataCoordCfg.WatchTimeoutInterval.Key, "0.000001")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.WatchTimeoutInterval.Key)
-	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
-	s.Require().Equal(0, s.manager.opRunners.Len())
-	err := s.manager.Submit(info)
-	s.Require().NoError(err)
-
-	opState := <-s.manager.communicateCh
-	s.Require().NotNil(opState)
-	s.Equal(info.GetOpID(), opState.opID)
-	s.Equal(datapb.ChannelWatchState_WatchFailure, opState.state)
-
-	s.manager.handleOpState(opState)
-
-	resp := s.manager.GetProgress(info)
-	s.Equal(datapb.ChannelWatchState_WatchFailure, resp.GetState())
-}
-
-=======
->>>>>>> 1606df919 (fix: channel manager's goroutine run order)
 func (s *ChannelManagerSuite) TestReleaseStuck() {
 	var (
 		channel  = "by-dev-rootcoord-dml-2"
