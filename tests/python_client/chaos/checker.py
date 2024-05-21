@@ -13,7 +13,7 @@ from prettytable import PrettyTable
 import functools
 from time import sleep
 from pymilvus import AnnSearchRequest, RRFRanker
-from pymilvus import RemoteBulkWriter, BulkFileType
+from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 from base.database_wrapper import ApiDatabaseWrapper
 from base.collection_wrapper import ApiCollectionWrapper
 from base.partition_wrapper import ApiPartitionWrapper
