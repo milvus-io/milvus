@@ -162,7 +162,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
        steps
        """
         milvus_op = MilvusOperator()
-        image_tag = "master-20240515-7c60d725-amd64"
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
         milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
@@ -212,7 +211,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
         steps
         """
         milvus_op = MilvusOperator()
-        image_tag = "master-20240515-7c60d725-amd64"
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 8
         milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
@@ -263,7 +261,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
        steps
        """
         milvus_op = MilvusOperator()
-        image_tag = "master-20240515-7c60d725-amd64"
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
         milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
@@ -317,7 +314,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
         steps
         """
         milvus_op = MilvusOperator()
-        image_tag = "master-20240515-7c60d725-amd64"
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
         milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
@@ -383,7 +379,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
        steps
        """
         milvus_op = MilvusOperator()
-        image_tag = "master-20240515-7c60d725-amd64"
         release_name, host, port = _install_milvus(image_tag=image_tag)
         qn_num = 1
         milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
@@ -411,11 +406,6 @@ class TestChannelExclusiveBalance(TestcaseBase):
                 v.check_result()
             qn_num = qn_num + 1
             qn_num = min(qn_num, 8)
-            if qn_num == 5:
-                config = {
-                    "spec.config.queryCoord.channelExclusiveNodeFactor": 3
-                }
-                milvus_op.upgrade(release_name, config, namespace)
             milvus_op.scale(release_name, 'queryNode', qn_num, namespace)
             seg_res = bw.show_segment_info(collection_id)
             display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
