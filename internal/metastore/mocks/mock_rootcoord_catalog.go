@@ -4,6 +4,7 @@ package mocks
 
 import (
 	context "context"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 
 	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	metastore "github.com/milvus-io/milvus/internal/metastore"
@@ -1658,6 +1659,47 @@ func (_c *RootCoordCatalog_ListUserRole_Call) Return(_a0 []string, _a1 error) *R
 }
 
 func (_c *RootCoordCatalog_ListUserRole_Call) RunAndReturn(run func(context.Context, string) ([]string, error)) *RootCoordCatalog_ListUserRole_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ExchangeCollections provides a mock function with given fields:
+func (_m *RootCoordCatalog) ExchangeCollections(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp) error {
+	ret := _m.Called(ctx, collections, aliases, ts)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*model.Collection, []*model.Alias, typeutil.Timestamp) error); ok {
+		r0 = rf(ctx, collections, aliases, ts)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// RootCoordCatalog_ExchangeCollections_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ExchangeCollections'
+type RootCoordCatalog_ExchangeCollections_Call struct {
+	*mock.Call
+}
+
+// ExchangeCollections is a helper method to define mock.On call
+func (_e *RootCoordCatalog_Expecter) ExchangeCollections(ctx interface{}, collections interface{}, aliases interface{}, ts interface{}) *RootCoordCatalog_ExchangeCollections_Call {
+	return &RootCoordCatalog_ExchangeCollections_Call{Call: _e.mock.On("ExchangeCollections", ctx, collections, aliases, ts)}
+}
+
+func (_c *RootCoordCatalog_ExchangeCollections_Call) Run(run func(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp)) *RootCoordCatalog_ExchangeCollections_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].([]*model.Collection), args[2].([]*model.Alias), args[3].(typeutil.Timestamp))
+	})
+	return _c
+}
+
+func (_c *RootCoordCatalog_ExchangeCollections_Call) Return(_a0 error) *RootCoordCatalog_ExchangeCollections_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *RootCoordCatalog_ExchangeCollections_Call) RunAndReturn(run func(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp)) *RootCoordCatalog_ExchangeCollections_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -405,6 +405,15 @@ class CollectionClient(Requests):
         response = self.post(url, headers=self.update_headers(), data=payload)
         return response.json()
 
+    def collection_truncate(self, payload, db_name="default"):
+        time.sleep(1)  # wait for collection drop and in case of rate limit
+        url = f'{self.endpoint}/v2/vectordb/collections/truncate'
+        if self.db_name is not None:
+            payload["dbName"] = self.db_name
+        if db_name != "default":
+            payload["dbName"] = db_name
+        response = self.post(url, headers=self.update_headers(), data=payload)
+        return response.json()
 
 class PartitionClient(Requests):
 

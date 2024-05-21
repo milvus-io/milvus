@@ -39,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_createCollectionTask_validate(t *testing.T) {
@@ -772,6 +773,56 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 
 		err := task.Execute(context.Background())
 		assert.NoError(t, err)
+	})
+
+	t.Run("add duplicate temp collection", func(t *testing.T) {
+		defer cleanTestEnv()
+		ticker := newRocksMqTtSynchronizer()
+		shardNum := 2
+		pchans := ticker.getDmlChannelNames(shardNum)
+
+		collectionName := util.GenerateTempCollectionName(funcutil.GenRandomStr())
+		field1 := funcutil.GenRandomStr()
+		collID := UniqueID(1)
+		schema := &schemapb.CollectionSchema{Name: collectionName, Fields: []*schemapb.FieldSchema{{Name: field1}}}
+		channels := collectionChannels{
+			virtualChannels:  []string{funcutil.GenRandomStr(), funcutil.GenRandomStr()},
+			physicalChannels: pchans,
+		}
+		coll := &model.Collection{
+			CollectionID:         collID,
+			Name:                 schema.Name,
+			Description:          schema.Description,
+			AutoID:               schema.AutoID,
+			Fields:               model.UnmarshalFieldModels(schema.GetFields()),
+			VirtualChannelNames:  channels.virtualChannels,
+			PhysicalChannelNames: channels.physicalChannels,
+		}
+
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+				if !util.IsTempCollection(collectionName) {
+					return nil, errors.New("mock GetCollectionByName")
+				}
+				return coll, nil
+			})
+
+		core := newTestCore(withMeta(meta), withTtSynchronizer(ticker))
+
+		task := &createCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.CreateCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_CreateCollection},
+				CollectionName: collectionName,
+			},
+			collID:   collID,
+			schema:   schema,
+			channels: channels,
+		}
+
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
 	})
 
 	t.Run("failed to get start positions", func(t *testing.T) {

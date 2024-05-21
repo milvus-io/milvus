@@ -250,6 +250,10 @@ func (m mockMetaTable) ListUserRole(tenant string) ([]string, error) {
 	return m.ListUserRoleFunc(tenant)
 }
 
+func (m mockMetaTable) ReplaceCollectionWithTemp(ctx context.Context, dbName string, collectionName string, ts Timestamp) (int64, int64, error) {
+	return 0, 0, nil
+}
+
 func newMockMetaTable() *mockMetaTable {
 	return &mockMetaTable{}
 }
@@ -262,6 +266,7 @@ type mockDataCoord struct {
 	broadCastAlteredCollectionFunc func(ctx context.Context, req *datapb.AlterCollectionRequest) (*commonpb.Status, error)
 	GetSegmentIndexStateFunc       func(ctx context.Context, req *indexpb.GetSegmentIndexStateRequest) (*indexpb.GetSegmentIndexStateResponse, error)
 	DropIndexFunc                  func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error)
+	CreateIndexFunc                func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error)
 }
 
 func newMockDataCoord() *mockDataCoord {
@@ -296,6 +301,18 @@ func (m *mockDataCoord) GetSegmentIndexState(ctx context.Context, req *indexpb.G
 
 func (m *mockDataCoord) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return m.DropIndexFunc(ctx, req)
+}
+
+func (m *mockDataCoord) DropIndexesForTemp(ctx context.Context, in *indexpb.CollectionWithTempRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return m.DropIndexFunc(ctx, &indexpb.DropIndexRequest{
+		CollectionID: in.TempCollectionID,
+	})
+}
+
+func (m *mockDataCoord) CreateIndexesForTemp(ctx context.Context, in *indexpb.CollectionWithTempRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return m.CreateIndexFunc(ctx, &indexpb.CreateIndexRequest{
+		CollectionID: in.TempCollectionID,
+	})
 }
 
 type mockQueryCoord struct {
@@ -538,6 +555,10 @@ func withValidIDAllocator() Opt {
 	idAllocator.AllocOneF = func() (UniqueID, error) {
 		return rand.Int63(), nil
 	}
+	idAllocator.AllocF = func(count uint32) (UniqueID, UniqueID, error) {
+		start := rand.Int63()
+		return start, start + int64(count), nil
+	}
 	return withIDAllocator(idAllocator)
 }
 
@@ -715,6 +736,9 @@ func withInvalidDataCoord() Opt {
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return nil, errors.New("error mock DropIndexFunc")
 	}
+	dc.CreateIndexFunc = func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+		return nil, errors.New("error mock CreateIndexFunc")
+	}
 	return withDataCoord(dc)
 }
 
@@ -748,6 +772,9 @@ func withFailedDataCoord() Opt {
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
 		return merr.Status(err), nil
 	}
+	dc.CreateIndexFunc = func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
+		return merr.Status(err), nil
+	}
 	return withDataCoord(dc)
 }
 
@@ -778,6 +805,9 @@ func withValidDataCoord() Opt {
 		}, nil
 	}
 	dc.DropIndexFunc = func(ctx context.Context, req *indexpb.DropIndexRequest) (*commonpb.Status, error) {
+		return merr.Success(), nil
+	}
+	dc.CreateIndexFunc = func(ctx context.Context, req *indexpb.CreateIndexRequest) (*commonpb.Status, error) {
 		return merr.Success(), nil
 	}
 	return withDataCoord(dc)
@@ -932,6 +962,10 @@ func (b mockBroker) SyncNewCreatedPartition(ctx context.Context, collectionID Un
 
 func (b mockBroker) DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error {
 	return b.DropCollectionIndexFunc(ctx, collID, partIDs)
+}
+
+func (b mockBroker) DropTempCollectionIndexes(ctx context.Context, collID UniqueID, tempCollID UniqueID) error {
+	return b.DropCollectionIndexFunc(ctx, tempCollID, nil)
 }
 
 func (b mockBroker) GetSegmentIndexState(ctx context.Context, collID UniqueID, indexName string, segIDs []UniqueID) ([]*indexpb.SegmentIndexState, error) {

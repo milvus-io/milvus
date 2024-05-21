@@ -2107,6 +2107,61 @@ func (_c *IMetaTable_SelectUser_Call) RunAndReturn(run func(string, *milvuspb.Us
 	return _c
 }
 
+// ReplaceCollectionWithTemp provides a mock function with given fields: tenant
+func (_m *IMetaTable) ReplaceCollectionWithTemp(ctx context.Context, dbName string, collectionName string, ts uint64) (int64, int64, error) {
+	ret := _m.Called(ctx, dbName, collectionName, ts)
+
+	var r0 int64
+	var r1 int64
+	var r2 error
+
+	if rf, ok := ret.Get(0).(func(context.Context, string, string, uint64) int64); ok {
+		r0 = rf(ctx, dbName, collectionName, ts)
+	} else {
+		r0 = 0
+	}
+	if rf, ok := ret.Get(1).(func(context.Context, string, string, uint64) int64); ok {
+		r1 = rf(ctx, dbName, collectionName, ts)
+	} else {
+		r1 = 0
+	}
+	if rf, ok := ret.Get(2).(func(context.Context, string, string, uint64) error); ok {
+		r2 = rf(ctx, dbName, collectionName, ts)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
+}
+
+// IMetaTable_ReplaceCollectionWithTemp_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ReplaceCollectionWithTemp'
+type IMetaTable_ReplaceCollectionWithTemp_Call struct {
+	*mock.Call
+}
+
+// ReplaceCollectionWithTemp is a helper method to define mock.On call
+//   - tenant string
+func (_e *IMetaTable_Expecter) ReplaceCollectionWithTemp(ctx interface{}, dbName interface{}, collectionName interface{}, ts interface{}) *IMetaTable_ReplaceCollectionWithTemp_Call {
+	return &IMetaTable_ReplaceCollectionWithTemp_Call{Call: _e.mock.On("ReplaceCollectionWithTemp", ctx, dbName, collectionName, ts)}
+}
+
+func (_c *IMetaTable_ReplaceCollectionWithTemp_Call) Run(run func(ctx context.Context, dbName string, collectionName string, ts uint64)) *IMetaTable_ReplaceCollectionWithTemp_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(string), args[2].(string), args[3].(uint64))
+	})
+	return _c
+}
+
+func (_c *IMetaTable_ReplaceCollectionWithTemp_Call) Return(_a0 int64, _a1 int64, _a2 error) *IMetaTable_ReplaceCollectionWithTemp_Call {
+	_c.Call.Return(_a0, _a1, _a2)
+	return _c
+}
+
+func (_c *IMetaTable_ReplaceCollectionWithTemp_Call) RunAndReturn(run func(ctx context.Context, dbName string, collectionName string, ts uint64) (int64, int64, error)) *IMetaTable_ReplaceCollectionWithTemp_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewIMetaTable creates a new instance of IMetaTable. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewIMetaTable(t interface {

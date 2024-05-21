@@ -561,6 +561,25 @@ func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {
 	return nil
 }
 
+func (kc *Catalog) CreateIndexes(ctx context.Context, indexes []*model.Index) error {
+	if len(indexes) == 0 {
+		return nil
+	}
+	kvMap := map[string]string{}
+	for i, index := range indexes {
+		key := BuildIndexKey(index.CollectionID, index.IndexID)
+		value, err := proto.Marshal(model.MarshalIndexModel(index))
+		if err != nil {
+			return err
+		}
+		kvMap[key] = string(value)
+		log.Ctx(ctx).Debug("add new indexes",
+			zap.String("key", key), zap.String("value", string(value)),
+			zap.Int("total", len(indexes)), zap.Int("no.", i))
+	}
+	return kc.MetaKv.MultiSave(kvMap)
+}
+
 func (kc *Catalog) ListIndexes(ctx context.Context) ([]*model.Index, error) {
 	_, values, err := kc.MetaKv.LoadWithPrefix(util.FieldIndexPrefix)
 	if err != nil {

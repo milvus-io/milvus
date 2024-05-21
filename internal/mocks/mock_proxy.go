@@ -4,6 +4,7 @@ package mocks
 
 import (
 	context "context"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 
 	commonpb "github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	clientv3 "go.etcd.io/etcd/client/v3"
@@ -1460,6 +1461,61 @@ func (_c *MockProxy_DropCollection_Call) Return(_a0 *commonpb.Status, _a1 error)
 }
 
 func (_c *MockProxy_DropCollection_Call) RunAndReturn(run func(context.Context, *milvuspb.DropCollectionRequest) (*commonpb.Status, error)) *MockProxy_DropCollection_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// TruncateCollection provides a mock function with given fields: _a0, _a1
+func (_m *MockProxy) TruncateCollection(_a0 context.Context, _a1 *rootcoordpb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	ret := _m.Called(_a0, _a1)
+
+	var r0 *commonpb.Status
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.TruncateCollectionRequest) (*commonpb.Status, error)); ok {
+		return rf(_a0, _a1)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *rootcoordpb.TruncateCollectionRequest) *commonpb.Status); ok {
+		r0 = rf(_a0, _a1)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*commonpb.Status)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *rootcoordpb.TruncateCollectionRequest) error); ok {
+		r1 = rf(_a0, _a1)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockProxy_TruncateCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'TruncateCollection'
+type MockProxy_TruncateCollection_Call struct {
+	*mock.Call
+}
+
+// TruncateCollection is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *rootcoordpb.TruncateCollectionRequest
+func (_e *MockProxy_Expecter) TruncateCollection(_a0 interface{}, _a1 interface{}) *MockProxy_TruncateCollection_Call {
+	return &MockProxy_TruncateCollection_Call{Call: _e.mock.On("TruncateCollection", _a0, _a1)}
+}
+
+func (_c *MockProxy_TruncateCollection_Call) Run(run func(_a0 context.Context, _a1 *rootcoordpb.TruncateCollectionRequest)) *MockProxy_TruncateCollection_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*rootcoordpb.TruncateCollectionRequest))
+	})
+	return _c
+}
+
+func (_c *MockProxy_TruncateCollection_Call) Return(_a0 *commonpb.Status, _a1 error) *MockProxy_TruncateCollection_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockProxy_TruncateCollection_Call) RunAndReturn(run func(context.Context, *rootcoordpb.TruncateCollectionRequest) (*commonpb.Status, error)) *MockProxy_TruncateCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }

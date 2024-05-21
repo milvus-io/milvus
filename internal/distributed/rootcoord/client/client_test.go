@@ -93,6 +93,10 @@ func Test_NewClient(t *testing.T) {
 			retCheck(retNotNil, r, err)
 		}
 		{
+			r, err := client.TruncateCollection(ctx, nil)
+			retCheck(retNotNil, r, err)
+		}
+		{
 			r, err := client.HasCollection(ctx, nil)
 			retCheck(retNotNil, r, err)
 		}
@@ -304,6 +308,10 @@ func Test_NewClient(t *testing.T) {
 	}
 	{
 		rTimeout, err := client.DropCollection(shortCtx, nil)
+		retCheck(rTimeout, err)
+	}
+	{
+		rTimeout, err := client.TruncateCollection(shortCtx, nil)
 		retCheck(rTimeout, err)
 	}
 	{

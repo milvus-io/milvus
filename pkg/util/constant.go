@@ -213,3 +213,15 @@ func IsBuiltinRole(roleName string) bool {
 	}
 	return false
 }
+
+const (
+	TempCollectionSuffix = ".tmp"
+)
+
+func IsTempCollection(collectionName string) bool {
+	return strings.HasSuffix(collectionName, TempCollectionSuffix)
+}
+
+func GenerateTempCollectionName(collectionName string) string {
+	return collectionName + TempCollectionSuffix
+}

@@ -339,3 +339,29 @@ func mockGetDatabase(meta *mockrootcoord.IMetaTable) {
 	meta.EXPECT().GetDatabaseByID(mock.Anything, mock.Anything, mock.Anything).
 		Return(db, nil).Maybe()
 }
+
+func TestServerBroker_TempCollectionIndexesDrop(t *testing.T) {
+	t.Run("failed to execute", func(t *testing.T) {
+		c := newTestCore(withInvalidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropTempCollectionIndexes(ctx, 1, 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("non success error code on execute", func(t *testing.T) {
+		c := newTestCore(withFailedDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropTempCollectionIndexes(ctx, 1, 1)
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		c := newTestCore(withValidDataCoord())
+		b := newServerBroker(c)
+		ctx := context.Background()
+		err := b.DropTempCollectionIndexes(ctx, 1, 1)
+		assert.NoError(t, err)
+	})
+}

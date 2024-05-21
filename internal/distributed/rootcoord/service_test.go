@@ -68,6 +68,10 @@ func (m *mockCore) RenameCollection(ctx context.Context, request *milvuspb.Renam
 	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
 }
 
+func (m *mockCore) TruncateCollection(ctx context.Context, in *rootcoordpb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{ErrorCode: commonpb.ErrorCode_Success}, nil
+}
+
 func (m *mockCore) CheckHealth(ctx context.Context, req *milvuspb.CheckHealthRequest) (*milvuspb.CheckHealthResponse, error) {
 	return &milvuspb.CheckHealthResponse{
 		IsHealthy: true,
@@ -183,6 +187,11 @@ func TestRun(t *testing.T) {
 
 		t.Run("RenameCollection", func(t *testing.T) {
 			_, err := svr.RenameCollection(ctx, nil)
+			assert.NoError(t, err)
+		})
+
+		t.Run("TruncateCollection", func(t *testing.T) {
+			_, err := svr.TruncateCollection(ctx, nil)
 			assert.NoError(t, err)
 		})
 

@@ -1800,3 +1800,62 @@ func TestProxy_InvalidateShardLeaderCache(t *testing.T) {
 		assert.True(t, merr.Ok(resp))
 	})
 }
+
+func TestProxy_TruncateCollection(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+		node.UpdateStateCode(commonpb.StateCode_Abnormal)
+		ctx := context.Background()
+		resp, err := node.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+	})
+
+	//t.Run("truncate with illegal new collection name", func(t *testing.T) {
+	//	node := &Proxy{session: &sessionutil.Session{SessionRaw: sessionutil.SessionRaw{ServerID: 1}}}
+	//	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	//	ctx := context.Background()
+	//	resp, err := node.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{CollectionName: "$#^%#&#$*!)#@!"})
+	//	assert.NoError(t, err)
+	//	assert.ErrorIs(t, merr.Error(resp), merr.ErrParameterInvalid)
+	//})
+
+	ctx := context.Background()
+	factory := dependency.NewDefaultFactory(true)
+	node, err := NewProxy(ctx, factory)
+	assert.NoError(t, err)
+	node.tsoAllocator = &timestampAllocator{
+		tso: newMockTimestampAllocatorInterface(),
+	}
+	node.initRateCollector()
+	node.UpdateStateCode(commonpb.StateCode_Healthy)
+	node.sched, err = newTaskScheduler(ctx, node.tsoAllocator, node.factory)
+	assert.NoError(t, err)
+	node.sched.ddQueue.setMaxTaskNum(0)
+	err = node.sched.Start()
+	assert.NoError(t, err)
+	defer node.sched.Close()
+	t.Run("truncate enqueue fail", func(t *testing.T) {
+		resp, err := node.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{CollectionName: "new"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+	node.sched.ddQueue.setMaxTaskNum(10)
+	t.Run("truncate execute fail", func(t *testing.T) {
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().TruncateCollection(mock.Anything, mock.Anything).Return(nil, errors.New("fail"))
+		node.rootCoord = rc
+		resp, err := node.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{CollectionName: "new"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+	})
+
+	t.Run("truncate ok", func(t *testing.T) {
+		rc := mocks.NewMockRootCoordClient(t)
+		rc.EXPECT().TruncateCollection(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		node.rootCoord = rc
+		resp, err := node.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{CollectionName: "new"})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}

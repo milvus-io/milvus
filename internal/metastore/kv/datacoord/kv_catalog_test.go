@@ -876,6 +876,33 @@ func TestCatalog_CreateIndex(t *testing.T) {
 	})
 }
 
+func TestCatalog_CreateIndexes(t *testing.T) {
+	t.Run("catalog with mock metakv", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		metakv.EXPECT().MultiSave(mock.Anything).Return(nil).Once()
+		metakv.EXPECT().MultiSave(mock.Anything).Return(errors.New("mock error")).Once()
+		catalog := &Catalog{
+			MetaKv: metakv,
+		}
+		err := catalog.CreateIndexes(context.Background(), []*model.Index{})
+		assert.NoError(t, err)
+		index := &model.Index{
+			CollectionID: 0,
+			FieldID:      0,
+			IndexID:      0,
+			IndexName:    "",
+			IsDeleted:    false,
+			CreateTime:   0,
+			TypeParams:   nil,
+			IndexParams:  nil,
+		}
+		err = catalog.CreateIndexes(context.Background(), []*model.Index{index})
+		assert.NoError(t, err)
+		err = catalog.CreateIndexes(context.Background(), []*model.Index{index})
+		assert.Error(t, err)
+	})
+}
+
 func TestCatalog_ListIndexes(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
 		metakv := mocks.NewMetaKv(t)

@@ -750,3 +750,15 @@ func (c *Client) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest
 		return client.ListIndexes(ctx, in)
 	})
 }
+
+func (c *Client) CreateIndexesForTemp(ctx context.Context, in *indexpb.CollectionWithTempRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
+		return client.CreateIndexesForTemp(ctx, in)
+	})
+}
+
+func (c *Client) DropIndexesForTemp(ctx context.Context, in *indexpb.CollectionWithTempRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return wrapGrpcCall(ctx, c, func(client datapb.DataCoordClient) (*commonpb.Status, error) {
+		return client.DropIndexesForTemp(ctx, in)
+	})
+}

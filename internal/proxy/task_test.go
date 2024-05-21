@@ -41,6 +41,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -3681,4 +3682,52 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+}
+
+func Test_truncateCollectionTask_PreExecute(t *testing.T) {
+	dct := &truncateCollectionTask{TruncateCollectionRequest: &rootcoordpb.TruncateCollectionRequest{
+		Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+		CollectionName: "0xffff", // invalid
+	}}
+	assert.Equal(t, commonpb.MsgType_DropCollection, dct.Type())
+	ctx := context.Background()
+	err := dct.PreExecute(ctx)
+	assert.Error(t, err)
+	dct.TruncateCollectionRequest.CollectionName = "valid"
+	err = dct.PreExecute(ctx)
+	assert.NoError(t, err)
+}
+
+func Test_truncateCollectionTask_Execute(t *testing.T) {
+	mockRC := mocks.NewMockRootCoordClient(t)
+	mockRC.EXPECT().TruncateCollection(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, request *rootcoordpb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+		switch request.GetCollectionName() {
+		case "c1":
+			return nil, errors.New("error mock DropCollection")
+		case "c2":
+			return nil, merr.WrapErrCollectionNotFound("mock")
+		default:
+			return merr.Success(), nil
+		}
+	})
+
+	ctx := context.Background()
+
+	dct := &truncateCollectionTask{rootCoord: mockRC, TruncateCollectionRequest: &rootcoordpb.TruncateCollectionRequest{CollectionName: "normal"}}
+	err := dct.Execute(ctx)
+	assert.NoError(t, err)
+
+	dct.TruncateCollectionRequest.CollectionName = "c1"
+	err = dct.Execute(ctx)
+	assert.Error(t, err)
+
+	dct.TruncateCollectionRequest.CollectionName = "c2"
+	err = dct.Execute(ctx)
+	assert.Error(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, dct.result.GetErrorCode())
+}
+
+func Test_truncateCollectionTask_PostExecute(t *testing.T) {
+	dct := &truncateCollectionTask{}
+	assert.NoError(t, dct.PostExecute(context.Background()))
 }

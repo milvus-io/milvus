@@ -29,6 +29,8 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_alterCollectionTask_Prepare(t *testing.T) {
@@ -80,12 +82,13 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 	t.Run("alter step failed", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+				if util.IsTempCollection(collectionName) {
+					return nil, errors.New("temp collection")
+				}
+				return &model.Collection{CollectionID: int64(1)}, nil
+			})
 		meta.On("AlterCollection",
 			mock.Anything,
 			mock.Anything,
@@ -107,14 +110,39 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	t.Run("alter step refused", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+				if !util.IsTempCollection(collectionName) {
+					return nil, errors.New("mock GetCollectionByName")
+				}
+				return &model.Collection{CollectionID: int64(1)}, nil
+			})
+
+		core := newTestCore(withMeta(meta))
+		task := &alterCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.AlterCollectionRequest{
+				Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterCollection},
+				CollectionName: "cn",
+				Properties:     properties,
+			},
+		}
+
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
+	})
+
 	t.Run("broadcast step failed", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+				if util.IsTempCollection(collectionName) {
+					return nil, errors.New("temp collection")
+				}
+				return &model.Collection{CollectionID: int64(1)}, nil
+			})
 		meta.On("AlterCollection",
 			mock.Anything,
 			mock.Anything,
@@ -143,12 +171,13 @@ func Test_alterCollectionTask_Execute(t *testing.T) {
 
 	t.Run("alter successfully", func(t *testing.T) {
 		meta := mockrootcoord.NewIMetaTable(t)
-		meta.On("GetCollectionByName",
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-			mock.Anything,
-		).Return(&model.Collection{CollectionID: int64(1)}, nil)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+				if util.IsTempCollection(collectionName) {
+					return nil, errors.New("temp collection")
+				}
+				return &model.Collection{CollectionID: int64(1)}, nil
+			})
 		meta.On("AlterCollection",
 			mock.Anything,
 			mock.Anything,

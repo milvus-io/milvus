@@ -29,7 +29,16 @@ service RootCoord {
      *
      * @return Status
      */
-    rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
+  rpc DropCollection(milvus.DropCollectionRequest) returns (common.Status) {}
+
+  /**
+   * @brief This method is used to truncate collection.
+   *
+   * @param DropCollectionRequest, collection name is going to be truncated.
+   *
+   * @return Status
+   */
+  rpc TruncateCollection(TruncateCollectionRequest) returns (common.Status) {}
 
     /**
      * @brief This method is used to test collection existence.
@@ -142,6 +151,24 @@ service RootCoord {
     rpc ListDatabases(milvus.ListDatabasesRequest) returns (milvus.ListDatabasesResponse) {}
     rpc DescribeDatabase(DescribeDatabaseRequest) returns(DescribeDatabaseResponse){}
     rpc AlterDatabase(AlterDatabaseRequest) returns(common.Status){}
+}
+
+/** move to milvus-proto/milvus.proto
+* truncate collection in milvus, also will truncate data in collection.
+*/
+message TruncateCollectionRequest {
+//  option (common.privilege_ext_obj) = {
+//    object_type: Global
+//    object_privilege: PrivilegeTruncateCollection
+//    object_name_index: -1
+//  };
+  // Not useful for now
+  common.MsgBase base = 1;
+  string db_name = 2;
+  // The unique collection name in milvus.(Required)
+  string collection_name = 3;
+  bool need_load = 4;
+  bool clear = 5;
 }
 
 message AllocTimestampRequest {

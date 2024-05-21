@@ -43,6 +43,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestServerId(t *testing.T) {
@@ -2396,4 +2397,596 @@ func TestMeta_GetHasUnindexTaskSegments(t *testing.T) {
 		segments := s.getUnIndexTaskSegments()
 		assert.Equal(t, 0, len(segments))
 	})
+}
+
+func newIndexServer(catalog *catalogmocks.DataCoordCatalog) *Server {
+	return &Server{
+		ctx: context.Background(),
+		meta: &meta{
+			catalog: catalog,
+			indexMeta: &indexMeta{
+				catalog: catalog,
+				indexes: map[UniqueID]map[UniqueID]*model.Index{
+					collID: {
+						// finished
+						indexID: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID,
+							IndexID:         indexID,
+							IndexName:       indexName,
+							IsDeleted:       false,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// deleted
+						indexID + 1: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 1,
+							IndexID:         indexID + 1,
+							IndexName:       indexName + "_1",
+							IsDeleted:       true,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// unissued
+						indexID + 2: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 2,
+							IndexID:         indexID + 2,
+							IndexName:       indexName + "_2",
+							IsDeleted:       false,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// inProgress
+						indexID + 3: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 3,
+							IndexID:         indexID + 3,
+							IndexName:       indexName + "_3",
+							IsDeleted:       false,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// failed
+						indexID + 4: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 4,
+							IndexID:         indexID + 4,
+							IndexName:       indexName + "_4",
+							IsDeleted:       false,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+						// unissued
+						indexID + 5: {
+							TenantID:        "",
+							CollectionID:    collID,
+							FieldID:         fieldID + 5,
+							IndexID:         indexID + 5,
+							IndexName:       indexName + "_5",
+							IsDeleted:       false,
+							IsAutoIndex:     false,
+							UserIndexParams: nil,
+						},
+					},
+				},
+			},
+		},
+		allocator:       newMockAllocator(),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+}
+
+func TestServer_CreateIndexesForTemp(t *testing.T) {
+	paramtable.Init()
+	s := &Server{
+		ctx:             context.Background(),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+	t.Run("server not available", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.CreateIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+	})
+	t.Run("create the guard index of target collection fail", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		s.allocator = newMockAllocator()
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID: {}},
+		}}
+		resp, err := s.CreateIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetCode())
+	})
+	t.Run("fail to alloc indexID for new index", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		s.allocator = &FailsAllocator{
+			allocIDSucceed: false,
+		}
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			}},
+		}}
+		resp, err := s.CreateIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetCode())
+	})
+	t.Run("create indexes of temp collection fail", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		s.allocator = newMockAllocator()
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		catalog.EXPECT().CreateIndexes(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			}},
+		}}
+		resp, err := s.CreateIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetCode())
+	})
+	t.Run("create indexes for temp collection success", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		s.allocator = newMockAllocator()
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Once()
+		catalog.EXPECT().CreateIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			}},
+		}}
+		_, err := s.CreateIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+	})
+}
+
+func TestServer_DropIndexesForTemp(t *testing.T) {
+	paramtable.Init()
+	s := &Server{
+		ctx:             context.Background(),
+		allocator:       newMockAllocator(),
+		notifyIndexChan: make(chan UniqueID, 1),
+	}
+	t.Run("server not available", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Initializing)
+		resp, err := s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.ErrorIs(t, merr.Error(resp), merr.ErrServiceNotReady)
+	})
+	t.Run("drop the guard index of temp collection fail", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID - 1: {}},
+		}}
+		resp, err := s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetCode())
+	})
+	t.Run("drop indexes of temp collection fail", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID - 1: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			}},
+		}}
+		resp, err := s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetCode())
+	})
+	t.Run("drop the guard index of target collection fail", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID - 1: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			}},
+		}}
+		resp, err := s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetCode())
+	})
+	t.Run("drop indexes for temp collection success", func(t *testing.T) {
+		s.stateCode.Store(commonpb.StateCode_Healthy)
+		catalog := catalogmocks.NewDataCoordCatalog(t)
+		catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		s.meta = &meta{catalog: catalog, indexMeta: &indexMeta{
+			catalog: catalog, indexes: map[UniqueID]map[UniqueID]*model.Index{collID - 1: {
+				// finished
+				indexID: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID,
+					IndexID:         indexID,
+					IndexName:       indexName,
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// deleted
+				indexID + 1: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID + 1,
+					IndexID:         indexID + 1,
+					IndexName:       indexName + "_1",
+					IsDeleted:       true,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+				// unissued
+				indexID + 2: {
+					TenantID:        "",
+					CollectionID:    collID - 1,
+					FieldID:         fieldID + 2,
+					IndexID:         indexID + 2,
+					IndexName:       indexName + "_2",
+					IsDeleted:       false,
+					IsAutoIndex:     false,
+					UserIndexParams: nil,
+				},
+			}},
+		}}
+		_, err := s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+			CollectionID:     collID,
+			TempCollectionID: collID - 1,
+		})
+		assert.NoError(t, err)
+	})
+}
+
+// create indexes + drop indexes
+func TestServer_TempCollectionIndexesNormal(t *testing.T) {
+	paramtable.Init()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Twice()
+	catalog.EXPECT().CreateIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil).Times(3)
+	s := newIndexServer(catalog)
+	b := mocks.NewMockRootCoordClient(t)
+	b.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		Schema: &schemapb.CollectionSchema{Fields: []*schemapb.FieldSchema{
+			{FieldID: fieldID},
+			{FieldID: fieldID + 1},
+			{FieldID: fieldID + 2},
+			{FieldID: fieldID + 3},
+			{FieldID: fieldID + 4},
+			{FieldID: fieldID + 5},
+		}},
+		CollectionID: collID,
+	}, nil).Twice()
+	s.broker = broker.NewCoordinatorBroker(b)
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+	s.allocator.allocN(100)
+
+	res, err := s.CreateIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+		CollectionID:     collID,
+		TempCollectionID: collID - 1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	indexes, err := s.ListIndexes(s.ctx, &indexpb.ListIndexesRequest{CollectionID: collID})
+	assert.NoError(t, err)
+	assert.Equal(t, len(indexes.IndexInfos), 5)
+	indexes, err = s.ListIndexes(s.ctx, &indexpb.ListIndexesRequest{CollectionID: collID - 1})
+	assert.NoError(t, err)
+	assert.Equal(t, len(indexes.IndexInfos), 5)
+
+	typeParams := []*commonpb.KeyValuePair{
+		{
+			Key:   common.DimKey,
+			Value: "128",
+		},
+	}
+	indexParams := []*commonpb.KeyValuePair{
+		{
+			Key:   common.IndexTypeKey,
+			Value: "IVF_FLAT",
+		},
+	}
+	createIndexRequest := &indexpb.CreateIndexRequest{
+		CollectionID:    collID,
+		FieldID:         fieldID + 1,
+		IndexName:       "",
+		TypeParams:      typeParams,
+		IndexParams:     indexParams,
+		Timestamp:       100,
+		IsAutoIndex:     false,
+		UserIndexParams: indexParams,
+	}
+	status, err := s.CreateIndex(s.ctx, createIndexRequest)
+	assert.Nil(t, err)
+	assert.Contains(t, status.GetDetail(), "cannot")
+	status, err = s.AlterIndex(s.ctx, &indexpb.AlterIndexRequest{
+		CollectionID: collID,
+		IndexName:    indexName + "_2",
+	})
+	assert.Nil(t, err)
+	assert.Contains(t, status.GetDetail(), "cannot")
+	status, err = s.DropIndex(s.ctx, &indexpb.DropIndexRequest{
+		CollectionID: collID,
+		IndexName:    indexName + "_2",
+	})
+	assert.Nil(t, err)
+	assert.Contains(t, status.GetDetail(), "cannot")
+
+	res, err = s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+		CollectionID:     collID,
+		TempCollectionID: collID - 1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	assert.NoError(t, err)
+	_, err = s.CreateIndex(s.ctx, createIndexRequest)
+	assert.NoError(t, err)
+	_, err = s.AlterIndex(s.ctx, &indexpb.AlterIndexRequest{
+		CollectionID: collID,
+		IndexName:    indexName + "_2",
+	})
+	assert.NoError(t, err)
+	_, err = s.DropIndex(s.ctx, &indexpb.DropIndexRequest{
+		CollectionID: collID,
+		IndexName:    indexName + "_2",
+	})
+	assert.NoError(t, err)
+}
+
+// drop indexes + create indexes + drop indexes + drop indexes
+func TestServer_TempCollectionIndexesAbnormal(t *testing.T) {
+	paramtable.Init()
+	catalog := catalogmocks.NewDataCoordCatalog(t)
+	catalog.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().CreateIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+	catalog.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil).Times(6)
+	catalog.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+	s := newIndexServer(catalog)
+	s.stateCode.Store(commonpb.StateCode_Healthy)
+	s.allocator.allocN(100)
+
+	res, err := s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+		CollectionID:     collID,
+		TempCollectionID: collID - 1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	assert.NoError(t, err)
+
+	res, err = s.CreateIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+		CollectionID:     collID,
+		TempCollectionID: collID - 1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	indexes, err := s.ListIndexes(s.ctx, &indexpb.ListIndexesRequest{CollectionID: collID})
+	assert.NoError(t, err)
+	assert.Equal(t, len(indexes.IndexInfos), 5)
+	indexes, err = s.ListIndexes(s.ctx, &indexpb.ListIndexesRequest{CollectionID: collID - 1})
+	assert.NoError(t, err)
+	assert.Equal(t, len(indexes.IndexInfos), 5)
+
+	res, err = s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+		CollectionID:     collID,
+		TempCollectionID: collID - 1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	assert.NoError(t, err)
+
+	res, err = s.DropIndexesForTemp(s.ctx, &indexpb.CollectionWithTempRequest{
+		CollectionID:     collID,
+		TempCollectionID: collID - 1,
+	})
+	assert.NoError(t, err)
+	assert.Equal(t, commonpb.ErrorCode_Success, res.GetErrorCode())
+	assert.NoError(t, err)
 }

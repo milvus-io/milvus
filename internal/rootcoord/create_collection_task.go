@@ -35,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	ms "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -472,6 +473,9 @@ func (t *createCollectionTask) Execute(ctx context.Context) error {
 	// need double check in meta table if we can't promise the sequence execution.
 	existedCollInfo, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), t.Req.GetCollectionName(), typeutil.MaxTimestamp)
 	if err == nil {
+		if util.IsTempCollection(t.Req.GetCollectionName()) {
+			return fmt.Errorf("create duplicate temp collection")
+		}
 		equal := existedCollInfo.Equal(*clone)
 		if !equal {
 			return fmt.Errorf("create duplicate collection with different parameters, collection: %s", t.Req.GetCollectionName())

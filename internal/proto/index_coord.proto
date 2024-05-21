@@ -450,7 +450,6 @@ message DropJobsV2Request {
     JobType job_type = 3;
 }
 
-
 enum JobState {
     JobStateNone = 0;
     JobStateInit = 1;
@@ -458,4 +457,9 @@ enum JobState {
     JobStateFinished = 3;
     JobStateFailed = 4;
     JobStateRetry = 5;
+}
+
+message CollectionWithTempRequest {
+    int64 collectionID = 1;
+    int64 tempCollectionID = 2;
 }

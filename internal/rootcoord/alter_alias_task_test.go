@@ -24,6 +24,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
 )
 
 func Test_alterAliasTask_Prepare(t *testing.T) {
@@ -42,7 +43,7 @@ func Test_alterAliasTask_Prepare(t *testing.T) {
 
 func Test_alterAliasTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
-		core := newTestCore(withInvalidProxyManager())
+		core := newTestCore(withInvalidProxyManager(), withInvalidMeta())
 		task := &alterAliasTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterAliasRequest{
@@ -56,6 +57,23 @@ func Test_alterAliasTask_Execute(t *testing.T) {
 
 	t.Run("failed to alter alias", func(t *testing.T) {
 		core := newTestCore(withValidProxyManager(), withInvalidMeta())
+		task := &alterAliasTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.AlterAliasRequest{
+				Base:  &commonpb.MsgBase{MsgType: commonpb.MsgType_AlterAlias},
+				Alias: "test",
+			},
+		}
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("will be refused while truncate collection", func(t *testing.T) {
+		meta := newMockMetaTable()
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return nil, nil
+		}
+		core := newTestCore(withValidProxyManager(), withMeta(meta))
 		task := &alterAliasTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.AlterAliasRequest{
