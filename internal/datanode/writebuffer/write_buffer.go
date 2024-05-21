@@ -260,7 +260,7 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	switch {
 	case bufferCandidate == nil && syncCandidate == nil:
 		// all buffer are empty
-		log.RatedDebug(60, "checkpoint from latest consumed msg")
+		log.RatedInfo(60, "checkpoint from latest consumed msg")
 		return wb.checkpoint
 	case bufferCandidate == nil && syncCandidate != nil:
 		checkpoint = syncCandidate
@@ -280,7 +280,7 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 		cpSource = "syncManager"
 	}
 
-	log.RatedDebug(20, "checkpoint evaluated",
+	log.RatedInfo(20, "checkpoint evaluated",
 		zap.String("cpSource", cpSource),
 		zap.Int64("segmentID", segmentID),
 		zap.Uint64("cpTimestamp", checkpoint.GetTimestamp()))

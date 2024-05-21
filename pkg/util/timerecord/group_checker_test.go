@@ -23,24 +23,20 @@ import (
 	"github.com/stretchr/testify/assert"
 )
 
-func TestChecker(t *testing.T) {
+func TestGroupChecker(t *testing.T) {
 	groupName := `test_group`
 	signal := make(chan []string, 1)
 	// 10ms period which set before is too short
 	// change 10ms to 500ms to ensure the group checker schedule after the second value stored
 	duration := 500 * time.Millisecond
-	gc1 := GetCheckerManger(groupName, duration, func(list []string) {
+	gc1 := GetGroupChecker(groupName, duration, func(list []string) {
 		signal <- list
 	})
-
-	checker1 := NewChecker("1", gc1)
-	checker1.Check()
-
-	gc2 := GetCheckerManger(groupName, time.Second, func(list []string) {
+	gc1.Check("1")
+	gc2 := GetGroupChecker(groupName, time.Second, func(list []string) {
 		t.FailNow()
 	})
-	checker2 := NewChecker("2", gc2)
-	checker2.Check()
+	gc2.Check("2")
 
 	assert.Equal(t, duration, gc2.d)
 
@@ -49,11 +45,10 @@ func TestChecker(t *testing.T) {
 		return len(list) == 2
 	}, duration*3, duration)
 
-	checker2.Close()
+	gc2.Remove("2")
+
 	list := <-signal
 	assert.ElementsMatch(t, []string{"1"}, list)
-
-	checker1.Close()
 
 	assert.NotPanics(t, func() {
 		gc1.Stop()

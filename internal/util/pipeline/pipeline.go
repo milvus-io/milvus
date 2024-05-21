@@ -37,6 +37,8 @@ type pipeline struct {
 	inputChannel    chan Msg
 	nodeTtInterval  time.Duration
 	enableTtChecker bool
+
+	checkerNames map[string]string
 }
 
 func (p *pipeline) Add(nodes ...Node) {
@@ -46,19 +48,21 @@ func (p *pipeline) Add(nodes ...Node) {
 }
 
 func (p *pipeline) addNode(node Node) {
-	nodeCtx := NewNodeCtx(node)
+	nodeCtx := newNodeCtx(node)
 	if p.enableTtChecker {
-		manager := timerecord.GetCheckerManger("fgNode", p.nodeTtInterval, func(list []string) {
+		nodeCtx.checker = timerecord.GetGroupChecker("fgNode", p.nodeTtInterval, func(list []string) {
 			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", p.nodeTtInterval))
 		})
-		name := fmt.Sprintf("nodeCtxTtChecker-%s", node.Name())
-		nodeCtx.Checker = timerecord.NewChecker(name, manager)
+		if p.checkerNames == nil {
+			p.checkerNames = make(map[string]string)
+		}
+		p.checkerNames[nodeCtx.node.Name()] = fmt.Sprintf("nodeCtxTtChecker-%s", nodeCtx.node.Name())
 	}
 
 	if len(p.nodes) != 0 {
-		p.nodes[len(p.nodes)-1].Next = nodeCtx
+		p.nodes[len(p.nodes)-1].next = nodeCtx
 	} else {
-		p.inputChannel = nodeCtx.InputChannel
+		p.inputChannel = nodeCtx.inputChannel
 	}
 
 	p.nodes = append(p.nodes, nodeCtx)
@@ -83,18 +87,18 @@ func (p *pipeline) process() {
 
 	curNode := p.nodes[0]
 	for curNode != nil {
-		if len(curNode.InputChannel) == 0 {
+		if len(curNode.inputChannel) == 0 {
 			break
 		}
 
-		input := <-curNode.InputChannel
+		input := <-curNode.inputChannel
 		output := curNode.node.Operate(input)
-		if curNode.Checker != nil {
-			curNode.Checker.Check()
+		if _, ok := p.checkerNames[curNode.node.Name()]; ok {
+			curNode.checker.Check(p.checkerNames[curNode.node.Name()])
 		}
-		if curNode.Next != nil && output != nil {
-			curNode.Next.InputChannel <- output
+		if curNode.next != nil && output != nil {
+			curNode.next.inputChannel <- output
 		}
-		curNode = curNode.Next
+		curNode = curNode.next
 	}
 }

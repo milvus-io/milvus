@@ -83,16 +83,16 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 	inputNode := nodeCtxManager.inputNodeCtx
 	curNode := inputNode
 	// tt checker start
-	var checker *timerecord.Checker
+	var checker *timerecord.GroupChecker
 	if enableTtChecker {
-		manager := timerecord.GetCheckerManger("fgNode", nodeCtxTtInterval, func(list []string) {
+		checker = timerecord.GetGroupChecker("fgNode", nodeCtxTtInterval, func(list []string) {
 			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", nodeCtxTtInterval))
 		})
 		for curNode != nil {
 			name := fmt.Sprintf("nodeCtxTtChecker-%s", curNode.node.Name())
-			checker = timerecord.NewChecker(name, manager)
+			checker.Check(name)
 			curNode = curNode.downstream
-			defer checker.Close()
+			defer checker.Remove(name)
 		}
 	}
 
@@ -138,7 +138,7 @@ func (nodeCtxManager *nodeCtxManager) workNodeStart() {
 					curNode.downstream.inputChannel <- output
 				}
 				if enableTtChecker {
-					checker.Check()
+					checker.Check(fmt.Sprintf("nodeCtxTtChecker-%s", curNode.node.Name()))
 				}
 				curNode = curNode.downstream
 			}
