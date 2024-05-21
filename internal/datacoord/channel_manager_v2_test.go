@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -447,6 +448,29 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		s.checkAssignment(m, 1, "ch1", Watching)
 		s.checkAssignment(m, 1, "ch2", Watching)
 	})
+	s.Run("advance watching channels check ErrNodeNotFound", func() {
+		chNodes := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+		}
+		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
+		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		s.Require().NoError(err)
+		s.checkAssignment(m, 1, "ch1", ToWatch)
+		s.checkAssignment(m, 1, "ch2", ToWatch)
+
+		m.AdvanceChannelState(ctx)
+		s.checkAssignment(m, 1, "ch1", Watching)
+		s.checkAssignment(m, 1, "ch2", Watching)
+
+		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrNodeNotFound(1)).Twice()
+		m.AdvanceChannelState(ctx)
+		s.checkAssignment(m, 1, "ch1", Standby)
+		s.checkAssignment(m, 1, "ch2", Standby)
+	})
+
 	s.Run("advance watching channels check watch success", func() {
 		chNodes := map[string]int64{
 			"ch1": 1,
@@ -517,6 +541,28 @@ func (s *ChannelManagerSuite) TestAdvanceChannelState() {
 		m.AdvanceChannelState(ctx)
 		s.checkAssignment(m, 1, "ch1", Releasing)
 		s.checkAssignment(m, 1, "ch2", Releasing)
+	})
+	s.Run("advance releasing channels check ErrNodeNotFound", func() {
+		chNodes := map[string]int64{
+			"ch1": 1,
+			"ch2": 1,
+		}
+		s.prepareMeta(chNodes, datapb.ChannelWatchState_ToRelease)
+		s.mockCluster.EXPECT().NotifyChannelOperation(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+		s.Require().NoError(err)
+		s.checkAssignment(m, 1, "ch1", ToRelease)
+		s.checkAssignment(m, 1, "ch2", ToRelease)
+
+		m.AdvanceChannelState(ctx)
+		s.checkAssignment(m, 1, "ch1", Releasing)
+		s.checkAssignment(m, 1, "ch2", Releasing)
+
+		s.mockCluster.EXPECT().CheckChannelOperationProgress(mock.Anything, mock.Anything, mock.Anything).
+			Return(nil, merr.WrapErrNodeNotFound(1)).Twice()
+		m.AdvanceChannelState(ctx)
+		s.checkAssignment(m, 1, "ch1", Standby)
+		s.checkAssignment(m, 1, "ch2", Standby)
 	})
 	s.Run("advance releasing channels check release success", func() {
 		chNodes := map[string]int64{
