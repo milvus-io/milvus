@@ -29,6 +29,7 @@ type SparseEmbedding interface {
 	Len() int // the actual items in this vector
 	Get(idx int) (pos uint32, value float32, ok bool)
 	Serialize() []byte
+	FieldType() FieldType
 }
 
 var (
