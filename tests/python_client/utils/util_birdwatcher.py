@@ -44,7 +44,7 @@ class BirdWatcher:
     """
 
     def __init__(self, etcd_endpoints, root_path):
-        self.prefix = f"/Users/zilliz/go/bin/birdwatcher --olc=\"#connect --etcd {etcd_endpoints} --rootPath={root_path},"
+        self.prefix = f"birdwatcher --olc=\"#connect --etcd {etcd_endpoints} --rootPath={root_path},"
 
     def parse_segment_info(self, output):
         splitter = output.strip().split('\n')[0]
