@@ -209,7 +209,8 @@ func TestRendezvousFlushManager(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	}
-	assert.Eventually(t, func() bool { return counter.Load() == int64(size) }, 3*time.Second, 100*time.Millisecond)
+	m.waitForAllFlushQueue()
+	assert.True(t, counter.Load() == int64(size))
 
 	_, _, err := m.serializePkStatsLog(0, false, nil, &storage.InsertCodec{Schema: &etcdpb.CollectionMeta{Schema: &schemapb.CollectionSchema{}, ID: 0}})
 	assert.Error(t, err)
@@ -251,6 +252,11 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 		counter.Inc()
 	}, emptyFlushAndDropFunc)
 
+	oldIntervalStr := Params.DataNodeCfg.FlushMgrCleanInterval.GetValue()
+	Params.Save(Params.DataNodeCfg.FlushMgrCleanInterval.Key, "1")
+	defer Params.Save(Params.DataNodeCfg.FlushMgrCleanInterval.Key, oldIntervalStr)
+	m.start()
+
 	ti := newTaskInjection(1, func(*segmentFlushPack) {})
 	m.injectFlush(ti, 1)
 	<-ti.injected
@@ -274,7 +280,10 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 		})
 		assert.NoError(t, err)
 	}
-	assert.Eventually(t, func() bool { return counter.Load() == int64(size) }, 3*time.Second, 100*time.Millisecond)
+	m.waitForAllFlushQueue()
+
+	assert.True(t, counter.Load() == int64(size))
+	assert.Eventually(t, func() bool { return m.segmentNum() == 0 }, 3*time.Second, 100*time.Millisecond)
 
 	id := make([]byte, 10)
 	rand.Read(id)
@@ -332,6 +341,7 @@ func TestRendezvousFlushManager_Inject(t *testing.T) {
 	})
 	assert.Eventually(t, func() bool { return counter.Load() == int64(size+3) }, 3*time.Second, 100*time.Millisecond)
 	assert.EqualValues(t, 4, packs[size+1].segmentID)
+	m.close()
 }
 
 func TestRendezvousFlushManager_getSegmentMeta(t *testing.T) {
