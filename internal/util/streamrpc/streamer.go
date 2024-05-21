@@ -86,9 +86,25 @@ func (c *RetrieveResultCache) merge(result *internalpb.RetrieveResults) {
 	case *schemapb.IDs_StrId:
 		c.result.GetIds().GetStrId().Data = append(c.result.GetIds().GetStrId().GetData(), result.GetIds().GetStrId().GetData()...)
 	}
-	c.result.AllRetrieveCount += result.AllRetrieveCount
-	c.result.CostAggregation.TotalRelatedDataSize += result.CostAggregation.TotalRelatedDataSize
+	c.result.AllRetrieveCount = c.result.AllRetrieveCount + result.AllRetrieveCount
+	c.result.CostAggregation = mergeCostAggregation(c.result.GetCostAggregation(), result.GetCostAggregation())
 	c.size = proto.Size(c.result)
+}
+
+func mergeCostAggregation(a *internalpb.CostAggregation, b *internalpb.CostAggregation) *internalpb.CostAggregation {
+	if a == nil {
+		return b
+	}
+	if b == nil {
+		return a
+	}
+
+	return &internalpb.CostAggregation{
+		ResponseTime:         a.GetResponseTime() + b.GetResponseTime(),
+		ServiceTime:          a.GetServiceTime() + b.GetServiceTime(),
+		TotalNQ:              a.GetTotalNQ() + b.GetTotalNQ(),
+		TotalRelatedDataSize: a.GetTotalRelatedDataSize() + b.GetTotalRelatedDataSize(),
+	}
 }
 
 // Merge result by size and time.
