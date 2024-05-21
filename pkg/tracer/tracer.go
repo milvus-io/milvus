@@ -29,7 +29,6 @@ import (
 	"go.opentelemetry.io/otel/sdk/resource"
 	sdk "go.opentelemetry.io/otel/sdk/trace"
 	semconv "go.opentelemetry.io/otel/semconv/v1.4.0"
-	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/pkg/log"
@@ -63,11 +62,6 @@ func CloseTracerProvider(ctx context.Context) error {
 }
 
 func SetTracerProvider(exp sdk.SpanExporter, traceIDRatio float64) {
-	if exp == nil {
-		otel.SetTracerProvider(trace.NewNoopTracerProvider())
-		return
-	}
-
 	tp := sdk.NewTracerProvider(
 		sdk.WithBatcher(exp),
 		sdk.WithResource(resource.NewWithAttributes(
