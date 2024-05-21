@@ -21,7 +21,9 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
@@ -114,6 +116,46 @@ func TestCompactionExecutor(t *testing.T) {
 		default:
 			t.FailNow()
 		}
+	})
+
+	t.Run("test getAllCompactionResults", func(t *testing.T) {
+		ex := newCompactionExecutor()
+
+		mockC := newMockCompactor(true)
+		ex.executing.Insert(int64(1), mockC)
+
+		ex.completedCompactor.Insert(int64(2), mockC)
+		ex.completed.Insert(int64(2), &datapb.CompactionPlanResult{
+			PlanID: 2,
+			State:  commonpb.CompactionState_Completed,
+			Type:   datapb.CompactionType_MixCompaction,
+		})
+
+		ex.completedCompactor.Insert(int64(3), mockC)
+		ex.completed.Insert(int64(3), &datapb.CompactionPlanResult{
+			PlanID: 3,
+			State:  commonpb.CompactionState_Completed,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+		})
+
+		require.Equal(t, 2, ex.completed.Len())
+		require.Equal(t, 2, ex.completedCompactor.Len())
+		require.Equal(t, 1, ex.executing.Len())
+
+		result := ex.getAllCompactionResults()
+		assert.Equal(t, 3, len(result))
+
+		for _, res := range result {
+			if res.PlanID == int64(1) {
+				assert.Equal(t, res.GetState(), commonpb.CompactionState_Executing)
+			} else {
+				assert.Equal(t, res.GetState(), commonpb.CompactionState_Completed)
+			}
+		}
+
+		assert.Equal(t, 1, ex.completed.Len())
+		require.Equal(t, 1, ex.completedCompactor.Len())
+		require.Equal(t, 1, ex.executing.Len())
 	})
 }
 
