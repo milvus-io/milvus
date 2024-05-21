@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
@@ -657,6 +658,27 @@ func (s *ChannelManagerSuite) TestStartup() {
 	s.checkAssignment(m, 2, "ch1", ToWatch)
 	s.checkAssignment(m, 2, "ch2", ToWatch)
 	s.checkAssignment(m, 2, "ch3", ToWatch)
+}
+
+func (s *ChannelManagerSuite) TestStartupRootCoordFailed() {
+	chNodes := map[string]int64{
+		"ch1": 1,
+		"ch2": 1,
+		"ch3": 1,
+		"ch4": bufferID,
+	}
+	s.prepareMeta(chNodes, datapb.ChannelWatchState_ToWatch)
+
+	s.mockAlloc = NewNMockAllocator(s.T())
+	s.mockAlloc.EXPECT().allocID(mock.Anything).Return(0, errors.New("mock rootcoord failure"))
+	m, err := NewChannelManagerV2(s.mockKv, s.mockHandler, s.mockCluster, s.mockAlloc)
+	s.Require().NoError(err)
+
+	err = m.Startup(context.TODO(), nil, []int64{2})
+	s.Error(err)
+
+	err = m.Startup(context.TODO(), nil, []int64{1, 2})
+	s.Error(err)
 }
 
 func (s *ChannelManagerSuite) TestCheckLoop() {}
