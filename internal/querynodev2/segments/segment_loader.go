@@ -508,7 +508,7 @@ func (loader *segmentLoaderV2) loadSealedSegmentFields(ctx context.Context, segm
 	runningGroup, _ := errgroup.WithContext(ctx)
 	fields.Range(func(fieldID int64, field *schemapb.FieldSchema) bool {
 		runningGroup.Go(func() error {
-			return segment.LoadFieldData(ctx, fieldID, rowCount, nil)
+			return segment.LoadFieldData(ctx, fieldID, rowCount, nil, false)
 		})
 		return true
 	})
@@ -1058,7 +1058,7 @@ func (loader *segmentLoader) loadSealedSegment(ctx context.Context, loadInfo *qu
 				zap.String("index", info.IndexInfo.GetIndexName()),
 			)
 			// for scalar index's raw data, only load to mmap not memory
-			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog); err != nil {
+			if err = segment.LoadFieldData(ctx, fieldID, loadInfo.GetNumOfRows(), info.FieldBinlog, true); err != nil {
 				log.Warn("load raw data failed", zap.Int64("fieldID", fieldID), zap.Error(err))
 				return err
 			}
@@ -1212,7 +1212,7 @@ func loadSealedSegmentFields(ctx context.Context, collection *Collection, segmen
 				fieldID,
 				rowCount,
 				fieldBinLog,
-			)
+				false)
 		})
 	}
 	err := runningGroup.Wait()
