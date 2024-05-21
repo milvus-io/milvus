@@ -175,19 +175,28 @@ func (it *indexBuildTaskV2) BuildIndex(ctx context.Context) error {
 	}
 
 	it.currentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
-	buildIndexParams := &indexcgopb.BuildIndexParams{
-		ClusterID:           it.req.GetClusterID(),
-		BuildID:             it.req.GetBuildID(),
-		CollectionID:        it.req.GetCollectionID(),
-		PartitionID:         it.req.GetPartitionID(),
-		SegmentID:           it.req.GetSegmentID(),
+	field := it.req.GetField()
+	if field == nil || field.GetDataType() == schemapb.DataType_None {
+		field = &schemapb.FieldSchema{
+			FieldID:  it.fieldID,
+			Name:     it.fieldName,
+			DataType: it.fieldType,
+		}
+	}
+
+	buildIndexParams := &indexcgopb.BuildIndexInfo{
+		ClusterID:           it.ClusterID,
+		BuildID:             it.BuildID,
+		CollectionID:        it.collectionID,
+		PartitionID:         it.partitionID,
+		SegmentID:           it.segmentID,
 		IndexVersion:        it.req.GetIndexVersion(),
 		CurrentIndexVersion: it.currentIndexVersion,
 		NumRows:             it.req.GetNumRows(),
 		Dim:                 it.req.GetDim(),
 		IndexFilePrefix:     it.req.GetIndexFilePrefix(),
 		InsertFiles:         it.req.GetDataPaths(),
-		FieldSchema:         it.req.GetField(),
+		FieldSchema:         field,
 		StorageConfig:       storageConfig,
 		IndexParams:         mapToKVPairs(it.newIndexParams),
 		TypeParams:          mapToKVPairs(it.newTypeParams),
@@ -509,19 +518,27 @@ func (it *indexBuildTask) BuildIndex(ctx context.Context) error {
 	}
 
 	it.currentIndexVersion = getCurrentIndexVersion(it.req.GetCurrentIndexVersion())
-	buildIndexParams := &indexcgopb.BuildIndexParams{
-		ClusterID:           it.req.GetClusterID(),
-		BuildID:             it.req.GetBuildID(),
-		CollectionID:        it.req.GetCollectionID(),
-		PartitionID:         it.req.GetPartitionID(),
-		SegmentID:           it.req.GetSegmentID(),
+	field := it.req.GetField()
+	if field == nil || field.GetDataType() == schemapb.DataType_None {
+		field = &schemapb.FieldSchema{
+			FieldID:  it.fieldID,
+			Name:     it.fieldName,
+			DataType: it.fieldType,
+		}
+	}
+	buildIndexParams := &indexcgopb.BuildIndexInfo{
+		ClusterID:           it.ClusterID,
+		BuildID:             it.BuildID,
+		CollectionID:        it.collectionID,
+		PartitionID:         it.partitionID,
+		SegmentID:           it.segmentID,
 		IndexVersion:        it.req.GetIndexVersion(),
 		CurrentIndexVersion: it.currentIndexVersion,
 		NumRows:             it.req.GetNumRows(),
 		Dim:                 it.req.GetDim(),
 		IndexFilePrefix:     it.req.GetIndexFilePrefix(),
 		InsertFiles:         it.req.GetDataPaths(),
-		FieldSchema:         it.req.GetField(),
+		FieldSchema:         field,
 		StorageConfig:       storageConfig,
 		IndexParams:         mapToKVPairs(it.newIndexParams),
 		TypeParams:          mapToKVPairs(it.newTypeParams),

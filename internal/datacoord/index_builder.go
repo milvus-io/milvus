@@ -364,13 +364,11 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 
-		var dim int
-		if typeutil.IsVectorType(field.GetDataType()) {
-			dim, err = storage.GetDimFromParams(field.TypeParams)
-			if err != nil {
-				log.Ctx(ib.ctx).Warn("failed to get dim from field type params", zap.Error(err))
-				return false
-			}
+		dim, err := storage.GetDimFromParams(field.TypeParams)
+		if err != nil {
+			log.Ctx(ib.ctx).Warn("failed to get dim from field type params",
+				zap.String("field type", field.GetDataType().String()), zap.Error(err))
+			// don't return, maybe field is scalar field or sparseFloatVector
 		}
 		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
 			storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())

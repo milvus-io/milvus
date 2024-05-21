@@ -58,7 +58,7 @@ message OptionalFieldInfo {
   repeated string data_paths = 4;
 }
 
-message BuildIndexParams {
+message BuildIndexInfo {
   string clusterID = 1;
   int64 buildID = 2;
   int64 collectionID = 3;
