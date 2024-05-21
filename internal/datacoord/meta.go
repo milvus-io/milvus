@@ -1374,6 +1374,28 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 	return nil
 }
 
+// MarkChannelCheckpointDropped set channel checkpoint to MaxUint64 preventing future update
+// and remove the metrics for channel checkpoint lag.
+func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
+	m.channelCPs.Lock()
+	defer m.channelCPs.Unlock()
+
+	cp := &msgpb.MsgPosition{
+		ChannelName: channel,
+		Timestamp:   math.MaxUint64,
+	}
+
+	err := m.catalog.SaveChannelCheckpoints(ctx, []*msgpb.MsgPosition{cp})
+	if err != nil {
+		return err
+	}
+
+	m.channelCPs.checkpoints[channel] = cp
+
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
+	return nil
+}
+
 // UpdateChannelCheckpoints updates and saves channel checkpoints.
 func (m *meta) UpdateChannelCheckpoints(positions []*msgpb.MsgPosition) error {
 	m.channelCPs.Lock()
