@@ -441,6 +441,8 @@ func (s *Server) startQueryCoord() error {
 			s.nodeMgr.Stopping(node.ServerID)
 		}
 	}
+
+	s.checkNodeStateInRG()
 	for _, node := range sessions {
 		s.handleNodeUp(node.ServerID)
 	}
@@ -760,6 +762,20 @@ func (s *Server) handleNodeDown(node int64) {
 	s.taskScheduler.RemoveByNode(node)
 
 	s.meta.ResourceManager.HandleNodeDown(node)
+}
+
+func (s *Server) checkNodeStateInRG() {
+	for _, rgName := range s.meta.ListResourceGroups() {
+		rg := s.meta.ResourceManager.GetResourceGroup(rgName)
+		for _, node := range rg.GetNodes() {
+			info := s.nodeMgr.Get(node)
+			if info == nil {
+				s.meta.ResourceManager.HandleNodeDown(node)
+			} else if info.IsStoppingState() {
+				s.meta.ResourceManager.HandleNodeStopping(node)
+			}
+		}
+	}
 }
 
 func (s *Server) updateBalanceConfigLoop(ctx context.Context) {
