@@ -202,8 +202,10 @@ class TestChannelExclusiveBalance(TestcaseBase):
         for k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)
-        for r in res:
-            assert len(set(r["channel"])) == 1
+        # in final state, channel exclusive balance is on, so all qn should have only one channel
+        for k, v in res.items():
+            assert len(set(v["channel"])) == 1
+
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_channel_exclusive_balance_during_qn_scale_down(self, image_tag):
@@ -252,8 +254,10 @@ class TestChannelExclusiveBalance(TestcaseBase):
         for k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)
-        for r in res:
-            assert len(set(r["channel"])) > 1
+        # shard num = 2, k = 2, qn_num = 3
+        # in final state, channel exclusive balance is off, so all qn should have more than one channel
+        for k, v in res.items():
+            assert len(set(v["channel"])) > 1
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_channel_exclusive_balance_with_channel_num_is_1(self, image_tag):
@@ -305,8 +309,10 @@ class TestChannelExclusiveBalance(TestcaseBase):
         for k, v in self.health_checkers.items():
             v.terminate()
             time.sleep(60)
-        for r in res:
-            assert len(set(r["channel"])) == 1
+
+        # since shard num is 1, so all qn should have only one channel, no matter what k is
+        for k, v in res.items():
+            assert len(set(v["channel"])) == 1
 
     @pytest.mark.tags(CaseLabel.L3)
     def test_channel_exclusive_balance_after_k_increase(self, image_tag):
@@ -351,14 +357,17 @@ class TestChannelExclusiveBalance(TestcaseBase):
             display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
             res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
             if qn_num == 4:
-                for r in res:
+                # channel exclusive balance is on, so all qn should have only one channel
+                for r in res.values():
                     assert len(set(r["channel"])) == 1
             if qn_num == 5:
-                # change k to 3 when qn_num is 5
-                for r in res:
+                # k is changed to 3 when qn_num is 5,
+                # channel exclusive balance is off, so all qn should have more than one channel
+                for r in res.values():
                     assert len(set(r["channel"])) > 1
             if qn_num == 6:
-                for r in res:
+                # channel exclusive balance is on, so all qn should have more than one channel
+                for r in res.values():
                     assert len(set(r["channel"])) == 1
 
         milvus_op.scale(release_name, 'queryNode', 8, namespace)
