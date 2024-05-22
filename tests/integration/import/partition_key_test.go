@@ -170,11 +170,32 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
-	resData := queryResult.GetFieldsData()[0].GetScalars().GetStringData().GetData()
-	s.Equal(queryNum, len(resData))
-	s.ElementsMatch(resData, queryData)
+	for _, data := range queryResult.GetFieldsData() {
+		if data.GetType() == schemapb.DataType_VarChar {
+			resData := data.GetScalars().GetStringData().GetData()
+			s.Equal(queryNum, len(resData))
+			s.ElementsMatch(resData, queryData)
+		}
+	}
 
-	// query partition key, CmpOp
+	// query partition key, CmpOp 1
+	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
+	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName: collectionName,
+		Expr:           expr,
+		OutputFields:   []string{integration.VarCharField},
+	})
+	err = merr.CheckRPCCall(queryResult, err)
+	s.NoError(err)
+	for _, data := range queryResult.GetFieldsData() {
+		if data.GetType() == schemapb.DataType_VarChar {
+			resData := data.GetScalars().GetStringData().GetData()
+			s.Equal(rowCount, len(resData))
+			s.ElementsMatch(resData, partitionKeyData)
+		}
+	}
+
+	// query partition key, CmpOp 2
 	target := partitionKeyData[rand.Intn(rowCount)]
 	expr = fmt.Sprintf("%s == \"%s\"", integration.VarCharField, target)
 	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
@@ -184,7 +205,11 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
-	resData = queryResult.GetFieldsData()[0].GetScalars().GetStringData().GetData()
-	s.Equal(1, len(resData))
-	s.Equal(resData[0], target)
+	for _, data := range queryResult.GetFieldsData() {
+		if data.GetType() == schemapb.DataType_VarChar {
+			resData := data.GetScalars().GetStringData().GetData()
+			s.Equal(1, len(resData))
+			s.Equal(resData[0], target)
+		}
+	}
 }
