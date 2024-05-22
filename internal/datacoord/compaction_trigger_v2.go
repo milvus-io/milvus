@@ -7,6 +7,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -133,7 +134,14 @@ func (m *CompactionTriggerManager) buildL0CompactionPlan(view CompactionView) *d
 		Channel:        view.GetGroupLabel().Channel,
 	}
 
-	if err := fillOriginPlan(view.GetGroupLabel().CollectionID, m.handler, m.allocator, plan); err != nil {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		return nil
+	}
+
+	if err := fillOriginPlan(collection.Schema, m.allocator, plan); err != nil {
 		return nil
 	}
 
@@ -148,8 +156,8 @@ type chanPartSegments struct {
 	segments     []*SegmentInfo
 }
 
-func fillOriginPlan(collectionID int64, handler Handler, alloc allocator, plan *datapb.CompactionPlan) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+func fillOriginPlan(schema *schemapb.CollectionSchema, alloc allocator, plan *datapb.CompactionPlan) error {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	id, err := alloc.allocID(ctx)
 	if err != nil {
@@ -158,10 +166,6 @@ func fillOriginPlan(collectionID int64, handler Handler, alloc allocator, plan *
 
 	plan.PlanID = id
 	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32()
-	collection, err := handler.GetCollection(ctx, collectionID)
-	if err != nil {
-		return err
-	}
-	plan.Schema = collection.Schema
+	plan.Schema = schema
 	return nil
 }

@@ -430,7 +430,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				break
 			}
 			start := time.Now()
-			if err := fillOriginPlan(group.collectionID, t.handler, t.allocator, plan); err != nil {
+			if err := fillOriginPlan(coll.Schema, t.allocator, plan); err != nil {
 				log.Warn("failed to fill plan",
 					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64s("segmentIDs", segIDs),
@@ -521,7 +521,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			break
 		}
 		start := time.Now()
-		if err := fillOriginPlan(collectionID, t.handler, t.allocator, plan); err != nil {
+		if err := fillOriginPlan(coll.Schema, t.allocator, plan); err != nil {
 			log.Warn("failed to fill plan", zap.Error(err))
 			continue
 		}

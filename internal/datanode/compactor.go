@@ -411,7 +411,7 @@ func (t *compactionTask) compact() (*datapb.CompactionPlanResult, error) {
 	defer span.End()
 
 	if len(t.plan.GetSegmentBinlogs()) < 1 {
-		log.Warn("compact wrong, there's no segments in segment binlogs")
+		log.Warn("compact failed, there's no segments in segment binlogs", zap.Int64("planID", t.plan.GetPlanID()))
 		return nil, errIllegalCompactionPlan
 	}
 
