@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -146,7 +147,11 @@ func (op *ChannelOp) BuildKV() (map[string]string, []string, error) {
 		k := buildNodeChannelKey(op.NodeID, ch.GetName())
 		switch op.Type {
 		case Add, Watch, Release:
-			info, err := proto.Marshal(ch.GetWatchInfo())
+			tmpWatchInfo := ch.GetWatchInfo()
+			if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
+				tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
+			}
+			info, err := proto.Marshal(tmpWatchInfo)
 			if err != nil {
 				return saves, removals, err
 			}

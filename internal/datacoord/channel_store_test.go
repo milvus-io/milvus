@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv/predicates"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -58,6 +59,9 @@ func genChannelOperationsV1(from, to int64, num int) *ChannelOpSet {
 }
 
 func TestChannelStore_Update(t *testing.T) {
+	enableRPCK := paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.Key
+	paramtable.Get().Save(enableRPCK, "false")
+	defer paramtable.Get().Reset(enableRPCK)
 	txnKv := mocks.NewTxnKV(t)
 	txnKv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
 		assert.False(t, len(saves)+len(removals) > 64, "too many operations")

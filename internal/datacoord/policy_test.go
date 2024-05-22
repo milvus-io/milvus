@@ -37,7 +37,7 @@ func getChannel(name string, collID int64) *StateChannel {
 	return &StateChannel{
 		Name:         name,
 		CollectionID: collID,
-		Info:         &datapb.ChannelWatchInfo{},
+		Info:         &datapb.ChannelWatchInfo{Vchan: &datapb.VchannelInfo{}},
 	}
 }
 
