@@ -1,5 +1,5 @@
 --extra-index-url https://test.pypi.org/simple/
-requests==2.31.0
+requests==2.32.2
 urllib3==1.26.18
 pytest==7.2.0
 pytest-assume==2.4.3
