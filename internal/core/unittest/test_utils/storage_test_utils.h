@@ -103,7 +103,7 @@ PrepareInsertBinlog(int64_t collection_id,
 
 std::map<std::string, int64_t>
 PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
-             const std::vector<const uint8_t*>& buffers,
+             const std::vector<void*>& buffers,
              const std::vector<int64_t>& element_counts,
              const std::vector<std::string>& object_keys,
              FieldDataMeta& field_data_meta,
@@ -120,7 +120,7 @@ PutFieldData(milvus::storage::ChunkManager* remote_chunk_manager,
         futures.push_back(
             pool.Submit(milvus::storage::EncodeAndUploadFieldSlice,
                         remote_chunk_manager,
-                        const_cast<uint8_t*>(buffers[i]),
+                        buffers[i],
                         element_counts[i],
                         field_data_meta,
                         field_meta,
