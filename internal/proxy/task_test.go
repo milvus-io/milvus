@@ -3135,7 +3135,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		// check default partitions
 		err = InitMetaCache(ctx, rc, nil, nil)
 		assert.NoError(t, err)
-		partitionNames, err := getDefaultPartitionNames(ctx, "", task.CollectionName)
+		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
 		assert.NoError(t, err)
 		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
 
