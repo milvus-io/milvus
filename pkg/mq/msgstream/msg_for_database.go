@@ -39,6 +39,11 @@ func (c *CreateDatabaseMsg) SetID(id UniqueID) {
 	c.Base.MsgID = id
 }
 
+func (d *CreateDatabaseMsg) SetTs(ts Timestamp) {
+	d.BeginTimestamp = ts
+	d.EndTimestamp = ts
+}
+
 func (c *CreateDatabaseMsg) Type() MsgType {
 	return c.Base.MsgType
 }
@@ -91,6 +96,11 @@ func (d *DropDatabaseMsg) ID() UniqueID {
 
 func (d *DropDatabaseMsg) SetID(id UniqueID) {
 	d.Base.MsgID = id
+}
+
+func (d *DropDatabaseMsg) SetTs(ts Timestamp) {
+	d.BeginTimestamp = ts
+	d.EndTimestamp = ts
 }
 
 func (d *DropDatabaseMsg) Type() MsgType {

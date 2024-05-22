@@ -145,49 +145,7 @@ func newTimeTickSync(ctx context.Context, sourceID int64, factory msgstream.Fact
 // sendToChannel send all channels' timetick to sendChan
 // lock is needed by the invoker
 func (t *timetickSync) sendToChannel() bool {
-	if len(t.sess2ChanTsMap) == 0 {
-		return false
-	}
-
-	// detect whether rootcoord receives ttMsg from all source sessions
-	maxCnt := int64(0)
-	idleSessionList := make([]typeutil.UniqueID, 0, len(t.sess2ChanTsMap))
-	for id, v := range t.sess2ChanTsMap {
-		if v == nil {
-			idleSessionList = append(idleSessionList, id)
-		} else {
-			if maxCnt < v.cnt {
-				maxCnt = v.cnt
-			}
-		}
-	}
-
-	if len(idleSessionList) > 0 {
-		// give warning every 2 second if not get ttMsg from source sessions
-		if maxCnt%10 == 0 {
-			log.Warn("session idle for long time", zap.Any("idle list", idleSessionList),
-				zap.Int64("idle time", Params.ProxyCfg.TimeTickInterval.GetAsInt64()*time.Millisecond.Milliseconds()*maxCnt))
-		}
-		return false
-	}
-
-	// clear sess2ChanTsMap and send a clone
-	ptt := make(map[typeutil.UniqueID]*chanTsMsg)
-	for k, v := range t.sess2ChanTsMap {
-		ptt[k] = v
-		t.sess2ChanTsMap[k] = nil
-	}
-
-	select {
-	case t.sendChan <- ptt:
-	default:
-		// The consumer of `sendChan` haven't completed its operation. If we send the `ptt` here, the consumer will
-		// always get an older time tick. The older time tick in `sendChan` will block newer time tick in next window.
-		// However, in fact the consumer can only focus on the newest.
-
-		// TODO: maybe a metric should be here.
-	}
-
+	// sync on log node now.
 	return true
 }
 

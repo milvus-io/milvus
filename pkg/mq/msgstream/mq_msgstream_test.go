@@ -1198,6 +1198,10 @@ func (t *MarshalFailTsMsg) SetID(id UniqueID) {
 	// do nothing
 }
 
+func (t *MarshalFailTsMsg) SetTs(ts Timestamp) {
+	// do nothing
+}
+
 func (t *MarshalFailTsMsg) Type() MsgType {
 	return commonpb.MsgType_Undefined
 }

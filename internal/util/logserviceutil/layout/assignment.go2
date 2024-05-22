@@ -1,0 +1,80 @@
+package layout
+
+import (
+	"github.com/milvus-io/milvus/internal/logcoord/server/channel"
+	"github.com/milvus-io/milvus/internal/proto/logpb"
+)
+
+// Assignment is initialized by persistent data of pChannel info.
+func NewAssignment(channels map[string]channel.PhysicalChannel) *Assignments {
+	m := make(map[int64]Assignment, len(channels))
+	for channelsName, ch := range channels {
+		info := ch.Info()
+		if _, ok := m[info.ServerID]; !ok {
+			m[info.ServerID] = Assignment{
+				ServerID: info.ServerID,
+				Channels: make(map[string]*logpb.PChannelInfo),
+			}
+		}
+		m[info.ServerID].Channels[channelsName] = info
+	}
+	return &Assignments{
+		Version: 0,
+		Map:     m,
+	}
+}
+
+// Relation is the relation between log node and channel.
+type Relation struct {
+	Channel  []*logpb.PChannelInfo
+	ServerID int64
+}
+
+// Assignment is the assignment of log node and channel.
+type Assignment struct {
+	ServerID int64
+	Channels map[string]*logpb.PChannelInfo
+}
+
+// Assignments is the assignment of all log node and channel.
+type Assignments struct {
+	Version int64                // version of assignments.
+	Map     map[int64]Assignment // map serverID to assignment info.
+}
+
+// RemoveChannelFromNode remove a channel from a log node.
+func (a *Assignments) RemoveChannelFromNode(serverID int64, channelName string) {
+	if _, ok := a.Map[serverID]; !ok {
+		return
+	}
+	delete(a.Map[serverID].Channels, channelName)
+	a.Version++
+}
+
+// AssignChannelToNode assign a channel to a log node.
+func (a *Assignments) AssignChannelToNode(serverID int64, channel *logpb.PChannelInfo) {
+	if _, ok := a.Map[serverID]; !ok {
+		a.Map[serverID] = Assignment{
+			ServerID: serverID,
+			Channels: make(map[string]*logpb.PChannelInfo),
+		}
+	}
+	a.Map[serverID].Channels[channel.Name] = channel
+	a.Version++
+}
+
+// JoinNewNode join a new log node.
+func (a *Assignments) JoinNewNode(serverID int64, channel *logpb.PChannelInfo) {
+	if _, ok := a.Map[serverID]; !ok {
+		a.Map[serverID] = Assignment{
+			ServerID: serverID,
+			Channels: make(map[string]*logpb.PChannelInfo),
+		}
+	}
+}
+
+// RemoveNode remove a log node.
+func (a *Assignments) RemoveNode(serverID int64) {
+	delete(a.Map, serverID)
+	a.Version++
+}

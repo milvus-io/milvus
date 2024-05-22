@@ -74,8 +74,7 @@ func NewPmsFactory(serviceParam *paramtable.ServiceParam) *PmsFactory {
 	return f
 }
 
-// NewMsgStream is used to generate a new Msgstream object
-func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+func (f *PmsFactory) NewClient(ctx context.Context) (mqwrapper.Client, error) {
 	var timeout time.Duration = f.RequestTimeout
 
 	if deadline, ok := ctx.Deadline(); ok {
@@ -95,8 +94,12 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 		OperationTimeout:  timeout,
 		MetricsRegisterer: f.metricRegisterer,
 	}
+	return pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
+}
 
-	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
+// NewMsgStream is used to generate a new Msgstream object
+func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
+	pulsarClient, err := f.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -105,25 +108,7 @@ func (f *PmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 
 // NewTtMsgStream is used to generate a new TtMsgstream object
 func (f *PmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	var timeout time.Duration = f.RequestTimeout
-	if deadline, ok := ctx.Deadline(); ok {
-		if deadline.Before(time.Now()) {
-			return nil, errors.New("context timeout when NewTtMsgStream")
-		}
-		timeout = time.Until(deadline)
-	}
-	auth, err := f.getAuthentication()
-	if err != nil {
-		return nil, err
-	}
-	clientOpts := pulsar.ClientOptions{
-		URL:               f.PulsarAddress,
-		Authentication:    auth,
-		OperationTimeout:  timeout,
-		MetricsRegisterer: f.metricRegisterer,
-	}
-
-	pulsarClient, err := pulsarmqwrapper.NewClient(f.PulsarTenant, f.PulsarNameSpace, clientOpts)
+	pulsarClient, err := f.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -183,8 +168,12 @@ type KmsFactory struct {
 	MQBufSize         int64
 }
 
+func (f *KmsFactory) NewClient(ctx context.Context) (mqwrapper.Client, error) {
+	return kafkawrapper.NewKafkaClientInstanceWithConfig(ctx, f.config)
+}
+
 func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
-	kafkaClient, err := kafkawrapper.NewKafkaClientInstanceWithConfig(ctx, f.config)
+	kafkaClient, err := f.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -192,7 +181,7 @@ func (f *KmsFactory) NewMsgStream(ctx context.Context) (MsgStream, error) {
 }
 
 func (f *KmsFactory) NewTtMsgStream(ctx context.Context) (MsgStream, error) {
-	kafkaClient, err := kafkawrapper.NewKafkaClientInstanceWithConfig(ctx, f.config)
+	kafkaClient, err := f.NewClient(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -211,7 +200,7 @@ func (f *KmsFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, st
 	}
 }
 
-func NewKmsFactory(config *paramtable.ServiceParam) Factory {
+func NewKmsFactory(config *paramtable.ServiceParam) *KmsFactory {
 	f := &KmsFactory{
 		dispatcherFactory: ProtoUDFactory{},
 		ReceiveBufSize:    config.MQCfg.ReceiveBufSize.GetAsInt64(),
@@ -222,14 +211,12 @@ func NewKmsFactory(config *paramtable.ServiceParam) Factory {
 }
 
 // NewNatsmqFactory create a new nats-mq factory.
-func NewNatsmqFactory() Factory {
+func NewNatsmqFactory() *CommonFactory {
 	paramtable.Init()
 	paramtable := paramtable.Get()
 	nmq.MustInitNatsMQ(nmq.ParseServerOption(paramtable))
 	return &CommonFactory{
 		Newer:             nmq.NewClientWithDefaultOptions,
 		DispatcherFactory: ProtoUDFactory{},
-		ReceiveBufSize:    paramtable.MQCfg.ReceiveBufSize.GetAsInt64(),
-		MQBufSize:         paramtable.MQCfg.MQBufSize.GetAsInt64(),
 	}
 }

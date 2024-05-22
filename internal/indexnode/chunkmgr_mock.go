@@ -7,6 +7,7 @@ import (
 	"sync"
 	"time"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"golang.org/x/exp/mmap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -239,6 +240,10 @@ func (f *mockFactory) NewTtMsgStream(context.Context) (msgstream.MsgStream, erro
 
 func (f *mockFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
 	// TODO
+	return nil
+}
+
+func (f *mockFactory) ETCDClient() *clientv3.Client {
 	return nil
 }
 

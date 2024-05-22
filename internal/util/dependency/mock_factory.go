@@ -5,10 +5,11 @@ package dependency
 import (
 	context "context"
 
-	msgstream "github.com/milvus-io/milvus/pkg/mq/msgstream"
+	clientv3 "go.etcd.io/etcd/client/v3"
+
 	mock "github.com/stretchr/testify/mock"
 
-	paramtable "github.com/milvus-io/milvus/pkg/util/paramtable"
+	msgstream "github.com/milvus-io/milvus/pkg/mq/msgstream"
 
 	storage "github.com/milvus-io/milvus/internal/storage"
 )
@@ -26,35 +27,45 @@ func (_m *MockFactory) EXPECT() *MockFactory_Expecter {
 	return &MockFactory_Expecter{mock: &_m.Mock}
 }
 
-// Init provides a mock function with given fields: p
-func (_m *MockFactory) Init(p *paramtable.ComponentParam) {
-	_m.Called(p)
+// ETCDClient provides a mock function with given fields:
+func (_m *MockFactory) ETCDClient() *clientv3.Client {
+	ret := _m.Called()
+
+	var r0 *clientv3.Client
+	if rf, ok := ret.Get(0).(func() *clientv3.Client); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*clientv3.Client)
+		}
+	}
+
+	return r0
 }
 
-// MockFactory_Init_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Init'
-type MockFactory_Init_Call struct {
+// MockFactory_ETCDClient_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ETCDClient'
+type MockFactory_ETCDClient_Call struct {
 	*mock.Call
 }
 
-// Init is a helper method to define mock.On call
-//   - p *paramtable.ComponentParam
-func (_e *MockFactory_Expecter) Init(p interface{}) *MockFactory_Init_Call {
-	return &MockFactory_Init_Call{Call: _e.mock.On("Init", p)}
+// ETCDClient is a helper method to define mock.On call
+func (_e *MockFactory_Expecter) ETCDClient() *MockFactory_ETCDClient_Call {
+	return &MockFactory_ETCDClient_Call{Call: _e.mock.On("ETCDClient")}
 }
 
-func (_c *MockFactory_Init_Call) Run(run func(p *paramtable.ComponentParam)) *MockFactory_Init_Call {
+func (_c *MockFactory_ETCDClient_Call) Run(run func()) *MockFactory_ETCDClient_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(*paramtable.ComponentParam))
+		run()
 	})
 	return _c
 }
 
-func (_c *MockFactory_Init_Call) Return() *MockFactory_Init_Call {
-	_c.Call.Return()
+func (_c *MockFactory_ETCDClient_Call) Return(_a0 *clientv3.Client) *MockFactory_ETCDClient_Call {
+	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockFactory_Init_Call) RunAndReturn(run func(*paramtable.ComponentParam)) *MockFactory_Init_Call {
+func (_c *MockFactory_ETCDClient_Call) RunAndReturn(run func() *clientv3.Client) *MockFactory_ETCDClient_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -48,6 +48,10 @@ const (
 	IndexNodeRole = "indexnode"
 	// MixtureRole is a constant represents Mixture running modtoe
 	MixtureRole = "mixture"
+	// LogCoord is a constant represent LogCoord
+	LogCoordRole = "logcoord"
+	// LogNode is a constant represent LogNode
+	LogNodeRole = "lognode"
 )
 
 var (
@@ -60,6 +64,7 @@ var (
 		IndexNodeRole,
 		DataCoordRole,
 		DataNodeRole,
+		LogNodeRole,
 	)
 	serverTypeList = serverTypeSet.Collect()
 )

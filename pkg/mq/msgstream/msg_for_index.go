@@ -43,6 +43,11 @@ func (it *CreateIndexMsg) SetID(id UniqueID) {
 	it.Base.MsgID = id
 }
 
+func (d *CreateIndexMsg) SetTs(ts Timestamp) {
+	d.BeginTimestamp = ts
+	d.EndTimestamp = ts
+}
+
 // Type returns the type of this message pack
 func (it *CreateIndexMsg) Type() MsgType {
 	return it.Base.MsgType
@@ -105,6 +110,11 @@ func (it *AlterIndexMsg) SetID(id UniqueID) {
 	it.Base.MsgID = id
 }
 
+func (it *AlterIndexMsg) SetTs(ts Timestamp) {
+	it.BeginTimestamp = ts
+	it.EndTimestamp = ts
+}
+
 // Type returns the type of this message pack
 func (it *AlterIndexMsg) Type() MsgType {
 	return it.Base.MsgType
@@ -162,6 +172,11 @@ func (d *DropIndexMsg) ID() UniqueID {
 
 func (d *DropIndexMsg) SetID(id UniqueID) {
 	d.Base.MsgID = id
+}
+
+func (d *DropIndexMsg) SetTs(ts Timestamp) {
+	d.BeginTimestamp = ts
+	d.EndTimestamp = ts
 }
 
 func (d *DropIndexMsg) Type() MsgType {

@@ -253,6 +253,9 @@ func RegisterDataNode(registry *prometheus.Registry) {
 	registry.MustRegister(DataNodeForwardDeleteMsgTimeTaken)
 	registry.MustRegister(DataNodeNumProducers)
 	registry.MustRegister(DataNodeProduceTimeTickLag)
+
+	// may use LogServiceClient, so we need to register LogServiceClient metrics here.
+	RegisterLogServiceClient(registry)
 }
 
 func CleanupDataNodeCollectionMetrics(nodeID int64, collectionID int64, channel string) {

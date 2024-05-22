@@ -525,25 +525,41 @@ func (kc *Catalog) DropChannelCheckpoint(ctx context.Context, vChannel string) e
 	return kc.MetaKv.Remove(k)
 }
 
-func (kc *Catalog) getBinlogsWithPrefix(binlogType storage.BinlogType, collectionID, partitionID,
-	segmentID typeutil.UniqueID,
-) ([]string, []string, error) {
-	var binlogPrefix string
-	switch binlogType {
-	case storage.InsertBinlog:
-		binlogPrefix = buildFieldBinlogPathPrefix(collectionID, partitionID, segmentID)
-	case storage.DeleteBinlog:
-		binlogPrefix = buildFieldDeltalogPathPrefix(collectionID, partitionID, segmentID)
-	case storage.StatsBinlog:
-		binlogPrefix = buildFieldStatslogPathPrefix(collectionID, partitionID, segmentID)
-	default:
-		return nil, nil, fmt.Errorf("invalid binlog type: %d", binlogType)
-	}
-	keys, values, err := kc.MetaKv.LoadWithPrefix(binlogPrefix)
+func (kc *Catalog) ListPChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error) {
+	keys, values, err := kc.MetaKv.LoadWithPrefix(ChannelCheckpointPrefix)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
-	return keys, values, nil
+
+	channelCPs := make(map[string]*msgpb.MsgPosition)
+	for i, key := range keys {
+		value := values[i]
+		channelCP := &msgpb.MsgPosition{}
+		err = proto.Unmarshal([]byte(value), channelCP)
+		if err != nil {
+			log.Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
+			return nil, err
+		}
+		ss := strings.Split(key, "/")
+		vChannel := ss[len(ss)-1]
+		channelCPs[vChannel] = channelCP
+	}
+
+	return channelCPs, nil
+}
+
+func (kc *Catalog) SavePChannelCheckpoint(ctx context.Context, pChannel string, pos *msgpb.MsgPosition) error {
+	k := buildChannelCPKey(pChannel)
+	v, err := proto.Marshal(pos)
+	if err != nil {
+		return err
+	}
+	return kc.MetaKv.Save(k, string(v))
+}
+
+func (kc *Catalog) DropPChannelCheckpoint(ctx context.Context, pChannel string) error {
+	k := buildChannelCPKey(pChannel)
+	return kc.MetaKv.Remove(k)
 }
 
 func (kc *Catalog) CreateIndex(ctx context.Context, index *model.Index) error {

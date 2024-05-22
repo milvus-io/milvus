@@ -20,6 +20,12 @@ type etcdClientCreator struct {
 	rootpath *string
 }
 
+// GetEtcd returns an Etcd client, if an error is hit, will panic.
+func GetEtcd() *clientv3.Client {
+	client, _ := getEtcdAndPathFunction()
+	return client
+}
+
 // Returns an Etcd client and the metaRootPath, if an error is hit, will panic.
 // This client is reused by all calls in the current runtime.
 func GetEtcdAndPath() (*clientv3.Client, string) {

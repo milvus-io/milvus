@@ -694,6 +694,7 @@ func (s *Session) GoingStop() error {
 type SessionEvent struct {
 	EventType SessionEventType
 	Session   *Session
+	Revision  int64
 }
 
 type sessionWatcher struct {
@@ -806,6 +807,7 @@ func (w *sessionWatcher) handleWatchResponse(wresp clientv3.WatchResponse) {
 		}
 		log.Debug("WatchService", zap.Any("event type", eventType))
 		w.eventCh <- &SessionEvent{
+			Revision:  wresp.Header.Revision,
 			EventType: eventType,
 			Session:   session,
 		}

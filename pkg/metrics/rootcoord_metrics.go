@@ -246,6 +246,8 @@ func RegisterRootCoord(registry *prometheus.Registry) {
 
 	registry.MustRegister(RootCoordNumEntities)
 	registry.MustRegister(RootCoordIndexedNumEntities)
+	// may use LogServiceClient, so we need to register LogServiceClient metrics here.
+	RegisterLogServiceClient(registry)
 }
 
 func CleanupRootCoordDBMetrics(dbName string) {

@@ -91,7 +91,6 @@ func (suite *QueryNodeSuite) TearDownTest() {
 
 func (suite *QueryNodeSuite) TestBasic() {
 	// mock expect
-	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(context.Background()))
 
 	var err error
@@ -132,7 +131,6 @@ func (suite *QueryNodeSuite) TestInit_RemoteChunkManagerFailed() {
 	suite.node.SetEtcdClient(suite.etcd)
 
 	// init remote chunk manager failed
-	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(nil, errors.New("mock error"))
 	err = suite.node.Init()
 	suite.Error(err)
@@ -143,7 +141,6 @@ func (suite *QueryNodeSuite) TestInit_VactorChunkManagerFailed() {
 	suite.node.SetEtcdClient(suite.etcd)
 
 	// init vactor chunk manager failed
-	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(nil, errors.New("mock error")).Once()
 	err = suite.node.Init()
 	suite.Error(err)
@@ -151,7 +148,6 @@ func (suite *QueryNodeSuite) TestInit_VactorChunkManagerFailed() {
 
 func (suite *QueryNodeSuite) TestInit_QueryHook() {
 	// mock expect
-	suite.factory.EXPECT().Init(mock.Anything).Return()
 	suite.factory.EXPECT().NewPersistentStorageChunkManager(mock.Anything).Return(suite.chunkManagerFactory.NewPersistentStorageChunkManager(context.Background()))
 
 	var err error

@@ -27,6 +27,8 @@ const (
 	ImportJobPrefix           = MetaPrefix + "/import-job"
 	ImportTaskPrefix          = MetaPrefix + "/import-task"
 	PreImportTaskPrefix       = MetaPrefix + "/preimport-task"
+	PChannelInfoPrefix        = MetaPrefix + "/pchannel-watch"
+	PChannelLeaseIDPrefix     = MetaPrefix + "/pchannel-leaseID"
 
 	NonRemoveFlagTomestone = "non-removed"
 	RemoveFlagTomestone    = "removed"

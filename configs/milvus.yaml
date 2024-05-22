@@ -535,6 +535,17 @@ dataNode:
   slot:
     slotCap: 2 # The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode.
 
+logNode:
+  # can specify ip for example
+  # ip: 127.0.0.1
+  ip: # if not specify address, will use the first unicastable address as local ip
+  port: 19532
+  grpc:
+    serverMaxSendSize: 536870912
+    serverMaxRecvSize: 536870912
+    clientMaxSendSize: 268435456
+    clientMaxRecvSize: 268435456
+
 # Configures the system log output.
 log:
   level: info # Only supports debug, info, warn, error, panic, or fatal. Default 'info'.

@@ -586,6 +586,15 @@ message WatchChannelsResponse {
   common.Status status = 1;
 }
 
+message DropChannelsRequest {
+  int64 collectionID = 1;
+  repeated string channelNames = 2;
+}
+
+message DropChannelsResponse {
+  common.Status status = 1;
+}
+
 message SetSegmentStateRequest {
   common.MsgBase base = 1;
   int64 segment_id = 2;

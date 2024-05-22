@@ -529,6 +529,17 @@ func (rmq *rocksmq) RegisterConsumer(consumer *Consumer) error {
 		return errors.New(RmqNotServingErrMsg)
 	}
 	start := time.Now()
+	ll, ok := topicMu.Load(consumer.Topic)
+	if !ok {
+		return fmt.Errorf("topic name = %s not exist at RegisterConsumer", consumer.Topic)
+	}
+	lock, ok := ll.(*sync.Mutex)
+	if !ok {
+		return fmt.Errorf("get mutex failed, topic name = %s, at RegisterConsumer", consumer.Topic)
+	}
+	lock.Lock()
+	defer lock.Unlock()
+
 	if vals, ok := rmq.consumers.Load(consumer.Topic); ok {
 		for _, v := range vals.([]*Consumer) {
 			if v.GroupName == consumer.GroupName {
@@ -587,8 +598,12 @@ func (rmq *rocksmq) destroyConsumerGroupInternal(topicName, groupName string) er
 		for index, v := range consumers {
 			if v.GroupName == groupName {
 				close(v.MsgMutex)
-				consumers = append(consumers[:index], consumers[index+1:]...)
-				rmq.consumers.Store(topicName, consumers)
+				// Need CopyOnWrite operation here.
+				// Operate on a copy of the slice, so that the original slice is not modified and be safe to be accessed by other method.
+				newConsumers := make([]*Consumer, 0, len(consumers)-1)
+				newConsumers = append(newConsumers, consumers[:index]...)
+				newConsumers = append(newConsumers, consumers[index+1:]...)
+				rmq.consumers.Store(topicName, newConsumers)
 				break
 			}
 		}

@@ -30,6 +30,7 @@ const (
 	SuccessLabel = "success"
 	FailLabel    = "fail"
 	TotalLabel   = "total"
+	CancelLabel  = "cancel"
 
 	HybridSearchLabel = "hybrid_search"
 

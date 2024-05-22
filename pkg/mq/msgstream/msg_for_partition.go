@@ -39,6 +39,11 @@ func (l *LoadPartitionsMsg) SetID(id UniqueID) {
 	l.Base.MsgID = id
 }
 
+func (l *LoadPartitionsMsg) SetTs(ts Timestamp) {
+	l.BeginTimestamp = ts
+	l.EndTimestamp = ts
+}
+
 func (l *LoadPartitionsMsg) Type() MsgType {
 	return l.Base.MsgType
 }
@@ -91,6 +96,11 @@ func (r *ReleasePartitionsMsg) ID() UniqueID {
 
 func (r *ReleasePartitionsMsg) SetID(id UniqueID) {
 	r.Base.MsgID = id
+}
+
+func (r *ReleasePartitionsMsg) SetTs(ts Timestamp) {
+	r.BeginTimestamp = ts
+	r.EndTimestamp = ts
 }
 
 func (r *ReleasePartitionsMsg) Type() MsgType {

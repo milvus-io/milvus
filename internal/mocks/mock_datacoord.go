@@ -10,6 +10,8 @@ import (
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
 
+	grpc "google.golang.org/grpc"
+
 	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	internalpb "github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -2314,6 +2316,39 @@ func (_c *MockDataCoord_Register_Call) Return(_a0 error) *MockDataCoord_Register
 }
 
 func (_c *MockDataCoord_Register_Call) RunAndReturn(run func() error) *MockDataCoord_Register_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// RegisterLogCoordGRPCService provides a mock function with given fields: _a0
+func (_m *MockDataCoord) RegisterLogCoordGRPCService(_a0 *grpc.Server) {
+	_m.Called(_a0)
+}
+
+// MockDataCoord_RegisterLogCoordGRPCService_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'RegisterLogCoordGRPCService'
+type MockDataCoord_RegisterLogCoordGRPCService_Call struct {
+	*mock.Call
+}
+
+// RegisterLogCoordGRPCService is a helper method to define mock.On call
+//   - _a0 *grpc.Server
+func (_e *MockDataCoord_Expecter) RegisterLogCoordGRPCService(_a0 interface{}) *MockDataCoord_RegisterLogCoordGRPCService_Call {
+	return &MockDataCoord_RegisterLogCoordGRPCService_Call{Call: _e.mock.On("RegisterLogCoordGRPCService", _a0)}
+}
+
+func (_c *MockDataCoord_RegisterLogCoordGRPCService_Call) Run(run func(_a0 *grpc.Server)) *MockDataCoord_RegisterLogCoordGRPCService_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(*grpc.Server))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_RegisterLogCoordGRPCService_Call) Return() *MockDataCoord_RegisterLogCoordGRPCService_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockDataCoord_RegisterLogCoordGRPCService_Call) RunAndReturn(run func(*grpc.Server)) *MockDataCoord_RegisterLogCoordGRPCService_Call {
 	_c.Call.Return(run)
 	return _c
 }

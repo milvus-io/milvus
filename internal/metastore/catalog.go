@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/logpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -168,4 +169,23 @@ type QueryCoordCatalog interface {
 	SaveCollectionTargets(target ...*querypb.CollectionTarget) error
 	RemoveCollectionTarget(collectionID int64) error
 	GetCollectionTargets() (map[int64]*querypb.CollectionTarget, error)
+}
+
+// LogCoordCataLog is the interface for logcoord catalog
+type LogCoordCataLog interface {
+	// physical channel watch related
+	// ListPChannelCheckpoint(ctx context.Context) (map[string]*msgpb.MsgPosition, error)
+	// SavePChannelCheckpoint(ctx context.Context, pChannel string, pos *msgpb.MsgPosition) error
+	// DropPChannelCheckpoint(ctx context.Context, pChannel string) error
+	// SavePChannelLeaseID(ctx context.Context, channel string, leaseID uint64) error
+	// ListPChannelLeaseID(ctx context.Context) (map[string]uint64, error)
+
+	// ListPChannel list all pchannels on milvus.
+	ListPChannel(ctx context.Context) (map[string]*logpb.PChannelInfo, error)
+
+	// SavePChannel save a pchannel info to metastore.
+	SavePChannel(ctx context.Context, info *logpb.PChannelInfo) error
+
+	// DropPChannel drop a pchannel info from metastore.
+	DropPChannel(ctx context.Context, name string) error
 }

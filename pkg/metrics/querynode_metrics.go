@@ -754,6 +754,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(QueryNodeDiskCacheEvictBytes)
 	registry.MustRegister(QueryNodeDiskCacheEvictDuration)
 	registry.MustRegister(QueryNodeDiskCacheEvictGlobalDuration)
+	// may use LogServiceClient, so we need to register LogServiceClient metrics here.
+	RegisterLogServiceClient(registry)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

@@ -319,6 +319,10 @@ func RegisterDataCoord(registry *prometheus.Registry) {
 	registry.MustRegister(ImportTasks)
 	registry.MustRegister(GarbageCollectorFileScanDuration)
 	registry.MustRegister(GarbageCollectorRunCount)
+	// LogCoord is embedded in DataCoord, so we need to register LogCoord metrics here.
+	RegisterLogCoord(registry)
+	// may use LogServiceClient, so we need to register LogServiceClient metrics here.
+	RegisterLogServiceClient(registry)
 }
 
 func CleanupDataCoordSegmentMetrics(dbName string, collectionID int64, segmentID int64) {

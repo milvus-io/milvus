@@ -41,6 +41,11 @@ func (l *LoadCollectionMsg) SetID(id UniqueID) {
 	l.Base.MsgID = id
 }
 
+func (l *LoadCollectionMsg) SetTs(ts Timestamp) {
+	l.BeginTimestamp = ts
+	l.EndTimestamp = ts
+}
+
 func (l *LoadCollectionMsg) Type() MsgType {
 	return l.Base.MsgType
 }
@@ -96,6 +101,11 @@ func (r *ReleaseCollectionMsg) SetID(id UniqueID) {
 	r.Base.MsgID = id
 }
 
+func (l *ReleaseCollectionMsg) SetTs(ts Timestamp) {
+	l.BeginTimestamp = ts
+	l.EndTimestamp = ts
+}
+
 func (r *ReleaseCollectionMsg) Type() MsgType {
 	return r.Base.MsgType
 }
@@ -148,6 +158,11 @@ func (f *FlushMsg) ID() UniqueID {
 
 func (f *FlushMsg) SetID(id UniqueID) {
 	f.Base.MsgID = id
+}
+
+func (l *FlushMsg) SetTs(ts Timestamp) {
+	l.BeginTimestamp = ts
+	l.EndTimestamp = ts
 }
 
 func (f *FlushMsg) Type() MsgType {

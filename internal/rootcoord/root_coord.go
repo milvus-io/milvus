@@ -445,7 +445,6 @@ func (c *Core) initInternal() error {
 
 	c.scheduler = newScheduler(c.ctx, c.idAllocator, c.tsoAllocator)
 
-	c.factory.Init(Params)
 	chanMap := c.meta.ListCollectionPhysicalChannels()
 	c.chanTimeTick = newTimeTickSync(c.ctx, c.session.ServerID, c.factory, chanMap)
 	log.Info("create TimeTick sync done")
@@ -487,7 +486,6 @@ func (c *Core) initInternal() error {
 // Init initialize routine
 func (c *Core) Init() error {
 	var initError error
-	c.factory.Init(Params)
 	if err := c.initSession(); err != nil {
 		return err
 	}

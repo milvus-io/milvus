@@ -222,10 +222,6 @@ func (node *Proxy) Init() error {
 	}
 	log.Info("init session for Proxy done")
 
-	node.factory.Init(Params)
-
-	log.Debug("init access log for Proxy done")
-
 	err := node.initRateCollector()
 	if err != nil {
 		return err

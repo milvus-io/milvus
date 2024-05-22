@@ -1,0 +1,38 @@
+env: "prod"
+tikv:
+  pdAddr: ["localhost:2379"]
+  callTimeout: 5s
+bkProxy:
+  addr: "bkproxy://localhost:9999"
+  callTimeout: 5s
+  handlerKeepAliveInterval: 15s
+servicer:
+  dialTimeout: 5s
+  callTimeout: 5s
+  serviceDiscoveryRetryInterval: 1s
+dlog:
+  namespace: "milvus_cluster_unique_id"
+  ensSize: 3
+  writeQuorum: 3
+  ackQuorum: 2
+  digestType: "CRC32"
+  rotation:
+    maxBytes: 1073741824
+  retention:
+    maxAge: 15m
+  bgTaskInterval: 1m
+  writeCacheSize: 64
+  writeCacheCleanDelay: 30s
+  maxReadBatchSize: 100
+  readAheadBufSize: 256
+zapLogger:
+  level: "debug"
+  encoding: "console"
+  outputPaths:
+    - "stderr"
+  errorOutputPaths:
+    - "stderr"
+metrics:
+  enable: true
+  namespace: "milvus"
+  subsystem: "logstore"

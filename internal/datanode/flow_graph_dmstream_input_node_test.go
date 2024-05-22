@@ -22,6 +22,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -60,6 +61,10 @@ func (mm *mockMsgStreamFactory) NewTtMsgStream(ctx context.Context) (msgstream.M
 }
 
 func (mm *mockMsgStreamFactory) NewMsgStreamDisposer(ctx context.Context) func([]string, string) error {
+	return nil
+}
+
+func (mm *mockMsgStreamFactory) ETCDClient() *clientv3.Client {
 	return nil
 }
 
