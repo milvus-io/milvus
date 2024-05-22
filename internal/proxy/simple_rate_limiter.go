@@ -32,6 +32,7 @@ import (
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -79,7 +80,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	}
 
 	// 2. check database level rate limits
-	if ret == nil {
+	if ret == nil && dbID != util.InvalidDBID {
 		dbRateLimiters := m.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newDatabaseLimiter)
 		ret = dbRateLimiters.Check(rt, n)
 		if ret != nil {
@@ -92,6 +93,9 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	// 3. check collection level rate limits
 	if ret == nil && len(collectionIDToPartIDs) > 0 && !isNotCollectionLevelLimitRequest(rt) {
 		for collectionID := range collectionIDToPartIDs {
+			if collectionID == 0 || dbID == util.InvalidDBID {
+				continue
+			}
 			// only dml and dql have collection level rate limits
 			collectionRateLimiters := m.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
 				newDatabaseLimiter, newCollectionLimiters)
@@ -108,6 +112,9 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	if ret == nil && len(collectionIDToPartIDs) > 0 {
 		for collectionID, partitionIDs := range collectionIDToPartIDs {
 			for _, partID := range partitionIDs {
+				if collectionID == 0 || partID == 0 || dbID == util.InvalidDBID {
+					continue
+				}
 				partitionRateLimiters := m.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partID,
 					newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
 				ret = partitionRateLimiters.Check(rt, n)
