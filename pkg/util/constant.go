@@ -56,6 +56,7 @@ const (
 	DefaultDBName       = "default"
 	DefaultDBID         = int64(1)
 	NonDBID             = int64(0)
+	InvalidDBID         = int64(-1)
 
 	PrivilegeWord = "Privilege"
 	AnyWord       = "*"

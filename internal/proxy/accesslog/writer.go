@@ -113,12 +113,15 @@ func (l *CacheWriter) Start() {
 }
 
 func (l *CacheWriter) Close() {
-	l.mu.Lock()
-	defer l.mu.Unlock()
 	l.closeOnce.Do(func() {
-		l.closed = true
+		// close auto flush
 		close(l.closeCh)
 		l.closeWg.Wait()
+
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.closed = true
+
 		// flush remaining bytes
 		l.writer.Flush()
 

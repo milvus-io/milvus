@@ -87,9 +87,11 @@ func TestSimpleRateLimiter(t *testing.T) {
 		clusterRateLimiters := simpleLimiter.rateLimiter.GetRootLimiters()
 
 		collectionIDToPartIDs := map[int64][]int64{
+			0: {},
 			1: {},
 			2: {},
 			3: {},
+			4: {0},
 		}
 
 		for i := 1; i <= 3; i++ {

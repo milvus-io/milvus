@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -131,16 +132,19 @@ func (m *ChannelManagerImplV2) Startup(ctx context.Context, legacyNodes, allNode
 	oNodes := m.store.GetNodes()
 	m.mu.Unlock()
 
-	// Add new online nodes to the cluster.
 	offLines, newOnLines := lo.Difference(oNodes, allNodes)
-	lo.ForEach(newOnLines, func(nodeID int64, _ int) {
-		m.AddNode(nodeID)
-	})
-
 	// Delete offlines from the cluster
-	lo.ForEach(offLines, func(nodeID int64, _ int) {
-		m.DeleteNode(nodeID)
-	})
+	for _, nodeID := range offLines {
+		if err := m.DeleteNode(nodeID); err != nil {
+			return err
+		}
+	}
+	// Add new online nodes to the cluster.
+	for _, nodeID := range newOnLines {
+		if err := m.AddNode(nodeID); err != nil {
+			return err
+		}
+	}
 
 	m.mu.Lock()
 	nodeChannels := m.store.GetNodeChannelsBy(
@@ -654,7 +658,10 @@ func (m *ChannelManagerImplV2) Check(ctx context.Context, nodeID int64, info *da
 	)
 	resp, err := m.subCluster.CheckChannelOperationProgress(ctx, nodeID, info)
 	if err != nil {
-		log.Warn("Fail to check channel operation progress")
+		log.Warn("Fail to check channel operation progress", zap.Error(err))
+		if errors.Is(err, merr.ErrNodeNotFound) {
+			return false, true
+		}
 		return false, false
 	}
 	log.Info("Got channel operation progress",
