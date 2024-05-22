@@ -62,10 +62,6 @@ func (c *Client) CreateCollection(ctx context.Context, option CreateCollectionOp
 	return nil
 }
 
-type ListCollectionOption interface {
-	Request() *milvuspb.ShowCollectionsRequest
-}
-
 func (c *Client) ListCollections(ctx context.Context, option ListCollectionOption, callOptions ...grpc.CallOption) (collectionNames []string, err error) {
 	req := option.Request()
 	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
@@ -82,7 +78,7 @@ func (c *Client) ListCollections(ctx context.Context, option ListCollectionOptio
 	return collectionNames, err
 }
 
-func (c *Client) DescribeCollection(ctx context.Context, option *describeCollectionOption, callOptions ...grpc.CallOption) (collection *entity.Collection, err error) {
+func (c *Client) DescribeCollection(ctx context.Context, option DescribeCollectionOption, callOptions ...grpc.CallOption) (collection *entity.Collection, err error) {
 	req := option.Request()
 	err = c.callService(func(milvusService milvuspb.MilvusServiceClient) error {
 		resp, err := milvusService.DescribeCollection(ctx, req, callOptions...)
