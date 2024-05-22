@@ -37,9 +37,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
-var (
-	errUploadToBlobStorage = errors.New("upload to blob storage wrong")
-)
+var errUploadToBlobStorage = errors.New("upload to blob storage wrong")
 
 type downloader interface {
 	// donload downloads insert-binlogs, stats-binlogs, and, delta-binlogs from blob storage for given paths.
