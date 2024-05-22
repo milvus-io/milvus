@@ -159,6 +159,10 @@ func NewCreateCollectionOption(name string, collectionSchema *entity.Schema) *cr
 	}
 }
 
+type ListCollectionOption interface {
+	Request() *milvuspb.ShowCollectionsRequest
+}
+
 type listCollectionOption struct{}
 
 func (opt *listCollectionOption) Request() *milvuspb.ShowCollectionsRequest {

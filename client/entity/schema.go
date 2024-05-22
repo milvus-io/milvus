@@ -19,6 +19,8 @@ package entity
 import (
 	"strconv"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
@@ -291,6 +293,18 @@ func (f *Field) WithDim(dim int64) *Field {
 	}
 	f.TypeParams[TypeParamDim] = strconv.FormatInt(dim, 10)
 	return f
+}
+
+func (f *Field) GetDim() (int64, error) {
+	dimStr, has := f.TypeParams[TypeParamDim]
+	if !has {
+		return -1, errors.New("field with no dim")
+	}
+	dim, err := strconv.ParseInt(dimStr, 10, 64)
+	if err != nil {
+		return -1, errors.Newf("field with bad format dim: %s", err.Error())
+	}
+	return dim, nil
 }
 
 func (f *Field) WithMaxLength(maxLen int64) *Field {
