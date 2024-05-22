@@ -361,6 +361,12 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		return err
 	}
 
+	if indexType == indexparamcheck.IndexBitmap {
+		_, exist := indexParams[common.BitmapCardinalityLimitKey]
+		if !exist {
+			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().CommonCfg.BitmapIndexCardinalityBound.GetValue()
+		}
+	}
 	return nil
 }
 

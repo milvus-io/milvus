@@ -46,4 +46,7 @@ SetCpuNum(const int core);
 void
 SetDefaultExecEvalExprBatchSize(int64_t val);
 
+void
+SetBitmapIndexCardinalityBound(int64_t val);
+
 }  // namespace milvus
