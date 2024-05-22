@@ -1555,22 +1555,34 @@ func CreateSparseFloatRowFromMap(input map[string]interface{}) ([]byte, error) {
 
 	if ok1 && ok2 {
 		// try format1
-		for _, v1 := range jsonIndices {
-			if num1, suc1 := v1.(int); suc1 {
-				indices = append(indices, uint32(num1))
-			} else {
-				if num2, suc2 := v1.(float64); suc2 && num2 == float64(int(num2)) {
-					indices = append(indices, uint32(num2))
+		for _, idx := range jsonIndices {
+			if i1, s1 := idx.(int); s1 {
+				indices = append(indices, uint32(i1))
+			} else if i2, s2 := idx.(float64); s2 && i2 == float64(int(i2)) {
+				indices = append(indices, uint32(i2))
+			} else if i3, s3 := idx.(json.Number); s3 {
+				if num, err := strconv.ParseUint(i3.String(), 0, 32); err == nil {
+					indices = append(indices, uint32(num))
 				} else {
-					return nil, fmt.Errorf("invalid index type: %v(%s)", v1, reflect.TypeOf(v1))
+					return nil, err
 				}
+			} else {
+				return nil, fmt.Errorf("invalid indicies type: %v(%s)", idx, reflect.TypeOf(idx))
 			}
 		}
-		for _, v2 := range jsonValues {
-			if num, ok := v2.(float64); ok {
-				values = append(values, float32(num))
+		for _, val := range jsonValues {
+			if v1, s1 := val.(int); s1 {
+				values = append(values, float32(v1))
+			} else if v2, s2 := val.(float64); s2 {
+				values = append(values, float32(v2))
+			} else if v3, s3 := val.(json.Number); s3 {
+				if num, err := strconv.ParseFloat(v3.String(), 32); err == nil {
+					values = append(values, float32(num))
+				} else {
+					return nil, err
+				}
 			} else {
-				return nil, fmt.Errorf("invalid value type: %s", reflect.TypeOf(v2))
+				return nil, fmt.Errorf("invalid values type: %v(%s)", val, reflect.TypeOf(val))
 			}
 		}
 	} else if !ok1 && !ok2 {
