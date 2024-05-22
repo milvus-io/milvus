@@ -189,8 +189,11 @@ type UserRoleReq struct {
 }
 
 type RoleReq struct {
+	DbName   string `json:"dbName"`
 	RoleName string `json:"roleName" binding:"required"`
 }
+
+func (req *RoleReq) GetDbName() string { return req.DbName }
 
 func (req *RoleReq) GetRoleName() string {
 	return req.RoleName
@@ -203,6 +206,8 @@ type GrantReq struct {
 	Privilege  string `json:"privilege" binding:"required"`
 	DbName     string `json:"dbName"`
 }
+
+func (req *GrantReq) GetDbName() string { return req.DbName }
 
 type IndexParam struct {
 	FieldName  string                 `json:"fieldName" binding:"required"`
