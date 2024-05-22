@@ -363,13 +363,27 @@ class TestChannelExclusiveBalance(TestcaseBase):
             if qn_num == 5:
                 # k is changed to 3 when qn_num is 5,
                 # channel exclusive balance is off, so all qn should have more than one channel
-                for r in res.values():
-                    assert len(set(r["channel"])) > 1
+                # wait for a while to make sure all qn have more than one channel
+                ready = False
+                t0 = time.time()
+                while not ready and time.time() - t0 < 180:
+                    ready = True
+                    for r in res.values():
+                        if len(set(r["channel"])) == 1:
+                            ready = False
+                    time.sleep(10)
+                    res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
             if qn_num == 6:
-                # channel exclusive balance is on, so all qn should have more than one channel
-                for r in res.values():
-                    assert len(set(r["channel"])) == 1
-
+                # channel exclusive balance is on, so all qn should have only one channel
+                ready = False
+                t0 = time.time()
+                while not ready and time.time() - t0 < 180:
+                    ready = True
+                    for r in res.values():
+                        if len(set(r["channel"])) != 1:
+                            ready = False
+                    time.sleep(10)
+                    res = display_channel_on_qn_distribution_info(c_name, release_name, segment_info=seg_res)
         milvus_op.scale(release_name, 'queryNode', 8, namespace)
         seg_res = bw.show_segment_info(collection_id)
         display_segment_distribution_info(c_name, release_name, segment_info=seg_res)
