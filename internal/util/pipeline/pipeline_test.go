@@ -31,8 +31,9 @@ type testNode struct {
 
 func (t *testNode) Operate(in Msg) Msg {
 	msg := in.(*msgstream.MsgPack)
-	msg.BeginTs++
-	t.outChannel <- msg.BeginTs
+	if t.outChannel != nil {
+		t.outChannel <- msg.BeginTs
+	}
 	return msg
 }
 
@@ -43,7 +44,7 @@ type PipelineSuite struct {
 }
 
 func (suite *PipelineSuite) SetupTest() {
-	suite.outChannel = make(chan msgstream.Timestamp)
+	suite.outChannel = make(chan msgstream.Timestamp, 1)
 	suite.pipeline = &pipeline{
 		nodes:           []*nodeCtx{},
 		nodeTtInterval:  0,
@@ -52,7 +53,21 @@ func (suite *PipelineSuite) SetupTest() {
 
 	suite.pipeline.addNode(&testNode{
 		BaseNode: &BaseNode{
-			name:           "test-node",
+			name:           "test-node1",
+			maxQueueLength: 8,
+		},
+	})
+
+	suite.pipeline.addNode(&testNode{
+		BaseNode: &BaseNode{
+			name:           "test-node2",
+			maxQueueLength: 8,
+		},
+	})
+
+	suite.pipeline.addNode(&testNode{
+		BaseNode: &BaseNode{
+			name:           "test-node3",
 			maxQueueLength: 8,
 		},
 		outChannel: suite.outChannel,
@@ -62,10 +77,13 @@ func (suite *PipelineSuite) SetupTest() {
 func (suite *PipelineSuite) TestBasic() {
 	suite.pipeline.Start()
 	defer suite.pipeline.Close()
-	suite.pipeline.inputChannel <- &msgstream.MsgPack{}
 
-	output := <-suite.outChannel
-	suite.Equal(msgstream.Timestamp(1), output)
+	for i := 0; i < 100; i++ {
+		suite.pipeline.inputChannel <- &msgstream.MsgPack{BeginTs: msgstream.Timestamp(i)}
+		suite.pipeline.process()
+		output := <-suite.outChannel
+		suite.Equal(i, int(output))
+	}
 }
 
 func TestPipeline(t *testing.T) {

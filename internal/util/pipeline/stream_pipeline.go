@@ -37,7 +37,7 @@ type StreamPipeline interface {
 }
 
 type streamPipeline struct {
-	*pipeline
+	pipeline   *pipeline
 	input      <-chan *msgstream.MsgPack
 	dispatcher msgdispatcher.Client
 	startOnce  sync.Once
@@ -57,7 +57,8 @@ func (p *streamPipeline) work() {
 			return
 		case msg := <-p.input:
 			log.RatedDebug(10, "stream pipeline fetch msg", zap.Int("sum", len(msg.Msgs)))
-			p.nodes[0].inputChannel <- msg
+			p.pipeline.inputChannel <- msg
+			p.pipeline.process()
 		}
 	}
 }
@@ -84,6 +85,10 @@ func (p *streamPipeline) ConsumeMsgStream(position *msgpb.MsgPosition) error {
 		zap.Duration("elapse", time.Since(start)),
 	)
 	return nil
+}
+
+func (p *streamPipeline) Add(nodes ...Node) {
+	p.pipeline.Add(nodes...)
 }
 
 func (p *streamPipeline) Start() error {
