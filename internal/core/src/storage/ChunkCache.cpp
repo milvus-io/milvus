@@ -64,10 +64,10 @@ ChunkCache::Prefetch(const std::string& filepath) {
     }
 
     auto column = it->second;
-    auto ok =
-        madvise(reinterpret_cast<void*>(const_cast<char*>(column->Data())),
-                column->ByteSize(),
-                read_ahead_policy_);
+    auto ok = madvise(
+        reinterpret_cast<void*>(const_cast<char*>(column->MmappedData())),
+        column->ByteSize(),
+        read_ahead_policy_);
     AssertInfo(ok == 0,
                "failed to madvise to the data file {}, err: {}",
                path,
@@ -100,7 +100,18 @@ ChunkCache::Mmap(const std::filesystem::path& path,
 
     std::shared_ptr<ColumnBase> column{};
 
-    if (IsVariableDataType(data_type)) {
+    if (IsSparseFloatVectorDataType(data_type)) {
+        std::vector<uint64_t> indices{};
+        uint64_t offset = 0;
+        for (auto i = 0; i < field_data->get_num_rows(); ++i) {
+            indices.push_back(offset);
+            offset += field_data->Size(i);
+        }
+        auto sparse_column = std::make_shared<SparseFloatColumn>(
+            file, data_size, dim, data_type);
+        sparse_column->Seal(std::move(indices));
+        column = std::move(sparse_column);
+    } else if (IsVariableDataType(data_type)) {
         AssertInfo(
             false, "TODO: unimplemented for variable data type: {}", data_type);
     } else {

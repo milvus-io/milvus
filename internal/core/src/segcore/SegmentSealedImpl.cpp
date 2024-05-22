@@ -585,7 +585,13 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
                 column = std::move(arr_column);
                 break;
             }
-            // TODO(SPARSE) support mmap
+            case milvus::DataType::VECTOR_SPARSE_FLOAT: {
+                auto sparse_column = std::make_shared<SparseFloatColumn>(
+                    file, total_written, field_meta);
+                sparse_column->Seal(std::move(indices));
+                column = std::move(sparse_column);
+                break;
+            }
             default: {
                 PanicInfo(DataTypeInvalid,
                           fmt::format("unsupported data type {}", data_type));
@@ -850,7 +856,7 @@ SegmentSealedImpl::get_vector(FieldId field_id,
     auto metric_type = vec_index->GetMetricType();
     auto has_raw_data = vec_index->HasRawData();
 
-    if (has_raw_data) {
+    if (has_raw_data && !TEST_skip_index_for_retrieve_) {
         // If index has raw data, get vector from memory.
         auto ids_ds = GenIdsDataset(count, ids);
         if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
@@ -864,9 +870,6 @@ SegmentSealedImpl::get_vector(FieldId field_id,
                 vector.data(), count, field_meta);
         }
     }
-
-    AssertInfo(field_meta.get_data_type() != DataType::VECTOR_SPARSE_FLOAT,
-               "index of sparse float vector is guaranteed to have raw data");
 
     // If index doesn't have raw data, get vector from chunk cache.
     auto cc = storage::ChunkCacheSingleton::GetInstance().GetChunkCache();
@@ -898,23 +901,50 @@ SegmentSealedImpl::get_vector(FieldId field_id,
         path_to_column[data_path] = column;
     }
 
-    // assign to data array
-    auto row_bytes = field_meta.get_sizeof();
-    auto buf = std::vector<char>(count * row_bytes);
-    for (auto i = 0; i < count; i++) {
-        AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
-        const auto& [data_path, offset_in_binlog] = id_to_data_path.at(ids[i]);
-        AssertInfo(path_to_column.count(data_path) != 0, "column not found");
-        const auto& column = path_to_column.at(data_path);
-        AssertInfo(offset_in_binlog * row_bytes < column->ByteSize(),
-                   "column idx out of range, idx: {}, size: {}, data_path: {}",
-                   offset_in_binlog * row_bytes,
-                   column->ByteSize(),
-                   data_path);
-        auto vector = &column->Data()[offset_in_binlog * row_bytes];
-        std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
+    if (field_meta.get_data_type() == DataType::VECTOR_SPARSE_FLOAT) {
+        auto buf = std::vector<knowhere::sparse::SparseRow<float>>(count);
+        for (auto i = 0; i < count; ++i) {
+            const auto& [data_path, offset_in_binlog] =
+                id_to_data_path.at(ids[i]);
+            const auto& column = path_to_column.at(data_path);
+            AssertInfo(
+                offset_in_binlog < column->NumRows(),
+                "column idx out of range, idx: {}, size: {}, data_path: {}",
+                offset_in_binlog,
+                column->NumRows(),
+                data_path);
+            auto sparse_column =
+                std::dynamic_pointer_cast<SparseFloatColumn>(column);
+            AssertInfo(sparse_column, "incorrect column created");
+            buf[i] = static_cast<const knowhere::sparse::SparseRow<float>*>(
+                static_cast<const void*>(
+                    sparse_column->Data()))[offset_in_binlog];
+        }
+        return segcore::CreateVectorDataArrayFrom(
+            buf.data(), count, field_meta);
+    } else {
+        // assign to data array
+        auto row_bytes = field_meta.get_sizeof();
+        auto buf = std::vector<char>(count * row_bytes);
+        for (auto i = 0; i < count; ++i) {
+            AssertInfo(id_to_data_path.count(ids[i]) != 0, "id not found");
+            const auto& [data_path, offset_in_binlog] =
+                id_to_data_path.at(ids[i]);
+            AssertInfo(path_to_column.count(data_path) != 0,
+                       "column not found");
+            const auto& column = path_to_column.at(data_path);
+            AssertInfo(
+                offset_in_binlog * row_bytes < column->ByteSize(),
+                "column idx out of range, idx: {}, size: {}, data_path: {}",
+                offset_in_binlog * row_bytes,
+                column->ByteSize(),
+                data_path);
+            auto vector = &column->Data()[offset_in_binlog * row_bytes];
+            std::memcpy(buf.data() + i * row_bytes, vector, row_bytes);
+        }
+        return segcore::CreateVectorDataArrayFrom(
+            buf.data(), count, field_meta);
     }
-    return segcore::CreateVectorDataArrayFrom(buf.data(), count, field_meta);
 }
 
 void
@@ -997,7 +1027,8 @@ SegmentSealedImpl::check_search(const query::Plan* plan) const {
 SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
                                      IndexMetaPtr index_meta,
                                      const SegcoreConfig& segcore_config,
-                                     int64_t segment_id)
+                                     int64_t segment_id,
+                                     bool TEST_skip_index_for_retrieve)
     : segcore_config_(segcore_config),
       field_data_ready_bitset_(schema->size()),
       index_ready_bitset_(schema->size()),
@@ -1006,7 +1037,8 @@ SegmentSealedImpl::SegmentSealedImpl(SchemaPtr schema,
       insert_record_(*schema, MAX_ROW_COUNT),
       schema_(schema),
       id_(segment_id),
-      col_index_meta_(index_meta) {
+      col_index_meta_(index_meta),
+      TEST_skip_index_for_retrieve_(TEST_skip_index_for_retrieve) {
 }
 
 SegmentSealedImpl::~SegmentSealedImpl() {
