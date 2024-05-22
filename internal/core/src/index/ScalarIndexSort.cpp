@@ -117,6 +117,35 @@ ScalarIndexSort<T>::Build(const Config& config) {
     auto field_datas =
         file_manager_->CacheRawDataToMemory(insert_files.value());
 
+    BuildWithFieldData(field_datas);
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::Build(size_t n, const T* values) {
+    if (is_built_)
+        return;
+    if (n == 0) {
+        throw SegcoreError(DataIsEmpty,
+                           "ScalarIndexSort cannot build null values!");
+    }
+    data_.reserve(n);
+    idx_to_offsets_.resize(n);
+    T* p = const_cast<T*>(values);
+    for (size_t i = 0; i < n; ++i) {
+        data_.emplace_back(IndexStructure(*p++, i));
+    }
+    std::sort(data_.begin(), data_.end());
+    for (size_t i = 0; i < data_.size(); ++i) {
+        idx_to_offsets_[data_[i].idx_] = i;
+    }
+    is_built_ = true;
+}
+
+template <typename T>
+void
+ScalarIndexSort<T>::BuildWithFieldData(
+    const std::vector<milvus::FieldDataPtr>& field_datas) {
     int64_t total_num_rows = 0;
     for (const auto& data : field_datas) {
         total_num_rows += data->get_num_rows();
@@ -140,28 +169,6 @@ ScalarIndexSort<T>::Build(const Config& config) {
     std::sort(data_.begin(), data_.end());
     idx_to_offsets_.resize(total_num_rows);
     for (size_t i = 0; i < total_num_rows; ++i) {
-        idx_to_offsets_[data_[i].idx_] = i;
-    }
-    is_built_ = true;
-}
-
-template <typename T>
-void
-ScalarIndexSort<T>::Build(size_t n, const T* values) {
-    if (is_built_)
-        return;
-    if (n == 0) {
-        throw SegcoreError(DataIsEmpty,
-                           "ScalarIndexSort cannot build null values!");
-    }
-    data_.reserve(n);
-    idx_to_offsets_.resize(n);
-    T* p = const_cast<T*>(values);
-    for (size_t i = 0; i < n; ++i) {
-        data_.emplace_back(IndexStructure(*p++, i));
-    }
-    std::sort(data_.begin(), data_.end());
-    for (size_t i = 0; i < data_.size(); ++i) {
         idx_to_offsets_[data_[i].idx_] = i;
     }
     is_built_ = true;

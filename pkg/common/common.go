@@ -110,6 +110,8 @@ const (
 	MaxCapacityKey = "max_capacity"
 
 	DropRatioBuildKey = "drop_ratio_build"
+
+	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 )
 
 //  Collection properties key

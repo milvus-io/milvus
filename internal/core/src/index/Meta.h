@@ -54,6 +54,8 @@ constexpr const char* INDEX_BUILD_ID = "index_build_id";
 constexpr const char* INDEX_ID = "index_id";
 constexpr const char* INDEX_VERSION = "index_version";
 constexpr const char* INDEX_ENGINE_VERSION = "index_engine_version";
+constexpr const char* BITMAP_INDEX_CARDINALITY_LIMIT =
+    "bitmap_cardinality_limit";
 
 // VecIndex file metas
 constexpr const char* DISK_ANN_PREFIX_PATH = "index_prefix";
