@@ -1034,6 +1034,7 @@ type proxyConfig struct {
 	MustUsePartitionKey          ParamItem `refreshable:"true"`
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
+	EnablePublicPrivilege        ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
 
@@ -1393,6 +1394,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
+
+	p.EnablePublicPrivilege = ParamItem{
+		Key:          "proxy.enablePublicPrivilege",
+		Version:      "2.4.1",
+		DefaultValue: "true",
+		Doc:          "switch for whether proxy shall enable public privilege",
+	}
+	p.EnablePublicPrivilege.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
