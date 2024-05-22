@@ -46,33 +46,38 @@ import (
 const dim = 128
 
 func GenerateParquetFile(filePath string, schema *schemapb.CollectionSchema, numRows int) error {
+	_, err := GenerateParquetFileAndReturnInsertData(filePath, schema, numRows)
+	return err
+}
+
+func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.CollectionSchema, numRows int) (*storage.InsertData, error) {
 	w, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	pqSchema, err := pq.ConvertToArrowSchema(schema)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fw, err := pqarrow.NewFileWriter(pqSchema, w, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(numRows))), pqarrow.DefaultWriterProps())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer fw.Close()
 
 	insertData, err := testutil.CreateInsertData(schema, numRows)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	columns, err := testutil.BuildArrayData(schema, insertData)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	recordBatch := array.NewRecord(pqSchema, columns, int64(numRows))
-	return fw.Write(recordBatch)
+	return insertData, fw.Write(recordBatch)
 }
 
 func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSchema, rowCount int) (*internalpb.ImportFile, error) {
