@@ -260,7 +260,8 @@ func (s *StateChannelStoreSuite) TestUpdateWithTxnLimit() {
 func (s *StateChannelStoreSuite) TestUpdateMeta2000kSegs() {
 	ch := getChannel("ch1", 1)
 	info := ch.GetWatchInfo()
-	seg2000k := make([]int64, 2000000, 2000000)
+	// way larger than limit=2097152
+	seg2000k := make([]int64, 2000000)
 	for i := range seg2000k {
 		seg2000k[i] = int64(i)
 	}
