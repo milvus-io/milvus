@@ -30,7 +30,6 @@ import (
 	"fmt"
 	"io"
 	"runtime"
-	"strconv"
 	"strings"
 	"unsafe"
 
@@ -440,15 +439,6 @@ func (s *LocalSegment) initializeSegment() error {
 
 	// Update the insert count when initialize the segment and update the metrics.
 	s.insertCount.Store(loadInfo.GetNumOfRows())
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		s.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(s.Collection()),
-		fmt.Sprint(s.Partition()),
-		s.Type().String(),
-		strconv.FormatInt(int64(len(s.Indexes())), 10),
-	).Add(float64(loadInfo.GetNumOfRows()))
-
 	return nil
 }
 
@@ -808,15 +798,6 @@ func (s *LocalSegment) Insert(ctx context.Context, rowIDs []int64, timestamps []
 	}
 
 	s.insertCount.Add(int64(numOfRow))
-	metrics.QueryNodeNumEntities.WithLabelValues(
-		s.DatabaseName(),
-		fmt.Sprint(paramtable.GetNodeID()),
-		fmt.Sprint(s.Collection()),
-		fmt.Sprint(s.Partition()),
-		s.Type().String(),
-		strconv.FormatInt(int64(len(s.Indexes())), 10),
-	).Add(float64(numOfRow))
-
 	s.rowNum.Store(-1)
 	s.memSize.Store(-1)
 	return nil
