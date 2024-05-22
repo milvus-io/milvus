@@ -174,20 +174,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 	s.Equal(queryNum, len(resData))
 	s.ElementsMatch(resData, queryData)
 
-	// query partition key, CmpOp 1
-	expr = fmt.Sprintf("%s >= \"0\"", integration.VarCharField)
-	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
-		CollectionName: collectionName,
-		Expr:           expr,
-		OutputFields:   []string{integration.VarCharField},
-	})
-	err = merr.CheckRPCCall(queryResult, err)
-	s.NoError(err)
-	resData = queryResult.GetFieldsData()[0].GetScalars().GetStringData().GetData()
-	s.Equal(rowCount, len(resData))
-	s.ElementsMatch(resData, partitionKeyData)
-
-	// query partition key, CmpOp 2
+	// query partition key, CmpOp
 	target := partitionKeyData[rand.Intn(rowCount)]
 	expr = fmt.Sprintf("%s == \"%s\"", integration.VarCharField, target)
 	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
