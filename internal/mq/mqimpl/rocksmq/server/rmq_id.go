@@ -48,6 +48,21 @@ func (rid *RmqID) Equal(msgID []byte) (bool, error) {
 	return rid.MessageID == rMsgID, nil
 }
 
+// LT less than
+func (rid *RmqID) LT(id2 mqwrapper.MessageID) bool {
+	return rid.MessageID < id2.(*RmqID).MessageID
+}
+
+// LTE less than or equal to
+func (rid *RmqID) LTE(id2 mqwrapper.MessageID) bool {
+	return rid.MessageID <= id2.(*RmqID).MessageID
+}
+
+// EQ Equal to.
+func (rid *RmqID) EQ(id2 mqwrapper.MessageID) bool {
+	return rid.MessageID == id2.(*RmqID).MessageID
+}
+
 // SerializeRmqID is used to serialize a message ID to byte array
 func SerializeRmqID(messageID int64) []byte {
 	b := make([]byte, 8)

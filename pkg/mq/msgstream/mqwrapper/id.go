@@ -23,7 +23,22 @@ type MessageID interface {
 
 	AtEarliestPosition() bool
 
+	// TODO: remove in future.
 	LessOrEqualThan(msgID []byte) (bool, error)
 
+	// TODO: remove in future.
 	Equal(msgID []byte) (bool, error)
+
+	// MessageID should be comparable.
+	// Comparable operation should must be used between the same implementation of message id.
+	// Panic if not.
+
+	// LT less than.
+	LT(MessageID) bool
+
+	// LTE less than or equal to.
+	LTE(MessageID) bool
+
+	// EQ Equal to.
+	EQ(MessageID) bool
 }

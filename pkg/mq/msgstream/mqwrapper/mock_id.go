@@ -58,6 +58,48 @@ func (_c *MockMessageID_AtEarliestPosition_Call) RunAndReturn(run func() bool) *
 	return _c
 }
 
+// EQ provides a mock function with given fields: _a0
+func (_m *MockMessageID) EQ(_a0 MessageID) bool {
+	ret := _m.Called(_a0)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(MessageID) bool); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockMessageID_EQ_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'EQ'
+type MockMessageID_EQ_Call struct {
+	*mock.Call
+}
+
+// EQ is a helper method to define mock.On call
+//   - _a0 MessageID
+func (_e *MockMessageID_Expecter) EQ(_a0 interface{}) *MockMessageID_EQ_Call {
+	return &MockMessageID_EQ_Call{Call: _e.mock.On("EQ", _a0)}
+}
+
+func (_c *MockMessageID_EQ_Call) Run(run func(_a0 MessageID)) *MockMessageID_EQ_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(MessageID))
+	})
+	return _c
+}
+
+func (_c *MockMessageID_EQ_Call) Return(_a0 bool) *MockMessageID_EQ_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMessageID_EQ_Call) RunAndReturn(run func(MessageID) bool) *MockMessageID_EQ_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // Equal provides a mock function with given fields: msgID
 func (_m *MockMessageID) Equal(msgID []byte) (bool, error) {
 	ret := _m.Called(msgID)
@@ -106,6 +148,90 @@ func (_c *MockMessageID_Equal_Call) Return(_a0 bool, _a1 error) *MockMessageID_E
 }
 
 func (_c *MockMessageID_Equal_Call) RunAndReturn(run func([]byte) (bool, error)) *MockMessageID_Equal_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LT provides a mock function with given fields: _a0
+func (_m *MockMessageID) LT(_a0 MessageID) bool {
+	ret := _m.Called(_a0)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(MessageID) bool); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockMessageID_LT_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LT'
+type MockMessageID_LT_Call struct {
+	*mock.Call
+}
+
+// LT is a helper method to define mock.On call
+//   - _a0 MessageID
+func (_e *MockMessageID_Expecter) LT(_a0 interface{}) *MockMessageID_LT_Call {
+	return &MockMessageID_LT_Call{Call: _e.mock.On("LT", _a0)}
+}
+
+func (_c *MockMessageID_LT_Call) Run(run func(_a0 MessageID)) *MockMessageID_LT_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(MessageID))
+	})
+	return _c
+}
+
+func (_c *MockMessageID_LT_Call) Return(_a0 bool) *MockMessageID_LT_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMessageID_LT_Call) RunAndReturn(run func(MessageID) bool) *MockMessageID_LT_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// LTE provides a mock function with given fields: _a0
+func (_m *MockMessageID) LTE(_a0 MessageID) bool {
+	ret := _m.Called(_a0)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(MessageID) bool); ok {
+		r0 = rf(_a0)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockMessageID_LTE_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LTE'
+type MockMessageID_LTE_Call struct {
+	*mock.Call
+}
+
+// LTE is a helper method to define mock.On call
+//   - _a0 MessageID
+func (_e *MockMessageID_Expecter) LTE(_a0 interface{}) *MockMessageID_LTE_Call {
+	return &MockMessageID_LTE_Call{Call: _e.mock.On("LTE", _a0)}
+}
+
+func (_c *MockMessageID_LTE_Call) Run(run func(_a0 MessageID)) *MockMessageID_LTE_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(MessageID))
+	})
+	return _c
+}
+
+func (_c *MockMessageID_LTE_Call) Return(_a0 bool) *MockMessageID_LTE_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMessageID_LTE_Call) RunAndReturn(run func(MessageID) bool) *MockMessageID_LTE_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -241,9 +241,13 @@ func (kc *kafkaClient) specialExtraConfig(current *kafka.ConfigMap, special kafk
 }
 
 func (kc *kafkaClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
-	offset := DeserializeKafkaID(id)
-	return &kafkaID{messageID: offset}, nil
+	return BytesToMsgID(id)
 }
 
 func (kc *kafkaClient) Close() {
+}
+
+func BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
+	offset := DeserializeKafkaID(id)
+	return &kafkaID{messageID: offset}, nil
 }

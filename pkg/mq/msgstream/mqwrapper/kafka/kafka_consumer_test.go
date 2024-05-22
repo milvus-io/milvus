@@ -131,6 +131,18 @@ func (m2 mockMsgID) Serialize() []byte {
 	return nil
 }
 
+func (m2 mockMsgID) LT(mqwrapper.MessageID) bool {
+	return false
+}
+
+func (m2 mockMsgID) LTE(mqwrapper.MessageID) bool {
+	return false
+}
+
+func (m2 mockMsgID) EQ(mqwrapper.MessageID) bool {
+	return false
+}
+
 func TestKafkaConsumer_SeekAfterChan(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	groupID := fmt.Sprintf("test-groupid-%d", rand.Int())

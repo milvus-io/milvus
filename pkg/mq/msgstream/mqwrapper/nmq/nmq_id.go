@@ -39,6 +39,11 @@ func NewNmqID(id MessageIDType) mqwrapper.MessageID {
 	}
 }
 
+// TODO: remove in future, remove mqwrapper layer.
+func (nid *nmqID) NMQID() uint64 {
+	return nid.messageID
+}
+
 // Serialize convert nmq message id to []byte
 func (nid *nmqID) Serialize() []byte {
 	return SerializeNmqID(nid.messageID)
@@ -54,6 +59,21 @@ func (nid *nmqID) LessOrEqualThan(msgID []byte) (bool, error) {
 
 func (nid *nmqID) Equal(msgID []byte) (bool, error) {
 	return nid.messageID == DeserializeNmqID(msgID), nil
+}
+
+// LT less than.
+func (rid *nmqID) LT(id2 mqwrapper.MessageID) bool {
+	return rid.messageID < id2.(*nmqID).messageID
+}
+
+// LTE less than or equal to.
+func (rid *nmqID) LTE(id2 mqwrapper.MessageID) bool {
+	return rid.messageID <= id2.(*nmqID).messageID
+}
+
+// EQ Equal to.
+func (rid *nmqID) EQ(id2 mqwrapper.MessageID) bool {
+	return rid.messageID == id2.(*nmqID).messageID
 }
 
 // SerializeNmqID is used to serialize a message ID to byte array

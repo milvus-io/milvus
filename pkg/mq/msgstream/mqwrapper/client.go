@@ -24,12 +24,6 @@ type Client interface {
 	// Subscribe creates a consumer instance and subscribe a topic
 	Subscribe(options ConsumerOptions) (Consumer, error)
 
-	// Get the earliest MessageID
-	EarliestMessageID() MessageID
-
-	// String to msg ID
-	StringToMsgID(string) (MessageID, error)
-
 	// Deserialize MessageId from a byte array
 	BytesToMsgID([]byte) (MessageID, error)
 

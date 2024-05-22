@@ -11,6 +11,17 @@ type kafkaID struct {
 
 var _ mqwrapper.MessageID = &kafkaID{}
 
+func NewKafkaID(messageID int64) mqwrapper.MessageID {
+	return &kafkaID{
+		messageID: messageID,
+	}
+}
+
+// TODO: remove in future, remove mqwrapper layer.
+func (kid *kafkaID) KafkaID() int64 {
+	return kid.messageID
+}
+
 func (kid *kafkaID) Serialize() []byte {
 	return SerializeKafkaID(kid.messageID)
 }
@@ -25,6 +36,21 @@ func (kid *kafkaID) Equal(msgID []byte) (bool, error) {
 
 func (kid *kafkaID) LessOrEqualThan(msgID []byte) (bool, error) {
 	return kid.messageID <= DeserializeKafkaID(msgID), nil
+}
+
+// LT less than
+func (kid *kafkaID) LT(id2 mqwrapper.MessageID) bool {
+	return kid.messageID < id2.(*kafkaID).messageID
+}
+
+// LTE less than or equal to
+func (kid *kafkaID) LTE(id2 mqwrapper.MessageID) bool {
+	return kid.messageID <= id2.(*kafkaID).messageID
+}
+
+// EQ Equal to.
+func (kid *kafkaID) EQ(id2 mqwrapper.MessageID) bool {
+	return kid.messageID == id2.(*kafkaID).messageID
 }
 
 func SerializeKafkaID(messageID int64) []byte {

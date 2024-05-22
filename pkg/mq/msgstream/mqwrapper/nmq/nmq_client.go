@@ -191,10 +191,14 @@ func (nc *nmqClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 
 // BytesToMsgID converts a byte array to messageID
 func (nc *nmqClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
-	rID := DeserializeNmqID(id)
-	return &nmqID{messageID: rID}, nil
+	return BytesToMsgID(id)
 }
 
 func (nc *nmqClient) Close() {
 	nc.conn.Close()
+}
+
+func BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
+	rID := DeserializeNmqID(id)
+	return &nmqID{messageID: rID}, nil
 }

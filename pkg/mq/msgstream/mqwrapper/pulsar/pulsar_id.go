@@ -31,6 +31,17 @@ type pulsarID struct {
 // Check if pulsarID implements and MessageID interface
 var _ mqwrapper.MessageID = &pulsarID{}
 
+func NewPulsarID(messageID pulsar.MessageID) mqwrapper.MessageID {
+	return &pulsarID{
+		messageID: messageID,
+	}
+}
+
+// TODO: remove in future, remove mqwrapper layer.
+func (pid *pulsarID) PulsarID() []byte {
+	return pid.Serialize()
+}
+
 func (pid *pulsarID) Serialize() []byte {
 	return pid.messageID.Serialize()
 }
@@ -51,13 +62,7 @@ func (pid *pulsarID) LessOrEqualThan(msgID []byte) (bool, error) {
 		return false, err
 	}
 
-	if pid.messageID.LedgerID() <= pMsgID.LedgerID() &&
-		pid.messageID.EntryID() <= pMsgID.EntryID() &&
-		pid.messageID.BatchIdx() <= pMsgID.BatchIdx() {
-		return true, nil
-	}
-
-	return false, nil
+	return pid.LTE(&pulsarID{messageID: pMsgID}), nil
 }
 
 func (pid *pulsarID) Equal(msgID []byte) (bool, error) {
@@ -66,13 +71,41 @@ func (pid *pulsarID) Equal(msgID []byte) (bool, error) {
 		return false, err
 	}
 
-	if pid.messageID.LedgerID() == pMsgID.LedgerID() &&
-		pid.messageID.EntryID() == pMsgID.EntryID() &&
-		pid.messageID.BatchIdx() == pMsgID.BatchIdx() {
-		return true, nil
+	return pid.EQ(&pulsarID{messageID: pMsgID}), nil
+}
+
+// LT less than.
+func (pid *pulsarID) LT(id2 mqwrapper.MessageID) bool {
+	other := id2.(*pulsarID)
+	if pid.messageID.LedgerID() != other.messageID.LedgerID() {
+		return pid.messageID.LedgerID() < other.messageID.LedgerID()
 	}
 
-	return false, nil
+	if pid.messageID.EntryID() != other.messageID.EntryID() {
+		return pid.messageID.EntryID() < other.messageID.EntryID()
+	}
+	return pid.messageID.BatchIdx() < pid.messageID.BatchIdx()
+}
+
+// LTE less than or equal to.
+func (pid *pulsarID) LTE(id2 mqwrapper.MessageID) bool {
+	other := id2.(*pulsarID).messageID
+	if pid.messageID.LedgerID() != other.LedgerID() {
+		return pid.messageID.LedgerID() < other.LedgerID()
+	}
+
+	if pid.messageID.EntryID() != other.EntryID() {
+		return pid.messageID.EntryID() < other.EntryID()
+	}
+	return pid.messageID.BatchIdx() <= pid.messageID.BatchIdx()
+}
+
+// EQ Equal to.
+func (pid *pulsarID) EQ(id2 mqwrapper.MessageID) bool {
+	other := id2.(*pulsarID).messageID
+	return pid.messageID.LedgerID() == other.LedgerID() &&
+		pid.messageID.EntryID() == other.EntryID() &&
+		pid.messageID.BatchIdx() == other.BatchIdx()
 }
 
 // SerializePulsarMsgID returns the serialized message ID

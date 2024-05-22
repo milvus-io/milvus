@@ -1,0 +1,49 @@
+syntax = "proto3";
+
+package milvus.proto.log;
+
+option go_package = "github.com/milvus-io/milvus/internal/proto/logpb";
+
+import "milvus.proto";
+import "google/protobuf/empty.proto";
+
+//
+// Common
+//
+
+// MessageID is the unique identifier of messages in same channel.
+// It's different if underlying message system is different.
+message MessageID {
+    oneof id {
+        MessageIDKafka kafka = 1;
+        MessageIDPulsar pulsar = 2;
+        MessageIDRmq rmq = 3;
+        MessageIDNmq nmq = 4;
+    }
+}
+
+// MessageIDKafka is the message id like kafka.
+message MessageIDKafka {
+    int64 Offset = 1;
+}
+
+// MessageIDRmq is the message id like rocksmq.
+message MessageIDRmq {
+    int64 offset = 1;
+}
+
+// MessageIDNmq is the message id like natsmq.
+message MessageIDNmq {
+    uint64 offset = 1;
+}
+
+// MessageIDPulsar is the message id like pulsar.
+message MessageIDPulsar {
+    bytes serialized = 1;
+}
+
+// Message is the basic unit of communication between publisher and consumer.
+message Message {
+    bytes payload = 1; // message body
+    map<string, string> properties = 2; // message properties
+}

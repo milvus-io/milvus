@@ -178,15 +178,19 @@ func (pc *pulsarClient) StringToMsgID(id string) (mqwrapper.MessageID, error) {
 
 // BytesToMsgID converts []byte id to MessageID type
 func (pc *pulsarClient) BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
-	pID, err := DeserializePulsarMsgID(id)
-	if err != nil {
-		return nil, err
-	}
-	return &pulsarID{messageID: pID}, nil
+	return BytesToMsgID(id)
 }
 
 // Close closes the pulsar client
 func (pc *pulsarClient) Close() {
 	// FIXME(yukun): pulsar.client is a singleton, so can't invoke this close when server run
 	// pc.client.Close()
+}
+
+func BytesToMsgID(id []byte) (mqwrapper.MessageID, error) {
+	pID, err := DeserializePulsarMsgID(id)
+	if err != nil {
+		return nil, err
+	}
+	return &pulsarID{messageID: pID}, nil
 }
