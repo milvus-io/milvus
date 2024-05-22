@@ -257,6 +257,41 @@ func (s *StateChannelStoreSuite) TestUpdateWithTxnLimit() {
 	}
 }
 
+func (s *StateChannelStoreSuite) TestUpdateMeta2000kSegs() {
+	ch := getChannel("ch1", 1)
+	info := ch.GetWatchInfo()
+	seg2000k := make([]int64, 2000000, 2000000)
+	for i := range seg2000k {
+		seg2000k[i] = int64(i)
+	}
+	info.Vchan.FlushedSegmentIds = seg2000k
+	ch.UpdateWatchInfo(info)
+
+	opSet := NewChannelOpSet(
+		NewChannelOp(bufferID, Delete, ch),
+		NewChannelOp(100, Watch, ch),
+	)
+	s.SetupTest()
+	s.mockTxn.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything).
+		Run(func(saves map[string]string, removals []string, preds ...predicates.Predicate) {
+		}).Return(nil).Once()
+
+	store := NewStateChannelStore(s.mockTxn)
+	store.AddNode(100)
+	s.Require().Equal(0, store.GetNodeChannelCount(100))
+	store.addAssignment(bufferID, ch)
+	s.Require().Equal(1, store.GetNodeChannelCount(bufferID))
+
+	err := store.updateMeta(opSet)
+	s.NoError(err)
+
+	got := store.GetNodeChannelsBy(WithNodeIDs(100))
+	s.NotNil(got)
+	s.Require().Equal(1, len(got))
+	gotInfo := got[0]
+	s.ElementsMatch([]string{"ch1"}, lo.Keys(gotInfo.Channels))
+}
+
 func (s *StateChannelStoreSuite) TestUpdateMeta() {
 	tests := []struct {
 		description string
@@ -474,7 +509,7 @@ func genChannelOperations(nodeID int64, opType ChannelOpType, num int) *ChannelO
 	for i := 0; i < num; i++ {
 		name := fmt.Sprintf("ch%d", i)
 		channel := NewStateChannel(getChannel(name, 1))
-		channel.Info = &datapb.ChannelWatchInfo{}
+		channel.Info = generateWatchInfo(name, datapb.ChannelWatchState_ToWatch)
 		channels = append(channels, channel)
 	}
 

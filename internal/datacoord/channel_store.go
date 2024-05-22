@@ -146,7 +146,9 @@ func (op *ChannelOp) BuildKV() (map[string]string, []string, error) {
 		k := buildNodeChannelKey(op.NodeID, ch.GetName())
 		switch op.Type {
 		case Add, Watch, Release:
-			info, err := proto.Marshal(ch.GetWatchInfo())
+			tmpWatchInfo := ch.GetWatchInfo()
+			tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
+			info, err := proto.Marshal(tmpWatchInfo)
 			if err != nil {
 				return saves, removals, err
 			}
