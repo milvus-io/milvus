@@ -68,11 +68,11 @@ func (suite *StreamPipelineSuite) TestBasic() {
 
 	suite.pipeline.Start()
 	defer suite.pipeline.Close()
-	suite.inChannel <- &msgstream.MsgPack{}
+	suite.inChannel <- &msgstream.MsgPack{BeginTs: 1001}
 
 	for i := 1; i <= suite.length; i++ {
 		output := <-suite.outChannel
-		suite.Equal(msgstream.Timestamp(i), output)
+		suite.Equal(int64(1001), int64(output))
 	}
 }
 
