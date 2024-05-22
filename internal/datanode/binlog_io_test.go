@@ -90,7 +90,7 @@ func TestBinlogIOInterfaceMethods(t *testing.T) {
 					cancel()
 
 					_, err := b.download(ctx, []string{"test"})
-					assert.EqualError(t, err, errDownloadFromBlobStorage.Error())
+					assert.ErrorIs(t, err, context.Canceled)
 				}
 			})
 		}
