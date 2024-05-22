@@ -32,7 +32,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 )
 
 var (
@@ -79,21 +81,19 @@ func (b *binlogIO) download(ctx context.Context, paths []string) ([]*Blob, error
 	for i, path := range paths {
 		localPath := path
 		future := getMultiReadPool().Submit(func() (any, error) {
-			var vs []byte
-			err := errStart
-			for err != nil {
-				select {
-				case <-ctx.Done():
-					log.Warn("ctx done when downloading kvs from blob storage", zap.Strings("paths", paths))
-					return nil, errDownloadFromBlobStorage
-				default:
-					if err != errStart {
-						time.Sleep(50 * time.Millisecond)
-					}
-					vs, err = b.Read(ctx, localPath)
+			var val []byte
+			var err error
+
+			log.Debug("binlogIO download", zap.String("path", localPath))
+			err = retry.Do(ctx, func() error {
+				val, err = b.Read(ctx, localPath)
+				if err != nil {
+					log.Warn("binlogIO fail to download", zap.String("path", localPath), zap.Error(err))
 				}
-			}
-			return vs, nil
+				return err
+			}, retry.Attempts(3), retry.RetryErr(merr.IsRetryableErr))
+
+			return val, err
 		})
 		futures[i] = future
 	}
