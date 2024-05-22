@@ -2,7 +2,15 @@
 
 pipeline {
     agent {
-        label 'arm'
+        kubernetes {
+            cloud '4am'
+            defaultContainer 'main'
+            yamlFile "ci/jenkins/pod/rte-arm.yaml"
+            customWorkspace '/home/jenkins/agent/workspace'
+            // We allow this pod to remain active for a while, later jobs can
+            // reuse cache in previous created nodes.
+            // idleMinutes 120
+        }
     }
 
     options {
@@ -27,10 +35,10 @@ pipeline {
                     script {
                         sh """
                         set -a  # automatically export all variables from .env
-                        . ${WORKSPACE}/.env
+                        . .env
                         set +a  # stop automatically
 
-                        docker run -v \$(pwd):/root/milvus -v \$(pwd)/.docker/.conan:/root/.conan -w /root/milvus milvusdb/milvus-env:gpu-ubuntu22.04-\${GPU_DATE_VERSION} sh -c "make clean && make gpu-install"
+                        docker run --net=host -v \$(pwd):/root/milvus -v /root/.conan:/root/.conan -w /root/milvus milvusdb/milvus-env:gpu-ubuntu22.04-\${GPU_DATE_VERSION}  sh -c "make clean && make gpu-install"
                         """
 
                         def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()

@@ -237,7 +237,8 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	observer := suite.checker
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))
 	observer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-	observer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, []int64{1, 2}))
+	replica := utils.CreateTestReplica(1, 1, []int64{1, 2})
+	observer.meta.ReplicaManager.Put(replica)
 	segments := []*datapb.SegmentInfo{
 		{
 			ID:            1,
@@ -261,12 +262,9 @@ func (suite *LeaderCheckerTestSuite) TestStoppingNode() {
 	view.TargetVersion = observer.target.GetCollectionTargetVersion(1, meta.CurrentTarget)
 	observer.dist.LeaderViewManager.Update(2, view)
 
-	suite.nodeMgr.Add(session.NewNodeInfo(session.ImmutableNodeInfo{
-		NodeID:   2,
-		Address:  "localhost",
-		Hostname: "localhost",
-	}))
-	suite.nodeMgr.Stopping(2)
+	mutableReplica := replica.CopyForWrite()
+	mutableReplica.AddRONode(2)
+	observer.meta.ReplicaManager.Put(mutableReplica.IntoReplica())
 
 	tasks := suite.checker.Check(context.TODO())
 	suite.Len(tasks, 0)

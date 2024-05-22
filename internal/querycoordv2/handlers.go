@@ -46,7 +46,7 @@ import (
 func (s *Server) checkAnyReplicaAvailable(collectionID int64) bool {
 	for _, replica := range s.meta.ReplicaManager.GetByCollection(collectionID) {
 		isAvailable := true
-		for _, node := range replica.GetNodes() {
+		for _, node := range replica.GetRONodes() {
 			if s.nodeMgr.Get(node) == nil {
 				isAvailable = false
 				break
@@ -99,7 +99,7 @@ func (s *Server) balanceSegments(ctx context.Context,
 	copyMode bool,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("srcNode", srcNode))
-	plans := s.balancer.AssignSegment(collectionID, segments, dstNodes, true)
+	plans := s.getBalancerFunc().AssignSegment(collectionID, segments, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica
@@ -175,7 +175,7 @@ func (s *Server) balanceChannels(ctx context.Context,
 ) error {
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID))
 
-	plans := s.balancer.AssignChannel(channels, dstNodes, true)
+	plans := s.getBalancerFunc().AssignChannel(channels, dstNodes, true)
 	for i := range plans {
 		plans[i].From = srcNode
 		plans[i].Replica = replica

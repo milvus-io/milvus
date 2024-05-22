@@ -524,16 +524,6 @@ func (suite *ResourceManagerSuite) TestAutoRecover() {
 	suite.Equal(80, suite.manager.GetResourceGroup("rg2").NodeNum())
 	suite.Equal(5, suite.manager.GetResourceGroup("rg3").NodeNum())
 	suite.Equal(5, suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
-
-	// Test down all nodes.
-	for i := 1; i <= 100; i++ {
-		suite.manager.nodeMgr.Remove(int64(i))
-	}
-	suite.manager.RemoveAllDownNode()
-	suite.Zero(suite.manager.GetResourceGroup("rg1").NodeNum())
-	suite.Zero(suite.manager.GetResourceGroup("rg2").NodeNum())
-	suite.Zero(suite.manager.GetResourceGroup("rg3").NodeNum())
-	suite.Zero(suite.manager.GetResourceGroup(DefaultResourceGroupName).NodeNum())
 }
 
 func (suite *ResourceManagerSuite) testTransferNode() {

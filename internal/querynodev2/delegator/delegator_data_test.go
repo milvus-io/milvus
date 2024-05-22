@@ -1110,44 +1110,62 @@ func (s *DelegatorDataSuite) TestLevel0Deletions() {
 	partitionID := int64(10)
 	partitionDeleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1)}, []storage.Timestamp{100})
 	allPartitionDeleteData := storage.NewDeleteData([]storage.PrimaryKey{storage.NewInt64PrimaryKey(2)}, []storage.Timestamp{101})
-	delegator.level0Deletions[partitionID] = partitionDeleteData
 
-	pks, _ := delegator.GetLevel0Deletions(partitionID)
+	schema := segments.GenTestCollectionSchema("test_stop", schemapb.DataType_Int64, true)
+	collection := segments.NewCollection(1, schema, nil, &querypb.LoadMetaInfo{
+		LoadType: querypb.LoadType_LoadCollection,
+	})
+
+	l0, _ := segments.NewL0Segment(collection, segments.SegmentTypeSealed, 1, &querypb.SegmentLoadInfo{
+		CollectionID:  1,
+		SegmentID:     2,
+		PartitionID:   partitionID,
+		InsertChannel: delegator.vchannelName,
+		Level:         datapb.SegmentLevel_L0,
+		NumOfRows:     1,
+	})
+	l0.LoadDeltaData(context.TODO(), partitionDeleteData)
+	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0)
+
+	l0Global, _ := segments.NewL0Segment(collection, segments.SegmentTypeSealed, 2, &querypb.SegmentLoadInfo{
+		CollectionID:  1,
+		SegmentID:     3,
+		PartitionID:   common.AllPartitionsID,
+		InsertChannel: delegator.vchannelName,
+		Level:         datapb.SegmentLevel_L0,
+		NumOfRows:     int64(1),
+	})
+	l0Global.LoadDeltaData(context.TODO(), allPartitionDeleteData)
+
+	pks, _ := delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
 
-	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
+	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
 
-	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
-	pks, _ = delegator.GetLevel0Deletions(partitionID)
-	s.Len(pks, 2)
+	delegator.segmentManager.Put(context.TODO(), segments.SegmentTypeSealed, l0Global)
+	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
 	s.True(pks[1].EQ(allPartitionDeleteData.Pks[0]))
 
-	delete(delegator.level0Deletions, partitionID)
-	pks, _ = delegator.GetLevel0Deletions(partitionID)
+	bfs := pkoracle.NewBloomFilterSet(3, l0.Partition(), commonpb.SegmentState_Sealed)
+	bfs.UpdateBloomFilter(allPartitionDeleteData.Pks)
+
+	pks, _ = delegator.GetLevel0Deletions(partitionID, bfs)
+	// bf filtered segment
+	s.Equal(len(pks), 1)
 	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
 
-	// exchange the order
-	delegator.level0Deletions = make(map[int64]*storage.DeleteData)
-	partitionDeleteData, allPartitionDeleteData = allPartitionDeleteData, partitionDeleteData
-	delegator.level0Deletions[partitionID] = partitionDeleteData
+	delegator.segmentManager.Remove(context.TODO(), l0.ID(), querypb.DataScope_All)
+	pks, _ = delegator.GetLevel0Deletions(partitionID, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
 
-	pks, _ = delegator.GetLevel0Deletions(partitionID)
-	s.True(pks[0].EQ(partitionDeleteData.Pks[0]))
+	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
+	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
 
-	pks, _ = delegator.GetLevel0Deletions(partitionID + 1)
+	delegator.segmentManager.Remove(context.TODO(), l0Global.ID(), querypb.DataScope_All)
+	pks, _ = delegator.GetLevel0Deletions(partitionID+1, pkoracle.NewCandidateKey(l0.ID(), l0.Partition(), segments.SegmentTypeGrowing))
 	s.Empty(pks)
-
-	delegator.level0Deletions[common.AllPartitionsID] = allPartitionDeleteData
-	pks, _ = delegator.GetLevel0Deletions(partitionID)
-	s.Len(pks, 2)
-	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
-	s.True(pks[1].EQ(partitionDeleteData.Pks[0]))
-
-	delete(delegator.level0Deletions, partitionID)
-	pks, _ = delegator.GetLevel0Deletions(partitionID)
-	s.True(pks[0].EQ(allPartitionDeleteData.Pks[0]))
 }
 
 func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {

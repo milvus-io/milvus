@@ -130,15 +130,13 @@ func ReadBoolData(pcr *FieldReader, count int64) (any, error) {
 	data := make([]bool, 0, count)
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
-		chunkData := make([]bool, dataNums)
 		boolReader, ok := chunk.(*array.Boolean)
 		if !ok {
 			return nil, WrapTypeErr("bool", chunk.DataType().Name(), pcr.field)
 		}
 		for i := 0; i < dataNums; i++ {
-			chunkData[i] = boolReader.Value(i)
+			data = append(data, boolReader.Value(i))
 		}
-		data = append(data, chunkData...)
 	}
 	if len(data) == 0 {
 		return nil, nil
@@ -154,42 +152,40 @@ func ReadIntegerOrFloatData[T constraints.Integer | constraints.Float](pcr *Fiel
 	data := make([]T, 0, count)
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
-		chunkData := make([]T, dataNums)
 		switch chunk.DataType().ID() {
 		case arrow.INT8:
 			int8Reader := chunk.(*array.Int8)
 			for i := 0; i < dataNums; i++ {
-				chunkData[i] = T(int8Reader.Value(i))
+				data = append(data, T(int8Reader.Value(i)))
 			}
 		case arrow.INT16:
 			int16Reader := chunk.(*array.Int16)
 			for i := 0; i < dataNums; i++ {
-				chunkData[i] = T(int16Reader.Value(i))
+				data = append(data, T(int16Reader.Value(i)))
 			}
 		case arrow.INT32:
 			int32Reader := chunk.(*array.Int32)
 			for i := 0; i < dataNums; i++ {
-				chunkData[i] = T(int32Reader.Value(i))
+				data = append(data, T(int32Reader.Value(i)))
 			}
 		case arrow.INT64:
 			int64Reader := chunk.(*array.Int64)
 			for i := 0; i < dataNums; i++ {
-				chunkData[i] = T(int64Reader.Value(i))
+				data = append(data, T(int64Reader.Value(i)))
 			}
 		case arrow.FLOAT32:
 			float32Reader := chunk.(*array.Float32)
 			for i := 0; i < dataNums; i++ {
-				chunkData[i] = T(float32Reader.Value(i))
+				data = append(data, T(float32Reader.Value(i)))
 			}
 		case arrow.FLOAT64:
 			float64Reader := chunk.(*array.Float64)
 			for i := 0; i < dataNums; i++ {
-				chunkData[i] = T(float64Reader.Value(i))
+				data = append(data, T(float64Reader.Value(i)))
 			}
 		default:
 			return nil, WrapTypeErr("integer|float", chunk.DataType().Name(), pcr.field)
 		}
-		data = append(data, chunkData...)
 	}
 	if len(data) == 0 {
 		return nil, nil
@@ -205,15 +201,13 @@ func ReadStringData(pcr *FieldReader, count int64) (any, error) {
 	data := make([]string, 0, count)
 	for _, chunk := range chunked.Chunks() {
 		dataNums := chunk.Data().Len()
-		chunkData := make([]string, dataNums)
 		stringReader, ok := chunk.(*array.String)
 		if !ok {
 			return nil, WrapTypeErr("string", chunk.DataType().Name(), pcr.field)
 		}
 		for i := 0; i < dataNums; i++ {
-			chunkData[i] = stringReader.Value(i)
+			data = append(data, stringReader.Value(i))
 		}
-		data = append(data, chunkData...)
 	}
 	if len(data) == 0 {
 		return nil, nil
@@ -297,7 +291,7 @@ func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
 	for _, str := range data.([]string) {
 		rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
 		if err != nil {
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s'", str))
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
 		}
 		byteArr = append(byteArr, rowVec)
 		elemCount := len(rowVec) / 8

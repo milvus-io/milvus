@@ -78,7 +78,7 @@ func (suite *BalanceCheckerTestSuite) SetupTest() {
 	suite.targetMgr = meta.NewTargetManager(suite.broker, suite.meta)
 
 	suite.balancer = balance.NewMockBalancer(suite.T())
-	suite.checker = NewBalanceChecker(suite.meta, suite.targetMgr, suite.balancer, suite.nodeMgr, suite.scheduler)
+	suite.checker = NewBalanceChecker(suite.meta, suite.targetMgr, suite.nodeMgr, suite.scheduler, func() balance.Balance { return suite.balancer })
 }
 
 func (suite *BalanceCheckerTestSuite) TearDownTest() {
@@ -278,6 +278,14 @@ func (suite *BalanceCheckerTestSuite) TestStoppingBalance() {
 	suite.targetMgr.UpdateCollectionNextTarget(int64(cid2))
 	suite.targetMgr.UpdateCollectionCurrentTarget(int64(cid2))
 
+	mr1 := replica1.CopyForWrite()
+	mr1.AddRONode(1)
+	suite.checker.meta.ReplicaManager.Put(mr1.IntoReplica())
+
+	mr2 := replica2.CopyForWrite()
+	mr2.AddRONode(1)
+	suite.checker.meta.ReplicaManager.Put(mr2.IntoReplica())
+
 	// test stopping balance
 	idsToBalance := []int64{int64(replicaID1), int64(replicaID2)}
 	replicasToBalance := suite.checker.replicasToBalance()
@@ -347,6 +355,14 @@ func (suite *BalanceCheckerTestSuite) TestTargetNotReady() {
 	partition2 := utils.CreateTestPartition(int64(cid2), int64(partitionID2))
 	suite.checker.meta.CollectionManager.PutCollection(collection2, partition2)
 	suite.checker.meta.ReplicaManager.Put(replica2)
+
+	mr1 := replica1.CopyForWrite()
+	mr1.AddRONode(1)
+	suite.checker.meta.ReplicaManager.Put(mr1.IntoReplica())
+
+	mr2 := replica2.CopyForWrite()
+	mr2.AddRONode(1)
+	suite.checker.meta.ReplicaManager.Put(mr2.IntoReplica())
 
 	// test stopping balance
 	idsToBalance := []int64{int64(replicaID1)}

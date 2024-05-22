@@ -35,6 +35,8 @@ import (
 
 var errTypeNotFound = errors.New("checker type not found")
 
+type GetBalancerFunc = func() balance.Balance
+
 type CheckerController struct {
 	cancel         context.CancelFunc
 	manualCheckChs map[utils.CheckerType]chan struct{}
@@ -55,17 +57,17 @@ func NewCheckerController(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
-	balancer balance.Balance,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
 	broker meta.Broker,
+	getBalancerFunc GetBalancerFunc,
 ) *CheckerController {
 	// CheckerController runs checkers with the order,
 	// the former checker has higher priority
 	checkers := map[utils.CheckerType]Checker{
-		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, balancer, nodeMgr),
-		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, balancer, nodeMgr),
-		utils.BalanceChecker: NewBalanceChecker(meta, targetMgr, balancer, nodeMgr, scheduler),
+		utils.ChannelChecker: NewChannelChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
+		utils.SegmentChecker: NewSegmentChecker(meta, dist, targetMgr, nodeMgr, getBalancerFunc),
+		utils.BalanceChecker: NewBalanceChecker(meta, targetMgr, nodeMgr, scheduler, getBalancerFunc),
 		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
 		utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
 	}

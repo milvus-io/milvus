@@ -409,8 +409,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			segmentCnts:     []int{1, 2},
 			states:          []session.State{session.NodeStateNormal, session.NodeStateNormal},
 			distributions: map[int64][]*meta.Segment{
-				1: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 30}, Node: 11}},
-				2: {
+				11: {{SegmentInfo: &datapb.SegmentInfo{ID: 1, CollectionID: 1, NumOfRows: 30}, Node: 11}},
+				22: {
 					{SegmentInfo: &datapb.SegmentInfo{ID: 2, CollectionID: 1, NumOfRows: 20}, Node: 22},
 					{SegmentInfo: &datapb.SegmentInfo{ID: 3, CollectionID: 1, NumOfRows: 30}, Node: 22},
 				},
@@ -455,7 +455,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			collection.LoadType = querypb.LoadType_LoadCollection
 			balancer.meta.CollectionManager.PutCollection(collection)
 			balancer.meta.CollectionManager.PutPartition(utils.CreateTestPartition(1, 1))
-			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, append(c.nodes, c.notExistedNodes...)))
+			balancer.meta.ReplicaManager.Put(utils.CreateTestReplica(1, 1, c.nodes))
 			suite.broker.ExpectedCalls = nil
 			suite.broker.EXPECT().GetRecoveryInfoV2(mock.Anything, int64(1)).Return(nil, segments, nil)
 			balancer.targetMgr.UpdateCollectionNextTarget(int64(1))
@@ -481,6 +481,7 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
+			utils.RecoverAllCollection(balancer.meta)
 
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			if !c.multiple {
@@ -492,10 +493,11 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalance() {
 			}
 
 			// clear distribution
-			for node := range c.distributions {
+
+			for _, node := range c.nodes {
+				balancer.meta.ResourceManager.HandleNodeDown(node)
+				balancer.nodeManager.Remove(node)
 				balancer.dist.SegmentDistManager.Update(node)
-			}
-			for node := range c.distributionChannels {
 				balancer.dist.ChannelDistManager.Update(node)
 			}
 		})
@@ -693,6 +695,8 @@ func (suite *RowCountBasedBalancerTestSuite) TestBalanceOnPartStopping() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
+			utils.RecoverAllCollection(balancer.meta)
+
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, 1)
 			assertSegmentAssignPlanElementMatch(&suite.Suite, c.expectPlans, segmentPlans)
 			assertChannelAssignPlanElementMatch(&suite.Suite, c.expectChannelPlans, channelPlans)

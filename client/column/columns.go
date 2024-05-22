@@ -239,7 +239,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		data := x.FloatVector.GetData()
 		dim := int(vectors.GetDim())
 		if end < 0 {
-			end = int(len(data) / dim)
+			end = len(data) / dim
 		}
 		vector := make([][]float32, 0, end-begin) // shall not have remanunt
 		for i := begin; i < end; i++ {
@@ -262,7 +262,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		dim := int(vectors.GetDim())
 		blen := dim / 8
 		if end < 0 {
-			end = int(len(data) / blen)
+			end = len(data) / blen
 		}
 		vector := make([][]byte, 0, end-begin)
 		for i := begin; i < end; i++ {
@@ -281,7 +281,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		data := x.Float16Vector
 		dim := int(vectors.GetDim())
 		if end < 0 {
-			end = int(len(data) / dim)
+			end = len(data) / dim
 		}
 		vector := make([][]byte, 0, end-begin)
 		for i := begin; i < end; i++ {
@@ -300,7 +300,7 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		data := x.Bfloat16Vector
 		dim := int(vectors.GetDim())
 		if end < 0 {
-			end = int(len(data) / dim)
+			end = len(data) / dim
 		}
 		vector := make([][]byte, 0, end-begin) // shall not have remanunt
 		for i := begin; i < end; i++ {

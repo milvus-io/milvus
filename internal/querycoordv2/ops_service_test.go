@@ -121,7 +121,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 	suite.distController = dist.NewMockController(suite.T())
 
 	suite.checkerController = checkers.NewCheckerController(suite.meta, suite.distMgr,
-		suite.targetMgr, suite.balancer, suite.nodeMgr, suite.taskScheduler, suite.broker)
+		suite.targetMgr, suite.nodeMgr, suite.taskScheduler, suite.broker, func() balance.Balance { return suite.balancer })
 
 	suite.server = &Server{
 		kv:                  suite.kv,
@@ -137,7 +137,7 @@ func (suite *OpsServiceSuite) SetupTest() {
 		cluster:             suite.cluster,
 		jobScheduler:        suite.jobScheduler,
 		taskScheduler:       suite.taskScheduler,
-		balancer:            suite.balancer,
+		getBalancerFunc:     func() balance.Balance { return suite.balancer },
 		distController:      suite.distController,
 		ctx:                 context.Background(),
 		checkerController:   suite.checkerController,
