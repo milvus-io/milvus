@@ -138,13 +138,13 @@ def _install_milvus(image_tag="master-latest"):
 
 class TestChannelExclusiveBalance(TestcaseBase):
 
-    # def teardown_method(self, method):
-    #     log.info(("*" * 35) + " teardown " + ("*" * 35))
-    #     log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
-    #     milvus_op = MilvusOperator()
-    #     milvus_op.uninstall(self.release_name, namespace)
-    #     connections.disconnect("default")
-    #     connections.remove_connection("default")
+    def teardown_method(self, method):
+        log.info(("*" * 35) + " teardown " + ("*" * 35))
+        log.info("[teardown_method] Start teardown test case %s..." % method.__name__)
+        milvus_op = MilvusOperator()
+        milvus_op.uninstall(self.release_name, namespace)
+        connections.disconnect("default")
+        connections.remove_connection("default")
 
     def init_health_checkers(self, collection_name=None, shards_num=2):
         c_name = collection_name
