@@ -26,15 +26,19 @@ pipeline {
             steps {
                     script {
                         sh """
+                             git config --global --add safe.directory /home/jenkins/agent/workspace
+                        """
+
+                        def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
+                        def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
+
+                        sh """
                         set -a  # automatically export all variables from .env
                         . ${WORKSPACE}/.env
                         set +a  # stop automatically
 
                         docker run -v \$(pwd):/root/milvus -v \$(pwd)/.docker/.conan:/root/.conan -w /root/milvus milvusdb/milvus-env:gpu-ubuntu22.04-\${GPU_DATE_VERSION} sh -c "make clean && make gpu-install"
                         """
-
-                        def date = sh(returnStdout: true, script: 'date +%Y%m%d').trim()
-                        def gitShortCommit = sh(returnStdout: true, script: 'git rev-parse --short HEAD').trim()
 
                         withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                             sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}'
