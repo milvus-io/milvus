@@ -160,6 +160,11 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     void
     finish();
 
+    template <typename ElementT>
+    void
+    build_index_for_array(
+        const std::vector<std::shared_ptr<FieldDataBase>>& field_datas);
+
  private:
     std::shared_ptr<TantivyIndexWrapper> wrapper_;
     TantivyConfig cfg_;

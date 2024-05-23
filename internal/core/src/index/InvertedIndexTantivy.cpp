@@ -114,6 +114,7 @@ InvertedIndexTantivy<T>::Build(const Config& config) {
     AssertInfo(insert_files.has_value(), "insert_files were empty");
     auto field_datas =
         mem_file_manager_->CacheRawDataToMemory(insert_files.value());
+
     switch (cfg_.data_type_) {
         case DataType::BOOL: {
             for (const auto& data : field_datas) {
@@ -187,9 +188,77 @@ InvertedIndexTantivy<T>::Build(const Config& config) {
             break;
         }
 
+        case DataType::ARRAY: {
+            switch (cfg_.element_type_) {
+                case DataType::BOOL: {
+                    build_index_for_array<bool>(field_datas);
+                    break;
+                }
+
+                case DataType::INT8: {
+                    build_index_for_array<int8_t>(field_datas);
+                    break;
+                }
+
+                case DataType::INT16: {
+                    build_index_for_array<int16_t>(field_datas);
+                    break;
+                }
+
+                case DataType::INT32: {
+                    build_index_for_array<int32_t>(field_datas);
+                    break;
+                }
+
+                case DataType::INT64: {
+                    build_index_for_array<int64_t>(field_datas);
+                    break;
+                }
+
+                case DataType::FLOAT: {
+                    build_index_for_array<float>(field_datas);
+                    break;
+                }
+
+                case DataType::DOUBLE: {
+                    build_index_for_array<double>(field_datas);
+                    break;
+                }
+
+                case DataType::VARCHAR: {
+                    for (const auto& data : field_datas) {
+                        auto n = data->get_num_rows();
+                        auto array_column =
+                            static_cast<const Array*>(data->Data());
+                        for (int64_t i = 0; i < n; i++) {
+                            assert(array_column[i].get_element_type() ==
+                                   cfg_.element_type_);
+                            std::vector<std::string> output;
+                            for (int64_t j = 0; j < array_column[i].length();
+                                 j++) {
+                                output.push_back(
+                                    array_column[i]
+                                        .template get_data<std::string>(j));
+                            }
+                            wrapper_->template add_multi_data(output.data(),
+                                                              output.size());
+                        }
+                    }
+                    break;
+                }
+
+                default:
+                    PanicInfo(ErrorCode::NotImplemented,
+                              fmt::format("Inverted index not supported on {}",
+                                          cfg_.element_type_));
+            }
+            break;
+        }
+
         default:
             PanicInfo(ErrorCode::NotImplemented,
-                      fmt::format("todo: not supported, {}", cfg_.data_type_));
+                      fmt::format("Inverted index not supported on {}",
+                                  cfg_.data_type_));
     }
 }
 
@@ -287,7 +356,8 @@ InvertedIndexTantivy<T>::BuildV2(const Config& config) {
 
         default:
             PanicInfo(ErrorCode::NotImplemented,
-                      fmt::format("todo: not supported, {}", cfg_.data_type_));
+                      fmt::format("Inverted index not supported on {}",
+                                  cfg_.data_type_));
     }
 }
 
@@ -444,6 +514,23 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
         wrapper_->add_data<std::string>(static_cast<const std::string*>(values),
                                         n);
         finish();
+    }
+}
+
+template <typename T>
+template <typename ElementT>
+void
+InvertedIndexTantivy<T>::build_index_for_array(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    for (const auto& data : field_datas) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++) {
+            assert(array_column[i].get_element_type() == cfg_.element_type_);
+            wrapper_->template add_multi_data(
+                reinterpret_cast<const ElementT*>(array_column[i].data()),
+                array_column[i].length());
+        }
     }
 }
 

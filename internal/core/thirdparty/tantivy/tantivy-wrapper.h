@@ -197,7 +197,6 @@ struct TantivyIndexWrapper {
                           typeid(T).name());
     }
 
-
     template <typename T>
     void
     add_multi_data(const T* array, uintptr_t len) {
@@ -247,8 +246,9 @@ struct TantivyIndexWrapper {
             return;
         }
 
-        throw fmt::format("InvertedIndex.add_multi_data: unsupported data type: {}",
-                          typeid(T).name());
+        throw fmt::format(
+            "InvertedIndex.add_multi_data: unsupported data type: {}",
+            typeid(T).name());
     }
 
     inline void

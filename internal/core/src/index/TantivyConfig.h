@@ -15,36 +15,47 @@
 #include "tantivy-binding.h"
 
 namespace milvus::index {
+inline TantivyDataType
+get_tantivy_data_type(DataType data_type) {
+    switch (data_type) {
+        case DataType::BOOL: {
+            return TantivyDataType::Bool;
+        }
+
+        case DataType::INT8:
+        case DataType::INT16:
+        case DataType::INT32:
+        case DataType::INT64: {
+            return TantivyDataType::I64;
+        }
+
+        case DataType::FLOAT:
+        case DataType::DOUBLE: {
+            return TantivyDataType::F64;
+        }
+
+        case DataType::VARCHAR: {
+            return TantivyDataType::Keyword;
+        }
+
+        default:
+            PanicInfo(ErrorCode::NotImplemented,
+                      fmt::format("not implemented data type: {}", data_type));
+    }
+}
+
 struct TantivyConfig {
     DataType data_type_;
+    DataType element_type_;
 
     TantivyDataType
     to_tantivy_data_type() {
         switch (data_type_) {
-            case DataType::BOOL: {
-                return TantivyDataType::Bool;
+            case DataType::ARRAY: {
+                return get_tantivy_data_type(element_type_);
             }
-
-            case DataType::INT8:
-            case DataType::INT16:
-            case DataType::INT32:
-            case DataType::INT64: {
-                return TantivyDataType::I64;
-            }
-
-            case DataType::FLOAT:
-            case DataType::DOUBLE: {
-                return TantivyDataType::F64;
-            }
-
-            case DataType::VARCHAR: {
-                return TantivyDataType::Keyword;
-            }
-
             default:
-                PanicInfo(
-                    ErrorCode::NotImplemented,
-                    fmt::format("not implemented data type: {}", data_type_));
+                return get_tantivy_data_type(data_type_);
         }
     }
 };

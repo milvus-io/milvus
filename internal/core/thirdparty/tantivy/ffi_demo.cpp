@@ -5,9 +5,7 @@
 
 int
 main(int argc, char* argv[]) {
-    std::vector<std::string> data{
-            "data1", "data2", "data3"
-    };
+    std::vector<std::string> data{"data1", "data2", "data3"};
     std::vector<const char*> datas{};
     for (auto& s : data) {
         datas.push_back(s.c_str());
