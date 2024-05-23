@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -524,43 +525,51 @@ func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*No
 
 func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies []*NodeChannelInfo) bool {
 	var advanced bool = false
+	batchSize := paramtable.Get().DataCoordCfg.ChannelNotifyBatchSize.GetAsInt()
 	for _, nodeAssign := range toNotifies {
 		channelCount := len(nodeAssign.Channels)
 		if channelCount == 0 {
 			continue
 		}
 
-		var (
-			succeededChannels = make([]RWChannel, 0, channelCount)
-			failedChannels    = make([]RWChannel, 0, channelCount)
-			futures           = make([]*conc.Future[any], 0, channelCount)
-		)
-
 		chNames := lo.Keys(nodeAssign.Channels)
-		log.Info("Notify channel operations to datanode",
+		log.Info("Notifying channel operations to datanode",
 			zap.Int64("assignment", nodeAssign.NodeID),
-			zap.Int("total operation count", len(nodeAssign.Channels)),
+			zap.Int("total operation count", channelCount),
 			zap.Strings("channel names", chNames),
 		)
+
+		var (
+			succeededChannels []RWChannel
+			failedChannels    []RWChannel
+			futures           []*conc.Future[any]
+		)
+
+		processBatch := func() {
+			for _, f := range futures {
+				ch, err := f.Await()
+				if err != nil {
+					failedChannels = append(failedChannels, ch.(RWChannel))
+				} else {
+					succeededChannels = append(succeededChannels, ch.(RWChannel))
+					advanced = true
+				}
+			}
+		}
+
 		for _, ch := range nodeAssign.Channels {
 			innerCh := ch
-
 			future := getOrCreateIOPool().Submit(func() (any, error) {
 				err := m.Notify(ctx, nodeAssign.NodeID, innerCh.GetWatchInfo())
 				return innerCh, err
 			})
 			futures = append(futures, future)
-		}
-
-		for _, f := range futures {
-			ch, err := f.Await()
-			if err != nil {
-				failedChannels = append(failedChannels, ch.(RWChannel))
-			} else {
-				succeededChannels = append(succeededChannels, ch.(RWChannel))
-				advanced = true
+			if len(futures) >= batchSize {
+				processBatch()
+				futures = nil
 			}
 		}
+		processBatch()
 
 		log.Info("Finish to notify channel operations to datanode",
 			zap.Int64("assignment", nodeAssign.NodeID),
@@ -584,22 +593,35 @@ type poolResult struct {
 
 func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
 	var advanced bool = false
+	batchSize := paramtable.Get().DataCoordCfg.ChannelCheckBatchSize.GetAsInt()
 	for _, nodeAssign := range toChecks {
-		if len(nodeAssign.Channels) == 0 {
+		channelCount := len(nodeAssign.Channels)
+		if channelCount == 0 {
 			continue
 		}
 
-		futures := make([]*conc.Future[any], 0, len(nodeAssign.Channels))
-
 		chNames := lo.Keys(nodeAssign.Channels)
-		log.Info("Check ToWatch/ToRelease channel operations progress",
-			zap.Int("channel count", len(nodeAssign.Channels)),
+		log.Info("Checking ToWatch/ToRelease channel operations progress",
+			zap.Int("channel count", channelCount),
 			zap.Strings("channel names", chNames),
 		)
 
+		var futures []*conc.Future[any]
+		processBatch := func() {
+			for _, f := range futures {
+				got, err := f.Await()
+				if err == nil {
+					m.mu.Lock()
+					result := got.(poolResult)
+					m.store.UpdateState(result.successful, result.ch)
+					m.mu.Unlock()
+					advanced = true
+				}
+			}
+		}
+
 		for _, ch := range nodeAssign.Channels {
 			innerCh := ch
-
 			future := getOrCreateIOPool().Submit(func() (any, error) {
 				successful, got := m.Check(ctx, nodeAssign.NodeID, innerCh.GetWatchInfo())
 				if got {
@@ -611,22 +633,15 @@ func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*
 				return nil, errors.New("Got results with no progress")
 			})
 			futures = append(futures, future)
-		}
-
-		for _, f := range futures {
-			got, err := f.Await()
-			if err == nil {
-				m.mu.Lock()
-				result := got.(poolResult)
-				m.store.UpdateState(result.successful, result.ch)
-				m.mu.Unlock()
-
-				advanced = true
+			if len(futures) >= batchSize {
+				processBatch()
+				futures = nil
 			}
 		}
+		processBatch()
 
 		log.Info("Finish to Check ToWatch/ToRelease channel operations progress",
-			zap.Int("channel count", len(nodeAssign.Channels)),
+			zap.Int("channel count", channelCount),
 			zap.Strings("channel names", chNames),
 		)
 	}

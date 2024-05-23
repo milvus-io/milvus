@@ -2696,6 +2696,8 @@ type dataCoordConfig struct {
 	ChannelBalanceInterval       ParamItem `refreshable:"true"`
 	ChannelCheckInterval         ParamItem `refreshable:"true"`
 	ChannelOperationRPCTimeout   ParamItem `refreshable:"true"`
+	ChannelCheckBatchSize        ParamItem `refreshable:"true"`
+	ChannelNotifyBatchSize       ParamItem `refreshable:"true"`
 
 	// --- SEGMENTS ---
 	SegmentMaxSize                 ParamItem `refreshable:"false"`
@@ -2836,6 +2838,24 @@ func (p *dataCoordConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.ChannelOperationRPCTimeout.Init(base.mgr)
+
+	p.ChannelCheckBatchSize = ParamItem{
+		Key:          "dataCoord.channel.checkBatchSize",
+		Version:      "2.4.0",
+		DefaultValue: "24",
+		Doc:          "Channel manager check channel states in batches to avoid resource spikes",
+		Export:       true,
+	}
+	p.ChannelCheckBatchSize.Init(base.mgr)
+
+	p.ChannelNotifyBatchSize = ParamItem{
+		Key:          "dataCoord.channel.notifyBatchSize",
+		Version:      "2.4.0",
+		DefaultValue: "24",
+		Doc:          "Channel manager notify datanodes in batches to avoid resource spikes",
+		Export:       true,
+	}
+	p.ChannelNotifyBatchSize.Init(base.mgr)
 
 	p.SegmentMaxSize = ParamItem{
 		Key:          "dataCoord.segment.maxSize",
