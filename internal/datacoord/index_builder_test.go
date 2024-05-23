@@ -675,7 +675,30 @@ func TestIndexBuilder(t *testing.T) {
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 
-	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), nil)
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
+	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), handler)
 
 	assert.Equal(t, 6, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
@@ -741,6 +764,30 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
+
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
 	ib := &indexBuilder{
 		ctx: context.Background(),
 		tasks: map[int64]indexTaskState{
@@ -749,6 +796,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		meta:                      createMetaTable(ec),
 		chunkManager:              chunkManager,
 		indexEngineVersionManager: newIndexEngineVersionManager(),
+		handler:                   handler,
 	}
 
 	t.Run("meta not exist", func(t *testing.T) {
@@ -1414,9 +1462,32 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
 	}
 
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), nil)
+	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), handler)
 
 	t.Run("success to get opt field on startup", func(t *testing.T) {
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
