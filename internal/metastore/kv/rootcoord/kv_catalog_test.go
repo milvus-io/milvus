@@ -942,14 +942,14 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 	})
 }
 
-func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
+func Test_batchMultiSaveAndRemove(t *testing.T) {
 	t.Run("failed to save", func(t *testing.T) {
 		snapshot := kv.NewMockSnapshotKV()
 		snapshot.MultiSaveFunc = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return errors.New("error mock MultiSave")
 		}
 		saves := map[string]string{"k": "v"}
-		err := batchMultiSaveAndRemoveWithPrefix(snapshot, util.MaxEtcdTxnNum/2, saves, []string{}, 0)
+		err := batchMultiSaveAndRemove(snapshot, util.MaxEtcdTxnNum/2, saves, []string{}, 0)
 		assert.Error(t, err)
 	})
 	t.Run("failed to remove", func(t *testing.T) {
@@ -957,12 +957,12 @@ func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		snapshot.MultiSaveFunc = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return nil
 		}
-		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+		snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 			return errors.New("error mock MultiSaveAndRemoveWithPrefix")
 		}
 		saves := map[string]string{"k": "v"}
 		removals := []string{"prefix1", "prefix2"}
-		err := batchMultiSaveAndRemoveWithPrefix(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
+		err := batchMultiSaveAndRemove(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
 		assert.Error(t, err)
 	})
 	t.Run("normal case", func(t *testing.T) {
@@ -971,7 +971,7 @@ func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
 			log.Info("multi save", zap.Any("len", len(kvs)), zap.Any("saves", kvs))
 			return nil
 		}
-		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+		snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 			log.Info("multi save and remove with prefix", zap.Any("len of saves", len(saves)), zap.Any("len of removals", len(removals)),
 				zap.Any("saves", saves), zap.Any("removals", removals))
 			return nil
@@ -983,7 +983,7 @@ func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
 			saves[fmt.Sprintf("k%d", i)] = fmt.Sprintf("v%d", i)
 			removals = append(removals, fmt.Sprintf("k%d", i))
 		}
-		err := batchMultiSaveAndRemoveWithPrefix(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
+		err := batchMultiSaveAndRemove(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
 		assert.NoError(t, err)
 	})
 }

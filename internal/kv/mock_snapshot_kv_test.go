@@ -87,3 +87,19 @@ func Test_mockSnapshotKV_MultiSaveAndRemoveWithPrefix(t *testing.T) {
 		assert.NoError(t, err)
 	})
 }
+
+func Test_mockSnapshotKV_MultiSaveAndRemove(t *testing.T) {
+	t.Run("func not set", func(t *testing.T) {
+		snapshot := NewMockSnapshotKV()
+		err := snapshot.MultiSaveAndRemove(nil, nil, 0)
+		assert.NoError(t, err)
+	})
+	t.Run("func set", func(t *testing.T) {
+		snapshot := NewMockSnapshotKV()
+		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+			return nil
+		}
+		err := snapshot.MultiSaveAndRemove(nil, nil, 0)
+		assert.NoError(t, err)
+	})
+}
