@@ -340,7 +340,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (any, error) {
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (any, error) {
 		return h.proxy.DescribeCollection(reqCtx, req.(*milvuspb.DescribeCollectionRequest))
 	})
 	if err != nil {
@@ -1601,7 +1601,7 @@ func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (any, error) {
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (any, error) {
 		resp, err := h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
 		if errors.Is(err, merr.ErrIndexNotFound) {
 			return &milvuspb.DescribeIndexResponse{
@@ -1633,7 +1633,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 		CollectionName: collectionGetter.GetCollectionName(),
 		IndexName:      indexGetter.GetIndexName(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
 	})
 	if err == nil {
@@ -1681,7 +1681,7 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 		for key, value := range indexParam.Params {
 			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
 		}
-		resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
+		resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 			return h.proxy.CreateIndex(reqCtx, req.(*milvuspb.CreateIndexRequest))
 		})
 		if err != nil {
@@ -1700,7 +1700,7 @@ func (h *HandlersV2) dropIndex(ctx context.Context, c *gin.Context, anyReq any, 
 		CollectionName: collGetter.GetCollectionName(),
 		IndexName:      indexGetter.GetIndexName(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropIndex(reqCtx, req.(*milvuspb.DropIndexRequest))
 	})
 	if err == nil {
@@ -1752,7 +1752,7 @@ func (h *HandlersV2) createAlias(ctx context.Context, c *gin.Context, anyReq any
 		CollectionName: collectionGetter.GetCollectionName(),
 		Alias:          aliasGetter.GetAliasName(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateAlias(reqCtx, req.(*milvuspb.CreateAliasRequest))
 	})
 	if err == nil {
@@ -1767,7 +1767,7 @@ func (h *HandlersV2) dropAlias(ctx context.Context, c *gin.Context, anyReq any, 
 		DbName: dbName,
 		Alias:  getter.GetAliasName(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropAlias(reqCtx, req.(*milvuspb.DropAliasRequest))
 	})
 	if err == nil {
@@ -1784,7 +1784,7 @@ func (h *HandlersV2) alterAlias(ctx context.Context, c *gin.Context, anyReq any,
 		CollectionName: collectionGetter.GetCollectionName(),
 		Alias:          aliasGetter.GetAliasName(),
 	}
-	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
+	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterAlias(reqCtx, req.(*milvuspb.AlterAliasRequest))
 	})
 	if err == nil {
