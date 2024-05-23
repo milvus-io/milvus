@@ -494,7 +494,7 @@ func getTS(i *internalpb.RetrieveResults, idx int64) uint64 {
 	return 0
 }
 
-func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam, segments []Segment, plan *RetrievePlan) (*segcorepb.RetrieveResults, error) {
+func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam, segments []Segment, plan *RetrievePlan, manager *Manager) (*segcorepb.RetrieveResults, error) {
 	ctx, span := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "MergeSegcoreResults")
 	defer span.End()
 
@@ -605,8 +605,12 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			}
 			idx, theOffsets := i, offsets
 			future := GetSQPool().Submit(func() (any, error) {
-				r, err := validSegments[idx].RetrieveByOffsets(ctx, plan, theOffsets)
-				if err != nil {
+				var r *segcorepb.RetrieveResults
+				var err error
+				if err := doOnSegment(ctx, manager, validSegments[idx], func(ctx context.Context, segment Segment) error {
+					r, err = segment.RetrieveByOffsets(ctx, plan, theOffsets)
+					return err
+				}); err != nil {
 					return nil, err
 				}
 				segmentResults[idx] = r
@@ -666,8 +670,9 @@ func mergeSegcoreRetrieveResultsAndFillIfEmpty(
 	param *mergeParam,
 	segments []Segment,
 	plan *RetrievePlan,
+	manager *Manager,
 ) (*segcorepb.RetrieveResults, error) {
-	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, param, segments, plan)
+	mergedResult, err := MergeSegcoreRetrieveResults(ctx, retrieveResults, param, segments, plan, manager)
 	if err != nil {
 		return nil, err
 	}
