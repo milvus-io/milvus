@@ -38,6 +38,7 @@ import (
 // Otherwise, the request will pass. Limit also returns limit of limiter.
 type Limiter interface {
 	Check(dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error
+	Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error
 }
 
 // Component is the interface all services implement
