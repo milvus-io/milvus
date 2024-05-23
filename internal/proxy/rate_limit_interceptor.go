@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
@@ -206,7 +205,7 @@ func getRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
 		}
-		return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("unsupported request type %s", reflect.TypeOf(req).Name())
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("unsupported request type %T", req)
 	}
 }
 
