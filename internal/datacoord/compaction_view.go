@@ -148,7 +148,8 @@ func (v *SegmentView) Equal(other *SegmentView) bool {
 		v.DeltaSize == other.DeltaSize &&
 		v.BinlogCount == other.BinlogCount &&
 		v.StatslogCount == other.StatslogCount &&
-		v.DeltalogCount == other.DeltalogCount
+		v.DeltalogCount == other.DeltalogCount &&
+		v.DeltaRowCount == other.DeltaRowCount
 }
 
 func (v *SegmentView) String() string {
