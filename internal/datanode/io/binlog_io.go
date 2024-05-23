@@ -101,7 +101,6 @@ func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error 
 			})
 			return struct{}{}, err
 		})
-
 		futures = append(futures, future)
 	}
 

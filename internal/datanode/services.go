@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -235,10 +236,10 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
-	var task compactor
+	var task compaction.Compactor
+	binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
-		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
 		task = newLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
@@ -249,8 +250,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
-		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
-		task = newCompactionTask(
+		task = compaction.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
 			ds.metacache,
