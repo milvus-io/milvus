@@ -78,7 +78,6 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	ret := clusterRateLimiters.Check(rt, n)
 
 	if ret != nil {
-		clusterRateLimiters.Cancel(rt, n)
 		return ret
 	}
 
