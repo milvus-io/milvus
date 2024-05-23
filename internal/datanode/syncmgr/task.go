@@ -198,14 +198,14 @@ func (t *SyncTask) Run() (err error) {
 	}
 
 	actions := []metacache.SegmentAction{metacache.FinishSyncing(t.batchSize)}
-	switch {
-	case t.isDrop:
-		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Dropped))
-	case t.isFlush:
+	if t.isFlush {
 		actions = append(actions, metacache.UpdateState(commonpb.SegmentState_Flushed))
 	}
-
 	t.metacache.UpdateSegments(metacache.MergeSegmentAction(actions...), metacache.WithSegmentIDs(t.segment.SegmentID()))
+
+	if t.isDrop {
+		t.metacache.RemoveSegments(metacache.WithSegmentIDs(t.segment.SegmentID()))
+	}
 
 	log.Info("task done", zap.Float64("flushedSize", totalSize))
 

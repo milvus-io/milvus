@@ -67,6 +67,13 @@ func WithPartitionID(partitionID int64) SegmentFilter {
 	})
 }
 
+func WithPartitionIDs(partitionIDs []int64) SegmentFilter {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
+		idSet := typeutil.NewSet(partitionIDs...)
+		return idSet.Contain(info.partitionID)
+	})
+}
+
 func WithSegmentState(states ...commonpb.SegmentState) SegmentFilter {
 	set := typeutil.NewSet(states...)
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
