@@ -113,6 +113,10 @@ type EtcdConfig struct {
 	EtcdEnableAuth   ParamItem `refreshable:"false"`
 	EtcdAuthUserName ParamItem `refreshable:"false"`
 	EtcdAuthPassword ParamItem `refreshable:"false"`
+
+	// --- ETCD rpc size ---
+	MaxRPCSendMsgBytes ParamItem `refreshable:"false"`
+	MaxRPCRecvMsgBytes ParamItem `refreshable:"false"`
 }
 
 func (p *EtcdConfig) Init(base *BaseTable) {
@@ -302,6 +306,24 @@ We recommend using version 1.2 and above.`,
 		Export:  true,
 	}
 	p.EtcdAuthPassword.Init(base.mgr)
+
+	p.MaxRPCSendMsgBytes = ParamItem{
+		Key:          "etcd.maxRpcSendMsgBytes",
+		Version:      "2.4.4",
+		Doc:          "client-side request send limit in bytes. If 0, it defaults to 2.0 MiB (2 * 1024 * 1024)",
+		DefaultValue: "2097152",
+		Export:       true,
+	}
+	p.MaxRPCSendMsgBytes.Init(base.mgr)
+
+	p.MaxRPCRecvMsgBytes = ParamItem{
+		Key:          "etcd.maxRpcRecvMsgBytes",
+		Version:      "2.4.4",
+		Doc:          "client-side response receive limit. If 0, it defaults to math.MaxInt32",
+		DefaultValue: "2147483647",
+		Export:       true,
+	}
+	p.MaxRPCRecvMsgBytes.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

@@ -26,9 +26,9 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 type ResourceManagerSuite struct {
@@ -44,7 +44,7 @@ func (suite *ResourceManagerSuite) SetupSuite() {
 
 func (suite *ResourceManagerSuite) SetupTest() {
 	config := params.GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
+	cli, err := testutils.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),

@@ -33,8 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 type CollectionManagerSuite struct {
@@ -86,7 +86,7 @@ func (suite *CollectionManagerSuite) SetupSuite() {
 func (suite *CollectionManagerSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
+	cli, err := testutils.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),

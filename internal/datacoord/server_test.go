@@ -60,6 +60,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -3066,7 +3067,7 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	paramtable.Get().Save(Params.CommonCfg.DataCoordTimeTick.Key, Params.CommonCfg.DataCoordTimeTick.GetValue()+strconv.Itoa(rand.Int()))
 	paramtable.Get().Save(Params.RocksmqCfg.CompressionTypes.Key, "0,0,0,0,0")
 	factory := dependency.NewDefaultFactory(true)
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

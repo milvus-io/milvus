@@ -67,7 +67,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/crypto"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
@@ -219,7 +218,7 @@ func runIndexNode(ctx context.Context, localMsg bool, alias string) *grpcindexno
 			panic(err)
 		}
 		wg.Done()
-		etcd, err := etcd.GetEtcdClient(
+		etcd, err := testutils.GetEtcdClient(
 			Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 			Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 			Params.EtcdCfg.Endpoints.GetAsStrings(),
@@ -380,7 +379,7 @@ func TestProxy(t *testing.T) {
 	assert.NoError(t, err)
 	assert.NotNil(t, proxy)
 
-	etcdcli, err := etcd.GetEtcdClient(
+	etcdcli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

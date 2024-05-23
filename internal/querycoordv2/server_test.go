@@ -50,6 +50,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/tikv"
 )
 
@@ -630,7 +631,7 @@ func (suite *ServerSuite) newQueryCoord() (*Server, error) {
 		return nil, err
 	}
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

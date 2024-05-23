@@ -49,10 +49,10 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -128,7 +128,7 @@ func (suite *ServiceSuite) SetupSuite() {
 
 func (suite *ServiceSuite) SetupTest() {
 	config := params.GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
+	cli, err := testutils.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),

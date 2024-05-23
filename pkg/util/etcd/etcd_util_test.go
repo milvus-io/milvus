@@ -30,7 +30,7 @@ func TestEtcd(t *testing.T) {
 	assert.NoError(t, err)
 	defer StopEtcdServer()
 
-	etcdCli, err := GetEtcdClient(true, false, []string{}, "", "", "", "")
+	etcdCli, err := CreateEtcdClient(&EtcdCfg{UseEmbed: true})
 	assert.NoError(t, err)
 
 	key := path.Join("test", "test")
@@ -42,25 +42,31 @@ func TestEtcd(t *testing.T) {
 	assert.False(t, resp.Count < 1)
 	assert.Equal(t, string(resp.Kvs[0].Value), "value")
 
-	_, err = GetEtcdClient(false, true, []string{},
-		"../../../configs/cert/client.pem",
-		"../../../configs/cert/client.key",
-		"../../../configs/cert/ca.pem",
-		"some not right word")
+	_, err = CreateEtcdClient(&EtcdCfg{
+		UseSSL:     true,
+		CertFile:   "../../../configs/cert/client.pem",
+		KeyFile:    "../../../configs/cert/client.key",
+		CaCertFile: "../../../configs/cert/ca.pem",
+		MinVersion: "some not right word",
+	})
 	assert.Error(t, err)
 
-	_, err = GetEtcdClient(false, true, []string{},
-		"../../../configs/cert/client.pem",
-		"../../../configs/cert/client.key",
-		"wrong/file",
-		"1.2")
+	_, err = CreateEtcdClient(&EtcdCfg{
+		UseSSL:     true,
+		CertFile:   "../../../configs/cert/client.pem",
+		KeyFile:    "../../../configs/cert/client.key",
+		CaCertFile: "wrong/file",
+		MinVersion: "1.2",
+	})
 	assert.Error(t, err)
 
-	_, err = GetEtcdClient(false, true, []string{},
-		"wrong/file",
-		"../../../configs/cert/client.key",
-		"../../../configs/cert/ca.pem",
-		"1.2")
+	_, err = CreateEtcdClient(&EtcdCfg{
+		UseSSL:     true,
+		CertFile:   "wrong/file",
+		KeyFile:    "../../../configs/cert/client.key",
+		CaCertFile: "../../../configs/cert/ca.pem",
+		MinVersion: "1.2",
+	})
 	assert.Error(t, err)
 }
 

@@ -36,8 +36,8 @@ import (
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestWatchChannel(t *testing.T) {
@@ -46,7 +46,7 @@ func TestWatchChannel(t *testing.T) {
 	defer paramtable.Get().Reset(paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.Key)
 
 	node := newIDLEDataNodeMock(ctx, schemapb.DataType_Int64)
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

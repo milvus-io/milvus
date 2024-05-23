@@ -34,8 +34,8 @@ import (
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/task"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 type CheckerControllerSuite struct {
@@ -59,7 +59,7 @@ func (suite *CheckerControllerSuite) SetupSuite() {
 func (suite *CheckerControllerSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
+	cli, err := testutils.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),

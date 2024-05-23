@@ -51,12 +51,12 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/conc"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -133,7 +133,7 @@ func (suite *ServiceSuite) SetupTest() {
 	var err error
 	suite.node = NewQueryNode(ctx, suite.factory)
 	// init etcd
-	suite.etcdClient, err = etcd.GetEtcdClient(
+	suite.etcdClient, err = testutils.GetEtcdClient(
 		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
 		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),

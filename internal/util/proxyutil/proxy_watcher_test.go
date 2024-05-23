@@ -28,15 +28,15 @@ import (
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus/internal/util/sessionutil"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func TestProxyManager(t *testing.T) {
 	paramtable.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
 		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),
@@ -112,7 +112,7 @@ func TestProxyManager(t *testing.T) {
 func TestProxyManager_ErrCompacted(t *testing.T) {
 	paramtable.Init()
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		paramtable.Get().EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		paramtable.Get().EtcdCfg.EtcdUseSSL.GetAsBool(),
 		paramtable.Get().EtcdCfg.Endpoints.GetAsStrings(),

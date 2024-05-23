@@ -179,21 +179,11 @@ var getTiKVClient = tikv.GetTiKVClient
 
 func (s *Server) init() error {
 	params := paramtable.Get()
-	etcdConfig := &params.EtcdCfg
 	rpcParams := &params.RootCoordGrpcServerCfg
 	log.Debug("init params done..")
 
-	etcdCli, err := etcd.CreateEtcdClient(
-		etcdConfig.UseEmbedEtcd.GetAsBool(),
-		etcdConfig.EtcdEnableAuth.GetAsBool(),
-		etcdConfig.EtcdAuthUserName.GetValue(),
-		etcdConfig.EtcdAuthPassword.GetValue(),
-		etcdConfig.EtcdUseSSL.GetAsBool(),
-		etcdConfig.Endpoints.GetAsStrings(),
-		etcdConfig.EtcdTLSCert.GetValue(),
-		etcdConfig.EtcdTLSKey.GetValue(),
-		etcdConfig.EtcdTLSCACert.GetValue(),
-		etcdConfig.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(&params.EtcdCfg)
+	etcdCli, err := etcd.CreateEtcdClient(etcdConfig)
 	if err != nil {
 		log.Debug("RootCoord connect to etcd failed", zap.Error(err))
 		return err

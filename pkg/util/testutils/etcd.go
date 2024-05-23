@@ -19,8 +19,11 @@ package testutils
 import (
 	"os"
 
+	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.etcd.io/etcd/server/v3/embed"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 )
 
@@ -47,4 +50,44 @@ func (util *EmbedEtcdUtil) TearDownEmbedEtcd() {
 	if util.tempDir != "" {
 		os.RemoveAll(util.tempDir)
 	}
+}
+
+// GetEtcdClient returns etcd client
+// Note: should only used for test
+func GetEtcdClient(
+	useEmbedEtcd bool,
+	useSSL bool,
+	endpoints []string,
+	certFile string,
+	keyFile string,
+	caCertFile string,
+	minVersion string,
+) (*clientv3.Client, error) {
+	log.Info("create etcd client",
+		zap.Bool("useEmbedEtcd", useEmbedEtcd),
+		zap.Bool("useSSL", useSSL),
+		zap.Any("endpoints", endpoints),
+		zap.String("minVersion", minVersion))
+	if useEmbedEtcd {
+		return etcd.GetEmbedEtcdClient()
+	}
+
+	var cfg clientv3.Config
+	var err error
+	if useSSL {
+		cfg, err = etcd.GetSSLCfg(&etcd.EtcdCfg{
+			Endpoints:  endpoints,
+			CertFile:   certFile,
+			KeyFile:    keyFile,
+			CaCertFile: caCertFile,
+			MinVersion: minVersion,
+		})
+	} else {
+		cfg = etcd.GetBasicClientCfg(&etcd.EtcdCfg{Endpoints: endpoints})
+	}
+
+	if err != nil {
+		return nil, err
+	}
+	return clientv3.New(cfg)
 }

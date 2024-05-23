@@ -32,8 +32,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments"
 	"github.com/milvus-io/milvus/internal/util/dependency"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 type LocalWorkerTestSuite struct {
@@ -78,7 +78,7 @@ func (suite *LocalWorkerTestSuite) BeforeTest(suiteName, testName string) {
 	factory := dependency.MockDefaultFactory(true, paramtable.Get())
 	suite.node = NewQueryNode(suite.ctx, factory)
 	//	init etcd
-	suite.etcdClient, err = etcd.GetEtcdClient(
+	suite.etcdClient, err = testutils.GetEtcdClient(
 		suite.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		suite.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		suite.params.EtcdCfg.Endpoints.GetAsStrings(),

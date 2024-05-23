@@ -216,17 +216,8 @@ func (c *mck) connectEctd() {
 	if c.etcdIP != "" {
 		etcdCli, err = etcd.GetRemoteEtcdClient([]string{c.etcdIP})
 	} else {
-		etcdCli, err = etcd.CreateEtcdClient(
-			c.params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-			c.params.EtcdCfg.EtcdEnableAuth.GetAsBool(),
-			c.params.EtcdCfg.EtcdAuthUserName.GetValue(),
-			c.params.EtcdCfg.EtcdAuthPassword.GetValue(),
-			c.params.EtcdCfg.EtcdUseSSL.GetAsBool(),
-			c.params.EtcdCfg.Endpoints.GetAsStrings(),
-			c.params.EtcdCfg.EtcdTLSCert.GetValue(),
-			c.params.EtcdCfg.EtcdTLSKey.GetValue(),
-			c.params.EtcdCfg.EtcdTLSCACert.GetValue(),
-			c.params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+		etcdConfig := paramtable.GetEtcdCfg(&c.params.EtcdCfg)
+		etcdCli, err = etcd.CreateEtcdClient(etcdConfig)
 	}
 	if err != nil {
 		log.Fatal("failed to connect to etcd", zap.Error(err))

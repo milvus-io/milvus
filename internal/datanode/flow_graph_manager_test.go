@@ -29,14 +29,14 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 func TestFlowGraphManager(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
 
-	etcdCli, err := etcd.GetEtcdClient(
+	etcdCli, err := testutils.GetEtcdClient(
 		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
 		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
 		Params.EtcdCfg.Endpoints.GetAsStrings(),

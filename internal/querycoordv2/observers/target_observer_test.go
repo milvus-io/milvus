@@ -33,8 +33,8 @@ import (
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
 	"github.com/milvus-io/milvus/internal/querycoordv2/utils"
-	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
 type TargetObserverSuite struct {
@@ -64,7 +64,7 @@ func (suite *TargetObserverSuite) SetupSuite() {
 func (suite *TargetObserverSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
+	cli, err := testutils.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),
@@ -242,7 +242,7 @@ func (suite *TargetObserverCheckSuite) SetupSuite() {
 func (suite *TargetObserverCheckSuite) SetupTest() {
 	var err error
 	config := GenerateEtcdConfig()
-	cli, err := etcd.GetEtcdClient(
+	cli, err := testutils.GetEtcdClient(
 		config.UseEmbedEtcd.GetAsBool(),
 		config.EtcdUseSSL.GetAsBool(),
 		config.Endpoints.GetAsStrings(),

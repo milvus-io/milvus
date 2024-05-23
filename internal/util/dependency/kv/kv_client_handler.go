@@ -61,16 +61,6 @@ func getEtcdAndPath() (*clientv3.Client, string) {
 
 // Function that calls the Etcd constructor
 func createEtcdClient() (*clientv3.Client, error) {
-	cfg := &paramtable.Get().ServiceParam
-	return etcd.CreateEtcdClient(
-		cfg.EtcdCfg.UseEmbedEtcd.GetAsBool(),
-		cfg.EtcdCfg.EtcdEnableAuth.GetAsBool(),
-		cfg.EtcdCfg.EtcdAuthUserName.GetValue(),
-		cfg.EtcdCfg.EtcdAuthPassword.GetValue(),
-		cfg.EtcdCfg.EtcdUseSSL.GetAsBool(),
-		cfg.EtcdCfg.Endpoints.GetAsStrings(),
-		cfg.EtcdCfg.EtcdTLSCert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSKey.GetValue(),
-		cfg.EtcdCfg.EtcdTLSCACert.GetValue(),
-		cfg.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	etcdConfig := paramtable.GetEtcdCfg(&paramtable.Get().ServiceParam.EtcdCfg)
+	return etcd.CreateEtcdClient(etcdConfig)
 }
