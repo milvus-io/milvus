@@ -14,7 +14,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/retry"
@@ -143,6 +142,7 @@ func (wb *l0WriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 }
 
 func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPosition) int64 {
+	log := wb.logger
 	segmentID, ok := wb.l0Segments[partitionID]
 	if !ok {
 		err := retry.Do(context.Background(), func() error {
@@ -168,7 +168,6 @@ func (wb *l0WriteBuffer) getL0SegmentID(partitionID int64, startPos *msgpb.MsgPo
 		log.Info("Add a new level zero segment",
 			zap.Int64("segmentID", segmentID),
 			zap.String("level", datapb.SegmentLevel_L0.String()),
-			zap.String("channel", wb.channelName),
 			zap.Any("start position", startPos),
 		)
 	}

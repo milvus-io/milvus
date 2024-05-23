@@ -88,7 +88,7 @@ func deserializeSliceSparceEmbedding(bs []byte) (sliceSparseEmbedding, error) {
 		return sliceSparseEmbedding{}, errors.New("not valid sparse embedding bytes")
 	}
 
-	length = length / 8
+	length /= 8
 
 	result := sliceSparseEmbedding{
 		positions: make([]uint32, length),

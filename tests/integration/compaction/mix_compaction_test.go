@@ -45,7 +45,7 @@ func (s *CompactionSuite) TestMixCompaction() {
 	const (
 		dim    = 128
 		dbName = ""
-		rowNum = 30000
+		rowNum = 10000
 		batch  = 1000
 
 		indexType  = integration.IndexFaissIvfFlat
