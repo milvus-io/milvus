@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -2642,6 +2643,11 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
+	var limiter types.Limiter
+	if node.enableComplexDeleteLimit {
+		limiter, _ = node.GetRateLimiter()
+	}
+
 	dr := &deleteRunner{
 		req:             request,
 		idAllocator:     node.rowIDAllocator,
@@ -2650,6 +2656,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		chTicker:        node.chTicker,
 		queue:           node.sched.dmQueue,
 		lb:              node.lbPolicy,
+		limiter:         limiter,
 	}
 
 	log.Debug("init delete runner in Proxy")
