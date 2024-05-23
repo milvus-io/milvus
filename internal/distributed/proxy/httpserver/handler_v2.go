@@ -1381,7 +1381,7 @@ func (h *HandlersV2) listRoles(ctx context.Context, c *gin.Context, anyReq any, 
 func (h *HandlersV2) describeRole(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	getter, _ := anyReq.(RoleNameGetter)
 	req := &milvuspb.SelectGrantRequest{
-		Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: getter.GetRoleName()}},
+		Entity: &milvuspb.GrantEntity{Role: &milvuspb.RoleEntity{Name: getter.GetRoleName()}, DbName: dbName},
 	}
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.SelectGrant(reqCtx, req.(*milvuspb.SelectGrantRequest))
