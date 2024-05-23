@@ -359,12 +359,12 @@ class TestIndexOperation(TestcaseBase):
         collection_w.create_index(str_field2.name, index_name=index_name,
                                   check_task=CheckTasks.err_res,
                                   check_items=error)
-        assert len(collection_w.indexes) == 2
-        assert collection_w.indexes[0].index_name != collection_w.indexes[1].index_name
-        for index in collection_w.indexes:
+        all_indexes = collection_w.indexes
+        assert len(all_indexes) == 2
+        assert all_indexes[0].index_name != all_indexes[1].index_name
+        for index in all_indexes:
             assert index.index_name in [vec_index_name, index_name]
 
-    
     @pytest.mark.tags(CaseLabel.L1)
     def test_index_drop_index(self):
         """
