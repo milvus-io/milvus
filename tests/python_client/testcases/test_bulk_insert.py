@@ -1224,6 +1224,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert len(res) == len(query_data)
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
+    
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
