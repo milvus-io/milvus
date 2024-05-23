@@ -570,7 +570,7 @@ TEST_P(IndexTest, Mmap) {
     load_conf["mmap_filepath"] = "mmap/test_index_mmap_" + index_type;
     vec_index->Load(milvus::tracer::TraceContext{}, load_conf);
     EXPECT_EQ(vec_index->Count(), NB);
-    EXPECT_EQ(vec_index->GetDim(), DIM);
+    EXPECT_EQ(vec_index->GetDim(), is_sparse ? kTestSparseDim : DIM);
 
     milvus::SearchInfo search_info;
     search_info.topk_ = K;

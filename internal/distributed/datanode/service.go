@@ -404,3 +404,7 @@ func (s *Server) QueryImport(ctx context.Context, req *datapb.QueryImportRequest
 func (s *Server) DropImport(ctx context.Context, req *datapb.DropImportRequest) (*commonpb.Status, error) {
 	return s.datanode.DropImport(ctx, req)
 }
+
+func (s *Server) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
+	return s.datanode.QuerySlot(ctx, req)
+}

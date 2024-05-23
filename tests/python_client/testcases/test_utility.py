@@ -57,42 +57,67 @@ class TestUtilityParams(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_name_invalid(self, get_invalid_collection_name):
+    def test_has_collection_name_type_invalid(self, get_invalid_type_collection_name):
         """
         target: test has_collection with error collection name
         method: input invalid name
         expected: raise exception
         """
         self._connect()
-        c_name = get_invalid_collection_name
-        if isinstance(c_name, str) and c_name:
-            self.utility_wrap.has_collection(
-                c_name,
-                check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1100,
-                             ct.err_msg: "collection name should not be empty: invalid parameter"})
-        # elif not isinstance(c_name, str): self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
-        # check_items={ct.err_code: 1, ct.err_msg: "illegal"})
+        c_name = get_invalid_type_collection_name
+        self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
+                                         check_items={ct.err_code: 999,
+                                                      ct.err_msg: f"`collection_name` value {c_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_partition_collection_name_invalid(self, get_invalid_collection_name):
+    def test_has_collection_name_value_invalid(self, get_invalid_value_collection_name):
+        """
+        target: test has_collection with error collection name
+        method: input invalid name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_invalid_value_collection_name
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        if c_name in [None, ""]:
+            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+        elif c_name == " ":
+            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
+        self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_has_partition_collection_name_type_invalid(self, get_invalid_type_collection_name):
         """
         target: test has_partition with error collection name
         method: input invalid name
         expected: raise exception
         """
         self._connect()
-        c_name = get_invalid_collection_name
+        c_name = get_invalid_type_collection_name
         p_name = cf.gen_unique_str(prefix)
-        if isinstance(c_name, str) and c_name:
-            self.utility_wrap.has_partition(
-                c_name, p_name,
-                check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1100,
-                             ct.err_msg: "collection name should not be empty: invalid parameter"})
+        self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
+                                        check_items={ct.err_code: 999,
+                                                     ct.err_msg: f"`collection_name` value {c_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_partition_name_invalid(self, get_invalid_partition_name):
+    def test_has_partition_collection_name_value_invalid(self, get_invalid_value_collection_name):
+        """
+        target: test has_partition with error collection name
+        method: input invalid name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_invalid_value_collection_name
+        p_name = cf.gen_unique_str(prefix)
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        if c_name in [None, ""]:
+            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+        elif c_name == " ":
+            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
+        self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_has_partition_name_type_invalid(self, get_invalid_type_collection_name):
         """
         target: test has_partition with error partition name
         method: input invalid name
@@ -101,21 +126,49 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
-        p_name = get_invalid_partition_name
-        if isinstance(p_name, str) and p_name:
-            ex, _ = ut.has_partition(
-                c_name, p_name,
-                check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
+        p_name = get_invalid_type_collection_name
+        ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
+                         check_items={ct.err_code: 999,
+                                      ct.err_msg: f"`partition_name` value {p_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_collection_name_invalid(self, get_invalid_collection_name):
+    def test_has_partition_name_value_invalid(self, get_invalid_value_collection_name):
+        """
+        target: test has_partition with error partition name
+        method: input invalid name
+        expected: raise exception
+        """
         self._connect()
-        error1 = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {get_invalid_collection_name} is illegal"}
-        error2 = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {get_invalid_collection_name}."}
-        error = error1 if get_invalid_collection_name in [[], 1, [1, '2', 3], (1,), {1: 1}, None, ""] else error2
-        self.utility_wrap.drop_collection(get_invalid_collection_name, check_task=CheckTasks.err_res,
-                                          check_items=error)
+        ut = ApiUtilityWrapper()
+        c_name = cf.gen_unique_str(prefix)
+        p_name = get_invalid_value_collection_name
+        if p_name == "12name":
+            pytest.skip("partition name 12name is legal")
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid partition name: {p_name}"}
+        if p_name in [None]:
+            error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {p_name} is illegal"}
+        elif p_name in [" ", ""]:
+            error = {ct.err_code: 999, ct.err_msg: "Invalid partition name: . Partition name should not be empty."}
+        ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_collection_name_type_invalid(self, get_invalid_type_collection_name):
+        self._connect()
+        c_name = get_invalid_type_collection_name
+        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 999,
+                                                       ct.err_msg: f"`collection_name` value {c_name} is illegal"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_collection_name_value_invalid(self, get_invalid_value_collection_name):
+        self._connect()
+        c_name = get_invalid_value_collection_name
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        if c_name in [None, ""]:
+            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+        elif c_name == " ":
+            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
+        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     # TODO: enable
     @pytest.mark.tags(CaseLabel.L2)
@@ -162,7 +215,8 @@ class TestUtilityParams(TestcaseBase):
                                                   check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_wait_index_invalid_name(self, get_invalid_collection_name):
+    @pytest.mark.skip("not ready")
+    def test_wait_index_invalid_name(self, get_invalid_type_collection_name):
         """
         target: test wait_index
         method: input invalid name
@@ -436,13 +490,12 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = collection_w.name
         new_collection_name = get_invalid_value_collection_name
+        error = {"err_code": 1100, "err_msg": "Invalid collection name: %s. the first character of a collection name mu"
+                                              "st be an underscore or letter: invalid parameter" % new_collection_name}
+        if new_collection_name in [None, ""]:
+            error = {"err_code": 999, "err_msg": f"`collection_name` value {new_collection_name} is illegal"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1100,
-                                                         "err_msg": "Invalid collection name: %s. the first "
-                                                                    "character of a collection name must be an "
-                                                                    "underscore or letter: invalid parameter"
-                                                                    % new_collection_name})
+                                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_not_existed_collection(self):

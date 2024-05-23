@@ -37,6 +37,7 @@ const (
 	IndexSTLSORT IndexType = "STL_SORT"
 	IndexTRIE    IndexType = "TRIE"
 	IndexTrie    IndexType = "Trie"
+	IndexBitmap  IndexType = "BITMAP"
 
 	AutoIndex IndexType = "AUTOINDEX"
 )
@@ -56,7 +57,9 @@ func IsMmapSupported(indexType IndexType) bool {
 		indexType == IndexFaissBinIDMap ||
 		indexType == IndexFaissBinIvfFlat ||
 		indexType == IndexHNSW ||
-		indexType == IndexScaNN
+		indexType == IndexScaNN ||
+		indexType == IndexSparseInverted ||
+		indexType == IndexSparseWand
 }
 
 func IsDiskIndex(indexType IndexType) bool {

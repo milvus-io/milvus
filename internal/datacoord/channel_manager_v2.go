@@ -19,6 +19,7 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -30,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/lock"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -59,9 +61,9 @@ type SubCluster interface {
 }
 
 type ChannelManagerImplV2 struct {
-	ctx    context.Context
 	cancel context.CancelFunc
 	mu     lock.RWMutex
+	wg     sync.WaitGroup
 
 	h          Handler
 	store      RWChannelStore
@@ -101,7 +103,6 @@ func NewChannelManagerV2(
 ) (*ChannelManagerImplV2, error) {
 	m := &ChannelManagerImplV2{
 		h:          h,
-		ctx:        context.TODO(), // TODO
 		factory:    NewChannelPolicyFactoryV1(),
 		store:      NewChannelStoreV2(kv),
 		subCluster: subCluster,
@@ -122,7 +123,7 @@ func NewChannelManagerV2(
 }
 
 func (m *ChannelManagerImplV2) Startup(ctx context.Context, legacyNodes, allNodes []int64) error {
-	m.ctx, m.cancel = context.WithCancel(ctx)
+	ctx, m.cancel = context.WithCancel(ctx)
 
 	m.legacyNodes = typeutil.NewUniqueSet(legacyNodes...)
 
@@ -131,16 +132,19 @@ func (m *ChannelManagerImplV2) Startup(ctx context.Context, legacyNodes, allNode
 	oNodes := m.store.GetNodes()
 	m.mu.Unlock()
 
-	// Add new online nodes to the cluster.
 	offLines, newOnLines := lo.Difference(oNodes, allNodes)
-	lo.ForEach(newOnLines, func(nodeID int64, _ int) {
-		m.AddNode(nodeID)
-	})
-
 	// Delete offlines from the cluster
-	lo.ForEach(offLines, func(nodeID int64, _ int) {
-		m.DeleteNode(nodeID)
-	})
+	for _, nodeID := range offLines {
+		if err := m.DeleteNode(nodeID); err != nil {
+			return err
+		}
+	}
+	// Add new online nodes to the cluster.
+	for _, nodeID := range newOnLines {
+		if err := m.AddNode(nodeID); err != nil {
+			return err
+		}
+	}
 
 	m.mu.Lock()
 	nodeChannels := m.store.GetNodeChannelsBy(
@@ -156,7 +160,11 @@ func (m *ChannelManagerImplV2) Startup(ctx context.Context, legacyNodes, allNode
 
 	if m.balanceCheckLoop != nil {
 		log.Info("starting channel balance loop")
-		go m.balanceCheckLoop(m.ctx)
+		m.wg.Add(1)
+		go func() {
+			defer m.wg.Done()
+			m.balanceCheckLoop(ctx)
+		}()
 	}
 
 	log.Info("cluster start up",
@@ -171,6 +179,7 @@ func (m *ChannelManagerImplV2) Startup(ctx context.Context, legacyNodes, allNode
 func (m *ChannelManagerImplV2) Close() {
 	if m.cancel != nil {
 		m.cancel()
+		m.wg.Wait()
 	}
 }
 
@@ -439,12 +448,12 @@ func (m *ChannelManagerImplV2) CheckLoop(ctx context.Context) {
 				m.Balance()
 			}
 		case <-checkTicker.C:
-			m.AdvanceChannelState()
+			m.AdvanceChannelState(ctx)
 		}
 	}
 }
 
-func (m *ChannelManagerImplV2) AdvanceChannelState() {
+func (m *ChannelManagerImplV2) AdvanceChannelState(ctx context.Context) {
 	m.mu.RLock()
 	standbys := m.store.GetNodeChannelsBy(WithAllNodes(), WithChannelStates(Standby))
 	toNotifies := m.store.GetNodeChannelsBy(WithoutBufferNode(), WithChannelStates(ToWatch, ToRelease))
@@ -452,9 +461,9 @@ func (m *ChannelManagerImplV2) AdvanceChannelState() {
 	m.mu.RUnlock()
 
 	// Processing standby channels
-	updatedStandbys := m.advanceStandbys(standbys)
-	updatedToCheckes := m.advanceToChecks(toChecks)
-	updatedToNotifies := m.advanceToNotifies(toNotifies)
+	updatedStandbys := m.advanceStandbys(ctx, standbys)
+	updatedToCheckes := m.advanceToChecks(ctx, toChecks)
+	updatedToNotifies := m.advanceToNotifies(ctx, toNotifies)
 
 	if updatedStandbys || updatedToCheckes || updatedToNotifies {
 		m.lastActiveTimestamp = time.Now()
@@ -477,7 +486,7 @@ func (m *ChannelManagerImplV2) finishRemoveChannel(nodeID int64, channels ...RWC
 	}
 }
 
-func (m *ChannelManagerImplV2) advanceStandbys(standbys []*NodeChannelInfo) bool {
+func (m *ChannelManagerImplV2) advanceStandbys(_ context.Context, standbys []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range standbys {
 		validChannels := make(map[string]RWChannel)
@@ -513,7 +522,7 @@ func (m *ChannelManagerImplV2) advanceStandbys(standbys []*NodeChannelInfo) bool
 	return advanced
 }
 
-func (m *ChannelManagerImplV2) advanceToNotifies(toNotifies []*NodeChannelInfo) bool {
+func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range toNotifies {
 		channelCount := len(nodeAssign.Channels)
@@ -537,7 +546,7 @@ func (m *ChannelManagerImplV2) advanceToNotifies(toNotifies []*NodeChannelInfo) 
 			innerCh := ch
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				err := m.Notify(nodeAssign.NodeID, innerCh.GetWatchInfo())
+				err := m.Notify(ctx, nodeAssign.NodeID, innerCh.GetWatchInfo())
 				return innerCh, err
 			})
 			futures = append(futures, future)
@@ -573,7 +582,7 @@ type poolResult struct {
 	ch         RWChannel
 }
 
-func (m *ChannelManagerImplV2) advanceToChecks(toChecks []*NodeChannelInfo) bool {
+func (m *ChannelManagerImplV2) advanceToChecks(ctx context.Context, toChecks []*NodeChannelInfo) bool {
 	var advanced bool = false
 	for _, nodeAssign := range toChecks {
 		if len(nodeAssign.Channels) == 0 {
@@ -592,7 +601,7 @@ func (m *ChannelManagerImplV2) advanceToChecks(toChecks []*NodeChannelInfo) bool
 			innerCh := ch
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				successful, got := m.Check(nodeAssign.NodeID, innerCh.GetWatchInfo())
+				successful, got := m.Check(ctx, nodeAssign.NodeID, innerCh.GetWatchInfo())
 				if got {
 					return poolResult{
 						successful: successful,
@@ -624,14 +633,14 @@ func (m *ChannelManagerImplV2) advanceToChecks(toChecks []*NodeChannelInfo) bool
 	return advanced
 }
 
-func (m *ChannelManagerImplV2) Notify(nodeID int64, info *datapb.ChannelWatchInfo) error {
+func (m *ChannelManagerImplV2) Notify(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) error {
 	log := log.With(
 		zap.String("channel", info.GetVchan().GetChannelName()),
 		zap.Int64("assignment", nodeID),
 		zap.String("operation", info.GetState().String()),
 	)
 	log.Info("Notify channel operation")
-	err := m.subCluster.NotifyChannelOperation(m.ctx, nodeID, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{info}})
+	err := m.subCluster.NotifyChannelOperation(ctx, nodeID, &datapb.ChannelOperationsRequest{Infos: []*datapb.ChannelWatchInfo{info}})
 	if err != nil {
 		log.Warn("Fail to notify channel operations", zap.Error(err))
 		return err
@@ -640,16 +649,19 @@ func (m *ChannelManagerImplV2) Notify(nodeID int64, info *datapb.ChannelWatchInf
 	return nil
 }
 
-func (m *ChannelManagerImplV2) Check(nodeID int64, info *datapb.ChannelWatchInfo) (successful bool, got bool) {
+func (m *ChannelManagerImplV2) Check(ctx context.Context, nodeID int64, info *datapb.ChannelWatchInfo) (successful bool, got bool) {
 	log := log.With(
 		zap.Int64("opID", info.GetOpID()),
 		zap.Int64("nodeID", nodeID),
 		zap.String("check operation", info.GetState().String()),
 		zap.String("channel", info.GetVchan().GetChannelName()),
 	)
-	resp, err := m.subCluster.CheckChannelOperationProgress(m.ctx, nodeID, info)
+	resp, err := m.subCluster.CheckChannelOperationProgress(ctx, nodeID, info)
 	if err != nil {
-		log.Warn("Fail to check channel operation progress")
+		log.Warn("Fail to check channel operation progress", zap.Error(err))
+		if errors.Is(err, merr.ErrNodeNotFound) {
+			return false, true
+		}
 		return false, false
 	}
 	log.Info("Got channel operation progress",

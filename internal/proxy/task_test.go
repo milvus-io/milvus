@@ -754,6 +754,25 @@ func TestCreateCollectionTask(t *testing.T) {
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
+		// without vector field
+		schema = &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		}
+		noVectorSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = noVectorSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
 		task.CreateCollectionRequest = reqBackup
 
 		// validateCollectionName
@@ -3116,7 +3135,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		// check default partitions
 		err = InitMetaCache(ctx, rc, nil, nil)
 		assert.NoError(t, err)
-		partitionNames, err := getDefaultPartitionNames(ctx, "", task.CollectionName)
+		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
 		assert.NoError(t, err)
 		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
 

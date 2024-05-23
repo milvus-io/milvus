@@ -439,6 +439,7 @@ func (suite *ScoreBasedBalancerTestSuite) TestBalanceOneRound() {
 				suite.balancer.nodeManager.Add(nodeInfo)
 				suite.balancer.meta.ResourceManager.HandleNodeUp(c.nodes[i])
 			}
+			utils.RecoverAllCollection(balancer.meta)
 
 			// 4. balance and verify result
 			segmentPlans, channelPlans := suite.getCollectionBalancePlans(balancer, c.collectionID)

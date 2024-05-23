@@ -690,7 +690,7 @@ func (s *Server) DescribeIndex(ctx context.Context, req *indexpb.DescribeIndexRe
 	indexes := s.meta.indexMeta.GetIndexesForCollection(req.GetCollectionID(), req.GetIndexName())
 	if len(indexes) == 0 {
 		err := merr.WrapErrIndexNotFound(req.GetIndexName())
-		log.Warn("DescribeIndex fail", zap.Error(err))
+		log.RatedWarn(60, "DescribeIndex fail", zap.Error(err))
 		return &indexpb.DescribeIndexResponse{
 			Status: merr.Status(err),
 		}, nil

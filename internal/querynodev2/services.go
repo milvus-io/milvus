@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
@@ -190,6 +191,8 @@ func (node *QueryNode) composeIndexMeta(indexInfos []*indexpb.IndexInfo, schema 
 
 // WatchDmChannels create consumers on dmChannels to receive Incremental data，which is the important part of real-time query
 func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDmChannelsRequest) (status *commonpb.Status, e error) {
+	defer node.updateDistributionModifyTS()
+
 	channel := req.GetInfos()[0]
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
@@ -339,6 +342,7 @@ func (node *QueryNode) WatchDmChannels(ctx context.Context, req *querypb.WatchDm
 }
 
 func (node *QueryNode) UnsubDmChannel(ctx context.Context, req *querypb.UnsubDmChannelRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannelName()),
@@ -396,6 +400,7 @@ func (node *QueryNode) LoadPartitions(ctx context.Context, req *querypb.LoadPart
 
 // LoadSegments load historical data into query node, historical data can be vector data or index
 func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmentsRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
 	segment := req.GetInfos()[0]
 
 	log := log.Ctx(ctx).With(
@@ -527,6 +532,7 @@ func (node *QueryNode) ReleasePartitions(ctx context.Context, req *querypb.Relea
 
 // ReleaseSegments remove the specified segments from query node according segmentIDs, partitionIDs, and collectionID
 func (node *QueryNode) ReleaseSegments(ctx context.Context, req *querypb.ReleaseSegmentsRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
 	log := log.Ctx(ctx).With(
 		zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("shard", req.GetShard()),
@@ -1174,6 +1180,23 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	}
 	defer node.lifetime.Done()
 
+	lastModifyTs := node.getDistributionModifyTS()
+	distributionChange := func() bool {
+		if req.GetLastUpdateTs() == 0 {
+			return true
+		}
+
+		return req.GetLastUpdateTs() < lastModifyTs
+	}
+
+	if !distributionChange() {
+		return &querypb.GetDataDistributionResponse{
+			Status:       merr.Success(),
+			NodeID:       node.GetNodeID(),
+			LastModifyTs: lastModifyTs,
+		}, nil
+	}
+
 	sealedSegments := node.manager.Segment.GetBy(segments.WithType(commonpb.SegmentState_Sealed))
 	segmentVersionInfos := make([]*querypb.SegmentVersionInfo, 0, len(sealedSegments))
 	for _, s := range sealedSegments {
@@ -1239,15 +1262,18 @@ func (node *QueryNode) GetDataDistribution(ctx context.Context, req *querypb.Get
 	})
 
 	return &querypb.GetDataDistributionResponse{
-		Status:      merr.Success(),
-		NodeID:      node.GetNodeID(),
-		Segments:    segmentVersionInfos,
-		Channels:    channelVersionInfos,
-		LeaderViews: leaderViews,
+		Status:       merr.Success(),
+		NodeID:       node.GetNodeID(),
+		Segments:     segmentVersionInfos,
+		Channels:     channelVersionInfos,
+		LeaderViews:  leaderViews,
+		LastModifyTs: lastModifyTs,
 	}, nil
 }
 
 func (node *QueryNode) SyncDistribution(ctx context.Context, req *querypb.SyncDistributionRequest) (*commonpb.Status, error) {
+	defer node.updateDistributionModifyTS()
+
 	log := log.Ctx(ctx).With(zap.Int64("collectionID", req.GetCollectionID()),
 		zap.String("channel", req.GetChannel()), zap.Int64("currentNodeID", node.GetNodeID()))
 	// check node healthy
@@ -1401,4 +1427,17 @@ func (req *deleteRequestStringer) String() string {
 	}
 	tss := req.GetTimestamps()
 	return fmt.Sprintf("%s, timestamp range: [%d-%d]", pkInfo, tss[0], tss[len(tss)-1])
+}
+
+func (node *QueryNode) updateDistributionModifyTS() {
+	node.lastModifyLock.Lock()
+	defer node.lastModifyLock.Unlock()
+
+	node.lastModifyTs = time.Now().UnixNano()
+}
+
+func (node *QueryNode) getDistributionModifyTS() int64 {
+	node.lastModifyLock.RLock()
+	defer node.lastModifyLock.RUnlock()
+	return node.lastModifyTs
 }

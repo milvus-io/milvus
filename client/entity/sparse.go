@@ -56,7 +56,7 @@ func (e sliceSparseEmbedding) FieldType() FieldType {
 }
 
 func (e sliceSparseEmbedding) Get(idx int) (uint32, float32, bool) {
-	if idx < 0 || idx >= int(e.len) {
+	if idx < 0 || idx >= e.len {
 		return 0, 0, false
 	}
 	return e.positions[idx], e.values[idx], true
@@ -88,7 +88,7 @@ func deserializeSliceSparceEmbedding(bs []byte) (sliceSparseEmbedding, error) {
 		return sliceSparseEmbedding{}, errors.New("not valid sparse embedding bytes")
 	}
 
-	length = length / 8
+	length /= 8
 
 	result := sliceSparseEmbedding{
 		positions: make([]uint32, length),

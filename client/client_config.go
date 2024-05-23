@@ -1,7 +1,7 @@
 package client
 
 import (
-	"crypto/tls"
+	"context"
 	"fmt"
 	"math"
 	"net/url"
@@ -10,13 +10,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/backoff"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/credentials/insecure"
 	"google.golang.org/grpc/keepalive"
+
+	"github.com/milvus-io/milvus/pkg/util/crypto"
 )
 
 const (
@@ -59,14 +57,21 @@ type ClientConfig struct {
 
 	DialOptions []grpc.DialOption // Dial options for GRPC.
 
-	// RetryRateLimit *RetryRateLimitOption // option for retry on rate limit inteceptor
+	RetryRateLimit *RetryRateLimitOption // option for retry on rate limit inteceptor
 
 	DisableConn bool
+
+	metadataHeaders map[string]string
 
 	identifier    string // Identifier for this connection
 	ServerVersion string // ServerVersion
 	parsedAddress *url.URL
 	flags         uint64 // internal flags
+}
+
+type RetryRateLimitOption struct {
+	MaxRetry   uint
+	MaxBackoff time.Duration
 }
 
 func (cfg *ClientConfig) parse() error {
@@ -118,54 +123,36 @@ func (c *ClientConfig) setServerInfo(serverInfo string) {
 	c.ServerVersion = serverInfo
 }
 
-// Get parsed grpc dial options, should be called after parse was called.
-func (c *ClientConfig) getDialOption() []grpc.DialOption {
-	options := c.DialOptions
-	if c.DialOptions == nil {
-		// Add default connection options.
-		options = make([]grpc.DialOption, len(DefaultGrpcOpts))
-		copy(options, DefaultGrpcOpts)
+// parseAuthentication prepares authentication headers for grpc inteceptors based on the provided username, password or API key.
+func (c *ClientConfig) parseAuthentication() {
+	c.metadataHeaders = make(map[string]string)
+	if c.Username != "" || c.Password != "" {
+		value := crypto.Base64Encode(fmt.Sprintf("%s:%s", c.Username, c.Password))
+		c.metadataHeaders[authorizationHeader] = value
 	}
-
-	// Construct dial option.
-	if c.EnableTLSAuth {
-		options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
-	} else {
-		options = append(options, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	// API overwrites username & passwd
+	if c.APIKey != "" {
+		value := crypto.Base64Encode(c.APIKey)
+		c.metadataHeaders[authorizationHeader] = value
 	}
-
-	options = append(options,
-		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
-			grpc_retry.WithMax(6),
-			grpc_retry.WithBackoff(func(attempt uint) time.Duration {
-				return 60 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
-			}),
-			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
-		// c.getRetryOnRateLimitInterceptor(),
-		))
-
-	// options = append(options, grpc.WithChainUnaryInterceptor(
-	// 	createMetaDataUnaryInterceptor(c),
-	// ))
-	return options
 }
 
-// func (c *ClientConfig) getRetryOnRateLimitInterceptor() grpc.UnaryClientInterceptor {
-// 	if c.RetryRateLimit == nil {
-// 		c.RetryRateLimit = c.defaultRetryRateLimitOption()
-// 	}
+func (c *ClientConfig) getRetryOnRateLimitInterceptor() grpc.UnaryClientInterceptor {
+	if c.RetryRateLimit == nil {
+		c.RetryRateLimit = c.defaultRetryRateLimitOption()
+	}
 
-// 	return RetryOnRateLimitInterceptor(c.RetryRateLimit.MaxRetry, c.RetryRateLimit.MaxBackoff, func(ctx context.Context, attempt uint) time.Duration {
-// 		return 10 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
-// 	})
-// }
+	return RetryOnRateLimitInterceptor(c.RetryRateLimit.MaxRetry, c.RetryRateLimit.MaxBackoff, func(ctx context.Context, attempt uint) time.Duration {
+		return 10 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
+	})
+}
 
-// func (c *ClientConfig) defaultRetryRateLimitOption() *RetryRateLimitOption {
-// 	return &RetryRateLimitOption{
-// 		MaxRetry:   75,
-// 		MaxBackoff: 3 * time.Second,
-// 	}
-// }
+func (c *ClientConfig) defaultRetryRateLimitOption() *RetryRateLimitOption {
+	return &RetryRateLimitOption{
+		MaxRetry:   75,
+		MaxBackoff: 3 * time.Second,
+	}
+}
 
 // addFlags set internal flags
 func (c *ClientConfig) addFlags(flags uint64) {

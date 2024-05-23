@@ -176,21 +176,10 @@ func (m *meta) AddCollection(collection *collectionInfo) {
 // DropCollection drop a collection from meta
 func (m *meta) DropCollection(collectionID int64) {
 	log.Info("meta update: drop collection", zap.Int64("collectionID", collectionID))
-	segments := m.SelectSegments(WithCollection(collectionID))
 	m.Lock()
 	defer m.Unlock()
-	coll, ok := m.collections[collectionID]
-	if ok {
-		metrics.CleanupDataCoordNumStoredRows(coll.DatabaseName, collectionID)
-		metrics.CleanupDataCoordBulkInsertVectors(coll.DatabaseName, collectionID)
-		for _, seg := range segments {
-			metrics.CleanupDataCoordSegmentMetrics(coll.DatabaseName, collectionID, seg.ID)
-		}
-	} else {
-		log.Warn("not found database name", zap.Int64("collectionID", collectionID))
-	}
-
 	delete(m.collections, collectionID)
+	metrics.CleanupDataCoordWithCollectionID(collectionID)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
 }
@@ -318,13 +307,13 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
 		}
 	}
+
+	metrics.DataCoordNumStoredRows.Reset()
 	for collectionID, statesRows := range collectionRowsNum {
 		for state, rows := range statesRows {
 			coll, ok := m.collections[collectionID]
 			if ok {
 				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), state.String()).Set(float64(rows))
-			} else {
-				log.Warn("not found database name", zap.Int64("collectionID", collectionID))
 			}
 		}
 	}
@@ -1371,6 +1360,28 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
 			Set(float64(ts.Unix()))
 	}
+	return nil
+}
+
+// MarkChannelCheckpointDropped set channel checkpoint to MaxUint64 preventing future update
+// and remove the metrics for channel checkpoint lag.
+func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
+	m.channelCPs.Lock()
+	defer m.channelCPs.Unlock()
+
+	cp := &msgpb.MsgPosition{
+		ChannelName: channel,
+		Timestamp:   math.MaxUint64,
+	}
+
+	err := m.catalog.SaveChannelCheckpoints(ctx, []*msgpb.MsgPosition{cp})
+	if err != nil {
+		return err
+	}
+
+	m.channelCPs.checkpoints[channel] = cp
+
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 	return nil
 }
 

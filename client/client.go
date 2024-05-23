@@ -18,14 +18,20 @@ package client
 
 import (
 	"context"
+	"crypto/tls"
 	"fmt"
+	"math"
 	"os"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/gogo/status"
+	grpc_retry "github.com/grpc-ecosystem/go-grpc-middleware/retry"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -38,6 +44,11 @@ type Client struct {
 	conn    *grpc.ClientConn
 	service milvuspb.MilvusServiceClient
 	config  *ClientConfig
+
+	// mutable status
+	stateMut   sync.RWMutex
+	currentDB  string
+	identifier string
 
 	collCache *CollectionCache
 }
@@ -54,8 +65,10 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	// Parse remote address.
 	addr := c.config.getParsedAddress()
 
+	// parse authentication parameters
+	c.config.parseAuthentication()
 	// Parse grpc options
-	options := c.config.getDialOption()
+	options := c.dialOptions()
 
 	// Connect the grpc server.
 	if err := c.connect(ctx, addr, options...); err != nil {
@@ -69,6 +82,40 @@ func New(ctx context.Context, config *ClientConfig) (*Client, error) {
 	return c, nil
 }
 
+func (c *Client) dialOptions() []grpc.DialOption {
+	var options []grpc.DialOption
+	// Construct dial option.
+	if c.config.EnableTLSAuth {
+		options = append(options, grpc.WithTransportCredentials(credentials.NewTLS(&tls.Config{})))
+	} else {
+		options = append(options, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	if c.config.DialOptions == nil {
+		// Add default connection options.
+		options = append(options, DefaultGrpcOpts...)
+	} else {
+		options = append(options, c.config.DialOptions...)
+	}
+
+	options = append(options,
+		grpc.WithChainUnaryInterceptor(grpc_retry.UnaryClientInterceptor(
+			grpc_retry.WithMax(6),
+			grpc_retry.WithBackoff(func(attempt uint) time.Duration {
+				return 60 * time.Millisecond * time.Duration(math.Pow(3, float64(attempt)))
+			}),
+			grpc_retry.WithCodes(codes.Unavailable, codes.ResourceExhausted)),
+
+		// c.getRetryOnRateLimitInterceptor(),
+		))
+
+	options = append(options, grpc.WithChainUnaryInterceptor(
+		c.MetadataUnaryInterceptor(),
+	))
+
+	return options
+}
+
 func (c *Client) Close(ctx context.Context) error {
 	if c.conn == nil {
 		return nil
@@ -80,6 +127,18 @@ func (c *Client) Close(ctx context.Context) error {
 	c.conn = nil
 	c.service = nil
 	return nil
+}
+
+func (c *Client) usingDatabase(dbName string) {
+	c.stateMut.Lock()
+	defer c.stateMut.Unlock()
+	c.currentDB = dbName
+}
+
+func (c *Client) setIdentifier(identifier string) {
+	c.stateMut.Lock()
+	defer c.stateMut.Unlock()
+	c.identifier = identifier
 }
 
 func (c *Client) connect(ctx context.Context, addr string, options ...grpc.DialOption) error {
@@ -112,7 +171,7 @@ func (c *Client) connectInternal(ctx context.Context) error {
 
 	req := &milvuspb.ConnectRequest{
 		ClientInfo: &commonpb.ClientInfo{
-			SdkType:    "Golang",
+			SdkType:    "GoMilvusClient",
 			SdkVersion: common.SDKVersion,
 			LocalTime:  time.Now().String(),
 			User:       c.config.Username,
@@ -131,8 +190,8 @@ func (c *Client) connectInternal(ctx context.Context) error {
 						disableJSON |
 						disableParitionKey |
 						disableDynamicSchema)
+				return nil
 			}
-			return nil
 		}
 		return err
 	}
@@ -142,7 +201,7 @@ func (c *Client) connectInternal(ctx context.Context) error {
 	}
 
 	c.config.setServerInfo(resp.GetServerInfo().GetBuildTags())
-	c.config.setIdentifier(strconv.FormatInt(resp.GetIdentifier(), 10))
+	c.setIdentifier(strconv.FormatInt(resp.GetIdentifier(), 10))
 
 	return nil
 }

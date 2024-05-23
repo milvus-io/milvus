@@ -24,6 +24,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -34,10 +35,10 @@ const (
 )
 
 type compactionExecutor struct {
-	executing          *typeutil.ConcurrentMap[int64, compactor]                    // planID to compactor
-	completedCompactor *typeutil.ConcurrentMap[int64, compactor]                    // planID to compactor
+	executing          *typeutil.ConcurrentMap[int64, compaction.Compactor]         // planID to compactor
+	completedCompactor *typeutil.ConcurrentMap[int64, compaction.Compactor]         // planID to compactor
 	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionPlanResult] // planID to CompactionPlanResult
-	taskCh             chan compactor
+	taskCh             chan compaction.Compactor
 	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
 
 	// To prevent concurrency of release channel and compaction get results
@@ -47,39 +48,39 @@ type compactionExecutor struct {
 
 func newCompactionExecutor() *compactionExecutor {
 	return &compactionExecutor{
-		executing:          typeutil.NewConcurrentMap[int64, compactor](),
-		completedCompactor: typeutil.NewConcurrentMap[int64, compactor](),
+		executing:          typeutil.NewConcurrentMap[int64, compaction.Compactor](),
+		completedCompactor: typeutil.NewConcurrentMap[int64, compaction.Compactor](),
 		completed:          typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult](),
-		taskCh:             make(chan compactor, maxTaskNum),
+		taskCh:             make(chan compaction.Compactor, maxTaskNum),
 		dropped:            typeutil.NewConcurrentSet[string](),
 	}
 }
 
-func (c *compactionExecutor) execute(task compactor) {
+func (c *compactionExecutor) execute(task compaction.Compactor) {
 	c.taskCh <- task
 	c.toExecutingState(task)
 }
 
-func (c *compactionExecutor) toExecutingState(task compactor) {
-	c.executing.Insert(task.getPlanID(), task)
+func (c *compactionExecutor) toExecutingState(task compaction.Compactor) {
+	c.executing.Insert(task.GetPlanID(), task)
 }
 
-func (c *compactionExecutor) toCompleteState(task compactor) {
-	task.complete()
-	c.executing.GetAndRemove(task.getPlanID())
+func (c *compactionExecutor) toCompleteState(task compaction.Compactor) {
+	task.Complete()
+	c.executing.GetAndRemove(task.GetPlanID())
 }
 
 func (c *compactionExecutor) injectDone(planID UniqueID) {
 	c.completed.GetAndRemove(planID)
 	task, loaded := c.completedCompactor.GetAndRemove(planID)
 	if loaded {
-		log.Info("Compaction task inject done", zap.Int64("planID", planID), zap.String("channel", task.getChannelName()))
-		task.injectDone()
+		log.Info("Compaction task inject done", zap.Int64("planID", planID), zap.String("channel", task.GetChannelName()))
+		task.InjectDone()
 	}
 }
 
 // These two func are bounded for waitGroup
-func (c *compactionExecutor) executeWithState(task compactor) {
+func (c *compactionExecutor) executeWithState(task compaction.Compactor) {
 	go c.executeTask(task)
 }
 
@@ -94,11 +95,11 @@ func (c *compactionExecutor) start(ctx context.Context) {
 	}
 }
 
-func (c *compactionExecutor) executeTask(task compactor) {
+func (c *compactionExecutor) executeTask(task compaction.Compactor) {
 	log := log.With(
-		zap.Int64("planID", task.getPlanID()),
-		zap.Int64("Collection", task.getCollection()),
-		zap.String("channel", task.getChannelName()),
+		zap.Int64("planID", task.GetPlanID()),
+		zap.Int64("Collection", task.GetCollection()),
+		zap.String("channel", task.GetChannelName()),
 	)
 
 	defer func() {
@@ -107,23 +108,23 @@ func (c *compactionExecutor) executeTask(task compactor) {
 
 	log.Info("start to execute compaction")
 
-	result, err := task.compact()
+	result, err := task.Compact()
 	if err != nil {
-		task.injectDone()
+		task.InjectDone()
 		log.Warn("compaction task failed", zap.Error(err))
 	} else {
 		c.completed.Insert(result.GetPlanID(), result)
 		c.completedCompactor.Insert(result.GetPlanID(), task)
 	}
 
-	log.Info("end to execute compaction", zap.Int64("planID", task.getPlanID()))
+	log.Info("end to execute compaction")
 }
 
 func (c *compactionExecutor) stopTask(planID UniqueID) {
 	task, loaded := c.executing.GetAndRemove(planID)
 	if loaded {
-		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.getChannelName()))
-		task.stop()
+		log.Warn("compaction executor stop task", zap.Int64("planID", planID), zap.String("vChannelName", task.GetChannelName()))
+		task.Stop()
 	}
 }
 
@@ -141,8 +142,8 @@ func (c *compactionExecutor) discardPlan(channel string) {
 	c.resultGuard.Lock()
 	defer c.resultGuard.Unlock()
 
-	c.executing.Range(func(planID int64, task compactor) bool {
-		if task.getChannelName() == channel {
+	c.executing.Range(func(planID int64, task compaction.Compactor) bool {
+		if task.GetChannelName() == channel {
 			c.stopTask(planID)
 		}
 		return true
@@ -170,7 +171,7 @@ func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanR
 	)
 	results := make([]*datapb.CompactionPlanResult, 0)
 	// get executing results
-	c.executing.Range(func(planID int64, task compactor) bool {
+	c.executing.Range(func(planID int64, task compaction.Compactor) bool {
 		executing = append(executing, planID)
 		results = append(results, &datapb.CompactionPlanResult{
 			State:  commonpb.CompactionState_Executing,
@@ -190,9 +191,10 @@ func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanR
 		return true
 	})
 
-	// remote level zero results
+	// remove level zero results
 	lo.ForEach(completedLevelZero, func(planID int64, _ int) {
 		c.completed.Remove(planID)
+		c.completedCompactor.Remove(planID)
 	})
 
 	if len(results) > 0 {

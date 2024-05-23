@@ -1034,6 +1034,7 @@ type proxyConfig struct {
 	MustUsePartitionKey          ParamItem `refreshable:"true"`
 	SkipAutoIDCheck              ParamItem `refreshable:"true"`
 	SkipPartitionKeyCheck        ParamItem `refreshable:"true"`
+	EnablePublicPrivilege        ParamItem `refreshable:"false"`
 
 	AccessLog AccessLogConfig
 
@@ -1393,6 +1394,14 @@ please adjust in embedded Milvus: false`,
 		Doc:          "switch for whether proxy shall skip partition key check when inserting data",
 	}
 	p.SkipPartitionKeyCheck.Init(base.mgr)
+
+	p.EnablePublicPrivilege = ParamItem{
+		Key:          "proxy.enablePublicPrivilege",
+		Version:      "2.4.1",
+		DefaultValue: "true",
+		Doc:          "switch for whether proxy shall enable public privilege",
+	}
+	p.EnablePublicPrivilege.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "proxy.gracefulStopTimeout",
@@ -3406,6 +3415,9 @@ type dataNodeConfig struct {
 	L0BatchMemoryRatio ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
+
+	// slot
+	SlotCap ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3711,6 +3723,15 @@ if this parameter <= 0, will set it as 10`,
 		Export:       true,
 	}
 	p.GracefulStopTimeout.Init(base.mgr)
+
+	p.SlotCap = ParamItem{
+		Key:          "dataNode.slot.slotCap",
+		Version:      "2.4.2",
+		DefaultValue: "2",
+		Doc:          "The maximum number of tasks(e.g. compaction, importing) allowed to run concurrently on a datanode",
+		Export:       true,
+	}
+	p.SlotCap.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

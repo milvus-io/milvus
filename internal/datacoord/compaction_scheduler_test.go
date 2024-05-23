@@ -22,7 +22,8 @@ type SchedulerSuite struct {
 }
 
 func (s *SchedulerSuite) SetupTest() {
-	s.scheduler = NewCompactionScheduler()
+	cluster := NewMockCluster(s.T())
+	s.scheduler = NewCompactionScheduler(cluster)
 	s.scheduler.parallelTasks = map[int64][]*compactionTask{
 		100: {
 			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
@@ -39,7 +40,8 @@ func (s *SchedulerSuite) SetupTest() {
 }
 
 func (s *SchedulerSuite) TestScheduleEmpty() {
-	emptySch := NewCompactionScheduler()
+	cluster := NewMockCluster(s.T())
+	emptySch := NewCompactionScheduler(cluster)
 
 	tasks := emptySch.Schedule()
 	s.Empty(tasks)
@@ -71,6 +73,12 @@ func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
 		s.Run(test.description, func() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
+
+			if len(test.tasks) > 0 {
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{100: 0})
+				s.scheduler.cluster = cluster
+			}
 
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
@@ -111,6 +119,12 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
+			if len(test.tasks) > 0 {
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 2})
+				s.scheduler.cluster = cluster
+			}
+
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
@@ -120,7 +134,12 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 				return t.plan.PlanID
 			}))
 
-			// the second schedule returns empty for full paralleTasks
+			// the second schedule returns empty for no slot
+			if len(test.tasks) > 0 {
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 0})
+				s.scheduler.cluster = cluster
+			}
 			gotTasks = s.scheduler.Schedule()
 			s.Empty(gotTasks)
 
@@ -158,6 +177,12 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 			s.SetupTest()
 			s.Require().Equal(4, s.scheduler.GetTaskCount())
 
+			if len(test.tasks) > 0 {
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{102: 2})
+				s.scheduler.cluster = cluster
+			}
+
 			// submit the testing tasks
 			s.scheduler.Submit(test.tasks...)
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
@@ -167,7 +192,12 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 				return t.plan.PlanID
 			}))
 
-			// the second schedule returns empty for full paralleTasks
+			// the second schedule returns empty for no slot
+			if len(test.tasks) > 0 {
+				cluster := NewMockCluster(s.T())
+				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 0})
+				s.scheduler.cluster = cluster
+			}
 			if len(gotTasks) > 0 {
 				gotTasks = s.scheduler.Schedule()
 				s.Empty(gotTasks)
@@ -213,5 +243,19 @@ func (s *SchedulerSuite) TestFinish() {
 		taskNum, err = metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues(fmt.Sprint(datanodeID), datapb.CompactionType_Level0DeleteCompaction.String(), metrics.Done)
 		s.NoError(err)
 		s.MetricsEqual(taskNum, 1)
+	})
+}
+
+func (s *SchedulerSuite) TestPickNode() {
+	s.Run("test pickAnyNode", func() {
+		nodeSlots := map[int64]int64{
+			100: 2,
+			101: 6,
+		}
+		node := s.scheduler.pickAnyNode(nodeSlots)
+		s.Equal(int64(101), node)
+
+		node = s.scheduler.pickAnyNode(map[int64]int64{})
+		s.Equal(int64(NullNodeID), node)
 	})
 }

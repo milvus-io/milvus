@@ -6101,7 +6101,11 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
-			partitionIDs = lo.Values(partitions)
+			_, partitionIDs, err = typeutil.RearrangePartitionsForPartitionKey(partitions)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
 		} else {
 			if req.GetPartitionName() == "" {
 				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()

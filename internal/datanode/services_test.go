@@ -34,6 +34,7 @@ import (
 	allocator2 "github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -159,8 +160,12 @@ func (s *DataNodeServicesSuite) TestGetComponentStates() {
 
 func (s *DataNodeServicesSuite) TestGetCompactionState() {
 	s.Run("success", func() {
-		s.node.compactionExecutor.executing.Insert(int64(3), newMockCompactor(true))
-		s.node.compactionExecutor.executing.Insert(int64(2), newMockCompactor(true))
+		mockC := compaction.NewMockCompactor(s.T())
+		s.node.compactionExecutor.executing.Insert(int64(3), mockC)
+
+		mockC2 := compaction.NewMockCompactor(s.T())
+		s.node.compactionExecutor.executing.Insert(int64(2), mockC2)
+
 		s.node.compactionExecutor.completed.Insert(int64(1), &datapb.CompactionPlanResult{
 			PlanID: 1,
 			State:  commonpb.CompactionState_Completed,
@@ -168,9 +173,16 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 				{SegmentID: 10},
 			},
 		})
+
+		s.node.compactionExecutor.completed.Insert(int64(4), &datapb.CompactionPlanResult{
+			PlanID: 4,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+			State:  commonpb.CompactionState_Completed,
+		})
+
 		stat, err := s.node.GetCompactionState(s.ctx, nil)
 		s.Assert().NoError(err)
-		s.Assert().Equal(3, len(stat.GetResults()))
+		s.Assert().Equal(4, len(stat.GetResults()))
 
 		var mu sync.RWMutex
 		cnt := 0
@@ -182,7 +194,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 			}
 		}
 		mu.Lock()
-		s.Assert().Equal(1, cnt)
+		s.Assert().Equal(2, cnt)
 		mu.Unlock()
 
 		s.Assert().Equal(1, s.node.compactionExecutor.completed.Len())
@@ -652,5 +664,27 @@ func (s *DataNodeServicesSuite) TestRPCWatch() {
 		resp, err := s.node.CheckChannelOperationProgress(ctx, nil)
 		s.NoError(err)
 		s.False(merr.Ok(resp.GetStatus()))
+	})
+}
+
+func (s *DataNodeServicesSuite) TestQuerySlot() {
+	s.Run("node not healthy", func() {
+		s.SetupTest()
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		ctx := context.Background()
+		resp, err := s.node.QuerySlot(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(resp.GetStatus()))
+		s.ErrorIs(merr.Error(resp.GetStatus()), merr.ErrServiceNotReady)
+	})
+
+	s.Run("normal case", func() {
+		s.SetupTest()
+		ctx := context.Background()
+		resp, err := s.node.QuerySlot(ctx, nil)
+		s.NoError(err)
+		s.True(merr.Ok(resp.GetStatus()))
+		s.NoError(merr.Error(resp.GetStatus()))
 	})
 }

@@ -32,6 +32,7 @@ type Collection struct {
 	Loaded           bool
 	ConsistencyLevel ConsistencyLevel
 	ShardNum         int32
+	Properties       map[string]string
 }
 
 // Partition represent partition meta in Milvus

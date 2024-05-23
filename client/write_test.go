@@ -22,12 +22,14 @@ import (
 	"math/rand"
 	"testing"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/client/v2/entity"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type WriteSuite struct {
@@ -63,16 +65,25 @@ func (s *WriteSuite) TestInsert() {
 			s.Require().Len(ir.GetFieldsData(), 2)
 			s.EqualValues(3, ir.GetNumRows())
 			return &milvuspb.MutationResult{
-				Status: merr.Success(),
+				Status:    merr.Success(),
+				InsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
 			}, nil
 		}).Once()
 
-		err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
+		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
 			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
 		s.NoError(err)
+		s.EqualValues(3, result.InsertCount)
 	})
 
 	s.Run("dynamic_schema", func() {
@@ -86,17 +97,26 @@ func (s *WriteSuite) TestInsert() {
 			s.Require().Len(ir.GetFieldsData(), 3)
 			s.EqualValues(3, ir.GetNumRows())
 			return &milvuspb.MutationResult{
-				Status: merr.Success(),
+				Status:    merr.Success(),
+				InsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
 			}, nil
 		}).Once()
 
-		err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
+		result, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
 			WithVarcharColumn("extra", []string{"a", "b", "c"}).
 			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
 		s.NoError(err)
+		s.EqualValues(3, result.InsertCount)
 	})
 
 	s.Run("bad_input", func() {
@@ -141,7 +161,7 @@ func (s *WriteSuite) TestInsert() {
 
 		for _, tc := range cases {
 			s.Run(tc.tag, func() {
-				err := s.client.Insert(ctx, tc.input)
+				_, err := s.client.Insert(ctx, tc.input)
 				s.Error(err)
 			})
 		}
@@ -153,7 +173,7 @@ func (s *WriteSuite) TestInsert() {
 
 		s.mock.EXPECT().Insert(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
-		err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
+		_, err := s.client.Insert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
@@ -177,16 +197,25 @@ func (s *WriteSuite) TestUpsert() {
 			s.Require().Len(ur.GetFieldsData(), 2)
 			s.EqualValues(3, ur.GetNumRows())
 			return &milvuspb.MutationResult{
-				Status: merr.Success(),
+				Status:    merr.Success(),
+				UpsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
 			}, nil
 		}).Once()
 
-		err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
+		result, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
 			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
 		s.NoError(err)
+		s.EqualValues(3, result.UpsertCount)
 	})
 
 	s.Run("dynamic_schema", func() {
@@ -200,17 +229,26 @@ func (s *WriteSuite) TestUpsert() {
 			s.Require().Len(ur.GetFieldsData(), 3)
 			s.EqualValues(3, ur.GetNumRows())
 			return &milvuspb.MutationResult{
-				Status: merr.Success(),
+				Status:    merr.Success(),
+				UpsertCnt: 3,
+				IDs: &schemapb.IDs{
+					IdField: &schemapb.IDs_IntId{
+						IntId: &schemapb.LongArray{
+							Data: []int64{1, 2, 3},
+						},
+					},
+				},
 			}, nil
 		}).Once()
 
-		err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
+		result, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
 			WithVarcharColumn("extra", []string{"a", "b", "c"}).
 			WithInt64Column("id", []int64{1, 2, 3}).WithPartition(partName))
 		s.NoError(err)
+		s.EqualValues(3, result.UpsertCount)
 	})
 
 	s.Run("bad_input", func() {
@@ -255,7 +293,7 @@ func (s *WriteSuite) TestUpsert() {
 
 		for _, tc := range cases {
 			s.Run(tc.tag, func() {
-				err := s.client.Upsert(ctx, tc.input)
+				_, err := s.client.Upsert(ctx, tc.input)
 				s.Error(err)
 			})
 		}
@@ -267,7 +305,7 @@ func (s *WriteSuite) TestUpsert() {
 
 		s.mock.EXPECT().Upsert(mock.Anything, mock.Anything).Return(nil, merr.WrapErrServiceInternal("mocked")).Once()
 
-		err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
+		_, err := s.client.Upsert(ctx, NewColumnBasedInsertOption(collName).
 			WithFloatVectorColumn("vector", 128, lo.RepeatBy(3, func(i int) []float32 {
 				return lo.RepeatBy(128, func(i int) float32 { return rand.Float32() })
 			})).
@@ -315,11 +353,13 @@ func (s *WriteSuite) TestDelete() {
 					s.Equal(partName, dr.GetPartitionName())
 					s.Equal(tc.expectExpr, dr.GetExpr())
 					return &milvuspb.MutationResult{
-						Status: merr.Success(),
+						Status:    merr.Success(),
+						DeleteCnt: 100,
 					}, nil
 				}).Once()
-				err := s.client.Delete(ctx, tc.input)
+				result, err := s.client.Delete(ctx, tc.input)
 				s.NoError(err)
+				s.EqualValues(100, result.DeleteCount)
 			})
 		}
 	})

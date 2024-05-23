@@ -37,7 +37,6 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	pq "github.com/milvus-io/milvus/internal/util/importutilv2/parquet"
 	"github.com/milvus-io/milvus/internal/util/testutil"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -47,33 +46,38 @@ import (
 const dim = 128
 
 func GenerateParquetFile(filePath string, schema *schemapb.CollectionSchema, numRows int) error {
+	_, err := GenerateParquetFileAndReturnInsertData(filePath, schema, numRows)
+	return err
+}
+
+func GenerateParquetFileAndReturnInsertData(filePath string, schema *schemapb.CollectionSchema, numRows int) (*storage.InsertData, error) {
 	w, err := os.OpenFile(filePath, os.O_RDWR|os.O_CREATE, 0o666)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	pqSchema, err := pq.ConvertToArrowSchema(schema)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	fw, err := pqarrow.NewFileWriter(pqSchema, w, parquet.NewWriterProperties(parquet.WithMaxRowGroupLength(int64(numRows))), pqarrow.DefaultWriterProps())
 	if err != nil {
-		return err
+		return nil, err
 	}
 	defer fw.Close()
 
 	insertData, err := testutil.CreateInsertData(schema, numRows)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	columns, err := testutil.BuildArrayData(schema, insertData)
 	if err != nil {
-		return err
+		return nil, err
 	}
 
 	recordBatch := array.NewRecord(pqSchema, columns, int64(numRows))
-	return fw.Write(recordBatch)
+	return insertData, fw.Write(recordBatch)
 }
 
 func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSchema, rowCount int) (*internalpb.ImportFile, error) {
@@ -234,14 +238,7 @@ func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.Collection
 				data[fieldID] = typeutil.BFloat16BytesToFloat32Vector(bytes)
 			case schemapb.DataType_SparseFloatVector:
 				bytes := v.GetRow(i).([]byte)
-				elemCount := len(bytes) / 8
-				values := make(map[uint32]float32)
-				for j := 0; j < elemCount; j++ {
-					idx := common.Endian.Uint32(bytes[j*8:])
-					f := typeutil.BytesToFloat32(bytes[j*8+4:])
-					values[idx] = f
-				}
-				data[fieldID] = values
+				data[fieldID] = typeutil.SparseFloatBytesToMap(bytes)
 			default:
 				data[fieldID] = v.GetRow(i)
 			}

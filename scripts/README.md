@@ -4,7 +4,7 @@
 
 ```
 OS: Ubuntu 20.04
-go：1.20
+go：1.21
 cmake: >=3.18
 gcc： 7.5
 ```
@@ -22,6 +22,14 @@ $ go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
 ```
 
 Install OpenBlas library
+
+install using apt
+
+```shell
+sudo apt install -y libopenblas-dev
+```
+
+or build from source code
 
 ```shell
 $ wget https://github.com/xianyi/OpenBLAS/archive/v0.3.9.tar.gz && \

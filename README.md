@@ -56,13 +56,13 @@ Milvus was released under the [open-source Apache License 2.0](https://github.co
 ## Quick start
 
 ### Start with Zilliz Cloud
-Zilliz Cloud is a fully managed service on cloud and the simplest way to deploy LF AI Milvus®, See [Zilliz Cloud Quick Start Guide](https://zilliz.com/doc/quick_start) and start your [free trial](https://cloud.zilliz.com/signup). 
+Zilliz Cloud is a fully managed service on cloud and the simplest way to deploy LF AI Milvus®, See [Zilliz Cloud](https://zilliz.com/) and start your [free trial](https://cloud.zilliz.com/signup). 
 
 ### Install Milvus
 
-- [Standalone Quick Start Guide](https://milvus.io/docs/v2.0.x/install_standalone-docker.md)
+- [Standalone Quick Start Guide](https://milvus.io/docs/install_standalone-docker.md)
 
-- [Cluster Quick Start Guide](https://milvus.io/docs/v2.0.x/install_cluster-docker.md)
+- [Cluster Quick Start Guide](https://milvus.io/docs/install_cluster-docker.md)
 
 - [Advanced Deployment](https://github.com/milvus-io/milvus/wiki)
 
@@ -72,21 +72,21 @@ Check the requirements first.
 
 Linux systems (Ubuntu 20.04 or later recommended):
 ```bash
-go: >= 1.20
+go: >= 1.21
 cmake: >= 3.26.4
 gcc: 7.5
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 ```bash
-go: >= 1.20
+go: >= 1.21
 cmake: >= 3.26.4
 llvm: >= 15
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 ```bash
-go: >= 1.20 (Arch=ARM64)
+go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.26.4
 llvm: >= 15
 ```
@@ -169,7 +169,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 ### All contributors
 
 <br><!-- Do not remove start of hero-bot -->
-<img src="https://img.shields.io/badge/all--contributors-373-orange"><br>
+<img src="https://img.shields.io/badge/all--contributors-375-orange"><br>
 <a href="https://github.com/0xflotus"><img src="https://avatars.githubusercontent.com/u/26602940?v=4" width="30px" /></a>
 <a href="https://github.com/ABNER-1"><img src="https://avatars.githubusercontent.com/u/24547351?v=4" width="30px" /></a>
 <a href="https://github.com/Accagain2014"><img src="https://avatars.githubusercontent.com/u/9635216?v=4" width="30px" /></a>
@@ -284,6 +284,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/bjzhjing"><img src="https://avatars.githubusercontent.com/u/46661806?v=4" width="30px" /></a>
 <a href="https://github.com/bo-huang"><img src="https://avatars.githubusercontent.com/u/24309515?v=4" width="30px" /></a>
 <a href="https://github.com/brandonbiggs"><img src="https://avatars.githubusercontent.com/u/34954680?v=4" width="30px" /></a>
+<a href="https://github.com/brunocfnba"><img src="https://avatars.githubusercontent.com/u/7377163?v=4" width="30px" /></a>
 <a href="https://github.com/bryanwux"><img src="https://avatars.githubusercontent.com/u/17968665?v=4" width="30px" /></a>
 <a href="https://github.com/caesarjuly"><img src="https://avatars.githubusercontent.com/u/927521?v=4" width="30px" /></a>
 <a href="https://github.com/caosiyang"><img src="https://avatars.githubusercontent.com/u/2155120?v=4" width="30px" /></a>
@@ -371,6 +372,7 @@ Contributions to Milvus are welcome from everyone. See [Guidelines for Contribut
 <a href="https://github.com/jeffreye"><img src="https://avatars.githubusercontent.com/u/1737680?v=4" width="30px" /></a>
 <a href="https://github.com/jennyli-z"><img src="https://avatars.githubusercontent.com/u/93511422?v=4" width="30px" /></a>
 <a href="https://github.com/jhonroxton"><img src="https://avatars.githubusercontent.com/u/105436184?v=4" width="30px" /></a>
+<a href="https://github.com/jiangyinzuo"><img src="https://avatars.githubusercontent.com/u/40995042?v=4" width="30px" /></a>
 <a href="https://github.com/jiaoew1991"><img src="https://avatars.githubusercontent.com/u/2297455?v=4" width="30px" /></a>
 <a href="https://github.com/jielinxu"><img src="https://avatars.githubusercontent.com/u/52057195?v=4" width="30px" /></a>
 <a href="https://github.com/jingkl"><img src="https://avatars.githubusercontent.com/u/34296482?v=4" width="30px" /></a>

@@ -254,13 +254,9 @@ func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *s
 	log := log.With(zap.Int64("segmentID", segmentID))
 	log.Info("begin to init pk bloom filter", zap.Int("statsBinLogsLen", len(statsBinlogs)))
 
-	// get pkfield id
-	pkField := int64(-1)
-	for _, field := range schema.Fields {
-		if field.IsPrimaryKey {
-			pkField = field.FieldID
-			break
-		}
+	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
+	if err != nil {
+		return nil, err
 	}
 
 	// filter stats binlog files which is pk field stats log
@@ -268,7 +264,7 @@ func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *s
 	logType := storage.DefaultStatsType
 
 	for _, binlog := range statsBinlogs {
-		if binlog.FieldID != pkField {
+		if binlog.FieldID != pkField.GetFieldID() {
 			continue
 		}
 	Loop:

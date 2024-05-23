@@ -35,15 +35,17 @@ type CompactionScheduler struct {
 	taskGuard     lock.RWMutex
 
 	planHandler *compactionPlanHandler
+	cluster     Cluster
 }
 
 var _ Scheduler = (*CompactionScheduler)(nil)
 
-func NewCompactionScheduler() *CompactionScheduler {
+func NewCompactionScheduler(cluster Cluster) *CompactionScheduler {
 	return &CompactionScheduler{
 		taskNumber:    atomic.NewInt32(0),
 		queuingTasks:  make([]*compactionTask, 0),
 		parallelTasks: make(map[int64][]*compactionTask),
+		cluster:       cluster,
 	}
 }
 
@@ -62,22 +64,27 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 
 // Schedule pick 1 or 0 tasks for 1 node
 func (s *CompactionScheduler) Schedule() []*compactionTask {
-	nodeTasks := make(map[int64][]*compactionTask) // nodeID
-
 	s.taskGuard.Lock()
-	defer s.taskGuard.Unlock()
-	for _, task := range s.queuingTasks {
-		if _, ok := nodeTasks[task.dataNodeID]; !ok {
-			nodeTasks[task.dataNodeID] = make([]*compactionTask, 0)
-		}
-
-		nodeTasks[task.dataNodeID] = append(nodeTasks[task.dataNodeID], task)
+	nodeTasks := lo.GroupBy(s.queuingTasks, func(t *compactionTask) int64 {
+		return t.dataNodeID
+	})
+	s.taskGuard.Unlock()
+	if len(nodeTasks) == 0 {
+		return nil // To mitigate the need for frequent slot querying
 	}
+
+	nodeSlots := s.cluster.QuerySlots()
 
 	executable := make(map[int64]*compactionTask)
 
 	pickPriorPolicy := func(tasks []*compactionTask, exclusiveChannels []string, executing []string) *compactionTask {
 		for _, task := range tasks {
+			// TODO: sheep, replace pickShardNode with pickAnyNode
+			if nodeID := s.pickShardNode(task.dataNodeID, nodeSlots); nodeID == NullNodeID {
+				log.Warn("cannot find datanode for compaction task", zap.Int64("planID", task.plan.PlanID), zap.String("vchannel", task.plan.Channel))
+				continue
+			}
+
 			if lo.Contains(exclusiveChannels, task.plan.GetChannel()) {
 				continue
 			}
@@ -100,13 +107,11 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 		return nil
 	}
 
+	s.taskGuard.Lock()
+	defer s.taskGuard.Unlock()
 	// pick 1 or 0 task for 1 node
 	for node, tasks := range nodeTasks {
 		parallel := s.parallelTasks[node]
-		if len(parallel) >= calculateParallel() {
-			log.Info("Compaction parallel in DataNode reaches the limit", zap.Int64("nodeID", node), zap.Int("parallel", len(parallel)))
-			continue
-		}
 
 		var (
 			executing         = typeutil.NewSet[string]()
@@ -122,6 +127,7 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 		picked := pickPriorPolicy(tasks, channelsExecPrior.Collect(), executing.Collect())
 		if picked != nil {
 			executable[node] = picked
+			nodeSlots[node]--
 		}
 	}
 
@@ -210,4 +216,25 @@ func (s *CompactionScheduler) LogStatus() {
 
 func (s *CompactionScheduler) GetTaskCount() int {
 	return int(s.taskNumber.Load())
+}
+
+func (s *CompactionScheduler) pickAnyNode(nodeSlots map[int64]int64) int64 {
+	var (
+		nodeID   int64 = NullNodeID
+		maxSlots int64 = -1
+	)
+	for id, slots := range nodeSlots {
+		if slots > 0 && slots > maxSlots {
+			nodeID = id
+			maxSlots = slots
+		}
+	}
+	return nodeID
+}
+
+func (s *CompactionScheduler) pickShardNode(nodeID int64, nodeSlots map[int64]int64) int64 {
+	if nodeSlots[nodeID] > 0 {
+		return nodeID
+	}
+	return NullNodeID
 }

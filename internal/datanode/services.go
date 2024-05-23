@@ -27,6 +27,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
@@ -235,21 +236,21 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		taskCtx := trace.ContextWithSpanContext(node.ctx, spanCtx)*/
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
-	var task compactor
+	var task compaction.Compactor
+	binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
-		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
 		task = newLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
 			node.allocator,
 			ds.metacache,
 			node.syncMgr,
+			node.chunkManager,
 			req,
 		)
 	case datapb.CompactionType_MixCompaction:
-		binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
-		task = newCompactionTask(
+		task = compaction.NewMixCompactionTask(
 			taskCtx,
 			binlogIO,
 			ds.metacache,
@@ -418,7 +419,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	task := importv2.NewPreImportTask(req)
+	task := importv2.NewPreImportTask(req, node.importTaskMgr, node.chunkManager)
 	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added preimport task")
@@ -437,7 +438,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	task := importv2.NewImportTask(req)
+	task := importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
 	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added import task")
@@ -514,4 +515,17 @@ func (node *DataNode) DropImport(ctx context.Context, req *datapb.DropImportRequ
 	log.Info("datanode drop import done")
 
 	return merr.Success(), nil
+}
+
+func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &datapb.QuerySlotResponse{
+			Status: merr.Status(err),
+		}, nil
+	}
+
+	return &datapb.QuerySlotResponse{
+		Status:   merr.Success(),
+		NumSlots: Params.DataNodeCfg.SlotCap.GetAsInt64() - int64(node.compactionExecutor.executing.Len()),
+	}, nil
 }

@@ -127,7 +127,7 @@ type compactionPlanHandler struct {
 	stopWg   sync.WaitGroup
 }
 
-func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator,
+func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
@@ -135,7 +135,7 @@ func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta C
 		meta:      meta,
 		sessions:  sessions,
 		allocator: allocator,
-		scheduler: NewCompactionScheduler(),
+		scheduler: NewCompactionScheduler(cluster),
 	}
 }
 
@@ -199,7 +199,7 @@ func (c *compactionPlanHandler) start() {
 	// influence the schedule
 	go func() {
 		defer c.stopWg.Done()
-		scheduleTicker := time.NewTicker(200 * time.Millisecond)
+		scheduleTicker := time.NewTicker(2 * time.Second)
 		defer scheduleTicker.Stop()
 		log.Info("compaction handler start schedule")
 		for {
@@ -322,7 +322,6 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 
 		// Select sealed L1 segments for LevelZero compaction that meets the condition:
 		// dmlPos < triggerInfo.pos
-		// TODO: select L2 segments too
 		sealedSegments := c.meta.SelectSegments(WithCollection(task.triggerInfo.collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 			return (task.triggerInfo.partitionID == -1 || info.GetPartitionID() == task.triggerInfo.partitionID) &&
 				info.GetInsertChannel() == plan.GetChannel() &&
@@ -339,7 +338,7 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
 				SegmentID:    info.GetID(),
-				Level:        datapb.SegmentLevel_L1,
+				Level:        info.GetLevel(),
 				CollectionID: info.GetCollectionID(),
 				PartitionID:  info.GetPartitionID(),
 			}

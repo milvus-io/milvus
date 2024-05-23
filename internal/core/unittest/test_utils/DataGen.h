@@ -259,6 +259,18 @@ GenerateRandomSparseFloatVector(size_t rows,
 
     std::vector<std::map<int32_t, float>> data(rows);
 
+    // ensure the actual dim of the entire generated dataset is cols.
+    data[0][cols - 1] = real_distrib(rng);
+    --num_elements;
+
+    // Ensure each row has at least one non-zero value
+    for (size_t i = 0; i < rows; ++i) {
+        auto col = col_distrib(rng);
+        float val = real_distrib(rng);
+        data[i][col] = val;
+    }
+    num_elements -= rows;
+
     for (int32_t i = 0; i < num_elements; ++i) {
         auto row = row_distrib(rng);
         while (data[row].size() == (size_t)cols) {

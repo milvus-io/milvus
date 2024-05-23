@@ -19,6 +19,7 @@ set(INDEX_FILES
         ScalarIndexSort.cpp
         SkipIndex.cpp
         InvertedIndexTantivy.cpp
+        BitmapIndex.cpp
         )
 
 milvus_add_pkg_config("milvus_index")
