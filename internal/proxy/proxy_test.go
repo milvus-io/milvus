@@ -299,7 +299,7 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	multiLimiter := NewMultiRateLimiter()
+	multiLimiter := NewMultiRateLimiter(0, 0)
 	s.multiRateLimiter = multiLimiter
 
 	opts := tracer.GetInterceptorOpts()

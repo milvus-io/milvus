@@ -614,6 +614,9 @@ common:
 quotaAndLimits:
   enabled: true # `true` to enable quota and limits, `false` to disable.
   limits:
+    allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
+    allocWaitInterval: 1000 # retry wait duration when delete alloc forward data rate failed, in millisecond
+    complexDeleteLimitEnable: false # whether complex delete check forward data by limiter
     maxCollectionNum: 65536
     maxCollectionNumPerDB: 65536
   # quotaCenterCollectInterval is the time interval that quotaCenter

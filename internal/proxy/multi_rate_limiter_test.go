@@ -41,7 +41,7 @@ func TestMultiRateLimiter(t *testing.T) {
 	t.Run("test multiRateLimiter", func(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-		multiLimiter := NewMultiRateLimiter()
+		multiLimiter := NewMultiRateLimiter(0, 0)
 		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
 		for _, rt := range internalpb.RateType_value {
 			if isNotCollectionLevelLimitRequest(internalpb.RateType(rt)) {
@@ -73,7 +73,7 @@ func TestMultiRateLimiter(t *testing.T) {
 	t.Run("test global static limit", func(t *testing.T) {
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
-		multiLimiter := NewMultiRateLimiter()
+		multiLimiter := NewMultiRateLimiter(0, 0)
 		multiLimiter.collectionLimiters[1] = newRateLimiter(false)
 		multiLimiter.collectionLimiters[2] = newRateLimiter(false)
 		multiLimiter.collectionLimiters[3] = newRateLimiter(false)
@@ -115,7 +115,7 @@ func TestMultiRateLimiter(t *testing.T) {
 	})
 
 	t.Run("not enable quotaAndLimit", func(t *testing.T) {
-		multiLimiter := NewMultiRateLimiter()
+		multiLimiter := NewMultiRateLimiter(0, 0)
 		multiLimiter.collectionLimiters[collectionID] = newRateLimiter(false)
 		bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 		paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "false")
@@ -130,7 +130,7 @@ func TestMultiRateLimiter(t *testing.T) {
 		run := func(insertRate float64) {
 			bakInsertRate := Params.QuotaConfig.DMLMaxInsertRate.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.DMLMaxInsertRate.Key, fmt.Sprintf("%f", insertRate))
-			multiLimiter := NewMultiRateLimiter()
+			multiLimiter := NewMultiRateLimiter(0, 0)
 			bak := Params.QuotaConfig.QuotaAndLimitsEnabled.GetValue()
 			paramtable.Get().Save(Params.QuotaConfig.QuotaAndLimitsEnabled.Key, "true")
 			err := multiLimiter.Check([]int64{collectionID}, internalpb.RateType_DMLInsert, 1*1024*1024)
@@ -146,7 +146,7 @@ func TestMultiRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test set rates", func(t *testing.T) {
-		multiLimiter := NewMultiRateLimiter()
+		multiLimiter := NewMultiRateLimiter(0, 0)
 		zeroRates := make([]*internalpb.Rate, 0, len(internalpb.RateType_value))
 		for _, rt := range internalpb.RateType_value {
 			zeroRates = append(zeroRates, &internalpb.Rate{
@@ -168,7 +168,7 @@ func TestMultiRateLimiter(t *testing.T) {
 	})
 
 	t.Run("test quota states", func(t *testing.T) {
-		multiLimiter := NewMultiRateLimiter()
+		multiLimiter := NewMultiRateLimiter(0, 0)
 		zeroRates := make([]*internalpb.Rate, 0, len(internalpb.RateType_value))
 		for _, rt := range internalpb.RateType_value {
 			zeroRates = append(zeroRates, &internalpb.Rate{
