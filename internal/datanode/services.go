@@ -419,7 +419,7 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	task := importv2.NewPreImportTask(req)
+	task := importv2.NewPreImportTask(req, node.importTaskMgr, node.chunkManager)
 	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added preimport task")
@@ -438,7 +438,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	task := importv2.NewImportTask(req)
+	task := importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
 	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added import task")

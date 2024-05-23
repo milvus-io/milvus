@@ -17,18 +17,12 @@
 package importv2
 
 import (
-	"context"
-
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
+	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 )
 
 type TaskType int
@@ -130,6 +124,7 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 }
 
 type Task interface {
+	Execute() []*conc.Future[any]
 	GetJobID() int64
 	GetTaskID() int64
 	GetCollectionID() int64
@@ -139,183 +134,17 @@ type Task interface {
 	GetState() datapb.ImportTaskStateV2
 	GetReason() string
 	GetSchema() *schemapb.CollectionSchema
-	GetCtx() context.Context
-	GetOptions() []*commonpb.KeyValuePair
 	Cancel()
 	Clone() Task
 }
 
-type PreImportTask struct {
-	*datapb.PreImportTask
-	ctx          context.Context
-	cancel       context.CancelFunc
-	partitionIDs []int64
-	vchannels    []string
-	schema       *schemapb.CollectionSchema
-	options      []*commonpb.KeyValuePair
-}
-
-func NewPreImportTask(req *datapb.PreImportRequest) Task {
-	fileStats := lo.Map(req.GetImportFiles(), func(file *internalpb.ImportFile, _ int) *datapb.ImportFileStats {
-		return &datapb.ImportFileStats{
-			ImportFile: file,
-		}
-	})
-	ctx, cancel := context.WithCancel(context.Background())
-	// During binlog import, even if the primary key's autoID is set to true,
-	// the primary key from the binlog should be used instead of being reassigned.
-	if importutilv2.IsBackup(req.GetOptions()) {
-		UnsetAutoID(req.GetSchema())
+func WrapLogFields(task Task, fields ...zap.Field) []zap.Field {
+	res := []zap.Field{
+		zap.Int64("taskID", task.GetTaskID()),
+		zap.Int64("jobID", task.GetJobID()),
+		zap.Int64("collectionID", task.GetCollectionID()),
+		zap.String("type", task.GetType().String()),
 	}
-	return &PreImportTask{
-		PreImportTask: &datapb.PreImportTask{
-			JobID:        req.GetJobID(),
-			TaskID:       req.GetTaskID(),
-			CollectionID: req.GetCollectionID(),
-			State:        datapb.ImportTaskStateV2_Pending,
-			FileStats:    fileStats,
-		},
-		ctx:          ctx,
-		cancel:       cancel,
-		partitionIDs: req.GetPartitionIDs(),
-		vchannels:    req.GetVchannels(),
-		schema:       req.GetSchema(),
-		options:      req.GetOptions(),
-	}
-}
-
-func (p *PreImportTask) GetPartitionIDs() []int64 {
-	return p.partitionIDs
-}
-
-func (p *PreImportTask) GetVchannels() []string {
-	return p.vchannels
-}
-
-func (p *PreImportTask) GetType() TaskType {
-	return PreImportTaskType
-}
-
-func (p *PreImportTask) GetSchema() *schemapb.CollectionSchema {
-	return p.schema
-}
-
-func (p *PreImportTask) GetOptions() []*commonpb.KeyValuePair {
-	return p.options
-}
-
-func (p *PreImportTask) GetCtx() context.Context {
-	return p.ctx
-}
-
-func (p *PreImportTask) Cancel() {
-	p.cancel()
-}
-
-func (p *PreImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(p.GetCtx())
-	return &PreImportTask{
-		PreImportTask: proto.Clone(p.PreImportTask).(*datapb.PreImportTask),
-		ctx:           ctx,
-		cancel:        cancel,
-		partitionIDs:  p.GetPartitionIDs(),
-		vchannels:     p.GetVchannels(),
-		schema:        p.GetSchema(),
-		options:       p.GetOptions(),
-	}
-}
-
-type ImportTask struct {
-	*datapb.ImportTaskV2
-	ctx          context.Context
-	cancel       context.CancelFunc
-	segmentsInfo map[int64]*datapb.ImportSegmentInfo
-	req          *datapb.ImportRequest
-	metaCaches   map[string]metacache.MetaCache
-}
-
-func NewImportTask(req *datapb.ImportRequest) Task {
-	ctx, cancel := context.WithCancel(context.Background())
-	// During binlog import, even if the primary key's autoID is set to true,
-	// the primary key from the binlog should be used instead of being reassigned.
-	if importutilv2.IsBackup(req.GetOptions()) {
-		UnsetAutoID(req.GetSchema())
-	}
-	task := &ImportTask{
-		ImportTaskV2: &datapb.ImportTaskV2{
-			JobID:        req.GetJobID(),
-			TaskID:       req.GetTaskID(),
-			CollectionID: req.GetCollectionID(),
-			State:        datapb.ImportTaskStateV2_Pending,
-		},
-		ctx:          ctx,
-		cancel:       cancel,
-		segmentsInfo: make(map[int64]*datapb.ImportSegmentInfo),
-		req:          req,
-	}
-	task.initMetaCaches(req)
-	return task
-}
-
-func (t *ImportTask) initMetaCaches(req *datapb.ImportRequest) {
-	metaCaches := make(map[string]metacache.MetaCache)
-	schema := typeutil.AppendSystemFields(req.GetSchema())
-	for _, channel := range req.GetVchannels() {
-		info := &datapb.ChannelWatchInfo{
-			Vchan: &datapb.VchannelInfo{
-				CollectionID: req.GetCollectionID(),
-				ChannelName:  channel,
-			},
-			Schema: schema,
-		}
-		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
-			return metacache.NewBloomFilterSet()
-		})
-		metaCaches[channel] = metaCache
-	}
-	t.metaCaches = metaCaches
-}
-
-func (t *ImportTask) GetType() TaskType {
-	return ImportTaskType
-}
-
-func (t *ImportTask) GetPartitionIDs() []int64 {
-	return t.req.GetPartitionIDs()
-}
-
-func (t *ImportTask) GetVchannels() []string {
-	return t.req.GetVchannels()
-}
-
-func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
-	return t.req.GetSchema()
-}
-
-func (t *ImportTask) GetOptions() []*commonpb.KeyValuePair {
-	return t.req.GetOptions()
-}
-
-func (t *ImportTask) GetCtx() context.Context {
-	return t.ctx
-}
-
-func (t *ImportTask) Cancel() {
-	t.cancel()
-}
-
-func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
-	return lo.Values(t.segmentsInfo)
-}
-
-func (t *ImportTask) Clone() Task {
-	ctx, cancel := context.WithCancel(t.GetCtx())
-	return &ImportTask{
-		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
-		ctx:          ctx,
-		cancel:       cancel,
-		segmentsInfo: t.segmentsInfo,
-		req:          t.req,
-		metaCaches:   t.metaCaches,
-	}
+	res = append(res, fields...)
+	return res
 }

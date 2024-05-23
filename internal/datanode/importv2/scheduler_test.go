@@ -116,7 +116,7 @@ func (s *SchedulerSuite) SetupTest() {
 
 	s.manager = NewTaskManager()
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
-	s.scheduler = NewScheduler(s.manager, s.syncMgr, nil).(*scheduler)
+	s.scheduler = NewScheduler(s.manager).(*scheduler)
 }
 
 func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount int) *storage.InsertData {
@@ -236,7 +236,7 @@ func (s *SchedulerSuite) TestScheduler_Slots() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
 
 	slots := s.scheduler.Slots()
@@ -262,7 +262,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.scheduler.cm = cm
+	s.cm = cm
 
 	preimportReq := &datapb.PreImportRequest{
 		JobID:        1,
@@ -273,7 +273,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -316,7 +316,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Size(mock.Anything, mock.Anything).Return(1024, nil)
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.scheduler.cm = cm
+	s.cm = cm
 
 	preimportReq := &datapb.PreImportRequest{
 		JobID:        1,
@@ -327,7 +327,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Preimport_Failed() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{{Paths: []string{"dummy.json"}}},
 	}
-	preimportTask := NewPreImportTask(preimportReq)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
 
 	go s.scheduler.Start()
@@ -355,7 +355,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.scheduler.cm = cm
+	s.cm = cm
 
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
 		future := conc.Go(func() (struct{}, error) {
@@ -388,7 +388,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -416,7 +416,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 	cm := mocks.NewChunkManager(s.T())
 	ioReader := strings.NewReader(string(bytes))
 	cm.EXPECT().Reader(mock.Anything, mock.Anything).Return(&mockReader{Reader: ioReader}, nil)
-	s.scheduler.cm = cm
+	s.cm = cm
 
 	s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, task syncmgr.Task) *conc.Future[struct{}] {
 		future := conc.Go(func() (struct{}, error) {
@@ -449,7 +449,7 @@ func (s *SchedulerSuite) TestScheduler_Start_Import_Failed() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
 
 	go s.scheduler.Start()
@@ -487,9 +487,9 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 		Schema:       s.schema,
 		ImportFiles:  []*internalpb.ImportFile{importFile},
 	}
-	preimportTask := NewPreImportTask(preimportReq)
+	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
-	err := s.scheduler.readFileStat(s.reader, preimportTask, 0)
+	err := preimportTask.(*PreImportTask).readFileStat(s.reader, preimportTask, 0)
 	s.NoError(err)
 }
 
@@ -538,9 +538,9 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 			},
 		},
 	}
-	importTask := NewImportTask(importReq)
+	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
-	err := s.scheduler.importFile(s.reader, importTask)
+	err := importTask.(*ImportTask).importFile(s.reader, importTask)
 	s.NoError(err)
 }
 
