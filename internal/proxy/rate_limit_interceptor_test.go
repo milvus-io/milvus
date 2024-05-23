@@ -257,7 +257,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		_, _, _, _, err = getRequestInfo(context.Background(), &milvuspb.CalcDistanceRequest{})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test getFailedResponse", func(t *testing.T) {
