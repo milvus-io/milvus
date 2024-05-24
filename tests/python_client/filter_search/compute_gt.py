@@ -120,7 +120,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     train_data_file_name = glob.glob('/root/dataset/laion_with_scalar_medium_10m/train*.parquet')
     test_data_file_name = "/root/dataset/laion_with_scalar_medium_10m/test.parquet"
-    neighbor_dir = "."
+    neighbor_dir = "/root/dataset/laion_with_scalar_medium_10m"
     expr = args.filter
     neighbors_file_name_list = []
     for train_data_f in train_data_file_name:

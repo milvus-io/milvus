@@ -19,10 +19,6 @@ class MilvusUser(HttpUser):
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
                               catch_response=True
                               ) as resp:
-            # print(resp)
-            # print(resp.text)
-            # print(resp.status_code)
-            # print(resp.json()["code"])
             if resp.status_code != 200 or resp.json()["code"] != 200:
                 # print(resp.text)
                 resp.failure(f"search failed with error {resp.text}")
