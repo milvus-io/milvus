@@ -108,7 +108,7 @@ func initWarmupPool() {
 		)
 
 		warmupPool.Store(pool)
-		pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, config.NewHandler("qn.warmpool.lowpriority", ResizeLoadPool))
+		pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, config.NewHandler("qn.warmpool.lowpriority", ResizeWarmupPool))
 	})
 }
 
@@ -149,6 +149,14 @@ func ResizeLoadPool(evt *config.Event) {
 		pt := paramtable.Get()
 		newSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
 		resizePool(GetLoadPool(), newSize, "LoadPool")
+	}
+}
+
+func ResizeWarmupPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+		resizePool(GetWarmupPool(), newSize, "WarmupPool")
 	}
 }
 
