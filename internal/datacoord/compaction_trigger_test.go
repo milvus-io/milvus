@@ -2336,7 +2336,7 @@ func (s *CompactionTriggerSuite) TestEnableCompactionConfigDynamicly() {
 					ID:     s.collectionID,
 					Schema: s.schema,
 				}, nil).Once()
-				s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil).Times(1)
+				s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return().Times(1)
 
 				compactionID, err := s.tr.forceTriggerCompaction(s.collectionID)
 				s.NoError(err)
@@ -2512,7 +2512,7 @@ func (s *CompactionTriggerSuite) TestCollectionAutoCompaction() {
 
 		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil).Times(1)
 		s.allocator.EXPECT().allocID(mock.Anything).Return(20000, nil).Times(1)
-		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil).Times(1)
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return().Times(1)
 		s.tr.handleGlobalSignal(&compactionSignal{
 			segmentID:    1,
 			collectionID: s.collectionID,
@@ -2621,7 +2621,7 @@ func (s *CompactionTriggerSuite) TestHandleGlobalSignal() {
 		}, nil).Once()
 		s.allocator.EXPECT().allocTimestamp(mock.Anything).Return(10000, nil).Once()
 		s.compactionHandler.EXPECT().isFull().Return(false).Twice()
-		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return(nil).Once()
+		s.compactionHandler.EXPECT().execCompactionPlan(mock.Anything, mock.Anything).Return().Once()
 		s.allocator.EXPECT().allocID(mock.Anything).Return(19530, nil).Once()
 		err := s.tr.handleGlobalSignal(&compactionSignal{
 			collectionID: s.collectionID,
