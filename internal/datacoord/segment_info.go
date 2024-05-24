@@ -102,7 +102,7 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 		filter.AddFilter(criterion)
 	}
 	var result []*SegmentInfo
-	var candidates []*SegmentInfo
+	var candidates map[int64]*SegmentInfo
 	// apply criterion
 	switch {
 	case criterion.collectionID > 0:
@@ -110,9 +110,9 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 		if !ok {
 			return nil
 		}
-		candidates = lo.Values(collSegments.segments)
+		candidates = collSegments.segments
 	default:
-		candidates = lo.Values(s.segments)
+		candidates = s.segments
 	}
 	for _, segment := range candidates {
 		if criterion.Match(segment) {
