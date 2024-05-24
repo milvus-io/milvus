@@ -65,6 +65,10 @@ SegmentGrowingImpl::mask_with_delete(BitsetType& bitset,
             delete_bitset.size(),
             bitset.size()));
     bitset |= delete_bitset;
+    LOG_INFO("Segment:{} mark delete done, timestamp:{}, ins_bar:{}, "
+             "del_bar:{}, bitset_size:{}, bitset_count:{}",
+             this->id_, timestamp, ins_barrier,
+             del_barrier, bitset.size(), bitset.count());
 }
 
 void

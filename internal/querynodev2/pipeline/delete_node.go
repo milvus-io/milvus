@@ -57,7 +57,7 @@ func (dNode *deleteNode) addDeleteData(deleteDatas map[UniqueID]*delegator.Delet
 	log.Info("pipeline fetch delete msg",
 		zap.Int64("collectionID", dNode.collectionID),
 		zap.Int64("partitionID", msg.PartitionID),
-		zap.Int("insertRowNum", len(pks)),
+		zap.Int("deleteRowNum", len(pks)),
 		zap.Uint64("timestampMin", msg.BeginTimestamp),
 		zap.Uint64("timestampMax", msg.EndTimestamp))
 }

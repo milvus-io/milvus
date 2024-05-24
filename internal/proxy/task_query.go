@@ -619,23 +619,23 @@ func reduceRetrieveResults(ctx context.Context, retrieveResults []*internalpb.Re
 	if queryParams != nil && queryParams.offset > 0 {
 		for i := int64(0); i < queryParams.offset; i++ {
 			sel, drainOneResult := typeutil.SelectMinPK(retrieveLimit, validRetrieveResults, cursors)
-			if sel == -1 || (queryParams.reduceStopForBest && drainOneResult) {
+			if sel == -1 || drainOneResult {
 				return ret, nil
 			}
 			cursors[sel]++
 		}
 	}
 
-	reduceStopForBest := false
+	/*reduceStopForBest := false
 	if queryParams != nil {
 		reduceStopForBest = queryParams.reduceStopForBest
-	}
+	}*/
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
 		sel, drainOneResult := typeutil.SelectMinPK(retrieveLimit, validRetrieveResults, cursors)
-		if sel == -1 || (reduceStopForBest && drainOneResult) {
+		if sel == -1 || drainOneResult {
 			break
 		}
 

@@ -426,9 +426,13 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+	var lastPk interface{}
+	var lastTs uint64
+	var drainStop bool
 	for j := 0; j < loopEnd; {
 		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
-		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
+		if sel == -1 || drainOneResult {
+			drainStop = true
 			break
 		}
 
@@ -439,6 +443,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 			retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
 			idTsMap[pk] = ts
 			j++
+			lastPk = pk
+			lastTs = ts
 		} else {
 			// primary keys duplicate
 			skipDupCnt++
@@ -446,6 +452,8 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 				idTsMap[pk] = ts
 				typeutil.DeleteFieldData(ret.FieldsData)
 				retSize += typeutil.AppendFieldData(ret.FieldsData, validRetrieveResults[sel].GetFieldsData(), cursors[sel])
+				lastTs = ts
+				lastPk = pk
 			}
 		}
 
@@ -457,8 +465,12 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		cursors[sel]++
 	}
 
+	log.Ctx(ctx).Debug("Merge Internal query reduce done", zap.Any("lastPK", lastPk), zap.Int("loopEnd", loopEnd),
+		zap.Int64("limit", param.limit), zap.Bool("param.mergeStopForBest", param.mergeStopForBest),
+		zap.Uint64("lastTs", lastTs), zap.Bool("drainStop", drainStop))
+
 	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
+		log.Ctx(ctx).Debug("skip duplicated query result while reducing internal.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
 
 	requestCosts := lo.FilterMap(retrieveResults, func(result *internalpb.RetrieveResults, _ int) (*internalpb.CostAggregation, bool) {
@@ -519,7 +531,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
 		if r == nil || len(r.GetOffset()) == 0 || size == 0 {
-			log.Debug("filter out invalid retrieve result")
+			log.Ctx(ctx).Debug("filter out invalid retrieve result")
 			continue
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
@@ -548,9 +560,14 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	var availableCount int
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
+	var lastPK interface{}
 	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); {
 		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
-		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
+		if sel == -1 || drainOneResult {
+			log.Ctx(ctx).Debug("Merge SegCore stop looping for", zap.Int("sel", sel),
+				zap.Bool("mergeStopForBest", param.mergeStopForBest),
+				zap.Bool("drainOneResult", drainOneResult),
+				zap.Any("lastPK", lastPK))
 			break
 		}
 
@@ -562,6 +579,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 			selectedIndexes[sel] = append(selectedIndexes[sel], cursors[sel])
 			idSet[pk] = struct{}{}
 			availableCount++
+			lastPK = pk
 			j++
 		} else {
 			// primary keys duplicate
@@ -571,8 +589,11 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		cursors[sel]++
 	}
 
+	log.Ctx(ctx).Debug("Merge SegCore query reduce done", zap.Any("lastPK", lastPK), zap.Int("loopEnd", loopEnd),
+		zap.Int("limit", limit), zap.Int("availableCount", availableCount),
+		zap.Bool("param.mergeStopForBest", param.mergeStopForBest))
 	if skipDupCnt > 0 {
-		log.Debug("skip duplicated query result while reducing segcore.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
+		log.Ctx(ctx).Debug("skip duplicated query result while reducing segcore.RetrieveResults", zap.Int64("dupCount", skipDupCnt))
 	}
 
 	if !plan.ignoreNonPk {

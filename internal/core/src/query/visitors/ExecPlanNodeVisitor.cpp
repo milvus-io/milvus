@@ -264,10 +264,15 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
                                 cache_offsets);
         bitset_holder.flip();
     }
-
+    LOG_INFO("segment:{} before mark with timestamp, bitset_size:{}, bitset_count:{}, timestamp:{}",
+             segment->get_segment_id(), bitset_holder.size(), bitset_holder.count(), timestamp_);
     segment->mask_with_timestamps(bitset_holder, timestamp_);
 
+    LOG_INFO("segment:{} before mark with delete, bitset_size:{}, bitset_count:{}, timestamp:{}",
+             segment->get_segment_id(), bitset_holder.size(), bitset_holder.count(), timestamp_);
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
+    LOG_INFO("segment:{} after mark with delete, bitset_size:{}, bitset_count:{}, timestamp:{}",
+             segment->get_segment_id(), bitset_holder.size(), bitset_holder.count(), timestamp_);
     // if bitset_holder is all 1's, we got empty result
     if (bitset_holder.all() && !node.is_count_) {
         retrieve_result_opt_ = std::move(retrieve_result);
