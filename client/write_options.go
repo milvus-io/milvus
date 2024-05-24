@@ -28,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/client/v2/column"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/client/v2/row"
 )
 
 type InsertOption interface {
@@ -71,10 +72,8 @@ func (opt *columnBasedDataOption) processInsertColumns(colSchema *entity.Schema,
 		l := col.Len()
 		if rowSize == 0 {
 			rowSize = l
-		} else {
-			if rowSize != l {
-				return nil, 0, errors.New("column size not match")
-			}
+		} else if rowSize != l {
+			return nil, 0, errors.New("column size not match")
 		}
 		field, has := mNameField[col.Name()]
 		if !has {
@@ -245,6 +244,56 @@ func NewColumnBasedInsertOption(collName string, columns ...column.Column) *colu
 		collName: collName,
 		// leave partition name empty, using default partition
 	}
+}
+
+type rowBasedDataOption struct {
+	*columnBasedDataOption
+	rows []any
+}
+
+func NewRowBasedInsertOption(collName string, rows ...any) *rowBasedDataOption {
+	return &rowBasedDataOption{
+		columnBasedDataOption: &columnBasedDataOption{
+			collName: collName,
+		},
+		rows: rows,
+	}
+}
+
+func (opt *rowBasedDataOption) InsertRequest(coll *entity.Collection) (*milvuspb.InsertRequest, error) {
+	columns, err := row.AnyToColumns(opt.rows, coll.Schema)
+	if err != nil {
+		return nil, err
+	}
+	opt.columnBasedDataOption.columns = columns
+	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
+	if err != nil {
+		return nil, err
+	}
+	return &milvuspb.InsertRequest{
+		CollectionName: opt.collName,
+		PartitionName:  opt.partitionName,
+		FieldsData:     fieldsData,
+		NumRows:        uint32(rowNum),
+	}, nil
+}
+
+func (opt *rowBasedDataOption) UpsertRequest(coll *entity.Collection) (*milvuspb.UpsertRequest, error) {
+	columns, err := row.AnyToColumns(opt.rows, coll.Schema)
+	if err != nil {
+		return nil, err
+	}
+	opt.columnBasedDataOption.columns = columns
+	fieldsData, rowNum, err := opt.processInsertColumns(coll.Schema, opt.columns...)
+	if err != nil {
+		return nil, err
+	}
+	return &milvuspb.UpsertRequest{
+		CollectionName: opt.collName,
+		PartitionName:  opt.partitionName,
+		FieldsData:     fieldsData,
+		NumRows:        uint32(rowNum),
+	}, nil
 }
 
 type DeleteOption interface {

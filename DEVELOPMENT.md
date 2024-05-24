@@ -104,7 +104,7 @@ You can use Vscode to integrate C++ and Go together. Please replace user.setting
 Linux systems (Recommend Ubuntu 20.04 or later):
 
 ```bash
-go: >= 1.20
+go: >= 1.21
 cmake: >= 3.18
 gcc: 7.5
 conan: 1.61
@@ -113,7 +113,7 @@ conan: 1.61
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 
 ```bash
-go: >= 1.20
+go: >= 1.21
 cmake: >= 3.18
 llvm: >= 15
 conan: 1.61
@@ -122,7 +122,7 @@ conan: 1.61
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 
 ```bash
-go: >= 1.20 (Arch=ARM64)
+go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.18
 llvm: >= 15
 conan: 1.61
@@ -178,7 +178,7 @@ Confirm that your `GOPATH` and `GOBIN` environment variables are correctly set a
 ```shell
 $ go version
 ```
-Note: go >= 1.20 is required to build Milvus.
+Note: go >= 1.21 is required to build Milvus.
 
 #### Docker & Docker Compose
 
@@ -195,7 +195,13 @@ To build the Milvus project, run the following command:
 $ make
 ```
 
-If this command succeed, you will now have an executable at `bin/milvus` off of your Milvus project directory.
+If this command succeeds, you will now have an executable at `bin/milvus` in your Milvus project directory.
+
+If you want to run the `bin/milvus` executable on the host machine, you need to set `LD_LIBRARY_PATH` temporarily:
+
+```shell
+$ LD_LIBRARY_PATH=./internal/core/output/lib:lib:$LD_LIBRARY_PATH ./bin/milvus
+```
 
 If you want to update proto file before `make`, we can use the following command:
 
@@ -239,8 +245,8 @@ pip3 install conan==1.61.0
 #### Install GO 1.80
 
 ```bash
-wget https://go.dev/dl/go1.18.10.linux-arm64.tar.gz
-tar zxf go1.18.10.linux-arm64.tar.gz
+wget https://go.dev/dl/go1.21.10.linux-arm64.tar.gz
+tar zxf go1.21.10.linux-arm64.tar.gz
 mv ./go /usr/local
 vi /etc/profile
 export PATH=$PATH:/usr/local/go/bin
@@ -500,7 +506,6 @@ $ ./build/build_image.sh // build milvus latest docker image
 $ docker images // check if milvus latest image is ready
 REPOSITORY                 TAG                                 IMAGE ID       CREATED          SIZE
 milvusdb/milvus            latest                              63c62ff7c1b7   52 minutes ago   570MB
-$ install with docker compose
 ```
 
 ## GitHub Flow

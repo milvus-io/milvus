@@ -17,6 +17,8 @@
 package metrics
 
 import (
+	"fmt"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -129,7 +131,7 @@ var (
 			Name:      "task_latency",
 			Help:      "latency of all kind of task in query coord scheduler scheduler",
 			Buckets:   longTaskBuckets,
-		}, []string{taskTypeLabel, channelNameLabelName})
+		}, []string{collectionIDLabelName, taskTypeLabel, channelNameLabelName})
 )
 
 // RegisterQueryCoord registers QueryCoord metrics
@@ -144,4 +146,10 @@ func RegisterQueryCoord(registry *prometheus.Registry) {
 	registry.MustRegister(QueryCoordNumQueryNodes)
 	registry.MustRegister(QueryCoordCurrentTargetCheckpointUnixSeconds)
 	registry.MustRegister(QueryCoordTaskLatency)
+}
+
+func CleanQueryCoordMetricsWithCollectionID(collectionID int64) {
+	QueryCoordTaskLatency.DeletePartialMatch(prometheus.Labels{
+		collectionIDLabelName: fmt.Sprint(collectionID),
+	})
 }

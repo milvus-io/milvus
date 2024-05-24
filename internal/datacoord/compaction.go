@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/tracer"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -44,11 +45,12 @@ const (
 	tsTimeout = uint64(1)
 )
 
+//go:generate mockery --name=compactionPlanContext --structname=MockCompactionPlanContext --output=./  --filename=mock_compaction_plan_context.go --with-expecter --inpackage
 type compactionPlanContext interface {
 	start()
 	stop()
 	// execCompactionPlan start to execute plan and return immediately
-	execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error
+	execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan)
 	// getCompaction return compaction task. If planId does not exist, return nil.
 	getCompaction(planID int64) *compactionTask
 	// isFull return true if the task pool is full
@@ -110,7 +112,7 @@ func (t *compactionTask) shadowClone(opts ...compactionTaskOpt) *compactionTask 
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	mu    sync.RWMutex
+	mu    lock.RWMutex
 	plans map[int64]*compactionTask // planID -> task
 
 	meta      CompactionMeta
@@ -124,7 +126,7 @@ type compactionPlanHandler struct {
 	stopWg   sync.WaitGroup
 }
 
-func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator,
+func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:     make(map[int64]*compactionTask),
@@ -132,7 +134,7 @@ func newCompactionPlanHandler(sessions SessionManager, cm ChannelManager, meta C
 		meta:      meta,
 		sessions:  sessions,
 		allocator: allocator,
-		scheduler: NewCompactionScheduler(),
+		scheduler: NewCompactionScheduler(cluster),
 	}
 }
 
@@ -163,7 +165,7 @@ func (c *compactionPlanHandler) start() {
 	// influence the schedule
 	go func() {
 		defer c.stopWg.Done()
-		scheduleTicker := time.NewTicker(200 * time.Millisecond)
+		scheduleTicker := time.NewTicker(2 * time.Second)
 		defer scheduleTicker.Stop()
 		log.Info("compaction handler start schedule")
 		for {
@@ -284,14 +286,8 @@ func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskO
 	}
 }
 
-func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
-	nodeID, err := c.chManager.FindWatcher(plan.GetChannel())
-	if err != nil {
-		log.Error("failed to find watcher", zap.Int64("planID", plan.GetPlanID()), zap.Error(err))
-		return err
-	}
-
-	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.Int64("nodeID", nodeID))
+func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
+	log := log.With(zap.Int64("planID", plan.GetPlanID()))
 	c.setSegmentsCompacting(plan, true)
 
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", plan.GetType()))
@@ -300,7 +296,6 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 		triggerInfo: signal,
 		plan:        plan,
 		state:       pipelining,
-		dataNodeID:  nodeID,
 		span:        span,
 	}
 	c.mu.Lock()
@@ -308,8 +303,7 @@ func (c *compactionPlanHandler) enqueuePlan(signal *compactionSignal, plan *data
 	c.mu.Unlock()
 
 	c.scheduler.Submit(task)
-	log.Info("Compaction plan submited")
-	return nil
+	log.Info("Compaction plan submitted")
 }
 
 func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
@@ -329,7 +323,6 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 
 		// Select sealed L1 segments for LevelZero compaction that meets the condition:
 		// dmlPos < triggerInfo.pos
-		// TODO: select L2 segments too
 		sealedSegments := c.meta.SelectSegments(WithCollection(task.triggerInfo.collectionID), SegmentFilterFunc(func(info *SegmentInfo) bool {
 			return (task.triggerInfo.partitionID == -1 || info.GetPartitionID() == task.triggerInfo.partitionID) &&
 				info.GetInsertChannel() == plan.GetChannel() &&
@@ -345,10 +338,14 @@ func (c *compactionPlanHandler) RefreshPlan(task *compactionTask) error {
 
 		sealedSegBinlogs := lo.Map(sealedSegments, func(info *SegmentInfo, _ int) *datapb.CompactionSegmentBinlogs {
 			return &datapb.CompactionSegmentBinlogs{
-				SegmentID:    info.GetID(),
-				Level:        datapb.SegmentLevel_L1,
-				CollectionID: info.GetCollectionID(),
-				PartitionID:  info.GetPartitionID(),
+				SegmentID:           info.GetID(),
+				FieldBinlogs:        nil,
+				Field2StatslogPaths: info.GetStatslogs(),
+				Deltalogs:           nil,
+				InsertChannel:       info.GetInsertChannel(),
+				Level:               info.GetLevel(),
+				CollectionID:        info.GetCollectionID(),
+				PartitionID:         info.GetPartitionID(),
 			}
 		})
 
@@ -415,11 +412,11 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 }
 
 // execCompactionPlan start to execute plan and return immediately
-func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
+func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
 	if !compactionEnabled() {
 		return nil
 	}
-	return c.enqueuePlan(signal, plan)
+	c.enqueuePlan(signal, plan)
 }
 
 func (c *compactionPlanHandler) setSegmentsCompacting(plan *datapb.CompactionPlan, compacting bool) {
@@ -494,25 +491,17 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
 	} else {
 		// Also prepare metric updates.
-		newSegments, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
+		_, metricMutation, err := c.meta.CompleteCompactionMutation(plan, result)
 		if err != nil {
 			return err
 		}
 		// Apply metrics after successful meta update.
 		metricMutation.commit()
-		newSegmentInfo = newSegments[0]
 	}
 
 	nodeID := c.plans[plan.GetPlanID()].dataNodeID
 	req := &datapb.SyncSegmentsRequest{
-		PlanID:        plan.PlanID,
-		CompactedTo:   newSegmentInfo.GetID(),
-		CompactedFrom: newSegmentInfo.GetCompactionFrom(),
-		NumOfRows:     newSegmentInfo.GetNumOfRows(),
-		StatsLogs:     newSegmentInfo.GetStatslogs(),
-		ChannelName:   plan.GetChannel(),
-		PartitionId:   newSegmentInfo.GetPartitionID(),
-		CollectionId:  newSegmentInfo.GetCollectionID(),
+		PlanID: plan.PlanID,
 	}
 
 	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
@@ -649,8 +638,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			// without changing the meta
 			log.Info("compaction syncing unknown plan with node")
 			if err := c.sessions.SyncSegments(nodeID, &datapb.SyncSegmentsRequest{
-				PlanID:      planID,
-				ChannelName: plan.GetChannel(),
+				PlanID: planID,
 			}); err != nil {
 				log.Warn("compaction failed to sync segments with node", zap.Error(err))
 				return err

@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -28,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/kv"
 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/kv/mocks"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 )
 
@@ -173,5 +175,31 @@ func (suite *ClusterSuite) TestFlushChannels() {
 		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
 		err := cluster.FlushChannels(context.Background(), 1, 0, channels)
 		suite.NoError(err)
+	})
+}
+
+func (suite *ClusterSuite) TestQuerySlot() {
+	suite.Run("query slot failed", func() {
+		suite.SetupTest()
+		suite.mockSession.EXPECT().GetSessionIDs().Return([]int64{1}).Once()
+		suite.mockSession.EXPECT().QuerySlot(int64(1)).Return(nil, errors.New("mock err")).Once()
+		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
+		nodeSlots := cluster.QuerySlots()
+		suite.Equal(0, len(nodeSlots))
+	})
+
+	suite.Run("normal", func() {
+		suite.SetupTest()
+		suite.mockSession.EXPECT().GetSessionIDs().Return([]int64{1, 2, 3, 4}).Once()
+		suite.mockSession.EXPECT().QuerySlot(int64(1)).Return(&datapb.QuerySlotResponse{NumSlots: 1}, nil).Once()
+		suite.mockSession.EXPECT().QuerySlot(int64(2)).Return(&datapb.QuerySlotResponse{NumSlots: 2}, nil).Once()
+		suite.mockSession.EXPECT().QuerySlot(int64(3)).Return(&datapb.QuerySlotResponse{NumSlots: 3}, nil).Once()
+		suite.mockSession.EXPECT().QuerySlot(int64(4)).Return(&datapb.QuerySlotResponse{NumSlots: 4}, nil).Once()
+		cluster := NewClusterImpl(suite.mockSession, suite.mockChManager)
+		nodeSlots := cluster.QuerySlots()
+		suite.Equal(int64(1), nodeSlots[1])
+		suite.Equal(int64(2), nodeSlots[2])
+		suite.Equal(int64(3), nodeSlots[3])
+		suite.Equal(int64(4), nodeSlots[4])
 	})
 }

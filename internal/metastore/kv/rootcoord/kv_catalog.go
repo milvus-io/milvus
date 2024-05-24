@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"sort"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -24,10 +25,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-)
-
-const (
-	maxTxnNum = 64
 )
 
 // prefix/collection/collection_id 					-> CollectionInfo
@@ -86,18 +83,26 @@ func BuildAliasPrefixWithDB(dbID int64) string {
 	return fmt.Sprintf("%s/%s/%d", DatabaseMetaPrefix, Aliases, dbID)
 }
 
-func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, maxTxnNum int, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+// since SnapshotKV may save both snapshot key and the original key if the original key is newest
+// MaxEtcdTxnNum need to divided by 2
+func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, limit int, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	saveFn := func(partialKvs map[string]string) error {
 		return snapshot.MultiSave(partialKvs, ts)
 	}
-	if err := etcd.SaveByBatchWithLimit(saves, maxTxnNum, saveFn); err != nil {
+	if err := etcd.SaveByBatchWithLimit(saves, limit, saveFn); err != nil {
 		return err
 	}
+
+	// avoid a case that the former key is the prefix of the later key.
+	// for example, `root-coord/fields/collection_id/1` is the prefix of `root-coord/fields/collection_id/100`.
+	sort.Slice(removals, func(i, j int) bool {
+		return removals[i] > removals[j]
+	})
 
 	removeFn := func(partialKeys []string) error {
 		return snapshot.MultiSaveAndRemoveWithPrefix(nil, partialKeys, ts)
 	}
-	return etcd.RemoveByBatchWithLimit(removals, maxTxnNum, removeFn)
+	return etcd.RemoveByBatchWithLimit(removals, limit, removeFn)
 }
 
 func (kc *Catalog) CreateDatabase(ctx context.Context, db *model.Database, ts typeutil.Timestamp) error {
@@ -193,7 +198,9 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 
 	// Though batchSave is not atomic enough, we can promise the atomicity outside.
 	// Recovering from failure, if we found collection is creating, we should remove all these related meta.
-	return etcd.SaveByBatchWithLimit(kvs, maxTxnNum/2, func(partialKvs map[string]string) error {
+	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
+	// MaxEtcdTxnNum need to divided by 2
+	return etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum/2, func(partialKvs map[string]string) error {
 		return kc.Snapshot.MultiSave(partialKvs, ts)
 	})
 }
@@ -446,9 +453,9 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	// Though batchMultiSaveAndRemoveWithPrefix is not atomic enough, we can promise atomicity outside.
 	// If we found collection under dropping state, we'll know that gc is not completely on this collection.
 	// However, if we remove collection first, we cannot remove other metas.
-	// We set maxTxnNum to 64, since SnapshotKV may save both snapshot key and the original key if the original key is
-	// newest.
-	if err := batchMultiSaveAndRemoveWithPrefix(kc.Snapshot, maxTxnNum, nil, delMetakeysSnap, ts); err != nil {
+	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
+	// MaxEtcdTxnNum need to divided by 2
+	if err := batchMultiSaveAndRemoveWithPrefix(kc.Snapshot, util.MaxEtcdTxnNum/2, nil, delMetakeysSnap, ts); err != nil {
 		return err
 	}
 

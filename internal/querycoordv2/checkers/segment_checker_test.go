@@ -77,7 +77,7 @@ func (suite *SegmentCheckerTestSuite) SetupTest() {
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
 
 	balancer := suite.createMockBalancer()
-	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, balancer, suite.nodeMgr)
+	suite.checker = NewSegmentChecker(suite.meta, distManager, targetManager, suite.nodeMgr, func() balance.Balance { return balancer })
 
 	suite.broker.EXPECT().GetPartitions(mock.Anything, int64(1)).Return([]int64{1}, nil).Maybe()
 }

@@ -36,27 +36,27 @@ import (
 // TODO(sunby): have too much similar codes with SegmentChecker
 type ChannelChecker struct {
 	*checkerActivation
-	meta      *meta.Meta
-	dist      *meta.DistributionManager
-	targetMgr *meta.TargetManager
-	nodeMgr   *session.NodeManager
-	balancer  balance.Balance
+	meta            *meta.Meta
+	dist            *meta.DistributionManager
+	targetMgr       *meta.TargetManager
+	nodeMgr         *session.NodeManager
+	getBalancerFunc GetBalancerFunc
 }
 
 func NewChannelChecker(
 	meta *meta.Meta,
 	dist *meta.DistributionManager,
 	targetMgr *meta.TargetManager,
-	balancer balance.Balance,
 	nodeMgr *session.NodeManager,
+	getBalancerFunc GetBalancerFunc,
 ) *ChannelChecker {
 	return &ChannelChecker{
 		checkerActivation: newCheckerActivation(),
 		meta:              meta,
 		dist:              dist,
 		targetMgr:         targetMgr,
-		balancer:          balancer,
 		nodeMgr:           nodeMgr,
+		getBalancerFunc:   getBalancerFunc,
 	}
 }
 
@@ -130,7 +130,7 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 		return
 	}
 
-	dist := c.getChannelDist(replica)
+	dist := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
 	distMap := typeutil.NewSet[string]()
 	for _, ch := range dist {
 		distMap.Insert(ch.GetChannelName())
@@ -159,14 +159,6 @@ func (c *ChannelChecker) getDmChannelDiff(collectionID int64,
 	return
 }
 
-func (c *ChannelChecker) getChannelDist(replica *meta.Replica) []*meta.DmChannel {
-	dist := make([]*meta.DmChannel, 0)
-	for _, nodeID := range replica.GetNodes() {
-		dist = append(dist, c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))...)
-	}
-	return dist
-}
-
 func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int64) []*meta.DmChannel {
 	log := log.Ctx(ctx).WithRateGroup("ChannelChecker.findRepeatedChannels", 1, 60)
 	replica := c.meta.Get(replicaID)
@@ -176,7 +168,7 @@ func (c *ChannelChecker) findRepeatedChannels(ctx context.Context, replicaID int
 		log.Info("replica does not exist, skip it")
 		return ret
 	}
-	dist := c.getChannelDist(replica)
+	dist := c.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithReplica2Channel(replica))
 
 	targets := c.targetMgr.GetSealedSegmentsByCollection(replica.GetCollectionID(), meta.CurrentTarget)
 	versionsMap := make(map[string]*meta.DmChannel)
@@ -221,9 +213,9 @@ func (c *ChannelChecker) createChannelLoadTask(ctx context.Context, channels []*
 	for _, ch := range channels {
 		rwNodes := replica.GetChannelRWNodes(ch.GetChannelName())
 		if len(rwNodes) == 0 {
-			rwNodes = replica.GetNodes()
+			rwNodes = replica.GetRWNodes()
 		}
-		plan := c.balancer.AssignChannel([]*meta.DmChannel{ch}, rwNodes, false)
+		plan := c.getBalancerFunc().AssignChannel([]*meta.DmChannel{ch}, rwNodes, false)
 		plans = append(plans, plan...)
 	}
 

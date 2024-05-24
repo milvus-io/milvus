@@ -102,16 +102,17 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	)
 	var tasks []task.Task
 
-	segments := c.getSealedSegmentsDist(replica)
+	segments := c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithReplica(replica))
 	idSegments := make(map[int64]*meta.Segment)
 
+	roNodeSet := typeutil.NewUniqueSet(replica.GetRONodes()...)
 	targets := make(map[int64][]int64) // segmentID => FieldID
 	for _, segment := range segments {
-		// skip update index in stopping node
-		if ok, _ := c.nodeMgr.IsStoppingNode(segment.Node); ok {
+		// skip update index in read only node
+		if roNodeSet.Contain(segment.Node) {
 			continue
 		}
-		missing := c.checkSegment(ctx, segment, indexInfos)
+		missing := c.checkSegment(segment, indexInfos)
 		if len(missing) > 0 {
 			targets[segment.GetID()] = missing
 			idSegments[segment.GetID()] = segment
@@ -142,7 +143,7 @@ func (c *IndexChecker) checkReplica(ctx context.Context, collection *meta.Collec
 	return tasks
 }
 
-func (c *IndexChecker) checkSegment(ctx context.Context, segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
+func (c *IndexChecker) checkSegment(segment *meta.Segment, indexInfos []*indexpb.IndexInfo) (fieldIDs []int64) {
 	var result []int64
 	for _, indexInfo := range indexInfos {
 		fieldID, indexID := indexInfo.FieldID, indexInfo.IndexID
@@ -156,14 +157,6 @@ func (c *IndexChecker) checkSegment(ctx context.Context, segment *meta.Segment, 
 		}
 	}
 	return result
-}
-
-func (c *IndexChecker) getSealedSegmentsDist(replica *meta.Replica) []*meta.Segment {
-	var ret []*meta.Segment
-	for _, node := range replica.GetNodes() {
-		ret = append(ret, c.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))...)
-	}
-	return ret
 }
 
 func (c *IndexChecker) createSegmentUpdateTask(ctx context.Context, segment *meta.Segment, replica *meta.Replica) (task.Task, bool) {

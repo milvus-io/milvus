@@ -73,6 +73,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -298,7 +299,7 @@ func (s *proxyTestServer) startGrpc(ctx context.Context, wg *sync.WaitGroup, p *
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 
-	s.simpleLimiter = NewSimpleLimiter()
+	s.simpleLimiter = NewSimpleLimiter(0, 0)
 
 	opts := tracer.GetInterceptorOpts()
 	s.grpcServer = grpc.NewServer(
@@ -599,7 +600,7 @@ func TestProxy(t *testing.T) {
 	constructCollectionInsertRequest := func() *milvuspb.InsertRequest {
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		hashKeys := generateHashKeys(rowNum)
+		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.InsertRequest{
 			Base:           nil,
 			DbName:         dbName,
@@ -614,7 +615,7 @@ func TestProxy(t *testing.T) {
 	constructPartitionInsertRequest := func() *milvuspb.InsertRequest {
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		hashKeys := generateHashKeys(rowNum)
+		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.InsertRequest{
 			Base:           nil,
 			DbName:         dbName,
@@ -629,7 +630,7 @@ func TestProxy(t *testing.T) {
 	constructCollectionUpsertRequest := func() *milvuspb.UpsertRequest {
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		hashKeys := generateHashKeys(rowNum)
+		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
 			Base:           nil,
 			DbName:         dbName,
@@ -1811,7 +1812,7 @@ func TestProxy(t *testing.T) {
 					Dim: int64(dim),
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
-							Data: generateFloatVectors(nq, dim),
+							Data: testutils.GenerateFloatVectors(nq, dim),
 						},
 					},
 				},
@@ -1824,7 +1825,7 @@ func TestProxy(t *testing.T) {
 					Dim: int64(dim),
 					Data: &schemapb.VectorField_FloatVector{
 						FloatVector: &schemapb.FloatArray{
-							Data: generateFloatVectors(nq, dim),
+							Data: testutils.GenerateFloatVectors(nq, dim),
 						},
 					},
 				},
@@ -3723,7 +3724,7 @@ func TestProxy(t *testing.T) {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		hashKeys := generateHashKeys(rowNum)
+		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
 			Base:           nil,
 			DbName:         dbName,
@@ -3739,7 +3740,7 @@ func TestProxy(t *testing.T) {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		hashKeys := generateHashKeys(rowNum)
+		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
 			Base:           nil,
 			DbName:         dbName,
@@ -3755,7 +3756,7 @@ func TestProxy(t *testing.T) {
 		pkFieldData := newScalarFieldData(schema.Fields[0], int64Field, rowNum)
 		fVecColumn := newFloatVectorFieldData(floatVecField, rowNum, dim)
 		bVecColumn := newBinaryVectorFieldData(binaryVecField, rowNum, dim)
-		hashKeys := generateHashKeys(rowNum)
+		hashKeys := testutils.GenerateHashKeys(rowNum)
 		return &milvuspb.UpsertRequest{
 			Base:           nil,
 			DbName:         dbName,

@@ -21,6 +21,7 @@ import (
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
@@ -87,7 +88,7 @@ func (opt *searchOption) prepareSearchRequest(annRequest *annRequest) *milvuspb.
 
 		// search param
 		bs, _ := json.Marshal(annRequest.searchParam)
-		request.SearchParams = entity.MapKvPairs(map[string]string{
+		params := map[string]string{
 			spAnnsField:     annRequest.annField,
 			spTopK:          strconv.Itoa(opt.topK),
 			spOffset:        strconv.Itoa(opt.offset),
@@ -95,8 +96,11 @@ func (opt *searchOption) prepareSearchRequest(annRequest *annRequest) *milvuspb.
 			spMetricsType:   string(annRequest.metricsType),
 			spRoundDecimal:  "-1",
 			spIgnoreGrowing: strconv.FormatBool(opt.ignoreGrowing),
-			spGroupBy:       annRequest.groupByField,
-		})
+		}
+		if annRequest.groupByField != "" {
+			params[spGroupBy] = annRequest.groupByField
+		}
+		request.SearchParams = entity.MapKvPairs(params)
 
 		// placeholder group
 		request.PlaceholderGroup = vector2PlaceholderGroupBytes(annRequest.vectors)

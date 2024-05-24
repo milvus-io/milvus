@@ -352,7 +352,7 @@ message SegmentLoadInfo {
     repeated data.FieldBinlog deltalogs = 9;
     repeated int64 compactionFrom = 10;  // segmentIDs compacted from
     repeated FieldIndexInfo index_infos = 11;
-    int64 segment_size = 12;
+    int64 segment_size = 12 [deprecated = true];
     string insert_channel = 13;
     msg.MsgPosition start_position = 14;
     msg.MsgPosition delta_position = 15;
@@ -589,6 +589,7 @@ message SealedSegmentsChangeInfo {
 message GetDataDistributionRequest {
     common.MsgBase base = 1;
     map<string, msg.MsgPosition> checkpoints = 2;
+    int64 lastUpdateTs = 3;
 }
 
 message GetDataDistributionResponse {
@@ -597,6 +598,7 @@ message GetDataDistributionResponse {
     repeated SegmentVersionInfo segments = 3;
     repeated ChannelVersionInfo channels = 4;
     repeated LeaderView leader_views = 5;
+    int64 lastModifyTs = 6;
 }
 
 message LeaderView {

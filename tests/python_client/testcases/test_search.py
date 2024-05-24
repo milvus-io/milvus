@@ -75,20 +75,6 @@ class TestCollectionSearchInvalid(TestcaseBase):
     def get_invalid_vectors(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_fields_type(self, request):
-        if isinstance(request.param, str):
-            pytest.skip("string is valid type for field")
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_fields_value(self, request):
-        if not isinstance(request.param, str):
-            pytest.skip("field value only support string")
-        if request.param == "":
-            pytest.skip("empty field is valid")
-        yield request.param
-
     @pytest.fixture(scope="function", params=ct.get_invalid_metric_type)
     def get_invalid_metric_type(self, request):
         yield request.param
@@ -99,54 +85,12 @@ class TestCollectionSearchInvalid(TestcaseBase):
             pytest.skip("positive int is valid type for limit")
         yield request.param
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_expr_type(self, request):
-        if isinstance(request.param, str):
-            pytest.skip("string is valid type for expr")
-        if request.param is None:
-            pytest.skip("None is valid for expr")
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_expr_value(self, request):
-        if not isinstance(request.param, str):
-            pytest.skip("expression value only support string")
-        if request.param in ["", " "]:
-            pytest.skip("empty field is valid")
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_expr_bool_value(self, request):
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_partition(self, request):
-        if request.param == []:
-            pytest.skip("empty is valid for partition")
-        if request.param is None:
-            pytest.skip("None is valid for partition")
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_output_fields(self, request):
-        if request.param == []:
-            pytest.skip("empty is valid for output_fields")
-        if request.param is None:
-            pytest.skip("None is valid for output_fields")
-        yield request.param
-
     @pytest.fixture(scope="function", params=ct.get_invalid_ints)
     def get_invalid_guarantee_timestamp(self, request):
         if request.param == 9999999999:
             pytest.skip("9999999999 is valid for guarantee_timestamp")
         if request.param is None:
             pytest.skip("None is valid for guarantee_timestamp")
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_range_search_paras(self, request):
-        if request.param == 1:
-            pytest.skip("number is valid for range search paras")
         yield request.param
 
     @pytest.fixture(scope="function", params=[True, False])
@@ -232,7 +176,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         expected: raise exception and report the error
         """
         # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
+        collection_w = self.init_collection_general(prefix, dim=32)[0]
         # 2. search with invalid field
         invalid_vectors = get_invalid_vectors
         log.info("test_search_param_invalid_vectors: searching with "
@@ -240,7 +184,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(invalid_vectors, default_search_field, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 999,
                                          "err_msg": "`search_data` value {} is illegal".format(invalid_vectors)})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -264,45 +208,23 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": 'vector dimension mismatch'})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_param_invalid_field_type(self, get_invalid_fields_type):
+    @pytest.mark.parametrize("invalid_field_name", ct.invalid_resource_names)
+    def test_search_param_invalid_field(self, invalid_field_name):
         """
         target: test search with invalid parameter type
         method: search with invalid field type
         expected: raise exception and report the error
         """
-        if get_invalid_fields_type is None:
+        if invalid_field_name in [None, ""]:
             pytest.skip("None is legal")
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search with invalid field
-        invalid_search_field = get_invalid_fields_type
-        log.info("test_search_param_invalid_field_type: searching with invalid field: %s"
-                 % invalid_search_field)
         collection_w.load()
-        error = {"err_code": 1, "err_msg": f"`anns_field` value {get_invalid_fields_type} is illegal"}
-        collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
+        error = {"err_code": 999, "err_msg": f"failed to create query plan: failed to get field schema by name"}
+        collection_w.search(vectors[:default_nq], invalid_field_name, default_search_params,
                             default_limit, default_search_exp,
                             check_task=CheckTasks.err_res, check_items=error)
-
-    @pytest.mark.tags(CaseLabel.L2)
-    def test_search_param_invalid_field_value(self, get_invalid_fields_value):
-        """
-        target: test search with invalid parameter values
-        method: search with invalid field value
-        expected: raise exception and report the error
-        """
-        # 1. initialize with data
-        collection_w = self.init_collection_general(prefix)[0]
-        # 2. search with invalid field
-        invalid_search_field = get_invalid_fields_value
-        log.info("test_search_param_invalid_field_value: searching with "
-                 "invalid field: %s" % invalid_search_field)
-        collection_w.search(vectors[:default_nq], invalid_search_field, default_search_params,
-                            default_limit, default_search_exp,
-                            check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1100,
-                                         "err_msg": "failed to create query plan: failed to get field schema "
-                                                    "by name: %s not found" % invalid_search_field})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue 30356")
@@ -446,7 +368,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_param_invalid_expr_type(self, get_invalid_expr_type):
+    @pytest.mark.parametrize("invalid_search_expr", ["'non_existing_field'==2", 1])
+    def test_search_param_invalid_expr_type(self, invalid_search_expr):
         """
         target: test search with invalid parameter type
         method: search with invalid search expressions
@@ -454,17 +377,15 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
+        collection_w.load()
         # 2 search with invalid expr
-        invalid_search_expr = get_invalid_expr_type
-        log.info("test_search_param_invalid_expr_type: searching with "
-                 "invalid expr: {}".format(invalid_search_expr))
-
+        error = {"err_code": 999, "err_msg": "failed to create query plan: cannot parse expression"}
+        if invalid_search_expr == 1:
+            error = {"err_code": 999, "err_msg": "The type of expr must be string"}
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "The type of expr must be string ,"
-                                                    "but {} is given".format(type(invalid_search_expr))})
+                            check_items=error)
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.parametrize("expression", cf.gen_field_compare_expressions())
@@ -497,12 +418,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, nb, expression,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 999,
                                          "err_msg": "failed to create query plan: "
                                                     "cannot parse expression: %s" % expression})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_param_invalid_expr_value(self, get_invalid_expr_value):
+    @pytest.mark.parametrize("invalid_expr_value", ["string", 1.2, None, [1, 2, 3]])
+    def test_search_param_invalid_expr_value(self, invalid_expr_value):
         """
         target: test search with invalid parameter values
         method: search with invalid search expressions
@@ -511,19 +433,20 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2 search with invalid expr
-        invalid_search_expr = get_invalid_expr_value
+        invalid_search_expr = f"{ct.default_int64_field_name}=={invalid_expr_value}"
         log.info("test_search_param_invalid_expr_value: searching with "
                  "invalid expr: %s" % invalid_search_expr)
         collection_w.load()
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit, invalid_search_expr,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 65535,
+                            check_items={"err_code": 999,
                                          "err_msg": "failed to create query plan: cannot parse expression: %s"
                                                     % invalid_search_expr})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_param_invalid_expr_bool(self, get_invalid_expr_bool_value):
+    @pytest.mark.parametrize("invalid_expr_bool_value", [1.2, 10, "string"])
+    def test_search_param_invalid_expr_bool(self, invalid_expr_bool_value):
         """
         target: test search with invalid parameter values
         method: search with invalid bool search expressions
@@ -531,8 +454,9 @@ class TestCollectionSearchInvalid(TestcaseBase):
         """
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix, is_all_data_type=True)[0]
+        collection_w.load()
         # 2 search with invalid bool expr
-        invalid_search_expr_bool = f"{default_bool_field_name} == {get_invalid_expr_bool_value}"
+        invalid_search_expr_bool = f"{default_bool_field_name} == {invalid_expr_bool_value}"
         log.info("test_search_param_invalid_expr_bool: searching with "
                  "invalid expr: %s" % invalid_search_expr_bool)
         collection_w.search(vectors[:default_nq], default_search_field,
@@ -634,7 +558,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
                             default_search_params, nb, expression)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_partition_invalid_type(self, get_invalid_partition):
+    @pytest.mark.parametrize("invalid_partitions", [[None], [1, 2]])
+    def test_search_partitions_invalid_type(self, invalid_partitions):
         """
         target: test search invalid partition
         method: search with invalid partition type
@@ -643,17 +568,33 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search the invalid partition
-        partition_name = get_invalid_partition
-        err_msg = "`partition_name_array` value {} is illegal".format(
-            partition_name)
+        err_msg = "`partition_name_array` value {} is illegal".format(invalid_partitions)
         collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
-                            default_limit, default_search_exp, partition_name,
+                            default_limit, default_search_exp, invalid_partitions,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 999,
                                          "err_msg": err_msg})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_search_with_output_fields_invalid_type(self, get_invalid_output_fields):
+    @pytest.mark.parametrize("invalid_partitions", [["non_existing"], [ct.default_partition_name, "non_existing"]])
+    def test_search_partitions_non_existing(self, invalid_partitions):
+        """
+        target: test search invalid partition
+        method: search with invalid partition type
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix)[0]
+        # 2. search the invalid partition
+        err_msg = "partition name non_existing not found"
+        collection_w.search(vectors[:default_nq], default_search_field, default_search_params,
+                            default_limit, default_search_exp, invalid_partitions,
+                            check_task=CheckTasks.err_res,
+                            check_items={"err_code": 999, "err_msg": err_msg})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("invalid_output_fields", [[None], [1, 2], ct.default_int64_field_name])
+    def test_search_with_output_fields_invalid_type(self, invalid_output_fields):
         """
         target: test search with output fields
         method: search with invalid output_field
@@ -662,15 +603,31 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 1. initialize with data
         collection_w = self.init_collection_general(prefix)[0]
         # 2. search
-        log.info("test_search_with_output_fields_invalid_type: Searching collection %s" %
-                 collection_w.name)
-        output_fields = get_invalid_output_fields
-        err_msg = "`output_fields` value {} is illegal".format(output_fields)
+        err_msg = f"`output_fields` value {invalid_output_fields} is illegal"
         collection_w.search(vectors[:default_nq], default_search_field,
                             default_search_params, default_limit,
-                            default_search_exp, output_fields=output_fields,
+                            default_search_exp, output_fields=invalid_output_fields,
                             check_task=CheckTasks.err_res,
-                            check_items={ct.err_code: 1,
+                            check_items={ct.err_code: 999,
+                                         ct.err_msg: err_msg})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    @pytest.mark.parametrize("non_exiting_output_fields", [["non_exiting"], [ct.default_int64_field_name, "non_exiting"]])
+    def test_search_with_output_fields_non_existing(self, non_exiting_output_fields):
+        """
+        target: test search with output fields
+        method: search with invalid output_field
+        expected: raise exception and report the error
+        """
+        # 1. initialize with data
+        collection_w = self.init_collection_general(prefix)[0]
+        # 2. search
+        err_msg = f"field non_exiting not exist"
+        collection_w.search(vectors[:default_nq], default_search_field,
+                            default_search_params, default_limit,
+                            default_search_exp, output_fields=non_exiting_output_fields,
+                            check_task=CheckTasks.err_res,
+                            check_items={ct.err_code: 999,
                                          ct.err_msg: err_msg})
 
     @pytest.mark.tags(CaseLabel.L1)
@@ -1053,7 +1010,7 @@ class TestCollectionSearchInvalid(TestcaseBase):
                                          "err_msg": f"field {output_fields[-1]} not exist"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("ignore_growing", ct.get_invalid_strs[2:8])
+    @pytest.mark.parametrize("ignore_growing", [1.2, "string", [True]])
     def test_search_invalid_ignore_growing_param(self, ignore_growing):
         """
         target: test search ignoring growing segment
@@ -1062,24 +1019,21 @@ class TestCollectionSearchInvalid(TestcaseBase):
                 3. search with param ignore_growing invalid
         expected: raise exception
         """
-        if ignore_growing is None or ignore_growing == "":
-            pytest.skip("number is valid")
         # 1. create a collection
         collection_w = self.init_collection_general(prefix, True, 10)[0]
 
         # 2. insert data again
-        data = cf.gen_default_dataframe_data(start=10000)
+        data = cf.gen_default_dataframe_data(start=100)
         collection_w.insert(data)
 
         # 3. search with param ignore_growing=True
-        search_params = {"metric_type": "L2", "params": {
-            "nprobe": 10}, "ignore_growing": ignore_growing}
+        search_params = {"metric_type": "L2", "params": {"nprobe": 10}, "ignore_growing": ignore_growing}
         vector = [[random.random() for _ in range(default_dim)]
                   for _ in range(nq)]
         collection_w.search(vector[:default_nq], default_search_field, search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
+                            check_items={"err_code": 999,
                                          "err_msg": "parse search growing failed"})
 
     @pytest.mark.tags(CaseLabel.L2)
@@ -1125,7 +1079,8 @@ class TestCollectionSearchInvalid(TestcaseBase):
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue 30365")
-    def test_range_search_invalid_radius(self, get_invalid_range_search_paras):
+    @pytest.mark.parametrize("invalid_radius", [[0.1], "str"])
+    def test_range_search_invalid_radius(self, invalid_radius):
         """
         target: test range search with invalid radius
         method: range search with invalid radius
@@ -1136,19 +1091,18 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. range search
         log.info("test_range_search_invalid_radius: Range searching collection %s" %
                  collection_w.name)
-        radius = get_invalid_range_search_paras
         range_search_params = {"metric_type": "L2",
-                               "params": {"nprobe": 10, "radius": radius, "range_filter": 0}}
+                               "params": {"nprobe": 10, "radius": invalid_radius, "range_filter": 0}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "type must be number"})
+                            check_items={"err_code": 999, "err_msg": "type must be number"})
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.skip(reason="issue 30365")
-    def test_range_search_invalid_range_filter(self, get_invalid_range_search_paras):
+    @pytest.mark.parametrize("invalid_range_filter", [[0.1], "str"])
+    def test_range_search_invalid_range_filter(self, invalid_range_filter):
         """
         target: test range search with invalid range_filter
         method: range search with invalid range_filter
@@ -1164,15 +1118,13 @@ class TestCollectionSearchInvalid(TestcaseBase):
         # 2. range search
         log.info("test_range_search_invalid_range_filter: Range searching collection %s" %
                  collection_w.name)
-        range_filter = get_invalid_range_search_paras
         range_search_params = {"metric_type": "L2",
-                               "params": {"nprobe": 10, "radius": 1, "range_filter": range_filter}}
+                               "params": {"nprobe": 10, "radius": 1, "range_filter": invalid_range_filter}}
         collection_w.search(vectors[:default_nq], default_search_field,
                             range_search_params, default_limit,
                             default_search_exp,
                             check_task=CheckTasks.err_res,
-                            check_items={"err_code": 1,
-                                         "err_msg": "type must be number"})
+                            check_items={"err_code": 999, "err_msg": "type must be number"})
 
     @pytest.mark.tags(CaseLabel.L1)
     @pytest.mark.skip(reason="issue 30365")
@@ -1408,7 +1360,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search without specify metric type
         method: create connection, collection, insert and search
-        expected: 1. search successfully with limit(topK) 
+        expected: 1. search successfully with limit(topK)
         """
         nq = 2
         dim = 32
@@ -1434,7 +1386,7 @@ class TestCollectionSearch(TestcaseBase):
         """
         target: test search normal case
         method: create connection, collection, insert and search
-        expected: 1. search successfully with limit(topK) 
+        expected: 1. search successfully with limit(topK)
         """
         nq = 2
         dim = 32
@@ -6556,7 +6508,7 @@ class TestSearchDiskann(TestcaseBase):
         """
         target: test delete after creating index
         method: 1.create collection , insert data, primary_field is int field
-                2.create diskann index 
+                2.create diskann index
                 3.search with invalid params, where  topk <=20, search list [topk, 2147483647]
         expected: search report an error
         """
@@ -6588,7 +6540,7 @@ class TestSearchDiskann(TestcaseBase):
         """
         target: test delete after creating index
         method: 1.create collection , insert data, primary_field is int field
-                2.create  diskann index 
+                2.create  diskann index
                 3.search with invalid params, [k, 200] when k <= 20
         expected: search report an error
         """
@@ -6617,7 +6569,7 @@ class TestSearchDiskann(TestcaseBase):
         """
         target: test delete after creating index
         method: 1.create collection , insert data, primary_field is string field
-                2.create diskann index 
+                2.create diskann index
                 3.search with invalid metric type
         expected: search successfully
         """
@@ -6655,8 +6607,8 @@ class TestSearchDiskann(TestcaseBase):
     def test_search_with_delete_data(self, _async):
         """
         target: test delete after creating index
-        method: 1.create collection , insert data, 
-                2.create  diskann index 
+        method: 1.create collection , insert data,
+                2.create  diskann index
                 3.delete data, the search
         expected: assert index and deleted id not in search result
         """
@@ -9628,7 +9580,7 @@ class TestCollectionSearchJSON(TestcaseBase):
         """
         target: test search case with default json expression
         method: create connection, collection, insert and search
-        expected: 1. search successfully with limit(topK) 
+        expected: 1. search successfully with limit(topK)
         """
         # 1. initialize with data
         dim = 64
@@ -10145,7 +10097,6 @@ class TestSearchGroupBy(TestcaseBase):
 
         collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index_params)
-        # time.sleep(10)
         collection_w.load()
 
         search_params = {"metric_type": metric, "params": {"ef": 128}}
@@ -10262,7 +10213,6 @@ class TestSearchGroupBy(TestcaseBase):
         collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
         collection_w.create_index(grpby_field)
-        time.sleep(30)
         collection_w.load()
 
         search_params = {"metric_type": metric, "params": {"ef": 128}}
@@ -10555,7 +10505,6 @@ class TestSearchGroupBy(TestcaseBase):
 
         collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
-        time.sleep(10)
         collection_w.load()
 
         nq = 1
@@ -12509,7 +12458,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
-        # 4. hybrid search 
+        # 4. hybrid search
         res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)[0]
         is_sorted_descend = lambda lst: all(lst[i] >= lst[i + 1] for i in range(len(lst) - 1))
         for i in range(nq):
@@ -12541,7 +12490,7 @@ class TestCollectionHybridSearchValid(TestcaseBase):
                 "expr": "int64 > 0"}
             req = AnnSearchRequest(**search_param)
             req_list.append(req)
-        # 4. hybrid search 
+        # 4. hybrid search
         res = collection_w.hybrid_search(req_list, WeightedRanker(*weights), 10)[0]
         is_sorted_descend = lambda lst: all(lst[i] >= lst[i+1] for i in range(len(lst)-1))
         for i in range(nq):

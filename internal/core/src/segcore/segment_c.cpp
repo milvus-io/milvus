@@ -12,6 +12,7 @@
 #include "segcore/segment_c.h"
 
 #include <memory>
+#include <limits>
 
 #include "common/FieldData.h"
 #include "common/LoadInfo.h"
@@ -239,6 +240,9 @@ Insert(CSegmentInterface c_segment,
        const uint8_t* data_info,
        const uint64_t data_info_len) {
     try {
+        AssertInfo(data_info_len < std::numeric_limits<int>::max(),
+                   "insert data length ({}) exceeds max int",
+                   data_info_len);
         auto segment = static_cast<milvus::segcore::SegmentGrowing*>(c_segment);
         auto insert_record_proto =
             std::make_unique<milvus::InsertRecordProto>();

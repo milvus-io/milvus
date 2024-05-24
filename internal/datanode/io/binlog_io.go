@@ -85,17 +85,26 @@ func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, 
 func (b *BinlogIoImpl) Upload(ctx context.Context, kvs map[string][]byte) error {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "Upload")
 	defer span.End()
-	future := b.pool.Submit(func() (any, error) {
-		log.Debug("BinlogIO uplaod", zap.Strings("paths", lo.Keys(kvs)))
-		err := retry.Do(ctx, func() error {
-			return b.MultiWrite(ctx, kvs)
+
+	futures := make([]*conc.Future[any], 0, len(kvs))
+	for k, v := range kvs {
+		innerK, innerV := k, v
+		future := b.pool.Submit(func() (any, error) {
+			var err error
+			log.Debug("BinlogIO upload", zap.String("paths", innerK))
+			err = retry.Do(ctx, func() error {
+				err = b.Write(ctx, innerK, innerV)
+				if err != nil {
+					log.Warn("BinlogIO fail to upload", zap.String("paths", innerK), zap.Error(err))
+				}
+				return err
+			})
+			return struct{}{}, err
 		})
+		futures = append(futures, future)
+	}
 
-		return nil, err
-	})
-
-	_, err := future.Await()
-	return err
+	return conc.AwaitAll(futures...)
 }
 
 func (b *BinlogIoImpl) JoinFullPath(paths ...string) string {

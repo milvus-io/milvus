@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/allocator"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
-	"github.com/milvus-io/milvus/internal/proxy/accesslog"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -129,6 +128,9 @@ type Proxy struct {
 
 	// materialized view
 	enableMaterializedView bool
+
+	// delete rate limiter
+	enableComplexDeleteLimit bool
 }
 
 // NewProxy returns a Proxy struct.
@@ -147,7 +149,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		factory:                factory,
 		searchResultCh:         make(chan *internalpb.SearchResults, n),
 		shardMgr:               mgr,
-		simpleLimiter:          NewSimpleLimiter(),
+		simpleLimiter:          NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
 		lbPolicy:               lbPolicy,
 		resourceManager:        resourceManager,
 		replicateStreamManager: replicateStreamManager,
@@ -222,7 +224,6 @@ func (node *Proxy) Init() error {
 
 	node.factory.Init(Params)
 
-	accesslog.InitAccessLogger(Params)
 	log.Debug("init access log for Proxy done")
 
 	err := node.initRateCollector()
@@ -289,6 +290,7 @@ func (node *Proxy) Init() error {
 	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond)/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
 
+	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 

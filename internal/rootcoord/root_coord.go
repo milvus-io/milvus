@@ -545,15 +545,29 @@ func (c *Core) initRbac() error {
 		}
 	}
 
+	if Params.ProxyCfg.EnablePublicPrivilege.GetAsBool() {
+		err = c.initPublicRolePrivilege()
+		if err != nil {
+			return err
+		}
+	}
+
+	if Params.RoleCfg.Enabled.GetAsBool() {
+		return c.initBuiltinRoles()
+	}
+	return nil
+}
+
+func (c *Core) initPublicRolePrivilege() error {
 	// grant privileges for the public role
 	globalPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeDescribeCollection.String(),
-		commonpb.ObjectPrivilege_PrivilegeShowCollections.String(),
 	}
 	collectionPrivileges := []string{
 		commonpb.ObjectPrivilege_PrivilegeIndexDetail.String(),
 	}
 
+	var err error
 	for _, globalPrivilege := range globalPrivileges {
 		err = c.meta.OperatePrivilege(util.DefaultTenant, &milvuspb.GrantEntity{
 			Role:       &milvuspb.RoleEntity{Name: util.RolePublic},
@@ -583,9 +597,6 @@ func (c *Core) initRbac() error {
 		if err != nil && !common.IsIgnorableError(err) {
 			return errors.Wrap(err, "failed to grant collection privilege")
 		}
-	}
-	if Params.RoleCfg.Enabled.GetAsBool() {
-		return c.initBuiltinRoles()
 	}
 	return nil
 }

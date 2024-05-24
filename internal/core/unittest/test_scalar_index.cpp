@@ -382,7 +382,7 @@ TYPED_TEST_P(TypedScalarIndexTestV2, Base) {
         auto new_scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(new_index.get());
         new_scalar_index->LoadV2();
-        ASSERT_EQ(nb, scalar_index->Count());
+        ASSERT_EQ(nb, new_scalar_index->Count());
     }
 }
 

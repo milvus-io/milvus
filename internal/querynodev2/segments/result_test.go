@@ -39,7 +39,7 @@ type ResultSuite struct {
 
 func MergeSegcoreRetrieveResultsV1(ctx context.Context, retrieveResults []*segcorepb.RetrieveResults, param *mergeParam) (*segcorepb.RetrieveResults, error) {
 	plan := &RetrievePlan{ignoreNonPk: false}
-	return MergeSegcoreRetrieveResults(ctx, retrieveResults, param, nil, plan)
+	return MergeSegcoreRetrieveResults(ctx, retrieveResults, param, nil, plan, nil)
 }
 
 func (suite *ResultSuite) TestResult_MergeSegcoreRetrieveResults() {

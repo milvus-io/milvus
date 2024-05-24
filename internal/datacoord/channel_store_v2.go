@@ -366,7 +366,7 @@ func WithChannelStates(states ...ChannelState) ChannelSelector {
 }
 
 func (c *StateChannelStore) GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo {
-	nodeChannels := make(map[int64]*NodeChannelInfo)
+	var nodeChannels []*NodeChannelInfo
 	for nodeID, cInfo := range c.channelsInfo {
 		if nodeSelector(nodeID) {
 			selected := make(map[string]RWChannel)
@@ -382,13 +382,13 @@ func (c *StateChannelStore) GetNodeChannelsBy(nodeSelector NodeSelector, channel
 					selected[chName] = channel
 				}
 			}
-			nodeChannels[nodeID] = &NodeChannelInfo{
+			nodeChannels = append(nodeChannels, &NodeChannelInfo{
 				NodeID:   nodeID,
 				Channels: selected,
-			}
+			})
 		}
 	}
-	return lo.Values(nodeChannels)
+	return nodeChannels
 }
 
 func (c *StateChannelStore) GetNodesChannels() []*NodeChannelInfo {
@@ -399,6 +399,23 @@ func (c *StateChannelStore) GetNodesChannels() []*NodeChannelInfo {
 		}
 	}
 	return ret
+}
+
+func (c *StateChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
+	nodeChs := make(map[UniqueID][]string)
+	for id, info := range c.channelsInfo {
+		if id == bufferID {
+			continue
+		}
+		var channelNames []string
+		for name, ch := range info.Channels {
+			if ch.GetCollectionID() == collectionID {
+				channelNames = append(channelNames, name)
+			}
+		}
+		nodeChs[id] = channelNames
+	}
+	return nodeChs
 }
 
 func (c *StateChannelStore) GetBufferChannelInfo() *NodeChannelInfo {

@@ -53,9 +53,8 @@ var _ compactionPlanContext = (*spyCompactionHandler)(nil)
 func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
 
 // execCompactionPlan start to execute plan and return immediately
-func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) error {
+func (h *spyCompactionHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
 	h.spyChan <- plan
-	return nil
 }
 
 // completeCompaction record the result of a compaction
@@ -108,6 +107,22 @@ func Test_compactionTrigger_force(t *testing.T) {
 
 	vecFieldID := int64(201)
 	indexID := int64(1001)
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{
+			{
+				FieldID:  vecFieldID,
+				DataType: schemapb.DataType_FloatVector,
+				TypeParams: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DimKey,
+						Value: "128",
+					},
+				},
+			},
+		},
+	}
+
 	tests := []struct {
 		name         string
 		fields       fields
@@ -294,21 +309,8 @@ func Test_compactionTrigger_force(t *testing.T) {
 					},
 					collections: map[int64]*collectionInfo{
 						2: {
-							ID: 2,
-							Schema: &schemapb.CollectionSchema{
-								Fields: []*schemapb.FieldSchema{
-									{
-										FieldID:  vecFieldID,
-										DataType: schemapb.DataType_FloatVector,
-										TypeParams: []*commonpb.KeyValuePair{
-											{
-												Key:   common.DimKey,
-												Value: "128",
-											},
-										},
-									},
-								},
-							},
+							ID:     2,
+							Schema: schema,
 							Properties: map[string]string{
 								common.CollectionTTLConfigKey: "0",
 							},
@@ -471,6 +473,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 					Type:             datapb.CompactionType_MixCompaction,
 					Channel:          "ch1",
 					TotalRows:        200,
+					Schema:           schema,
 				},
 			},
 		},
@@ -895,7 +898,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									Binlogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+												{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 											},
 										},
 									},
@@ -915,7 +918,7 @@ func Test_compactionTrigger_noplan(t *testing.T) {
 									Binlogs: []*datapb.FieldBinlog{
 										{
 											Binlogs: []*datapb.Binlog{
-												{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
+												{EntriesNum: 5, LogPath: "log2", LogSize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1, MemorySize: Params.DataCoordCfg.SegmentMaxSize.GetAsInt64()*1024*1024 - 1},
 											},
 										},
 									},
@@ -1017,7 +1020,7 @@ func Test_compactionTrigger_PrioritizedCandi(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: numRows, LogPath: "log1", LogSize: 100},
+						{EntriesNum: numRows, LogPath: "log1", LogSize: 100, MemorySize: 100},
 					},
 				},
 			},
@@ -1209,7 +1212,7 @@ func Test_compactionTrigger_SmallCandi(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024},
+						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024, MemorySize: numRows * 1024 * 1024},
 					},
 				},
 			},
@@ -1402,7 +1405,7 @@ func Test_compactionTrigger_SqueezeNonPlannedSegs(t *testing.T) {
 			Binlogs: []*datapb.FieldBinlog{
 				{
 					Binlogs: []*datapb.Binlog{
-						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024},
+						{EntriesNum: 5, LogPath: "log1", LogSize: numRows * 1024 * 1024, MemorySize: numRows * 1024 * 1024},
 					},
 				},
 			},
@@ -1629,7 +1632,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 				Binlogs: []*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
-							{EntriesNum: 5, LogPath: "log1", LogSize: size[i] * 2 * 1024 * 1024},
+							{EntriesNum: 5, LogPath: "log1", LogSize: size[i] * 2 * 1024 * 1024, MemorySize: size[i] * 2 * 1024 * 1024},
 						},
 					},
 				},
@@ -1768,7 +1771,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 1000; i++ {
 		binlogs = append(binlogs, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 			},
 		})
 	}
@@ -1812,7 +1815,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 100; i++ {
 		binlogs2 = append(binlogs2, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500, MemorySize: 100000},
 			},
 		})
 	}
@@ -1820,7 +1823,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 100; i++ {
 		binlogs2 = append(binlogs2, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 1000000, TimestampFrom: 300, TimestampTo: 1000},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 1000000, TimestampFrom: 300, TimestampTo: 1000, MemorySize: 1000000},
 			},
 		})
 	}
@@ -1855,7 +1858,7 @@ func Test_compactionTrigger_shouldDoSingleCompaction(t *testing.T) {
 	for i := UniqueID(0); i < 100; i++ {
 		binlogs3 = append(binlogs2, &datapb.FieldBinlog{
 			Binlogs: []*datapb.Binlog{
-				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500},
+				{EntriesNum: 5, LogPath: "log1", LogSize: 100000, TimestampFrom: 300, TimestampTo: 500, MemorySize: 100000},
 			},
 		})
 	}
@@ -2002,12 +2005,12 @@ func Test_compactionTrigger_new(t *testing.T) {
 }
 
 func Test_compactionTrigger_allocTs(t *testing.T) {
-	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(), newMockHandler(), newMockVersionManager())
+	got := newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler(nil)}, newMockAllocator(), newMockHandler(), newMockVersionManager())
 	ts, err := got.allocTs()
 	assert.NoError(t, err)
 	assert.True(t, ts > 0)
 
-	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
+	got = newCompactionTrigger(&meta{segments: NewSegmentsInfo()}, &compactionPlanHandler{scheduler: NewCompactionScheduler(nil)}, &FailsAllocator{}, newMockHandler(), newMockVersionManager())
 	ts, err = got.allocTs()
 	assert.Error(t, err)
 	assert.Equal(t, uint64(0), ts)
@@ -2034,7 +2037,7 @@ func Test_compactionTrigger_getCompactTime(t *testing.T) {
 	}
 
 	m := &meta{segments: NewSegmentsInfo(), collections: collections}
-	got := newCompactionTrigger(m, &compactionPlanHandler{scheduler: NewCompactionScheduler()}, newMockAllocator(),
+	got := newCompactionTrigger(m, &compactionPlanHandler{scheduler: NewCompactionScheduler(nil)}, newMockAllocator(),
 		&ServerHandler{
 			&Server{
 				meta: m,
@@ -2161,7 +2164,7 @@ func (s *CompactionTriggerSuite) genSeg(segID, numRows, partitionID int64) *data
 		Binlogs: []*datapb.FieldBinlog{
 			{
 				Binlogs: []*datapb.Binlog{
-					{EntriesNum: 5, LogPath: "log1", LogSize: 100},
+					{EntriesNum: 5, LogPath: "log1", LogSize: 100, MemorySize: 100},
 				},
 			},
 		},

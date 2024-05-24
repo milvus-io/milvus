@@ -1,7 +1,6 @@
 package testutil
 
 import (
-	rand2 "crypto/rand"
 	"encoding/json"
 	"fmt"
 	"math/rand"
@@ -108,210 +107,117 @@ func CreateInsertData(schema *schemapb.CollectionSchema, rows int) (*storage.Ins
 	if err != nil {
 		return nil, err
 	}
-	for _, field := range schema.GetFields() {
-		if field.GetAutoID() {
+	for _, f := range schema.GetFields() {
+		if f.GetAutoID() {
 			continue
 		}
-		switch field.GetDataType() {
+		switch f.GetDataType() {
 		case schemapb.DataType_Bool:
-			boolData := make([]bool, 0)
-			for i := 0; i < rows; i++ {
-				boolData = append(boolData, i%3 != 0)
+			insertData.Data[f.FieldID] = &storage.BoolFieldData{
+				Data: testutils.GenerateBoolArray(rows),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.BoolFieldData{Data: boolData}
-		case schemapb.DataType_Float:
-			floatData := make([]float32, 0)
-			for i := 0; i < rows; i++ {
-				floatData = append(floatData, float32(i/2))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.FloatFieldData{Data: floatData}
-		case schemapb.DataType_Double:
-			doubleData := make([]float64, 0)
-			for i := 0; i < rows; i++ {
-				doubleData = append(doubleData, float64(i/5))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.DoubleFieldData{Data: doubleData}
 		case schemapb.DataType_Int8:
-			int8Data := make([]int8, 0)
-			for i := 0; i < rows; i++ {
-				int8Data = append(int8Data, int8(i%256))
+			insertData.Data[f.FieldID] = &storage.Int8FieldData{
+				Data: testutils.GenerateInt8Array(rows),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.Int8FieldData{Data: int8Data}
 		case schemapb.DataType_Int16:
-			int16Data := make([]int16, 0)
-			for i := 0; i < rows; i++ {
-				int16Data = append(int16Data, int16(i%65536))
+			insertData.Data[f.FieldID] = &storage.Int16FieldData{
+				Data: testutils.GenerateInt16Array(rows),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.Int16FieldData{Data: int16Data}
 		case schemapb.DataType_Int32:
-			int32Data := make([]int32, 0)
-			for i := 0; i < rows; i++ {
-				int32Data = append(int32Data, int32(i%1000))
+			insertData.Data[f.FieldID] = &storage.Int32FieldData{
+				Data: testutils.GenerateInt32Array(rows),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.Int32FieldData{Data: int32Data}
 		case schemapb.DataType_Int64:
-			int64Data := make([]int64, 0)
-			for i := 0; i < rows; i++ {
-				int64Data = append(int64Data, int64(i))
+			insertData.Data[f.FieldID] = &storage.Int64FieldData{
+				Data: testutils.GenerateInt64Array(rows),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.Int64FieldData{Data: int64Data}
+		case schemapb.DataType_Float:
+			insertData.Data[f.FieldID] = &storage.FloatFieldData{
+				Data: testutils.GenerateFloat32Array(rows),
+			}
+		case schemapb.DataType_Double:
+			insertData.Data[f.FieldID] = &storage.DoubleFieldData{
+				Data: testutils.GenerateFloat64Array(rows),
+			}
 		case schemapb.DataType_BinaryVector:
-			dim, err := typeutil.GetDim(field)
+			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			binVecData := make([]byte, 0)
-			total := rows * int(dim) / 8
-			for i := 0; i < total; i++ {
-				binVecData = append(binVecData, byte(i%256))
+			insertData.Data[f.FieldID] = &storage.BinaryVectorFieldData{
+				Data: testutils.GenerateBinaryVectors(rows, int(dim)),
+				Dim:  int(dim),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.BinaryVectorFieldData{Data: binVecData, Dim: int(dim)}
 		case schemapb.DataType_FloatVector:
-			dim, err := typeutil.GetDim(field)
+			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			floatVecData := make([]float32, 0)
-			total := rows * int(dim)
-			for i := 0; i < total; i++ {
-				floatVecData = append(floatVecData, rand.Float32())
+			insertData.Data[f.GetFieldID()] = &storage.FloatVectorFieldData{
+				Data: testutils.GenerateFloatVectors(rows, int(dim)),
+				Dim:  int(dim),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.FloatVectorFieldData{Data: floatVecData, Dim: int(dim)}
 		case schemapb.DataType_Float16Vector:
-			dim, err := typeutil.GetDim(field)
+			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			total := int64(rows) * dim * 2
-			float16VecData := make([]byte, total)
-			_, err = rand2.Read(float16VecData)
-			if err != nil {
-				return nil, err
+			insertData.Data[f.FieldID] = &storage.Float16VectorFieldData{
+				Data: testutils.GenerateFloat16Vectors(rows, int(dim)),
+				Dim:  int(dim),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.Float16VectorFieldData{Data: float16VecData, Dim: int(dim)}
 		case schemapb.DataType_BFloat16Vector:
-			dim, err := typeutil.GetDim(field)
+			dim, err := typeutil.GetDim(f)
 			if err != nil {
 				return nil, err
 			}
-			total := int64(rows) * dim * 2
-			bfloat16VecData := make([]byte, total)
-			_, err = rand2.Read(bfloat16VecData)
-			if err != nil {
-				return nil, err
+			insertData.Data[f.FieldID] = &storage.BFloat16VectorFieldData{
+				Data: testutils.GenerateBFloat16Vectors(rows, int(dim)),
+				Dim:  int(dim),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.BFloat16VectorFieldData{Data: bfloat16VecData, Dim: int(dim)}
 		case schemapb.DataType_SparseFloatVector:
 			sparseFloatVecData := testutils.GenerateSparseFloatVectors(rows)
-			insertData.Data[field.GetFieldID()] = &storage.SparseFloatVectorFieldData{
+			insertData.Data[f.FieldID] = &storage.SparseFloatVectorFieldData{
 				SparseFloatArray: *sparseFloatVecData,
 			}
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			varcharData := make([]string, 0)
-			for i := 0; i < rows; i++ {
-				varcharData = append(varcharData, strconv.Itoa(i))
+			insertData.Data[f.FieldID] = &storage.StringFieldData{
+				Data: testutils.GenerateStringArray(rows),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.StringFieldData{Data: varcharData}
 		case schemapb.DataType_JSON:
-			jsonData := make([][]byte, 0)
-			for i := 0; i < rows; i++ {
-				if i%4 == 0 {
-					v, _ := json.Marshal("{\"a\": \"%s\", \"b\": %d}")
-					jsonData = append(jsonData, v)
-				} else if i%4 == 1 {
-					v, _ := json.Marshal(i)
-					jsonData = append(jsonData, v)
-				} else if i%4 == 2 {
-					v, _ := json.Marshal(float32(i) * 0.1)
-					jsonData = append(jsonData, v)
-				} else if i%4 == 3 {
-					v, _ := json.Marshal(strconv.Itoa(i))
-					jsonData = append(jsonData, v)
-				}
+			insertData.Data[f.FieldID] = &storage.JSONFieldData{
+				Data: testutils.GenerateJSONArray(rows),
 			}
-			insertData.Data[field.GetFieldID()] = &storage.JSONFieldData{Data: jsonData}
 		case schemapb.DataType_Array:
-			arrayData := make([]*schemapb.ScalarField, 0)
-			switch field.GetElementType() {
+			switch f.GetElementType() {
 			case schemapb.DataType_Bool:
-				for i := 0; i < rows; i++ {
-					data := []bool{i%2 == 0, i%3 == 0, i%4 == 0}
-					arrayData = append(arrayData, &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_BoolData{
-							BoolData: &schemapb.BoolArray{
-								Data: data,
-							},
-						},
-					})
+				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
+					Data: testutils.GenerateArrayOfBoolArray(rows),
 				}
-				insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
 			case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
-				for i := 0; i < rows; i++ {
-					data := []int32{int32(i), int32(i + 1), int32(i + 2)}
-					arrayData = append(arrayData, &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_IntData{
-							IntData: &schemapb.IntArray{
-								Data: data,
-							},
-						},
-					})
+				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
+					Data: testutils.GenerateArrayOfIntArray(rows),
 				}
-				insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
 			case schemapb.DataType_Int64:
-				for i := 0; i < rows; i++ {
-					data := []int64{int64(i), int64(i + 1), int64(i + 2)}
-					arrayData = append(arrayData, &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_LongData{
-							LongData: &schemapb.LongArray{
-								Data: data,
-							},
-						},
-					})
+				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
+					Data: testutils.GenerateArrayOfLongArray(rows),
 				}
-				insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
 			case schemapb.DataType_Float:
-				for i := 0; i < rows; i++ {
-					data := []float32{float32(i) * 0.1, float32(i+1) * 0.1, float32(i+2) * 0.1}
-					arrayData = append(arrayData, &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_FloatData{
-							FloatData: &schemapb.FloatArray{
-								Data: data,
-							},
-						},
-					})
+				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
+					Data: testutils.GenerateArrayOfFloatArray(rows),
 				}
-				insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
 			case schemapb.DataType_Double:
-				for i := 0; i < rows; i++ {
-					data := []float64{float64(i) * 0.02, float64(i+1) * 0.02, float64(i+2) * 0.02}
-					arrayData = append(arrayData, &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_DoubleData{
-							DoubleData: &schemapb.DoubleArray{
-								Data: data,
-							},
-						},
-					})
+				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
+					Data: testutils.GenerateArrayOfDoubleArray(rows),
 				}
-				insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
-				for i := 0; i < rows; i++ {
-					data := []string{
-						randomString(5) + "-" + fmt.Sprintf("%d", i),
-						randomString(5) + "-" + fmt.Sprintf("%d", i),
-						randomString(5) + "-" + fmt.Sprintf("%d", i),
-					}
-					arrayData = append(arrayData, &schemapb.ScalarField{
-						Data: &schemapb.ScalarField_StringData{
-							StringData: &schemapb.StringArray{
-								Data: data,
-							},
-						},
-					})
+				insertData.Data[f.FieldID] = &storage.ArrayFieldData{
+					Data: testutils.GenerateArrayOfStringArray(rows),
 				}
-				insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
 			}
 		default:
-			panic(fmt.Sprintf("unexpected data type: %s", field.GetDataType().String()))
+			panic(fmt.Sprintf("unsupported data type: %s", f.GetDataType().String()))
 		}
 	}
 	return insertData, nil
@@ -428,23 +334,24 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 			builder.AppendValues(offsets, valid)
 			columns = append(columns, builder.NewListArray())
 		case schemapb.DataType_SparseFloatVector:
-			sparseFloatVecData := make([]byte, 0)
-			builder := array.NewListBuilder(mem, &arrow.Uint8Type{})
+			builder := array.NewStringBuilder(mem)
 			contents := insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
 			rows := len(contents)
-			offsets := make([]int32, 0, rows)
-			valid := make([]bool, 0, rows)
-			currOffset := int32(0)
+			jsonBytesData := make([][]byte, 0)
 			for i := 0; i < rows; i++ {
 				rowVecData := contents[i]
-				sparseFloatVecData = append(sparseFloatVecData, rowVecData...)
-				offsets = append(offsets, currOffset)
-				currOffset = currOffset + int32(len(rowVecData))
-				valid = append(valid, true)
+				mapData := typeutil.SparseFloatBytesToMap(rowVecData)
+				// convert to JSON format
+				jsonBytes, err := json.Marshal(mapData)
+				if err != nil {
+					return nil, err
+				}
+				jsonBytesData = append(jsonBytesData, jsonBytes)
 			}
-			builder.ValueBuilder().(*array.Uint8Builder).AppendValues(sparseFloatVecData, nil)
-			builder.AppendValues(offsets, valid)
-			columns = append(columns, builder.NewListArray())
+			builder.AppendValues(lo.Map(jsonBytesData, func(bs []byte, _ int) string {
+				return string(bs)
+			}), nil)
+			columns = append(columns, builder.NewStringArray())
 		case schemapb.DataType_JSON:
 			builder := array.NewStringBuilder(mem)
 			jsonData := insertData.Data[fieldID].(*storage.JSONFieldData).Data
@@ -576,4 +483,67 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 		}
 	}
 	return columns, nil
+}
+
+func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([]map[string]any, error) {
+	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+		return field.GetFieldID()
+	})
+
+	rowNum := insertData.GetRowNum()
+	rows := make([]map[string]any, 0, rowNum)
+	for i := 0; i < rowNum; i++ {
+		data := make(map[int64]interface{})
+		for fieldID, v := range insertData.Data {
+			field := fieldIDToField[fieldID]
+			dataType := field.GetDataType()
+			elemType := field.GetElementType()
+			if field.GetAutoID() {
+				continue
+			}
+			switch dataType {
+			case schemapb.DataType_Array:
+				switch elemType {
+				case schemapb.DataType_Bool:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetBoolData().GetData()
+				case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
+				case schemapb.DataType_Int64:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetLongData().GetData()
+				case schemapb.DataType_Float:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetFloatData().GetData()
+				case schemapb.DataType_Double:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetDoubleData().GetData()
+				case schemapb.DataType_String:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetStringData().GetData()
+				}
+			case schemapb.DataType_JSON:
+				data[fieldID] = string(v.GetRow(i).([]byte))
+			case schemapb.DataType_BinaryVector:
+				bytes := v.GetRow(i).([]byte)
+				ints := make([]int, 0, len(bytes))
+				for _, b := range bytes {
+					ints = append(ints, int(b))
+				}
+				data[fieldID] = ints
+			case schemapb.DataType_Float16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.Float16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_BFloat16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.BFloat16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_SparseFloatVector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.SparseFloatBytesToMap(bytes)
+			default:
+				data[fieldID] = v.GetRow(i)
+			}
+		}
+		row := lo.MapKeys(data, func(_ any, fieldID int64) string {
+			return fieldIDToField[fieldID].GetName()
+		})
+		rows = append(rows, row)
+	}
+
+	return rows, nil
 }

@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -40,6 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -48,7 +48,7 @@ import (
 )
 
 type meta struct {
-	sync.RWMutex
+	lock.RWMutex
 	ctx          context.Context
 	catalog      metastore.DataCoordCatalog
 	collections  map[UniqueID]*collectionInfo // collection id to collection info
@@ -60,7 +60,7 @@ type meta struct {
 }
 
 type channelCPs struct {
-	sync.RWMutex
+	lock.RWMutex
 	checkpoints map[string]*msgpb.MsgPosition
 }
 
@@ -179,6 +179,7 @@ func (m *meta) DropCollection(collectionID int64) {
 	m.Lock()
 	defer m.Unlock()
 	delete(m.collections, collectionID)
+	metrics.CleanupDataCoordWithCollectionID(collectionID)
 	metrics.DataCoordNumCollections.WithLabelValues().Set(float64(len(m.collections)))
 	log.Info("meta update: drop collection - complete", zap.Int64("collectionID", collectionID))
 }
@@ -304,17 +305,35 @@ func (m *meta) GetCollectionBinlogSize() (int64, map[UniqueID]int64, map[UniqueI
 			collectionRowsNum[segment.GetCollectionID()][segment.GetState()] += segment.GetNumOfRows()
 		}
 	}
+
+	metrics.DataCoordNumStoredRows.Reset()
 	for collectionID, statesRows := range collectionRowsNum {
 		for state, rows := range statesRows {
 			coll, ok := m.collections[collectionID]
 			if ok {
 				metrics.DataCoordNumStoredRows.WithLabelValues(coll.DatabaseName, fmt.Sprint(collectionID), state.String()).Set(float64(rows))
-			} else {
-				log.Warn("not found database name", zap.Int64("collectionID", collectionID))
 			}
 		}
 	}
 	return total, collectionBinlogSize, partitionBinlogSize
+}
+
+// GetCollectionIndexFilesSize returns the total index files size of all segment for each collection.
+func (m *meta) GetCollectionIndexFilesSize() uint64 {
+	m.RLock()
+	defer m.RUnlock()
+	var total uint64
+	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
+		coll, ok := m.collections[segmentIdx.CollectionID]
+		if ok {
+			metrics.DataCoordStoredIndexFilesSize.WithLabelValues(coll.DatabaseName,
+				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
+			total += segmentIdx.IndexSize
+		} else {
+			log.Warn("not found database name", zap.Int64("collectionID", segmentIdx.CollectionID))
+		}
+	}
+	return total
 }
 
 func (m *meta) GetAllCollectionNumRows() map[int64]int64 {
@@ -367,6 +386,11 @@ func (m *meta) DropSegment(segmentID UniqueID) error {
 		return err
 	}
 	metrics.DataCoordNumSegments.WithLabelValues(segment.GetState().String(), segment.GetLevel().String()).Dec()
+	coll, ok := m.collections[segment.CollectionID]
+	if ok {
+		metrics.CleanupDataCoordSegmentMetrics(coll.DatabaseName, segment.CollectionID, segment.ID)
+	}
+
 	m.segments.DropSegment(segmentID)
 	log.Info("meta update: dropping segment - complete",
 		zap.Int64("segmentID", segmentID))
@@ -1017,8 +1041,6 @@ func (m *meta) GetSegmentsIDOfPartitionWithDropped(collectionID, partitionID Uni
 
 // GetNumRowsOfPartition returns row count of segments belongs to provided collection & partition
 func (m *meta) GetNumRowsOfPartition(collectionID UniqueID, partitionID UniqueID) int64 {
-	m.RLock()
-	defer m.RUnlock()
 	var ret int64
 	segments := m.SelectSegments(WithCollection(collectionID), SegmentFilterFunc(func(si *SegmentInfo) bool {
 		return isSegmentHealthy(si) && si.GetPartitionID() == partitionID
@@ -1336,6 +1358,28 @@ func (m *meta) UpdateChannelCheckpoint(vChannel string, pos *msgpb.MsgPosition) 
 		metrics.DataCoordCheckpointUnixSeconds.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), vChannel).
 			Set(float64(ts.Unix()))
 	}
+	return nil
+}
+
+// MarkChannelCheckpointDropped set channel checkpoint to MaxUint64 preventing future update
+// and remove the metrics for channel checkpoint lag.
+func (m *meta) MarkChannelCheckpointDropped(ctx context.Context, channel string) error {
+	m.channelCPs.Lock()
+	defer m.channelCPs.Unlock()
+
+	cp := &msgpb.MsgPosition{
+		ChannelName: channel,
+		Timestamp:   math.MaxUint64,
+	}
+
+	err := m.catalog.SaveChannelCheckpoints(ctx, []*msgpb.MsgPosition{cp})
+	if err != nil {
+		return err
+	}
+
+	m.channelCPs.checkpoints[channel] = cp
+
+	metrics.DataCoordCheckpointUnixSeconds.DeleteLabelValues(fmt.Sprint(paramtable.GetNodeID()), channel)
 	return nil
 }
 

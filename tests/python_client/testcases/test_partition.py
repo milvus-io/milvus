@@ -122,8 +122,7 @@ class TestPartitionParams(TestcaseBase):
         assert partition_w1.description == partition_w2.description
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("description", ct.get_invalid_strs)
-    def test_partition_special_chars_description(self, description):
+    def test_partition_special_chars_description(self):
         """
         target: verify create a partition with special characters in description
         method: create a partition with special characters in description
@@ -134,6 +133,7 @@ class TestPartitionParams(TestcaseBase):
 
         # create partition
         partition_name = cf.gen_unique_str(prefix)
+        description = "！@#￥%……&*（"
         self.init_partition_wrap(collection_w, partition_name,
                                  description=description,
                                  check_task=CheckTasks.check_partition_property,
@@ -199,25 +199,26 @@ class TestPartitionParams(TestcaseBase):
                                            check_items={"name": partition_name})
 
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.parametrize("partition_name", ct.get_invalid_strs)
+    @pytest.mark.parametrize("partition_name", ct.invalid_resource_names)
     def test_partition_invalid_name(self, partition_name):
         """
         target: verify create a partition with invalid name
         method: create a partition with invalid names
         expected: raise exception
         """
+        if partition_name == "12name":
+            pytest.skip(reason="won't fix issue #32998")
         # create collection
         collection_w = self.init_collection_wrap()
 
         # create partition
-        error1 = {ct.err_code: 1, ct.err_msg: f"`partition_name` value {partition_name} is illegal"}
-        error2 = {ct.err_code: 65535, ct.err_msg: f"Invalid partition name: {partition_name}. Partition name can"
-                                                  f" only contain numbers, letters and underscores."}
-        error = error1 if partition_name in [None, [], 1, [1, "2", 3], (1,), {1: 1}] else error2
+        if partition_name is not None:
+            error = {ct.err_code: 999, ct.err_msg: f"Invalid partition name: {partition_name.strip()}"}
+        else:
+            error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {partition_name} is illegal"}
         self.partition_wrap.init_partition(collection_w.collection, partition_name,
                                            check_task=CheckTasks.err_res,
                                            check_items=error)
-        # TODO: need an error code issue #5144 and assert independently
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_partition_none_collection(self):
@@ -311,17 +312,9 @@ class TestPartitionParams(TestcaseBase):
         partition_w1.release()
         partition_w2.load()
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_non_number_replicas(self, request):
-        if request.param == 1:
-            pytest.skip("1 is valid replica number")
-        if request.param is None:
-            pytest.skip("None is valid replica number")
-        yield request.param
-
     @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="issue #21618")
-    def test_load_partition_replica_non_number(self, get_non_number_replicas):
+    @pytest.mark.parametrize("replicas", [1.2, "not-int"])
+    def test_load_partition_replica_non_number(self, replicas):
         """
         target: test load partition with non-number replicas
         method: load with non-number replicas
@@ -334,17 +327,17 @@ class TestPartitionParams(TestcaseBase):
         partition_w.insert(cf.gen_default_list_data(nb=100))
 
         # load with non-number replicas
-        error = {ct.err_code: 0, ct.err_msg: f"but expected one of: int, long"}
+        error = {ct.err_code: 0, ct.err_msg: f"`replica_number` value {replicas} is illegal"}
         collection_w.create_index(ct.default_float_vec_field_name, index_params=ct.default_flat_index)
-        partition_w.load(replica_number=get_non_number_replicas, check_task=CheckTasks.err_res, check_items=error)
+        partition_w.load(replica_number=replicas, check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     @pytest.mark.parametrize("replicas", [0, -1])
     def test_load_replica_invalid_number(self, replicas):
         """
-        target: test load partition with invalid replica number
-        method: load with invalid replica number
-        expected: raise exception
+        target: test load partition with 0 and negative number
+        method: load with 0 or -1
+        expected: load successful
         """
         # create, insert
         self._connect()
@@ -1317,9 +1310,9 @@ class TestHasBase(TestcaseBase):
         expected: status ok
         """
         collection_w = self.init_collection_wrap()
-        partition_name = ct.get_invalid_strs
+        partition_name = ct.invalid_resource_names[0]
         collection_w.has_partition(partition_name, check_task=CheckTasks.err_res,
-                                   check_items={ct.err_code: 1, 'err_msg': "is illegal"})
+                                   check_items={ct.err_code: 999, 'err_msg': "is illegal"})
 
 
 class TestDropBase(TestcaseBase):
@@ -1384,6 +1377,7 @@ class TestNameInvalid(TestcaseBase):
         expected: status not ok
         """
         collection_w = self.init_collection_wrap()
-        partition_name = ct.get_invalid_strs
+        partition_name = ct.invalid_resource_names[0]
         collection_w.drop_partition(partition_name, check_task=CheckTasks.err_res,
-                                    check_items={ct.err_code: 1, 'err_msg': "is illegal"})
+                                    check_items={ct.err_code: 999,
+                                                 'err_msg': f"`partition_name` value {partition_name} is illegal"})

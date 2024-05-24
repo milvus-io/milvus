@@ -5,9 +5,7 @@ package broker
 import (
 	context "context"
 
-	milvuspb "github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
-
 	mock "github.com/stretchr/testify/mock"
 
 	msgpb "github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -24,66 +22,6 @@ type MockBroker_Expecter struct {
 
 func (_m *MockBroker) EXPECT() *MockBroker_Expecter {
 	return &MockBroker_Expecter{mock: &_m.Mock}
-}
-
-// AllocTimestamp provides a mock function with given fields: ctx, num
-func (_m *MockBroker) AllocTimestamp(ctx context.Context, num uint32) (uint64, uint32, error) {
-	ret := _m.Called(ctx, num)
-
-	var r0 uint64
-	var r1 uint32
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, uint32) (uint64, uint32, error)); ok {
-		return rf(ctx, num)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, uint32) uint64); ok {
-		r0 = rf(ctx, num)
-	} else {
-		r0 = ret.Get(0).(uint64)
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, uint32) uint32); ok {
-		r1 = rf(ctx, num)
-	} else {
-		r1 = ret.Get(1).(uint32)
-	}
-
-	if rf, ok := ret.Get(2).(func(context.Context, uint32) error); ok {
-		r2 = rf(ctx, num)
-	} else {
-		r2 = ret.Error(2)
-	}
-
-	return r0, r1, r2
-}
-
-// MockBroker_AllocTimestamp_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AllocTimestamp'
-type MockBroker_AllocTimestamp_Call struct {
-	*mock.Call
-}
-
-// AllocTimestamp is a helper method to define mock.On call
-//   - ctx context.Context
-//   - num uint32
-func (_e *MockBroker_Expecter) AllocTimestamp(ctx interface{}, num interface{}) *MockBroker_AllocTimestamp_Call {
-	return &MockBroker_AllocTimestamp_Call{Call: _e.mock.On("AllocTimestamp", ctx, num)}
-}
-
-func (_c *MockBroker_AllocTimestamp_Call) Run(run func(ctx context.Context, num uint32)) *MockBroker_AllocTimestamp_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(uint32))
-	})
-	return _c
-}
-
-func (_c *MockBroker_AllocTimestamp_Call) Return(ts uint64, count uint32, err error) *MockBroker_AllocTimestamp_Call {
-	_c.Call.Return(ts, count, err)
-	return _c
-}
-
-func (_c *MockBroker_AllocTimestamp_Call) RunAndReturn(run func(context.Context, uint32) (uint64, uint32, error)) *MockBroker_AllocTimestamp_Call {
-	_c.Call.Return(run)
-	return _c
 }
 
 // AssignSegmentID provides a mock function with given fields: ctx, reqs
@@ -151,62 +89,6 @@ func (_c *MockBroker_AssignSegmentID_Call) Return(_a0 []int64, _a1 error) *MockB
 }
 
 func (_c *MockBroker_AssignSegmentID_Call) RunAndReturn(run func(context.Context, ...*datapb.SegmentIDRequest) ([]int64, error)) *MockBroker_AssignSegmentID_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// DescribeCollection provides a mock function with given fields: ctx, collectionID, ts
-func (_m *MockBroker) DescribeCollection(ctx context.Context, collectionID int64, ts uint64) (*milvuspb.DescribeCollectionResponse, error) {
-	ret := _m.Called(ctx, collectionID, ts)
-
-	var r0 *milvuspb.DescribeCollectionResponse
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) (*milvuspb.DescribeCollectionResponse, error)); ok {
-		return rf(ctx, collectionID, ts)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, int64, uint64) *milvuspb.DescribeCollectionResponse); ok {
-		r0 = rf(ctx, collectionID, ts)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*milvuspb.DescribeCollectionResponse)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, int64, uint64) error); ok {
-		r1 = rf(ctx, collectionID, ts)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBroker_DescribeCollection_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DescribeCollection'
-type MockBroker_DescribeCollection_Call struct {
-	*mock.Call
-}
-
-// DescribeCollection is a helper method to define mock.On call
-//   - ctx context.Context
-//   - collectionID int64
-//   - ts uint64
-func (_e *MockBroker_Expecter) DescribeCollection(ctx interface{}, collectionID interface{}, ts interface{}) *MockBroker_DescribeCollection_Call {
-	return &MockBroker_DescribeCollection_Call{Call: _e.mock.On("DescribeCollection", ctx, collectionID, ts)}
-}
-
-func (_c *MockBroker_DescribeCollection_Call) Run(run func(ctx context.Context, collectionID int64, ts uint64)) *MockBroker_DescribeCollection_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(int64), args[2].(uint64))
-	})
-	return _c
-}
-
-func (_c *MockBroker_DescribeCollection_Call) Return(_a0 *milvuspb.DescribeCollectionResponse, _a1 error) *MockBroker_DescribeCollection_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockBroker_DescribeCollection_Call) RunAndReturn(run func(context.Context, int64, uint64) (*milvuspb.DescribeCollectionResponse, error)) *MockBroker_DescribeCollection_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -403,62 +285,6 @@ func (_c *MockBroker_SaveBinlogPaths_Call) Return(_a0 error) *MockBroker_SaveBin
 }
 
 func (_c *MockBroker_SaveBinlogPaths_Call) RunAndReturn(run func(context.Context, *datapb.SaveBinlogPathsRequest) error) *MockBroker_SaveBinlogPaths_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// ShowPartitions provides a mock function with given fields: ctx, dbName, collectionName
-func (_m *MockBroker) ShowPartitions(ctx context.Context, dbName string, collectionName string) (map[string]int64, error) {
-	ret := _m.Called(ctx, dbName, collectionName)
-
-	var r0 map[string]int64
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) (map[string]int64, error)); ok {
-		return rf(ctx, dbName, collectionName)
-	}
-	if rf, ok := ret.Get(0).(func(context.Context, string, string) map[string]int64); ok {
-		r0 = rf(ctx, dbName, collectionName)
-	} else {
-		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[string]int64)
-		}
-	}
-
-	if rf, ok := ret.Get(1).(func(context.Context, string, string) error); ok {
-		r1 = rf(ctx, dbName, collectionName)
-	} else {
-		r1 = ret.Error(1)
-	}
-
-	return r0, r1
-}
-
-// MockBroker_ShowPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ShowPartitions'
-type MockBroker_ShowPartitions_Call struct {
-	*mock.Call
-}
-
-// ShowPartitions is a helper method to define mock.On call
-//   - ctx context.Context
-//   - dbName string
-//   - collectionName string
-func (_e *MockBroker_Expecter) ShowPartitions(ctx interface{}, dbName interface{}, collectionName interface{}) *MockBroker_ShowPartitions_Call {
-	return &MockBroker_ShowPartitions_Call{Call: _e.mock.On("ShowPartitions", ctx, dbName, collectionName)}
-}
-
-func (_c *MockBroker_ShowPartitions_Call) Run(run func(ctx context.Context, dbName string, collectionName string)) *MockBroker_ShowPartitions_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(context.Context), args[1].(string), args[2].(string))
-	})
-	return _c
-}
-
-func (_c *MockBroker_ShowPartitions_Call) Return(_a0 map[string]int64, _a1 error) *MockBroker_ShowPartitions_Call {
-	_c.Call.Return(_a0, _a1)
-	return _c
-}
-
-func (_c *MockBroker_ShowPartitions_Call) RunAndReturn(run func(context.Context, string, string) (map[string]int64, error)) *MockBroker_ShowPartitions_Call {
 	_c.Call.Return(run)
 	return _c
 }

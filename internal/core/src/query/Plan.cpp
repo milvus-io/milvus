@@ -56,7 +56,8 @@ ParsePlaceholderGroup(const Plan* plan,
         AssertInfo(element.num_of_queries_ > 0, "must have queries");
         if (info.type() ==
             milvus::proto::common::PlaceholderType::SparseFloatVector) {
-            element.sparse_matrix_ = SparseBytesToRows(info.values());
+            element.sparse_matrix_ =
+                SparseBytesToRows(info.values(), /*validate=*/true);
         } else {
             auto line_size = info.values().Get(0).size();
             if (field_meta.get_sizeof() != line_size) {

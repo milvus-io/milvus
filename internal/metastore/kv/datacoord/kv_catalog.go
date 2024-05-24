@@ -45,8 +45,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-var maxEtcdTxnNum = 128
-
 var paginationSize = 2000
 
 type Catalog struct {
@@ -193,6 +191,13 @@ func (kc *Catalog) listBinlogs(binlogType storage.BinlogType) (map[typeutil.Uniq
 			return fmt.Errorf("prefix:%s, %w", path.Join(kc.metaRootpath, logPathPrefix), err)
 		}
 
+		// set log size to memory size if memory size is zero for old segment before v2.4.3
+		for i, b := range fieldBinlog.GetBinlogs() {
+			if b.GetMemorySize() == 0 {
+				fieldBinlog.Binlogs[i].MemorySize = b.GetLogSize()
+			}
+		}
+
 		// no need to set log path and only store log id
 		ret[segmentID] = append(ret[segmentID], fieldBinlog)
 		return nil
@@ -334,32 +339,10 @@ func (kc *Catalog) SaveByBatch(kvs map[string]string) error {
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
-	if len(kvs) <= maxEtcdTxnNum {
-		if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
-			log.Error("failed to save by batch", zap.Error(err))
-			return err
-		}
-	} else {
-		// Split kvs into multiple operations to avoid over-sized operations.
-		// Also make sure kvs of the same segment are not split into different operations.
-		batch := make(map[string]string)
-		for k, v := range kvs {
-			if len(batch) == maxEtcdTxnNum {
-				if err := etcd.SaveByBatch(batch, saveFn); err != nil {
-					log.Error("failed to save by batch", zap.Error(err))
-					return err
-				}
-				maps.Clear(batch)
-			}
-			batch[k] = v
-		}
-
-		if len(batch) > 0 {
-			if err := etcd.SaveByBatch(batch, saveFn); err != nil {
-				log.Error("failed to save by batch", zap.Error(err))
-				return err
-			}
-		}
+	err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn)
+	if err != nil {
+		log.Error("failed to save by batch", zap.Error(err))
+		return err
 	}
 	return nil
 }
@@ -427,7 +410,7 @@ func (kc *Catalog) SaveDroppedSegmentsInBatch(ctx context.Context, segments []*d
 	saveFn := func(partialKvs map[string]string) error {
 		return kc.MetaKv.MultiSave(partialKvs)
 	}
-	if err := etcd.SaveByBatch(kvs, saveFn); err != nil {
+	if err := etcd.SaveByBatchWithLimit(kvs, util.MaxEtcdTxnNum, saveFn); err != nil {
 		return err
 	}
 
@@ -445,7 +428,6 @@ func (kc *Catalog) DropSegment(ctx context.Context, segment *datapb.SegmentInfo)
 		return err
 	}
 
-	metrics.CleanupDataCoordSegmentMetrics(segment.CollectionID, segment.ID)
 	return nil
 }
 

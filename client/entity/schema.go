@@ -19,6 +19,8 @@ package entity
 import (
 	"strconv"
 
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 )
@@ -60,6 +62,8 @@ type Schema struct {
 	AutoID             bool
 	Fields             []*Field
 	EnableDynamicField bool
+
+	pkField *Field
 }
 
 // NewSchema creates an empty schema object.
@@ -91,6 +95,9 @@ func (s *Schema) WithDynamicFieldEnabled(dynamicEnabled bool) *Schema {
 
 // WithField adds a field into schema and returns schema itself.
 func (s *Schema) WithField(f *Field) *Schema {
+	if f.PrimaryKey {
+		s.pkField = f
+	}
 	s.Fields = append(s.Fields, f)
 	return s
 }
@@ -116,10 +123,14 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 	s.CollectionName = p.GetName()
 	s.Fields = make([]*Field, 0, len(p.GetFields()))
 	for _, fp := range p.GetFields() {
+		field := NewField().ReadProto(fp)
 		if fp.GetAutoID() {
 			s.AutoID = true
 		}
-		s.Fields = append(s.Fields, NewField().ReadProto(fp))
+		if field.PrimaryKey {
+			s.pkField = field
+		}
+		s.Fields = append(s.Fields, field)
 	}
 	s.EnableDynamicField = p.GetEnableDynamicField()
 	return s
@@ -127,12 +138,15 @@ func (s *Schema) ReadProto(p *schemapb.CollectionSchema) *Schema {
 
 // PKFieldName returns pk field name for this schemapb.
 func (s *Schema) PKFieldName() string {
-	for _, field := range s.Fields {
-		if field.PrimaryKey {
-			return field.Name
-		}
+	if s.pkField == nil {
+		return ""
 	}
-	return ""
+	return s.pkField.Name
+}
+
+// PKField returns PK Field schema for this schema.
+func (s *Schema) PKField() *Field {
+	return s.pkField
 }
 
 // Field represent field schema in milvus
@@ -279,6 +293,18 @@ func (f *Field) WithDim(dim int64) *Field {
 	}
 	f.TypeParams[TypeParamDim] = strconv.FormatInt(dim, 10)
 	return f
+}
+
+func (f *Field) GetDim() (int64, error) {
+	dimStr, has := f.TypeParams[TypeParamDim]
+	if !has {
+		return -1, errors.New("field with no dim")
+	}
+	dim, err := strconv.ParseInt(dimStr, 10, 64)
+	if err != nil {
+		return -1, errors.Newf("field with bad format dim: %s", err.Error())
+	}
+	return dim, nil
 }
 
 func (f *Field) WithMaxLength(maxLen int64) *Field {

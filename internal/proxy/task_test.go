@@ -49,6 +49,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/util/uniquegenerator"
@@ -750,6 +751,25 @@ func TestCreateCollectionTask(t *testing.T) {
 		tooManyVectorFieldsSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = tooManyVectorFieldsSchema
+		err = task.PreExecute(ctx)
+		assert.Error(t, err)
+
+		// without vector field
+		schema = &schemapb.CollectionSchema{
+			Name:        collectionName,
+			Description: "",
+			AutoID:      false,
+			Fields: []*schemapb.FieldSchema{
+				{
+					Name:         "id",
+					DataType:     schemapb.DataType_Int64,
+					IsPrimaryKey: true,
+				},
+			},
+		}
+		noVectorSchema, err := proto.Marshal(schema)
+		assert.NoError(t, err)
+		task.CreateCollectionRequest.Schema = noVectorSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
@@ -1680,7 +1700,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
@@ -1874,7 +1894,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	defer segAllocator.Close()
 
 	t.Run("insert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &insertTask{
 			insertMsg: &BaseInsertTask{
 				BaseMsg: msgstream.BaseMsg{
@@ -1929,7 +1949,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 	})
 
 	t.Run("upsert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		task := &upsertTask{
 			upsertMsg: &msgstream.UpsertMsg{
 				InsertMsg: &BaseInsertTask{
@@ -3115,7 +3135,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		// check default partitions
 		err = InitMetaCache(ctx, rc, nil, nil)
 		assert.NoError(t, err)
-		partitionNames, err := getDefaultPartitionNames(ctx, "", task.CollectionName)
+		partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, "", task.CollectionName)
 		assert.NoError(t, err)
 		assert.Equal(t, task.GetNumPartitions(), int64(len(partitionNames)))
 
@@ -3339,7 +3359,7 @@ func TestPartitionKey(t *testing.T) {
 	})
 
 	t.Run("Upsert", func(t *testing.T) {
-		hash := generateHashKeys(nb)
+		hash := testutils.GenerateHashKeys(nb)
 		ut := &upsertTask{
 			ctx:       ctx,
 			Condition: NewTaskCondition(ctx),

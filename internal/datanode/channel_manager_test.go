@@ -20,6 +20,7 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -56,7 +57,7 @@ func (s *OpRunnerSuite) TestWatchWithTimer() {
 	mockReleaseFunc := func(channel string) {
 		log.Info("mock release func")
 	}
-	runner := NewOpRunner(channel, s.node, mockReleaseFunc, commuCh)
+	runner := NewOpRunner(channel, s.node, mockReleaseFunc, executeWatch, commuCh)
 	err := runner.Enqueue(info)
 	s.Require().NoError(err)
 
@@ -65,6 +66,35 @@ func (s *OpRunnerSuite) TestWatchWithTimer() {
 	s.Equal(channel, opState.channel)
 
 	runner.FinishOp(100)
+}
+
+func (s *OpRunnerSuite) TestWatchTimeout() {
+	channel := "by-dev-rootcoord-dml-1000"
+	paramtable.Get().Save(Params.DataCoordCfg.WatchTimeoutInterval.Key, "0.000001")
+	defer paramtable.Get().Reset(Params.DataCoordCfg.WatchTimeoutInterval.Key)
+	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+
+	sig := make(chan struct{})
+	commuCh := make(chan *opState)
+
+	mockReleaseFunc := func(channel string) { log.Info("mock release func") }
+	mockWatchFunc := func(ctx context.Context, dn *DataNode, info *datapb.ChannelWatchInfo, tickler *tickler) (*dataSyncService, error) {
+		<-ctx.Done()
+		sig <- struct{}{}
+		return nil, errors.New("timeout")
+	}
+
+	runner := NewOpRunner(channel, s.node, mockReleaseFunc, mockWatchFunc, commuCh)
+	runner.Start()
+	defer runner.Close()
+	err := runner.Enqueue(info)
+	s.Require().NoError(err)
+
+	<-sig
+	opState := <-commuCh
+	s.Require().NotNil(opState)
+	s.Equal(info.GetOpID(), opState.opID)
+	s.Equal(datapb.ChannelWatchState_WatchFailure, opState.state)
 }
 
 type OpRunnerSuite struct {
@@ -124,26 +154,6 @@ func (s *ChannelManagerSuite) TearDownTest() {
 	if s.manager != nil {
 		s.manager.Close()
 	}
-}
-
-func (s *ChannelManagerSuite) TestWatchFail() {
-	channel := "by-dev-rootcoord-dml-2"
-	paramtable.Get().Save(Params.DataCoordCfg.WatchTimeoutInterval.Key, "0.000001")
-	defer paramtable.Get().Reset(Params.DataCoordCfg.WatchTimeoutInterval.Key)
-	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
-	s.Require().Equal(0, s.manager.opRunners.Len())
-	err := s.manager.Submit(info)
-	s.Require().NoError(err)
-
-	opState := <-s.manager.communicateCh
-	s.Require().NotNil(opState)
-	s.Equal(info.GetOpID(), opState.opID)
-	s.Equal(datapb.ChannelWatchState_WatchFailure, opState.state)
-
-	s.manager.handleOpState(opState)
-
-	resp := s.manager.GetProgress(info)
-	s.Equal(datapb.ChannelWatchState_WatchFailure, resp.GetState())
 }
 
 func (s *ChannelManagerSuite) TestReleaseStuck() {
@@ -207,6 +217,32 @@ func (s *ChannelManagerSuite) TestSubmitIdempotent() {
 	s.Equal(1, runner.UnfinishedOpSize())
 }
 
+func (s *ChannelManagerSuite) TestSubmitSkip() {
+	channel := "by-dev-rootcoord-dml-1"
+
+	info := getWatchInfoByOpID(100, channel, datapb.ChannelWatchState_ToWatch)
+	s.Require().Equal(0, s.manager.opRunners.Len())
+
+	err := s.manager.Submit(info)
+	s.NoError(err)
+
+	s.Equal(1, s.manager.opRunners.Len())
+	s.True(s.manager.opRunners.Contain(channel))
+	opState := <-s.manager.communicateCh
+	s.NotNil(opState)
+	s.Equal(datapb.ChannelWatchState_WatchSuccess, opState.state)
+	s.NotNil(opState.fg)
+	s.Equal(info.GetOpID(), opState.fg.opID)
+	s.manager.handleOpState(opState)
+
+	err = s.manager.Submit(info)
+	s.NoError(err)
+
+	runner, ok := s.manager.opRunners.Get(channel)
+	s.False(ok)
+	s.Nil(runner)
+}
+
 func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	channel := "by-dev-rootcoord-dml-0"
 
@@ -253,4 +289,10 @@ func (s *ChannelManagerSuite) TestSubmitWatchAndRelease() {
 	s.Equal(0, s.manager.fgManager.GetFlowgraphCount())
 	s.False(s.manager.opRunners.Contain(info.GetVchan().GetChannelName()))
 	s.Equal(0, s.manager.opRunners.Len())
+
+	err = s.manager.Submit(info)
+	s.NoError(err)
+	runner, ok := s.manager.opRunners.Get(channel)
+	s.False(ok)
+	s.Nil(runner)
 }

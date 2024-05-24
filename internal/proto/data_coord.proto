@@ -127,6 +127,8 @@ service DataNode {
   rpc QueryPreImport(QueryPreImportRequest) returns(QueryPreImportResponse) {}
   rpc QueryImport(QueryImportRequest) returns(QueryImportResponse) {}
   rpc DropImport(DropImportRequest) returns(common.Status) {}
+
+  rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
 }
 
 message FlushRequest {
@@ -405,6 +407,10 @@ message Binlog {
   string log_path = 4;
   int64 log_size = 5;
   int64 logID = 6;
+  // memory_size represents the size occupied by loading data into memory.
+  // log_size represents the size after data serialized.
+  // for stats_log, the memory_size always equal log_size.
+  int64 memory_size = 7;
 }
 
 message GetRecoveryInfoResponse {
@@ -522,6 +528,7 @@ message CompactionPlan {
   string channel = 7;
   int64 collection_ttl = 8;
   int64 total_rows = 9;
+  schema.CollectionSchema schema = 10;
 }
 
 message CompactionSegment {
@@ -827,4 +834,11 @@ message GcControlRequest {
   common.MsgBase base = 1;
   GcCommand command = 2;
   repeated common.KeyValuePair params = 3;
+}
+
+message QuerySlotRequest {}
+
+message QuerySlotResponse {
+  common.Status status = 1;
+  int64 num_slots = 2;
 }

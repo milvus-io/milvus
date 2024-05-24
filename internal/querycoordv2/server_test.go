@@ -567,10 +567,10 @@ func (suite *ServerSuite) hackServer() {
 		suite.server.meta,
 		suite.server.dist,
 		suite.server.targetMgr,
-		suite.server.balancer,
 		suite.server.nodeMgr,
 		suite.server.taskScheduler,
 		suite.server.broker,
+		suite.server.getBalancerFunc,
 	)
 	suite.server.targetObserver = observers.NewTargetObserver(
 		suite.server.meta,

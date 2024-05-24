@@ -245,7 +245,7 @@ func (node *DataNode) Init() error {
 		serverID := node.GetNodeID()
 		log := log.Ctx(node.ctx).With(zap.String("role", typeutil.DataNodeRole), zap.Int64("nodeID", serverID))
 
-		node.broker = broker.NewCoordBroker(node.rootCoord, node.dataCoord, serverID)
+		node.broker = broker.NewCoordBroker(node.dataCoord, serverID)
 
 		err := node.initRateCollector()
 		if err != nil {
@@ -288,8 +288,8 @@ func (node *DataNode) Init() error {
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
 		node.importTaskMgr = importv2.NewTaskManager()
-		node.importScheduler = importv2.NewScheduler(node.importTaskMgr, node.syncMgr, node.chunkManager)
-		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
+		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
+		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node.broker)
 		node.flowgraphManager = newFlowgraphManager()
 
 		if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {

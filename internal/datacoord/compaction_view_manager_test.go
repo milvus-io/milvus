@@ -349,7 +349,8 @@ func genTestDeltalogs(logCount int, logSize int64) []*datapb.FieldBinlog {
 
 	for i := 0; i < logCount; i++ {
 		binlog := &datapb.Binlog{
-			LogSize: logSize,
+			LogSize:    logSize,
+			MemorySize: logSize,
 		}
 		binlogs = append(binlogs, binlog)
 	}

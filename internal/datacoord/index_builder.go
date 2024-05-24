@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/indexparams"
+	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -73,7 +74,7 @@ type indexBuilder struct {
 	cancel context.CancelFunc
 
 	wg               sync.WaitGroup
-	taskMutex        sync.RWMutex
+	taskMutex        lock.RWMutex
 	scheduleDuration time.Duration
 
 	// TODO @xiaocai2333: use priority queue
@@ -347,28 +348,29 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 			}
 		}
 		var req *indexpb.CreateJobRequest
+		collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
+		if err != nil {
+			log.Ctx(ib.ctx).Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+			return false
+		}
+
+		schema := collectionInfo.Schema
+		var field *schemapb.FieldSchema
+
+		for _, f := range schema.Fields {
+			if f.FieldID == fieldID {
+				field = f
+				break
+			}
+		}
+
+		dim, err := storage.GetDimFromParams(field.TypeParams)
+		if err != nil {
+			log.Ctx(ib.ctx).Warn("failed to get dim from field type params",
+				zap.String("field type", field.GetDataType().String()), zap.Error(err))
+			// don't return, maybe field is scalar field or sparseFloatVector
+		}
 		if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-			collectionInfo, err := ib.handler.GetCollection(ib.ctx, segment.GetCollectionID())
-			if err != nil {
-				log.Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
-				return false
-			}
-
-			schema := collectionInfo.Schema
-			var field *schemapb.FieldSchema
-
-			for _, f := range schema.Fields {
-				if f.FieldID == fieldID {
-					field = f
-					break
-				}
-			}
-
-			dim, err := storage.GetDimFromParams(field.TypeParams)
-			if err != nil {
-				return false
-			}
-
 			storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
 			if err != nil {
 				log.Ctx(ib.ctx).Warn("failed to get storage uri", zap.Error(err))
@@ -402,6 +404,7 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				CurrentIndexVersion:  ib.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
 				DataIds:              binlogIDs,
 				OptionalScalarFields: optionalFields,
+				Field:                field,
 			}
 		} else {
 			req = &indexpb.CreateJobRequest{
@@ -420,6 +423,8 @@ func (ib *indexBuilder) process(buildID UniqueID) bool {
 				SegmentID:            segment.GetID(),
 				FieldID:              fieldID,
 				OptionalScalarFields: optionalFields,
+				Dim:                  int64(dim),
+				Field:                field,
 			}
 		}
 

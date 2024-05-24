@@ -28,7 +28,9 @@ CreateIndexV0(enum CDataType dtype,
               CIndex* res_index);
 
 CStatus
-CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info);
+CreateIndex(CIndex* res_index,
+            const uint8_t* serialized_build_index_info,
+            const uint64_t len);
 
 CStatus
 DeleteIndex(CIndex index);
@@ -130,7 +132,9 @@ CStatus
 SerializeIndexAndUpLoadV2(CIndex index, CBinarySet* c_binary_set);
 
 CStatus
-CreateIndexV2(CIndex* res_index, CBuildIndexInfo c_build_index_info);
+CreateIndexV2(CIndex* res_index,
+              const uint8_t* serialized_build_index_info,
+              const uint64_t len);
 
 CStatus
 AppendIndexStorageInfo(CBuildIndexInfo c_build_index_info,

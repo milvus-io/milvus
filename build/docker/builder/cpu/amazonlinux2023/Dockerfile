@@ -14,9 +14,18 @@ FROM amazonlinux:2023
 ARG TARGETARCH
 
 RUN dnf install -y wget g++ gcc gdb libatomic libstdc++-static ninja-build git make zip unzip tar which \
-    autoconf automake golang python3 python3-pip perl-FindBin texinfo \
+    autoconf automake python3 python3-pip perl-FindBin texinfo \
     pkg-config libuuid-devel libaio perl-IPC-Cmd libasan openblas-devel && \
     rm -rf /var/cache/yum/*
+
+ENV GOPATH /go
+ENV GOROOT /usr/local/go
+ENV GO111MODULE on
+ENV PATH $GOPATH/bin:$GOROOT/bin:$PATH
+RUN mkdir -p /usr/local/go && wget -qO- "https://go.dev/dl/go1.21.10.linux-$TARGETARCH.tar.gz" | tar --strip-components=1 -xz -C /usr/local/go && \
+    mkdir -p "$GOPATH/src" "$GOPATH/bin" && \
+    go clean --modcache && \
+    chmod -R 777 "$GOPATH" && chmod -R a+w $(go env GOTOOLDIR)
 
 RUN pip3 install conan==1.61.0
 

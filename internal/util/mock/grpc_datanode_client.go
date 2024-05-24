@@ -104,3 +104,7 @@ func (m *GrpcDataNodeClient) QueryImport(ctx context.Context, req *datapb.QueryI
 func (m *GrpcDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImportRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
 	return &commonpb.Status{}, m.Err
 }
+
+func (m *GrpcDataNodeClient) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest, opts ...grpc.CallOption) (*datapb.QuerySlotResponse, error) {
+	return &datapb.QuerySlotResponse{}, m.Err
+}

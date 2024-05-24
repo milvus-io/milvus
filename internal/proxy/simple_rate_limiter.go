@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -32,8 +33,10 @@ import (
 	rlinternal "github.com/milvus-io/milvus/internal/util/ratelimitutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -41,13 +44,24 @@ import (
 type SimpleLimiter struct {
 	quotaStatesMu sync.RWMutex
 	rateLimiter   *rlinternal.RateLimiterTree
+
+	// for alloc
+	allocWaitInterval time.Duration
+	allocRetryTimes   uint
 }
 
 // NewSimpleLimiter returns a new SimpleLimiter.
-func NewSimpleLimiter() *SimpleLimiter {
+func NewSimpleLimiter(allocWaitInterval time.Duration, allocRetryTimes uint) *SimpleLimiter {
 	rootRateLimiter := newClusterLimiter()
-	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter)}
+	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter), allocWaitInterval: allocWaitInterval, allocRetryTimes: allocRetryTimes}
 	return m
+}
+
+// Alloc will retry till check pass or out of times.
+func (m *SimpleLimiter) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
+	return retry.Do(ctx, func() error {
+		return m.Check(dbID, collectionIDToPartIDs, rt, n)
+	}, retry.Sleep(m.allocWaitInterval), retry.Attempts(m.allocRetryTimes))
 }
 
 // Check checks if request would be limited or denied.
@@ -64,7 +78,6 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	ret := clusterRateLimiters.Check(rt, n)
 
 	if ret != nil {
-		clusterRateLimiters.Cancel(rt, n)
 		return ret
 	}
 
@@ -79,7 +92,7 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	}
 
 	// 2. check database level rate limits
-	if ret == nil {
+	if ret == nil && dbID != util.InvalidDBID {
 		dbRateLimiters := m.rateLimiter.GetOrCreateDatabaseLimiters(dbID, newDatabaseLimiter)
 		ret = dbRateLimiters.Check(rt, n)
 		if ret != nil {
@@ -92,6 +105,9 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	// 3. check collection level rate limits
 	if ret == nil && len(collectionIDToPartIDs) > 0 && !isNotCollectionLevelLimitRequest(rt) {
 		for collectionID := range collectionIDToPartIDs {
+			if collectionID == 0 || dbID == util.InvalidDBID {
+				continue
+			}
 			// only dml and dql have collection level rate limits
 			collectionRateLimiters := m.rateLimiter.GetOrCreateCollectionLimiters(dbID, collectionID,
 				newDatabaseLimiter, newCollectionLimiters)
@@ -108,6 +124,9 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	if ret == nil && len(collectionIDToPartIDs) > 0 {
 		for collectionID, partitionIDs := range collectionIDToPartIDs {
 			for _, partID := range partitionIDs {
+				if collectionID == 0 || partID == 0 || dbID == util.InvalidDBID {
+					continue
+				}
 				partitionRateLimiters := m.rateLimiter.GetOrCreatePartitionLimiters(dbID, collectionID, partID,
 					newDatabaseLimiter, newCollectionLimiters, newPartitionLimiters)
 				ret = partitionRateLimiters.Check(rt, n)
@@ -202,7 +221,7 @@ func initLimiter(rln *rlinternal.RateLimiterNode, rateLimiterConfigs map[interna
 	for rt, p := range rateLimiterConfigs {
 		limit := ratelimitutil.Limit(p.GetAsFloat())
 		burst := p.GetAsFloat() // use rate as burst, because SimpleLimiter is with punishment mechanism, burst is insignificant.
-		rln.GetLimiters().GetOrInsert(rt, ratelimitutil.NewLimiter(limit, burst))
+		rln.GetLimiters().Insert(rt, ratelimitutil.NewLimiter(limit, burst))
 		log.RatedDebug(30, "RateLimiter register for rateType",
 			zap.String("rateType", internalpb.RateType_name[(int32(rt))]),
 			zap.String("rateLimit", ratelimitutil.Limit(p.GetAsFloat()).String()),

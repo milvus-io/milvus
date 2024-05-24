@@ -97,7 +97,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    0,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 1: {
@@ -115,7 +115,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 2: {
@@ -133,7 +133,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     true,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 3: {
@@ -151,7 +151,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 4: {
@@ -169,7 +169,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 5: {
@@ -187,7 +187,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 6: {
@@ -205,7 +205,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 7: {
@@ -223,7 +223,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 8: {
@@ -241,7 +241,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 9: {
@@ -259,7 +259,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 10: {
@@ -277,7 +277,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 		},
@@ -296,7 +296,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    0,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 1: {
 				SegmentID:     segID + 1,
@@ -312,7 +312,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 2: {
 				SegmentID:     segID + 2,
@@ -328,7 +328,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     true,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 3: {
 				SegmentID:     segID + 3,
@@ -344,7 +344,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 4: {
 				SegmentID:     segID + 4,
@@ -360,7 +360,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 5: {
 				SegmentID:     segID + 5,
@@ -376,7 +376,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 6: {
 				SegmentID:     segID + 6,
@@ -392,7 +392,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 7: {
 				SegmentID:     segID + 7,
@@ -408,7 +408,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 8: {
 				SegmentID:     segID + 8,
@@ -424,7 +424,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 9: {
 				SegmentID:     segID + 9,
@@ -440,7 +440,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 10: {
 				SegmentID:     segID + 10,
@@ -456,7 +456,7 @@ func createMetaTable(catalog metastore.DataCoordCatalog) *meta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 		},
 	}
@@ -675,7 +675,30 @@ func TestIndexBuilder(t *testing.T) {
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
 
-	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), nil)
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
+	ib := newIndexBuilder(ctx, mt, nodeManager, chunkManager, newIndexEngineVersionManager(), handler)
 
 	assert.Equal(t, 6, len(ib.tasks))
 	assert.Equal(t, indexTaskInit, ib.tasks[buildID])
@@ -741,6 +764,30 @@ func TestIndexBuilder_Error(t *testing.T) {
 
 	chunkManager := &mocks.ChunkManager{}
 	chunkManager.EXPECT().RootPath().Return("root")
+
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
 	ib := &indexBuilder{
 		ctx: context.Background(),
 		tasks: map[int64]indexTaskState{
@@ -749,6 +796,7 @@ func TestIndexBuilder_Error(t *testing.T) {
 		meta:                      createMetaTable(ec),
 		chunkManager:              chunkManager,
 		indexEngineVersionManager: newIndexEngineVersionManager(),
+		handler:                   handler,
 	}
 
 	t.Run("meta not exist", func(t *testing.T) {
@@ -1414,9 +1462,32 @@ func TestVecIndexWithOptionalScalarField(t *testing.T) {
 		mt.collections[collID].Schema.Fields[1].DataType = schemapb.DataType_VarChar
 	}
 
+	handler := NewNMockHandler(t)
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{
+		ID: collID,
+		Schema: &schemapb.CollectionSchema{
+			Name: "coll",
+			Fields: []*schemapb.FieldSchema{
+				{
+					FieldID:  fieldID,
+					Name:     "vec",
+					DataType: schemapb.DataType_FloatVector,
+					TypeParams: []*commonpb.KeyValuePair{
+						{
+							Key:   "dim",
+							Value: "128",
+						},
+					},
+				},
+			},
+			EnableDynamicField: false,
+			Properties:         nil,
+		},
+	}, nil)
+
 	paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("true")
 	defer paramtable.Get().CommonCfg.EnableMaterializedView.SwapTempValue("false")
-	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), nil)
+	ib := newIndexBuilder(ctx, &mt, nodeManager, cm, newIndexEngineVersionManager(), handler)
 
 	t.Run("success to get opt field on startup", func(t *testing.T) {
 		ic.EXPECT().CreateJob(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(

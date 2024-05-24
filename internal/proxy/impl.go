@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proxy/connection"
+	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/hookutil"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -2642,6 +2643,11 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 		metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
+	var limiter types.Limiter
+	if node.enableComplexDeleteLimit {
+		limiter, _ = node.GetRateLimiter()
+	}
+
 	dr := &deleteRunner{
 		req:             request,
 		idAllocator:     node.rowIDAllocator,
@@ -2650,6 +2656,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		chTicker:        node.chTicker,
 		queue:           node.sched.dmQueue,
 		lb:              node.lbPolicy,
+		limiter:         limiter,
 	}
 
 	log.Debug("init delete runner in Proxy")
@@ -3408,21 +3415,8 @@ func (node *Proxy) Flush(ctx context.Context, request *milvuspb.FlushRequest) (*
 // Query get the records by primary keys.
 func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryResults, error) {
 	request := qt.request
-	receiveSize := proto.Size(request)
-	metrics.ProxyReceiveBytes.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.QueryLabel,
-		request.GetCollectionName(),
-	).Add(float64(receiveSize))
-
-	metrics.ProxyReceivedNQ.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.SearchLabel,
-		request.GetCollectionName(),
-	).Add(float64(1))
-
-	subLabel := GetCollectionRateSubLabel(request)
-	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
+	method := "Query"
+	isProxyRequest := GetRequestLabelFromContext(ctx)
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.QueryResults{
@@ -3430,26 +3424,22 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		}, nil
 	}
 
-	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Query")
-	defer sp.End()
-	tr := timerecord.NewTimeRecorder("Query")
-
-	method := "Query"
-
-	metrics.ProxyFunctionCall.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		method,
-		metrics.TotalLabel,
-		request.GetDbName(),
-		request.GetCollectionName(),
-	).Inc()
-
 	log := log.Ctx(ctx).With(
 		zap.String("role", typeutil.ProxyRole),
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Strings("partitions", request.PartitionNames),
 	)
+
+	log.Debug(
+		rpcReceived(method),
+		zap.String("expr", request.Expr),
+		zap.Strings("OutputFields", request.OutputFields),
+		zap.Uint64("travel_timestamp", request.TravelTimestamp),
+		zap.Uint64("guarantee_timestamp", request.GuaranteeTimestamp),
+	)
+
+	tr := timerecord.NewTimeRecorder(method)
 
 	defer func() {
 		span := tr.ElapseSpan()
@@ -3468,27 +3458,21 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		}
 	}()
 
-	log.Debug(
-		rpcReceived(method),
-		zap.String("expr", request.Expr),
-		zap.Strings("OutputFields", request.OutputFields),
-		zap.Uint64("travel_timestamp", request.TravelTimestamp),
-		zap.Uint64("guarantee_timestamp", request.GuaranteeTimestamp),
-	)
-
 	if err := node.sched.dqQueue.Enqueue(qt); err != nil {
 		log.Warn(
 			rpcFailedToEnqueue(method),
 			zap.Error(err),
 		)
 
-		metrics.ProxyFunctionCall.WithLabelValues(
-			strconv.FormatInt(paramtable.GetNodeID(), 10),
-			method,
-			metrics.AbandonLabel,
-			request.GetDbName(),
-			request.GetCollectionName(),
-		).Inc()
+		if isProxyRequest {
+			metrics.ProxyFunctionCall.WithLabelValues(
+				strconv.FormatInt(paramtable.GetNodeID(), 10),
+				method,
+				metrics.AbandonLabel,
+				request.GetDbName(),
+				request.GetCollectionName(),
+			).Inc()
+		}
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
@@ -3503,45 +3487,36 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 			rpcFailedToWaitToFinish(method),
 			zap.Error(err))
 
-		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
-			metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		if isProxyRequest {
+			metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
+				metrics.FailLabel, request.GetDbName(), request.GetCollectionName()).Inc()
+		}
 
 		return &milvuspb.QueryResults{
 			Status: merr.Status(err),
 		}, nil
 	}
-	span := tr.CtxRecord(ctx, "wait query result")
-	metrics.ProxyWaitForSearchResultLatency.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.QueryLabel,
-	).Observe(float64(span.Milliseconds()))
 
-	log.Debug(rpcDone(method))
+	if isProxyRequest {
+		span := tr.CtxRecord(ctx, "wait query result")
+		metrics.ProxyWaitForSearchResultLatency.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+		).Observe(float64(span.Milliseconds()))
 
-	metrics.ProxyFunctionCall.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		method,
-		metrics.SuccessLabel,
-		request.GetDbName(),
-		request.GetCollectionName(),
-	).Inc()
+		metrics.ProxySQLatency.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.GetDbName(),
+			request.GetCollectionName(),
+		).Observe(float64(tr.ElapseSpan().Milliseconds()))
 
-	metrics.ProxySQLatency.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.QueryLabel,
-		request.GetDbName(),
-		request.GetCollectionName(),
-	).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-	metrics.ProxyCollectionSQLatency.WithLabelValues(
-		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.QueryLabel,
-		request.CollectionName,
-	).Observe(float64(tr.ElapseSpan().Milliseconds()))
-
-	sentSize := proto.Size(qt.result)
-	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
-	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
+		metrics.ProxyCollectionSQLatency.WithLabelValues(
+			strconv.FormatInt(paramtable.GetNodeID(), 10),
+			metrics.QueryLabel,
+			request.CollectionName,
+		).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	}
 
 	return qt.result, nil
 }
@@ -3563,22 +3538,73 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		lb:                  node.lbPolicy,
 		mustUsePartitionKey: Params.ProxyCfg.MustUsePartitionKey.GetAsBool(),
 	}
-	res, err := node.query(ctx, qt)
-	if merr.Ok(res.Status) && err == nil {
-		username := GetCurUserFromContextOrDefault(ctx)
-		nodeID := paramtable.GetStringNodeID()
-		v := Extension.Report(map[string]any{
-			hookutil.OpTypeKey:          hookutil.OpTypeQuery,
-			hookutil.DatabaseKey:        request.DbName,
-			hookutil.UsernameKey:        username,
-			hookutil.ResultDataSizeKey:  proto.Size(res),
-			hookutil.RelatedDataSizeKey: qt.totalRelatedDataSize,
-			hookutil.RelatedCntKey:      qt.allQueryCnt,
-		})
-		SetReportValue(res.Status, v)
-		metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
+
+	subLabel := GetCollectionRateSubLabel(request)
+	receiveSize := proto.Size(request)
+	metrics.ProxyReceiveBytes.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		metrics.QueryLabel,
+		request.GetCollectionName(),
+	).Add(float64(receiveSize))
+	metrics.ProxyReceivedNQ.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		metrics.SearchLabel,
+		request.GetCollectionName(),
+	).Add(float64(1))
+
+	rateCol.Add(internalpb.RateType_DQLQuery.String(), 1, subLabel)
+
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return &milvuspb.QueryResults{
+			Status: merr.Status(err),
+		}, nil
 	}
-	return res, err
+
+	ctx, sp := otel.Tracer(typeutil.ProxyRole).Start(ctx, "Proxy-Query")
+	defer sp.End()
+	method := "Query"
+
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.TotalLabel,
+		request.GetDbName(),
+		request.GetCollectionName(),
+	).Inc()
+
+	ctx = SetRequestLabelForContext(ctx)
+	res, err := node.query(ctx, qt)
+	if err != nil || !merr.Ok(res.Status) {
+		return res, err
+	}
+
+	log.Debug(rpcDone(method))
+
+	metrics.ProxyFunctionCall.WithLabelValues(
+		strconv.FormatInt(paramtable.GetNodeID(), 10),
+		method,
+		metrics.SuccessLabel,
+		request.GetDbName(),
+		request.GetCollectionName(),
+	).Inc()
+
+	sentSize := proto.Size(qt.result)
+	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
+	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
+
+	username := GetCurUserFromContextOrDefault(ctx)
+	nodeID := paramtable.GetStringNodeID()
+	v := Extension.Report(map[string]any{
+		hookutil.OpTypeKey:          hookutil.OpTypeQuery,
+		hookutil.DatabaseKey:        request.DbName,
+		hookutil.UsernameKey:        username,
+		hookutil.ResultDataSizeKey:  proto.Size(res),
+		hookutil.RelatedDataSizeKey: qt.totalRelatedDataSize,
+		hookutil.RelatedCntKey:      qt.allQueryCnt,
+	})
+	SetReportValue(res.Status, v)
+	metrics.ProxyReportValue.WithLabelValues(nodeID, hookutil.OpTypeQuery, request.DbName, username).Add(float64(v))
+	return res, nil
 }
 
 // CreateAlias create alias for collection, then you can search the collection with alias.
@@ -6083,12 +6109,12 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 			return resp, nil
 		}
 		// Currently, Backup tool call import must with a partition name, each time restore a partition
-		partitions, err := globalMetaCache.GetPartitions(ctx, req.GetDbName(), req.GetCollectionName())
+		partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.GetPartitionName())
 		if err != nil {
 			resp.Status = merr.Status(err)
 			return resp, nil
 		}
-		partitionIDs = lo.Values(partitions)
+		partitionIDs = []UniqueID{partitionID}
 	} else {
 		if hasPartitionKey {
 			if req.GetPartitionName() != "" {
@@ -6100,7 +6126,11 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 				resp.Status = merr.Status(err)
 				return resp, nil
 			}
-			partitionIDs = lo.Values(partitions)
+			_, partitionIDs, err = typeutil.RearrangePartitionsForPartitionKey(partitions)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
 		} else {
 			if req.GetPartitionName() == "" {
 				req.PartitionName = Params.CommonCfg.DefaultPartitionName.GetValue()

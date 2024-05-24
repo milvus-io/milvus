@@ -41,20 +41,94 @@ var (
 
 type CacheWriter struct {
 	mu     sync.Mutex
-	writer io.Writer
+	writer *bufio.Writer
+	closer io.Closer
+
+	// interval of auto flush
+	flushInterval time.Duration
+
+	closed    bool
+	closeOnce sync.Once
+	closeCh   chan struct{}
+	closeWg   sync.WaitGroup
 }
 
-func NewCacheWriter(writer io.Writer, cacheSize int) *CacheWriter {
-	return &CacheWriter{
-		writer: bufio.NewWriterSize(writer, cacheSize),
+func NewCacheWriter(writer io.Writer, cacheSize int, flushInterval time.Duration) *CacheWriter {
+	c := &CacheWriter{
+		writer:        bufio.NewWriterSize(writer, cacheSize),
+		flushInterval: flushInterval,
+		closeCh:       make(chan struct{}),
 	}
+	c.Start()
+	return c
+}
+
+func NewCacheWriterWithCloser(writer io.Writer, closer io.Closer, cacheSize int, flushInterval time.Duration) *CacheWriter {
+	c := &CacheWriter{
+		writer:        bufio.NewWriterSize(writer, cacheSize),
+		flushInterval: flushInterval,
+		closer:        closer,
+		closeCh:       make(chan struct{}),
+	}
+	c.Start()
+	return c
 }
 
 func (l *CacheWriter) Write(p []byte) (n int, err error) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
+	if l.closed {
+		return 0, fmt.Errorf("write to closed writer")
+	}
 
 	return l.writer.Write(p)
+}
+
+func (l *CacheWriter) Flush() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	return l.writer.Flush()
+}
+
+func (l *CacheWriter) Start() {
+	l.closeWg.Add(1)
+	go func() {
+		defer l.closeWg.Done()
+		if l.flushInterval == 0 {
+			return
+		}
+		ticker := time.NewTicker(l.flushInterval)
+		defer ticker.Stop()
+
+		for {
+			select {
+			case <-ticker.C:
+				l.Flush()
+			case <-l.closeCh:
+				return
+			}
+		}
+	}()
+}
+
+func (l *CacheWriter) Close() {
+	l.closeOnce.Do(func() {
+		// close auto flush
+		close(l.closeCh)
+		l.closeWg.Wait()
+
+		l.mu.Lock()
+		defer l.mu.Unlock()
+		l.closed = true
+
+		// flush remaining bytes
+		l.writer.Flush()
+
+		if l.closer != nil {
+			l.closer.Close()
+		}
+	})
 }
 
 // a rotated file writer
@@ -94,6 +168,7 @@ func NewRotateWriter(logCfg *paramtable.AccessLogConfig, minioCfg *paramtable.Mi
 		rotatedTime: logCfg.RotatedTime.GetAsInt64(),
 		maxSize:     logCfg.MaxSize.GetAsInt(),
 		maxBackups:  logCfg.MaxBackups.GetAsInt(),
+		closeCh:     make(chan struct{}),
 	}
 	log.Info("Access log save to " + logger.dir())
 	if logCfg.MinioEnable.GetAsBool() {
@@ -306,8 +381,6 @@ func (l *RotateWriter) timeRotating() {
 
 // start rotate log file by time
 func (l *RotateWriter) start() {
-	l.closeCh = make(chan struct{})
-	l.closeWg = sync.WaitGroup{}
 	if l.rotatedTime > 0 {
 		l.closeWg.Add(1)
 		go l.timeRotating()

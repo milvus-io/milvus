@@ -365,7 +365,7 @@ func (sd *shardDelegator) LoadGrowing(ctx context.Context, infos []*querypb.Segm
 		log := log.With(
 			zap.Int64("segmentID", segment.ID()),
 		)
-		deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition())
+		deletedPks, deletedTss := sd.GetLevel0Deletions(segment.Partition(), pkoracle.NewCandidateKey(segment.ID(), segment.Partition(), segments.SegmentTypeGrowing))
 		if len(deletedPks) == 0 {
 			continue
 		}
@@ -488,7 +488,7 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		}
 	})
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
-		sd.GenerateLevel0DeletionCache()
+		sd.RefreshLevel0DeletionStats()
 	} else {
 		log.Debug("load delete...")
 		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
@@ -512,94 +512,51 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	return nil
 }
 
-func (sd *shardDelegator) GetLevel0Deletions(partitionID int64) ([]storage.PrimaryKey, []storage.Timestamp) {
-	sd.level0Mut.RLock()
-	deleteData, ok1 := sd.level0Deletions[partitionID]
-	allPartitionsDeleteData, ok2 := sd.level0Deletions[common.AllPartitionsID]
-	sd.level0Mut.RUnlock()
-	// we may need to merge the specified partition deletions and the all partitions deletions,
-	// so release the mutex as early as possible.
+func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkoracle.Candidate) ([]storage.PrimaryKey, []storage.Timestamp) {
+	sd.level0Mut.Lock()
+	defer sd.level0Mut.Unlock()
 
-	if ok1 && ok2 {
-		pks := make([]storage.PrimaryKey, 0, deleteData.RowCount+allPartitionsDeleteData.RowCount)
-		tss := make([]storage.Timestamp, 0, deleteData.RowCount+allPartitionsDeleteData.RowCount)
+	// TODO: this could be large, host all L0 delete on delegator might be a dangerous, consider mmap it on local segment and stream processing it
+	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
+	pks := make([]storage.PrimaryKey, 0)
+	tss := make([]storage.Timestamp, 0)
 
-		i := 0
-		j := 0
-		for i < int(deleteData.RowCount) || j < int(allPartitionsDeleteData.RowCount) {
-			if i == int(deleteData.RowCount) {
-				pks = append(pks, allPartitionsDeleteData.Pks[j])
-				tss = append(tss, allPartitionsDeleteData.Tss[j])
-				j++
-			} else if j == int(allPartitionsDeleteData.RowCount) {
-				pks = append(pks, deleteData.Pks[i])
-				tss = append(tss, deleteData.Tss[i])
-				i++
-			} else if deleteData.Tss[i] < allPartitionsDeleteData.Tss[j] {
-				pks = append(pks, deleteData.Pks[i])
-				tss = append(tss, deleteData.Tss[i])
-				i++
-			} else {
-				pks = append(pks, allPartitionsDeleteData.Pks[j])
-				tss = append(tss, allPartitionsDeleteData.Tss[j])
-				j++
+	for _, segment := range level0Segments {
+		segment := segment.(*segments.L0Segment)
+		if segment.Partition() == partitionID || segment.Partition() == common.AllPartitionsID {
+			segmentPks, segmentTss := segment.DeleteRecords()
+			for i, pk := range segmentPks {
+				if candidate.MayPkExist(pk) {
+					pks = append(pks, pk)
+					tss = append(tss, segmentTss[i])
+				}
 			}
 		}
-
-		return pks, tss
-	} else if ok1 {
-		return deleteData.Pks, deleteData.Tss
-	} else if ok2 {
-		return allPartitionsDeleteData.Pks, allPartitionsDeleteData.Tss
 	}
 
-	return nil, nil
+	sort.Slice(pks, func(i, j int) bool {
+		return tss[i] < tss[j]
+	})
+
+	return pks, tss
 }
 
-func (sd *shardDelegator) GenerateLevel0DeletionCache() {
+func (sd *shardDelegator) RefreshLevel0DeletionStats() {
+	sd.level0Mut.Lock()
+	defer sd.level0Mut.Unlock()
 	level0Segments := sd.segmentManager.GetBy(segments.WithLevel(datapb.SegmentLevel_L0), segments.WithChannel(sd.vchannelName))
-	deletions := make(map[int64]*storage.DeleteData)
+	totalSize := int64(0)
 	for _, segment := range level0Segments {
 		segment := segment.(*segments.L0Segment)
 		pks, tss := segment.DeleteRecords()
-		deleteData, ok := deletions[segment.Partition()]
-		if !ok {
-			deleteData = storage.NewDeleteData(pks, tss)
-		} else {
-			deleteData.AppendBatch(pks, tss)
-		}
-		deletions[segment.Partition()] = deleteData
+		totalSize += lo.SumBy(pks, func(pk storage.PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8)
 	}
 
-	type DeletePair struct {
-		Pk storage.PrimaryKey
-		Ts storage.Timestamp
-	}
-	for _, deleteData := range deletions {
-		pairs := make([]DeletePair, deleteData.RowCount)
-		for i := range deleteData.Pks {
-			pairs[i] = DeletePair{deleteData.Pks[i], deleteData.Tss[i]}
-		}
-		sort.Slice(pairs, func(i, j int) bool {
-			return pairs[i].Ts < pairs[j].Ts
-		})
-		for i := range pairs {
-			deleteData.Pks[i], deleteData.Tss[i] = pairs[i].Pk, pairs[i].Ts
-		}
-	}
-
-	sd.level0Mut.Lock()
-	defer sd.level0Mut.Unlock()
-	totalSize := int64(0)
-	for _, delete := range deletions {
-		totalSize += delete.Size()
-	}
 	metrics.QueryNodeLevelZeroSize.WithLabelValues(
 		fmt.Sprint(paramtable.GetNodeID()),
 		fmt.Sprint(sd.collectionID),
 		sd.vchannelName,
 	).Set(float64(totalSize))
-	sd.level0Deletions = deletions
 }
 
 func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
@@ -635,14 +592,9 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 			position = deltaPositions[0]
 		}
 
-		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition())
+		deletedPks, deletedTss := sd.GetLevel0Deletions(candidate.Partition(), candidate)
 		deleteData := &storage.DeleteData{}
-		for i, pk := range deletedPks {
-			if candidate.MayPkExist(pk) {
-				deleteData.Append(pk, deletedTss[i])
-			}
-		}
-
+		deleteData.AppendBatch(deletedPks, deletedTss)
 		if deleteData.RowCount > 0 {
 			log.Info("forward L0 delete to worker...",
 				zap.Int64("deleteRowNum", deleteData.RowCount),
@@ -900,7 +852,7 @@ func (sd *shardDelegator) ReleaseSegments(ctx context.Context, req *querypb.Rele
 	}
 
 	if hasLevel0 {
-		sd.GenerateLevel0DeletionCache()
+		sd.RefreshLevel0DeletionStats()
 	}
 	partitionsToReload := make([]UniqueID, 0)
 	lo.ForEach(req.GetSegmentIDs(), func(segmentID int64, _ int) {

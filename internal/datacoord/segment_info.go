@@ -102,7 +102,7 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 		filter.AddFilter(criterion)
 	}
 	var result []*SegmentInfo
-	var candidates []*SegmentInfo
+	var candidates map[int64]*SegmentInfo
 	// apply criterion
 	switch {
 	case criterion.collectionID > 0:
@@ -110,9 +110,9 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 		if !ok {
 			return nil
 		}
-		candidates = lo.Values(collSegments.segments)
+		candidates = collSegments.segments
 	default:
-		candidates = lo.Values(s.segments)
+		candidates = s.segments
 	}
 	for _, segment := range candidates {
 		if criterion.Match(segment) {
@@ -414,19 +414,19 @@ func (s *SegmentInfo) getSegmentSize() int64 {
 		var size int64
 		for _, binlogs := range s.GetBinlogs() {
 			for _, l := range binlogs.GetBinlogs() {
-				size += l.GetLogSize()
+				size += l.GetMemorySize()
 			}
 		}
 
 		for _, deltaLogs := range s.GetDeltalogs() {
 			for _, l := range deltaLogs.GetBinlogs() {
-				size += l.GetLogSize()
+				size += l.GetMemorySize()
 			}
 		}
 
 		for _, statsLogs := range s.GetStatslogs() {
 			for _, l := range statsLogs.GetBinlogs() {
-				size += l.GetLogSize()
+				size += l.GetMemorySize()
 			}
 		}
 		if size > 0 {

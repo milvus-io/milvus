@@ -1052,6 +1052,76 @@ func (_c *MockDataNodeClient_QueryPreImport_Call) RunAndReturn(run func(context.
 	return _c
 }
 
+// QuerySlot provides a mock function with given fields: ctx, in, opts
+func (_m *MockDataNodeClient) QuerySlot(ctx context.Context, in *datapb.QuerySlotRequest, opts ...grpc.CallOption) (*datapb.QuerySlotResponse, error) {
+	_va := make([]interface{}, len(opts))
+	for _i := range opts {
+		_va[_i] = opts[_i]
+	}
+	var _ca []interface{}
+	_ca = append(_ca, ctx, in)
+	_ca = append(_ca, _va...)
+	ret := _m.Called(_ca...)
+
+	var r0 *datapb.QuerySlotResponse
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QuerySlotRequest, ...grpc.CallOption) (*datapb.QuerySlotResponse, error)); ok {
+		return rf(ctx, in, opts...)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.QuerySlotRequest, ...grpc.CallOption) *datapb.QuerySlotResponse); ok {
+		r0 = rf(ctx, in, opts...)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*datapb.QuerySlotResponse)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context, *datapb.QuerySlotRequest, ...grpc.CallOption) error); ok {
+		r1 = rf(ctx, in, opts...)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// MockDataNodeClient_QuerySlot_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'QuerySlot'
+type MockDataNodeClient_QuerySlot_Call struct {
+	*mock.Call
+}
+
+// QuerySlot is a helper method to define mock.On call
+//   - ctx context.Context
+//   - in *datapb.QuerySlotRequest
+//   - opts ...grpc.CallOption
+func (_e *MockDataNodeClient_Expecter) QuerySlot(ctx interface{}, in interface{}, opts ...interface{}) *MockDataNodeClient_QuerySlot_Call {
+	return &MockDataNodeClient_QuerySlot_Call{Call: _e.mock.On("QuerySlot",
+		append([]interface{}{ctx, in}, opts...)...)}
+}
+
+func (_c *MockDataNodeClient_QuerySlot_Call) Run(run func(ctx context.Context, in *datapb.QuerySlotRequest, opts ...grpc.CallOption)) *MockDataNodeClient_QuerySlot_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		variadicArgs := make([]grpc.CallOption, len(args)-2)
+		for i, a := range args[2:] {
+			if a != nil {
+				variadicArgs[i] = a.(grpc.CallOption)
+			}
+		}
+		run(args[0].(context.Context), args[1].(*datapb.QuerySlotRequest), variadicArgs...)
+	})
+	return _c
+}
+
+func (_c *MockDataNodeClient_QuerySlot_Call) Return(_a0 *datapb.QuerySlotResponse, _a1 error) *MockDataNodeClient_QuerySlot_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataNodeClient_QuerySlot_Call) RunAndReturn(run func(context.Context, *datapb.QuerySlotRequest, ...grpc.CallOption) (*datapb.QuerySlotResponse, error)) *MockDataNodeClient_QuerySlot_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ResendSegmentStats provides a mock function with given fields: ctx, in, opts
 func (_m *MockDataNodeClient) ResendSegmentStats(ctx context.Context, in *datapb.ResendSegmentStatsRequest, opts ...grpc.CallOption) (*datapb.ResendSegmentStatsResponse, error) {
 	_va := make([]interface{}, len(opts))

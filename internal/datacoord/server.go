@@ -515,10 +515,10 @@ func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (typ
 }
 
 func (s *Server) initCompaction() {
-	s.compactionHandler = newCompactionPlanHandler(s.sessionManager, s.channelManager, s.meta, s.allocator)
+	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator)
 	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
 
-	triggerv2 := NewCompactionTriggerManager(s.allocator, s.compactionHandler)
+	triggerv2 := NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler)
 	s.compactionViewManager = NewCompactionViewManager(s.meta, triggerv2, s.allocator)
 }
 
@@ -905,6 +905,7 @@ func (s *Server) handleSessionEvent(ctx context.Context, role string, event *ses
 	if event == nil {
 		return nil
 	}
+	log := log.Ctx(ctx)
 	switch role {
 	case typeutil.DataNodeRole:
 		info := &datapb.DataNodeInfo{
@@ -1023,6 +1024,7 @@ func (s *Server) startFlushLoop(ctx context.Context) {
 // 2. notify RootCoord segment is flushed
 // 3. change segment state to `Flushed` in meta
 func (s *Server) postFlush(ctx context.Context, segmentID UniqueID) error {
+	log := log.Ctx(ctx)
 	segment := s.meta.GetHealthySegment(segmentID)
 	if segment == nil {
 		return merr.WrapErrSegmentNotFound(segmentID, "segment not found, might be a faked segment, ignore post flush")

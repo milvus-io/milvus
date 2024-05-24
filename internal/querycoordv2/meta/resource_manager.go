@@ -453,7 +453,6 @@ func (rm *ResourceManager) HandleNodeDown(node int64) {
 	rm.rwmutex.Lock()
 	defer rm.rwmutex.Unlock()
 
-	// failure of node down can be ignored, node down can be done by `RemoveAllDownNode`.
 	rm.incomingNode.Remove(node)
 
 	// for stopping query node becomes offline, node change won't be triggered,
@@ -464,6 +463,19 @@ func (rm *ResourceManager) HandleNodeDown(node int64) {
 	// trigger node changes, expected to remove ro node from replica immediately
 	rm.nodeChangedNotifier.NotifyAll()
 	log.Info("HandleNodeDown: remove node from resource group",
+		zap.String("rgName", rgName),
+		zap.Int64("node", node),
+		zap.Error(err),
+	)
+}
+
+func (rm *ResourceManager) HandleNodeStopping(node int64) {
+	rm.rwmutex.Lock()
+	defer rm.rwmutex.Unlock()
+
+	rm.incomingNode.Remove(node)
+	rgName, err := rm.unassignNode(node)
+	log.Info("HandleNodeStopping: remove node from resource group",
 		zap.String("rgName", rgName),
 		zap.Int64("node", node),
 		zap.Error(err),
@@ -492,25 +504,6 @@ func (rm *ResourceManager) AssignPendingIncomingNode() {
 			zap.Int64("node", node),
 			zap.Error(err),
 		)
-	}
-}
-
-// RemoveAllDownNode remove all down node from resource group.
-func (rm *ResourceManager) RemoveAllDownNode() {
-	rm.rwmutex.Lock()
-	defer rm.rwmutex.Unlock()
-
-	for nodeID := range rm.nodeIDMap {
-		if node := rm.nodeMgr.Get(nodeID); node == nil || node.IsStoppingState() {
-			// unassignNode failure can be skip.
-			rgName, err := rm.unassignNode(nodeID)
-			log.Info("remove down node from resource group",
-				zap.Bool("nodeExist", node != nil),
-				zap.Int64("nodeID", nodeID),
-				zap.String("rgName", rgName),
-				zap.Error(err),
-			)
-		}
 	}
 }
 
@@ -847,7 +840,8 @@ func (rm *ResourceManager) unassignNode(node int64) (string, error) {
 		rm.nodeChangedNotifier.NotifyAll()
 		return rg.GetName(), nil
 	}
-	return "", nil
+
+	return "", errors.Errorf("node %d not found in any resource group", node)
 }
 
 // validateResourceGroupConfig validate resource group config.

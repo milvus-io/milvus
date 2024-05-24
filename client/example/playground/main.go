@@ -18,6 +18,7 @@ const (
 	helloMilvusCmd = `hello_milvus`
 	partitionsCmd  = `partitions`
 	indexCmd       = `indexes`
+	countCmd       = `count`
 
 	milvusAddr     = `localhost:19530`
 	nEntities, dim = 3000, 128
@@ -38,7 +39,107 @@ func main() {
 		Partitions()
 	case indexCmd:
 		Indexes()
+	case countCmd:
+		Count()
 	}
+}
+
+func Count() {
+	ctx := context.Background()
+
+	collectionName := "hello_count_inverted"
+
+	c, err := milvusclient.New(ctx, &milvusclient.ClientConfig{
+		Address: "127.0.0.1:19530",
+	})
+	if err != nil {
+		log.Fatal("failed to connect to milvus, err: ", err.Error())
+	}
+
+	schema := entity.NewSchema().WithName(collectionName).
+		WithField(entity.NewField().WithName("id").WithDataType(entity.FieldTypeInt64).WithIsAutoID(true).WithIsPrimaryKey(true)).
+		WithField(entity.NewField().WithName("vector").WithDataType(entity.FieldTypeFloatVector).WithDim(128))
+
+	err = c.CreateCollection(ctx, milvusclient.NewCreateCollectionOption(collectionName, schema))
+	if err != nil {
+		log.Fatal("failed to connect to milvus, err: ", err.Error())
+	}
+
+	indexTask, err := c.CreateIndex(ctx, milvusclient.NewCreateIndexOption(collectionName, "id", index.NewGenericIndex("inverted", map[string]string{})))
+	if err != nil {
+		log.Fatal("failed to connect to milvus, err: ", err.Error())
+	}
+
+	indexTask.Await(ctx)
+
+	indexTask, err = c.CreateIndex(ctx, milvusclient.NewCreateIndexOption(collectionName, "vector", index.NewHNSWIndex(entity.L2, 16, 32)))
+	if err != nil {
+		log.Fatal("failed to connect to milvus, err: ", err.Error())
+	}
+
+	indexTask.Await(ctx)
+
+	loadTask, err := c.LoadCollection(ctx, milvusclient.NewLoadCollectionOption(collectionName))
+	if err != nil {
+		log.Fatal("faied to load collection, err: ", err.Error())
+	}
+	loadTask.Await(ctx)
+
+	for i := 0; i < 100; i++ {
+		// randomData := make([]int64, 0, nEntities)
+		vectorData := make([][]float32, 0, nEntities)
+		// generate data
+		for i := 0; i < nEntities; i++ {
+			// randomData = append(randomData, rand.Int63n(1000))
+			vec := make([]float32, 0, dim)
+			for j := 0; j < dim; j++ {
+				vec = append(vec, rand.Float32())
+			}
+			vectorData = append(vectorData, vec)
+		}
+
+		_, err = c.Insert(ctx, milvusclient.NewColumnBasedInsertOption(collectionName).WithFloatVectorColumn("vector", dim, vectorData))
+		if err != nil {
+			log.Fatal("failed to insert data")
+		}
+
+		log.Println("start flush collection")
+		flushTask, err := c.Flush(ctx, milvusclient.NewFlushOption(collectionName))
+		if err != nil {
+			log.Fatal("failed to flush", err.Error())
+		}
+		start := time.Now()
+		err = flushTask.Await(ctx)
+		if err != nil {
+			log.Fatal("failed to flush", err.Error())
+		}
+		log.Println("flush done, elapsed", time.Since(start))
+
+		result, err := c.Query(ctx, milvusclient.NewQueryOption(collectionName).
+			WithOutputFields([]string{"count(*)"}).
+			WithConsistencyLevel(entity.ClStrong))
+		if err != nil {
+			log.Fatal("failed to connect to milvus, err: ", err.Error())
+		}
+		for _, rs := range result.Fields {
+			log.Println(rs)
+		}
+		result, err = c.Query(ctx, milvusclient.NewQueryOption(collectionName).
+			WithOutputFields([]string{"count(*)"}).
+			WithFilter("id > 0").
+			WithConsistencyLevel(entity.ClStrong))
+		if err != nil {
+			log.Fatal("failed to connect to milvus, err: ", err.Error())
+		}
+		for _, rs := range result.Fields {
+			log.Println(rs)
+		}
+	}
+
+	// err = c.DropCollection(ctx, milvusclient.NewDropCollectionOption(collectionName))
+	// if err != nil {
+	// 	log.Fatal("=== Failed to drop collection", err.Error())
+	// }
 }
 
 func HelloMilvus() {
@@ -92,7 +193,7 @@ func HelloMilvus() {
 		vectorData = append(vectorData, vec)
 	}
 
-	err = c.Insert(ctx, milvusclient.NewColumnBasedInsertOption(collectionName).WithFloatVectorColumn("vector", dim, vectorData))
+	_, err = c.Insert(ctx, milvusclient.NewColumnBasedInsertOption(collectionName).WithFloatVectorColumn("vector", dim, vectorData))
 	if err != nil {
 		log.Fatal("failed to insert data")
 	}
@@ -107,22 +208,7 @@ func HelloMilvus() {
 	if err != nil {
 		log.Fatal("failed to flush", err.Error())
 	}
-	log.Println("flush done, elasped", time.Since(start))
-
-	indexTask, err := c.CreateIndex(ctx, milvusclient.NewCreateIndexOption(collectionName, "vector", index.NewHNSWIndex(entity.L2, 16, 100)))
-	if err != nil {
-		log.Fatal("failed to create index, err: ", err.Error())
-	}
-	err = indexTask.Await(ctx)
-	if err != nil {
-		log.Fatal("failed to wait index construction complete")
-	}
-
-	loadTask, err := c.LoadCollection(ctx, milvusclient.NewLoadCollectionOption(collectionName))
-	if err != nil {
-		log.Fatal("failed to load collection", err.Error())
-	}
-	loadTask.Await(ctx)
+	log.Println("flush done, elapsed", time.Since(start))
 
 	vec2search := []entity.Vector{
 		entity.FloatVector(vectorData[len(vectorData)-2]),

@@ -575,11 +575,22 @@ GetObjectData(std::shared_ptr<milvus_storage::Space> space,
     }
 
     std::vector<FieldDataPtr> datas;
-    for (int i = 0; i < futures.size(); ++i) {
-        auto res = futures[i].get();
-        datas.emplace_back(res->GetFieldData());
+    std::exception_ptr first_exception = nullptr;
+    for (auto& future : futures) {
+        try {
+            auto res = future.get();
+            datas.emplace_back(res->GetFieldData());
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
     }
     ReleaseArrowUnused();
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
+    }
+
     return datas;
 }
 
@@ -612,12 +623,22 @@ PutIndexData(ChunkManager* remote_chunk_manager,
     }
 
     std::map<std::string, int64_t> remote_paths_to_size;
+    std::exception_ptr first_exception = nullptr;
     for (auto& future : futures) {
-        auto res = future.get();
-        remote_paths_to_size[res.first] = res.second;
+        try {
+            auto res = future.get();
+            remote_paths_to_size[res.first] = res.second;
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    ReleaseArrowUnused();
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
     }
 
-    ReleaseArrowUnused();
     return remote_paths_to_size;
 }
 
@@ -650,12 +671,22 @@ PutIndexData(std::shared_ptr<milvus_storage::Space> space,
     }
 
     std::map<std::string, int64_t> remote_paths_to_size;
+    std::exception_ptr first_exception = nullptr;
     for (auto& future : futures) {
-        auto res = future.get();
-        remote_paths_to_size[res.first] = res.second;
+        try {
+            auto res = future.get();
+            remote_paths_to_size[res.first] = res.second;
+        } catch (...) {
+            if (!first_exception) {
+                first_exception = std::current_exception();
+            }
+        }
+    }
+    ReleaseArrowUnused();
+    if (first_exception) {
+        std::rethrow_exception(first_exception);
     }
 
-    ReleaseArrowUnused();
     return remote_paths_to_size;
 }
 

@@ -25,13 +25,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 func TestFlowGraphManager(t *testing.T) {
@@ -55,20 +53,12 @@ func TestFlowGraphManager(t *testing.T) {
 	err = node.Init()
 	require.Nil(t, err)
 
-	meta := NewMetaFactory().GetCollectionMeta(1, "test_collection", schemapb.DataType_Int64)
 	broker := broker.NewMockBroker(t)
 	broker.EXPECT().ReportTimeTick(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().SaveBinlogPaths(mock.Anything, mock.Anything).Return(nil).Maybe()
 	broker.EXPECT().GetSegmentInfo(mock.Anything, mock.Anything).Return([]*datapb.SegmentInfo{}, nil).Maybe()
 	broker.EXPECT().DropVirtualChannel(mock.Anything, mock.Anything).Return(nil, nil).Maybe()
 	broker.EXPECT().UpdateChannelCheckpoint(mock.Anything, mock.Anything).Return(nil).Maybe()
-	broker.EXPECT().DescribeCollection(mock.Anything, mock.Anything, mock.Anything).
-		Return(&milvuspb.DescribeCollectionResponse{
-			Status:         merr.Status(nil),
-			CollectionID:   1,
-			CollectionName: "test_collection",
-			Schema:         meta.GetSchema(),
-		}, nil).Maybe()
 
 	node.broker = broker
 

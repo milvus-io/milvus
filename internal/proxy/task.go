@@ -293,8 +293,13 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return fmt.Errorf("maximum field's number should be limited to %d", Params.ProxyCfg.MaxFieldNum.GetAsInt())
 	}
 
-	if len(typeutil.GetVectorFieldSchemas(t.schema)) > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
+	vectorFields := len(typeutil.GetVectorFieldSchemas(t.schema))
+	if vectorFields > Params.ProxyCfg.MaxVectorFieldNum.GetAsInt() {
 		return fmt.Errorf("maximum vector field's number should be limited to %d", Params.ProxyCfg.MaxVectorFieldNum.GetAsInt())
+	}
+
+	if vectorFields == 0 {
+		return merr.WrapErrParameterInvalidMsg("schema does not contain vector field")
 	}
 
 	// validate collection name
@@ -661,6 +666,7 @@ func (t *describeCollectionTask) Execute(ctx context.Context) error {
 				IsClusteringKey: field.IsClusteringKey,
 				DefaultValue:    field.DefaultValue,
 				ElementType:     field.ElementType,
+				Nullable:        field.Nullable,
 			})
 		}
 	}

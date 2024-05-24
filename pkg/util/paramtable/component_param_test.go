@@ -481,6 +481,7 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, 16, Params.ReadBufferSizeInMB.GetAsInt())
 		params.Save("datanode.gracefulStopTimeout", "100")
 		assert.Equal(t, 100*time.Second, Params.GracefulStopTimeout.GetAsDuration(time.Second))
+		assert.Equal(t, 2, Params.SlotCap.GetAsInt())
 	})
 
 	t.Run("test indexNodeConfig", func(t *testing.T) {

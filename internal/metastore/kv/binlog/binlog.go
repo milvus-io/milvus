@@ -148,7 +148,7 @@ func DecompressBinLog(binlogType storage.BinlogType, collectionID, partitionID,
 	for _, fieldBinlog := range fieldBinlogs {
 		for _, binlog := range fieldBinlog.Binlogs {
 			if binlog.GetLogPath() == "" {
-				path, err := buildLogPath(binlogType, collectionID, partitionID,
+				path, err := BuildLogPath(binlogType, collectionID, partitionID,
 					segmentID, fieldBinlog.GetFieldID(), binlog.GetLogID())
 				if err != nil {
 					return err
@@ -161,7 +161,7 @@ func DecompressBinLog(binlogType storage.BinlogType, collectionID, partitionID,
 }
 
 // build a binlog path on the storage by metadata
-func buildLogPath(binlogType storage.BinlogType, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) (string, error) {
+func BuildLogPath(binlogType storage.BinlogType, collectionID, partitionID, segmentID, fieldID, logID typeutil.UniqueID) (string, error) {
 	chunkManagerRootPath := paramtable.Get().MinioCfg.RootPath.GetValue()
 	if paramtable.Get().CommonCfg.StorageType.GetValue() == "local" {
 		chunkManagerRootPath = paramtable.Get().LocalStorageCfg.Path.GetValue()

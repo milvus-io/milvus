@@ -473,7 +473,6 @@ func (s *LocalSegment) InsertCount() int64 {
 func (s *LocalSegment) RowNum() int64 {
 	// if segment is not loaded, return 0 (maybe not loaded or release by lru)
 	if !s.ptrLock.RLockIf(state.IsDataLoaded) {
-		log.Warn("segment is not valid", zap.Int64("segmentID", s.ID()))
 		return 0
 	}
 	defer s.ptrLock.RUnlock()
@@ -968,7 +967,7 @@ func (s *LocalSegment) LoadMultiFieldData(ctx context.Context) error {
 	return nil
 }
 
-func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog) error {
+func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCount int64, field *datapb.FieldBinlog, useMmap bool) error {
 	if !s.ptrLock.RLockIf(state.IsNotReleased) {
 		return merr.WrapErrSegmentNotLoaded(s.ID(), "segment released")
 	}
@@ -1007,7 +1006,7 @@ func (s *LocalSegment) LoadFieldData(ctx context.Context, fieldID int64, rowCoun
 	}
 
 	collection := s.collection
-	mmapEnabled := common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
+	mmapEnabled := useMmap || common.IsFieldMmapEnabled(collection.Schema(), fieldID) ||
 		(!common.FieldHasMmapKey(collection.Schema(), fieldID) && params.Params.QueryNodeCfg.MmapEnabled.GetAsBool())
 	loadFieldDataInfo.appendMMapDirPath(paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue())
 	loadFieldDataInfo.enableMmap(fieldID, mmapEnabled)
@@ -1423,7 +1422,7 @@ func (s *LocalSegment) UpdateFieldRawDataSize(ctx context.Context, numRows int64
 	fieldID := fieldBinlog.FieldID
 	fieldDataSize := int64(0)
 	for _, binlog := range fieldBinlog.GetBinlogs() {
-		fieldDataSize += binlog.LogSize
+		fieldDataSize += binlog.GetMemorySize()
 	}
 	GetDynamicPool().Submit(func() (any, error) {
 		status = C.UpdateFieldRawDataSize(s.ptr, C.int64_t(fieldID), C.int64_t(numRows), C.int64_t(fieldDataSize))

@@ -126,9 +126,7 @@ func (b *RowCountBasedBalancer) AssignChannel(channels []*meta.DmChannel, nodes 
 
 func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*nodeItem {
 	ret := make([]*nodeItem, 0, len(nodeIDs))
-	for _, nodeInfo := range b.getNodes(nodeIDs) {
-		node := nodeInfo.ID()
-
+	for _, node := range nodeIDs {
 		// calculate sealed segment row count on node
 		segments := b.dist.SegmentDistManager.GetByFilter(meta.WithNodeID(node))
 		rowcnt := 0
@@ -151,8 +149,7 @@ func (b *RowCountBasedBalancer) convertToNodeItemsBySegment(nodeIDs []int64) []*
 
 func (b *RowCountBasedBalancer) convertToNodeItemsByChannel(nodeIDs []int64) []*nodeItem {
 	ret := make([]*nodeItem, 0, len(nodeIDs))
-	for _, nodeInfo := range b.getNodes(nodeIDs) {
-		node := nodeInfo.ID()
+	for _, node := range nodeIDs {
 		channels := b.dist.ChannelDistManager.GetByFilter(meta.WithNodeID2Channel(node))
 
 		// more channel num, less priority
@@ -172,71 +169,52 @@ func (b *RowCountBasedBalancer) BalanceReplica(replica *meta.Replica) ([]Segment
 		return nil, nil
 	}
 
-	onlineNodes := make([]int64, 0)
-	offlineNodes := make([]int64, 0)
-
-	// read only nodes is offline in current replica.
-	if replica.RONodesCount() > 0 {
-		// if node is stop or transfer to other rg
-		log.RatedInfo(10, "meet read only node, try to move out all segment/channel", zap.Int64s("node", replica.GetRONodes()))
-		offlineNodes = append(offlineNodes, replica.GetRONodes()...)
-	}
-
-	for _, nid := range replica.GetNodes() {
-		if isStopping, err := b.nodeManager.IsStoppingNode(nid); err != nil {
-			log.Info("not existed node", zap.Int64("nid", nid), zap.Error(err))
-			continue
-		} else if isStopping {
-			offlineNodes = append(offlineNodes, nid)
-		} else {
-			onlineNodes = append(onlineNodes, nid)
-		}
-	}
-
-	if len(onlineNodes) == 0 {
+	rwNodes := replica.GetRWNodes()
+	roNodes := replica.GetRONodes()
+	if len(rwNodes) == 0 {
 		// no available nodes to balance
 		return nil, nil
 	}
 
 	segmentPlans, channelPlans := make([]SegmentAssignPlan, 0), make([]ChannelAssignPlan, 0)
-	if len(offlineNodes) != 0 {
+	if len(roNodes) != 0 {
 		if !paramtable.Get().QueryCoordCfg.EnableStoppingBalance.GetAsBool() {
-			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", offlineNodes))
+			log.RatedInfo(10, "stopping balance is disabled!", zap.Int64s("stoppingNode", roNodes))
 			return nil, nil
 		}
 
 		log.Info("Handle stopping nodes",
-			zap.Any("stopping nodes", offlineNodes),
-			zap.Any("available nodes", onlineNodes),
+			zap.Any("stopping nodes", roNodes),
+			zap.Any("available nodes", rwNodes),
 		)
 		// handle stopped nodes here, have to assign segments on stopping nodes to nodes with the smallest score
-		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, onlineNodes, offlineNodes)...)
+		channelPlans = append(channelPlans, b.genStoppingChannelPlan(replica, rwNodes, roNodes)...)
 		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, onlineNodes, offlineNodes)...)
+			segmentPlans = append(segmentPlans, b.genStoppingSegmentPlan(replica, rwNodes, roNodes)...)
 		}
 	} else {
 		if paramtable.Get().QueryCoordCfg.AutoBalanceChannel.GetAsBool() {
-			channelPlans = append(channelPlans, b.genChannelPlan(replica, onlineNodes)...)
+			channelPlans = append(channelPlans, b.genChannelPlan(replica, rwNodes)...)
 		}
 
 		if len(channelPlans) == 0 {
-			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, onlineNodes)...)
+			segmentPlans = append(segmentPlans, b.genSegmentPlan(replica, rwNodes)...)
 		}
 	}
 
 	return segmentPlans, channelPlans
 }
 
-func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []SegmentAssignPlan {
+func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, rwNodes []int64, roNodes []int64) []SegmentAssignPlan {
 	segmentPlans := make([]SegmentAssignPlan, 0)
-	for _, nodeID := range offlineNodes {
+	for _, nodeID := range roNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(nodeID))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
 				b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.NextTarget) != nil &&
 				segment.GetLevel() != datapb.SegmentLevel_L0
 		})
-		plans := b.AssignSegment(replica.GetCollectionID(), segments, onlineNodes, false)
+		plans := b.AssignSegment(replica.GetCollectionID(), segments, rwNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -246,13 +224,13 @@ func (b *RowCountBasedBalancer) genStoppingSegmentPlan(replica *meta.Replica, on
 	return segmentPlans
 }
 
-func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNodes []int64) []SegmentAssignPlan {
+func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, rwNodes []int64) []SegmentAssignPlan {
 	segmentsToMove := make([]*meta.Segment, 0)
 
 	nodeRowCount := make(map[int64]int, 0)
 	segmentDist := make(map[int64][]*meta.Segment)
 	totalRowCount := 0
-	for _, node := range onlineNodes {
+	for _, node := range rwNodes {
 		dist := b.dist.SegmentDistManager.GetByFilter(meta.WithCollectionID(replica.GetCollectionID()), meta.WithNodeID(node))
 		segments := lo.Filter(dist, func(segment *meta.Segment, _ int) bool {
 			return b.targetMgr.GetSealedSegment(segment.GetCollectionID(), segment.GetID(), meta.CurrentTarget) != nil &&
@@ -273,7 +251,7 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 	}
 
 	// find nodes with less row count than average
-	average := totalRowCount / len(onlineNodes)
+	average := totalRowCount / len(rwNodes)
 	nodesWithLessRow := make([]int64, 0)
 	for node, segments := range segmentDist {
 		sort.Slice(segments, func(i, j int) bool {
@@ -313,11 +291,11 @@ func (b *RowCountBasedBalancer) genSegmentPlan(replica *meta.Replica, onlineNode
 	return segmentPlans
 }
 
-func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, onlineNodes []int64, offlineNodes []int64) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, rwNodes []int64, roNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
-	for _, nodeID := range offlineNodes {
+	for _, nodeID := range roNodes {
 		dmChannels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(nodeID))
-		plans := b.AssignChannel(dmChannels, onlineNodes, false)
+		plans := b.AssignChannel(dmChannels, rwNodes, false)
 		for i := range plans {
 			plans[i].From = nodeID
 			plans[i].Replica = replica
@@ -327,20 +305,20 @@ func (b *RowCountBasedBalancer) genStoppingChannelPlan(replica *meta.Replica, on
 	return channelPlans
 }
 
-func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, onlineNodes []int64) []ChannelAssignPlan {
+func (b *RowCountBasedBalancer) genChannelPlan(replica *meta.Replica, rwNodes []int64) []ChannelAssignPlan {
 	channelPlans := make([]ChannelAssignPlan, 0)
-	if len(onlineNodes) > 1 {
+	if len(rwNodes) > 1 {
 		// start to balance channels on all available nodes
 		channelDist := b.dist.ChannelDistManager.GetByFilter(meta.WithReplica2Channel(replica))
 		if len(channelDist) == 0 {
 			return nil
 		}
-		average := int(math.Ceil(float64(len(channelDist)) / float64(len(onlineNodes))))
+		average := int(math.Ceil(float64(len(channelDist)) / float64(len(rwNodes))))
 
 		// find nodes with less channel count than average
 		nodeWithLessChannel := make([]int64, 0)
 		channelsToMove := make([]*meta.DmChannel, 0)
-		for _, node := range onlineNodes {
+		for _, node := range rwNodes {
 			channels := b.dist.ChannelDistManager.GetByCollectionAndFilter(replica.GetCollectionID(), meta.WithNodeID2Channel(node))
 
 			if len(channels) <= average {

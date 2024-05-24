@@ -17,6 +17,8 @@
 package client
 
 import (
+	"fmt"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
@@ -31,15 +33,27 @@ type createIndexOption struct {
 	fieldName      string
 	indexName      string
 	indexDef       index.Index
+
+	extraParams map[string]any
+}
+
+func (opt *createIndexOption) WithExtraParam(key string, value any) {
+	opt.extraParams[key] = value
 }
 
 func (opt *createIndexOption) Request() *milvuspb.CreateIndexRequest {
-	return &milvuspb.CreateIndexRequest{
+	params := opt.indexDef.Params()
+	for key, value := range opt.extraParams {
+		params[key] = fmt.Sprintf("%v", value)
+	}
+	req := &milvuspb.CreateIndexRequest{
 		CollectionName: opt.collectionName,
 		FieldName:      opt.fieldName,
 		IndexName:      opt.indexName,
-		ExtraParams:    entity.MapKvPairs(opt.indexDef.Params()),
+		ExtraParams:    entity.MapKvPairs(params),
 	}
+
+	return req
 }
 
 func (opt *createIndexOption) WithIndexName(indexName string) *createIndexOption {
@@ -52,6 +66,7 @@ func NewCreateIndexOption(collectionName string, fieldName string, index index.I
 		collectionName: collectionName,
 		fieldName:      fieldName,
 		indexDef:       index,
+		extraParams:    make(map[string]any),
 	}
 }
 

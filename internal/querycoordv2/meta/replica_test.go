@@ -30,13 +30,13 @@ func (suite *ReplicaSuite) TestReadOperations() {
 	r := newReplica(suite.replicaPB)
 	suite.testRead(r)
 	// keep same after clone.
-	mutableReplica := r.copyForWrite()
+	mutableReplica := r.CopyForWrite()
 	suite.testRead(mutableReplica.IntoReplica())
 }
 
 func (suite *ReplicaSuite) TestClone() {
 	r := newReplica(suite.replicaPB)
-	r2 := r.copyForWrite()
+	r2 := r.CopyForWrite()
 	suite.testRead(r)
 
 	// after apply write operation on copy, the original should not be affected.
@@ -68,7 +68,7 @@ func (suite *ReplicaSuite) TestRange() {
 	})
 	suite.Equal(1, count)
 
-	mr := r.copyForWrite()
+	mr := r.CopyForWrite()
 	mr.AddRONode(1)
 
 	count = 0
@@ -81,7 +81,7 @@ func (suite *ReplicaSuite) TestRange() {
 
 func (suite *ReplicaSuite) TestWriteOperation() {
 	r := newReplica(suite.replicaPB)
-	mr := r.copyForWrite()
+	mr := r.CopyForWrite()
 
 	// test add available node.
 	suite.False(mr.Contains(5))
@@ -158,7 +158,7 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 	suite.Equal(suite.replicaPB.GetResourceGroup(), r.GetResourceGroup())
 
 	// Test GetNodes()
-	suite.ElementsMatch(suite.replicaPB.GetNodes(), r.GetNodes())
+	suite.ElementsMatch(suite.replicaPB.GetNodes(), r.GetRWNodes())
 
 	// Test GetRONodes()
 	suite.ElementsMatch(suite.replicaPB.GetRoNodes(), r.GetRONodes())
@@ -180,6 +180,9 @@ func (suite *ReplicaSuite) testRead(r *Replica) {
 }
 
 func (suite *ReplicaSuite) TestChannelExclusiveMode() {
+	paramtable.Get().Save(paramtable.Get().QueryCoordCfg.Balancer.Key, ChannelLevelScoreBalancerName)
+	defer paramtable.Get().Reset(paramtable.Get().QueryCoordCfg.Balancer.Key)
+
 	r := newReplica(&querypb.Replica{
 		ID:            1,
 		CollectionID:  2,
@@ -192,7 +195,7 @@ func (suite *ReplicaSuite) TestChannelExclusiveMode() {
 		},
 	})
 
-	mutableReplica := r.copyForWrite()
+	mutableReplica := r.CopyForWrite()
 	// add 10 rw nodes, exclusive mode is false.
 	for i := 0; i < 10; i++ {
 		mutableReplica.AddRWNode(int64(i))
@@ -202,7 +205,7 @@ func (suite *ReplicaSuite) TestChannelExclusiveMode() {
 		suite.Equal(0, len(channelNodeInfo.GetRwNodes()))
 	}
 
-	mutableReplica = r.copyForWrite()
+	mutableReplica = r.CopyForWrite()
 	// add 10 rw nodes, exclusive mode is true.
 	for i := 10; i < 20; i++ {
 		mutableReplica.AddRWNode(int64(i))
@@ -213,7 +216,7 @@ func (suite *ReplicaSuite) TestChannelExclusiveMode() {
 	}
 
 	// 4 node become read only, exclusive mode still be true
-	mutableReplica = r.copyForWrite()
+	mutableReplica = r.CopyForWrite()
 	for i := 0; i < 4; i++ {
 		mutableReplica.AddRONode(int64(i))
 	}
@@ -223,7 +226,7 @@ func (suite *ReplicaSuite) TestChannelExclusiveMode() {
 	}
 
 	// 4 node has been removed, exclusive mode back to false
-	mutableReplica = r.copyForWrite()
+	mutableReplica = r.CopyForWrite()
 	for i := 4; i < 8; i++ {
 		mutableReplica.RemoveNode(int64(i))
 	}

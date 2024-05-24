@@ -20,26 +20,29 @@ import (
 	"context"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestCompactionExecutor(t *testing.T) {
 	t.Run("Test execute", func(t *testing.T) {
-		ctx, cancel := context.WithCancel(context.Background())
-		ex := newCompactionExecutor()
-		go ex.start(ctx)
-		ex.execute(newMockCompactor(true))
+		planID := int64(1)
+		mockC := compaction.NewMockCompactor(t)
+		mockC.EXPECT().GetPlanID().Return(planID).Once()
+		mockC.EXPECT().GetChannelName().Return("ch1").Once()
+		executor := newCompactionExecutor()
+		executor.execute(mockC)
 
-		cancel()
-	})
+		assert.EqualValues(t, 1, len(executor.taskCh))
+		assert.EqualValues(t, 1, executor.executing.Len())
 
-	t.Run("Test stopTask", func(t *testing.T) {
-		ex := newCompactionExecutor()
-		mc := newMockCompactor(true)
-		ex.executeWithState(mc)
-		ex.stopTask(UniqueID(1))
+		mockC.EXPECT().Stop().Return().Once()
+		executor.stopTask(planID)
 	})
 
 	t.Run("Test start", func(t *testing.T) {
@@ -55,19 +58,36 @@ func TestCompactionExecutor(t *testing.T) {
 
 			description string
 		}{
-			{true, "compact return nil"},
+			{true, "compact success"},
 			{false, "compact return error"},
 		}
 
 		ex := newCompactionExecutor()
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
+				mockC := compaction.NewMockCompactor(t)
+				mockC.EXPECT().GetPlanID().Return(int64(1))
+				mockC.EXPECT().GetCollection().Return(int64(1))
+				mockC.EXPECT().GetChannelName().Return("ch1")
+				mockC.EXPECT().Complete().Return().Maybe()
+				signal := make(chan struct{})
 				if test.isvalid {
-					validTask := newMockCompactor(true)
-					ex.executeWithState(validTask)
+					mockC.EXPECT().Compact().RunAndReturn(
+						func() (*datapb.CompactionPlanResult, error) {
+							signal <- struct{}{}
+							return &datapb.CompactionPlanResult{PlanID: 1}, nil
+						}).Once()
+					ex.executeWithState(mockC)
+					<-signal
 				} else {
-					invalidTask := newMockCompactor(false)
-					ex.executeWithState(invalidTask)
+					mockC.EXPECT().InjectDone().Return().Maybe()
+					mockC.EXPECT().Compact().RunAndReturn(
+						func() (*datapb.CompactionPlanResult, error) {
+							signal <- struct{}{}
+							return nil, errors.New("mock error")
+						}).Once()
+					ex.executeWithState(mockC)
+					<-signal
 				}
 			})
 		}
@@ -93,83 +113,58 @@ func TestCompactionExecutor(t *testing.T) {
 
 	t.Run("test stop vchannel tasks", func(t *testing.T) {
 		ex := newCompactionExecutor()
-		ctx, cancel := context.WithCancel(context.Background())
-		defer cancel()
-		go ex.start(ctx)
-		mc := newMockCompactor(true)
-		mc.alwaysWorking = true
+		mc := compaction.NewMockCompactor(t)
+		mc.EXPECT().GetPlanID().Return(int64(1))
+		mc.EXPECT().GetChannelName().Return("mock")
+		mc.EXPECT().Compact().Return(&datapb.CompactionPlanResult{PlanID: 1}, nil).Maybe()
+		mc.EXPECT().Stop().Return().Once()
 
 		ex.execute(mc)
 
-		// wait for task enqueued
-		found := false
-		for !found {
-			found = ex.executing.Contain(mc.getPlanID())
-		}
+		require.True(t, ex.executing.Contain(int64(1)))
 
 		ex.discardByDroppedChannel("mock")
-
-		select {
-		case <-mc.ctx.Done():
-		default:
-			t.FailNow()
-		}
+		assert.True(t, ex.dropped.Contain("mock"))
+		assert.False(t, ex.executing.Contain(int64(1)))
 	})
-}
 
-func newMockCompactor(isvalid bool) *mockCompactor {
-	ctx, cancel := context.WithCancel(context.TODO())
-	return &mockCompactor{
-		ctx:     ctx,
-		cancel:  cancel,
-		isvalid: isvalid,
-		done:    make(chan struct{}, 1),
-	}
-}
+	t.Run("test getAllCompactionResults", func(t *testing.T) {
+		ex := newCompactionExecutor()
 
-type mockCompactor struct {
-	ctx           context.Context
-	cancel        context.CancelFunc
-	isvalid       bool
-	alwaysWorking bool
+		mockC := compaction.NewMockCompactor(t)
+		ex.executing.Insert(int64(1), mockC)
 
-	done chan struct{}
-}
+		ex.completedCompactor.Insert(int64(2), mockC)
+		ex.completed.Insert(int64(2), &datapb.CompactionPlanResult{
+			PlanID: 2,
+			State:  commonpb.CompactionState_Completed,
+			Type:   datapb.CompactionType_MixCompaction,
+		})
 
-var _ compactor = (*mockCompactor)(nil)
+		ex.completedCompactor.Insert(int64(3), mockC)
+		ex.completed.Insert(int64(3), &datapb.CompactionPlanResult{
+			PlanID: 3,
+			State:  commonpb.CompactionState_Completed,
+			Type:   datapb.CompactionType_Level0DeleteCompaction,
+		})
 
-func (mc *mockCompactor) complete() {
-	mc.done <- struct{}{}
-}
+		require.Equal(t, 2, ex.completed.Len())
+		require.Equal(t, 2, ex.completedCompactor.Len())
+		require.Equal(t, 1, ex.executing.Len())
 
-func (mc *mockCompactor) injectDone() {}
+		result := ex.getAllCompactionResults()
+		assert.Equal(t, 3, len(result))
 
-func (mc *mockCompactor) compact() (*datapb.CompactionPlanResult, error) {
-	if !mc.isvalid {
-		return nil, errStart
-	}
-	if mc.alwaysWorking {
-		<-mc.ctx.Done()
-		return nil, mc.ctx.Err()
-	}
-	return nil, nil
-}
+		for _, res := range result {
+			if res.PlanID == int64(1) {
+				assert.Equal(t, res.GetState(), commonpb.CompactionState_Executing)
+			} else {
+				assert.Equal(t, res.GetState(), commonpb.CompactionState_Completed)
+			}
+		}
 
-func (mc *mockCompactor) getPlanID() UniqueID {
-	return 1
-}
-
-func (mc *mockCompactor) stop() {
-	if mc.cancel != nil {
-		mc.cancel()
-		<-mc.done
-	}
-}
-
-func (mc *mockCompactor) getCollection() UniqueID {
-	return 1
-}
-
-func (mc *mockCompactor) getChannelName() string {
-	return "mock"
+		assert.Equal(t, 1, ex.completed.Len())
+		require.Equal(t, 1, ex.completedCompactor.Len())
+		require.Equal(t, 1, ex.executing.Len())
+	})
 }

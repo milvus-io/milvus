@@ -34,22 +34,6 @@ exp_schema = "schema"
 class TestUtilityParams(TestcaseBase):
     """ Test case of index interface """
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_metric_type(self, request):
-        if request.param == [] or request.param == "":
-            pytest.skip("metric empty is valid for distance calculation")
-        if isinstance(request.param, str):
-            pytest.skip("string is valid type for metric")
-        yield request.param
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_metric_value(self, request):
-        if request.param == [] or request.param == "":
-            pytest.skip("metric empty is valid for distance calculation")
-        if not isinstance(request.param, str):
-            pytest.skip("Skip invalid type for metric")
-        yield request.param
-
     @pytest.fixture(scope="function", params=["JACCARD", "Superstructure", "Substructure"])
     def get_not_support_metric(self, request):
         yield request.param
@@ -58,20 +42,11 @@ class TestUtilityParams(TestcaseBase):
     def get_support_metric_field(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_partition_names(self, request):
-        if isinstance(request.param, list):
-            if len(request.param) == 0:
-                pytest.skip("empty is valid for partition")
-        if request.param is None:
-            pytest.skip("None is valid for partition")
-        yield request.param
-
     @pytest.fixture(scope="function", params=ct.get_not_string)
     def get_invalid_type_collection_name(self, request):
         yield request.param
 
-    @pytest.fixture(scope="function", params=ct.get_not_string_value)
+    @pytest.fixture(scope="function", params=ct.invalid_resource_names)
     def get_invalid_value_collection_name(self, request):
         yield request.param
 
@@ -82,42 +57,67 @@ class TestUtilityParams(TestcaseBase):
     """
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_collection_name_invalid(self, get_invalid_collection_name):
+    def test_has_collection_name_type_invalid(self, get_invalid_type_collection_name):
         """
         target: test has_collection with error collection name
         method: input invalid name
         expected: raise exception
         """
         self._connect()
-        c_name = get_invalid_collection_name
-        if isinstance(c_name, str) and c_name:
-            self.utility_wrap.has_collection(
-                c_name,
-                check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1100,
-                             ct.err_msg: "collection name should not be empty: invalid parameter"})
-        # elif not isinstance(c_name, str): self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
-        # check_items={ct.err_code: 1, ct.err_msg: "illegal"})
+        c_name = get_invalid_type_collection_name
+        self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res,
+                                         check_items={ct.err_code: 999,
+                                                      ct.err_msg: f"`collection_name` value {c_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_partition_collection_name_invalid(self, get_invalid_collection_name):
+    def test_has_collection_name_value_invalid(self, get_invalid_value_collection_name):
+        """
+        target: test has_collection with error collection name
+        method: input invalid name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_invalid_value_collection_name
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        if c_name in [None, ""]:
+            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+        elif c_name == " ":
+            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
+        self.utility_wrap.has_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_has_partition_collection_name_type_invalid(self, get_invalid_type_collection_name):
         """
         target: test has_partition with error collection name
         method: input invalid name
         expected: raise exception
         """
         self._connect()
-        c_name = get_invalid_collection_name
+        c_name = get_invalid_type_collection_name
         p_name = cf.gen_unique_str(prefix)
-        if isinstance(c_name, str) and c_name:
-            self.utility_wrap.has_partition(
-                c_name, p_name,
-                check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1100,
-                             ct.err_msg: "collection name should not be empty: invalid parameter"})
+        self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
+                                        check_items={ct.err_code: 999,
+                                                     ct.err_msg: f"`collection_name` value {c_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_has_partition_name_invalid(self, get_invalid_partition_name):
+    def test_has_partition_collection_name_value_invalid(self, get_invalid_value_collection_name):
+        """
+        target: test has_partition with error collection name
+        method: input invalid name
+        expected: raise exception
+        """
+        self._connect()
+        c_name = get_invalid_value_collection_name
+        p_name = cf.gen_unique_str(prefix)
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        if c_name in [None, ""]:
+            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+        elif c_name == " ":
+            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
+        self.utility_wrap.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_has_partition_name_type_invalid(self, get_invalid_type_collection_name):
         """
         target: test has_partition with error partition name
         method: input invalid name
@@ -126,21 +126,49 @@ class TestUtilityParams(TestcaseBase):
         self._connect()
         ut = ApiUtilityWrapper()
         c_name = cf.gen_unique_str(prefix)
-        p_name = get_invalid_partition_name
-        if isinstance(p_name, str) and p_name:
-            ex, _ = ut.has_partition(
-                c_name, p_name,
-                check_task=CheckTasks.err_res,
-                check_items={ct.err_code: 1, ct.err_msg: "Invalid"})
+        p_name = get_invalid_type_collection_name
+        ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res,
+                         check_items={ct.err_code: 999,
+                                      ct.err_msg: f"`partition_name` value {p_name} is illegal"})
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_drop_collection_name_invalid(self, get_invalid_collection_name):
+    def test_has_partition_name_value_invalid(self, get_invalid_value_collection_name):
+        """
+        target: test has_partition with error partition name
+        method: input invalid name
+        expected: raise exception
+        """
         self._connect()
-        error1 = {ct.err_code: 1, ct.err_msg: f"`collection_name` value {get_invalid_collection_name} is illegal"}
-        error2 = {ct.err_code: 1100, ct.err_msg: f"Invalid collection name: {get_invalid_collection_name}."}
-        error = error1 if get_invalid_collection_name in [[], 1, [1, '2', 3], (1,), {1: 1}, None, ""] else error2
-        self.utility_wrap.drop_collection(get_invalid_collection_name, check_task=CheckTasks.err_res,
-                                          check_items=error)
+        ut = ApiUtilityWrapper()
+        c_name = cf.gen_unique_str(prefix)
+        p_name = get_invalid_value_collection_name
+        if p_name == "12name":
+            pytest.skip("partition name 12name is legal")
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid partition name: {p_name}"}
+        if p_name in [None]:
+            error = {ct.err_code: 999, ct.err_msg: f"`partition_name` value {p_name} is illegal"}
+        elif p_name in [" ", ""]:
+            error = {ct.err_code: 999, ct.err_msg: "Invalid partition name: . Partition name should not be empty."}
+        ut.has_partition(c_name, p_name, check_task=CheckTasks.err_res, check_items=error)
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_collection_name_type_invalid(self, get_invalid_type_collection_name):
+        self._connect()
+        c_name = get_invalid_type_collection_name
+        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res,
+                                          check_items={ct.err_code: 999,
+                                                       ct.err_msg: f"`collection_name` value {c_name} is illegal"})
+
+    @pytest.mark.tags(CaseLabel.L2)
+    def test_drop_collection_name_value_invalid(self, get_invalid_value_collection_name):
+        self._connect()
+        c_name = get_invalid_value_collection_name
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {c_name}"}
+        if c_name in [None, ""]:
+            error = {ct.err_code: 999, ct.err_msg: f"`collection_name` value {c_name} is illegal"}
+        elif c_name == " ":
+            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty: invalid parameter"}
+        self.utility_wrap.drop_collection(c_name, check_task=CheckTasks.err_res, check_items=error)
 
     # TODO: enable
     @pytest.mark.tags(CaseLabel.L2)
@@ -157,35 +185,38 @@ class TestUtilityParams(TestcaseBase):
                                     check_items={ct.err_code: 0, ct.err_msg: "should create connect"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    def test_index_process_invalid_name(self, get_invalid_collection_name):
+    @pytest.mark.parametrize("invalid_name", ct.invalid_resource_names)
+    def test_index_process_invalid_name(self, invalid_name):
         """
         target: test building_process
         method: input invalid name
         expected: raise exception
         """
-        pass
-        # self._connect() c_name = get_invalid_collection_name ut = ApiUtilityWrapper() if isinstance(c_name,
-        # str) and c_name: ex, _ = ut.index_building_progress(c_name, check_items={ct.err_code: 1, ct.err_msg:
-        # "Invalid collection name"})
+        self._connect()
+        error = {ct.err_code: 999, ct.err_msg: f"Invalid collection name: {invalid_name}"}
+        if invalid_name in [None, "", " "]:
+            error = {ct.err_code: 999, ct.err_msg: "collection name should not be empty"}
+        self.utility_wrap.index_building_progress(collection_name=invalid_name,
+                                                  check_task=CheckTasks.err_res, check_items=error)
 
     # TODO: not support index name
     @pytest.mark.tags(CaseLabel.L1)
-    def _test_index_process_invalid_index_name(self, get_invalid_index_name):
+    @pytest.mark.parametrize("invalid_index_name", ct.invalid_resource_names)
+    def test_index_process_invalid_index_name(self, invalid_index_name):
         """
         target: test building_process
         method: input invalid index name
         expected: raise exception
         """
         self._connect()
-        c_name = cf.gen_unique_str(prefix)
-        index_name = get_invalid_index_name
-        ut = ApiUtilityWrapper()
-        ex, _ = ut.index_building_progress(c_name, index_name)
-        log.error(str(ex))
-        assert "invalid" or "illegal" in str(ex)
+        collection_w = self.init_collection_wrap()
+        error = {ct.err_code: 999, ct.err_msg: "index not found"}
+        self.utility_wrap.index_building_progress(collection_name=collection_w.name, index_name=invalid_index_name,
+                                                  check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_wait_index_invalid_name(self, get_invalid_collection_name):
+    @pytest.mark.skip("not ready")
+    def test_wait_index_invalid_name(self, get_invalid_type_collection_name):
         """
         target: test wait_index
         method: input invalid name
@@ -249,16 +280,19 @@ class TestUtilityParams(TestcaseBase):
         self.utility_wrap.loading_progress("not_existed_name", check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
-    def test_loading_progress_invalid_partition_names(self, get_invalid_partition_names):
+    @pytest.mark.parametrize("partition_name", ct.invalid_resource_names)
+    def test_loading_progress_invalid_partition_names(self, partition_name):
         """
         target: test loading progress with invalid partition names
         method: input invalid partition names
         expected: raise an exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
-        partition_names = get_invalid_partition_names
-        err_msg = {ct.err_code: 0, ct.err_msg: "`partition_name_array` value {} is illegal".format(partition_names)}
+        collection_w = self.init_collection_general(prefix, nb=10)[0]
+        partition_names = [partition_name]
         collection_w.load()
+        err_msg = {ct.err_code: 999, ct.err_msg: "partition not found"}
+        if partition_name is None:
+            err_msg = {ct.err_code: 999, ct.err_msg: "is illegal"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
                                            check_task=CheckTasks.err_res, check_items=err_msg)
 
@@ -270,8 +304,7 @@ class TestUtilityParams(TestcaseBase):
         method: input all or part not existed partition names
         expected: raise exception
         """
-        collection_w = self.init_collection_general(prefix)[0]
-        log.debug(collection_w.num_entities)
+        collection_w = self.init_collection_general(prefix, nb=10)[0]
         collection_w.load()
         err_msg = {ct.err_code: 15, ct.err_msg: f"partition not found"}
         self.utility_wrap.loading_progress(collection_w.name, partition_names,
@@ -394,138 +427,6 @@ class TestUtilityParams(TestcaseBase):
                                                          "err_msg": "vectors_right value {} "
                                                                     "is illegal".format(invalid_vector)})
 
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_invalid_metric_type(self, get_support_metric_field, get_invalid_metric_type):
-        """
-        target: test calculated distance with invalid metric
-        method: input invalid metric
-        expected: raise exception
-        """
-        self._connect()
-        vectors_l = cf.gen_vectors(default_nb, default_dim)
-        vectors_r = cf.gen_vectors(default_nb, default_dim)
-        op_l = {"float_vectors": vectors_l}
-        op_r = {"float_vectors": vectors_r}
-        metric_field = get_support_metric_field
-        metric = get_invalid_metric_type
-        params = {metric_field: metric}
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1,
-                                                     "err_msg": "params value {{'metric': {}}} "
-                                                                "is illegal".format(metric)})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_invalid_metric_value(self, get_support_metric_field, get_invalid_metric_value):
-        """
-        target: test calculated distance with invalid metric
-        method: input invalid metric
-        expected: raise exception
-        """
-        self._connect()
-        vectors_l = cf.gen_vectors(default_nb, default_dim)
-        vectors_r = cf.gen_vectors(default_nb, default_dim)
-        op_l = {"float_vectors": vectors_l}
-        op_r = {"float_vectors": vectors_r}
-        metric_field = get_support_metric_field
-        metric = get_invalid_metric_value
-        params = {metric_field: metric}
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1,
-                                                     "err_msg": "{} metric type is invalid for "
-                                                                "float vector".format(metric)})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_not_support_metric(self, get_support_metric_field, get_not_support_metric):
-        """
-        target: test calculated distance with invalid metric
-        method: input invalid metric
-        expected: raise exception
-        """
-        self._connect()
-        vectors_l = cf.gen_vectors(default_nb, default_dim)
-        vectors_r = cf.gen_vectors(default_nb, default_dim)
-        op_l = {"float_vectors": vectors_l}
-        op_r = {"float_vectors": vectors_r}
-        metric_field = get_support_metric_field
-        metric = get_not_support_metric
-        params = {metric_field: metric}
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1,
-                                                     "err_msg": "{} metric type is invalid for "
-                                                                "float vector".format(metric)})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_invalid_using(self, get_support_metric_field):
-        """
-        target: test calculated distance with invalid using
-        method: input invalid using
-        expected: raise exception
-        """
-        self._connect()
-        vectors_l = cf.gen_vectors(default_nb, default_dim)
-        vectors_r = cf.gen_vectors(default_nb, default_dim)
-        op_l = {"float_vectors": vectors_l}
-        op_r = {"float_vectors": vectors_r}
-        metric_field = get_support_metric_field
-        params = {metric_field: "L2", "sqrt": True}
-        using = "empty"
-        self.utility_wrap.calc_distance(op_l, op_r, params, using=using,
-                                        check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1,
-                                                     "err_msg": "should create connect"})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_not_match_dim(self):
-        """
-        target: test calculated distance with invalid vectors
-        method: input invalid vectors type and value
-        expected: raise exception
-        """
-        self._connect()
-        dim = 129
-        vector_l = cf.gen_vectors(default_nb, default_dim)
-        vector_r = cf.gen_vectors(default_nb, dim)
-        op_l = {"float_vectors": vector_l}
-        op_r = {"float_vectors": vector_r}
-        self.utility_wrap.calc_distance(op_l, op_r,
-                                        check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1,
-                                                     "err_msg": "Cannot calculate distance between "
-                                                                "vectors with different dimension"})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_collection_before_load(self, get_support_metric_field):
-        """
-        target: test calculated distance when entities is not ready
-        method: calculate distance before load
-        expected: raise exception
-        """
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb,
-                                                                               is_index=True)
-        middle = len(insert_ids) // 2
-        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
-                "field": default_field_name}
-        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
-                "field": default_field_name}
-        metric_field = get_support_metric_field
-        params = {metric_field: "L2", "sqrt": True}
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.err_res,
-                                        check_items={"err_code": 1,
-                                                     "err_msg": "collection {} was not "
-                                                                "loaded into memory)".format(collection_w.name)})
-
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection_old_invalid_type(self, get_invalid_type_collection_name):
         """
@@ -539,7 +440,7 @@ class TestUtilityParams(TestcaseBase):
         new_collection_name = cf.gen_unique_str(prefix)
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1,
+                                            check_items={"err_code": 999,
                                                          "err_msg": "`collection_name` value {} is illegal".format(
                                                              old_collection_name)})
 
@@ -554,10 +455,12 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = get_invalid_value_collection_name
         new_collection_name = cf.gen_unique_str(prefix)
+        error = {"err_code": 4, "err_msg": "collection not found"}
+        if old_collection_name in [None, ""]:
+            error = {"err_code": 999, "err_msg": "is illegal"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
                                             check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 4,
-                                                         "err_msg": "collection not found"})
+                                            check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_new_invalid_type(self, get_invalid_type_collection_name):
@@ -587,13 +490,12 @@ class TestUtilityParams(TestcaseBase):
         collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix)
         old_collection_name = collection_w.name
         new_collection_name = get_invalid_value_collection_name
+        error = {"err_code": 1100, "err_msg": "Invalid collection name: %s. the first character of a collection name mu"
+                                              "st be an underscore or letter: invalid parameter" % new_collection_name}
+        if new_collection_name in [None, ""]:
+            error = {"err_code": 999, "err_msg": f"`collection_name` value {new_collection_name} is illegal"}
         self.utility_wrap.rename_collection(old_collection_name, new_collection_name,
-                                            check_task=CheckTasks.err_res,
-                                            check_items={"err_code": 1100,
-                                                         "err_msg": "Invalid collection name: %s. the first "
-                                                                    "character of a collection name must be an "
-                                                                    "underscore or letter: invalid parameter"
-                                                                    % new_collection_name})
+                                            check_task=CheckTasks.err_res, check_items=error)
 
     @pytest.mark.tags(CaseLabel.L2)
     def test_rename_collection_not_existed_collection(self):
@@ -1014,7 +916,7 @@ class TestUtilityBase(TestcaseBase):
         method: insert and flush data, call loading_progress after release
         expected: return successfully with 0%
         """
-        collection_w = self.init_collection_general(prefix, insert_data=True)[0]
+        collection_w = self.init_collection_general(prefix, insert_data=True, nb=100)[0]
         collection_w.release()
         res = self.utility_wrap.loading_progress(collection_w.name)[0]
         exp_res = {loading_progress: '0%', num_loaded_partitions: 0, not_loaded_partitions: ['_default']}
@@ -1180,355 +1082,6 @@ class TestUtilityBase(TestcaseBase):
             self.utility_wrap.drop_collection(c_name)
             assert not self.utility_wrap.has_collection(c_name)[0]
             sleep(1)
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_default(self):
-        """
-        target: test calculated distance with default params
-        method: calculated distance between two random vectors
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        log.info("Creating vectors for distance calculation")
-        vectors_l = cf.gen_vectors(default_nb, default_dim)
-        vectors_r = cf.gen_vectors(default_nb, default_dim)
-        op_l = {"float_vectors": vectors_l}
-        op_r = {"float_vectors": vectors_r}
-        log.info("Calculating distance for generated vectors")
-        self.utility_wrap.calc_distance(op_l, op_r,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_default_sqrt(self, metric_field, metric):
-        """
-        target: test calculated distance with default param
-        method: calculated distance with default sqrt
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        log.info("Creating vectors for distance calculation")
-        vectors_l = cf.gen_vectors(default_nb, default_dim)
-        vectors_r = cf.gen_vectors(default_nb, default_dim)
-        op_l = {"float_vectors": vectors_l}
-        op_r = {"float_vectors": vectors_r}
-        log.info("Calculating distance for generated vectors within default sqrt")
-        params = {metric_field: metric}
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "metric": metric})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_default_metric(self, sqrt):
-        """
-        target: test calculated distance with default param
-        method: calculated distance with default metric
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        log.info("Creating vectors for distance calculation")
-        vectors_l = cf.gen_vectors(default_nb, default_dim)
-        vectors_r = cf.gen_vectors(default_nb, default_dim)
-        op_l = {"float_vectors": vectors_l}
-        op_r = {"float_vectors": vectors_r}
-        log.info("Calculating distance for generated vectors within default metric")
-        params = {"sqrt": sqrt}
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_binary_metric(self, metric_field, metric_binary):
-        """
-        target: test calculate distance with binary vectors
-        method: calculate distance between binary vectors
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        log.info("Creating vectors for distance calculation")
-        nb = 10
-        raw_vectors_l, vectors_l = cf.gen_binary_vectors(nb, default_dim)
-        raw_vectors_r, vectors_r = cf.gen_binary_vectors(nb, default_dim)
-        op_l = {"bin_vectors": vectors_l}
-        op_r = {"bin_vectors": vectors_r}
-        log.info("Calculating distance for binary vectors")
-        params = {metric_field: metric_binary}
-        vectors_l = raw_vectors_l
-        vectors_r = raw_vectors_r
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "metric": metric_binary})
-
-    @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_from_collection_ids(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance from collection entities
-        method: both left and right vectors are from collection
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
-        middle = len(insert_ids) // 2
-        vectors = vectors[0].loc[:, default_field_name]
-        vectors_l = vectors[:middle]
-        vectors_r = []
-        for i in range(middle):
-            vectors_r.append(vectors[middle + i])
-        log.info("Creating vectors from collections for distance calculation")
-        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
-                "field": default_field_name}
-        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
-                "field": default_field_name}
-        log.info("Creating vectors for entities")
-        params = {metric_field: metric, "sqrt": sqrt}
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "metric": metric,
-                                                     "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_from_collections(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance between entities from collections
-        method: calculated distance between entities from two collections
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        nb = 10
-        prefix_1 = "utility_distance"
-        log.info("Creating two collections")
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
-        collection_w_1, vectors_1, _, insert_ids_1, _ = self.init_collection_general(prefix_1, True, nb)
-        vectors_l = vectors[0].loc[:, default_field_name]
-        vectors_r = vectors_1[0].loc[:, default_field_name]
-        log.info("Extracting entities from collections for distance calculating")
-        op_l = {"ids": insert_ids, "collection": collection_w.name,
-                "field": default_field_name}
-        op_r = {"ids": insert_ids_1, "collection": collection_w_1.name,
-                "field": default_field_name}
-        params = {metric_field: metric, "sqrt": sqrt}
-        log.info("Calculating distance for entities from two collections")
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "metric": metric,
-                                                     "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_left_vector_and_collection_ids(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance from collection entities
-        method: set left vectors as random vectors, right vectors from collection
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
-        middle = len(insert_ids) // 2
-        vectors = vectors[0].loc[:, default_field_name]
-        vectors_l = cf.gen_vectors(nb, default_dim)
-        vectors_r = []
-        for i in range(middle):
-            vectors_r.append(vectors[middle + i])
-        op_l = {"float_vectors": vectors_l}
-        log.info("Extracting entities from collections for distance calculating")
-        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
-                "field": default_field_name}
-        params = {metric_field: metric, "sqrt": sqrt}
-        log.info("Calculating distance between vectors and entities")
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "metric": metric,
-                                                     "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_right_vector_and_collection_ids(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance from collection entities
-        method: set right vectors as random vectors, left vectors from collection
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb)
-        middle = len(insert_ids) // 2
-        vectors = vectors[0].loc[:, default_field_name]
-        vectors_l = vectors[:middle]
-        vectors_r = cf.gen_vectors(nb, default_dim)
-        log.info("Extracting entities from collections for distance calculating")
-        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
-                "field": default_field_name}
-        op_r = {"float_vectors": vectors_r}
-        params = {metric_field: metric, "sqrt": sqrt}
-        log.info("Calculating distance between right vector and entities")
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "metric": metric,
-                                                     "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_from_partition_ids(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance from one partition entities
-        method: both left and right vectors are from partition
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
-        partitions = collection_w.partitions
-        middle = len(insert_ids) // 2
-        params = {metric_field: metric, "sqrt": sqrt}
-        start = 0
-        end = middle
-        for i in range(len(partitions)):
-            log.info("Extracting entities from partitions for distance calculating")
-            vectors_l = vectors[i].loc[:, default_field_name]
-            vectors_r = vectors[i].loc[:, default_field_name]
-            op_l = {"ids": insert_ids[start:end], "collection": collection_w.name,
-                    "partition": partitions[i].name, "field": default_field_name}
-            op_r = {"ids": insert_ids[start:end], "collection": collection_w.name,
-                    "partition": partitions[i].name, "field": default_field_name}
-            start += middle
-            end += middle
-            log.info("Calculating distance between entities from one partition")
-            self.utility_wrap.calc_distance(op_l, op_r, params,
-                                            check_task=CheckTasks.check_distance,
-                                            check_items={"vectors_l": vectors_l,
-                                                         "vectors_r": vectors_r,
-                                                         "metric": metric,
-                                                         "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_from_partitions(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance between entities from partitions
-        method: calculate distance between entities from two partitions
-        expected: distance calculated successfully
-        """
-        log.info("Create connection")
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
-        partitions = collection_w.partitions
-        middle = len(insert_ids) // 2
-        params = {metric_field: metric, "sqrt": sqrt}
-        vectors_l = vectors[0].loc[:, default_field_name]
-        vectors_r = vectors[1].loc[:, default_field_name]
-        log.info("Extract entities from two partitions for distance calculating")
-        op_l = {"ids": insert_ids[:middle], "collection": collection_w.name,
-                "partition": partitions[0].name, "field": default_field_name}
-        op_r = {"ids": insert_ids[middle:], "collection": collection_w.name,
-                "partition": partitions[1].name, "field": default_field_name}
-        log.info("Calculate distance between entities from two partitions")
-        self.utility_wrap.calc_distance(op_l, op_r, params,
-                                        check_task=CheckTasks.check_distance,
-                                        check_items={"vectors_l": vectors_l,
-                                                     "vectors_r": vectors_r,
-                                                     "metric": metric,
-                                                     "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_left_vectors_and_partition_ids(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance between vectors and partition entities
-        method: set left vectors as random vectors, right vectors are entities
-        expected: distance calculated successfully
-        """
-        log.info("Creating connection")
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
-        middle = len(insert_ids) // 2
-        partitions = collection_w.partitions
-        vectors_l = cf.gen_vectors(nb // 2, default_dim)
-        log.info("Extract entities from collection as right vectors")
-        op_l = {"float_vectors": vectors_l}
-        params = {metric_field: metric, "sqrt": sqrt}
-        start = 0
-        end = middle
-        log.info("Calculate distance between vector and entities")
-        for i in range(len(partitions)):
-            vectors_r = vectors[i].loc[:, default_field_name]
-            op_r = {"ids": insert_ids[start:end], "collection": collection_w.name,
-                    "partition": partitions[i].name, "field": default_field_name}
-            start += middle
-            end += middle
-            self.utility_wrap.calc_distance(op_l, op_r, params,
-                                            check_task=CheckTasks.check_distance,
-                                            check_items={"vectors_l": vectors_l,
-                                                         "vectors_r": vectors_r,
-                                                         "metric": metric,
-                                                         "sqrt": sqrt})
-
-    @pytest.mark.tags(CaseLabel.L2)
-    @pytest.mark.skip(reason="calc_distance interface is no longer supported")
-    def test_calc_distance_right_vectors_and_partition_ids(self, metric_field, metric, sqrt):
-        """
-        target: test calculated distance between vectors and partition entities
-        method: set right vectors as random vectors, left vectors are entities
-        expected: distance calculated successfully
-        """
-        log.info("Create connection")
-        self._connect()
-        nb = 10
-        collection_w, vectors, _, insert_ids, _ = self.init_collection_general(prefix, True, nb, partition_num=1)
-        middle = len(insert_ids) // 2
-        partitions = collection_w.partitions
-        vectors_r = cf.gen_vectors(nb // 2, default_dim)
-        op_r = {"float_vectors": vectors_r}
-        params = {metric_field: metric, "sqrt": sqrt}
-        start = 0
-        end = middle
-        for i in range(len(partitions)):
-            vectors_l = vectors[i].loc[:, default_field_name]
-            log.info("Extract entities from partition %d as left vector" % i)
-            op_l = {"ids": insert_ids[start:end], "collection": collection_w.name,
-                    "partition": partitions[i].name, "field": default_field_name}
-            start += middle
-            end += middle
-            log.info("Calculate distance between vector and entities from partition %d" % i)
-            self.utility_wrap.calc_distance(op_l, op_r, params,
-                                            check_task=CheckTasks.check_distance,
-                                            check_items={"vectors_l": vectors_l,
-                                                         "vectors_r": vectors_r,
-                                                         "metric": metric,
-                                                         "sqrt": sqrt})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_rename_collection(self):
@@ -1980,7 +1533,6 @@ class TestUtilityAdvanced(TestcaseBase):
                                        check_items={ct.err_code: 1, ct.err_msg: "destination node not found in the same replica"})
 
     @pytest.mark.tags(CaseLabel.L1)
-    @pytest.mark.xfail(reason="issue: https://github.com/milvus-io/milvus/issues/19441")
     def test_load_balance_with_one_sealed_segment_id_not_exist(self):
         """
         target: test load balance of collection
@@ -2015,7 +1567,7 @@ class TestUtilityAdvanced(TestcaseBase):
         # load balance
         self.utility_wrap.load_balance(collection_w.name, src_node_id, dst_node_ids, sealed_segment_ids,
                                        check_task=CheckTasks.err_res,
-                                       check_items={ct.err_code: 1, ct.err_msg: "not found in source node"})
+                                       check_items={ct.err_code: 999, ct.err_msg: "not found in source node"})
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_load_balance_with_all_sealed_segment_id_not_exist(self):
@@ -4550,15 +4102,6 @@ class TestUtilityNegativeRbac(TestcaseBase):
                 self.database_wrap.drop_database(db_name)
 
         super().teardown_method(method)
-
-    @pytest.fixture(scope="function", params=ct.get_invalid_strs)
-    def get_invalid_non_string(self, request):
-        """
-        get invalid string without None
-        """
-        if isinstance(request.param, str):
-            pytest.skip("skip string")
-        yield request.param
 
     @pytest.mark.tags(CaseLabel.RBAC)
     @pytest.mark.parametrize("name", ["longlonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglonglong"
