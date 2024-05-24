@@ -535,10 +535,9 @@ func (ss *SuffixSnapshot) MultiSaveAndRemove(saves map[string]string, removals [
 		if IsTombstone(value) {
 			continue
 		}
-		key := ss.hideRootPrefix(removal)
-		execute[key] = string(SuffixSnapshotTombstone)
-		execute[ss.composeTSKey(key, ts)] = string(SuffixSnapshotTombstone)
-		updateList = append(updateList, key)
+		execute[removal] = string(SuffixSnapshotTombstone)
+		execute[ss.composeTSKey(removal, ts)] = string(SuffixSnapshotTombstone)
+		updateList = append(updateList, removal)
 	}
 
 	// multi save execute map; if succeeds, update ts in the update list
