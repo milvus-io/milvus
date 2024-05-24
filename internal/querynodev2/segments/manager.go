@@ -36,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querynodev2/segments/metricsutil"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/eventlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -723,11 +724,15 @@ func (mgr *segmentManager) updateMetric() {
 	collections, partiations := make(typeutil.Set[int64]), make(typeutil.Set[int64])
 	for _, seg := range mgr.growingSegments {
 		collections.Insert(seg.Collection())
-		partiations.Insert(seg.Partition())
+		if seg.Partition() != common.AllPartitionsID {
+			partiations.Insert(seg.Partition())
+		}
 	}
 	for _, seg := range mgr.sealedSegments {
 		collections.Insert(seg.Collection())
-		partiations.Insert(seg.Partition())
+		if seg.Partition() != common.AllPartitionsID {
+			partiations.Insert(seg.Partition())
+		}
 	}
 	metrics.QueryNodeNumCollections.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(collections.Len()))
 	metrics.QueryNodeNumPartitions.WithLabelValues(fmt.Sprint(paramtable.GetNodeID())).Set(float64(partiations.Len()))
