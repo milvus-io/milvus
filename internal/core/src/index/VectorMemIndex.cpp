@@ -669,10 +669,10 @@ VectorMemIndex<T>::GetVector(const DatasetPtr dataset) const {
     auto row_num = res.value()->GetRows();
     auto dim = res.value()->GetDim();
     int64_t data_size;
-    if (is_in_bin_list(index_type)) {
+    if constexpr (std::is_same_v<T, bin1>) {
         data_size = dim / 8 * row_num;
     } else {
-        data_size = dim * row_num * sizeof(float);
+        data_size = dim * row_num * sizeof(T);
     }
     std::vector<uint8_t> raw_data;
     raw_data.resize(data_size);
@@ -954,7 +954,7 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
     LOG_INFO("load vector index done");
 }
 template class VectorMemIndex<float>;
-template class VectorMemIndex<uint8_t>;
+template class VectorMemIndex<bin1>;
 template class VectorMemIndex<float16>;
 template class VectorMemIndex<bfloat16>;
 
