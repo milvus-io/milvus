@@ -37,12 +37,13 @@ var (
 	// and other operations (insert/delete/statistics/etc.)
 	// since in concurrent situation, there operation may block each other in high payload
 
-	sqp      atomic.Pointer[conc.Pool[any]]
-	sqOnce   sync.Once
-	dp       atomic.Pointer[conc.Pool[any]]
-	dynOnce  sync.Once
-	loadPool atomic.Pointer[conc.Pool[any]]
-	loadOnce sync.Once
+	sqp        atomic.Pointer[conc.Pool[any]]
+	sqOnce     sync.Once
+	dp         atomic.Pointer[conc.Pool[any]]
+	dynOnce    sync.Once
+	loadPool   atomic.Pointer[conc.Pool[any]]
+	loadOnce   sync.Once
+	warmupPool atomic.Pointer[conc.Pool[any]]
 )
 
 // initSQPool initialize
@@ -96,6 +97,23 @@ func initLoadPool() {
 	})
 }
 
+func initWarmupPool() {
+	sync.OnceFunc(func() {
+		pt := paramtable.Get()
+		poolSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+		pool := conc.NewPool[any](
+			poolSize,
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+			conc.WithNonBlocking(true),                // make warming up non blocking
+		)
+
+		warmupPool.Store(pool)
+		pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, config.NewHandler("qn.warmpool.lowpriority", ResizeLoadPool))
+	})
+}
+
 // GetSQPool returns the singleton pool instance for search/query operations.
 func GetSQPool() *conc.Pool[any] {
 	initSQPool()
@@ -111,6 +129,11 @@ func GetDynamicPool() *conc.Pool[any] {
 func GetLoadPool() *conc.Pool[any] {
 	initLoadPool()
 	return loadPool.Load()
+}
+
+func GetWarmupPool() *conc.Pool[any] {
+	initWarmupPool()
+	return warmupPool.Load()
 }
 
 func ResizeSQPool(evt *config.Event) {
