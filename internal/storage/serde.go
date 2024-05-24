@@ -924,9 +924,10 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		return nil, err
 	}
 	return &Blob{
-		Key:    strconv.Itoa(int(bsw.fieldSchema.FieldID)),
-		Value:  b.Bytes(),
-		RowNum: int64(bsw.rw.numRows),
+		Key:        strconv.Itoa(int(bsw.fieldSchema.FieldID)),
+		Value:      b.Bytes(),
+		RowNum:     int64(bsw.rw.numRows),
+		MemorySize: int64(bsw.memorySize),
 	}, nil
 }
 
@@ -1015,6 +1016,7 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 				if !ok {
 					return nil, 0, errors.New(fmt.Sprintf("serialize error on type %s", types[fid]))
 				}
+				writers[fid].memorySize += int(typeEntry.sizeof(e))
 				memorySize += typeEntry.sizeof(e)
 			}
 		}
