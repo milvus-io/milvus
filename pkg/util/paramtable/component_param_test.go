@@ -339,7 +339,7 @@ func TestComponentParam(t *testing.T) {
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
-		assert.Equal(t, "off", Params.ChunkCacheWarmingUp.GetValue())
+		assert.Equal(t, "false", Params.ChunkCacheWarmingUp.GetValue())
 
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")
