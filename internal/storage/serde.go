@@ -450,6 +450,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return false
 		},
 		func(v any) uint64 {
+			if v == nil {
+				return 8
+			}
 			return uint64(len(v.(string)))
 		},
 	}
@@ -488,11 +491,17 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return false
 		},
 		func(v any) uint64 {
+			if v == nil {
+				return 8
+			}
 			return uint64(v.(*schemapb.ScalarField).XXX_Size())
 		},
 	}
 
 	sizeOfBytes := func(v any) uint64 {
+		if v == nil {
+			return 8
+		}
 		return uint64(len(v.([]byte)))
 	}
 
@@ -608,6 +617,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return false
 		},
 		func(v any) uint64 {
+			if v == nil {
+				return 8
+			}
 			return uint64(len(v.([]float32)) * 4)
 		},
 	}
@@ -730,11 +742,15 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 
 			m := value.Value.(map[FieldID]interface{})
 			for j, dt := range r.Schema() {
-				d, ok := serdeMap[dt].deserialize(r.Column(j), i)
-				if ok {
-					m[j] = d // TODO: avoid memory copy here.
+				if r.Column(j).IsNull(i) {
+					m[j] = nil
 				} else {
-					return errors.New(fmt.Sprintf("unexpected type %s", dt))
+					d, ok := serdeMap[dt].deserialize(r.Column(j), i)
+					if ok {
+						m[j] = d // TODO: avoid memory copy here.
+					} else {
+						return errors.New(fmt.Sprintf("unexpected type %s", dt))
+					}
 				}
 			}
 
@@ -991,8 +1007,9 @@ func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
 	fid := bsw.fieldSchema.FieldID
 	dim, _ := typeutil.GetDim(bsw.fieldSchema)
 	rw, err := newSingleFieldRecordWriter(fid, arrow.Field{
-		Name: strconv.Itoa(int(fid)),
-		Type: serdeMap[bsw.fieldSchema.DataType].arrowType(int(dim)),
+		Name:     strconv.Itoa(int(fid)),
+		Type:     serdeMap[bsw.fieldSchema.DataType].arrowType(int(dim)),
+		Nullable: true, // No nullable check here.
 	}, &bsw.buf)
 	if err != nil {
 		return nil, err
@@ -1117,8 +1134,9 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 			arrays[i] = builder.NewArray()
 			builder.Release()
 			fields[i] = arrow.Field{
-				Name: strconv.Itoa(int(fid)),
-				Type: arrays[i].DataType(),
+				Name:     strconv.Itoa(int(fid)),
+				Type:     arrays[i].DataType(),
+				Nullable: true, // No nullable check here.
 			}
 			field2Col[fid] = i
 			i++

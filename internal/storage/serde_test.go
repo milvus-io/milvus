@@ -177,6 +177,68 @@ func TestBinlogSerializeWriter(t *testing.T) {
 	})
 }
 
+func TestNull(t *testing.T) {
+	t.Run("test null", func(t *testing.T) {
+		schema := generateTestSchema()
+		// Copy write the generated data
+		writers := NewBinlogStreamWriters(0, 0, 0, schema.Fields)
+		writer, err := NewBinlogSerializeWriter(schema, 0, 0, writers, 1024)
+		assert.NoError(t, err)
+
+		m := make(map[FieldID]any)
+		m[common.RowIDField] = int64(0)
+		m[common.TimeStampField] = int64(0)
+		m[10] = nil
+		m[11] = nil
+		m[12] = nil
+		m[13] = nil
+		m[14] = nil
+		m[15] = nil
+		m[16] = nil
+		m[17] = nil
+		m[18] = nil
+		m[19] = nil
+		m[101] = nil
+		m[102] = nil
+		m[103] = nil
+		m[104] = nil
+		m[105] = nil
+		m[106] = nil
+		pk, err := GenPrimaryKeyByRawData(m[common.RowIDField], schemapb.DataType_Int64)
+		assert.NoError(t, err)
+
+		value := &Value{
+			ID:        0,
+			PK:        pk,
+			Timestamp: 0,
+			IsDeleted: false,
+			Value:     m,
+		}
+		writer.Write(value)
+		err = writer.Close()
+		assert.NoError(t, err)
+
+		// Read from the written data
+		blobs := make([]*Blob, len(writers))
+		i := 0
+		for _, w := range writers {
+			blob, err := w.Finalize()
+			assert.NoError(t, err)
+			assert.NotNil(t, blob)
+			blobs[i] = blob
+			i++
+		}
+		reader, err := NewBinlogDeserializeReader(blobs, common.RowIDField)
+		assert.NoError(t, err)
+		defer reader.Close()
+		err = reader.Next()
+		assert.NoError(t, err)
+
+		readValue := reader.Value()
+		assert.Equal(t, value, readValue)
+	})
+}
+
 func TestSerDe(t *testing.T) {
 	type args struct {
 		dt schemapb.DataType
