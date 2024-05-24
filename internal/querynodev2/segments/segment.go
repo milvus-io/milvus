@@ -1367,7 +1367,7 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 	warmingUp := strings.ToLower(paramtable.Get().QueryNodeCfg.ChunkCacheWarmingUp.GetValue())
 	switch warmingUp {
 	case "sync":
-		GetLoadPool().Submit(func() (any, error) {
+		GetWarmupPool().Submit(func() (any, error) {
 			cFieldID := C.int64_t(fieldID)
 			status = C.WarmupChunkCache(s.ptr, cFieldID)
 			if err := HandleCStatus(ctx, &status, "warming up chunk cache failed"); err != nil {
@@ -1378,7 +1378,7 @@ func (s *LocalSegment) WarmupChunkCache(ctx context.Context, fieldID int64) {
 			return nil, nil
 		}).Await()
 	case "async":
-		GetLoadPool().Submit(func() (any, error) {
+		GetWarmupPool().Submit(func() (any, error) {
 			if !s.ptrLock.RLockIf(state.IsNotReleased) {
 				return nil, nil
 			}
