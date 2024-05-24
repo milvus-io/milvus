@@ -524,7 +524,7 @@ func (s *Server) SetIndexNodeCreator(f func(context.Context, string, int64) (typ
 
 func (s *Server) createCompactionHandler() {
 	s.compactionHandler = newCompactionPlanHandler(s.cluster, s.sessionManager, s.channelManager, s.meta, s.allocator)
-	triggerv2 := NewCompactionTriggerManager(s.allocator, s.compactionHandler)
+	triggerv2 := NewCompactionTriggerManager(s.allocator, s.handler, s.compactionHandler)
 	s.compactionViewManager = NewCompactionViewManager(s.meta, triggerv2, s.allocator)
 }
 

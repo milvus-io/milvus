@@ -64,75 +64,64 @@ func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
 
 // Schedule pick 1 or 0 tasks for 1 node
 func (s *CompactionScheduler) Schedule() []*compactionTask {
-	s.taskGuard.Lock()
-	nodeTasks := lo.GroupBy(s.queuingTasks, func(t *compactionTask) int64 {
-		return t.dataNodeID
-	})
-	s.taskGuard.Unlock()
-	if len(nodeTasks) == 0 {
+	s.taskGuard.RLock()
+	if len(s.queuingTasks) == 0 {
+		s.taskGuard.RUnlock()
 		return nil // To mitigate the need for frequent slot querying
 	}
+	s.taskGuard.RUnlock()
 
 	nodeSlots := s.cluster.QuerySlots()
 
-	executable := make(map[int64]*compactionTask)
+	l0ChannelExcludes := typeutil.NewSet[string]()
+	mixChannelExcludes := typeutil.NewSet[string]()
 
-	pickPriorPolicy := func(tasks []*compactionTask, exclusiveChannels []string, executing []string) *compactionTask {
-		for _, task := range tasks {
-			// TODO: sheep, replace pickShardNode with pickAnyNode
-			if nodeID := s.pickShardNode(task.dataNodeID, nodeSlots); nodeID == NullNodeID {
-				log.Warn("cannot find datanode for compaction task", zap.Int64("planID", task.plan.PlanID), zap.String("vchannel", task.plan.Channel))
-				continue
+	for _, tasks := range s.parallelTasks {
+		for _, t := range tasks {
+			switch t.plan.GetType() {
+			case datapb.CompactionType_Level0DeleteCompaction:
+				l0ChannelExcludes.Insert(t.plan.GetChannel())
+			case datapb.CompactionType_MixCompaction:
+				mixChannelExcludes.Insert(t.plan.GetChannel())
 			}
-
-			if lo.Contains(exclusiveChannels, task.plan.GetChannel()) {
-				continue
-			}
-
-			if task.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
-				// Channel of LevelZeroCompaction task with no executing compactions
-				if !lo.Contains(executing, task.plan.GetChannel()) {
-					return task
-				}
-
-				// Don't schedule any tasks for channel with LevelZeroCompaction task
-				// when there're executing compactions
-				exclusiveChannels = append(exclusiveChannels, task.plan.GetChannel())
-				continue
-			}
-
-			return task
 		}
-
-		return nil
 	}
 
 	s.taskGuard.Lock()
 	defer s.taskGuard.Unlock()
-	// pick 1 or 0 task for 1 node
-	for node, tasks := range nodeTasks {
-		parallel := s.parallelTasks[node]
 
-		var (
-			executing         = typeutil.NewSet[string]()
-			channelsExecPrior = typeutil.NewSet[string]()
-		)
-		for _, t := range parallel {
-			executing.Insert(t.plan.GetChannel())
-			if t.plan.GetType() == datapb.CompactionType_Level0DeleteCompaction {
-				channelsExecPrior.Insert(t.plan.GetChannel())
-			}
+	picked := make([]*compactionTask, 0)
+	for _, t := range s.queuingTasks {
+		nodeID := s.pickAnyNode(nodeSlots)
+		if nodeID == NullNodeID {
+			log.Warn("cannot find datanode for compaction task",
+				zap.Int64("planID", t.plan.PlanID), zap.String("vchannel", t.plan.Channel))
+			continue
 		}
-
-		picked := pickPriorPolicy(tasks, channelsExecPrior.Collect(), executing.Collect())
-		if picked != nil {
-			executable[node] = picked
-			nodeSlots[node]--
+		switch t.plan.GetType() {
+		case datapb.CompactionType_Level0DeleteCompaction:
+			if l0ChannelExcludes.Contain(t.plan.GetChannel()) ||
+				mixChannelExcludes.Contain(t.plan.GetChannel()) {
+				continue
+			}
+			t.dataNodeID = nodeID
+			picked = append(picked, t)
+			l0ChannelExcludes.Insert(t.plan.GetChannel())
+			nodeSlots[nodeID]--
+		case datapb.CompactionType_MixCompaction:
+			if l0ChannelExcludes.Contain(t.plan.GetChannel()) {
+				continue
+			}
+			t.dataNodeID = nodeID
+			picked = append(picked, t)
+			mixChannelExcludes.Insert(t.plan.GetChannel())
+			nodeSlots[nodeID]--
 		}
 	}
 
 	var pickPlans []int64
-	for node, task := range executable {
+	for _, task := range picked {
+		node := task.dataNodeID
 		pickPlans = append(pickPlans, task.plan.PlanID)
 		if _, ok := s.parallelTasks[node]; !ok {
 			s.parallelTasks[node] = []*compactionTask{task}
@@ -156,7 +145,7 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 		}
 	}
 
-	return lo.Values(executable)
+	return picked
 }
 
 func (s *CompactionScheduler) Finish(nodeID UniqueID, plan *datapb.CompactionPlan) {

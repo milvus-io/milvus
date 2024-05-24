@@ -50,7 +50,6 @@ type LevelZeroCompactionTaskSuite struct {
 
 	mockBinlogIO *io.MockBinlogIO
 	mockAlloc    *allocator.MockAllocator
-	mockMeta     *metacache.MockMetaCache
 	task         *LevelZeroCompactionTask
 
 	dData *storage.DeleteData
@@ -60,9 +59,8 @@ type LevelZeroCompactionTaskSuite struct {
 func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.mockAlloc = allocator.NewMockAllocator(s.T())
 	s.mockBinlogIO = io.NewMockBinlogIO(s.T())
-	s.mockMeta = metacache.NewMockMetaCache(s.T())
 	// plan of the task is unset
-	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, s.mockMeta, nil, nil, nil)
+	s.task = NewLevelZeroCompactionTask(context.Background(), s.mockBinlogIO, s.mockAlloc, nil, nil)
 
 	pk2ts := map[int64]uint64{
 		1: 20000,
@@ -99,6 +97,13 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
 				},
 			},
 			{SegmentID: 200, Level: datapb.SegmentLevel_L1},
+		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
 		},
 	}
 
@@ -141,7 +146,15 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadFail() {
 				},
 			}},
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
+	s.task.plan = plan
 
 	data := &storage.Int64FieldData{
 		Data: []int64{1, 2, 3, 4, 5, 6, 7, 8, 9},
@@ -153,20 +166,10 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadFail() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	s.task.plan = plan
-	s.task.tr = timerecord.NewTimeRecorder("test")
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload fail")).Once()
-	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Once()
-	s.mockMeta.EXPECT().Collection().Return(1)
-
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
+	mockAlloc := allocator.NewMockAllocator(s.T())
+	mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
+	s.task.allocator = mockAlloc
 
 	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L1
@@ -184,7 +187,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 		Type:   datapb.CompactionType_Level0DeleteCompaction,
 		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 			{
-				SegmentID: 100, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
+				CollectionID: 1,
+				SegmentID:    100, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
 							{LogPath: "a/b/c1", LogSize: 100},
@@ -196,7 +200,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 				},
 			},
 			{
-				SegmentID: 101, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
+				CollectionID: 1,
+				SegmentID:    101, Level: datapb.SegmentLevel_L0, Deltalogs: []*datapb.FieldBinlog{
 					{
 						Binlogs: []*datapb.Binlog{
 							{LogPath: "a/d/c1", LogSize: 100},
@@ -207,20 +212,33 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 					},
 				},
 			},
-			{SegmentID: 200, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{LogID: 9999, LogSize: 100},
+			{
+				CollectionID: 1,
+				SegmentID:    200, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogID: 9999, LogSize: 100},
+						},
 					},
 				},
-			}},
-			{SegmentID: 201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
-				{
-					Binlogs: []*datapb.Binlog{
-						{LogID: 9999, LogSize: 100},
+			},
+			{
+				CollectionID: 1,
+				SegmentID:    201, Level: datapb.SegmentLevel_L1, Field2StatslogPaths: []*datapb.FieldBinlog{
+					{
+						Binlogs: []*datapb.Binlog{
+							{LogID: 9999, LogSize: 100},
+						},
 					},
 				},
-			}},
+			},
+		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
 		},
 	}
 
@@ -240,14 +258,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Twice()
 
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 
 	s.Require().Equal(plan.GetPlanID(), s.task.GetPlanID())
@@ -333,6 +343,13 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 				},
 			}},
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 
 	s.task.plan = plan
@@ -349,14 +366,6 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	s.task.cm = cm
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
@@ -397,6 +406,17 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 
 func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 	ctx := context.Background()
+	plan := &datapb.CompactionPlan{
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				SegmentID: 100,
+			},
+			{
+				SegmentID: 101,
+			},
+		},
+	}
+
 	s.Run("serializeUpload allocator Alloc failed", func() {
 		s.SetupTest()
 		s.mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc wrong"))
@@ -411,6 +431,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 
 	s.Run("serializeUpload Upload failed", func() {
 		s.SetupTest()
+		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 
@@ -424,6 +445,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 
 	s.Run("upload success", func() {
 		s.SetupTest()
+		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 		writer := NewSegmentDeltaWriter(100, 10, 1)
@@ -441,6 +463,15 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
+	plan := &datapb.CompactionPlan{
+		SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+			{
+				CollectionID: 1,
+			},
+		},
+	}
+	s.task.plan = plan
+
 	bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
 	bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 3}})
 	bfs2 := metacache.NewBloomFilterSetWithBatchSize(100)
@@ -449,7 +480,6 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 	bfs3.UpdatePKRange(&storage.Int64FieldData{Data: []int64{3}})
 
 	predicted := []int64{100, 101, 102}
-	s.mockMeta.EXPECT().Collection().Return(1)
 
 	segmentBfs := map[int64]*metacache.BloomFilterSet{
 		100: bfs1,
@@ -526,6 +556,13 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 				},
 			}},
 		},
+		Schema: &schemapb.CollectionSchema{
+			Fields: []*schemapb.FieldSchema{
+				{
+					IsPrimaryKey: true,
+				},
+			},
+		},
 	}
 
 	s.task.plan = plan
@@ -539,14 +576,6 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 	cm := mocks.NewChunkManager(s.T())
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
-
-	s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-		Fields: []*schemapb.FieldSchema{
-			{
-				IsPrimaryKey: true,
-			},
-		},
-	})
 
 	bfs, err := s.task.loadBF(plan.SegmentBinlogs)
 	s.NoError(err)
@@ -572,17 +601,16 @@ func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 					},
 				}},
 			},
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						IsPrimaryKey: false,
+					},
+				},
+			},
 		}
 
 		s.task.plan = plan
-
-		s.mockMeta.EXPECT().Schema().Return(&schemapb.CollectionSchema{
-			Fields: []*schemapb.FieldSchema{
-				{
-					IsPrimaryKey: false,
-				},
-			},
-		})
 
 		_, err := s.task.loadBF(plan.SegmentBinlogs)
 		s.Error(err)

@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -50,8 +49,6 @@ type LevelZeroCompactionTask struct {
 	io.BinlogIO
 
 	allocator allocator.Allocator
-	metacache metacache.MetaCache
-	syncmgr   syncmgr.SyncManager
 	cm        storage.ChunkManager
 
 	plan *datapb.CompactionPlan
@@ -67,8 +64,6 @@ func NewLevelZeroCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	alloc allocator.Allocator,
-	metaCache metacache.MetaCache,
-	syncmgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 ) *LevelZeroCompactionTask {
@@ -79,8 +74,6 @@ func NewLevelZeroCompactionTask(
 
 		BinlogIO:  binlogIO,
 		allocator: alloc,
-		metacache: metaCache,
-		syncmgr:   syncmgr,
 		cm:        cm,
 		plan:      plan,
 		tr:        timerecord.NewTimeRecorder("levelzero compaction"),
@@ -106,11 +99,9 @@ func (t *LevelZeroCompactionTask) GetChannelName() string {
 }
 
 func (t *LevelZeroCompactionTask) GetCollection() int64 {
-	return t.metacache.Collection()
+	// The length of SegmentBinlogs is checked before task enqueueing.
+	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
-
-// Do nothing for levelzero compaction
-func (t *LevelZeroCompactionTask) InjectDone() {}
 
 func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
@@ -415,7 +406,7 @@ func (t *LevelZeroCompactionTask) loadBF(targetSegments []*datapb.CompactionSegm
 			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
 				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			pks, err := util.LoadStats(t.ctx, t.cm,
-				t.metacache.Schema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			if err != nil {
 				log.Warn("failed to load segment stats log", zap.Error(err))
 				return err, err
