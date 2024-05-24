@@ -56,5 +56,5 @@ pyarrow==14.0.1
 fastparquet==2023.7.0
 
 # for bf16 datatype
-ml-dtypes=0.2.0
+ml-dtypes==0.2.0
 
