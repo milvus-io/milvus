@@ -102,6 +102,39 @@ func (_c *MockWriteBuffer_Close_Call) RunAndReturn(run func(bool)) *MockWriteBuf
 	return _c
 }
 
+// DropPartitions provides a mock function with given fields: partitionIDs
+func (_m *MockWriteBuffer) DropPartitions(partitionIDs []int64) {
+	_m.Called(partitionIDs)
+}
+
+// MockWriteBuffer_DropPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPartitions'
+type MockWriteBuffer_DropPartitions_Call struct {
+	*mock.Call
+}
+
+// DropPartitions is a helper method to define mock.On call
+//   - partitionIDs []int64
+func (_e *MockWriteBuffer_Expecter) DropPartitions(partitionIDs interface{}) *MockWriteBuffer_DropPartitions_Call {
+	return &MockWriteBuffer_DropPartitions_Call{Call: _e.mock.On("DropPartitions", partitionIDs)}
+}
+
+func (_c *MockWriteBuffer_DropPartitions_Call) Run(run func(partitionIDs []int64)) *MockWriteBuffer_DropPartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockWriteBuffer_DropPartitions_Call) Return() *MockWriteBuffer_DropPartitions_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockWriteBuffer_DropPartitions_Call) RunAndReturn(run func([]int64)) *MockWriteBuffer_DropPartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // EvictBuffer provides a mock function with given fields: policies
 func (_m *MockWriteBuffer) EvictBuffer(policies ...SyncPolicy) {
 	_va := make([]interface{}, len(policies))

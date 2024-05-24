@@ -262,9 +262,9 @@ func (m *bufferManager) DropChannel(channel string) {
 }
 
 func (m *bufferManager) DropPartitions(channel string, partitionIDs []int64) {
-	m.mut.Lock()
+	m.mut.RLock()
 	buf, ok := m.buffers[channel]
-	m.mut.Unlock()
+	m.mut.RUnlock()
 
 	if !ok {
 		log.Warn("failed to drop partition, channel not maintained in manager", zap.String("channel", channel), zap.Int64s("partitionIDs", partitionIDs))
