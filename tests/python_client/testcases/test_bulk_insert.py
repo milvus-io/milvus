@@ -694,7 +694,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("dim", [2])  # 128
     @pytest.mark.parametrize("entities", [2])  # 1000
     @pytest.mark.parametrize("enable_dynamic_field", [True])
-    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field):
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -707,7 +708,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field),
             cf.gen_float_field(name=df.float_field),
-            cf.gen_double_field(name=df.double_field),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
             cf.gen_json_field(name=df.json_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
@@ -773,13 +774,23 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
+        # query data
+        res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+        assert len(res) == entities
+        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
+        assert len(res) == len(query_data)
+        if enable_partition_key:
+            assert len(self.collection_wrap.partitions) > 1
+
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
     @pytest.mark.parametrize("entities", [1000])  # 1000
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field):
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    def test_bulk_insert_all_field_with_numpy(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.npy and uid.npy,
@@ -793,7 +804,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field),
             cf.gen_float_field(name=df.float_field),
-            cf.gen_double_field(name=df.double_field),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
             cf.gen_json_field(name=df.json_field),
             cf.gen_float_vec_field(name=df.vec_field, dim=dim),
         ]
@@ -855,6 +866,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
+        # query data
+        res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+        assert len(res) == entities
+        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
+        assert len(res) == len(query_data)
+        if enable_partition_key:
+            assert len(self.collection_wrap.partitions) > 1
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
@@ -863,7 +882,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("file_nums", [1])
     @pytest.mark.parametrize("array_len", [None, 0, 100])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
-    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, file_nums, array_len, enable_dynamic_field):
+    @pytest.mark.parametrize("enable_partition_key", [True, False])
+    def test_bulk_insert_all_field_with_parquet(self, auto_id, dim, entities, file_nums, array_len, enable_dynamic_field, enable_partition_key):
         """
         collection schema 1: [pk, int64, float64, string float_vector]
         data file: vectors.parquet and uid.parquet,
@@ -876,7 +896,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_int64_field(name=df.int_field),
             cf.gen_float_field(name=df.float_field),
-            cf.gen_double_field(name=df.double_field),
+            cf.gen_string_field(name=df.string_field, is_partition_key=enable_partition_key),
             cf.gen_json_field(name=df.json_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
             cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
@@ -944,6 +964,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
                 if enable_dynamic_field:
                     assert "name" in fields_from_search
                     assert "address" in fields_from_search
+        # query data
+        res, _ = self.collection_wrap.query(expr=f"{df.string_field} >= '0'", output_fields=[df.string_field])
+        assert len(res) == entities
+        query_data = [r[df.string_field] for r in res][:len(self.collection_wrap.partitions)]
+        res, _ = self.collection_wrap.query(expr=f"{df.string_field} in {query_data}", output_fields=[df.string_field])
+        assert len(res) == len(query_data)
+        if enable_partition_key:
+            assert len(self.collection_wrap.partitions) > 1
 
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
