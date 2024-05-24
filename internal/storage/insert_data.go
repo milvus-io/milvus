@@ -84,7 +84,9 @@ func (i *InsertData) GetRowNum() int {
 	var rowNum int
 	for _, data := range i.Data {
 		rowNum = data.RowNum()
-		break
+		if rowNum > 0 {
+			break
+		}
 	}
 	return rowNum
 }

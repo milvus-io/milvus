@@ -39,7 +39,6 @@ import (
 	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -110,87 +109,60 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 		path := fmt.Sprintf("%s/%s.npy", cm.RootPath(), field.GetName())
 
 		fieldID := field.GetFieldID()
+		fieldData := insertData.Data[fieldID]
 		dType := field.GetDataType()
 		switch dType {
-		case schemapb.DataType_Bool:
-			data = insertData.Data[fieldID].(*storage.BoolFieldData).Data
-		case schemapb.DataType_Int8:
-			data = insertData.Data[fieldID].(*storage.Int8FieldData).Data
-		case schemapb.DataType_Int16:
-			data = insertData.Data[fieldID].(*storage.Int16FieldData).Data
-		case schemapb.DataType_Int32:
-			data = insertData.Data[fieldID].(*storage.Int32FieldData).Data
-		case schemapb.DataType_Int64:
-			data = insertData.Data[fieldID].(*storage.Int64FieldData).Data
-		case schemapb.DataType_Float:
-			data = insertData.Data[fieldID].(*storage.FloatFieldData).Data
-		case schemapb.DataType_Double:
-			data = insertData.Data[fieldID].(*storage.DoubleFieldData).Data
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			data = insertData.Data[fieldID].(*storage.StringFieldData).Data
 		case schemapb.DataType_BinaryVector:
-			vecData := insertData.Data[fieldID].(*storage.BinaryVectorFieldData).Data
-			if dim != insertData.Data[fieldID].(*storage.BinaryVectorFieldData).Dim {
-				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, insertData.Data[fieldID].(*storage.BinaryVectorFieldData).Dim))
+			rows := fieldData.GetRows().([]byte)
+			if dim != fieldData.(*storage.BinaryVectorFieldData).Dim {
+				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.BinaryVectorFieldData).Dim))
 			}
 			const rowBytes = dim / 8
-			rows := len(vecData) / rowBytes
-			binVecData := make([][rowBytes]byte, 0, rows)
-			for i := 0; i < rows; i++ {
-				rowVec := [rowBytes]byte{}
-				copy(rowVec[:], vecData[i*rowBytes:(i+1)*rowBytes])
-				binVecData = append(binVecData, rowVec)
+			chunked := lo.Chunk(rows, rowBytes)
+			chunkedRows := make([][rowBytes]byte, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			data = binVecData
+			data = chunkedRows
 		case schemapb.DataType_FloatVector:
-			vecData := insertData.Data[fieldID].(*storage.FloatVectorFieldData).Data
-			if dim != insertData.Data[fieldID].(*storage.FloatVectorFieldData).Dim {
-				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, insertData.Data[fieldID].(*storage.FloatVectorFieldData).Dim))
+			rows := fieldData.GetRows().([]float32)
+			if dim != fieldData.(*storage.FloatVectorFieldData).Dim {
+				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.FloatVectorFieldData).Dim))
 			}
-			rows := len(vecData) / dim
-			floatVecData := make([][dim]float32, 0, rows)
-			for i := 0; i < rows; i++ {
-				rowVec := [dim]float32{}
-				copy(rowVec[:], vecData[i*dim:(i+1)*dim])
-				floatVecData = append(floatVecData, rowVec)
+			chunked := lo.Chunk(rows, dim)
+			chunkedRows := make([][dim]float32, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			data = floatVecData
+			data = chunkedRows
 		case schemapb.DataType_Float16Vector:
-			vecData := insertData.Data[fieldID].(*storage.Float16VectorFieldData).Data
-			if dim != insertData.Data[fieldID].(*storage.Float16VectorFieldData).Dim {
-				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, insertData.Data[fieldID].(*storage.Float16VectorFieldData).Dim))
+			rows := insertData.Data[fieldID].GetRows().([]byte)
+			if dim != fieldData.(*storage.Float16VectorFieldData).Dim {
+				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.Float16VectorFieldData).Dim))
 			}
 			const rowBytes = dim * 2
-			rows := len(vecData) / rowBytes
-			float16VecData := make([][rowBytes]byte, 0, rows)
-			for i := 0; i < rows; i++ {
-				rowVec := [rowBytes]byte{}
-				copy(rowVec[:], vecData[i*rowBytes:(i+1)*rowBytes])
-				float16VecData = append(float16VecData, rowVec)
+			chunked := lo.Chunk(rows, rowBytes)
+			chunkedRows := make([][rowBytes]byte, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			data = float16VecData
+			data = chunkedRows
 		case schemapb.DataType_BFloat16Vector:
-			vecData := insertData.Data[fieldID].(*storage.BFloat16VectorFieldData).Data
-			if dim != insertData.Data[fieldID].(*storage.BFloat16VectorFieldData).Dim {
-				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, insertData.Data[fieldID].(*storage.BFloat16VectorFieldData).Dim))
+			rows := insertData.Data[fieldID].GetRows().([]byte)
+			if dim != fieldData.(*storage.BFloat16VectorFieldData).Dim {
+				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.BFloat16VectorFieldData).Dim))
 			}
 			const rowBytes = dim * 2
-			rows := len(vecData) / rowBytes
-			bfloat16VecData := make([][rowBytes]byte, 0, rows)
-			for i := 0; i < rows; i++ {
-				rowVec := [rowBytes]byte{}
-				copy(rowVec[:], vecData[i*rowBytes:(i+1)*rowBytes])
-				bfloat16VecData = append(bfloat16VecData, rowVec)
+			chunked := lo.Chunk(rows, rowBytes)
+			chunkedRows := make([][rowBytes]byte, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			data = bfloat16VecData
+			data = chunkedRows
 		case schemapb.DataType_SparseFloatVector:
 			data = insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
-		case schemapb.DataType_JSON:
-			data = insertData.Data[fieldID].(*storage.JSONFieldData).Data
-		case schemapb.DataType_Array:
-			data = insertData.Data[fieldID].(*storage.ArrayFieldData).Data
 		default:
-			panic(fmt.Sprintf("unsupported data type: %s", dType.String()))
+			data = insertData.Data[fieldID].GetRows()
 		}
 
 		err := writeFn(path, data)
@@ -207,47 +179,9 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 func GenerateJSONFile(t *testing.T, filePath string, schema *schemapb.CollectionSchema, count int) {
 	insertData, err := testutil.CreateInsertData(schema, count)
 	assert.NoError(t, err)
-	rows := make([]map[string]any, 0, count)
-	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
-		return field.GetFieldID()
-	})
-	for i := 0; i < count; i++ {
-		data := make(map[int64]interface{})
-		for fieldID, v := range insertData.Data {
-			dataType := fieldIDToField[fieldID].GetDataType()
-			if fieldIDToField[fieldID].GetAutoID() {
-				continue
-			}
-			switch dataType {
-			case schemapb.DataType_Array:
-				data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
-			case schemapb.DataType_JSON:
-				data[fieldID] = string(v.GetRow(i).([]byte))
-			case schemapb.DataType_BinaryVector:
-				bytes := v.GetRow(i).([]byte)
-				ints := make([]int, 0, len(bytes))
-				for _, b := range bytes {
-					ints = append(ints, int(b))
-				}
-				data[fieldID] = ints
-			case schemapb.DataType_Float16Vector:
-				bytes := v.GetRow(i).([]byte)
-				data[fieldID] = typeutil.Float16BytesToFloat32Vector(bytes)
-			case schemapb.DataType_BFloat16Vector:
-				bytes := v.GetRow(i).([]byte)
-				data[fieldID] = typeutil.BFloat16BytesToFloat32Vector(bytes)
-			case schemapb.DataType_SparseFloatVector:
-				bytes := v.GetRow(i).([]byte)
-				data[fieldID] = typeutil.SparseFloatBytesToMap(bytes)
-			default:
-				data[fieldID] = v.GetRow(i)
-			}
-		}
-		row := lo.MapKeys(data, func(_ any, fieldID int64) string {
-			return fieldIDToField[fieldID].GetName()
-		})
-		rows = append(rows, row)
-	}
+
+	rows, err := testutil.CreateInsertDataRowsForJSON(schema, insertData)
+	assert.NoError(t, err)
 
 	jsonBytes, err := json.Marshal(rows)
 	assert.NoError(t, err)
