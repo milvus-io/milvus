@@ -82,6 +82,27 @@ func TestResizePools(t *testing.T) {
 		assert.Equal(t, expectedCap, GetLoadPool().Cap())
 	})
 
+	t.Run("WarmupPool", func(t *testing.T) {
+		expectedCap := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+
+		ResizeWarmupPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, expectedCap, GetWarmupPool().Cap())
+
+		pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, strconv.FormatFloat(pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsFloat()*2, 'f', 10, 64))
+		ResizeWarmupPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, expectedCap, GetWarmupPool().Cap())
+
+		pt.Save(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, "0")
+		ResizeWarmupPool(&config.Event{
+			HasUpdated: true,
+		})
+		assert.Equal(t, expectedCap, GetWarmupPool().Cap())
+	})
+
 	t.Run("error_pool", func(*testing.T) {
 		pool := conc.NewDefaultPool[any]()
 		c := pool.Cap()
