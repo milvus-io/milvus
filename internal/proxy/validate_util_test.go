@@ -11,6 +11,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -3959,4 +3960,20 @@ func Test_validateUtil_checkDoubleFieldData(t *testing.T) {
 			},
 		},
 	}, nil))
+}
+
+func TestCheckArrayElementNilData(t *testing.T) {
+	data := &schemapb.ArrayArray{
+		Data: []*schemapb.ScalarField{nil},
+	}
+
+	fieldSchema := &schemapb.FieldSchema{
+		Name:        "test",
+		DataType:    schemapb.DataType_Array,
+		ElementType: schemapb.DataType_Int64,
+	}
+
+	v := newValidateUtil()
+	err := v.checkArrayElement(data, fieldSchema)
+	assert.True(t, merr.ErrParameterInvalid.Is(err))
 }
