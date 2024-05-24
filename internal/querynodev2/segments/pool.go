@@ -44,6 +44,7 @@ var (
 	loadPool   atomic.Pointer[conc.Pool[any]]
 	loadOnce   sync.Once
 	warmupPool atomic.Pointer[conc.Pool[any]]
+	warmupOnce sync.Once
 )
 
 // initSQPool initialize
@@ -98,7 +99,7 @@ func initLoadPool() {
 }
 
 func initWarmupPool() {
-	sync.OnceFunc(func() {
+	warmupOnce.Do(func() {
 		pt := paramtable.Get()
 		poolSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
 		pool := conc.NewPool[any](
