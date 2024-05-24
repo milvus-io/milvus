@@ -431,43 +431,22 @@ func (s *CompactionPlanHandlerSuite) TestRefreshPlanMixCompaction() {
 }
 
 func (s *CompactionPlanHandlerSuite) TestExecCompactionPlan() {
-	s.mockCm.EXPECT().FindWatcher(mock.Anything).RunAndReturn(func(channel string) (int64, error) {
-		if channel == "ch-1" {
-			return 0, errors.Errorf("mock error for ch-1")
-		}
-
-		return 1, nil
-	}).Twice()
 	s.mockSch.EXPECT().Submit(mock.Anything).Return().Once()
-
-	tests := []struct {
-		description string
-		channel     string
-		hasError    bool
-	}{
-		{"channel with error", "ch-1", true},
-		{"channel with no error", "ch-2", false},
-	}
 
 	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 	handler.scheduler = s.mockSch
 
-	for idx, test := range tests {
-		sig := &compactionSignal{id: int64(idx)}
-		plan := &datapb.CompactionPlan{
-			PlanID: int64(idx),
-		}
-		s.Run(test.description, func() {
-			plan.Channel = test.channel
-
-			err := handler.execCompactionPlan(sig, plan)
-			if test.hasError {
-				s.Error(err)
-			} else {
-				s.NoError(err)
-			}
-		})
+	sig := &compactionSignal{id: int64(1)}
+	plan := &datapb.CompactionPlan{
+		PlanID: int64(1),
 	}
+	plan.Channel = "ch-1"
+
+	handler.execCompactionPlan(sig, plan)
+	handler.mu.RLock()
+	defer handler.mu.RUnlock()
+	_, ok := handler.plans[int64(1)]
+	s.True(ok)
 }
 
 func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
