@@ -413,10 +413,9 @@ func (c *compactionPlanHandler) notifyTasks(tasks []*compactionTask) {
 
 // execCompactionPlan start to execute plan and return immediately
 func (c *compactionPlanHandler) execCompactionPlan(signal *compactionSignal, plan *datapb.CompactionPlan) {
-	if !compactionEnabled() {
-		return nil
+	if compactionEnabled() {
+		c.enqueuePlan(signal, plan)
 	}
-	c.enqueuePlan(signal, plan)
 }
 
 func (c *compactionPlanHandler) setSegmentsCompacting(plan *datapb.CompactionPlan, compacting bool) {
