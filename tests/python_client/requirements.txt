@@ -56,7 +56,5 @@ pyarrow==14.0.1
 fastparquet==2023.7.0
 
 # for bf16 datatype
-jax==0.4.13
-jaxlib==0.4.13
-tensorflow==2.13.1
+ml-dtypes=0.2.0
 
