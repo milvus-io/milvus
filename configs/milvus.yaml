@@ -494,7 +494,7 @@ dataNode:
       coldTime: 60 # Turn on skip mode after there are only timetick msg for x seconds
   segment:
     insertBufSize: 16777216 # Max buffer size to flush for a single segment.
-    deleteBufBytes: 67108864 # Max buffer size in bytes to flush del for a single channel, default as 16MB
+    deleteBufBytes: 16777216 # Max buffer size in bytes to flush del for a single channel, default as 16MB
     syncPeriod: 600 # The period to sync segments if buffer is not empty.
   memory:
     forceSyncEnable: true # Set true to force sync if memory usage is too high
