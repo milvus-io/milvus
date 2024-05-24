@@ -728,7 +728,7 @@ like the old password verification when updating the credential`,
 	p.MaxBloomFalsePositive = ParamItem{
 		Key:          "common.maxBloomFalsePositive",
 		Version:      "2.3.2",
-		DefaultValue: "0.05",
+		DefaultValue: "0.001",
 		Doc:          "max false positive rate for bloom filter",
 		Export:       true,
 	}
