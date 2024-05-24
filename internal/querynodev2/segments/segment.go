@@ -1327,7 +1327,7 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		zap.Duration("newLoadIndexInfoSpan", newLoadIndexInfoSpan),
 		zap.Duration("appendLoadIndexInfoSpan", appendLoadIndexInfoSpan),
 		zap.Duration("updateIndexInfoSpan", updateIndexInfoSpan),
-		zap.Duration("updateIndexInfoSpan", warmupChunkCacheSpan),
+		zap.Duration("warmupChunkCacheSpan", warmupChunkCacheSpan),
 	)
 	return nil
 }
