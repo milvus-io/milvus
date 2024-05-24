@@ -430,23 +430,14 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 				break
 			}
 			start := time.Now()
-			if err := fillOriginPlan(t.allocator, plan); err != nil {
+			if err := fillOriginPlan(coll.Schema, t.allocator, plan); err != nil {
 				log.Warn("failed to fill plan",
 					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64s("segmentIDs", segIDs),
 					zap.Error(err))
 				continue
 			}
-			err := t.compactionHandler.execCompactionPlan(signal, plan)
-			if err != nil {
-				log.Warn("failed to execute compaction plan",
-					zap.Int64("collectionID", signal.collectionID),
-					zap.Int64("planID", plan.PlanID),
-					zap.Int64s("segmentIDs", segIDs),
-					zap.Error(err))
-				continue
-			}
-
+			t.compactionHandler.execCompactionPlan(signal, plan)
 			log.Info("time cost of generating global compaction",
 				zap.Int64("planID", plan.PlanID),
 				zap.Int64("time cost", time.Since(start).Milliseconds()),
@@ -530,18 +521,11 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 			break
 		}
 		start := time.Now()
-		if err := fillOriginPlan(t.allocator, plan); err != nil {
+		if err := fillOriginPlan(coll.Schema, t.allocator, plan); err != nil {
 			log.Warn("failed to fill plan", zap.Error(err))
 			continue
 		}
-		if err := t.compactionHandler.execCompactionPlan(signal, plan); err != nil {
-			log.Warn("failed to execute compaction plan",
-				zap.Int64("collection", signal.collectionID),
-				zap.Int64("planID", plan.PlanID),
-				zap.Int64s("segmentIDs", fetchSegIDs(plan.GetSegmentBinlogs())),
-				zap.Error(err))
-			continue
-		}
+		t.compactionHandler.execCompactionPlan(signal, plan)
 		log.Info("time cost of generating compaction",
 			zap.Int64("planID", plan.PlanID),
 			zap.Int64("time cost", time.Since(start).Milliseconds()),
@@ -713,6 +697,7 @@ func segmentsToPlan(segments []*SegmentInfo, compactTime *compactTime) *datapb.C
 	}
 
 	log.Info("generate a plan for priority candidates", zap.Any("plan", plan),
+		zap.Int("len(segments)", len(plan.GetSegmentBinlogs())),
 		zap.Int64("target segment row", plan.TotalRows), zap.Int64("target segment size", size))
 	return plan
 }

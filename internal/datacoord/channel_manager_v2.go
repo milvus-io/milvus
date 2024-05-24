@@ -48,7 +48,6 @@ type ChannelManager interface {
 	FindWatcher(channel string) (UniqueID, error)
 
 	GetChannel(nodeID int64, channel string) (RWChannel, bool)
-	GetNodeIDByChannelName(channel string) (int64, bool)
 	GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string
 	GetChannelsByCollectionID(collectionID int64) []RWChannel
 	GetChannelNamesByCollectionID(collectionID int64) []string
@@ -351,31 +350,10 @@ func (m *ChannelManagerImplV2) GetChannel(nodeID int64, channelName string) (RWC
 	return nil, false
 }
 
-func (m *ChannelManagerImplV2) GetNodeIDByChannelName(channel string) (int64, bool) {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	nodeChannels := m.store.GetNodeChannelsBy(
-		WithoutBufferNode(),
-		WithChannelName(channel))
-
-	if len(nodeChannels) > 0 {
-		return nodeChannels[0].NodeID, true
-	}
-
-	return 0, false
-}
-
 func (m *ChannelManagerImplV2) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	nodeChs := make(map[UniqueID][]string)
-	nodeChannels := m.store.GetNodeChannelsBy(
-		WithoutBufferNode(),
-		WithCollectionIDV2(collectionID))
-	lo.ForEach(nodeChannels, func(info *NodeChannelInfo, _ int) {
-		nodeChs[info.NodeID] = lo.Keys(info.Channels)
-	})
-	return nodeChs
+	return m.store.GetNodeChannelsByCollectionID(collectionID)
 }
 
 func (m *ChannelManagerImplV2) GetChannelsByCollectionID(collectionID int64) []RWChannel {
