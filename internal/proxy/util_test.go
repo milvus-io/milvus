@@ -2294,3 +2294,24 @@ func TestGetCostValue(t *testing.T) {
 		assert.Equal(t, 100, cost)
 	})
 }
+
+func TestRequestLabelWithContext(t *testing.T) {
+	ctx := context.Background()
+
+	{
+		label := GetRequestLabelFromContext(ctx)
+		assert.False(t, label)
+	}
+
+	ctx = SetRequestLabelForContext(ctx)
+	{
+		label := GetRequestLabelFromContext(ctx)
+		assert.True(t, label)
+	}
+
+	{
+		// nolint
+		label := GetRequestLabelFromContext(nil)
+		assert.False(t, label)
+	}
+}
