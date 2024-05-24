@@ -431,7 +431,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	var drainStop bool
 	for j := 0; j < loopEnd; {
 		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
-		if sel == -1 || drainOneResult {
+		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			drainStop = true
 			break
 		}
@@ -563,7 +563,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	var lastPK interface{}
 	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); {
 		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
-		if sel == -1 || drainOneResult {
+		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			log.Ctx(ctx).Debug("Merge SegCore stop looping for", zap.Int("sel", sel),
 				zap.Bool("mergeStopForBest", param.mergeStopForBest),
 				zap.Bool("drainOneResult", drainOneResult),

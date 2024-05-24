@@ -1337,7 +1337,7 @@ func SelectMinPK[T ResultWithID](limit int64, results []T, cursors []int64) (int
 	)
 	for i, cursor := range cursors {
 		// if result size < limit, this means we should ignore the result from this segment
-		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) {
+		if int(cursor) >= GetSizeOfIDs(results[i].GetIds()) && (GetSizeOfIDs(results[i].GetIds()) == int(limit)) {
 			drainResult = true
 			continue
 		}
