@@ -280,7 +280,7 @@ func (c *Core) Register() error {
 		go func() {
 			if err := c.session.ProcessActiveStandBy(c.activateFunc); err != nil {
 				log.Warn("failed to activate standby rootcoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 			afterRegister()
 		}()
