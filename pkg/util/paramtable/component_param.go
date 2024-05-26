@@ -2357,7 +2357,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.ChunkCacheWarmingUp = ParamItem{
 		Key:          "queryNode.cache.warmup",
 		Version:      "2.3.6",
-		DefaultValue: "async",
+		DefaultValue: "off",
 		Doc: `options: async, sync, off. 
 Specifies the necessity for warming up the chunk cache. 
 1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
