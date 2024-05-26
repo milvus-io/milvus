@@ -15,7 +15,7 @@ def logger_request_response(response, url, tt, headers, data, str_data, str_resp
         data = data[:1000] + "..." + data[-1000:]
     try:
         if response.status_code == 200:
-            if ('code' in response.json() and response.json()["code"] == 200) or (
+            if ('code' in response.json() and response.json()["code"] == 0) or (
                     'Code' in response.json() and response.json()["Code"] == 0):
                 logger.debug(
                     f"\nmethod: {method}, \nurl: {url}, \ncost time: {tt}, \nheader: {headers}, \npayload: {str_data}, \nresponse: {str_response}")
@@ -612,7 +612,7 @@ class RoleClient(Requests):
         url = f'{self.endpoint}/v2/vectordb/roles/create'
         response = self.post(url, headers=self.update_headers(), data=payload)
         res = response.json()
-        if res["code"] == 200:
+        if res["code"] == 0:
             self.role_names.append(payload["roleName"])
         return res
 
