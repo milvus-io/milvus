@@ -41,7 +41,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		dbID, collectionIDToPartIDs, rt, n, err := getRequestInfo(ctx, req)
 		if err != nil {
-			log.RatedWarn(10, "failed to get request info", zap.Error(err))
+			log.Warn("failed to get request info", zap.Error(err))
 			return handler(ctx, req)
 		}
 
@@ -205,7 +205,7 @@ func getRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 		if req == nil {
 			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
 		}
-		return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("unsupported request type %T", req)
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	}
 }
 
