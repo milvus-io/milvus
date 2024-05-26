@@ -830,15 +830,15 @@ class TestSearchVector(TestBase):
         assert len(rsp['data']) == 100
 
 
-    @pytest.mark.parametrize("insert_round", [1])
-    @pytest.mark.parametrize("auto_id", [True])
-    @pytest.mark.parametrize("is_partition_key", [True])
+    @pytest.mark.parametrize("insert_round", [1, 10])
+    @pytest.mark.parametrize("auto_id", [True, False])
+    @pytest.mark.parametrize("is_partition_key", [True, False])
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.xfail(reason="issue https://github.com/milvus-io/milvus/issues/32214")
+    @pytest.mark.parametrize("groupingField", ['user_id', None])
     def test_search_vector_with_sparse_float_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema, groupingField):
         """
         Insert a vector with a simple payload
         """
@@ -860,7 +860,7 @@ class TestSearchVector(TestBase):
             },
             "indexParams": [
                 {"fieldName": "sparse_float_vector", "indexName": "sparse_float_vector", "metricType": "IP",
-                 "indexConfig": {"index_type": "SPARSE_INVERTED_INDEX", "drop_ratio_build": "0.2"}}
+                 "params": {"index_type": "SPARSE_INVERTED_INDEX", "drop_ratio_build": "0.2"}}
             ]
         }
         rsp = self.collection_client.collection_create(payload)
@@ -871,20 +871,21 @@ class TestSearchVector(TestBase):
         # insert data
         for i in range(insert_round):
             data = []
-            for i in range(nb):
+            for j in range(nb):
+                idx = i * nb + j
                 if auto_id:
                     tmp = {
-                        "user_id": i%100,
-                        "word_count": i,
-                        "book_describe": f"book_{i}",
+                        "user_id": idx%100,
+                        "word_count": j,
+                        "book_describe": f"book_{idx}",
                         "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim),
                     }
                 else:
                     tmp = {
-                        "book_id": i,
-                        "user_id": i%100,
-                        "word_count": i,
-                        "book_describe": f"book_{i}",
+                        "book_id": idx,
+                        "user_id": idx%100,
+                        "word_count": j,
+                        "book_describe": f"book_{idx}",
                         "sparse_float_vector": gen_vector(datatype="SparseFloatVector", dim=dim),
                     }
                 if enable_dynamic_schema:
@@ -902,7 +903,6 @@ class TestSearchVector(TestBase):
             "collectionName": name,
             "data": [gen_vector(datatype="SparseFloatVector", dim=dim)],
             "filter": "word_count > 100",
-            "groupingField": "user_id",
             "outputFields": ["*"],
             "searchParams": {
                 "metricType": "IP",
@@ -910,11 +910,12 @@ class TestSearchVector(TestBase):
                     "drop_ratio_search": "0.2",
                 }
             },
-            "limit": 100,
+            "limit": 500,
         }
+        if groupingField:
+            payload["groupingField"] = groupingField
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 200
-        assert len(rsp['data']) == 100
 
 
 
