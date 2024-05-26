@@ -59,7 +59,7 @@ func getLatestFieldIndexes(colls map[Timestamp]*pb.CollectionInfo) *FieldIndexes
 		coll *pb.CollectionInfo
 	}
 	l := len(colls)
-	pairs := make([]pair, l)
+	pairs := make([]pair, 0, l)
 	for ts, coll := range colls {
 		pairs = append(pairs, pair{ts: ts, coll: coll})
 	}

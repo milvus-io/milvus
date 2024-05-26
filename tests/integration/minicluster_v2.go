@@ -252,7 +252,7 @@ func StartMiniClusterV2(ctx context.Context, opts ...OptionV2) (*MiniClusterV2, 
 }
 
 func (cluster *MiniClusterV2) AddQueryNodes(k int) []*grpcquerynode.Server {
-	servers := make([]*grpcquerynode.Server, k)
+	servers := make([]*grpcquerynode.Server, 0, k)
 	for i := 0; i < k; i++ {
 		servers = append(servers, cluster.AddQueryNode())
 	}
