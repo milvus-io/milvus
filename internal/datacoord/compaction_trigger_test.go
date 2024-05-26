@@ -2197,34 +2197,63 @@ func (s *CompactionTriggerSuite) SetupTest() {
 	catalog := mocks.NewDataCoordCatalog(s.T())
 	catalog.EXPECT().SaveChannelCheckpoint(mock.Anything, s.channel, mock.Anything).Return(nil)
 
+	seg1 := &SegmentInfo{
+		SegmentInfo:   s.genSeg(1, 60),
+		lastFlushTime: time.Now().Add(-100 * time.Minute),
+	}
+	seg2 := &SegmentInfo{
+		SegmentInfo:   s.genSeg(2, 60),
+		lastFlushTime: time.Now(),
+	}
+	seg3 := &SegmentInfo{
+		SegmentInfo:   s.genSeg(3, 60),
+		lastFlushTime: time.Now(),
+	}
+	seg4 := &SegmentInfo{
+		SegmentInfo:   s.genSeg(4, 60),
+		lastFlushTime: time.Now(),
+	}
+	seg5 := &SegmentInfo{
+		SegmentInfo:   s.genSeg(5, 60),
+		lastFlushTime: time.Now(),
+	}
+	seg6 := &SegmentInfo{
+		SegmentInfo:   s.genSeg(6, 60),
+		lastFlushTime: time.Now(),
+	}
+
 	s.meta = &meta{
 		channelCPs: newChannelCps(),
 		catalog:    catalog,
 		segments: &SegmentsInfo{
 			segments: map[int64]*SegmentInfo{
-				1: {
-					SegmentInfo:   s.genSeg(1, 60),
-					lastFlushTime: time.Now().Add(-100 * time.Minute),
+				1: seg1,
+				2: seg2,
+				3: seg3,
+				4: seg4,
+				5: seg5,
+				6: seg6,
+			},
+			secondaryIndexes: segmentInfoIndexes{
+				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+					s.collectionID: {
+						1: seg1,
+						2: seg2,
+						3: seg3,
+						4: seg4,
+						5: seg5,
+						6: seg6,
+					},
 				},
-				2: {
-					SegmentInfo:   s.genSeg(2, 60),
-					lastFlushTime: time.Now(),
-				},
-				3: {
-					SegmentInfo:   s.genSeg(3, 60),
-					lastFlushTime: time.Now(),
-				},
-				4: {
-					SegmentInfo:   s.genSeg(4, 60),
-					lastFlushTime: time.Now(),
-				},
-				5: {
-					SegmentInfo:   s.genSeg(5, 26),
-					lastFlushTime: time.Now(),
-				},
-				6: {
-					SegmentInfo:   s.genSeg(6, 26),
-					lastFlushTime: time.Now(),
+				channel2Segments: map[string]map[UniqueID]*SegmentInfo{
+					s.channel: {
+						1: seg1,
+						2: seg2,
+						3: seg3,
+						4: seg4,
+						5: seg5,
+						6: seg6,
+					},
 				},
 			},
 		},
