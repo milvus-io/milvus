@@ -60,7 +60,7 @@ class OffsetMap {
 
     using OffsetType = int64_t;
     // TODO: in fact, we can retrieve the pk here. Not sure which way is more efficient.
-    virtual std::vector<OffsetType>
+    virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const = 0;
@@ -106,7 +106,7 @@ class OffsetOrderedMap : public OffsetMap {
         return map_.empty();
     }
 
-    std::vector<OffsetType>
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const override {
@@ -122,7 +122,7 @@ class OffsetOrderedMap : public OffsetMap {
     }
 
  private:
-    std::vector<OffsetType>
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first_by_index(int64_t limit,
                         const BitsetType& bitset,
                         bool false_filtered_out) const {
@@ -135,8 +135,8 @@ class OffsetOrderedMap : public OffsetMap {
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
-        for (auto it = map_.begin(); hit_num < limit && it != map_.end();
-             it++) {
+        auto it = map_.begin();
+        for (; hit_num < limit && it != map_.end(); it++) {
             for (auto seg_offset : it->second) {
                 if (seg_offset >= size) {
                     // Frequently concurrent insert/query will cause this case.
@@ -152,7 +152,7 @@ class OffsetOrderedMap : public OffsetMap {
                 }
             }
         }
-        return seg_offsets;
+        return {seg_offsets, it != map_.end()};
     }
 
  private:
@@ -217,7 +217,7 @@ class OffsetOrderedArray : public OffsetMap {
         return array_.empty();
     }
 
-    std::vector<OffsetType>
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const override {
@@ -233,7 +233,7 @@ class OffsetOrderedArray : public OffsetMap {
     }
 
  private:
-    std::vector<OffsetType>
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first_by_index(int64_t limit,
                         const BitsetType& bitset,
                         bool false_filtered_out) const {
@@ -246,11 +246,11 @@ class OffsetOrderedArray : public OffsetMap {
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
-        for (auto it = array_.begin(); hit_num < limit && it != array_.end();
-             it++) {
+        auto it = array_.begin();
+        for (; hit_num < limit && it != array_.end(); it++) {
             auto seg_offset = it->second;
             if (seg_offset >= size) {
-                // In fact, this case won't happend on sealed segments.
+                // In fact, this case won't happen on sealed segments.
                 continue;
             }
 
@@ -259,7 +259,7 @@ class OffsetOrderedArray : public OffsetMap {
                 hit_num++;
             }
         }
-        return seg_offsets;
+        return {seg_offsets, it != array_.end()};
     }
 
     void

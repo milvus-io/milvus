@@ -163,6 +163,7 @@ message RetrieveResults {
 
    // query request cost
   CostAggregation costAggregation = 13;
+  bool has_more_result = 14;
 }
 
 message LoadIndex {

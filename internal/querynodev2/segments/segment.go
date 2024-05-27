@@ -443,6 +443,7 @@ func (s *LocalSegment) Retrieve(ctx context.Context, plan *RetrievePlan) (*segco
 
 	result := new(segcorepb.RetrieveResults)
 	if err := HandleCProto(&retrieveResult.cRetrieveResult, result); err != nil {
+		log.Error("HandleCProto error", zap.Error(err))
 		return nil, err
 	}
 
