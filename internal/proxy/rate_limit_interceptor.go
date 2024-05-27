@@ -19,7 +19,6 @@ package proxy
 import (
 	"context"
 	"fmt"
-	"reflect"
 	"strconv"
 
 	"github.com/golang/protobuf/proto"
@@ -31,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/requestutil"
@@ -41,7 +41,7 @@ func RateLimitInterceptor(limiter types.Limiter) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
 		dbID, collectionIDToPartIDs, rt, n, err := getRequestInfo(ctx, req)
 		if err != nil {
-			log.RatedWarn(10, "failed to get request info", zap.Error(err))
+			log.Warn("failed to get request info", zap.Error(err))
 			return handler(ctx, req)
 		}
 
@@ -119,6 +119,9 @@ func getCollectionAndPartitionIDs(ctx context.Context, r reqPartNames) (int64, m
 
 func getCollectionID(r reqCollName) (int64, map[int64][]int64) {
 	db, _ := globalMetaCache.GetDatabaseInfo(context.TODO(), r.GetDbName())
+	if db == nil {
+		return util.InvalidDBID, map[int64][]int64{}
+	}
 	collectionID, _ := globalMetaCache.GetCollectionID(context.TODO(), r.GetDbName(), r.GetCollectionName())
 	return db.dbID, map[int64][]int64{collectionID: {}}
 }
@@ -177,14 +180,14 @@ func getRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 	case *milvuspb.FlushRequest:
 		db, err := globalMetaCache.GetDatabaseInfo(ctx, r.GetDbName())
 		if err != nil {
-			return 0, map[int64][]int64{}, 0, 0, err
+			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
 
 		collToPartIDs := make(map[int64][]int64, 0)
 		for _, collectionName := range r.GetCollectionNames() {
 			collectionID, err := globalMetaCache.GetCollectionID(ctx, r.GetDbName(), collectionName)
 			if err != nil {
-				return 0, map[int64][]int64{}, 0, 0, err
+				return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 			}
 			collToPartIDs[collectionID] = []int64{}
 		}
@@ -193,16 +196,16 @@ func getRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 		dbName := GetCurDBNameFromContextOrDefault(ctx)
 		dbInfo, err := globalMetaCache.GetDatabaseInfo(ctx, dbName)
 		if err != nil {
-			return 0, map[int64][]int64{}, 0, 0, err
+			return util.InvalidDBID, map[int64][]int64{}, 0, 0, err
 		}
 		return dbInfo.dbID, map[int64][]int64{
 			r.GetCollectionID(): {},
 		}, internalpb.RateType_DDLCompaction, 1, nil
 	default: // TODO: support more request
 		if req == nil {
-			return 0, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
+			return util.InvalidDBID, map[int64][]int64{}, 0, 0, fmt.Errorf("null request")
 		}
-		return 0, map[int64][]int64{}, 0, 0, fmt.Errorf("unsupported request type %s", reflect.TypeOf(req).Name())
+		return util.InvalidDBID, map[int64][]int64{}, 0, 0, nil
 	}
 }
 

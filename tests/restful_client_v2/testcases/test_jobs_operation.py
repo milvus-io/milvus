@@ -114,7 +114,7 @@ class TestCreateImportJob(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp["code"] == 200
+        assert rsp['code'] == 0
 
     @pytest.mark.parametrize("insert_num", [5000])
     @pytest.mark.parametrize("import_task_num", [1])
@@ -205,7 +205,7 @@ class TestCreateImportJob(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp["code"] == 200
+        assert rsp['code'] == 0
 
     @pytest.mark.parametrize("insert_num", [5000])
     @pytest.mark.parametrize("import_task_num", [1])
@@ -306,7 +306,7 @@ class TestCreateImportJob(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp["code"] == 200
+        assert rsp['code'] == 0
 
     def test_job_import_multi_json_file(self):
         # create collection
@@ -720,15 +720,15 @@ class TestCreateImportJob(TestBase):
             ]
         }
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # create restore collection
         restore_collection_name = f"{name}_restore"
         payload["collectionName"] = restore_collection_name
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # insert data
         for i in range(insert_round):
             data = []
@@ -772,7 +772,7 @@ class TestCreateImportJob(TestBase):
                 "data": data,
             }
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
             assert rsp['data']['insertCount'] == nb
         # flush data to generate binlog file
         c = Collection(name)
@@ -781,7 +781,7 @@ class TestCreateImportJob(TestBase):
 
         # query data to make sure the data is inserted
         rsp = self.vector_client.vector_query({"collectionName": name, "filter": "user_id > 0", "limit": 50})
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert len(rsp['data']) == 50
         # get collection id
         c = Collection(name)
@@ -802,7 +802,7 @@ class TestCreateImportJob(TestBase):
         if is_partition_key:
             payload["partitionName"] = "_default_0"
         rsp = self.import_job_client.create_import_jobs(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # list import job
         payload = {
             "collectionName": restore_collection_name,
@@ -1528,7 +1528,7 @@ class TestCreateImportJobNegative(TestBase):
             "outputFields": ["*"],
         }
         rsp = self.vector_client.vector_query(payload)
-        assert rsp["code"] == 200
+        assert rsp['code'] == 0
 
 
 @pytest.mark.L1

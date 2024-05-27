@@ -33,14 +33,14 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert rsp['data']['autoId'] is False
         assert rsp['data']['enableDynamicField'] is True
@@ -68,10 +68,10 @@ class TestCreateCollection(TestBase):
         if id_type == "VarChar":
             collection_payload["params"] = {"max_length": "256"}
         rsp = self.collection_client.collection_create(collection_payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = self.collection_client.collection_describe(name)
         logger.info(f"rsp: {rsp}")
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         fields = [f["name"] for f in rsp['data']['fields']]
         assert primary_field in fields
@@ -113,7 +113,7 @@ class TestCreateCollection(TestBase):
 
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
@@ -131,7 +131,7 @@ class TestCreateCollection(TestBase):
         for d in rsp["data"]["properties"]:
             if d["key"] == "collection.ttl.seconds":
                 ttl_seconds_actual = int(d["value"])
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['enableDynamicField'] == False
         assert rsp['data']['collectionName'] == name
         assert rsp['data']['shardsNum'] == num_shards
@@ -178,7 +178,7 @@ class TestCreateCollection(TestBase):
 
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
@@ -196,7 +196,7 @@ class TestCreateCollection(TestBase):
         for d in rsp["data"]["properties"]:
             if d["key"] == "collection.ttl.seconds":
                 ttl_seconds_actual = int(d["value"])
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert rsp['data']['shardsNum'] == num_shards
         assert rsp['data']['partitionsNum'] == num_partitions
@@ -235,7 +235,7 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
@@ -244,7 +244,7 @@ class TestCreateCollection(TestBase):
         logger.info(f"schema: {c.schema}")
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert rsp['data']['autoId'] == auto_id
         assert c.schema.auto_id == auto_id
@@ -288,7 +288,7 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
@@ -296,7 +296,7 @@ class TestCreateCollection(TestBase):
         # describe collection
         time.sleep(10)
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         # assert index created
         indexes = rsp['data']['indexes']
@@ -339,7 +339,7 @@ class TestCreateCollection(TestBase):
         # describe collection
         time.sleep(10)
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         # assert index created
         indexes = rsp['data']['indexes']
@@ -375,7 +375,7 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
@@ -383,7 +383,7 @@ class TestCreateCollection(TestBase):
         # describe collection
         time.sleep(10)
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         # assert index created
         indexes = rsp['data']['indexes']
@@ -426,7 +426,7 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
@@ -435,7 +435,7 @@ class TestCreateCollection(TestBase):
         logger.info(f"schema: {c.schema}")
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert len(rsp['data']['fields']) == len(c.schema.fields)
 
@@ -472,7 +472,7 @@ class TestCreateCollection(TestBase):
         }
         logging.info(f"create collection {name} with payload: {payload}")
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
 
         all_collections = rsp['data']
@@ -481,7 +481,7 @@ class TestCreateCollection(TestBase):
         logger.info(f"schema: {c.schema}")
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert len(rsp['data']['fields']) == len(c.schema.fields)
 
@@ -518,7 +518,7 @@ class TestCreateCollection(TestBase):
         time.sleep(10)
         success_cnt = 0
         for rsp in concurrent_rsp:
-            if rsp["code"] == 200:
+            if rsp['code'] == 0:
                 success_cnt += 1
         logger.info(concurrent_rsp)
         assert success_cnt == 10
@@ -527,7 +527,7 @@ class TestCreateCollection(TestBase):
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
 
     def test_create_collections_concurrent_with_different_param(self):
@@ -565,7 +565,7 @@ class TestCreateCollection(TestBase):
         time.sleep(10)
         success_cnt = 0
         for rsp in concurrent_rsp:
-            if rsp["code"] == 200:
+            if rsp['code'] == 0:
                 success_cnt += 1
         logger.info(concurrent_rsp)
         assert success_cnt == 1
@@ -574,7 +574,7 @@ class TestCreateCollection(TestBase):
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
 
 
@@ -659,7 +659,7 @@ class TestHasCollections(TestBase):
             }
             time.sleep(1)
             rsp = client.collection_create(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
             name_list.append(name)
         rsp = client.collection_list()
         all_collections = rsp['data']
@@ -706,11 +706,11 @@ class TestGetCollectionStats(TestBase):
         }
         time.sleep(1)
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # describe collection
         client.collection_describe(collection_name=name)
         rsp = client.collection_stats(collection_name=name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['rowCount'] == 0
         # insert data
         nb = 3000
@@ -746,7 +746,7 @@ class TestLoadReleaseCollection(TestBase):
             }
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # create index before load
         index_params = [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]
         payload = {
@@ -762,7 +762,7 @@ class TestLoadReleaseCollection(TestBase):
         # describe collection
         client.collection_describe(collection_name=name)
         rsp = client.collection_load(collection_name=name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['data']['loadState'] in ["LoadStateLoaded", "LoadStateLoading"]
         time.sleep(5)
@@ -793,11 +793,11 @@ class TestGetCollectionLoadState(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # describe collection
         client.collection_describe(collection_name=name)
         rsp = client.collection_load_state(collection_name=name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['loadState'] in ["LoadStateNotLoad", "LoadStateLoading"]
         # insert data
         nb = 3000
@@ -835,7 +835,7 @@ class TestListCollections(TestBase):
             }
             time.sleep(1)
             rsp = client.collection_create(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
             name_list.append(name)
         rsp = client.collection_list()
         all_collections = rsp['data']
@@ -863,7 +863,7 @@ class TestListCollectionsNegative(TestBase):
             }
             time.sleep(1)
             rsp = client.collection_create(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
             name_list.append(name)
         client = self.collection_client
         client.api_key = "illegal_api_key"
@@ -889,13 +889,13 @@ class TestDescribeCollection(TestBase):
             "metricType": "L2"
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert rsp['data']['autoId'] is False
         assert rsp['data']['enableDynamicField'] is True
@@ -936,7 +936,7 @@ class TestDescribeCollection(TestBase):
         assert name in all_collections
         # describe collection
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
 
         for field in rsp['data']['fields']:
@@ -964,7 +964,7 @@ class TestDescribeCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
@@ -987,7 +987,7 @@ class TestDescribeCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
@@ -1017,7 +1017,7 @@ class TestDropCollection(TestBase):
                 "metricType": "L2"
             }
             rsp = self.collection_client.collection_create(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
             clo_list.append(name)
         rsp = self.collection_client.collection_list()
         all_collections = rsp['data']
@@ -1029,7 +1029,7 @@ class TestDropCollection(TestBase):
                 "collectionName": name,
             }
             rsp = self.collection_client.collection_drop(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
         rsp = self.collection_client.collection_list()
         all_collections = rsp['data']
         for name in clo_list:
@@ -1052,7 +1052,7 @@ class TestDropCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
@@ -1081,7 +1081,7 @@ class TestDropCollectionNegative(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
@@ -1091,7 +1091,7 @@ class TestDropCollectionNegative(TestBase):
             "collectionName": invalid_name,
         }
         rsp = client.collection_drop(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
 
 
 @pytest.mark.L0
@@ -1112,7 +1112,7 @@ class TestRenameCollection(TestBase):
             "dimension": dim,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert name in all_collections
@@ -1122,7 +1122,7 @@ class TestRenameCollection(TestBase):
             "newCollectionName": new_name,
         }
         rsp = client.collection_rename(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         rsp = client.collection_list()
         all_collections = rsp['data']
         assert new_name in all_collections

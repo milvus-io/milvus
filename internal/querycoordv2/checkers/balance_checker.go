@@ -39,28 +39,28 @@ import (
 // BalanceChecker checks the cluster distribution and generates balance tasks.
 type BalanceChecker struct {
 	*checkerActivation
-	balance.Balance
 	meta                                 *meta.Meta
 	nodeManager                          *session.NodeManager
 	normalBalanceCollectionsCurrentRound typeutil.UniqueSet
 	scheduler                            task.Scheduler
 	targetMgr                            *meta.TargetManager
+	getBalancerFunc                      GetBalancerFunc
 }
 
 func NewBalanceChecker(meta *meta.Meta,
 	targetMgr *meta.TargetManager,
-	balancer balance.Balance,
 	nodeMgr *session.NodeManager,
 	scheduler task.Scheduler,
+	getBalancerFunc GetBalancerFunc,
 ) *BalanceChecker {
 	return &BalanceChecker{
 		checkerActivation:                    newCheckerActivation(),
-		Balance:                              balancer,
 		meta:                                 meta,
 		targetMgr:                            targetMgr,
 		nodeManager:                          nodeMgr,
 		normalBalanceCollectionsCurrentRound: typeutil.NewUniqueSet(),
 		scheduler:                            scheduler,
+		getBalancerFunc:                      getBalancerFunc,
 	}
 }
 
@@ -155,7 +155,7 @@ func (b *BalanceChecker) balanceReplicas(replicaIDs []int64) ([]balance.SegmentA
 		if replica == nil {
 			continue
 		}
-		sPlans, cPlans := b.Balance.BalanceReplica(replica)
+		sPlans, cPlans := b.getBalancerFunc().BalanceReplica(replica)
 		segmentPlans = append(segmentPlans, sPlans...)
 		channelPlans = append(channelPlans, cPlans...)
 		if len(segmentPlans) != 0 || len(channelPlans) != 0 {

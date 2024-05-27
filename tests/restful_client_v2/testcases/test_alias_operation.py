@@ -38,7 +38,7 @@ class TestAliasE2E(TestBase):
             "aliasName": alias_name
         }
         rsp = self.alias_client.create_alias(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # list alias after create
         rsp = self.alias_client.list_alias()
         assert alias_name in rsp['data']

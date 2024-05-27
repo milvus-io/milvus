@@ -525,6 +525,9 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 	switch field.GetElementType() {
 	case schemapb.DataType_Bool:
 		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("bool array", "nil array", "insert data does not match")
+			}
 			actualType := reflect.TypeOf(row.GetData())
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_BoolData)(nil)) {
 				return merr.WrapErrParameterInvalid("bool array",
@@ -533,6 +536,9 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 		}
 	case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
 		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("int array", "nil array", "insert data does not match")
+			}
 			actualType := reflect.TypeOf(row.GetData())
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_IntData)(nil)) {
 				return merr.WrapErrParameterInvalid("int array",
@@ -553,6 +559,9 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 		}
 	case schemapb.DataType_Int64:
 		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("int64 array", "nil array", "insert data does not match")
+			}
 			actualType := reflect.TypeOf(row.GetData())
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_LongData)(nil)) {
 				return merr.WrapErrParameterInvalid("int64 array",
@@ -561,6 +570,9 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 		}
 	case schemapb.DataType_Float:
 		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("float array", "nil array", "insert data does not match")
+			}
 			actualType := reflect.TypeOf(row.GetData())
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_FloatData)(nil)) {
 				return merr.WrapErrParameterInvalid("float array",
@@ -569,6 +581,9 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 		}
 	case schemapb.DataType_Double:
 		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("double array", "nil array", "insert data does not match")
+			}
 			actualType := reflect.TypeOf(row.GetData())
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_DoubleData)(nil)) {
 				return merr.WrapErrParameterInvalid("double array",
@@ -577,6 +592,9 @@ func (v *validateUtil) checkArrayElement(array *schemapb.ArrayArray, field *sche
 		}
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		for _, row := range array.GetData() {
+			if row.GetData() == nil {
+				return merr.WrapErrParameterInvalid("string array", "nil array", "insert data does not match")
+			}
 			actualType := reflect.TypeOf(row.GetData())
 			if actualType != reflect.TypeOf((*schemapb.ScalarField_StringData)(nil)) {
 				return merr.WrapErrParameterInvalid("string array",

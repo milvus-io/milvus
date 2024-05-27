@@ -1037,7 +1037,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	var queryResp []map[string]interface{}
 
 	columnNum := len(fieldDataList)
-	if rowsNum == int64(0) {
+	if rowsNum == int64(0) { // always
 		if columnNum > 0 {
 			switch fieldDataList[0].Type {
 			case schemapb.DataType_Bool:
