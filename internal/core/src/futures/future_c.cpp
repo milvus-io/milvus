@@ -15,19 +15,6 @@
 #include "folly/init/Init.h"
 #include "Future.h"
 
-extern "C" CFollyInit*
-folly_init() {
-    auto opts = folly::InitOptions{};
-    opts.useGFlags(false);
-    auto initializer = new folly::Init(nullptr, nullptr, opts);
-    return static_cast<CFollyInit*>(static_cast<void*>(initializer));
-}
-
-extern "C" void
-folly_init_destroy(CFollyInit* init) {
-    delete static_cast<folly::Init*>(static_cast<void*>(init));
-}
-
 extern "C" void
 future_cancel(CFuture* future) {
     static_cast<milvus::futures::IFuture*>(static_cast<void*>(future))
@@ -46,15 +33,6 @@ future_register_ready_callback(CFuture* future,
                                CLockedGoMutex* mutex) {
     static_cast<milvus::futures::IFuture*>(static_cast<void*>(future))
         ->registerReadyCallback(unlockFn, mutex);
-}
-
-extern "C" void
-future_register_releasable_callback(CFuture* future,
-                                    CUnlockGoMutexFn unlockFn,
-                                    CLockedGoMutex* mutex) {
-    static_cast<milvus::futures::IFuture*>(static_cast<void*>(future))
-        ->registerReleasableCallback(
-            folly::getGlobalCPUExecutor(), 0, unlockFn, mutex);
 }
 
 extern "C" CStatus

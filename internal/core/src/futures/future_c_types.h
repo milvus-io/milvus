@@ -15,8 +15,6 @@
 extern "C" {
 #endif
 
-typedef struct CFollyInit CFollyInit;
-
 typedef struct CFuture CFuture;
 
 typedef struct CLockedGoMutex CLockedGoMutex;

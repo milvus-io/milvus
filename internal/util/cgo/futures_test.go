@@ -13,12 +13,12 @@ import (
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestMain(m *testing.M) {
-	init := NewFollyInit()
-	defer init.Destroy()
-
+	paramtable.Init()
+	InitCGO()
 	exitCode := m.Run()
 	if exitCode > 0 {
 		os.Exit(exitCode)
@@ -43,6 +43,9 @@ func TestFutureWithSuccessCase(t *testing.T) {
 	freeCInt(result)
 	runtime.GC()
 
+	_, err = future.BlockAndLeakyGet()
+	assert.ErrorIs(t, err, ErrConsumed)
+
 	assert.Eventually(t, func() bool {
 		return unreleasedCnt.Load() == 0
 	}, time.Second, time.Millisecond*100)
@@ -65,7 +68,8 @@ func TestFutureWithCaseNoInterrupt(t *testing.T) {
 	// free the result after used.
 	freeCInt(result)
 
-	// Test cancellation.
+	// Test cancellation on no interrupt handling case.
+	start = time.Now()
 	ctx, cancel := context.WithTimeout(context.Background(), 200*time.Millisecond)
 	defer cancel()
 	future = createFutureWithTestCase(ctx, testCase{
@@ -73,22 +77,13 @@ func TestFutureWithCaseNoInterrupt(t *testing.T) {
 		loopCnt:  20,
 		caseNo:   caseNoNoInterrupt,
 	})
-	start = time.Now()
 	result, err = future.BlockAndLeakyGet()
-	// the future is timeout by the context after 200ms, so the future should be done in 1s but not 2s.
-	assert.Less(t, time.Since(start).Seconds(), 1.0)
-	assert.Error(t, err)
-	assert.ErrorIs(t, err, merr.ErrSegcoreFollyCancel)
-	assert.True(t, errors.Is(err, context.DeadlineExceeded))
-	assert.Nil(t, result)
-
-	// wait for the future to be done.
-	time.Sleep(2 * time.Second)
-
-	runtime.GC()
-	assert.Eventually(t, func() bool {
-		return unreleasedCnt.Load() == 0
-	}, time.Second, time.Millisecond*100)
+	// the future is timeout by the context after 200ms, but the underlying task doesn't handle the cancel, the future will return after 2s.
+	assert.Greater(t, time.Since(start).Seconds(), 2.0)
+	assert.NoError(t, err)
+	assert.NotNil(t, result)
+	assert.Equal(t, 0, getCInt(result))
+	freeCInt(result)
 }
 
 // TestFutures test the future implementation.
@@ -186,8 +181,10 @@ func TestFutures(t *testing.T) {
 }
 
 func TestConcurrent(t *testing.T) {
+	// Test is compatible with old implementation of fast fail future.
+	// So it's complicated and not easy to understand.
 	wg := sync.WaitGroup{}
-	for i := 0; i < 10; i++ {
+	for i := 0; i < 3; i++ {
 		wg.Add(4)
 		// success case
 		go func() {
@@ -246,17 +243,16 @@ func TestConcurrent(t *testing.T) {
 				caseNo:   caseNoNoInterrupt,
 			})
 			result, err := future.BlockAndLeakyGet()
-			assert.Nil(t, result)
-			assert.Error(t, err)
-			assert.ErrorIs(t, err, merr.ErrSegcoreFollyCancel)
-			assert.True(t, errors.Is(err, context.DeadlineExceeded))
+			assert.NoError(t, err)
+			assert.Equal(t, 0, getCInt(result))
+			freeCInt(result)
 		}()
 	}
 	wg.Wait()
 	assert.Eventually(t, func() bool {
 		stat := futureManager.Stat()
-		fmt.Printf("active count: %d, gc count: %d\n", stat.ActiveCount, stat.GCCount)
-		return stat.ActiveCount == 0 && stat.GCCount == 0
+		fmt.Printf("active count: %d\n", stat.ActiveCount)
+		return stat.ActiveCount == 0
 	}, 5*time.Second, 100*time.Millisecond)
 	runtime.GC()
 

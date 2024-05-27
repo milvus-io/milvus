@@ -39,9 +39,11 @@ func createFutureWithTestCase(ctx context.Context, testCase testCase) Future {
 	f := func() CFuturePtr {
 		return (CFuturePtr)(C.future_create_test_case(C.int(testCase.interval.Milliseconds()), C.int(testCase.loopCnt), C.int(testCase.caseNo)))
 	}
-	future := Async(ctx, f, WithReleaser(func() {
-		unreleasedCnt.Dec()
-	}))
+	future := Async(ctx, f,
+		WithName("createFutureWithTestCase"),
+		WithReleaser(func() {
+			unreleasedCnt.Dec()
+		}))
 	unreleasedCnt.Inc()
 	return future
 }

@@ -39,14 +39,16 @@ class Ready {
     /// @brief set the value into Ready.
     void
     setValue(T&& value) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        mutex_.lock();
         value_ = std::move(value);
         is_ready_ = true;
+        std::vector<std::function<void()>> callbacks(std::move(callbacks_));
+        mutex_.unlock();
+
         // perform all callbacks which is registered before value is ready.
-        for (auto& callback : callbacks_) {
+        for (auto& callback : callbacks) {
             callback();
         }
-        callbacks_.clear();
     }
 
     /// @brief  get the value from Ready.
@@ -73,14 +75,16 @@ class Ready {
     template <typename Fn, typename = std::enable_if<std::is_invocable_v<Fn>>>
     void
     callOrRegisterCallback(Fn&& fn) {
-        std::lock_guard<std::mutex> lock(mutex_);
+        mutex_.lock();
         // call if value is ready,
         // otherwise register as a callback to be called when value is ready.
         if (is_ready_) {
+            mutex_.unlock();
             fn();
-        } else {
-            callbacks_.push_back(std::forward<Fn>(fn));
+            return;
         }
+        callbacks_.push_back(std::forward<Fn>(fn));
+        mutex_.unlock();
     }
 
  private:

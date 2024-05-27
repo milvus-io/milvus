@@ -20,6 +20,8 @@ func ConsumeCStatusIntoError(status *C.CStatus) error {
 	}
 	errorCode := status.error_code
 	errorMsg := C.GoString(status.error_msg)
-	C.free(unsafe.Pointer(status.error_msg))
+	getCGOCaller().call("free", func() {
+		C.free(unsafe.Pointer(status.error_msg))
+	})
 	return merr.SegcoreError(int32(errorCode), errorMsg)
 }

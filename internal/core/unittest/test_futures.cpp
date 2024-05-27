@@ -14,6 +14,7 @@
 #include <folly/executors/CPUThreadPoolExecutor.h>
 #include <stdlib.h>
 #include <mutex>
+#include <exception>
 
 using namespace milvus::futures;
 
@@ -129,6 +130,55 @@ TEST(Futures, Future) {
         ASSERT_EQ(r, nullptr);
         ASSERT_EQ(s.error_code, milvus::NotImplemented);
         ASSERT_STREQ(s.error_msg, "unimplemented");
+        free((char*)(s.error_msg));
+    }
+
+    {
+        // try a async function
+        auto future = milvus::futures::Future<int>::async(
+            &executor, 0, [](milvus::futures::CancellationToken token) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                throw std::runtime_error("unimplemented");
+                return new int(1);
+            });
+        ASSERT_FALSE(future->isReady());
+
+        std::mutex mu;
+        mu.lock();
+        future->registerReadyCallback(
+            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+            (CLockedGoMutex*)(&mu));
+        mu.lock();
+        ASSERT_TRUE(future->isReady());
+        auto [r, s] = future->leakyGet();
+
+        ASSERT_EQ(r, nullptr);
+        ASSERT_EQ(s.error_code, milvus::UnexpectedError);
+        free((char*)(s.error_msg));
+    }
+
+    {
+        // try a async function
+        auto future = milvus::futures::Future<int>::async(
+            &executor, 0, [](milvus::futures::CancellationToken token) {
+                std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+                throw folly::FutureNotReady();
+                return new int(1);
+            });
+        ASSERT_FALSE(future->isReady());
+
+        std::mutex mu;
+        mu.lock();
+        future->registerReadyCallback(
+            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
+            (CLockedGoMutex*)(&mu));
+        mu.lock();
+        ASSERT_TRUE(future->isReady());
+        auto [r, s] = future->leakyGet();
+
+        ASSERT_EQ(r, nullptr);
+        ASSERT_EQ(s.error_code, milvus::FollyOtherException);
+        free((char*)(s.error_msg));
     }
 
     // cancellation path.
@@ -156,12 +206,5 @@ TEST(Futures, Future) {
 
         ASSERT_EQ(r, nullptr);
         ASSERT_EQ(s.error_code, milvus::FollyCancel);
-
-        future->registerReleasableCallback(
-            &executor,
-            0,
-            [](CLockedGoMutex* mutex) { ((std::mutex*)(mutex))->unlock(); },
-            (CLockedGoMutex*)(&mu));
-        mu.lock();
     }
 }

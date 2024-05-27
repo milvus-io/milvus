@@ -15,10 +15,6 @@ static inline void unlockMutexOnC(CLockedGoMutex* m) {
 static inline void future_go_register_ready_callback(CFuture* f, CLockedGoMutex* m) {
 	future_register_ready_callback(f, unlockMutexOnC, m);
 }
-
-static inline void future_go_register_releasable_callback(CFuture* f, CLockedGoMutex* m) {
-	future_register_releasable_callback(f, unlockMutexOnC, m);
-}
 */
 import "C"
 
@@ -32,6 +28,8 @@ import (
 
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
+
+var ErrConsumed = errors.New("future is already consumed")
 
 // Would put this in futures.go but for the documented issue with
 // exports and functions in preamble
@@ -53,16 +51,13 @@ type basicFuture interface {
 
 	// cancel the future with error.
 	cancel(error)
-
-	// releaseWhenUnderlyingDone release the resources of the future when underlying cgo function is done.
-	releaseWhenUnderlyingDone()
 }
 
 type Future interface {
 	basicFuture
 
 	// BlockAndLeakyGet block until the future is ready or canceled, and return the leaky result.
-	//   Caller should only call once for BlockAndLeakyGet, otherwise the behavior is crash.
+	//   Caller should only call once for BlockAndLeakyGet, otherwise the ErrConsumed will returned.
 	//   Caller will get the merr.ErrSegcoreCancel or merr.ErrSegcoreTimeout respectively if the future is canceled or timeout.
 	//   Caller will get other error if the underlying cgo function throws, otherwise caller will get result.
 	//   Caller should free the result after used (defined by caller), otherwise the memory of result is leaked.
@@ -76,23 +71,33 @@ type (
 
 // Async is a helper function to call a C async function that returns a future.
 func Async(ctx context.Context, f CGOAsyncFunction, opts ...Opt) Future {
-	// create a future for caller to use.
-	ctx, cancel := context.WithCancel(ctx)
-	future := &futureImpl{
-		closure:   f,
-		ctx:       ctx,
-		ctxCancel: cancel,
-		once:      sync.Once{},
-		future:    (*C.CFuture)(f()),
-		opts:      &options{},
-	}
+	options := getDefaultOpt()
 	// apply options.
 	for _, opt := range opts {
-		opt(future.opts)
+		opt(options)
+	}
+
+	// create a future for caller to use.
+	var cFuturePtr *C.CFuture
+	getCGOCaller().call(options.name, func() {
+		cFuturePtr = (*C.CFuture)(f())
+	})
+
+	ctx, cancel := context.WithCancel(ctx)
+	future := &futureImpl{
+		closure:      f,
+		ctx:          ctx,
+		ctxCancel:    cancel,
+		releaserOnce: sync.Once{},
+		future:       cFuturePtr,
+		opts:         options,
+		state:        newFutureState(),
 	}
 
 	runtime.SetFinalizer(future, func(future *futureImpl) {
-		C.future_destroy(future.future)
+		getCGOCaller().call("future_destroy", func() {
+			C.future_destroy(future.future)
+		})
 	})
 
 	// register the future to do timeout notification.
@@ -101,12 +106,13 @@ func Async(ctx context.Context, f CGOAsyncFunction, opts ...Opt) Future {
 }
 
 type futureImpl struct {
-	ctx       context.Context
-	ctxCancel context.CancelFunc
-	once      sync.Once
-	future    *C.CFuture
-	closure   CGOAsyncFunction
-	opts      *options
+	ctx          context.Context
+	ctxCancel    context.CancelFunc
+	future       *C.CFuture
+	closure      CGOAsyncFunction
+	opts         *options
+	state        futureState
+	releaserOnce sync.Once
 }
 
 func (f *futureImpl) Context() context.Context {
@@ -120,8 +126,15 @@ func (f *futureImpl) BlockUntilReady() {
 func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 	f.blockUntilReady()
 
+	if !f.state.intoConsumed() {
+		return nil, ErrConsumed
+	}
+
 	var ptr unsafe.Pointer
-	status := C.future_leak_and_get(f.future, &ptr)
+	var status C.CStatus
+	getCGOCaller().call("future_leak_and_get", func() {
+		status = C.future_leak_and_get(f.future, &ptr)
+	})
 	err := ConsumeCStatusIntoError(&status)
 
 	if errors.Is(err, merr.ErrSegcoreFollyCancel) {
@@ -132,30 +145,38 @@ func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 }
 
 func (f *futureImpl) cancel(err error) {
+	if !f.state.checkUnready() {
+		// only unready future can be canceled.
+		return
+	}
+
 	if errors.IsAny(err, context.DeadlineExceeded, context.Canceled) {
-		C.future_cancel(f.future)
+		getCGOCaller().call("future_cancel", func() {
+			C.future_cancel(f.future)
+		})
 		return
 	}
 	panic("unreachable: invalid cancel error type")
 }
 
 func (f *futureImpl) blockUntilReady() {
-	mu := &sync.Mutex{}
-	mu.Lock()
-	C.future_go_register_ready_callback(f.future, (*C.CLockedGoMutex)(unsafe.Pointer(mu)))
-	mu.Lock()
-
-	f.ctxCancel()
-}
-
-func (f *futureImpl) releaseWhenUnderlyingDone() {
-	mu := &sync.Mutex{}
-	mu.Lock()
-	C.future_go_register_releasable_callback(f.future, (*C.CLockedGoMutex)(unsafe.Pointer(mu)))
-	mu.Lock()
-
-	if f.opts.releaser != nil {
-		f.opts.releaser()
+	if !f.state.checkUnready() {
+		// only unready future should be block until ready.
+		return
 	}
+
+	mu := &sync.Mutex{}
+	mu.Lock()
+	getCGOCaller().call("future_go_register_ready_callback", func() {
+		C.future_go_register_ready_callback(f.future, (*C.CLockedGoMutex)(unsafe.Pointer(mu)))
+	})
+	mu.Lock()
+
+	// mark the future as ready at go side to avoid more cgo calls.
+	f.state.intoReady()
+	// notify the future manager that the future is ready.
 	f.ctxCancel()
+	if f.opts.releaser != nil {
+		f.releaserOnce.Do(f.opts.releaser)
+	}
 }

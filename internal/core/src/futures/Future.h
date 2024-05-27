@@ -29,9 +29,8 @@ class IFuture {
  public:
     /// @brief cancel the future with the given exception.
     /// After cancelled is called, the underlying async function will receive cancellation.
-    /// and the leakyGet will return a cancellation error as fast as possible.
-    /// callback registered from registerReadyCallback will be called.
-    /// callback registered from registerReleasableCallback may not be called if the async function is not handing the cancellation.
+    /// It just a signal notification, the cancellation is handled by user-defined.
+    /// If the underlying async function ignore the cancellation signal, the Future is still blocked.
     virtual void
     cancel() = 0;
 
@@ -43,13 +42,6 @@ class IFuture {
     /// @brief register a callback that will be called when the future is ready or future has been ready.
     virtual void
     registerReadyCallback(CUnlockGoMutexFn unlockFn, CLockedGoMutex* mutex) = 0;
-
-    /// @brief block until the future can be released (the underlying async operation is done).
-    virtual void
-    registerReleasableCallback(folly::Executor::KeepAlive<> executor,
-                               int priority,
-                               CUnlockGoMutexFn unlockFn,
-                               CLockedGoMutex* mutex) = 0;
 
     /// @brief get the result of the future. it must be called if future is ready.
     /// the first element of the pair is the result,
@@ -108,7 +100,7 @@ class Future : public IFuture {
         return future;
     }
 
-    /// use `createLeakedFuture`.
+    /// use `async`.
     Future()
         : ready_(std::make_shared<Ready<LeakyResult<R>>>()),
           promise_(std::make_shared<folly::SharedPromise<R*>>()),
@@ -139,19 +131,6 @@ class Future : public IFuture {
             [unlockFn = unlockFn, mutex = mutex]() { unlockFn(mutex); });
     }
 
-    /// @brief see `IFuture::registerReleasableCallback`
-    void
-    registerReleasableCallback(folly::Executor::KeepAlive<> executor,
-                               int priority,
-                               CUnlockGoMutexFn unlockFn,
-                               CLockedGoMutex* mutex) noexcept override {
-        promise_->getSemiFuture()
-            .via(executor, priority)
-            .then([unlockFn = unlockFn, mutex = mutex](auto&&) {
-                unlockFn(mutex);
-            });
-    }
-
     /// @brief see `IFuture::isReady`
     bool
     isReady() noexcept override {
@@ -177,13 +156,9 @@ class Future : public IFuture {
             // 2. set the cancellation to the source to notify cancellation to the consumers.
             ew.handle(
                 [&](const folly::FutureCancellation& e) {
-                    ready->setValue(
-                        LeakyResult<R>(milvus::FollyCancel, e.what()));
                     cancellation_source.requestCancellation();
                 },
                 [&](const folly::FutureTimeout& e) {
-                    ready->setValue(
-                        LeakyResult<R>(milvus::FollyCancel, e.what()));
                     cancellation_source.requestCancellation();
                 });
         });

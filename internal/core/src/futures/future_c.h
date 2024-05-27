@@ -18,12 +18,6 @@
 extern "C" {
 #endif
 
-CFollyInit*
-folly_init();
-
-void
-folly_init_destroy(CFollyInit* init);
-
 void
 future_cancel(CFuture* future);
 
@@ -34,11 +28,6 @@ void
 future_register_ready_callback(CFuture* future,
                                CUnlockGoMutexFn unlockFn,
                                CLockedGoMutex* mutex);
-
-void
-future_register_releasable_callback(CFuture* future,
-                                    CUnlockGoMutexFn unlockFn,
-                                    CLockedGoMutex* mutex);
 
 CStatus
 future_leak_and_get(CFuture* future, void** result);

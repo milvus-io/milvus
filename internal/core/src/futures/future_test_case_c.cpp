@@ -10,11 +10,12 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "Future.h"
+#include "Executor.h"
 
 extern "C" CFuture*
 future_create_test_case(int interval, int loop_cnt, int case_no) {
     auto future = milvus::futures::Future<int>::async(
-        folly::getGlobalCPUExecutor(),
+        milvus::futures::getGlobalCPUExecutor(),
         0,
         [interval = interval, loop_cnt = loop_cnt, case_no = case_no](
             milvus::futures::CancellationToken token) {

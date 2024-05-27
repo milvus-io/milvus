@@ -12,6 +12,7 @@
 milvus_add_pkg_config("milvus_futures")
 
 set(FUTURES_SRC
+        Executor.cpp
         future_c.cpp
         future_test_case_c.cpp
         )
