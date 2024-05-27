@@ -20,6 +20,22 @@
 
 namespace milvus {
 
+class MilvusException : public std::exception {
+ public:
+    explicit MilvusException(const std::string& msg)
+        : std::exception(), exception_message_(msg) {
+    }
+    const char*
+    what() const noexcept {
+        return exception_message_.c_str();
+    }
+    virtual ~MilvusException() {
+    }
+
+ private:
+    std::string exception_message_;
+};
+
 class NotImplementedException : public std::exception {
  public:
     explicit NotImplementedException(const std::string& msg)
