@@ -165,30 +165,30 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 		}
 	}
 	var req *indexpb.CreateJobRequest
+	collectionInfo, err := dependency.handler.GetCollection(ctx, segment.GetCollectionID())
+	if err != nil {
+		log.Ctx(ctx).Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
+		return false, false
+	}
+
+	schema := collectionInfo.Schema
+	var field *schemapb.FieldSchema
+
+	for _, f := range schema.Fields {
+		if f.FieldID == fieldID {
+			field = f
+			break
+		}
+	}
+
+	dim, err := storage.GetDimFromParams(field.TypeParams)
+	if err != nil {
+		log.Ctx(ctx).Warn("failed to get dim from field type params",
+			zap.String("field type", field.GetDataType().String()), zap.Error(err))
+		// don't return, maybe field is scalar field or sparseFloatVector
+	}
+
 	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		collectionInfo, err := dependency.handler.GetCollection(ctx, segment.GetCollectionID())
-		if err != nil {
-			log.Ctx(ctx).Info("index builder get collection info failed", zap.Int64("collectionID", segment.GetCollectionID()), zap.Error(err))
-			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return false, false
-		}
-
-		schema := collectionInfo.Schema
-		var field *schemapb.FieldSchema
-
-		for _, f := range schema.Fields {
-			if f.FieldID == fieldID {
-				field = f
-				break
-			}
-		}
-
-		dim, err := storage.GetDimFromParams(field.TypeParams)
-		if err != nil {
-			it.SetState(indexpb.JobState_JobStateInit, err.Error())
-			return false, false
-		}
-
 		storePath, err := itypeutil.GetStorageURI(params.Params.CommonCfg.StorageScheme.GetValue(), params.Params.CommonCfg.StoragePathPrefix.GetValue(), segment.GetID())
 		if err != nil {
 			log.Ctx(ctx).Warn("failed to get storage uri", zap.Error(err))
@@ -224,6 +224,7 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 			CurrentIndexVersion:  dependency.indexEngineVersionManager.GetCurrentIndexEngineVersion(),
 			DataIds:              binlogIDs,
 			OptionalScalarFields: optionalFields,
+			Field:                field,
 		}
 	} else {
 		req = &indexpb.CreateJobRequest{
@@ -242,6 +243,8 @@ func (it *indexBuildTask) AssignTask(ctx context.Context, client types.IndexNode
 			SegmentID:            segment.GetID(),
 			FieldID:              fieldID,
 			OptionalScalarFields: optionalFields,
+			Dim:                  int64(dim),
+			Field:                field,
 		}
 	}
 
