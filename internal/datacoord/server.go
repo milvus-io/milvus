@@ -674,6 +674,14 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
+
+		// Load collection information asynchronously
+		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
+		go func() {
+			_ = retry.Do(s.ctx, func() error {
+				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
+		}()
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
