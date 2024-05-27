@@ -1306,7 +1306,7 @@ func (m *meta) CheckAndSetSegmentsCompacting(segmentIDs []UniqueID) (hasCompacti
 	m.Lock()
 	defer m.Unlock()
 	for _, segmentID := range segmentIDs {
-		hasCompactingSegment = m.GetSegment(segmentID).isCompacting
+		hasCompactingSegment = m.segments.GetSegment(segmentID).isCompacting
 	}
 	if hasCompactingSegment {
 		return false

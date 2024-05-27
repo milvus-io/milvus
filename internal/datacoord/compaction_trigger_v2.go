@@ -2,13 +2,10 @@ package datacoord
 
 import (
 	"context"
-	"sync"
-	"time"
-
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"sync"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
@@ -189,6 +186,12 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		return segView.ID
 	})
 
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("fail to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		return
+	}
+
 	task := &datapb.CompactionTask{
 		TriggerID:        taskID, // inner trigger, use task id as trigger id
 		PlanID:           taskID,
@@ -199,7 +202,7 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		PartitionID:      view.GetGroupLabel().PartitionID,
 		Pos:              view.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
 		TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
-		// collectionSchema todo wayblink
+		Schema:           collection.Schema,
 	}
 
 	err = m.compactionHandler.enqueueCompaction(&l0CompactionTask{
@@ -225,6 +228,11 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		return
 	}
 	view.GetSegmentsView()
+	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	if err != nil {
+		log.Warn("fail to submit compaction view to scheduler because get collection fail", zap.String("view", view.String()))
+		return
+	}
 	_, totalRows, maxSegmentRows, preferSegmentRows := calculateClusteringCompactionConfig(view)
 	task := &datapb.CompactionTask{
 		PlanID:             taskID,
@@ -237,6 +245,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		CollectionID:       view.GetGroupLabel().CollectionID,
 		PartitionID:        view.GetGroupLabel().PartitionID,
 		Channel:            view.GetGroupLabel().Channel,
+		Schema:             collection.Schema,
 		ClusteringKeyField: view.(*ClusteringSegmentsView).clusteringKeyField,
 		InputSegments:      lo.Map(view.GetSegmentsView(), func(segmentView *SegmentView, _ int) int64 { return segmentView.ID }),
 		MaxSegmentRows:     maxSegmentRows,
@@ -279,18 +288,4 @@ type chanPartSegments struct {
 	partitionID  UniqueID
 	channelName  string
 	segments     []*SegmentInfo
-}
-
-func fillOriginPlan(schema *schemapb.CollectionSchema, alloc allocator, plan *datapb.CompactionPlan) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	id, err := alloc.allocID(ctx)
-	if err != nil {
-		return err
-	}
-
-	plan.PlanID = id
-	plan.TimeoutInSeconds = Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32()
-	plan.Schema = schema
-	return nil
 }

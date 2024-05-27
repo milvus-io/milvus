@@ -446,7 +446,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			start := time.Now()
 			planID := currentID
 			currentID++
-			task := &defaultCompactionTask{
+			task := &mixCompactionTask{
 				CompactionTask: &datapb.CompactionTask{
 					PlanID:           planID,
 					TriggerID:        signal.id,
@@ -460,6 +460,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 					Channel:          group.channelName,
 					InputSegments:    segIDs,
 					TotalRows:        totalRows,
+					Schema:           coll.Schema,
 				},
 			}
 			err := t.compactionHandler.enqueueCompaction(task)
@@ -564,7 +565,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 		start := time.Now()
 		planID := currentID
 		currentID++
-		if err := t.compactionHandler.enqueueCompaction(&defaultCompactionTask{
+		if err := t.compactionHandler.enqueueCompaction(&mixCompactionTask{
 			CompactionTask: &datapb.CompactionTask{
 				PlanID:           planID,
 				TriggerID:        signal.id,
@@ -578,7 +579,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 				Channel:          channel,
 				InputSegments:    segmentIDS,
 				TotalRows:        totalRows,
-				// collectionSchema
+				Schema:           coll.Schema,
 			},
 		}); err != nil {
 			log.Warn("failed to execute compaction task",
@@ -740,6 +741,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		pair := typeutil.NewPair(totalRows, segmentIDs)
 		tasks[i] = &pair
 	}
+	log.Info("generatePlans", zap.Int64("collectionID", signal.collectionID), zap.Int("plan_num", len(tasks)))
 	return tasks
 }
 

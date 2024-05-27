@@ -238,6 +238,7 @@ func (task *mixCompactionTask) BuildCompactionRequest(handler *compactionPlanHan
 		Channel:          task.GetChannel(),
 		CollectionTtl:    task.GetCollectionTtl(),
 		TotalRows:        task.GetTotalRows(),
+		Schema:           task.GetSchema(),
 	}
 	log := log.With(zap.Int64("taskID", task.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 

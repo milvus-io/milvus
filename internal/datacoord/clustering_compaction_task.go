@@ -324,6 +324,7 @@ func (task *clusteringCompactionTask) BuildCompactionRequest(handler *compaction
 		Channel:            task.GetChannel(),
 		CollectionTtl:      task.GetCollectionTtl(),
 		TotalRows:          task.GetTotalRows(),
+		Schema:             task.GetSchema(),
 		ClusteringKeyField: task.GetClusteringKeyField().GetFieldID(),
 		MaxSegmentRows:     task.GetMaxSegmentRows(),
 		PreferSegmentRows:  task.GetPreferSegmentRows(),

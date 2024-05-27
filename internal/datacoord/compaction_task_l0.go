@@ -237,7 +237,9 @@ func (task *l0CompactionTask) BuildCompactionRequest(handler *compactionPlanHand
 		Channel:          task.GetChannel(),
 		CollectionTtl:    task.GetCollectionTtl(),
 		TotalRows:        task.GetTotalRows(),
+		Schema:           task.GetSchema(),
 	}
+
 	log := log.With(zap.Int64("taskID", task.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))
 	for _, segID := range task.GetInputSegments() {
 		segInfo := handler.meta.GetHealthySegment(segID)
