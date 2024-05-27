@@ -83,6 +83,7 @@ func NewMetaCache(info *datapb.ChannelWatchInfo, factory PkStatsFactory) MetaCac
 		commonpb.SegmentState_Flushing,
 		commonpb.SegmentState_Flushed,
 		commonpb.SegmentState_Dropped,
+		commonpb.SegmentState_Importing,
 	} {
 		cache.stateSegments[state] = make(map[int64]*SegmentInfo)
 	}
