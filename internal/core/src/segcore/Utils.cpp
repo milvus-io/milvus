@@ -709,7 +709,7 @@ LoadFieldDatasFromRemote(const std::vector<std::string>& remote_files,
         channel->close();
     } catch (std::exception& e) {
         LOG_SEGCORE_INFO_ << "failed to load data from remote: " << e.what();
-        channel->close(std::move(e));
+        channel->close(MilvusException(e.what()));
     }
 }
 
