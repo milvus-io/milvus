@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"strconv"
+	"strings"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
@@ -35,11 +36,7 @@ type GetServerIDFunc func() int64
 // verifies whether the target server ID of request matches with the server's ID and rejects it accordingly.
 func ServerIDValidationUnaryServerInterceptor(fn GetServerIDFunc) grpc.UnaryServerInterceptor {
 	return func(ctx context.Context, req any, info *grpc.UnaryServerInfo, handler grpc.UnaryHandler) (interface{}, error) {
-		md, ok := metadata.FromIncomingContext(ctx)
-		if !ok {
-			return handler(ctx, req)
-		}
-		values := md.Get(ServerIDKey)
+		values := metadata.ValueFromIncomingContext(ctx, strings.ToLower(ServerIDKey))
 		if len(values) == 0 {
 			return handler(ctx, req)
 		}
@@ -59,11 +56,7 @@ func ServerIDValidationUnaryServerInterceptor(fn GetServerIDFunc) grpc.UnaryServ
 // verifies whether the target server ID of request matches with the server's ID and rejects it accordingly.
 func ServerIDValidationStreamServerInterceptor(fn GetServerIDFunc) grpc.StreamServerInterceptor {
 	return func(srv interface{}, ss grpc.ServerStream, info *grpc.StreamServerInfo, handler grpc.StreamHandler) error {
-		md, ok := metadata.FromIncomingContext(ss.Context())
-		if !ok {
-			return handler(srv, ss)
-		}
-		values := md.Get(ServerIDKey)
+		values := metadata.ValueFromIncomingContext(ss.Context(), strings.ToLower(ServerIDKey))
 		if len(values) == 0 {
 			return handler(srv, ss)
 		}
