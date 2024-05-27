@@ -23,16 +23,17 @@ import (
 	"sync"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
+	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -50,12 +51,8 @@ import (
 )
 
 type levelZeroCompactionTask struct {
-	compactor
 	io.BinlogIO
-
 	allocator allocator.Allocator
-	metacache metacache.MetaCache
-	syncmgr   syncmgr.SyncManager
 	cm        storage.ChunkManager
 
 	plan *datapb.CompactionPlan
@@ -67,12 +64,13 @@ type levelZeroCompactionTask struct {
 	tr   *timerecord.TimeRecorder
 }
 
+// make sure compactionTask implements compactor interface
+var _ compaction.Compactor = (*levelZeroCompactionTask)(nil)
+
 func newLevelZeroCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	alloc allocator.Allocator,
-	metaCache metacache.MetaCache,
-	syncmgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
 	plan *datapb.CompactionPlan,
 ) *levelZeroCompactionTask {
@@ -83,8 +81,6 @@ func newLevelZeroCompactionTask(
 
 		BinlogIO:  binlogIO,
 		allocator: alloc,
-		metacache: metaCache,
-		syncmgr:   syncmgr,
 		cm:        cm,
 		plan:      plan,
 		tr:        timerecord.NewTimeRecorder("levelzero compaction"),
@@ -92,31 +88,29 @@ func newLevelZeroCompactionTask(
 	}
 }
 
-func (t *levelZeroCompactionTask) complete() {
+func (t *levelZeroCompactionTask) Complete() {
 	t.done <- struct{}{}
 }
 
-func (t *levelZeroCompactionTask) stop() {
+func (t *levelZeroCompactionTask) Stop() {
 	t.cancel()
 	<-t.done
 }
 
-func (t *levelZeroCompactionTask) getPlanID() UniqueID {
+func (t *levelZeroCompactionTask) GetPlanID() UniqueID {
 	return t.plan.GetPlanID()
 }
 
-func (t *levelZeroCompactionTask) getChannelName() string {
+func (t *levelZeroCompactionTask) GetChannelName() string {
 	return t.plan.GetChannel()
 }
 
-func (t *levelZeroCompactionTask) getCollection() int64 {
-	return t.metacache.Collection()
+func (t *levelZeroCompactionTask) GetCollection() int64 {
+	// The length of SegmentBinlogs is checked before task enqueueing.
+	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
-// Do nothing for levelzero compaction
-func (t *levelZeroCompactionTask) injectDone() {}
-
-func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error) {
+func (t *levelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, "L0Compact")
 	defer span.End()
 	log := log.Ctx(t.ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.String("type", t.plan.GetType().String()))
@@ -124,7 +118,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 
 	if !funcutil.CheckCtxValid(ctx) {
 		log.Warn("compact wrong, task context done or timeout")
-		return nil, errContext
+		return nil, ctx.Err()
 	}
 
 	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
@@ -139,7 +133,7 @@ func (t *levelZeroCompactionTask) compact() (*datapb.CompactionPlanResult, error
 	})
 	if len(targetSegments) == 0 {
 		log.Warn("compact wrong, not target sealed segments")
-		return nil, errIllegalCompactionPlan
+		return nil, errors.New("illegal compaction plan with empty target segments")
 	}
 	err := binlog.DecompressCompactionBinlogs(l0Segments)
 	if err != nil {
@@ -333,16 +327,20 @@ func (t *levelZeroCompactionTask) splitDelta(
 }
 
 func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storage.DeleteData) (map[string][]byte, *datapb.Binlog, error) {
+	segment, ok := lo.Find(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) bool {
+		return segment.GetSegmentID() == segmentID
+	})
+	if !ok {
+		return nil, nil, merr.WrapErrSegmentNotFound(segmentID, "cannot find segment in compaction plan")
+	}
+
 	var (
-		collID   = t.metacache.Collection()
-		uploadKv = make(map[string][]byte)
+		collectionID = segment.GetCollectionID()
+		partitionID  = segment.GetPartitionID()
+		uploadKv     = make(map[string][]byte)
 	)
 
-	seg, ok := t.metacache.GetSegmentByID(segmentID)
-	if !ok {
-		return nil, nil, merr.WrapErrSegmentLack(segmentID)
-	}
-	blob, err := storage.NewDeleteCodec().Serialize(collID, seg.PartitionID(), segmentID, dData)
+	blob, err := storage.NewDeleteCodec().Serialize(collectionID, partitionID, segmentID, dData)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -352,7 +350,7 @@ func (t *levelZeroCompactionTask) composeDeltalog(segmentID int64, dData *storag
 		return nil, nil, err
 	}
 
-	blobKey := metautil.JoinIDPath(collID, seg.PartitionID(), segmentID, logID)
+	blobKey := metautil.JoinIDPath(collectionID, partitionID, segmentID, logID)
 	blobPath := t.BinlogIO.JoinFullPath(common.SegmentDeltaLogPath, blobKey)
 
 	uploadKv[blobPath] = blob.GetValue()
@@ -442,7 +440,7 @@ func (t *levelZeroCompactionTask) loadBF(targetSegments []*datapb.CompactionSegm
 			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
 				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			pks, err := loadStats(t.ctx, t.cm,
-				t.metacache.Schema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			if err != nil {
 				log.Warn("failed to load segment stats log", zap.Error(err))
 				return err, err

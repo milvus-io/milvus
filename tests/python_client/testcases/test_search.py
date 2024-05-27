@@ -10097,7 +10097,6 @@ class TestSearchGroupBy(TestcaseBase):
 
         collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index_params)
-        # time.sleep(10)
         collection_w.load()
 
         search_params = {"metric_type": metric, "params": {"ef": 128}}
@@ -10214,7 +10213,6 @@ class TestSearchGroupBy(TestcaseBase):
         collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
         collection_w.create_index(grpby_field)
-        time.sleep(30)
         collection_w.load()
 
         search_params = {"metric_type": metric, "params": {"ef": 128}}
@@ -10507,7 +10505,6 @@ class TestSearchGroupBy(TestcaseBase):
 
         collection_w.flush()
         collection_w.create_index(ct.default_float_vec_field_name, index_params=_index)
-        time.sleep(10)
         collection_w.load()
 
         nq = 1

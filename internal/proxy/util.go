@@ -1395,7 +1395,7 @@ func hasParitionKeyModeField(schema *schemapb.CollectionSchema) bool {
 	return false
 }
 
-// getDefaultPartitionNames only used in partition key mode
+// getDefaultPartitionsInPartitionKeyMode only used in partition key mode
 func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, collectionName string) ([]string, error) {
 	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
 	if err != nil {
@@ -1406,32 +1406,6 @@ func getDefaultPartitionsInPartitionKeyMode(ctx context.Context, dbName string, 
 	partitionNames, _, err := typeutil.RearrangePartitionsForPartitionKey(partitions)
 	if err != nil {
 		return nil, err
-	}
-
-	return partitionNames, nil
-}
-
-// getDefaultPartitionNames only used in partition key mode
-func getDefaultPartitionNames(ctx context.Context, dbName string, collectionName string) ([]string, error) {
-	partitions, err := globalMetaCache.GetPartitions(ctx, dbName, collectionName)
-	if err != nil {
-		return nil, err
-	}
-
-	// Make sure the order of the partition names got every time is the same
-	partitionNames := make([]string, len(partitions))
-	for partitionName := range partitions {
-		splits := strings.Split(partitionName, "_")
-		if len(splits) < 2 {
-			err = fmt.Errorf("bad default partion name in partition ket mode: %s", partitionName)
-			return nil, err
-		}
-		index, err := strconv.ParseInt(splits[len(splits)-1], 10, 64)
-		if err != nil {
-			return nil, err
-		}
-
-		partitionNames[index] = partitionName
 	}
 
 	return partitionNames, nil
@@ -1645,4 +1619,23 @@ func GetCostValue(status *commonpb.Status) int {
 		return 0
 	}
 	return value
+}
+
+type isProxyRequestKeyType struct{}
+
+var ctxProxyRequestKey = isProxyRequestKeyType{}
+
+func SetRequestLabelForContext(ctx context.Context) context.Context {
+	return context.WithValue(ctx, ctxProxyRequestKey, true)
+}
+
+func GetRequestLabelFromContext(ctx context.Context) bool {
+	if ctx == nil {
+		return false
+	}
+	v := ctx.Value(ctxProxyRequestKey)
+	if v == nil {
+		return false
+	}
+	return v.(bool)
 }

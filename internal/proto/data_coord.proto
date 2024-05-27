@@ -528,6 +528,7 @@ message CompactionPlan {
   string channel = 7;
   int64 collection_ttl = 8;
   int64 total_rows = 9;
+  schema.CollectionSchema schema = 10;
 }
 
 message CompactionSegment {

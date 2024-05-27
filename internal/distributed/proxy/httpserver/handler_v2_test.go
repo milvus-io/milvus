@@ -471,11 +471,11 @@ func TestDatabaseWrapper(t *testing.T) {
 func TestCreateCollection(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(11)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(12)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, CreateAction)
 	// quickly create collection
@@ -564,6 +564,18 @@ func TestCreateCollection(t *testing.T) {
             ]
         }}`),
 	})
+	// dim should not be specified for SparseFloatVector field
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+            "fields": [
+                {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": false, "elementTypeParams": {}},
+                {"fieldName": "partition_field", "dataType": "VarChar", "isPartitionKey": true, "elementTypeParams": {"max_length": 256}},
+                {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {}}
+            ]
+        }, "params": {"partitionsNum": "32"}}`),
+	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
@@ -612,6 +624,18 @@ func TestCreateCollection(t *testing.T) {
 		errMsg:      "",
 		errCode:     65535,
 	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+            "fields": [
+                {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+            ]
+        }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "",
+		errCode: 65535,
+	})
 
 	for _, testcase := range postTestCases {
 		t.Run("post"+testcase.path, func(t *testing.T) {
@@ -623,11 +647,9 @@ func TestCreateCollection(t *testing.T) {
 			returnBody := &ReturnErrMsg{}
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errCode, returnBody.Code)
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			} else {
-				assert.Equal(t, int32(200), returnBody.Code)
 			}
 		})
 	}
@@ -718,7 +740,15 @@ func TestMethodGet(t *testing.T) {
 	}, nil).Twice()
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadStateResponse{Status: commonErrorStatus}, nil).Once()
-	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Times(3)
+	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&DefaultLoadStateResp, nil).Times(4)
+	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadStateResponse{
+		Status: &StatusSuccess,
+		State:  commonpb.LoadState_LoadStateNotExist,
+	}, nil).Once()
+	mp.EXPECT().GetLoadState(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadStateResponse{
+		Status: &StatusSuccess,
+		State:  commonpb.LoadState_LoadStateNotLoad,
+	}, nil).Once()
 	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&milvuspb.DescribeIndexResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(&DefaultDescIndexesReqp, nil).Times(3)
 	mp.EXPECT().DescribeIndex(mock.Anything, mock.Anything).Return(nil, merr.WrapErrIndexNotFoundForCollection(DefaultCollectionName)).Once()
@@ -740,6 +770,10 @@ func TestMethodGet(t *testing.T) {
 	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
 		Status:   commonSuccessStatus,
 		Progress: int64(77),
+	}, nil).Once()
+	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{
+		Status:   commonSuccessStatus,
+		Progress: int64(100),
 	}, nil).Once()
 	mp.EXPECT().GetLoadingProgress(mock.Anything, mock.Anything).Return(&milvuspb.GetLoadingProgressResponse{Status: commonErrorStatus}, nil).Once()
 	mp.EXPECT().ShowPartitions(mock.Anything, mock.Anything).Return(&milvuspb.ShowPartitionsResponse{
@@ -842,6 +876,17 @@ func TestMethodGet(t *testing.T) {
 		path: versionalV2(CollectionCategory, LoadStateAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(CollectionCategory, LoadStateAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path:    versionalV2(CollectionCategory, LoadStateAction),
+		errCode: 100,
+		errMsg:  "collection not found[collection=book]",
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
+		path: versionalV2(CollectionCategory, LoadStateAction),
+	})
+	queryTestCases = append(queryTestCases, rawTestCase{
 		path: versionalV2(PartitionCategory, ListAction),
 	})
 	queryTestCases = append(queryTestCases, rawTestCase{
@@ -882,7 +927,7 @@ func TestMethodGet(t *testing.T) {
 	})
 
 	for _, testcase := range queryTestCases {
-		t.Run("query", func(t *testing.T) {
+		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader([]byte(`{` +
 				`"collectionName": "` + DefaultCollectionName + `",` +
 				`"partitionName": "` + DefaultPartitionName + `",` +
@@ -898,11 +943,9 @@ func TestMethodGet(t *testing.T) {
 			returnBody := &ReturnErrMsg{}
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errCode, returnBody.Code)
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			} else {
-				assert.Equal(t, int32(http.StatusOK), returnBody.Code)
 			}
 			fmt.Println(w.Body.String())
 		})
@@ -949,7 +992,7 @@ func TestMethodDelete(t *testing.T) {
 		path: versionalV2(AliasCategory, DropAction),
 	})
 	for _, testcase := range queryTestCases {
-		t.Run("query", func(t *testing.T) {
+		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader([]byte(`{"collectionName": "` + DefaultCollectionName + `", "partitionName": "` + DefaultPartitionName +
 				`", "userName": "` + util.UserRoot + `", "roleName": "` + util.RoleAdmin + `", "indexName": "` + DefaultIndexName + `", "aliasName": "` + DefaultAliasName + `"}`))
 			req := httptest.NewRequest(http.MethodPost, testcase.path, bodyReader)
@@ -959,11 +1002,9 @@ func TestMethodDelete(t *testing.T) {
 			returnBody := &ReturnErrMsg{}
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errCode, returnBody.Code)
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			} else {
-				assert.Equal(t, int32(http.StatusOK), returnBody.Code)
 			}
 			fmt.Println(w.Body.String())
 		})
@@ -1080,7 +1121,7 @@ func TestMethodPost(t *testing.T) {
 	})
 
 	for _, testcase := range queryTestCases {
-		t.Run("query", func(t *testing.T) {
+		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader([]byte(`{` +
 				`"collectionName": "` + DefaultCollectionName + `", "newCollectionName": "test", "newDbName": "",` +
 				`"partitionName": "` + DefaultPartitionName + `", "partitionNames": ["` + DefaultPartitionName + `"],` +
@@ -1099,11 +1140,9 @@ func TestMethodPost(t *testing.T) {
 			returnBody := &ReturnErrMsg{}
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errCode, returnBody.Code)
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			} else {
-				assert.Equal(t, int32(http.StatusOK), returnBody.Code)
 			}
 			fmt.Println(w.Body.String())
 		})
@@ -1198,7 +1237,7 @@ func TestDML(t *testing.T) {
 	})
 
 	for _, testcase := range queryTestCases {
-		t.Run("query", func(t *testing.T) {
+		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader(testcase.requestBody)
 			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
 			w := httptest.NewRecorder()
@@ -1207,11 +1246,51 @@ func TestDML(t *testing.T) {
 			returnBody := &ReturnErrMsg{}
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errCode, returnBody.Code)
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			} else {
-				assert.Equal(t, int32(http.StatusOK), returnBody.Code)
+			}
+			fmt.Println(w.Body.String())
+		})
+	}
+}
+
+func TestAllowInt64(t *testing.T) {
+	paramtable.Init()
+	mp := mocks.NewMockProxy(t)
+	testEngine := initHTTPServerV2(mp, false)
+	queryTestCases := []requestBodyTestCase{}
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        InsertAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": [0.11825, 0.6]}]}`),
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        UpsertAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [{"book_id": 0, "word_count": 0, "book_intro": [0.11825, 0.6]}]}`),
+	})
+	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+		CollectionName: DefaultCollectionName,
+		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
+		ShardsNum:      ShardNumDefault,
+		Status:         &StatusSuccess,
+	}, nil).Twice()
+	mp.EXPECT().Insert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, InsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
+	mp.EXPECT().Upsert(mock.Anything, mock.Anything).Return(&milvuspb.MutationResult{Status: commonSuccessStatus, UpsertCnt: int64(0), IDs: &schemapb.IDs{IdField: &schemapb.IDs_IntId{IntId: &schemapb.LongArray{Data: []int64{}}}}}, nil).Once()
+
+	for _, testcase := range queryTestCases {
+		t.Run(testcase.path, func(t *testing.T) {
+			bodyReader := bytes.NewReader(testcase.requestBody)
+			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
+			req.Header.Set(HTTPHeaderAllowInt64, "true")
+			w := httptest.NewRecorder()
+			testEngine.ServeHTTP(w, req)
+			assert.Equal(t, http.StatusOK, w.Code)
+			returnBody := &ReturnErrMsg{}
+			err := json.Unmarshal(w.Body.Bytes(), returnBody)
+			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
+			if testcase.errCode != 0 {
+				assert.Equal(t, testcase.errMsg, returnBody.Message)
 			}
 			fmt.Println(w.Body.String())
 		})
@@ -1220,17 +1299,32 @@ func TestDML(t *testing.T) {
 
 func TestSearchV2(t *testing.T) {
 	paramtable.Init()
+	outputFields := []string{FieldBookID, FieldWordCount, "author", "date"}
 	mp := mocks.NewMockProxy(t)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         generateCollectionSchema(schemapb.DataType_Int64),
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(10)
+	}, nil).Times(12)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+		TopK:         int64(3),
+		OutputFields: outputFields,
+		FieldsData:   generateFieldData(),
+		Ids:          generateIDs(schemapb.DataType_Int64, 3),
+		Scores:       DefaultScores,
+	}}, nil).Once()
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
 	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: &commonpb.Status{
 		ErrorCode: 1700, // ErrFieldNotFound
 		Reason:    "groupBy field not found in schema: field not found[field=test]",
+	}}, nil).Once()
+	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{
+		TopK:         int64(3),
+		OutputFields: outputFields,
+		FieldsData:   generateFieldData(),
+		Ids:          generateIDs(schemapb.DataType_Int64, 3),
+		Scores:       DefaultScores,
 	}}, nil).Once()
 	mp.EXPECT().HybridSearch(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
 	collSchema := generateCollectionSchema(schemapb.DataType_Int64)
@@ -1240,18 +1334,25 @@ func TestSearchV2(t *testing.T) {
 	float16VectorField.Name = "float16Vector"
 	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
 	bfloat16VectorField.Name = "bfloat16Vector"
+	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
+	sparseFloatVectorField.Name = "sparseFloatVector"
 	collSchema.Fields = append(collSchema.Fields, &binaryVectorField)
 	collSchema.Fields = append(collSchema.Fields, &float16VectorField)
 	collSchema.Fields = append(collSchema.Fields, &bfloat16VectorField)
+	collSchema.Fields = append(collSchema.Fields, &sparseFloatVectorField)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         collSchema,
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(9)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Twice()
+	}, nil).Times(10)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        SearchAction,
 		requestBody: []byte(`{"collectionName": "book", "data": [[0.1, 0.2]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
@@ -1281,6 +1382,10 @@ func TestSearchV2(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "book", "data": [["0.1", "0.2"]], "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"], "params": {"radius":0.9, "range_filter": 0.1}, "groupingField": "test"}`),
 		errMsg:      "can only accept json format request, error: json: cannot unmarshal string into Go value of type float32: invalid parameter[expected=FloatVector][actual=[\"0.1\", \"0.2\"]]",
 		errCode:     1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        AdvancedSearchAction,
+		requestBody: []byte(`{"collectionName": "hello_milvus", "search": [{"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}, {"data": [[0.1, 0.2]], "annsField": "book_intro", "metricType": "L2", "limit": 3}], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 	})
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
 		path:        AdvancedSearchAction,
@@ -1377,9 +1482,13 @@ func TestSearchV2(t *testing.T) {
 		errMsg:  "can only accept json format request, error: dimension: 2, bytesLen: 4, but length of []byte: 3: invalid parameter[expected=BFloat16Vector][actual=\x01\x02\x03]",
 		errCode: 1801,
 	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [{"1": 0.1}], "annsField": "sparseFloatVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
+	})
 
 	for _, testcase := range queryTestCases {
-		t.Run("search", func(t *testing.T) {
+		t.Run(testcase.path, func(t *testing.T) {
 			bodyReader := bytes.NewReader(testcase.requestBody)
 			req := httptest.NewRequest(http.MethodPost, versionalV2(EntityCategory, testcase.path), bodyReader)
 			w := httptest.NewRecorder()
@@ -1388,11 +1497,9 @@ func TestSearchV2(t *testing.T) {
 			returnBody := &ReturnErrMsg{}
 			err := json.Unmarshal(w.Body.Bytes(), returnBody)
 			assert.Nil(t, err)
+			assert.Equal(t, testcase.errCode, returnBody.Code)
 			if testcase.errCode != 0 {
-				assert.Equal(t, testcase.errCode, returnBody.Code)
 				assert.Equal(t, testcase.errMsg, returnBody.Message)
-			} else {
-				assert.Equal(t, int32(http.StatusOK), returnBody.Code)
 			}
 			fmt.Println(w.Body.String())
 		})

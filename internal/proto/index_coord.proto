@@ -226,6 +226,7 @@ message GetIndexBuildProgressResponse {
     int64 pending_index_rows = 4;
 }
 
+// Synchronously modify StorageConfig in index_cgo_msg.proto file
 message StorageConfig {
     string address = 1;
     string access_keyID = 2;
@@ -243,6 +244,7 @@ message StorageConfig {
     string sslCACert = 14;
 }
 
+// Synchronously modify OptionalFieldInfo in index_cgo_msg.proto file
 message OptionalFieldInfo {
   int64 fieldID = 1;
   string field_name = 2;
@@ -276,6 +278,7 @@ message CreateJobRequest {
     int64 dim = 22;
     repeated int64 data_ids = 23;
     repeated OptionalFieldInfo optional_scalar_fields = 24;
+    schema.FieldSchema field = 25;
 }
 
 message QueryJobsRequest {

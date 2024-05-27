@@ -588,9 +588,8 @@ func (deser *DeserializeReader[T]) Next() error {
 		deser.pos = 0
 		deser.rec = deser.rr.Record()
 
-		if deser.values == nil {
-			deser.values = make([]T, deser.rec.Len())
-		}
+		// allocate new slice preventing overwrite previous batch
+		deser.values = make([]T, deser.rec.Len())
 		if err := deser.deserializer(deser.rec, deser.values); err != nil {
 			return err
 		}
@@ -925,9 +924,10 @@ func (bsw *BinlogStreamWriter) Finalize() (*Blob, error) {
 		return nil, err
 	}
 	return &Blob{
-		Key:    strconv.Itoa(int(bsw.fieldSchema.FieldID)),
-		Value:  b.Bytes(),
-		RowNum: int64(bsw.rw.numRows),
+		Key:        strconv.Itoa(int(bsw.fieldSchema.FieldID)),
+		Value:      b.Bytes(),
+		RowNum:     int64(bsw.rw.numRows),
+		MemorySize: int64(bsw.memorySize),
 	}, nil
 }
 
@@ -1016,6 +1016,7 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 				if !ok {
 					return nil, 0, errors.New(fmt.Sprintf("serialize error on type %s", types[fid]))
 				}
+				writers[fid].memorySize += int(typeEntry.sizeof(e))
 				memorySize += typeEntry.sizeof(e)
 			}
 		}

@@ -248,6 +248,15 @@ func checkAndSetData(body string, collSchema *schemapb.CollectionSchema) (error,
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
 					}
 					reallyData[fieldName] = vectorArray
+				case schemapb.DataType_SparseFloatVector:
+					if dataString == "" {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
+					}
+					sparseVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(dataString))
+					if err != nil {
+						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], dataString, err.Error()), reallyDataArray
+					}
+					reallyData[fieldName] = sparseVec
 				case schemapb.DataType_Float16Vector:
 					if dataString == "" {
 						return merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(fieldType)], "", "missing vector field: "+fieldName), reallyDataArray
@@ -638,6 +647,9 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 			data = make([][]byte, 0, rowsLen)
 			dim, _ := getDim(field)
 			nameDims[field.Name] = dim
+		case schemapb.DataType_SparseFloatVector:
+			data = make([][]byte, 0, rowsLen)
+			nameDims[field.Name] = int64(0)
 		default:
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 		}
@@ -704,6 +716,13 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
 			case schemapb.DataType_BFloat16Vector:
 				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), candi.v.Interface().([]byte))
+			case schemapb.DataType_SparseFloatVector:
+				content := candi.v.Interface().([]byte)
+				rowSparseDim := typeutil.SparseFloatRowDim(content)
+				if rowSparseDim > nameDims[field.Name] {
+					nameDims[field.Name] = rowSparseDim
+				}
+				nameColumns[field.Name] = append(nameColumns[field.Name].([][]byte), content)
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", field.DataType, field.Name)
 			}
@@ -895,6 +914,18 @@ func anyToColumns(rows []map[string]interface{}, sch *schemapb.CollectionSchema)
 					},
 				},
 			}
+		case schemapb.DataType_SparseFloatVector:
+			colData.Field = &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: nameDims[name],
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      nameDims[name],
+							Contents: column.([][]byte),
+						},
+					},
+				},
+			}
 		default:
 			return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", colData.Type, name)
 		}
@@ -963,6 +994,19 @@ func serializeByteVectors(vectorStr string, dataType schemapb.DataType, dimensio
 	return values, nil
 }
 
+func serializeSparseFloatVectors(vectors []gjson.Result, dataType schemapb.DataType) ([][]byte, error) {
+	values := make([][]byte, 0)
+	for _, vector := range vectors {
+		vectorBytes := []byte(vector.String())
+		sparseVector, err := typeutil.CreateSparseFloatRowFromJSON(vectorBytes)
+		if err != nil {
+			return nil, merr.WrapErrParameterInvalid(schemapb.DataType_name[int32(dataType)], vector.String(), err.Error())
+		}
+		values = append(values, sparseVector)
+	}
+	return values, nil
+}
+
 func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimension int64) (*commonpb.PlaceholderValue, error) {
 	var valueType commonpb.PlaceholderType
 	var values [][]byte
@@ -980,6 +1024,9 @@ func convertVectors2Placeholder(body string, dataType schemapb.DataType, dimensi
 	case schemapb.DataType_BFloat16Vector:
 		valueType = commonpb.PlaceholderType_BFloat16Vector
 		values, err = serializeByteVectors(gjson.Get(body, HTTPRequestData).Raw, dataType, dimension, dimension*2)
+	case schemapb.DataType_SparseFloatVector:
+		valueType = commonpb.PlaceholderType_SparseFloatVector
+		values, err = serializeSparseFloatVectors(gjson.Get(body, HTTPRequestData).Array(), dataType)
 	}
 	if err != nil {
 		return nil, err
@@ -1037,7 +1084,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	var queryResp []map[string]interface{}
 
 	columnNum := len(fieldDataList)
-	if rowsNum == int64(0) {
+	if rowsNum == int64(0) { // always
 		if columnNum > 0 {
 			switch fieldDataList[0].Type {
 			case schemapb.DataType_Bool:
@@ -1070,6 +1117,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetFloat16Vector())/2) / fieldDataList[0].GetVectors().GetDim()
 			case schemapb.DataType_BFloat16Vector:
 				rowsNum = int64(len(fieldDataList[0].GetVectors().GetBfloat16Vector())/2) / fieldDataList[0].GetVectors().GetDim()
+			case schemapb.DataType_SparseFloatVector:
+				rowsNum = int64(len(fieldDataList[0].GetVectors().GetSparseFloatVector().Contents))
 			default:
 				return nil, fmt.Errorf("the type(%v) of field(%v) is not supported, use other sdk please", fieldDataList[0].Type, fieldDataList[0].FieldName)
 			}
@@ -1125,6 +1174,8 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetFloat16Vector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
 				case schemapb.DataType_BFloat16Vector:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetVectors().GetBfloat16Vector()[i*(fieldDataList[j].GetVectors().GetDim()*2) : (i+1)*(fieldDataList[j].GetVectors().GetDim()*2)]
+				case schemapb.DataType_SparseFloatVector:
+					row[fieldDataList[j].FieldName] = typeutil.SparseFloatBytesToMap(fieldDataList[j].GetVectors().GetSparseFloatVector().Contents[i])
 				case schemapb.DataType_Array:
 					row[fieldDataList[j].FieldName] = fieldDataList[j].GetScalars().GetArrayData().Data[i]
 				case schemapb.DataType_JSON:

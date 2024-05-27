@@ -16,6 +16,7 @@ import (
 	"unsafe"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -94,9 +95,17 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	return index, nil
 }
 
-func CreateIndex(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIndex, error) {
+func CreateIndex(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (CodecIndex, error) {
+	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
+			zap.String("clusterID", buildIndexInfo.GetClusterID()),
+			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
+			zap.Error(err))
+		return nil, err
+	}
 	var indexPtr C.CIndex
-	status := C.CreateIndex(&indexPtr, buildIndexInfo.cBuildIndexInfo)
+	status := C.CreateIndex(&indexPtr, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}
@@ -109,9 +118,17 @@ func CreateIndex(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecInde
 	return index, nil
 }
 
-func CreateIndexV2(ctx context.Context, buildIndexInfo *BuildIndexInfo) (CodecIndex, error) {
+func CreateIndexV2(ctx context.Context, buildIndexInfo *indexcgopb.BuildIndexInfo) (CodecIndex, error) {
+	buildIndexInfoBlob, err := proto.Marshal(buildIndexInfo)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal buildIndexInfo failed",
+			zap.String("clusterID", buildIndexInfo.GetClusterID()),
+			zap.Int64("buildID", buildIndexInfo.GetBuildID()),
+			zap.Error(err))
+		return nil, err
+	}
 	var indexPtr C.CIndex
-	status := C.CreateIndexV2(&indexPtr, buildIndexInfo.cBuildIndexInfo)
+	status := C.CreateIndexV2(&indexPtr, (*C.uint8_t)(unsafe.Pointer(&buildIndexInfoBlob[0])), (C.uint64_t)(len(buildIndexInfoBlob)))
 	if err := HandleCStatus(&status, "failed to create index"); err != nil {
 		return nil, err
 	}

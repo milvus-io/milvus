@@ -484,3 +484,66 @@ func BuildArrayData(schema *schemapb.CollectionSchema, insertData *storage.Inser
 	}
 	return columns, nil
 }
+
+func CreateInsertDataRowsForJSON(schema *schemapb.CollectionSchema, insertData *storage.InsertData) ([]map[string]any, error) {
+	fieldIDToField := lo.KeyBy(schema.GetFields(), func(field *schemapb.FieldSchema) int64 {
+		return field.GetFieldID()
+	})
+
+	rowNum := insertData.GetRowNum()
+	rows := make([]map[string]any, 0, rowNum)
+	for i := 0; i < rowNum; i++ {
+		data := make(map[int64]interface{})
+		for fieldID, v := range insertData.Data {
+			field := fieldIDToField[fieldID]
+			dataType := field.GetDataType()
+			elemType := field.GetElementType()
+			if field.GetAutoID() {
+				continue
+			}
+			switch dataType {
+			case schemapb.DataType_Array:
+				switch elemType {
+				case schemapb.DataType_Bool:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetBoolData().GetData()
+				case schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetIntData().GetData()
+				case schemapb.DataType_Int64:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetLongData().GetData()
+				case schemapb.DataType_Float:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetFloatData().GetData()
+				case schemapb.DataType_Double:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetDoubleData().GetData()
+				case schemapb.DataType_String:
+					data[fieldID] = v.GetRow(i).(*schemapb.ScalarField).GetStringData().GetData()
+				}
+			case schemapb.DataType_JSON:
+				data[fieldID] = string(v.GetRow(i).([]byte))
+			case schemapb.DataType_BinaryVector:
+				bytes := v.GetRow(i).([]byte)
+				ints := make([]int, 0, len(bytes))
+				for _, b := range bytes {
+					ints = append(ints, int(b))
+				}
+				data[fieldID] = ints
+			case schemapb.DataType_Float16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.Float16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_BFloat16Vector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.BFloat16BytesToFloat32Vector(bytes)
+			case schemapb.DataType_SparseFloatVector:
+				bytes := v.GetRow(i).([]byte)
+				data[fieldID] = typeutil.SparseFloatBytesToMap(bytes)
+			default:
+				data[fieldID] = v.GetRow(i)
+			}
+		}
+		row := lo.MapKeys(data, func(_ any, fieldID int64) string {
+			return fieldIDToField[fieldID].GetName()
+		})
+		rows = append(rows, row)
+	}
+
+	return rows, nil
+}

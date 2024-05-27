@@ -96,6 +96,10 @@ type writeBufferBase struct {
 	flushTimestamp *atomic.Uint64
 
 	storagev2Cache *metacache.StorageV2Cache
+
+	// pre build logger
+	logger        *log.MLogger
+	cpRatedLogger *log.MLogger
 }
 
 func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, option *writeBufferOption) (*writeBufferBase, error) {
@@ -127,7 +131,7 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 		return nil, err
 	}
 
-	return &writeBufferBase{
+	wb := &writeBufferBase{
 		channelName:      channel,
 		collectionID:     metacache.Collection(),
 		collSchema:       schema,
@@ -140,7 +144,13 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 		syncPolicies:     option.syncPolicies,
 		flushTimestamp:   flushTs,
 		storagev2Cache:   storageV2Cache,
-	}, nil
+	}
+
+	wb.logger = log.With(zap.Int64("collectionID", wb.collectionID),
+		zap.String("channel", wb.channelName))
+	wb.cpRatedLogger = wb.logger.WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
+
+	return wb, nil
 }
 
 func (wb *writeBufferBase) HasSegment(segmentID int64) bool {
@@ -178,13 +188,10 @@ func (wb *writeBufferBase) MemorySize() int64 {
 }
 
 func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
+	log := wb.logger
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
 
-	log := log.Ctx(context.Background()).With(
-		zap.Int64("collectionID", wb.collectionID),
-		zap.String("channel", wb.channelName),
-	)
 	// need valid checkpoint before triggering syncing
 	if wb.checkpoint == nil {
 		log.Warn("evict buffer before buffering data")
@@ -201,9 +208,7 @@ func (wb *writeBufferBase) EvictBuffer(policies ...SyncPolicy) {
 }
 
 func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
-	log := log.Ctx(context.Background()).
-		With(zap.String("channel", wb.channelName)).
-		WithRateGroup(fmt.Sprintf("writebuffer_cp_%s", wb.channelName), 1, 60)
+	log := wb.cpRatedLogger
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
@@ -235,7 +240,7 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	switch {
 	case bufferCandidate == nil && syncCandidate == nil:
 		// all buffer are empty
-		log.RatedInfo(60, "checkpoint from latest consumed msg")
+		log.RatedDebug(60, "checkpoint from latest consumed msg")
 		return wb.checkpoint
 	case bufferCandidate == nil && syncCandidate != nil:
 		checkpoint = syncCandidate
@@ -255,7 +260,7 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 		cpSource = "syncManager"
 	}
 
-	log.RatedInfo(20, "checkpoint evaluated",
+	log.RatedDebug(20, "checkpoint evaluated",
 		zap.String("cpSource", cpSource),
 		zap.Int64("segmentID", segmentID),
 		zap.Uint64("cpTimestamp", checkpoint.GetTimestamp()))
@@ -556,6 +561,7 @@ func (wb *writeBufferBase) getEstBatchSize() uint {
 }
 
 func (wb *writeBufferBase) Close(drop bool) {
+	log := wb.logger
 	// sink all data and call Drop for meta writer
 	wb.mut.Lock()
 	defer wb.mut.Unlock()
@@ -583,13 +589,13 @@ func (wb *writeBufferBase) Close(drop bool) {
 
 	err := conc.AwaitAll(futures...)
 	if err != nil {
-		log.Error("failed to sink write buffer data", zap.String("channel", wb.channelName), zap.Error(err))
+		log.Error("failed to sink write buffer data", zap.Error(err))
 		// TODO change to remove channel in the future
 		panic(err)
 	}
 	err = wb.metaWriter.DropChannel(wb.channelName)
 	if err != nil {
-		log.Error("failed to drop channel", zap.String("channel", wb.channelName), zap.Error(err))
+		log.Error("failed to drop channel", zap.Error(err))
 		// TODO change to remove channel in the future
 		panic(err)
 	}

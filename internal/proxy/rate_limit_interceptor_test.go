@@ -29,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
@@ -47,6 +48,10 @@ func (l *limiterMock) Check(dbID int64, collectionIDToPartIDs map[int64][]int64,
 		return merr.ErrServiceRateLimit
 	}
 	return nil
+}
+
+func (l *limiterMock) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
+	return l.Check(dbID, collectionIDToPartIDs, rt, n)
 }
 
 func TestRateLimitInterceptor(t *testing.T) {
@@ -256,7 +261,7 @@ func TestRateLimitInterceptor(t *testing.T) {
 		assert.Error(t, err)
 
 		_, _, _, _, err = getRequestInfo(context.Background(), &milvuspb.CalcDistanceRequest{})
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("test getFailedResponse", func(t *testing.T) {
@@ -367,7 +372,7 @@ func TestGetInfo(t *testing.T) {
 	}()
 
 	t.Run("fail to get database", func(t *testing.T) {
-		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("mock error: get database info")).Times(4)
+		mockCache.EXPECT().GetDatabaseInfo(mock.Anything, mock.Anything).Return(nil, errors.New("mock error: get database info")).Times(5)
 		{
 			_, _, err := getCollectionAndPartitionID(ctx, &milvuspb.InsertRequest{
 				DbName:         "foo",
@@ -393,6 +398,11 @@ func TestGetInfo(t *testing.T) {
 		{
 			_, _, _, _, err := getRequestInfo(ctx, &milvuspb.ManualCompactionRequest{})
 			assert.Error(t, err)
+		}
+		{
+			dbID, collectionIDInfos := getCollectionID(&milvuspb.CreateCollectionRequest{})
+			assert.Equal(t, util.InvalidDBID, dbID)
+			assert.Equal(t, 0, len(collectionIDInfos))
 		}
 	})
 

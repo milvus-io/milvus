@@ -18,23 +18,47 @@ package timerecord
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // groups maintains string to GroupChecker
-var groups = typeutil.NewConcurrentMap[string, *GroupChecker]()
+var groups = typeutil.NewConcurrentMap[string, *CheckerManager]()
 
-// GroupChecker checks members in same group silent for certain period of time
+type Checker struct {
+	name        string
+	manager     *CheckerManager
+	lastChecked atomic.Value
+}
+
+func NewChecker(name string, manager *CheckerManager) *Checker {
+	checker := &Checker{}
+	checker.name = name
+	checker.manager = manager
+	checker.lastChecked.Store(time.Now())
+	manager.Register(name, checker)
+	return checker
+}
+
+func (checker *Checker) Check() {
+	checker.lastChecked.Store(time.Now())
+}
+
+func (checker *Checker) Close() {
+	checker.manager.Remove(checker.name)
+}
+
+// CheckerManager checks members in same group silent for certain period of time
 // print warning msg if there are item(s) that not reported
-type GroupChecker struct {
+type CheckerManager struct {
 	groupName string
 
-	d        time.Duration                              // check duration
-	t        *time.Ticker                               // internal ticker
-	ch       chan struct{}                              // closing signal
-	lastest  *typeutil.ConcurrentMap[string, time.Time] // map member name => lastest report time
+	d        time.Duration                             // check duration
+	t        *time.Ticker                              // internal ticker
+	ch       chan struct{}                             // closing signal
+	checkers *typeutil.ConcurrentMap[string, *Checker] // map member name => checker
 	initOnce sync.Once
 	stopOnce sync.Once
 
@@ -43,7 +67,7 @@ type GroupChecker struct {
 
 // init start worker goroutine
 // protected by initOnce
-func (gc *GroupChecker) init() {
+func (gc *CheckerManager) init() {
 	gc.initOnce.Do(func() {
 		gc.ch = make(chan struct{})
 		go gc.work()
@@ -51,7 +75,7 @@ func (gc *GroupChecker) init() {
 }
 
 // work is the main procedure logic
-func (gc *GroupChecker) work() {
+func (gc *CheckerManager) work() {
 	gc.t = time.NewTicker(gc.d)
 	defer gc.t.Stop()
 
@@ -63,8 +87,8 @@ func (gc *GroupChecker) work() {
 		}
 
 		var list []string
-		gc.lastest.Range(func(name string, ts time.Time) bool {
-			if time.Since(ts) > gc.d {
+		gc.checkers.Range(func(name string, checker *Checker) bool {
+			if time.Since(checker.lastChecked.Load().(time.Time)) > gc.d {
 				list = append(list, name)
 			}
 			return true
@@ -75,18 +99,17 @@ func (gc *GroupChecker) work() {
 	}
 }
 
-// Check updates the latest timestamp for provided name
-func (gc *GroupChecker) Check(name string) {
-	gc.lastest.Insert(name, time.Now())
+func (gc *CheckerManager) Register(name string, checker *Checker) {
+	gc.checkers.Insert(name, checker)
 }
 
 // Remove deletes name from watch list
-func (gc *GroupChecker) Remove(name string) {
-	gc.lastest.GetAndRemove(name)
+func (gc *CheckerManager) Remove(name string) {
+	gc.checkers.GetAndRemove(name)
 }
 
 // Stop closes the GroupChecker
-func (gc *GroupChecker) Stop() {
+func (gc *CheckerManager) Stop() {
 	gc.stopOnce.Do(func() {
 		close(gc.ch)
 		groups.GetAndRemove(gc.groupName)
@@ -96,12 +119,12 @@ func (gc *GroupChecker) Stop() {
 // GetGroupChecker returns the GroupChecker with related group name
 // if no exist GroupChecker has the provided name, a new instance will be created with provided params
 // otherwise the params will be ignored
-func GetGroupChecker(groupName string, duration time.Duration, fn func([]string)) *GroupChecker {
-	gc := &GroupChecker{
+func GetCheckerManger(groupName string, duration time.Duration, fn func([]string)) *CheckerManager {
+	gc := &CheckerManager{
 		groupName: groupName,
 		d:         duration,
 		fn:        fn,
-		lastest:   typeutil.NewConcurrentMap[string, time.Time](),
+		checkers:  typeutil.NewConcurrentMap[string, *Checker](),
 	}
 	gc, loaded := groups.GetOrInsert(groupName, gc)
 	if !loaded {

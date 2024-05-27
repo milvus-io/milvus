@@ -128,60 +128,54 @@ func (suite *ReaderSuite) run(dt schemapb.DataType) {
 		io.ReaderAt
 		io.Seeker
 	}
+
+	var data interface{}
 	for fieldID, fieldData := range insertData.Data {
 		dataType := fieldIDToField[fieldID].GetDataType()
+		rowNum := fieldData.RowNum()
 		switch dataType {
 		case schemapb.DataType_JSON:
-			jsonStrs := make([]string, 0, fieldData.RowNum())
-			for i := 0; i < fieldData.RowNum(); i++ {
+			jsonStrs := make([]string, 0, rowNum)
+			for i := 0; i < rowNum; i++ {
 				row := fieldData.GetRow(i)
 				jsonStrs = append(jsonStrs, string(row.([]byte)))
 			}
-			reader, err := CreateReader(jsonStrs)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
+			data = jsonStrs
 		case schemapb.DataType_BinaryVector:
-			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim/8)
-			chunkedRows := make([][dim / 8]byte, len(chunked))
+			rows := fieldData.GetRows().([]byte)
+			const rowBytes = dim / 8
+			chunked := lo.Chunk(rows, rowBytes)
+			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
 				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			reader, err := CreateReader(chunkedRows)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
+			data = chunkedRows
 		case schemapb.DataType_FloatVector:
-			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]float32), dim)
+			rows := fieldData.GetRows().([]float32)
+			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
 				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			reader, err := CreateReader(chunkedRows)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
+			data = chunkedRows
 		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
-			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim*2)
-			chunkedRows := make([][dim * 2]byte, len(chunked))
+			rows := fieldData.GetRows().([]byte)
+			const rowBytes = dim * 2
+			chunked := lo.Chunk(rows, rowBytes)
+			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
 				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			reader, err := CreateReader(chunkedRows)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
+			data = chunkedRows
 		default:
-			reader, err := CreateReader(insertData.Data[fieldID].GetRows())
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
+			data = fieldData.GetRows()
 		}
+
+		reader, err := CreateReader(data)
+		suite.NoError(err)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+			Reader: reader,
+		}, nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)
@@ -268,59 +262,54 @@ func (suite *ReaderSuite) failRun(dt schemapb.DataType, isDynamic bool) {
 		io.ReaderAt
 		io.Seeker
 	}
+
+	var data interface{}
 	for fieldID, fieldData := range insertData.Data {
 		dataType := fieldIDToField[fieldID].GetDataType()
-		if dataType == schemapb.DataType_JSON {
-			jsonStrs := make([]string, 0, fieldData.RowNum())
-			for i := 0; i < fieldData.RowNum(); i++ {
+		rowNum := fieldData.RowNum()
+		switch dataType {
+		case schemapb.DataType_JSON:
+			jsonStrs := make([]string, 0, rowNum)
+			for i := 0; i < rowNum; i++ {
 				row := fieldData.GetRow(i)
 				jsonStrs = append(jsonStrs, string(row.([]byte)))
 			}
-			reader, err := CreateReader(jsonStrs)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
-		} else if dataType == schemapb.DataType_FloatVector {
-			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]float32), dim)
+			data = jsonStrs
+		case schemapb.DataType_BinaryVector:
+			rows := fieldData.GetRows().([]byte)
+			const rowBytes = dim / 8
+			chunked := lo.Chunk(rows, rowBytes)
+			chunkedRows := make([][rowBytes]byte, len(chunked))
+			for i, innerSlice := range chunked {
+				copy(chunkedRows[i][:], innerSlice[:])
+			}
+			data = chunkedRows
+		case schemapb.DataType_FloatVector:
+			rows := fieldData.GetRows().([]float32)
+			chunked := lo.Chunk(rows, dim)
 			chunkedRows := make([][dim]float32, len(chunked))
 			for i, innerSlice := range chunked {
 				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			reader, err := CreateReader(chunkedRows)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
-		} else if dataType == schemapb.DataType_Float16Vector || dataType == schemapb.DataType_BFloat16Vector {
-			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim*2)
-			chunkedRows := make([][dim * 2]byte, len(chunked))
+			data = chunkedRows
+		case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+			rows := fieldData.GetRows().([]byte)
+			const rowBytes = dim * 2
+			chunked := lo.Chunk(rows, rowBytes)
+			chunkedRows := make([][rowBytes]byte, len(chunked))
 			for i, innerSlice := range chunked {
 				copy(chunkedRows[i][:], innerSlice[:])
 			}
-			reader, err := CreateReader(chunkedRows)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
-		} else if dataType == schemapb.DataType_BinaryVector {
-			chunked := lo.Chunk(insertData.Data[fieldID].GetRows().([]byte), dim/8)
-			chunkedRows := make([][dim / 8]byte, len(chunked))
-			for i, innerSlice := range chunked {
-				copy(chunkedRows[i][:], innerSlice[:])
-			}
-			reader, err := CreateReader(chunkedRows)
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
-		} else {
-			reader, err := CreateReader(insertData.Data[fieldID].GetRows())
-			suite.NoError(err)
-			cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
-				Reader: reader,
-			}, nil)
+			data = chunkedRows
+		default:
+			data = fieldData.GetRows()
 		}
+
+		reader, err := CreateReader(data)
+		suite.NoError(err)
+		cm.EXPECT().Reader(mock.Anything, files[fieldID]).Return(&mockReader{
+			Reader: reader,
+		}, nil)
 	}
 
 	reader, err := NewReader(context.Background(), cm, schema, lo.Values(files), math.MaxInt)

@@ -128,6 +128,9 @@ type Proxy struct {
 
 	// materialized view
 	enableMaterializedView bool
+
+	// delete rate limiter
+	enableComplexDeleteLimit bool
 }
 
 // NewProxy returns a Proxy struct.
@@ -146,7 +149,7 @@ func NewProxy(ctx context.Context, factory dependency.Factory) (*Proxy, error) {
 		factory:                factory,
 		searchResultCh:         make(chan *internalpb.SearchResults, n),
 		shardMgr:               mgr,
-		simpleLimiter:          NewSimpleLimiter(),
+		simpleLimiter:          NewSimpleLimiter(Params.QuotaConfig.AllocWaitInterval.GetAsDuration(time.Millisecond), Params.QuotaConfig.AllocRetryTimes.GetAsUint()),
 		lbPolicy:               lbPolicy,
 		resourceManager:        resourceManager,
 		replicateStreamManager: replicateStreamManager,
@@ -287,6 +290,7 @@ func (node *Proxy) Init() error {
 	node.chTicker = newChannelsTimeTicker(node.ctx, Params.ProxyCfg.TimeTickInterval.GetAsDuration(time.Millisecond)/2, []string{}, node.sched.getPChanStatistics, tsoAllocator)
 	log.Debug("create channels time ticker done", zap.String("role", typeutil.ProxyRole), zap.Duration("syncTimeTickInterval", syncTimeTickInterval))
 
+	node.enableComplexDeleteLimit = Params.QuotaConfig.ComplexDeleteLimitEnable.GetAsBool()
 	node.metricsCacheManager = metricsinfo.NewMetricsCacheManager()
 	log.Debug("create metrics cache manager done", zap.String("role", typeutil.ProxyRole))
 

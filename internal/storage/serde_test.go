@@ -160,6 +160,7 @@ func TestBinlogSerializeWriter(t *testing.T) {
 			blob, err := w.Finalize()
 			assert.NoError(t, err)
 			assert.NotNil(t, blob)
+			assert.True(t, blob.MemorySize > 0)
 			newblobs[i] = blob
 			i++
 		}

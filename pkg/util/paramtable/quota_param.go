@@ -45,6 +45,9 @@ const (
 type quotaConfig struct {
 	QuotaAndLimitsEnabled      ParamItem `refreshable:"false"`
 	QuotaCenterCollectInterval ParamItem `refreshable:"false"`
+	AllocRetryTimes            ParamItem `refreshable:"false"`
+	AllocWaitInterval          ParamItem `refreshable:"false"`
+	ComplexDeleteLimitEnable   ParamItem `refreshable:"false"`
 
 	// ddl
 	DDLLimitEnabled   ParamItem `refreshable:"true"`
@@ -2021,6 +2024,33 @@ MB/s, default no limit`,
 		Export: true,
 	}
 	p.CoolOffSpeed.Init(base.mgr)
+
+	p.AllocRetryTimes = ParamItem{
+		Key:          "quotaAndLimits.limits.allocRetryTimes",
+		Version:      "2.4.0",
+		DefaultValue: "15",
+		Doc:          `retry times when delete alloc forward data from rate limit failed`,
+		Export:       true,
+	}
+	p.AllocRetryTimes.Init(base.mgr)
+
+	p.AllocWaitInterval = ParamItem{
+		Key:          "quotaAndLimits.limits.allocWaitInterval",
+		Version:      "2.4.0",
+		DefaultValue: "1000",
+		Doc:          `retry wait duration when delete alloc forward data rate failed, in millisecond`,
+		Export:       true,
+	}
+	p.AllocWaitInterval.Init(base.mgr)
+
+	p.ComplexDeleteLimitEnable = ParamItem{
+		Key:          "quotaAndLimits.limits.complexDeleteLimitEnable",
+		Version:      "2.4.0",
+		DefaultValue: "false",
+		Doc:          `whether complex delete check forward data by limiter`,
+		Export:       true,
+	}
+	p.ComplexDeleteLimitEnable.Init(base.mgr)
 }
 
 func megaBytes2Bytes(f float64) float64 {

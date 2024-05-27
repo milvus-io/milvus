@@ -17,6 +17,7 @@
 package pipeline
 
 import (
+	"fmt"
 	"time"
 
 	"go.uber.org/zap"
@@ -45,34 +46,50 @@ func (p *pipeline) Add(nodes ...Node) {
 }
 
 func (p *pipeline) addNode(node Node) {
-	nodeCtx := newNodeCtx(node)
+	nodeCtx := NewNodeCtx(node)
 	if p.enableTtChecker {
-		nodeCtx.checker = timerecord.GetGroupChecker("fgNode", p.nodeTtInterval, func(list []string) {
+		manager := timerecord.GetCheckerManger("fgNode", p.nodeTtInterval, func(list []string) {
 			log.Warn("some node(s) haven't received input", zap.Strings("list", list), zap.Duration("duration ", p.nodeTtInterval))
 		})
+		name := fmt.Sprintf("nodeCtxTtChecker-%s", node.Name())
+		nodeCtx.Checker = timerecord.NewChecker(name, manager)
 	}
 
 	if len(p.nodes) != 0 {
-		p.nodes[len(p.nodes)-1].next = nodeCtx
+		p.nodes[len(p.nodes)-1].Next = nodeCtx
 	} else {
-		p.inputChannel = nodeCtx.inputChannel
+		p.inputChannel = nodeCtx.InputChannel
 	}
 
 	p.nodes = append(p.nodes, nodeCtx)
 }
 
 func (p *pipeline) Start() error {
-	if len(p.nodes) == 0 {
-		return ErrEmptyPipeline
-	}
-	for _, node := range p.nodes {
-		node.Start()
-	}
 	return nil
 }
 
 func (p *pipeline) Close() {
-	for _, node := range p.nodes {
-		node.Close()
+}
+
+func (p *pipeline) process() {
+	if len(p.nodes) == 0 {
+		return
+	}
+
+	curNode := p.nodes[0]
+	for curNode != nil {
+		if len(curNode.InputChannel) == 0 {
+			break
+		}
+
+		input := <-curNode.InputChannel
+		output := curNode.node.Operate(input)
+		if curNode.Checker != nil {
+			curNode.Checker.Check()
+		}
+		if curNode.Next != nil && output != nil {
+			curNode.Next.InputChannel <- output
+		}
+		curNode = curNode.Next
 	}
 }

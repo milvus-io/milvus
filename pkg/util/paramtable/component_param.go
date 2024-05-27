@@ -728,7 +728,7 @@ like the old password verification when updating the credential`,
 	p.MaxBloomFalsePositive = ParamItem{
 		Key:          "common.maxBloomFalsePositive",
 		Version:      "2.3.2",
-		DefaultValue: "0.05",
+		DefaultValue: "0.001",
 		Doc:          "max false positive rate for bloom filter",
 		Export:       true,
 	}
@@ -2357,7 +2357,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.ChunkCacheWarmingUp = ParamItem{
 		Key:          "queryNode.cache.warmup",
 		Version:      "2.3.6",
-		DefaultValue: "async",
+		DefaultValue: "off",
 		Doc: `options: async, sync, off. 
 Specifies the necessity for warming up the chunk cache. 
 1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 

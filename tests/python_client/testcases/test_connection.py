@@ -824,7 +824,7 @@ class TestConnect(TestcaseBase):
         self.connection_wrap.disconnect(alias=connect_name)
 
     @pytest.mark.tags(ct.CaseLabel.L2)
-    @pytest.mark.parametrize("protocol", ["http", "ftp", "tcp"])
+    @pytest.mark.parametrize("protocol", ["http", "tcp"])
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
     def test_parameters_with_uri_connection(self, host, port, connect_name, protocol):
         """
@@ -835,6 +835,21 @@ class TestConnect(TestcaseBase):
 
         uri = "{}://{}:{}".format(protocol, host, port)
         self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.ccr)
+
+    @pytest.mark.tags(ct.CaseLabel.L2)
+    @pytest.mark.parametrize("protocol", ["ftp"])
+    @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])
+    def test_parameters_with_invalid_uri_connection(self, host, port, connect_name, protocol):
+        """
+        target: test the uri parameter to get a normal connection
+        method: get a connection with the uri parameter
+        expected: connected is True
+        """
+
+        uri = "{}://{}:{}".format(protocol, host, port)
+        self.connection_wrap.connect(alias=connect_name, uri=uri, check_task=ct.CheckTasks.err_res,
+                                     check_items={ct.err_code: 999,
+                                                  ct.err_msg: "Open local milvus failed, dir: ftp: not exists"})
 
     @pytest.mark.tags(ct.CaseLabel.L2)
     @pytest.mark.parametrize("connect_name", [DefaultConfig.DEFAULT_USING])

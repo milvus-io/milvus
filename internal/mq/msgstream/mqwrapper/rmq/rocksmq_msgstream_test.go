@@ -240,7 +240,7 @@ func TestMqMsgStream_SeekNotSubscribed(t *testing.T) {
 			ChannelName: "b",
 		},
 	}
-	err = m.Seek(context.Background(), p)
+	err = m.Seek(context.Background(), p, false)
 	assert.Error(t, err)
 }
 
@@ -403,7 +403,7 @@ func TestStream_RmqTtMsgStream_DuplicatedIDs(t *testing.T) {
 	outputStream, _ = msgstream.NewMqTtMsgStream(context.Background(), 100, 100, rmqClient, factory.NewUnmarshalDispatcher())
 	consumerSubName = funcutil.RandomString(8)
 	outputStream.AsConsumer(ctx, consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
-	outputStream.Seek(ctx, receivedMsg.StartPositions)
+	outputStream.Seek(ctx, receivedMsg.StartPositions, false)
 	seekMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg.Msgs), 1+2)
 	assert.EqualValues(t, seekMsg.Msgs[0].BeginTs(), 1)
@@ -506,7 +506,7 @@ func TestStream_RmqTtMsgStream_Seek(t *testing.T) {
 	consumerSubName = funcutil.RandomString(8)
 	outputStream.AsConsumer(ctx, consumerChannels, consumerSubName, mqwrapper.SubscriptionPositionUnknown)
 
-	outputStream.Seek(ctx, receivedMsg3.StartPositions)
+	outputStream.Seek(ctx, receivedMsg3.StartPositions, false)
 	seekMsg := consumer(ctx, outputStream)
 	assert.Equal(t, len(seekMsg.Msgs), 3)
 	result := []uint64{14, 12, 13}
@@ -565,7 +565,7 @@ func TestStream_RMqMsgStream_SeekInvalidMessage(t *testing.T) {
 		},
 	}
 
-	err = outputStream2.Seek(ctx, p)
+	err = outputStream2.Seek(ctx, p, false)
 	assert.NoError(t, err)
 
 	for i := 10; i < 20; i++ {
