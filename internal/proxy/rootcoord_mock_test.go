@@ -447,6 +447,27 @@ func (coord *RootCoordMock) DropCollection(ctx context.Context, req *milvuspb.Dr
 	return merr.Success(), nil
 }
 
+func (coord *RootCoordMock) TruncateCollection(ctx context.Context, req *rootcoordpb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	code := coord.state.Load().(commonpb.StateCode)
+	if code != commonpb.StateCode_Healthy {
+		return &commonpb.Status{
+			ErrorCode: commonpb.ErrorCode_UnexpectedError,
+			Reason:    fmt.Sprintf("state code = %s", commonpb.StateCode_name[int32(code)]),
+		}, nil
+	}
+	coord.collMtx.Lock()
+	defer coord.collMtx.Unlock()
+
+	_, exist := coord.collName2ID[req.CollectionName]
+	if !exist {
+		return merr.Status(merr.WrapErrCollectionNotFound(req.CollectionName)), nil
+	}
+
+	// todo some thing maybe
+
+	return merr.Success(), nil
+}
+
 func (coord *RootCoordMock) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	code := coord.state.Load().(commonpb.StateCode)
 	if code != commonpb.StateCode_Healthy {

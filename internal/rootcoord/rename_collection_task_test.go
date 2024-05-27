@@ -22,9 +22,14 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/metastore/model"
+	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
+	"github.com/milvus-io/milvus/pkg/util"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 func Test_renameCollectionTask_Prepare(t *testing.T) {
@@ -55,7 +60,7 @@ func Test_renameCollectionTask_Prepare(t *testing.T) {
 
 func Test_renameCollectionTask_Execute(t *testing.T) {
 	t.Run("failed to expire cache", func(t *testing.T) {
-		core := newTestCore(withInvalidProxyManager())
+		core := newTestCore(withInvalidProxyManager(), withInvalidMeta())
 		task := &renameCollectionTask{
 			baseTask: newBaseTask(context.Background(), core),
 			Req: &milvuspb.RenameCollectionRequest{
@@ -70,6 +75,9 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 
 	t.Run("failed to rename collection", func(t *testing.T) {
 		meta := newMockMetaTable()
+		meta.GetCollectionByNameFunc = func(ctx context.Context, collectionName string, ts Timestamp) (*model.Collection, error) {
+			return nil, errors.New("cannot find the temp collection")
+		}
 		meta.RenameCollectionFunc = func(ctx context.Context, oldName string, newName string, ts Timestamp) error {
 			return errors.New("fail")
 		}
@@ -83,6 +91,30 @@ func Test_renameCollectionTask_Execute(t *testing.T) {
 				},
 			},
 		}
+		err := task.Execute(context.Background())
+		assert.Error(t, err)
+	})
+
+	t.Run("rename step refused", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(ctx context.Context, dbName string, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
+				if !util.IsTempCollection(collectionName) {
+					return nil, errors.New("mock GetCollectionByName")
+				}
+				return &model.Collection{CollectionID: int64(1)}, nil
+			})
+
+		core := newTestCore(withMeta(meta))
+		task := &renameCollectionTask{
+			baseTask: newBaseTask(context.Background(), core),
+			Req: &milvuspb.RenameCollectionRequest{
+				Base: &commonpb.MsgBase{
+					MsgType: commonpb.MsgType_RenameCollection,
+				},
+			},
+		}
+
 		err := task.Execute(context.Background())
 		assert.Error(t, err)
 	})

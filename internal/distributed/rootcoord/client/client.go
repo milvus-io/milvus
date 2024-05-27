@@ -161,6 +161,18 @@ func (c *Client) DropCollection(ctx context.Context, in *milvuspb.DropCollection
 	})
 }
 
+// TruncateCollection truncate collection
+func (c *Client) TruncateCollection(ctx context.Context, in *rootcoordpb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	in = typeutil.Clone(in)
+	commonpbutil.UpdateMsgBase(
+		in.GetBase(),
+		commonpbutil.FillMsgBaseFromClient(paramtable.GetNodeID(), commonpbutil.WithTargetID(c.grpcClient.GetNodeID())),
+	)
+	return wrapGrpcCall(ctx, c, func(client rootcoordpb.RootCoordClient) (*commonpb.Status, error) {
+		return client.TruncateCollection(ctx, in)
+	})
+}
+
 // HasCollection check collection existence
 func (c *Client) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	in = typeutil.Clone(in)

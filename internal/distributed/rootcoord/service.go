@@ -389,6 +389,11 @@ func (s *Server) DropCollection(ctx context.Context, in *milvuspb.DropCollection
 	return s.rootCoord.DropCollection(ctx, in)
 }
 
+// TruncateCollection truncates a collection
+func (s *Server) TruncateCollection(ctx context.Context, in *rootcoordpb.TruncateCollectionRequest) (*commonpb.Status, error) {
+	return s.rootCoord.TruncateCollection(ctx, in)
+}
+
 // HasCollection checks whether a collection is created
 func (s *Server) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest) (*milvuspb.BoolResponse, error) {
 	return s.rootCoord.HasCollection(ctx, in)

@@ -301,6 +301,49 @@ func (_c *DataCoordCatalog_CreateIndex_Call) RunAndReturn(run func(context.Conte
 	return _c
 }
 
+// CreateIndexes provides a mock function with given fields: ctx, index
+func (_m *DataCoordCatalog) CreateIndexes(ctx context.Context, indexes []*model.Index) error {
+	ret := _m.Called(ctx, indexes)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, []*model.Index) error); ok {
+		r0 = rf(ctx, indexes)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_CreateIndexes_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CreateIndexes'
+type DataCoordCatalog_CreateIndexes_Call struct {
+	*mock.Call
+}
+
+// CreateIndexes is a helper method to define mock.On call
+//   - ctx context.Context
+//   - index *model.Index
+func (_e *DataCoordCatalog_Expecter) CreateIndexes(ctx interface{}, indexes interface{}) *DataCoordCatalog_CreateIndexes_Call {
+	return &DataCoordCatalog_CreateIndexes_Call{Call: _e.mock.On("CreateIndexes", ctx, indexes)}
+}
+
+func (_c *DataCoordCatalog_CreateIndexes_Call) Run(run func(ctx context.Context, index *model.Index)) *DataCoordCatalog_CreateIndexes_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*model.Index))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_CreateIndexes_Call) Return(_a0 error) *DataCoordCatalog_CreateIndexes_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_CreateIndexes_Call) RunAndReturn(run func(context.Context, *model.Index) error) *DataCoordCatalog_CreateIndexes_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // CreateSegmentIndex provides a mock function with given fields: ctx, segIdx
 func (_m *DataCoordCatalog) CreateSegmentIndex(ctx context.Context, segIdx *model.SegmentIndex) error {
 	ret := _m.Called(ctx, segIdx)

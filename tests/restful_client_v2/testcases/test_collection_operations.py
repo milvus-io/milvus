@@ -1,17 +1,17 @@
 import datetime
 import logging
-import time
-from utils.util_log import test_log as logger
-from utils.utils import gen_collection_name
 import pytest
+import threading
+import time
 from api.milvus import CollectionClient
 from base.testbase import TestBase
-import threading
-from utils.utils import get_data_by_payload
 from pymilvus import (
     FieldSchema, CollectionSchema, DataType,
     Collection
 )
+from utils.util_log import test_log as logger
+from utils.utils import gen_collection_name
+from utils.utils import get_data_by_payload
 
 
 @pytest.mark.L0
@@ -103,7 +103,7 @@ class TestCreateCollection(TestBase):
             "collectionName": name,
             "dimension": dim,
             "metricType": metric_type,
-            "params":{
+            "params": {
                 "enableDynamicField": enable_dynamic_field,
                 "shardsNum": request_shards_num,
                 "consistencyLevel": f"{consistency_level}",
@@ -155,7 +155,7 @@ class TestCreateCollection(TestBase):
         payload = {
             "collectionName": name,
             "enableDynamicField": True,
-            "params":{
+            "params": {
                 "shardsNum": f"{num_shards}",
                 "partitionsNum": f"{num_partitions}",
                 "consistencyLevel": f"{consistency_level}",
@@ -202,7 +202,6 @@ class TestCreateCollection(TestBase):
         assert rsp['data']['partitionsNum'] == num_partitions
         assert rsp['data']['consistencyLevel'] == consistency_level
         assert ttl_seconds_actual == ttl_seconds
-
 
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
@@ -775,6 +774,7 @@ class TestLoadReleaseCollection(TestBase):
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['data']['loadState'] == "LoadStateNotLoad"
 
+
 @pytest.mark.L0
 class TestGetCollectionLoadState(TestBase):
 
@@ -1127,3 +1127,64 @@ class TestRenameCollection(TestBase):
         all_collections = rsp['data']
         assert new_name in all_collections
         assert name not in all_collections
+
+
+@pytest.mark.L0
+class TestTruncateCollection(TestBase):
+    @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("insert_round", [3])
+    @pytest.mark.parametrize("nb", [3000])
+    @pytest.mark.parametrize("need_load", [False, True])
+    def test_truncate_collections_default(self, dim, insert_round, nb, need_load):
+        """
+        Drop a collection with a simple schema
+        target: test drop collection with a simple schema
+        method: drop collection
+        expected: dropped collection was not in collection list
+        """
+        name = 'test_collection_' + datetime.datetime.now().strftime("%Y_%m_%d_%H_%M_%S_%f_%f")
+        collection_payload = {
+            "collectionName": name,
+            "dimension": dim,
+            "metricType": "L2"
+        }
+        count_payload = {
+            "collectionName": name,
+            "filter": " ",
+            "limit": 0,
+            "outputFields": ["count(*)"]
+        }
+        rsp = self.collection_client.collection_create(collection_payload)
+        assert rsp['code'] == 200
+        rsp = self.collection_client.collection_load(collection_name=name)
+        assert rsp['code'] == 200
+        for i in range(insert_round):
+            data = get_data_by_payload(collection_payload, nb)
+            payload = {
+                "collectionName": name,
+                "data": data,
+            }
+            rsp = self.vector_client.vector_insert(payload)
+            assert rsp['code'] == 200
+            assert rsp['data']['insertCount'] == nb
+        rsp = self.collection_client.collection_list()
+        assert name in rsp['data']
+        rsp = self.vector_client.vector_query(count_payload)
+        assert rsp['code'] == 200
+        assert rsp['data'][0]['count(*)'] == insert_round * nb
+
+        payload = {
+            "collectionName": name,
+            "needLoad": need_load,
+        }
+        rsp = self.collection_client.collection_truncate(payload)
+        assert rsp['code'] == 200
+
+        rsp = self.collection_client.collection_list()
+        assert name in rsp['data']
+        if need_load == False:
+            rsp = self.collection_client.collection_load(collection_name=name)
+            assert rsp['code'] == 200
+        rsp = self.vector_client.vector_query(count_payload)
+        assert rsp['code'] == 200
+        assert rsp['data'][0]['count(*)'] == 0

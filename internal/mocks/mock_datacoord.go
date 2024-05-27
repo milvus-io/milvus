@@ -2167,6 +2167,72 @@ func (_c *MockDataCoord_ListIndexes_Call) RunAndReturn(run func(context.Context,
 	return _c
 }
 
+func (_m *MockDataCoord) CreateIndexesForTemp(_a0 context.Context, _a1 *indexpb.CollectionWithTempRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+// MockDataCoord_CreateIndexesForTemp_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListIndexes'
+type MockDataCoord_CreateIndexesForTemp_Call struct {
+	*mock.Call
+}
+
+// ListIndexes is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.CollectionWithTempRequest
+func (_e *MockDataCoord_Expecter) CreateIndexesForTemp(_a0 interface{}, _a1 interface{}) *MockDataCoord_CreateIndexesForTemp_Call {
+	return &MockDataCoord_CreateIndexesForTemp_Call{Call: _e.mock.On("ListIndexes", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_CreateIndexesForTemp_Call) Run(run func(_a0 context.Context, _a1 *indexpb.CollectionWithTempRequest)) *MockDataCoord_CreateIndexesForTemp_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.CollectionWithTempRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_CreateIndexesForTemp_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_CreateIndexesForTemp_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_CreateIndexesForTemp_Call) RunAndReturn(run func(context.Context, *indexpb.CollectionWithTempRequest) (*commonpb.Status, error)) *MockDataCoord_CreateIndexesForTemp_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+func (_m *MockDataCoord) DropIndexesForTemp(_a0 context.Context, _a1 *indexpb.CollectionWithTempRequest) (*commonpb.Status, error) {
+	return &commonpb.Status{}, nil
+}
+
+// MockDataCoord_DropIndexesForTemp_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListIndexes'
+type MockDataCoord_DropIndexesForTemp_Call struct {
+	*mock.Call
+}
+
+// ListIndexes is a helper method to define mock.On call
+//   - _a0 context.Context
+//   - _a1 *indexpb.CollectionWithTempRequest
+func (_e *MockDataCoord_Expecter) DropIndexesForTemp(_a0 interface{}, _a1 interface{}) *MockDataCoord_DropIndexesForTemp_Call {
+	return &MockDataCoord_DropIndexesForTemp_Call{Call: _e.mock.On("ListIndexes", _a0, _a1)}
+}
+
+func (_c *MockDataCoord_DropIndexesForTemp_Call) Run(run func(_a0 context.Context, _a1 *indexpb.CollectionWithTempRequest)) *MockDataCoord_DropIndexesForTemp_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.CollectionWithTempRequest))
+	})
+	return _c
+}
+
+func (_c *MockDataCoord_DropIndexesForTemp_Call) Return(_a0 *commonpb.Status, _a1 error) *MockDataCoord_DropIndexesForTemp_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *MockDataCoord_DropIndexesForTemp_Call) RunAndReturn(run func(context.Context, *indexpb.CollectionWithTempRequest) (*commonpb.Status, error)) *MockDataCoord_DropIndexesForTemp_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // ManualCompaction provides a mock function with given fields: _a0, _a1
 func (_m *MockDataCoord) ManualCompaction(_a0 context.Context, _a1 *milvuspb.ManualCompactionRequest) (*milvuspb.ManualCompactionResponse, error) {
 	ret := _m.Called(_a0, _a1)

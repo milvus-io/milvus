@@ -18,6 +18,7 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"testing"
 
@@ -1998,5 +1999,83 @@ func TestMetaTable_DropDatabase(t *testing.T) {
 		assert.NoError(t, err)
 		assert.False(t, mt.names.exist("not_commit"))
 		assert.False(t, mt.aliases.exist("not_commit"))
+	})
+}
+
+func TestMetaTable_TempCollection(t *testing.T) {
+	testCollectionName := "test"
+	testAliasName := "aliastest"
+	testCollectionID := int64(100)
+	catalog := mocks.NewRootCoordCatalog(t)
+	catalog.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, dbID int64, collectionName string, ts uint64) (*model.Collection, error) {
+			if util.IsTempCollection(collectionName) {
+				return nil, errors.New("mock error")
+			}
+			return &model.Collection{DBID: util.DefaultDBID, CollectionID: testCollectionID, Name: collectionName}, nil
+		}).Once()
+	catalog.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, dbID int64, collectionName string, ts uint64) (*model.Collection, error) {
+			if util.IsTempCollection(collectionName) {
+				return &model.Collection{DBID: util.DefaultDBID, CollectionID: testCollectionID - 1, Name: collectionName}, nil
+			}
+			return nil, errors.New("mock error")
+		}).Twice()
+	catalog.EXPECT().GetCollectionByName(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, dbID int64, collectionName string, ts uint64) (*model.Collection, error) {
+			if util.IsTempCollection(collectionName) {
+				return &model.Collection{DBID: util.DefaultDBID, CollectionID: testCollectionID - 1, Name: collectionName}, nil
+			}
+			return &model.Collection{DBID: util.DefaultDBID, CollectionID: testCollectionID, Name: collectionName}, nil
+		}).Times(4)
+	catalog.EXPECT().ExchangeCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+	catalog.EXPECT().ExchangeCollections(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+	meta := &MetaTable{
+		catalog: catalog,
+		dbName2Meta: map[string]*model.Database{
+			util.DefaultDBName: {Name: util.DefaultDBName, ID: util.DefaultDBID},
+		},
+		collID2Meta: map[typeutil.UniqueID]*model.Collection{
+			testCollectionID:     {Name: testCollectionName, CollectionID: testCollectionID, DBID: util.DefaultDBID, State: pb.CollectionState_CollectionCreated},
+			testCollectionID - 1: {Name: util.GenerateTempCollectionName(testCollectionName), CollectionID: testCollectionID - 1, DBID: util.DefaultDBID, State: pb.CollectionState_CollectionDropping},
+		},
+		names:   newNameDb(),
+		aliases: newNameDb(),
+	}
+	t.Run("get temp collection fail", func(t *testing.T) {
+		_, _, err := meta.ReplaceCollectionWithTemp(context.TODO(), "", testAliasName, typeutil.MaxTimestamp-1)
+		assert.Error(t, err)
+	})
+	t.Run("get collection fail", func(t *testing.T) {
+		_, _, err := meta.ReplaceCollectionWithTemp(context.TODO(), "", testAliasName, typeutil.MaxTimestamp-1)
+		assert.Error(t, err)
+	})
+	t.Run("truncate alias", func(t *testing.T) {
+		meta.aliases.insert(util.DefaultDBName, testAliasName, testCollectionID)
+		_, _, err := meta.ReplaceCollectionWithTemp(context.TODO(), "", testAliasName, typeutil.MaxTimestamp-1)
+		assert.Error(t, err)
+		assert.Equal(t, fmt.Sprintf("unsupported use a alias to truncate collection, alias:%s", testAliasName), err.Error())
+		meta.aliases.remove(util.DefaultDBName, testAliasName)
+	})
+	t.Run("alter alias while truncating", func(t *testing.T) {
+		meta.aliases.insert(util.DefaultDBName, testAliasName, testCollectionID)
+		meta.names.insert(util.DefaultDBName, testCollectionName, testCollectionID)
+		meta.names.insert(util.DefaultDBName, util.GenerateTempCollectionName(testCollectionName), testCollectionID-1)
+		err := meta.AlterAlias(context.TODO(), "", testAliasName, testCollectionName, typeutil.MaxTimestamp-1)
+		assert.Error(t, err)
+		assert.Equal(t, "cannot alter collection while truncate the collection", err.Error())
+		meta.aliases.remove(util.DefaultDBName, testAliasName)
+		meta.names.remove(util.DefaultDBName, testCollectionName)
+		meta.names.remove(util.DefaultDBName, util.GenerateTempCollectionName(testCollectionName))
+	})
+	t.Run("truncate fail", func(t *testing.T) {
+		_, _, err := meta.ReplaceCollectionWithTemp(context.TODO(), "", testCollectionName, typeutil.MaxTimestamp-1)
+		assert.Error(t, err)
+	})
+	t.Run("truncate success", func(t *testing.T) {
+		meta.aliases.insert(util.DefaultDBName, testAliasName, testCollectionID)
+		_, _, err := meta.ReplaceCollectionWithTemp(context.TODO(), "", testCollectionName, typeutil.MaxTimestamp-1)
+		assert.NoError(t, err)
+		meta.aliases.remove(util.DefaultDBName, testAliasName)
 	})
 }

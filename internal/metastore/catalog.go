@@ -80,6 +80,8 @@ type RootCoordCatalog interface {
 	// For example []string{"user1/role1"}
 	ListUserRole(ctx context.Context, tenant string) ([]string, error)
 
+	ExchangeCollections(ctx context.Context, collections []*model.Collection, aliases []*model.Alias, ts typeutil.Timestamp) error
+
 	Close()
 }
 
@@ -128,6 +130,7 @@ type DataCoordCatalog interface {
 	DropChannelCheckpoint(ctx context.Context, vChannel string) error
 
 	CreateIndex(ctx context.Context, index *model.Index) error
+	CreateIndexes(ctx context.Context, indexes []*model.Index) error
 	ListIndexes(ctx context.Context) ([]*model.Index, error)
 	AlterIndexes(ctx context.Context, newIndexes []*model.Index) error
 	DropIndex(ctx context.Context, collID, dropIdxID typeutil.UniqueID) error

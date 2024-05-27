@@ -122,6 +122,10 @@ func (m *GrpcRootCoordClient) DropCollection(ctx context.Context, in *milvuspb.D
 	return &commonpb.Status{}, m.Err
 }
 
+func (m *GrpcRootCoordClient) TruncateCollection(ctx context.Context, in *rootcoordpb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
+
 func (m *GrpcRootCoordClient) HasCollection(ctx context.Context, in *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	return &milvuspb.BoolResponse{}, m.Err
 }

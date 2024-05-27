@@ -489,3 +489,11 @@ func (s *Server) ListImports(ctx context.Context, in *internalpb.ListImportsRequ
 func (s *Server) ListIndexes(ctx context.Context, in *indexpb.ListIndexesRequest) (*indexpb.ListIndexesResponse, error) {
 	return s.dataCoord.ListIndexes(ctx, in)
 }
+
+func (s *Server) CreateIndexesForTemp(ctx context.Context, in *indexpb.CollectionWithTempRequest) (*commonpb.Status, error) {
+	return s.dataCoord.CreateIndexesForTemp(ctx, in)
+}
+
+func (s *Server) DropIndexesForTemp(ctx context.Context, in *indexpb.CollectionWithTempRequest) (*commonpb.Status, error) {
+	return s.dataCoord.DropIndexesForTemp(ctx, in)
+}

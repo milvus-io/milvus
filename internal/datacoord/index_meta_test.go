@@ -324,6 +324,46 @@ func TestMeta_CreateIndex(t *testing.T) {
 	})
 }
 
+func TestMeta_CreateIndexes(t *testing.T) {
+	ctx := context.Background()
+	indexParams := []*commonpb.KeyValuePair{
+		{
+			Key:   common.IndexTypeKey,
+			Value: "FLAT",
+		},
+	}
+	index := &model.Index{
+		TenantID:     "",
+		CollectionID: 1,
+		FieldID:      2,
+		IndexID:      3,
+		IndexName:    "_default_idx",
+		IsDeleted:    false,
+		CreateTime:   12,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: "128",
+			},
+		},
+		IndexParams:     indexParams,
+		IsAutoIndex:     false,
+		UserIndexParams: indexParams,
+	}
+	t.Run("indexMeta with mock catalog", func(t *testing.T) {
+		sc := catalogmocks.NewDataCoordCatalog(t)
+		sc.EXPECT().CreateIndexes(mock.Anything, mock.Anything).Return(nil).Once()
+		sc.EXPECT().CreateIndexes(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		m := newSegmentIndexMeta(sc)
+		err := m.CreateIndexes(ctx, []*model.Index{})
+		assert.NoError(t, err)
+		err = m.CreateIndexes(ctx, []*model.Index{index})
+		assert.NoError(t, err)
+		err = m.CreateIndexes(ctx, []*model.Index{index})
+		assert.Error(t, err)
+	})
+}
+
 func TestMeta_AddSegmentIndex(t *testing.T) {
 	sc := catalogmocks.NewDataCoordCatalog(t)
 	sc.On("CreateSegmentIndex",
@@ -636,10 +676,7 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 		mock.Anything,
 	).Return(nil)
 	ec := catalogmocks.NewDataCoordCatalog(t)
-	ec.On("AlterIndexes",
-		mock.Anything,
-		mock.Anything,
-	).Return(errors.New("fail"))
+	ec.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(errors.New("mock error")).Twice()
 
 	m := newSegmentIndexMeta(sc)
 	m.indexes = map[UniqueID]map[UniqueID]*model.Index{
@@ -676,6 +713,8 @@ func TestMeta_MarkIndexAsDeleted(t *testing.T) {
 	t.Run("fail", func(t *testing.T) {
 		m.catalog = ec
 		err := m.MarkIndexAsDeleted(collID, []UniqueID{indexID, indexID + 1, indexID + 2})
+		assert.Error(t, err)
+		err = m.AlterIndex(context.Background(), &model.Index{})
 		assert.Error(t, err)
 	})
 
@@ -1343,4 +1382,91 @@ func TestIndexMeta_GetUnindexedSegments(t *testing.T) {
 	// no index
 	unindexed = m.indexMeta.GetUnindexedSegments(collID+1, segmentIDs)
 	assert.Equal(t, 0, len(unindexed))
+}
+
+func TestMeta_TempCollectionIndexes(t *testing.T) {
+	indexParams := []*commonpb.KeyValuePair{
+		{
+			Key:   common.IndexTypeKey,
+			Value: "FLAT",
+		},
+	}
+	index := &model.Index{
+		TenantID:     "",
+		CollectionID: 1,
+		FieldID:      1,
+		IndexID:      1,
+		IndexName:    "_default_idx",
+		IsDeleted:    false,
+		CreateTime:   12,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: "128",
+			},
+		},
+		IndexParams:     indexParams,
+		IsAutoIndex:     false,
+		UserIndexParams: indexParams,
+	}
+	guardIndex := &model.Index{
+		TenantID:     "",
+		CollectionID: 1,
+		IndexID:      int64(0),
+		IsDeleted:    true,
+	}
+
+	t.Run("refuse ddl while temp collection exists", func(t *testing.T) {
+		sc := catalogmocks.NewDataCoordCatalog(t)
+		sc.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(nil).Twice()
+		sc.EXPECT().DropIndex(mock.Anything, mock.Anything, mock.Anything).Return(nil).Twice()
+		sc.EXPECT().AlterIndexes(mock.Anything, mock.Anything).Return(nil).Twice()
+
+		m := newSegmentIndexMeta(sc)
+		err := m.CreateIndex(index)
+		assert.NoError(t, err)
+		err = m.CreateIndex(guardIndex)
+		assert.NoError(t, err)
+
+		allIndexes, ok := m.indexes[index.CollectionID]
+		assert.Equal(t, true, ok)
+		assert.Equal(t, 2, len(allIndexes))
+		assert.Equal(t, int64(1), allIndexes[0].IndexID+allIndexes[1].IndexID)
+
+		indexes := m.GetIndexesForCollection(index.CollectionID, "")
+		assert.Equal(t, 1, len(indexes))
+		assert.Equal(t, index.IndexID, indexes[0].IndexID)
+
+		err = m.CreateIndex(index)
+		assert.Error(t, err)
+		err = m.CreateIndexes(context.Background(), []*model.Index{index})
+		assert.Error(t, err)
+		err = m.AlterIndex(m.ctx, index)
+		assert.Error(t, err)
+		err = m.MarkIndexAsDeleted(index.CollectionID, []int64{index.IndexID})
+		assert.Error(t, err)
+		err = m.RemoveIndex(index.CollectionID, index.IndexID)
+		assert.Error(t, err)
+
+		err = m.RemoveIndex(guardIndex.CollectionID, guardIndex.IndexID)
+		assert.NoError(t, err)
+		allIndexes, ok = m.indexes[index.CollectionID]
+		assert.Equal(t, true, ok)
+		assert.Equal(t, 1, len(allIndexes))
+
+		err = m.AlterIndex(m.ctx, index)
+		assert.NoError(t, err)
+		err = m.MarkIndexAsDeleted(index.CollectionID, []int64{index.IndexID})
+		assert.NoError(t, err)
+		allIndexes, ok = m.indexes[index.CollectionID]
+		assert.Equal(t, true, ok)
+		assert.Equal(t, 1, len(allIndexes))
+		indexes = m.GetIndexesForCollection(index.CollectionID, "")
+		assert.Equal(t, 0, len(indexes))
+
+		err = m.RemoveIndex(index.CollectionID, index.IndexID)
+		assert.NoError(t, err)
+		_, ok = m.indexes[index.CollectionID]
+		assert.Equal(t, false, ok)
+	})
 }

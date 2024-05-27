@@ -58,6 +58,7 @@ type Broker interface {
 	GcConfirm(ctx context.Context, collectionID, partitionID UniqueID) bool
 
 	DropCollectionIndex(ctx context.Context, collID UniqueID, partIDs []UniqueID) error
+	DropTempCollectionIndexes(ctx context.Context, collID UniqueID, tempCollID UniqueID) error
 	// notify observer to clean their meta cache
 	BroadcastAlteredCollection(ctx context.Context, req *milvuspb.AlterCollectionRequest) error
 }
@@ -205,6 +206,25 @@ func (b *ServerBroker) DropCollectionIndex(ctx context.Context, collID UniqueID,
 
 	log.Ctx(ctx).Info("done to drop collection index", zap.Int64("collection", collID), zap.Int64s("partitions", partIDs))
 
+	return nil
+}
+
+func (b *ServerBroker) DropTempCollectionIndexes(ctx context.Context, collectionID UniqueID, tempCollectionID UniqueID) error {
+	log := log.Ctx(ctx).With(zap.Int64("collectionID", collectionID), zap.Int64("tempCollectionID", tempCollectionID))
+	log.Info("dropping temp collection's indexes")
+	rsp, err := b.s.dataCoord.DropIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{
+		TempCollectionID: tempCollectionID,
+		CollectionID:     collectionID,
+	})
+	if err != nil {
+		log.Warn("drop temp collection's indexes failed", zap.Error(err))
+		return err
+	}
+	if rsp.ErrorCode != commonpb.ErrorCode_Success {
+		log.Warn("drop temp collection's indexes failed", zap.String("error", rsp.Reason))
+		return fmt.Errorf(rsp.Reason)
+	}
+	log.Info("done to drop temp collection's indexes")
 	return nil
 }
 

@@ -2271,3 +2271,87 @@ func Test_ListIndexes(t *testing.T) {
 	_, err = client.ListIndexes(ctx, &indexpb.ListIndexesRequest{})
 	assert.ErrorIs(t, err, context.Canceled)
 }
+
+func Test_CreateIndexesForTemp(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockDC)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().CreateIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	_, err = client.CreateIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CreateIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	rsp, err := client.CreateIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().CreateIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), mockErr)
+	_, err = client.CreateIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.CreateIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func Test_DropIndexesForTemp(t *testing.T) {
+	paramtable.Init()
+	ctx := context.Background()
+	client, err := NewClient(ctx)
+	assert.NoError(t, err)
+	assert.NotNil(t, client)
+	defer client.Close()
+
+	mockDC := mocks.NewMockDataCoordClient(t)
+	mockGrpcClient := mocks.NewMockGrpcClient[datapb.DataCoordClient](t)
+	mockGrpcClient.EXPECT().Close().Return(nil)
+	mockGrpcClient.EXPECT().ReCall(mock.Anything, mock.Anything).RunAndReturn(func(ctx context.Context, f func(datapb.DataCoordClient) (interface{}, error)) (interface{}, error) {
+		return f(mockDC)
+	})
+	client.(*Client).grpcClient = mockGrpcClient
+
+	// test success
+	mockDC.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+	_, err = client.DropIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.Nil(t, err)
+
+	// test return error status
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
+	rsp, err := client.DropIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.NotEqual(t, int32(0), rsp.GetCode())
+	assert.Nil(t, err)
+
+	// test return error
+	mockDC.ExpectedCalls = nil
+	mockDC.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), mockErr)
+	_, err = client.DropIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.NotNil(t, err)
+
+	// test ctx done
+	ctx, cancel := context.WithTimeout(ctx, 10*time.Millisecond)
+	defer cancel()
+	time.Sleep(20 * time.Millisecond)
+	_, err = client.DropIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+	assert.ErrorIs(t, err, context.DeadlineExceeded)
+}

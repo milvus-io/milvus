@@ -28,13 +28,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
+	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/proto/proxypb"
+	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
 	mockrootcoord "github.com/milvus-io/milvus/internal/rootcoord/mocks"
 	"github.com/milvus-io/milvus/internal/util/dependency"
@@ -1948,4 +1952,567 @@ func (s *RootCoordSuite) TestRestore() {
 
 func TestRootCoordSuite(t *testing.T) {
 	suite.Run(t, new(RootCoordSuite))
+}
+
+func TestRootCoord_TruncateCollectionConcurrent(t *testing.T) {
+	collInfo, ticker := prepareColl()
+	t.Run("clear before create indexes for temp collection", func(t *testing.T) {
+		finishCh := make(chan struct{}, 1)
+		exitCh := make(chan struct{}, 1)
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		gc := newMockGarbageCollector()
+		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+			return 0, nil
+		}
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = collInfo
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		dc := &mocks.MockDataCoordClient{}
+		dc.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		dc.EXPECT().CreateIndexesForTemp(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(context.Context, *indexpb.CollectionWithTempRequest, ...grpc.CallOption) (*commonpb.Status, error) {
+				<-finishCh
+				return merr.Status(errors.New("mock error")), nil
+			})
+		c := newTestCore(withHealthyCode(), withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withDataCoord(dc), withMeta(meta), withGarbageCollector(gc), withTtSynchronizer(ticker))
+		ctx := context.Background()
+		go func() {
+			resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false, NeedLoad: true})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+			exitCh <- struct{}{}
+		}()
+		time.Sleep(time.Second)
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: true})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		finishCh <- struct{}{}
+		<-exitCh
+	})
+	t.Run("clear before load temp collection", func(t *testing.T) {
+		finishCh := make(chan struct{}, 1)
+		exitCh := make(chan struct{}, 1)
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+			func(context.Context, *querypb.LoadCollectionRequest, ...grpc.CallOption) (*commonpb.Status, error) {
+				<-finishCh
+				return merr.Status(errors.New("mock error")), nil
+			})
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		gc := newMockGarbageCollector()
+		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+			return 0, nil
+		}
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = collInfo
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		dc := &mocks.MockDataCoordClient{}
+		dc.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		dc.EXPECT().CreateIndexesForTemp(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		c := newTestCore(withHealthyCode(), withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withDataCoord(dc), withMeta(meta), withGarbageCollector(gc), withTtSynchronizer(ticker))
+		ctx := context.Background()
+		go func() {
+			resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false, NeedLoad: true})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+			exitCh <- struct{}{}
+		}()
+		time.Sleep(time.Second)
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: true})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		finishCh <- struct{}{}
+		<-exitCh
+	})
+	t.Run("clear before add truncate collection task", func(t *testing.T) {
+		finishCh := make(chan struct{}, 1)
+		exitCh := make(chan struct{}, 1)
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		gc := newMockGarbageCollector()
+		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+			return 0, nil
+		}
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = collInfo
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *truncateCollectionTask:
+				<-finishCh
+				return errors.New("mock error")
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		dc := &mocks.MockDataCoordClient{}
+		dc.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		dc.EXPECT().CreateIndexesForTemp(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		c := newTestCore(withHealthyCode(), withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withDataCoord(dc), withMeta(meta), withGarbageCollector(gc), withTtSynchronizer(ticker))
+		ctx := context.Background()
+		go func() {
+			resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false, NeedLoad: true})
+			assert.NoError(t, err)
+			assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+			exitCh <- struct{}{}
+		}()
+		time.Sleep(time.Second)
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: true})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+		finishCh <- struct{}{}
+		<-exitCh
+	})
+}
+
+func TestRootCoord_DropTempCollectionAsync(t *testing.T) {
+	collectionName := funcutil.GenRandomStr()
+	ctx := context.Background()
+	t.Run("failed to add task", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched))
+		resp, err := core.dropCollectionForTemp(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		}, 0, 0)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("failed to execute task", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch t.(type) {
+			case *dropTempCollectionTask:
+				t.NotifyDone(errors.New("error mock AddTask"))
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched))
+		resp, err := core.dropCollectionForTemp(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		}, 0, 0)
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("normal async case", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch t.(type) {
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched))
+		resp, err := core.dropCollectionForTemp(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		}, 0, int64(1))
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_TruncateCollection(t *testing.T) {
+	t.Run("not healthy", func(t *testing.T) {
+		c := newTestCore(withAbnormalCode())
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: true})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("add copy task fail", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withInvalidScheduler())
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("execute copy task fail", func(t *testing.T) {
+		c := newTestCore(withHealthyCode(), withTaskFailScheduler())
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("invalid dataCoord", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = &model.Collection{CollectionID: int64(0)}
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		c := newTestCore(withHealthyCode(), withScheduler(sched), withInvalidDataCoord())
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("invalid queryCoord", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = &model.Collection{CollectionID: int64(0)}
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		c := newTestCore(withHealthyCode(), withScheduler(sched), withValidDataCoord(), withQueryCoord(qc))
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false, NeedLoad: true})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("add truncate task fail", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = &model.Collection{CollectionID: int64(0)}
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *truncateCollectionTask:
+				return errors.New("mock error")
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		c := newTestCore(withHealthyCode(), withScheduler(sched), withValidDataCoord(), withQueryCoord(qc))
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false, NeedLoad: true})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("execute truncate task fail", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = &model.Collection{CollectionID: int64(0)}
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *truncateCollectionTask:
+				t.NotifyDone(errors.New("mock error"))
+				return nil
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		c := newTestCore(withHealthyCode(), withScheduler(sched), withValidDataCoord(), withQueryCoord(qc))
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false, NeedLoad: true})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("execute truncate task success", func(t *testing.T) {
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *copyCollectionTask:
+				ct.collInfo = &model.Collection{CollectionID: int64(0)}
+				ct.collectionID = int64(1)
+				t.NotifyDone(nil)
+				return nil
+			case *truncateCollectionTask:
+				ct.tempCollectionID = int64(1)
+				ct.collectionID = int64(0)
+				t.NotifyDone(nil)
+				return nil
+			case *dropTempCollectionTask:
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().LoadCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		c := newTestCore(withHealthyCode(), withScheduler(sched), withValidDataCoord(), withQueryCoord(qc))
+		ctx := context.Background()
+		resp, err := c.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{Clear: false, NeedLoad: true})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+}
+
+func TestRootCoord_DropTempCollectionSync(t *testing.T) {
+	collectionName := funcutil.GenRandomStr()
+	ctx := context.Background()
+	collInfo, ticker := prepareColl()
+	t.Run("failed to add task", func(t *testing.T) {
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withTtSynchronizer(ticker))
+		resp, err := core.dropCollectionForTempSync(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("failed to execute task", func(t *testing.T) {
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch t.(type) {
+			case *markTempCollectionAsDeleteTask:
+				t.NotifyDone(errors.New("error mock AddTask"))
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withTtSynchronizer(ticker))
+		resp, err := core.dropCollectionForTempSync(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("failed to release collection", func(t *testing.T) {
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withTtSynchronizer(ticker))
+		resp, err := core.dropCollectionForTempSync(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("failed to drop temp collection indexes", func(t *testing.T) {
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		dc := &mocks.MockDataCoordClient{}
+		dc.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(nil, errors.New("mock error"))
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withDataCoord(dc), withTtSynchronizer(ticker))
+		resp, err := core.dropCollectionForTempSync(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		})
+
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("failed to drop collection data fail", func(t *testing.T) {
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		dc := &mocks.MockDataCoordClient{}
+		dc.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		gc := newMockGarbageCollector()
+		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+			return 0, errors.New("mock error")
+		}
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withDataCoord(dc), withGarbageCollector(gc), withTtSynchronizer(ticker))
+		resp, err := core.dropCollectionForTempSync(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("failed to remove temp collection metadata", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveCollection(mock.Anything, mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		dc := &mocks.MockDataCoordClient{}
+		dc.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		gc := newMockGarbageCollector()
+		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+			return 0, nil
+		}
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withDataCoord(dc), withMeta(meta), withGarbageCollector(gc), withTtSynchronizer(ticker))
+		resp, err := core.dropCollectionForTempSync(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.NotEqual(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
+	t.Run("normal case sync", func(t *testing.T) {
+		meta := mockrootcoord.NewIMetaTable(t)
+		meta.EXPECT().RemoveCollection(mock.Anything, mock.Anything, mock.Anything).Return(nil).Once()
+		qc := &mocks.MockQueryCoordClient{}
+		qc.EXPECT().ReleaseCollection(mock.Anything, mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		dc := &mocks.MockDataCoordClient{}
+		dc.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		gc := newMockGarbageCollector()
+		gc.GcCollectionDataFunc = func(ctx context.Context, coll *model.Collection) (Timestamp, error) {
+			return 0, nil
+		}
+		sched := newMockScheduler()
+		sched.AddTaskFunc = func(t task) error {
+			switch ct := t.(type) {
+			case *markTempCollectionAsDeleteTask:
+				ct.CollectionIDs = &indexpb.CollectionWithTempRequest{
+					CollectionID:     int64(1),
+					TempCollectionID: int64(0),
+				}
+				ct.collInfo = collInfo
+				t.NotifyDone(nil)
+				return nil
+			}
+			return errors.New("error mock AddTask")
+		}
+		core := newTestCore(withHealthyCode(), withValidProxyManager(), withScheduler(sched), withQueryCoord(qc), withDataCoord(dc), withMeta(meta), withGarbageCollector(gc), withTtSynchronizer(ticker))
+		resp, err := core.TruncateCollection(ctx, &rootcoordpb.TruncateCollectionRequest{
+			Clear:          true,
+			Base:           &commonpb.MsgBase{MsgType: commonpb.MsgType_DropCollection},
+			CollectionName: collectionName,
+		})
+		assert.NoError(t, err)
+		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetErrorCode())
+	})
 }

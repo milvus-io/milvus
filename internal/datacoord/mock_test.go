@@ -419,6 +419,10 @@ func (m *mockRootCoordClient) DropCollection(ctx context.Context, req *milvuspb.
 	panic("not implemented") // TODO: Implement
 }
 
+func (m *mockRootCoordClient) TruncateCollection(ctx context.Context, req *rootcoordpb.TruncateCollectionRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	panic("not implemented") // TODO: Implement
+}
+
 func (m *mockRootCoordClient) HasCollection(ctx context.Context, req *milvuspb.HasCollectionRequest, opts ...grpc.CallOption) (*milvuspb.BoolResponse, error) {
 	panic("not implemented") // TODO: Implement
 }

@@ -23,6 +23,7 @@ const (
 	DescribeAction       = "describe"
 	CreateAction         = "create"
 	DropAction           = "drop"
+	TruncateAction       = "truncate"
 	StatsAction          = "get_stats"
 	LoadStateAction      = "get_load_state"
 	RenameAction         = "rename"

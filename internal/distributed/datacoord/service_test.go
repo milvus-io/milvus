@@ -319,6 +319,20 @@ func Test_NewServer(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, merr.Ok(ret.GetStatus()))
 	})
+
+	t.Run("CreateIndexesForTemp", func(t *testing.T) {
+		mockDataCoord.EXPECT().CreateIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		ret, err := server.CreateIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(ret))
+	})
+
+	t.Run("DropIndexesForTemp", func(t *testing.T) {
+		mockDataCoord.EXPECT().DropIndexesForTemp(mock.Anything, mock.Anything).Return(merr.Success(), nil)
+		ret, err := server.DropIndexesForTemp(ctx, &indexpb.CollectionWithTempRequest{})
+		assert.NoError(t, err)
+		assert.True(t, merr.Ok(ret))
+	})
 }
 
 func Test_Run(t *testing.T) {

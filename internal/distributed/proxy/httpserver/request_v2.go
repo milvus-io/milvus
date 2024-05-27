@@ -55,6 +55,15 @@ type RenameCollectionReq struct {
 
 func (req *RenameCollectionReq) GetDbName() string { return req.DbName }
 
+type TruncateCollectionReq struct {
+	DbName         string `json:"dbName"`
+	CollectionName string `json:"collectionName" binding:"required"`
+	NeedLoad       bool   `json:"needLoad"`
+	Clear          bool   `json:"clear"`
+}
+
+func (req *TruncateCollectionReq) GetDbName() string { return req.DbName }
+
 type PartitionReq struct {
 	// CollectionNameReq
 	DbName         string `json:"dbName"`

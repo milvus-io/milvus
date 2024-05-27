@@ -27,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 type alterCollectionTask struct {
@@ -46,6 +47,13 @@ func (a *alterCollectionTask) Execute(ctx context.Context) error {
 	// Now we only support alter properties of collection
 	if a.Req.GetProperties() == nil {
 		return errors.New("only support alter collection properties, but collection properties is empty")
+	}
+
+	_, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), util.GenerateTempCollectionName(a.Req.GetCollectionName()), a.ts)
+	if err == nil {
+		log.Ctx(ctx).Info("cannot alter collection while truncate the collection", zap.String("dbName", a.Req.GetDbName()),
+			zap.String("collectionName", a.Req.GetCollectionName()), zap.Uint64("ts", a.ts))
+		return fmt.Errorf("cannot alter collection while truncate the collection")
 	}
 
 	oldColl, err := a.core.meta.GetCollectionByName(ctx, a.Req.GetDbName(), a.Req.GetCollectionName(), a.ts)

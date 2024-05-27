@@ -18,10 +18,15 @@ package rootcoord
 
 import (
 	"context"
+	"fmt"
+
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
+	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util"
 )
 
 type renameCollectionTask struct {
@@ -37,6 +42,12 @@ func (t *renameCollectionTask) Prepare(ctx context.Context) error {
 }
 
 func (t *renameCollectionTask) Execute(ctx context.Context) error {
+	_, err := t.core.meta.GetCollectionByName(ctx, t.Req.GetDbName(), util.GenerateTempCollectionName(t.Req.GetOldName()), t.ts)
+	if err == nil {
+		log.Info("cannot alter collection while truncate the collection", zap.String("dbName", t.Req.GetDbName()),
+			zap.String("collectionName", t.Req.GetOldName()), zap.Uint64("ts", t.ts))
+		return fmt.Errorf("cannot alter collection while truncate the collection")
+	}
 	if err := t.core.ExpireMetaCache(ctx, t.Req.GetDbName(), []string{t.Req.GetOldName()}, InvalidCollectionID, "", t.GetTs(), proxyutil.SetMsgType(commonpb.MsgType_RenameCollection)); err != nil {
 		return err
 	}
