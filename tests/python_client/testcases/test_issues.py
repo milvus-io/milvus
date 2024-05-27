@@ -11,9 +11,8 @@ import pytest
 class TestIssues(TestcaseBase):
     @pytest.mark.tags(CaseLabel.L0)
     @pytest.mark.parametrize("par_key_field", [ct.default_int64_field_name])
-    @pytest.mark.parametrize("index_on_par_key_field", [True])
     @pytest.mark.parametrize("use_upsert", [True, False])
-    def test_issue_30607(self, par_key_field, index_on_par_key_field, use_upsert):
+    def test_issue_30607(self, par_key_field, use_upsert):
         """
         Method：
         1. create a collection with partition key on collection schema with customized num_partitions
@@ -50,27 +49,30 @@ class TestIssues(TestcaseBase):
         num_entities = collection_w.num_entities
         # build index
         collection_w.create_index(field_name=vector_field.name, index_params=ct.default_index)
-        if index_on_par_key_field:
-            collection_w.create_index(field_name=par_key_field, index_params={})
-        # load
-        collection_w.load()
 
-        # verify the partition key values are bashed correctly
-        seeds = 200
-        rand_ids = random.sample(range(0, num_entities), seeds)
-        rand_ids = [str(rand_ids[i]) for i in range(len(rand_ids))]
-        res = collection_w.query(expr=f"pk in {rand_ids}", output_fields=["pk", par_key_field])
-        # verify every the random id exists
-        assert len(res) == len(rand_ids)
+        for index_on_par_key_field in [False, True]:
+            collection_w.release()
+            if index_on_par_key_field:
+                collection_w.create_index(field_name=par_key_field, index_params={})
+            # load
+            collection_w.load()
 
-        dirty_count = 0
-        for i in range(len(res)):
-            pk = res[i].get("pk")
-            parkey_value = res[i].get(par_key_field)
-            res_parkey = collection_w.query(expr=f"{par_key_field}=={parkey_value} and pk=='{pk}'",
-                                 output_fields=["pk", par_key_field])
-            if len(res_parkey) != 1:
-                log.info(f"dirty data found: pk {pk} with parkey {parkey_value}")
-                dirty_count += 1
-                assert dirty_count == 0
-        log.info(f"check randomly {seeds}/{num_entities}, dirty count={dirty_count}")
+            # verify the partition key values are bashed correctly
+            seeds = 200
+            rand_ids = random.sample(range(0, num_entities), seeds)
+            rand_ids = [str(rand_ids[i]) for i in range(len(rand_ids))]
+            res = collection_w.query(expr=f"pk in {rand_ids}", output_fields=["pk", par_key_field])
+            # verify every the random id exists
+            assert len(res) == len(rand_ids)
+
+            dirty_count = 0
+            for i in range(len(res)):
+                pk = res[i].get("pk")
+                parkey_value = res[i].get(par_key_field)
+                res_parkey = collection_w.query(expr=f"{par_key_field}=={parkey_value} and pk=='{pk}'",
+                                                output_fields=["pk", par_key_field])
+                if len(res_parkey) != 1:
+                    log.info(f"dirty data found: pk {pk} with parkey {parkey_value}")
+                    dirty_count += 1
+                    assert dirty_count == 0
+            log.info(f"check randomly {seeds}/{num_entities}, dirty count={dirty_count}")

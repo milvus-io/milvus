@@ -698,7 +698,7 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 	}
 
 	ts = time.Now()
-	err = stream.Seek(context.TODO(), []*msgpb.MsgPosition{position})
+	err = stream.Seek(context.TODO(), []*msgpb.MsgPosition{position}, false)
 	if err != nil {
 		return nil, err
 	}

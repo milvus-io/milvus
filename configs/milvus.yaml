@@ -335,7 +335,7 @@ queryNode:
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
     # 2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.
-    warmup: async
+    warmup: off
   mmap:
     mmapEnabled: false # Enable mmap for loading data
   lazyload:
@@ -494,7 +494,7 @@ dataNode:
       coldTime: 60 # Turn on skip mode after there are only timetick msg for x seconds
   segment:
     insertBufSize: 16777216 # Max buffer size to flush for a single segment.
-    deleteBufBytes: 67108864 # Max buffer size in bytes to flush del for a single channel, default as 16MB
+    deleteBufBytes: 16777216 # Max buffer size in bytes to flush del for a single channel, default as 16MB
     syncPeriod: 600 # The period to sync segments if buffer is not empty.
   memory:
     forceSyncEnable: true # Set true to force sync if memory usage is too high
@@ -612,7 +612,7 @@ common:
   ttMsgEnabled: true # Whether the instance disable sending ts messages
   traceLogMode: 0 # trace request info
   bloomFilterSize: 100000 # bloom filter initial size
-  maxBloomFalsePositive: 0.05 # max false positive rate for bloom filter
+  maxBloomFalsePositive: 0.001 # max false positive rate for bloom filter
 
 # QuotaConfig, configurations of Milvus quota and limits.
 # By default, we enable:
@@ -631,6 +631,14 @@ quotaAndLimits:
   # collects metrics from Proxies, Query cluster and Data cluster.
   # seconds, (0 ~ 65536)
   quotaCenterCollectInterval: 3
+  limits:
+    allocRetryTimes: 15 # retry times when delete alloc forward data from rate limit failed
+    allocWaitInterval: 1000 # retry wait duration when delete alloc forward data rate failed, in millisecond
+    complexDeleteLimitEnable: false # whether complex delete check forward data by limiter
+    maxCollectionNum: 65536
+    maxCollectionNumPerDB: 65536
+    maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
+    maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
   ddl:
     enabled: false
     collectionRate: -1 # qps, default no limit, rate for CreateCollection, DropCollection, LoadCollection, ReleaseCollection
@@ -711,11 +719,6 @@ quotaAndLimits:
         max: -1 # qps, default no limit
       partition:
         max: -1 # qps, default no limit
-  limits:
-    maxCollectionNum: 65536
-    maxCollectionNumPerDB: 65536
-    maxInsertSize: -1 # maximum size of a single insert request, in bytes, -1 means no limit
-    maxResourceGroupNumOfQueryNode: 1024 # maximum number of resource groups of query nodes
   limitWriting:
     # forceDeny false means dml requests are allowed (except for some
     # specific conditions, such as memory of nodes to water marker), true means always reject all dml requests.

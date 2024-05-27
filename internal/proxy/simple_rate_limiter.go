@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"strconv"
 	"sync"
+	"time"
 
 	"go.uber.org/zap"
 
@@ -35,6 +36,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/ratelimitutil"
+	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -42,13 +44,24 @@ import (
 type SimpleLimiter struct {
 	quotaStatesMu sync.RWMutex
 	rateLimiter   *rlinternal.RateLimiterTree
+
+	// for alloc
+	allocWaitInterval time.Duration
+	allocRetryTimes   uint
 }
 
 // NewSimpleLimiter returns a new SimpleLimiter.
-func NewSimpleLimiter() *SimpleLimiter {
+func NewSimpleLimiter(allocWaitInterval time.Duration, allocRetryTimes uint) *SimpleLimiter {
 	rootRateLimiter := newClusterLimiter()
-	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter)}
+	m := &SimpleLimiter{rateLimiter: rlinternal.NewRateLimiterTree(rootRateLimiter), allocWaitInterval: allocWaitInterval, allocRetryTimes: allocRetryTimes}
 	return m
+}
+
+// Alloc will retry till check pass or out of times.
+func (m *SimpleLimiter) Alloc(ctx context.Context, dbID int64, collectionIDToPartIDs map[int64][]int64, rt internalpb.RateType, n int) error {
+	return retry.Do(ctx, func() error {
+		return m.Check(dbID, collectionIDToPartIDs, rt, n)
+	}, retry.Sleep(m.allocWaitInterval), retry.Attempts(m.allocRetryTimes))
 }
 
 // Check checks if request would be limited or denied.
@@ -65,7 +78,6 @@ func (m *SimpleLimiter) Check(dbID int64, collectionIDToPartIDs map[int64][]int6
 	ret := clusterRateLimiters.Check(rt, n)
 
 	if ret != nil {
-		clusterRateLimiters.Cancel(rt, n)
 		return ret
 	}
 

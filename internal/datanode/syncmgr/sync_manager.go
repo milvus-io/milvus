@@ -40,19 +40,15 @@ type SyncMeta struct {
 	metacache metacache.MetaCache
 }
 
-// SyncMangger is the interface for sync manager.
+// SyncManager is the interface for sync manager.
 // it processes the sync tasks inside and changes the meta.
+//
+//go:generate mockery --name=SyncManager --structname=MockSyncManager --output=./  --filename=mock_sync_manager.go --with-expecter --inpackage
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
 	SyncData(ctx context.Context, task Task) *conc.Future[struct{}]
 	// GetEarliestPosition returns the earliest position (normally start position) of the processing sync task of provided channel.
 	GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition)
-	// Block allows caller to block tasks of provided segment id.
-	// normally used by compaction task.
-	// if levelzero delta policy is enabled, this shall be an empty operation.
-	Block(segmentID int64)
-	// Unblock is the reverse method for `Block`.
-	Unblock(segmentID int64)
 }
 
 type syncManager struct {
@@ -121,7 +117,6 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[st
 func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
-	defer mgr.tasks.Remove(taskKey)
 
 	key, err := task.CalcTargetSegment()
 	if err != nil {
@@ -133,6 +128,7 @@ func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
 }
 
 func (mgr *syncManager) submit(key int64, task Task) *conc.Future[struct{}] {
+	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	handler := func(err error) error {
 		if err == nil {
 			return nil
@@ -161,7 +157,10 @@ func (mgr *syncManager) submit(key int64, task Task) *conc.Future[struct{}] {
 		return mgr.submit(targetID, task).Err()
 	}
 	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
-	return mgr.Submit(key, task, handler)
+	return mgr.Submit(key, task, handler, func(err error) error {
+		mgr.tasks.Remove(taskKey)
+		return err
+	})
 }
 
 func (mgr *syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {
@@ -180,12 +179,4 @@ func (mgr *syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPo
 		return true
 	})
 	return segmentID, cp
-}
-
-func (mgr *syncManager) Block(segmentID int64) {
-	mgr.keyLock.Lock(segmentID)
-}
-
-func (mgr *syncManager) Unblock(segmentID int64) {
-	mgr.keyLock.Unlock(segmentID)
 }

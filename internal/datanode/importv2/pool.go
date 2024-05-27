@@ -14,19 +14,28 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package compaction
+package importv2
 
 import (
-	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
+	"sync"
+
+	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-//go:generate mockery --name=Compactor --structname=MockCompactor --output=./  --filename=mock_compactor.go --with-expecter --inpackage
-type Compactor interface {
-	Complete()
-	Compact() (*datapb.CompactionPlanResult, error)
-	Stop()
-	GetPlanID() typeutil.UniqueID
-	GetCollection() typeutil.UniqueID
-	GetChannelName() string
+var (
+	execPool         *conc.Pool[any]
+	execPoolInitOnce sync.Once
+)
+
+func initExecPool() {
+	execPool = conc.NewPool[any](
+		paramtable.Get().DataNodeCfg.MaxConcurrentImportTaskNum.GetAsInt(),
+		conc.WithPreAlloc(true),
+	)
+}
+
+func GetExecPool() *conc.Pool[any] {
+	execPoolInitOnce.Do(initExecPool)
+	return execPool
 }

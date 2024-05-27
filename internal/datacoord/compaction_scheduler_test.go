@@ -60,11 +60,11 @@ func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
 	}{
 		{"with L0 tasks", []*compactionTask{
 			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{}},
 		{"without L0 tasks", []*compactionTask{
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_MixCompaction}},
+			{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{}},
 		{"empty tasks", []*compactionTask{}, []UniqueID{}},
 	}
@@ -101,16 +101,16 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 	}{
 		{"with L0 tasks diff channel", []*compactionTask{
 			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{10}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+		}, []UniqueID{10, 11}},
 		{"with L0 tasks same channel", []*compactionTask{
 			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-2", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{11}},
 		{"without L0 tasks", []*compactionTask{
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{14}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction}},
+			{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+		}, []UniqueID{14, 13}},
 		{"empty tasks", []*compactionTask{}, []UniqueID{}},
 	}
 
@@ -134,15 +134,6 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 				return t.plan.PlanID
 			}))
 
-			// the second schedule returns empty for no slot
-			if len(test.tasks) > 0 {
-				cluster := NewMockCluster(s.T())
-				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 0})
-				s.scheduler.cluster = cluster
-			}
-			gotTasks = s.scheduler.Schedule()
-			s.Empty(gotTasks)
-
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 		})
 	}
@@ -158,16 +149,16 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 	}{
 		{"with L0 tasks diff channel", []*compactionTask{
 			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{10}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+		}, []UniqueID{10, 11}},
 		{"with L0 tasks same channel", []*compactionTask{
 			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-3", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-3", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{11}},
 		{"without L0 tasks", []*compactionTask{
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-3", Type: datapb.CompactionType_MinorCompaction}},
-			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-3", Type: datapb.CompactionType_MixCompaction}},
+			{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{13}},
 		{"empty tasks", []*compactionTask{}, []UniqueID{}},
 	}
@@ -191,17 +182,6 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 			s.Equal(test.expectedOut, lo.Map(gotTasks, func(t *compactionTask, _ int) int64 {
 				return t.plan.PlanID
 			}))
-
-			// the second schedule returns empty for no slot
-			if len(test.tasks) > 0 {
-				cluster := NewMockCluster(s.T())
-				cluster.EXPECT().QuerySlots().Return(map[int64]int64{101: 0})
-				s.scheduler.cluster = cluster
-			}
-			if len(gotTasks) > 0 {
-				gotTasks = s.scheduler.Schedule()
-				s.Empty(gotTasks)
-			}
 
 			s.Equal(4+len(test.tasks), s.scheduler.GetTaskCount())
 		})

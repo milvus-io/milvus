@@ -20,6 +20,7 @@ type CompactionTriggerManagerSuite struct {
 	suite.Suite
 
 	mockAlloc       *NMockAllocator
+	handler         Handler
 	mockPlanContext *MockCompactionPlanContext
 	testLabel       *CompactionGroupLabel
 	meta            *meta
@@ -29,6 +30,7 @@ type CompactionTriggerManagerSuite struct {
 
 func (s *CompactionTriggerManagerSuite) SetupTest() {
 	s.mockAlloc = NewNMockAllocator(s.T())
+	s.handler = NewNMockHandler(s.T())
 	s.mockPlanContext = NewMockCompactionPlanContext(s.T())
 
 	s.testLabel = &CompactionGroupLabel{
@@ -42,7 +44,7 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		s.meta.segments.SetSegment(id, segment)
 	}
 
-	s.m = NewCompactionTriggerManager(s.mockAlloc, s.mockPlanContext)
+	s.m = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyToFullScheduler() {
@@ -73,6 +75,10 @@ func (s *CompactionTriggerManagerSuite) TestNotifyToFullScheduler() {
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.m.handler = handler
+
 	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 
@@ -120,12 +126,16 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewIDLE() {
 
 			s.ElementsMatch(expectedSegs, gotSegs)
 			log.Info("generated plan", zap.Any("plan", plan))
-		}).Return(nil).Once()
+		}).Return().Once()
 
 	s.m.Notify(19530, TriggerTypeLevelZeroViewIDLE, levelZeroView)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
+	handler := NewNMockHandler(s.T())
+	handler.EXPECT().GetCollection(mock.Anything, mock.Anything).Return(&collectionInfo{}, nil)
+	s.m.handler = handler
+
 	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
 
@@ -168,7 +178,7 @@ func (s *CompactionTriggerManagerSuite) TestNotifyByViewChange() {
 
 			s.ElementsMatch(expectedSegs, gotSegs)
 			log.Info("generated plan", zap.Any("plan", plan))
-		}).Return(nil).Once()
+		}).Return().Once()
 
 	s.m.Notify(19530, TriggerTypeLevelZeroViewChange, levelZeroView)
 }

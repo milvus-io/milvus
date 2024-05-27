@@ -21,7 +21,6 @@ import (
 	"fmt"
 	sio "io"
 	"strconv"
-	"sync"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -33,15 +32,12 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -51,9 +47,6 @@ import (
 // for MixCompaction only
 type mixCompactionTask struct {
 	binlogIO io.BinlogIO
-	Compactor
-	metaCache metacache.MetaCache
-	syncMgr   syncmgr.SyncManager
 	allocator.Allocator
 	currentTs typeutil.Timestamp
 
@@ -62,9 +55,8 @@ type mixCompactionTask struct {
 	ctx    context.Context
 	cancel context.CancelFunc
 
-	injectDoneOnce sync.Once
-	done           chan struct{}
-	tr             *timerecord.TimeRecorder
+	done chan struct{}
+	tr   *timerecord.TimeRecorder
 }
 
 // make sure compactionTask implements compactor interface
@@ -73,8 +65,6 @@ var _ Compactor = (*mixCompactionTask)(nil)
 func NewMixCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
-	metaCache metacache.MetaCache,
-	syncMgr syncmgr.SyncManager,
 	alloc allocator.Allocator,
 	plan *datapb.CompactionPlan,
 ) *mixCompactionTask {
@@ -83,8 +73,6 @@ func NewMixCompactionTask(
 		ctx:       ctx1,
 		cancel:    cancel,
 		binlogIO:  binlogIO,
-		syncMgr:   syncMgr,
-		metaCache: metaCache,
 		Allocator: alloc,
 		plan:      plan,
 		tr:        timerecord.NewTimeRecorder("mix compaction"),
@@ -100,7 +88,6 @@ func (t *mixCompactionTask) Complete() {
 func (t *mixCompactionTask) Stop() {
 	t.cancel()
 	<-t.done
-	t.InjectDone()
 }
 
 func (t *mixCompactionTask) GetPlanID() typeutil.UniqueID {
@@ -112,18 +99,16 @@ func (t *mixCompactionTask) GetChannelName() string {
 }
 
 // return num rows of all segment compaction from
-func (t *mixCompactionTask) getNumRows() (int64, error) {
+func (t *mixCompactionTask) getNumRows() int64 {
 	numRows := int64(0)
 	for _, binlog := range t.plan.SegmentBinlogs {
-		seg, ok := t.metaCache.GetSegmentByID(binlog.GetSegmentID())
-		if !ok {
-			return 0, merr.WrapErrSegmentNotFound(binlog.GetSegmentID(), "get compaction segments num rows failed")
+		if len(binlog.GetFieldBinlogs()) > 0 {
+			for _, ct := range binlog.GetFieldBinlogs()[0].GetBinlogs() {
+				numRows += ct.GetEntriesNum()
+			}
 		}
-
-		numRows += seg.NumOfRows()
 	}
-
-	return numRows, nil
+	return numRows
 }
 
 func (t *mixCompactionTask) mergeDeltalogs(ctx context.Context, dpaths map[typeutil.UniqueID][]string) (map[interface{}]typeutil.Timestamp, error) {
@@ -417,7 +402,19 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	ctx, span := otel.Tracer(typeutil.DataNodeRole).Start(t.ctx, fmt.Sprintf("MixCompact-%d", t.GetPlanID()))
 	defer span.End()
 
-	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()), zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
+	if len(t.plan.GetSegmentBinlogs()) < 1 {
+		log.Warn("compact wrong, there's no segments in segment binlogs", zap.Int64("planID", t.plan.GetPlanID()))
+		return nil, errors.New("compaction plan is illegal")
+	}
+
+	collectionID := t.plan.GetSegmentBinlogs()[0].GetCollectionID()
+	partitionID := t.plan.GetSegmentBinlogs()[0].GetPartitionID()
+
+	log := log.Ctx(ctx).With(zap.Int64("planID", t.plan.GetPlanID()),
+		zap.Int64("collectionID", collectionID),
+		zap.Int64("partitionID", partitionID),
+		zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
+
 	if ok := funcutil.CheckCtxValid(ctx); !ok {
 		log.Warn("compact wrong, task context done or timeout")
 		return nil, ctx.Err()
@@ -427,10 +424,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	defer cancelAll()
 
 	log.Info("compact start")
-	if len(t.plan.GetSegmentBinlogs()) < 1 {
-		log.Warn("compact wrong, there's no segments in segment binlogs")
-		return nil, errors.New("compaction plan is illegal")
-	}
 
 	targetSegID, err := t.AllocOne()
 	if err != nil {
@@ -438,15 +431,9 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return nil, err
 	}
 
-	previousRowCount, err := t.getNumRows()
-	if err != nil {
-		log.Warn("compact wrong, unable to get previous numRows", zap.Error(err))
-		return nil, err
-	}
+	previousRowCount := t.getNumRows()
 
-	partID := t.plan.GetSegmentBinlogs()[0].GetPartitionID()
-
-	writer, err := NewSegmentWriter(t.metaCache.Schema(), previousRowCount, targetSegID, partID, t.metaCache.Collection())
+	writer, err := NewSegmentWriter(t.plan.GetSchema(), previousRowCount, targetSegID, partitionID, collectionID)
 	if err != nil {
 		log.Warn("compact wrong, unable to init segment writer", zap.Error(err))
 		return nil, err
@@ -455,12 +442,6 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	segIDs := lo.Map(t.plan.GetSegmentBinlogs(), func(binlogs *datapb.CompactionSegmentBinlogs, _ int) int64 {
 		return binlogs.GetSegmentID()
 	})
-	// Inject to stop flush
-	// when compaction failed, these segments need to be Unblocked by injectDone in compaction_executor
-	// when compaction succeeded, these segments will be Unblocked by SyncSegments from DataCoord.
-	for _, segID := range segIDs {
-		t.syncMgr.Block(segID)
-	}
 
 	if err := binlog.DecompressCompactionBinlogs(t.plan.GetSegmentBinlogs()); err != nil {
 		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
@@ -541,16 +522,9 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 	return planResult, nil
 }
 
-func (t *mixCompactionTask) InjectDone() {
-	t.injectDoneOnce.Do(func() {
-		for _, binlog := range t.plan.SegmentBinlogs {
-			t.syncMgr.Unblock(binlog.SegmentID)
-		}
-	})
-}
-
 func (t *mixCompactionTask) GetCollection() typeutil.UniqueID {
-	return t.metaCache.Collection()
+	// The length of SegmentBinlogs is checked before task enqueueing.
+	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
 func (t *mixCompactionTask) isExpiredEntity(ts typeutil.Timestamp) bool {

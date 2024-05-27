@@ -81,7 +81,10 @@ class IndexBase {
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IVFSQ8 ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IVFFLAT ||
                index_type_ == knowhere::IndexEnum::INDEX_FAISS_IDMAP ||
-               index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP;
+               index_type_ == knowhere::IndexEnum::INDEX_FAISS_BIN_IDMAP ||
+               index_type_ ==
+                   knowhere::IndexEnum::INDEX_SPARSE_INVERTED_INDEX ||
+               index_type_ == knowhere::IndexEnum::INDEX_SPARSE_WAND;
     }
 
     const IndexType&

@@ -231,7 +231,7 @@ func repackInsertDataWithPartitionKey(ctx context.Context,
 	}
 
 	channel2RowOffsets := assignChannelsByPK(result.IDs, channelNames, insertMsg)
-	partitionNames, err := getDefaultPartitionNames(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
+	partitionNames, err := getDefaultPartitionsInPartitionKeyMode(ctx, insertMsg.GetDbName(), insertMsg.CollectionName)
 	if err != nil {
 		log.Warn("get default partition names failed in partition key mode",
 			zap.String("collectionName", insertMsg.CollectionName),

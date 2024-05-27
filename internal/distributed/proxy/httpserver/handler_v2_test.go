@@ -471,11 +471,11 @@ func TestDatabaseWrapper(t *testing.T) {
 func TestCreateCollection(t *testing.T) {
 	postTestCases := []requestBodyTestCase{}
 	mp := mocks.NewMockProxy(t)
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(11)
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(12)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().LoadCollection(mock.Anything, mock.Anything).Return(commonSuccessStatus, nil).Times(6)
 	mp.EXPECT().CreateIndex(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
-	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Once()
+	mp.EXPECT().CreateCollection(mock.Anything, mock.Anything).Return(commonErrorStatus, nil).Twice()
 	testEngine := initHTTPServerV2(mp, false)
 	path := versionalV2(CollectionCategory, CreateAction)
 	// quickly create collection
@@ -564,6 +564,18 @@ func TestCreateCollection(t *testing.T) {
             ]
         }}`),
 	})
+	// dim should not be specified for SparseFloatVector field
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+            "fields": [
+                {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Int64", "isPartitionKey": false, "elementTypeParams": {}},
+                {"fieldName": "partition_field", "dataType": "VarChar", "isPartitionKey": true, "elementTypeParams": {"max_length": 256}},
+                {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {}}
+            ]
+        }, "params": {"partitionsNum": "32"}}`),
+	})
 	postTestCases = append(postTestCases, requestBodyTestCase{
 		path: path,
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
@@ -611,6 +623,18 @@ func TestCreateCollection(t *testing.T) {
 		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "dimension": 2, "metricType": "L2"}`),
 		errMsg:      "",
 		errCode:     65535,
+	})
+	postTestCases = append(postTestCases, requestBodyTestCase{
+		path: path,
+		requestBody: []byte(`{"collectionName": "` + DefaultCollectionName + `", "schema": {
+            "fields": [
+                {"fieldName": "book_id", "dataType": "Int64", "isPrimary": true, "elementTypeParams": {}},
+                {"fieldName": "word_count", "dataType": "Int64", "elementTypeParams": {}},
+                {"fieldName": "book_intro", "dataType": "SparseFloatVector", "elementTypeParams": {"dim": 2}}
+            ]
+        }, "indexParams": [{"fieldName": "book_intro", "indexName": "book_intro_vector", "metricType": "L2"}]}`),
+		errMsg:  "",
+		errCode: 65535,
 	})
 
 	for _, testcase := range postTestCases {
@@ -1240,16 +1264,19 @@ func TestSearchV2(t *testing.T) {
 	float16VectorField.Name = "float16Vector"
 	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
 	bfloat16VectorField.Name = "bfloat16Vector"
+	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
+	sparseFloatVectorField.Name = "sparseFloatVector"
 	collSchema.Fields = append(collSchema.Fields, &binaryVectorField)
 	collSchema.Fields = append(collSchema.Fields, &float16VectorField)
 	collSchema.Fields = append(collSchema.Fields, &bfloat16VectorField)
+	collSchema.Fields = append(collSchema.Fields, &sparseFloatVectorField)
 	mp.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
 		CollectionName: DefaultCollectionName,
 		Schema:         collSchema,
 		ShardsNum:      ShardNumDefault,
 		Status:         &StatusSuccess,
-	}, nil).Times(9)
-	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Twice()
+	}, nil).Times(10)
+	mp.EXPECT().Search(mock.Anything, mock.Anything).Return(&milvuspb.SearchResults{Status: commonSuccessStatus, Results: &schemapb.SearchResultData{TopK: int64(0)}}, nil).Times(3)
 	testEngine := initHTTPServerV2(mp, false)
 	queryTestCases := []requestBodyTestCase{}
 	queryTestCases = append(queryTestCases, requestBodyTestCase{
@@ -1376,6 +1403,10 @@ func TestSearchV2(t *testing.T) {
 			`], "rerank": {"strategy": "weighted", "params": {"weights":  [0.9, 0.8]}}}`),
 		errMsg:  "can only accept json format request, error: dimension: 2, bytesLen: 4, but length of []byte: 3: invalid parameter[expected=BFloat16Vector][actual=\x01\x02\x03]",
 		errCode: 1801,
+	})
+	queryTestCases = append(queryTestCases, requestBodyTestCase{
+		path:        SearchAction,
+		requestBody: []byte(`{"collectionName": "book", "data": [{"1": 0.1}], "annsField": "sparseFloatVector", "filter": "book_id in [2, 4, 6, 8]", "limit": 4, "outputFields": ["word_count"]}`),
 	})
 
 	for _, testcase := range queryTestCases {
