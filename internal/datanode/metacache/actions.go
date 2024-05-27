@@ -25,52 +25,80 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+type segmentCriterion struct {
+	ids    typeutil.Set[int64]
+	states typeutil.Set[commonpb.SegmentState]
+	others []SegmentFilter
+}
+
+func (sc *segmentCriterion) Match(segment *SegmentInfo) bool {
+	for _, filter := range sc.others {
+		if !filter.Filter(segment) {
+			return false
+		}
+	}
+	return true
+}
+
 type SegmentFilter interface {
 	Filter(info *SegmentInfo) bool
-	SegmentIDs() ([]int64, bool)
+	AddFilter(*segmentCriterion)
 }
 
+// SegmentIDFilter segment filter with segment ids.
 type SegmentIDFilter struct {
-	segmentIDs []int64
-	ids        typeutil.Set[int64]
-}
-
-func WithSegmentIDs(segmentIDs ...int64) SegmentFilter {
-	set := typeutil.NewSet(segmentIDs...)
-	return &SegmentIDFilter{
-		segmentIDs: segmentIDs,
-		ids:        set,
-	}
+	ids typeutil.Set[int64]
 }
 
 func (f *SegmentIDFilter) Filter(info *SegmentInfo) bool {
 	return f.ids.Contain(info.segmentID)
 }
 
-func (f *SegmentIDFilter) SegmentIDs() ([]int64, bool) {
-	return f.segmentIDs, true
+func (f *SegmentIDFilter) AddFilter(criterion *segmentCriterion) {
+	criterion.ids = f.ids
 }
 
+func WithSegmentIDs(segmentIDs ...int64) SegmentFilter {
+	set := typeutil.NewSet(segmentIDs...)
+	return &SegmentIDFilter{
+		ids: set,
+	}
+}
+
+// SegmentStateFilter segment filter with segment states.
+type SegmentStateFilter struct {
+	states typeutil.Set[commonpb.SegmentState]
+}
+
+func (f *SegmentStateFilter) Filter(info *SegmentInfo) bool {
+	return f.states.Contain(info.State())
+}
+
+func (f *SegmentStateFilter) AddFilter(criterion *segmentCriterion) {
+	criterion.states = f.states
+}
+
+func WithSegmentState(states ...commonpb.SegmentState) SegmentFilter {
+	set := typeutil.NewSet(states...)
+	return &SegmentStateFilter{
+		states: set,
+	}
+}
+
+// SegmentFilterFunc implements segment filter with other filters logic.
 type SegmentFilterFunc func(info *SegmentInfo) bool
 
 func (f SegmentFilterFunc) Filter(info *SegmentInfo) bool {
 	return f(info)
 }
 
-func (f SegmentFilterFunc) SegmentIDs() ([]int64, bool) {
-	return nil, false
+func (f SegmentFilterFunc) AddFilter(criterion *segmentCriterion) {
+	criterion.others = append(criterion.others, f)
 }
 
 func WithPartitionID(partitionID int64) SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return partitionID == common.AllPartitionsID || info.partitionID == partitionID
-	})
-}
-
-func WithSegmentState(states ...commonpb.SegmentState) SegmentFilter {
-	set := typeutil.NewSet(states...)
-	return SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return set.Len() > 0 && set.Contain(info.state)
 	})
 }
 

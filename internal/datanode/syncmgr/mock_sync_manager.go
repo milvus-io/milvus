@@ -57,7 +57,7 @@ type MockSyncManager_GetEarliestPosition_Call struct {
 }
 
 // GetEarliestPosition is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockSyncManager_Expecter) GetEarliestPosition(channel interface{}) *MockSyncManager_GetEarliestPosition_Call {
 	return &MockSyncManager_GetEarliestPosition_Call{Call: _e.mock.On("GetEarliestPosition", channel)}
 }
@@ -101,8 +101,8 @@ type MockSyncManager_SyncData_Call struct {
 }
 
 // SyncData is a helper method to define mock.On call
-//  - ctx context.Context
-//  - task Task
+//   - ctx context.Context
+//   - task Task
 func (_e *MockSyncManager_Expecter) SyncData(ctx interface{}, task interface{}) *MockSyncManager_SyncData_Call {
 	return &MockSyncManager_SyncData_Call{Call: _e.mock.On("SyncData", ctx, task)}
 }

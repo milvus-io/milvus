@@ -283,6 +283,7 @@ func (s *DataNodeServicesSuite) TestFlushSegments() {
 		ID:            segmentID,
 		CollectionID:  1,
 		PartitionID:   2,
+		State:         commonpb.SegmentState_Growing,
 		StartPosition: &msgpb.MsgPosition{},
 	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
 
