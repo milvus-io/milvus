@@ -147,7 +147,7 @@ func (op *ChannelOp) BuildKV() (map[string]string, []string, error) {
 		k := buildNodeChannelKey(op.NodeID, ch.GetName())
 		switch op.Type {
 		case Add, Watch, Release:
-			tmpWatchInfo := ch.GetWatchInfo()
+			tmpWatchInfo := proto.Clone(ch.GetWatchInfo()).(*datapb.ChannelWatchInfo)
 			if paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.GetAsBool() {
 				tmpWatchInfo.Vchan = reduceVChanSize(tmpWatchInfo.GetVchan())
 			}
