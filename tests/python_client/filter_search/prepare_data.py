@@ -1,13 +1,10 @@
-import random
 from minio import Minio
-import pandas as pd
 import glob
 from pymilvus import (
     connections, list_collections,
     FieldSchema, CollectionSchema, DataType,
     Collection, BulkInsertState, utility
 )
-from pymilvus.bulk_writer import RemoteBulkWriter, BulkFileType
 
 import time
 import argparse
