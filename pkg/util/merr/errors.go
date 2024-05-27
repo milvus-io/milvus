@@ -173,14 +173,13 @@ var (
 
 	// Compaction
 	ErrCompactionReadDeltaLogErr                  = newMilvusError("fail to read delta log", 2300, false)
-	ErrClusteringCompactionClusterNotSupport      = newMilvusError("milvus cluster not support clustering compaction", 2301, false)
-	ErrClusteringCompactionCollectionNotSupport   = newMilvusError("collection not support clustering compaction", 2302, false)
-	ErrClusteringCompactionCollectionIsCompacting = newMilvusError("collection is compacting", 2303, false)
-	ErrClusteringCompactionNotSupportVector       = newMilvusError("vector field clustering compaction is not supported", 2304, false)
-	ErrClusteringCompactionSubmitTaskFail         = newMilvusError("fail to submit task", 2305, true)
-	ErrClusteringCompactionCompactionTaskLost     = newMilvusError("compaction task lost", 2306, true)
-	ErrClusteringCompactionGetCollectionFail      = newMilvusError("fail to get collection in compaction", 2307, true)
-	ErrClusteringCompactionMetaError              = newMilvusError("fail to update meta in clustering compaction", 2308, true)
+	ErrIllegalCompactionPlan                      = newMilvusError("compaction plan illegal", 2301, false)
+	ErrClusteringCompactionClusterNotSupport      = newMilvusError("milvus cluster not support clustering compaction", 2302, false)
+	ErrClusteringCompactionCollectionNotSupport   = newMilvusError("collection not support clustering compaction", 2303, false)
+	ErrClusteringCompactionCollectionIsCompacting = newMilvusError("collection is compacting", 2304, false)
+	ErrClusteringCompactionNotSupportVector       = newMilvusError("vector field clustering compaction is not supported", 2305, false)
+	ErrClusteringCompactionSubmitTaskFail         = newMilvusError("fail to submit task", 2306, true)
+	ErrClusteringCompactionMetaError              = newMilvusError("fail to update meta in clustering compaction", 2307, true)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)

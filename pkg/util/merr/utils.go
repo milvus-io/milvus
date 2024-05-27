@@ -1048,6 +1048,14 @@ func WrapErrCompactionReadDeltaLogErr(msg ...string) error {
 	return err
 }
 
+func WrapErrIllegalCompactionPlan(msg ...string) error {
+	err := error(ErrIllegalCompactionPlan)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrClusteringCompactionClusterNotSupport(msg ...string) error {
 	err := error(ErrClusteringCompactionClusterNotSupport)
 	if len(msg) > 0 {
@@ -1077,14 +1085,6 @@ func WrapErrClusteringCompactionSubmitTaskFail(taskType string, err error) error
 		return nil
 	}
 	return wrapFieldsWithDesc(ErrClusteringCompactionSubmitTaskFail, err.Error(), value("taskType", taskType))
-}
-
-func WrapErrClusteringCompactionCompactionTaskLost(planID int64) error {
-	return wrapFields(ErrClusteringCompactionCompactionTaskLost, value("planID", planID))
-}
-
-func WrapErrClusteringCompactionGetCollectionFail(collectionID int64, err error) error {
-	return wrapFieldsWithDesc(ErrClusteringCompactionGetCollectionFail, err.Error(), value("collectionID", collectionID))
 }
 
 func WrapErrClusteringCompactionMetaError(operation string, err error) error {
