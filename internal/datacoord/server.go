@@ -266,13 +266,13 @@ func (s *Server) Register() error {
 			err := s.session.ProcessActiveStandBy(s.activateFunc)
 			if err != nil {
 				log.Error("failed to activate standby datacoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 
 			err = s.icSession.ForceActiveStandby(nil)
 			if err != nil {
 				log.Error("failed to force activate standby indexcoord server", zap.Error(err))
-				return
+				panic(err)
 			}
 			afterRegister()
 		}()
