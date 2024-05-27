@@ -78,6 +78,12 @@ func WithChannel(channel string) SegmentFilter {
 	return ChannelFilter(channel)
 }
 
+func WithPartition(partitionID int64) SegmentFilter {
+	return SegmentFilterFunc(func(si *SegmentInfo) bool {
+		return si.GetPartitionID() == partitionID
+	})
+}
+
 type SegmentFilterFunc func(*SegmentInfo) bool
 
 func (f SegmentFilterFunc) Match(segment *SegmentInfo) bool {

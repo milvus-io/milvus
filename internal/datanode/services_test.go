@@ -493,3 +493,40 @@ func (s *DataNodeServicesSuite) TestQuerySlot() {
 		s.NoError(merr.Error(resp.GetStatus()))
 	})
 }
+
+func (s *DataNodeServicesSuite) TestSyncSegments() {
+	s.Run("node not healthy", func() {
+		s.SetupTest()
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		ctx := context.Background()
+		status, err := s.node.SyncSegments(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(status))
+		s.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+	})
+
+	s.Run("normal case", func() {
+		s.SetupTest()
+		ctx := context.Background()
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  "channel1",
+			PartitionId:  2,
+			CollectionId: 1,
+			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
+				3: {
+					SegmentId:    3,
+					PkStatsLog:   nil,
+					State:        commonpb.SegmentState_Dropped,
+					Level:        2,
+					NumOfRows:    1024,
+					CompactionTo: 4,
+				},
+			},
+		}
+
+		status, err := s.node.SyncSegments(ctx, req)
+		s.NoError(err)
+		s.False(merr.Ok(status))
+	})
+}

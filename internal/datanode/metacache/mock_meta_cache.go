@@ -24,6 +24,42 @@ func (_m *MockMetaCache) EXPECT() *MockMetaCache_Expecter {
 	return &MockMetaCache_Expecter{mock: &_m.Mock}
 }
 
+// AddAndRemoveSegments provides a mock function with given fields: partitionID, newSegments, newSegmentsBF, oldSegments
+func (_m *MockMetaCache) AddAndRemoveSegments(partitionID int64, newSegments map[int64]*datapb.SyncSegmentInfo, newSegmentsBF map[int64]*BloomFilterSet, oldSegments map[int64]int64) {
+	_m.Called(partitionID, newSegments, newSegmentsBF, oldSegments)
+}
+
+// MockMetaCache_AddAndRemoveSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AddAndRemoveSegments'
+type MockMetaCache_AddAndRemoveSegments_Call struct {
+	*mock.Call
+}
+
+// AddAndRemoveSegments is a helper method to define mock.On call
+//   - partitionID int64
+//   - newSegments map[int64]*datapb.SyncSegmentInfo
+//   - newSegmentsBF map[int64]*BloomFilterSet
+//   - oldSegments map[int64]int64
+func (_e *MockMetaCache_Expecter) AddAndRemoveSegments(partitionID interface{}, newSegments interface{}, newSegmentsBF interface{}, oldSegments interface{}) *MockMetaCache_AddAndRemoveSegments_Call {
+	return &MockMetaCache_AddAndRemoveSegments_Call{Call: _e.mock.On("AddAndRemoveSegments", partitionID, newSegments, newSegmentsBF, oldSegments)}
+}
+
+func (_c *MockMetaCache_AddAndRemoveSegments_Call) Run(run func(partitionID int64, newSegments map[int64]*datapb.SyncSegmentInfo, newSegmentsBF map[int64]*BloomFilterSet, oldSegments map[int64]int64)) *MockMetaCache_AddAndRemoveSegments_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64), args[1].(map[int64]*datapb.SyncSegmentInfo), args[2].(map[int64]*BloomFilterSet), args[3].(map[int64]int64))
+	})
+	return _c
+}
+
+func (_c *MockMetaCache_AddAndRemoveSegments_Call) Return() *MockMetaCache_AddAndRemoveSegments_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockMetaCache_AddAndRemoveSegments_Call) RunAndReturn(run func(int64, map[int64]*datapb.SyncSegmentInfo, map[int64]*BloomFilterSet, map[int64]int64)) *MockMetaCache_AddAndRemoveSegments_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // AddSegment provides a mock function with given fields: segInfo, factory, actions
 func (_m *MockMetaCache) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsFactory, actions ...SegmentAction) {
 	_va := make([]interface{}, len(actions))

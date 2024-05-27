@@ -488,17 +488,17 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 		metricMutation.commit()
 	}
 
-	nodeID := c.plans[plan.GetPlanID()].dataNodeID
-	req := &datapb.SyncSegmentsRequest{
-		PlanID: plan.PlanID,
-	}
-
-	log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
-	if err := c.sessions.SyncSegments(nodeID, req); err != nil {
-		log.Warn("handleCompactionResult: fail to sync segments with node",
-			zap.Int64("nodeID", nodeID), zap.Error(err))
-		return err
-	}
+	//nodeID := c.plans[plan.GetPlanID()].dataNodeID
+	//req := &datapb.SyncSegmentsRequest{
+	//	PlanID: plan.PlanID,
+	//}
+	//
+	//log.Info("handleCompactionResult: syncing segments with node", zap.Int64("nodeID", nodeID))
+	//if err := c.sessions.SyncSegments(nodeID, req); err != nil {
+	//	log.Warn("handleCompactionResult: fail to sync segments with node",
+	//		zap.Int64("nodeID", nodeID), zap.Error(err))
+	//	return err
+	//}
 
 	log.Info("handleCompactionResult: success to handle merge compaction result")
 	return nil
@@ -549,10 +549,10 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 					// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
 					// without changing the meta
 					log.Warn("compaction failed for channel nodeID not match")
-					if err := c.sessions.SyncSegments(task.dataNodeID, &datapb.SyncSegmentsRequest{PlanID: planID}); err != nil {
-						log.Warn("compaction failed to sync segments with node", zap.Error(err))
-						continue
-					}
+					//if err := c.sessions.SyncSegments(task.dataNodeID, &datapb.SyncSegmentsRequest{PlanID: planID}); err != nil {
+					//	log.Warn("compaction failed to sync segments with node", zap.Error(err))
+					//	continue
+					//}
 					c.plans[planID] = c.plans[planID].shadowClone(setState(failed), endSpan())
 					c.setSegmentsCompacting(task.plan, false)
 					c.scheduler.Finish(task.dataNodeID, task.plan)
@@ -621,12 +621,12 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 			// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
 			// without changing the meta
 			log.Info("compaction syncing unknown plan with node")
-			if err := c.sessions.SyncSegments(nodeID, &datapb.SyncSegmentsRequest{
-				PlanID: planID,
-			}); err != nil {
-				log.Warn("compaction failed to sync segments with node", zap.Error(err))
-				return err
-			}
+			//if err := c.sessions.SyncSegments(nodeID, &datapb.SyncSegmentsRequest{
+			//	PlanID: planID,
+			//}); err != nil {
+			//	log.Warn("compaction failed to sync segments with node", zap.Error(err))
+			//	return err
+			//}
 		}
 	}
 

@@ -23,6 +23,11 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
+
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
+	"github.com/milvus-io/milvus/internal/storage"
+
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -261,6 +266,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	log := log.Ctx(ctx).With(
 		zap.Int64("planID", req.GetPlanID()),
 		zap.Int64("nodeID", node.GetNodeID()),
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("partitionID", req.GetPartitionId()),
+		zap.String("channel", req.GetChannelName()),
 	)
 
 	log.Info("DataNode receives SyncSegments")
@@ -270,8 +278,41 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	// TODO: sheep, add a new DropCompaction interface, deprecate SyncSegments
-	node.compactionExecutor.removeTask(req.GetPlanID())
+	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
+	if !ok {
+		node.compactionExecutor.discardPlan(req.GetChannelName())
+		err := merr.WrapErrChannelNotFound(req.GetChannelName())
+		log.Warn("failed to get flow graph service", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	newSegments := make(map[int64]*datapb.SyncSegmentInfo)
+	newSegmentsBF := make(map[int64]*metacache.BloomFilterSet)
+	oldSegments := make(map[int64]int64)
+	for _, seg := range req.GetSegmentInfos() {
+		if seg != nil &&
+			seg.GetState() != commonpb.SegmentState_SegmentStateNone &&
+			seg.GetState() != commonpb.SegmentState_NotExist &&
+			seg.GetState() != commonpb.SegmentState_Dropped {
+			err := binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), seg.GetSegmentId(), []*datapb.FieldBinlog{seg.GetPkStatsLog()})
+			if err != nil {
+				log.Warn("failed to DecompressBinLog", zap.Error(err))
+				return merr.Status(err), nil
+			}
+			pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), seg.GetSegmentId(), []*datapb.FieldBinlog{seg.GetPkStatsLog()})
+			if err != nil {
+				log.Warn("failed to load segment stats log", zap.Error(err))
+				return merr.Status(err), nil
+			}
+			bfs := metacache.NewBloomFilterSet(pks...)
+			newSegments[seg.GetSegmentId()] = seg
+			newSegmentsBF[seg.GetSegmentId()] = bfs
+		} else {
+			oldSegments[seg.GetSegmentId()] = seg.GetCompactionTo()
+		}
+	}
+
+	ds.metacache.AddAndRemoveSegments(req.GetPartitionId(), newSegments, newSegmentsBF, oldSegments)
 	return merr.Success(), nil
 }
 

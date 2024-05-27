@@ -210,6 +210,40 @@ func (s *MetaCacheSuite) TestPredictSegments() {
 	s.EqualValues(1, predict[0])
 }
 
+func (s *MetaCacheSuite) TestAddAndRemoveSegments() {
+	addSegments := map[int64]*datapb.SyncSegmentInfo{
+		100: {
+			SegmentId:    100,
+			PkStatsLog:   nil,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			NumOfRows:    10240,
+			CompactionTo: -1,
+		},
+	}
+	addSegmentsBF := map[int64]*BloomFilterSet{
+		1: NewBloomFilterSet(),
+	}
+
+	s.cache.AddAndRemoveSegments(1, addSegments, addSegmentsBF, nil)
+
+	addSegments = map[int64]*datapb.SyncSegmentInfo{
+		101: {
+			SegmentId:    101,
+			PkStatsLog:   nil,
+			State:        commonpb.SegmentState_Flushed,
+			Level:        datapb.SegmentLevel_L1,
+			NumOfRows:    10240,
+			CompactionTo: -1,
+		},
+	}
+
+	removedSegments := map[int64]int64{
+		100: 101,
+	}
+	s.cache.AddAndRemoveSegments(1, addSegments, addSegmentsBF, removedSegments)
+}
+
 func TestMetaCacheSuite(t *testing.T) {
 	suite.Run(t, new(MetaCacheSuite))
 }

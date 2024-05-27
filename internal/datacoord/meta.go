@@ -1569,3 +1569,10 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetLevel(), segToUpdate.GetNumOfRows())
 	segToUpdate.State = targetState
 }
+
+func (m *meta) ListCollections() []int64 {
+	m.RLock()
+	defer m.RUnlock()
+
+	return lo.Keys(m.collections)
+}

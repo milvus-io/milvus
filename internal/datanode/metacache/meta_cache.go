@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+//go:generate mockery --name=MetaCache --structname=MockMetaCache --output=./  --filename=mock_meta_cache.go --with-expecter --inpackage
 type MetaCache interface {
 	// Collection returns collection id of metacache.
 	Collection() int64
@@ -51,6 +52,8 @@ type MetaCache interface {
 	GetSegmentIDsBy(filters ...SegmentFilter) []int64
 	// PredictSegments returns the segment ids which may contain the provided primary key.
 	PredictSegments(pk storage.PrimaryKey, filters ...SegmentFilter) ([]int64, bool)
+	// AddAndRemoveSegments update the segments BF from datacoord view.
+	AddAndRemoveSegments(partitionID int64, newSegments map[int64]*datapb.SyncSegmentInfo, newSegmentsBF map[int64]*BloomFilterSet, oldSegments map[int64]int64)
 }
 
 var _ MetaCache = (*metaCacheImpl)(nil)
@@ -282,6 +285,42 @@ func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), fi
 			if criterion.Match(segment) {
 				fn(id, segment)
 			}
+		}
+	}
+}
+
+func (c *metaCacheImpl) AddAndRemoveSegments(partitionID int64,
+	newSegments map[int64]*datapb.SyncSegmentInfo,
+	newSegmentsBF map[int64]*BloomFilterSet,
+	oldSegments map[int64]int64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	for segID, info := range newSegments {
+		if _, ok := c.segmentInfos[segID]; !ok {
+			c.segmentInfos[segID] = &SegmentInfo{
+				segmentID:        segID,
+				partitionID:      partitionID,
+				state:            info.GetState(),
+				level:            info.GetLevel(),
+				flushedRows:      info.GetNumOfRows(),
+				startPosRecorded: true,
+				bfs:              newSegmentsBF[segID],
+			}
+			log.Info("metacache does not have segment, add it", zap.Int64("segmentID", segID))
+		}
+	}
+
+	for segID, compactTo := range oldSegments {
+		info, ok := c.segmentInfos[segID]
+		if ok {
+			updated := info.Clone()
+			updated.compactTo = compactTo
+			c.segmentInfos[updated.segmentID] = updated
+			log.Info("update segment compactTo",
+				zap.Int64("segmentID", segID),
+				zap.Int64("originalCompactTo", info.compactTo),
+				zap.Int64("compactTo", compactTo))
 		}
 	}
 }

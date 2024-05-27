@@ -496,15 +496,30 @@ message CompactionStateRequest {
   common.MsgBase base = 1;
 }
 
+message SyncSegmentInfo {
+  int64 segment_id = 1;
+  FieldBinlog pk_stats_log = 2;
+  common.SegmentState state = 3;
+  SegmentLevel level = 4;
+  int64 num_of_rows = 5;
+  int64 compaction_to = 6;
+}
+
 message SyncSegmentsRequest {
+  // Deprecated, after v2.4.3
   int64 planID = 1;
+  // Deprecated, after v2.4.3
   int64 compacted_to = 2;
+  // Deprecated, after v2.4.3
   int64 num_of_rows = 3;
+  // Deprecated, after v2.4.3
   repeated int64 compacted_from = 4;
+  // Deprecated, after v2.4.3
   repeated FieldBinlog stats_logs = 5;
   string channel_name = 6;
   int64 partition_id = 7;
   int64 collection_id = 8;
+  map<int64, SyncSegmentInfo> segment_infos = 9;
 }
 
 message CompactionSegmentBinlogs {

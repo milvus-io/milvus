@@ -84,7 +84,7 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 		4: {A: 100, B: &datapb.CompactionPlanResult{PlanID: 4, State: commonpb.CompactionState_Executing}},
 	}, nil)
 
-	s.mockSessMgr.EXPECT().SyncSegments(int64(100), mock.Anything).Return(nil).Once()
+	//s.mockSessMgr.EXPECT().SyncSegments(int64(100), mock.Anything).Return(nil).Once()
 	{
 		s.mockAlloc.EXPECT().allocTimestamp(mock.Anything).Return(0, errors.New("mock")).Once()
 		handler := newCompactionPlanHandler(nil, s.mockSessMgr, nil, nil, s.mockAlloc)
@@ -475,7 +475,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 				}
 				return nil
 			}).Once()
-		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
+		//s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 
 		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
@@ -517,7 +517,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			[]*SegmentInfo{segment},
 			&segMetricMutation{}, nil).Once()
-		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
+		//s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(errors.New("mock error")).Once()
 
 		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}
@@ -529,7 +529,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 		}
 
 		err := handler.handleMergeCompactionResult(plan, compactionResult)
-		s.Error(err)
+		s.NoError(err)
 	})
 }
 
@@ -549,7 +549,7 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 	})
 
 	s.Run("test complete merge compaction task", func() {
-		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
+		//s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Once()
 		// mock for handleMergeCompactionResult
 		s.mockMeta.EXPECT().GetHealthySegment(mock.Anything).Return(nil).Once()
 		segment := NewSegmentInfo(&datapb.SegmentInfo{ID: 100})
@@ -702,14 +702,14 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 		},
 	}
 
-	s.mockSessMgr.EXPECT().SyncSegments(int64(222), mock.Anything).RunAndReturn(func(nodeID int64, req *datapb.SyncSegmentsRequest) error {
-		s.EqualValues(nodeID, 222)
-		s.NotNil(req)
-		s.Empty(req.GetCompactedFrom())
-		s.EqualValues(5, req.GetPlanID())
-		return nil
-	}).Once()
-	s.mockSessMgr.EXPECT().SyncSegments(int64(111), mock.Anything).Return(nil)
+	//s.mockSessMgr.EXPECT().SyncSegments(int64(222), mock.Anything).RunAndReturn(func(nodeID int64, req *datapb.SyncSegmentsRequest) error {
+	//	s.EqualValues(nodeID, 222)
+	//	s.NotNil(req)
+	//	s.Empty(req.GetCompactedFrom())
+	//	s.EqualValues(5, req.GetPlanID())
+	//	return nil
+	//}).Once()
+	//s.mockSessMgr.EXPECT().SyncSegments(int64(111), mock.Anything).Return(nil)
 	s.mockCm.EXPECT().Match(int64(111), "ch-1").Return(true)
 	s.mockCm.EXPECT().Match(int64(111), "ch-2").Return(false).Once()
 
