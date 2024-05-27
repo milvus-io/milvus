@@ -56,7 +56,7 @@ class TestUserE2E(TestBase):
             "newPassword": new_password
         }
         rsp = self.user_client.user_password_update(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         # drop user
         payload = {
             "userName": user_name
@@ -124,7 +124,7 @@ class TestUserE2E(TestBase):
         }
         self.collection_client.api_key = f"{user_name}:{password}"
         rsp = self.collection_client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
 
 
 @pytest.mark.L1
@@ -158,7 +158,7 @@ class TestUserNegative(TestBase):
         for i in range(2):
             rsp = self.user_client.user_create(payload)
             if i == 0:
-                assert rsp['code'] == 200
+                assert rsp['code'] == 0
             else:
                 assert rsp['code'] == 65535
                 assert "user already exists" in rsp['message']

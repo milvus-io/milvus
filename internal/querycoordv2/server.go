@@ -160,7 +160,7 @@ func (s *Server) Register() error {
 		go func() {
 			if err := s.session.ProcessActiveStandBy(s.activateFunc); err != nil {
 				log.Error("failed to activate standby server", zap.Error(err))
-				return
+				panic(err)
 			}
 			afterRegister()
 		}()

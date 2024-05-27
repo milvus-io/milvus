@@ -76,13 +76,13 @@ class TestCreateIndex(TestBase):
         if index_type == "AUTOINDEX":
             payload["indexParams"][0]["params"] = {"index_type": "AUTOINDEX"}
         rsp = self.index_client.index_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         time.sleep(10)
         # list index, expect not empty
         rsp = self.index_client.index_list(collection_name=name)
         # describe index
         rsp = self.index_client.index_describe(collection_name=name, index_name="book_intro_vector")
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert len(rsp['data']) == len(payload['indexParams'])
         expected_index = sorted(payload['indexParams'], key=lambda x: x['fieldName'])
         actual_index = sorted(rsp['data'], key=lambda x: x['fieldName'])
@@ -99,7 +99,7 @@ class TestCreateIndex(TestBase):
                 "indexName": actual_index[i]['indexName']
             }
             rsp = self.index_client.index_drop(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
         # list index, expect empty
         rsp = self.index_client.index_list(collection_name=name)
         assert rsp['data'] == []
@@ -156,13 +156,13 @@ class TestCreateIndex(TestBase):
                              "params": {"index_type": "INVERTED"}}]
         }
         rsp = self.index_client.index_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         time.sleep(10)
         # list index, expect not empty
         rsp = self.index_client.index_list(collection_name=name)
         # describe index
         rsp = self.index_client.index_describe(collection_name=name, index_name="word_count_vector")
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert len(rsp['data']) == len(payload['indexParams'])
         expected_index = sorted(payload['indexParams'], key=lambda x: x['fieldName'])
         actual_index = sorted(rsp['data'], key=lambda x: x['fieldName'])
@@ -226,13 +226,13 @@ class TestCreateIndex(TestBase):
         if index_type == "BIN_IVF_FLAT":
             payload["indexParams"][0]["params"]["nlist"] = "16384"
         rsp = self.index_client.index_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         time.sleep(10)
         # list index, expect not empty
         rsp = self.index_client.index_list(collection_name=name)
         # describe index
         rsp = self.index_client.index_describe(collection_name=name, index_name=index_name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert len(rsp['data']) == len(payload['indexParams'])
         expected_index = sorted(payload['indexParams'], key=lambda x: x['fieldName'])
         actual_index = sorted(rsp['data'], key=lambda x: x['fieldName'])
