@@ -2165,6 +2165,8 @@ type queryNodeConfig struct {
 	UseStreamComputing                      ParamItem `refreshable:"false"`
 
 	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
+
+	QueryStreamBatchSize ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2788,6 +2790,15 @@ user-task-polling:
 		Export:       true,
 	}
 	p.BloomFilterApplyParallelFactor.Init(base.mgr)
+
+	p.QueryStreamBatchSize = ParamItem{
+		Key:          "queryNode.queryStreamBatchSize",
+		Version:      "2.4.1",
+		DefaultValue: "4194304",
+		Doc:          "return batch size of stream query",
+		Export:       true,
+	}
+	p.QueryStreamBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
