@@ -28,18 +28,9 @@ type candidateKey struct {
 }
 
 // MayPkExist checks whether primary key could exists in this candidate.
-func (k candidateKey) MayPkExist(pk storage.PrimaryKey) bool {
+func (k candidateKey) MayPkExist(lc storage.LocationsCache) bool {
 	// always return true to prevent miuse
 	return true
-}
-
-func (k candidateKey) TestLocations(pk storage.PrimaryKey, locs []uint64) bool {
-	// always return true to prevent miuse
-	return true
-}
-
-func (k candidateKey) GetHashFuncNum() uint {
-	return 0
 }
 
 // ID implements Candidate.

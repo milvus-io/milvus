@@ -20,12 +20,13 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestFieldStatsUpdate(t *testing.T) {
@@ -373,7 +374,7 @@ func TestFieldStatsWriter_UpgradePrimaryKey(t *testing.T) {
 		FieldID: common.RowIDField,
 		Min:     1,
 		Max:     9,
-		BF:      bloom.NewWithEstimates(100000, 0.05),
+		BF:      bloomfilter.NewBloomFilterWithType(100000, 0.05, paramtable.Get().CommonCfg.BloomFilterType.GetValue()),
 	}
 
 	b := make([]byte, 8)
