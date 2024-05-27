@@ -219,6 +219,7 @@ func newBaseTaskQueue(tsoAllocatorIns tsoAllocator) *baseTaskQueue {
 	}
 }
 
+// ddTaskQueue represents queue for DDL task such as createCollection/createPartition/dropCollection/dropPartition/hasCollection/hasPartition
 type ddTaskQueue struct {
 	*baseTaskQueue
 	lock sync.Mutex
@@ -229,6 +230,7 @@ type pChanStatInfo struct {
 	tsSet map[Timestamp]struct{}
 }
 
+// dmTaskQueue represents queue for DML task such as insert/delete/upsert
 type dmTaskQueue struct {
 	*baseTaskQueue
 
@@ -351,6 +353,7 @@ func (queue *dmTaskQueue) getPChanStatsInfo() (map[pChan]*pChanStatistics, error
 	return ret, nil
 }
 
+// dqTaskQueue represents queue for DQL task such as search/query
 type dqTaskQueue struct {
 	*baseTaskQueue
 }
