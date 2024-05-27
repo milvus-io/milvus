@@ -37,7 +37,7 @@ class TestRestfulSdkCompatibility(TestBase):
         all_collections = rsp['data']
         assert name in all_collections
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert rsp['data']['enableDynamicField'] == enable_dynamic
         assert rsp['data']['load'] == "LoadStateNotLoad"
@@ -57,7 +57,7 @@ class TestRestfulSdkCompatibility(TestBase):
             "metricType": metric_type,
         }
         rsp = client.collection_create(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         collection = Collection(name=name)
         logger.info(collection.schema)
         field_names = [field.name for field in collection.schema.fields]
@@ -89,7 +89,7 @@ class TestRestfulSdkCompatibility(TestBase):
         all_collections = rsp['data']
         assert name in all_collections
         rsp = client.collection_describe(name)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['collectionName'] == name
         assert len(rsp['data']['indexes']) == 1 and rsp['data']['indexes'][0]['metricType'] == metric_type
 
@@ -160,7 +160,7 @@ class TestRestfulSdkCompatibility(TestBase):
             "data": data,
         }
         rsp = client.vector_insert(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert rsp['data']['insertCount'] == nb
         assert len(rsp['data']["insertIds"]) == nb
 
@@ -196,7 +196,7 @@ class TestRestfulSdkCompatibility(TestBase):
         }
         # search data by restful
         rsp = client.vector_search(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert len(rsp['data']) == 10
 
     def test_collection_create_by_sdk_query_vector_by_restful(self):
@@ -230,7 +230,7 @@ class TestRestfulSdkCompatibility(TestBase):
         }
         # query data by restful
         rsp = client.vector_query(payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         assert len(rsp['data']) == 10
 
     def test_collection_create_by_restful_search_vector_by_sdk(self):
