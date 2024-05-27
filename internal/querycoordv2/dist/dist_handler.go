@@ -98,7 +98,7 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 	node.SetLastHeartbeat(time.Now())
 
 	// skip  update dist if no distribution change happens in query node
-	if resp.GetLastModifyTs() <= dh.lastUpdateTs {
+	if resp.GetLastModifyTs() != 0 && resp.GetLastModifyTs() <= dh.lastUpdateTs {
 		log.RatedInfo(30, "skip update dist due to no distribution change", zap.Int64("lastModifyTs", resp.GetLastModifyTs()), zap.Int64("lastUpdateTs", dh.lastUpdateTs))
 	} else {
 		dh.lastUpdateTs = resp.GetLastModifyTs()
