@@ -12,6 +12,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 // We wrap original protobuf structure for 2 reasons:
@@ -208,6 +209,40 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				Data: &schemapb.VectorField_FloatVector{
 					FloatVector: &schemapb.FloatArray{
 						Data: data,
+					},
+				},
+			},
+		}
+	case schemapb.DataType_SparseFloatVector:
+		var wrappedData []map[string]interface{}
+		err := json.Unmarshal(raw, &wrappedData)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		if len(wrappedData) < 1 {
+			return nil, errors.New("at least one row for insert")
+		}
+		data := make([][]byte, len(wrappedData))
+		dim := int64(0)
+		for _, row := range wrappedData {
+			rowData, err := typeutil.CreateSparseFloatRowFromMap(row)
+			if err != nil {
+				return nil, newFieldDataError(f.FieldName, err)
+			}
+			data = append(data, rowData)
+			rowDim := typeutil.SparseFloatRowDim(rowData)
+			if rowDim > dim {
+				dim = rowDim
+			}
+		}
+
+		ret.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: dim,
+				Data: &schemapb.VectorField_SparseFloatVector{
+					SparseFloatVector: &schemapb.SparseFloatArray{
+						Dim:      dim,
+						Contents: data,
 					},
 				},
 			},

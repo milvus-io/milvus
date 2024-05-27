@@ -848,7 +848,10 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	if vectorField == nil {
 		return nil, errors.New("cannot find a vector field named: " + fieldName)
 	}
-	dim, _ := getDim(vectorField)
+	dim := int64(0)
+	if !typeutil.IsSparseFloatVectorType(vectorField.DataType) {
+		dim, _ = getDim(vectorField)
+	}
 	phv, err := convertVectors2Placeholder(body, vectorField.DataType, dim)
 	if err != nil {
 		return nil, err

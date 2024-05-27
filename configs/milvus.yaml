@@ -335,7 +335,7 @@ queryNode:
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
     # 2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.
-    warmup: async
+    warmup: off
   mmap:
     mmapEnabled: false # Enable mmap for loading data
   lazyload:

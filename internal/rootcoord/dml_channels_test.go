@@ -293,8 +293,10 @@ func (ms *FailMsgStream) Broadcast(*msgstream.MsgPack) (map[string][]msgstream.M
 	}
 	return nil, nil
 }
-func (ms *FailMsgStream) Consume() *msgstream.MsgPack                                     { return nil }
-func (ms *FailMsgStream) Seek(ctx context.Context, offset []*msgstream.MsgPosition) error { return nil }
+func (ms *FailMsgStream) Consume() *msgstream.MsgPack { return nil }
+func (ms *FailMsgStream) Seek(ctx context.Context, msgPositions []*msgstream.MsgPosition, includeCurrentMsg bool) error {
+	return nil
+}
 
 func (ms *FailMsgStream) GetLatestMsgID(channel string) (msgstream.MessageID, error) {
 	return nil, nil

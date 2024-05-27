@@ -766,7 +766,7 @@ func createAndSeekConsumer(ctx context.Context, t *testing.T, newer streamNewer,
 	consumer, err := newer(ctx)
 	assert.NoError(t, err)
 	consumer.AsConsumer(context.Background(), channels, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
-	err = consumer.Seek(context.Background(), seekPositions)
+	err = consumer.Seek(context.Background(), seekPositions, false)
 	assert.NoError(t, err)
 	return consumer
 }

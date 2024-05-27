@@ -37,12 +37,14 @@ var (
 	// and other operations (insert/delete/statistics/etc.)
 	// since in concurrent situation, there operation may block each other in high payload
 
-	sqp      atomic.Pointer[conc.Pool[any]]
-	sqOnce   sync.Once
-	dp       atomic.Pointer[conc.Pool[any]]
-	dynOnce  sync.Once
-	loadPool atomic.Pointer[conc.Pool[any]]
-	loadOnce sync.Once
+	sqp        atomic.Pointer[conc.Pool[any]]
+	sqOnce     sync.Once
+	dp         atomic.Pointer[conc.Pool[any]]
+	dynOnce    sync.Once
+	loadPool   atomic.Pointer[conc.Pool[any]]
+	loadOnce   sync.Once
+	warmupPool atomic.Pointer[conc.Pool[any]]
+	warmupOnce sync.Once
 )
 
 // initSQPool initialize
@@ -80,9 +82,6 @@ func initLoadPool() {
 	loadOnce.Do(func() {
 		pt := paramtable.Get()
 		poolSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
-		if poolSize > 16 {
-			poolSize = 16
-		}
 		pool := conc.NewPool[any](
 			poolSize,
 			conc.WithPreAlloc(false),
@@ -93,6 +92,23 @@ func initLoadPool() {
 		loadPool.Store(pool)
 
 		pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, config.NewHandler("qn.loadpool.middlepriority", ResizeLoadPool))
+	})
+}
+
+func initWarmupPool() {
+	warmupOnce.Do(func() {
+		pt := paramtable.Get()
+		poolSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+		pool := conc.NewPool[any](
+			poolSize,
+			conc.WithPreAlloc(false),
+			conc.WithDisablePurge(false),
+			conc.WithPreHandler(runtime.LockOSThread), // lock os thread for cgo thread disposal
+			conc.WithNonBlocking(true),                // make warming up non blocking
+		)
+
+		warmupPool.Store(pool)
+		pt.Watch(pt.CommonCfg.LowPriorityThreadCoreCoefficient.Key, config.NewHandler("qn.warmpool.lowpriority", ResizeWarmupPool))
 	})
 }
 
@@ -113,6 +129,11 @@ func GetLoadPool() *conc.Pool[any] {
 	return loadPool.Load()
 }
 
+func GetWarmupPool() *conc.Pool[any] {
+	initWarmupPool()
+	return warmupPool.Load()
+}
+
 func ResizeSQPool(evt *config.Event) {
 	if evt.HasUpdated {
 		pt := paramtable.Get()
@@ -128,6 +149,14 @@ func ResizeLoadPool(evt *config.Event) {
 		pt := paramtable.Get()
 		newSize := hardware.GetCPUNum() * pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.GetAsInt()
 		resizePool(GetLoadPool(), newSize, "LoadPool")
+	}
+}
+
+func ResizeWarmupPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := hardware.GetCPUNum() * pt.CommonCfg.LowPriorityThreadCoreCoefficient.GetAsInt()
+		resizePool(GetWarmupPool(), newSize, "WarmupPool")
 	}
 }
 
