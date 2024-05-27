@@ -725,7 +725,7 @@ func (s *DelegatorDataSuite) TestLoadSegments() {
 		}, 10)
 
 		s.mq.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-		s.mq.EXPECT().Seek(mock.Anything, mock.Anything).Return(nil)
+		s.mq.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		s.mq.EXPECT().Close()
 		ch := make(chan *msgstream.MsgPack, 10)
 		close(ch)
@@ -1173,7 +1173,7 @@ func (s *DelegatorDataSuite) TestReadDeleteFromMsgstream() {
 	defer cancel()
 
 	s.mq.EXPECT().AsConsumer(mock.Anything, mock.Anything, mock.Anything, mock.Anything).Return(nil)
-	s.mq.EXPECT().Seek(mock.Anything, mock.Anything).Return(nil)
+	s.mq.EXPECT().Seek(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 	s.mq.EXPECT().Close()
 	ch := make(chan *msgstream.MsgPack, 10)
 	s.mq.EXPECT().Chan().Return(ch)
