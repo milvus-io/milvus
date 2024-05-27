@@ -136,6 +136,10 @@ func (t *SyncTask) Run() (err error) {
 	var has bool
 	t.segment, has = t.metacache.GetSegmentByID(t.segmentID)
 	if !has {
+		if t.isDrop {
+			log.Info("segment dropped, discard sync task")
+			return nil
+		}
 		log.Warn("failed to sync data, segment not found in metacache")
 		err := merr.WrapErrSegmentNotFound(t.segmentID)
 		return err
