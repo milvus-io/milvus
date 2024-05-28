@@ -7,6 +7,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -60,7 +61,8 @@ func (b *brokerMetaWriter) UpdateSync(pack *SyncTask) error {
 		Position:  pack.checkpoint,
 	})
 
-	startPos := lo.Map(pack.metacache.GetSegmentsBy(metacache.WithStartPosNotRecorded()), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
+	startPos := lo.Map(pack.metacache.GetSegmentsBy(metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Sealed, commonpb.SegmentState_Flushing),
+		metacache.WithStartPosNotRecorded()), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
 		return &datapb.SegmentStartPosition{
 			SegmentID:     info.SegmentID(),
 			StartPosition: info.StartPosition(),
@@ -150,7 +152,8 @@ func (b *brokerMetaWriter) UpdateSyncV2(pack *SyncTaskV2) error {
 		Position:  pack.checkpoint,
 	})
 
-	startPos := lo.Map(pack.metacache.GetSegmentsBy(metacache.WithStartPosNotRecorded()), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
+	startPos := lo.Map(pack.metacache.GetSegmentsBy(metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing),
+		metacache.WithStartPosNotRecorded()), func(info *metacache.SegmentInfo, _ int) *datapb.SegmentStartPosition {
 		return &datapb.SegmentStartPosition{
 			SegmentID:     info.SegmentID(),
 			StartPosition: info.StartPosition(),

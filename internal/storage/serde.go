@@ -199,10 +199,16 @@ func (crr *compositeRecordReader) Close() {
 }
 
 type serdeEntry struct {
-	arrowType   func(int) arrow.DataType
+	// arrowType returns the arrow type for the given dimension
+	arrowType func(int) arrow.DataType
+	// deserialize deserializes the i-th element in the array, returns the value and ok.
+	//	null is deserialized to nil without checking the type nullability.
 	deserialize func(arrow.Array, int) (any, bool)
-	serialize   func(array.Builder, any) bool
-	sizeof      func(any) uint64
+	// serialize serializes the value to the builder, returns ok.
+	// 	nil is serialized to null without checking the type nullability.
+	serialize func(array.Builder, any) bool
+	// sizeof returns the size in bytes of the value
+	sizeof func(any) uint64
 }
 
 var serdeMap = func() map[schemapb.DataType]serdeEntry {
@@ -212,12 +218,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.FixedWidthTypes.Boolean
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Boolean); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.BooleanBuilder); ok {
 				if v, ok := v.(bool); ok {
 					builder.Append(v)
@@ -235,12 +248,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.PrimitiveTypes.Int8
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Int8); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.Int8Builder); ok {
 				if v, ok := v.(int8); ok {
 					builder.Append(v)
@@ -258,12 +278,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.PrimitiveTypes.Int16
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Int16); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.Int16Builder); ok {
 				if v, ok := v.(int16); ok {
 					builder.Append(v)
@@ -281,12 +308,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.PrimitiveTypes.Int32
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Int32); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.Int32Builder); ok {
 				if v, ok := v.(int32); ok {
 					builder.Append(v)
@@ -304,12 +338,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.PrimitiveTypes.Int64
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Int64); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.Int64Builder); ok {
 				if v, ok := v.(int64); ok {
 					builder.Append(v)
@@ -327,12 +368,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.PrimitiveTypes.Float32
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Float32); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.Float32Builder); ok {
 				if v, ok := v.(float32); ok {
 					builder.Append(v)
@@ -350,12 +398,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.PrimitiveTypes.Float64
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Float64); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.Float64Builder); ok {
 				if v, ok := v.(float64); ok {
 					builder.Append(v)
@@ -373,12 +428,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.BinaryTypes.String
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.String); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.StringBuilder); ok {
 				if v, ok := v.(string); ok {
 					builder.Append(v)
@@ -388,6 +450,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return false
 		},
 		func(v any) uint64 {
+			if v == nil {
+				return 8
+			}
 			return uint64(len(v.(string)))
 		},
 	}
@@ -399,6 +464,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.BinaryTypes.Binary
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
 				v := &schemapb.ScalarField{}
 				if err := proto.Unmarshal(arr.Value(i), v); err == nil {
@@ -408,6 +476,10 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
 				if vv, ok := v.(*schemapb.ScalarField); ok {
 					if bytes, err := proto.Marshal(vv); err == nil {
@@ -419,11 +491,17 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return false
 		},
 		func(v any) uint64 {
+			if v == nil {
+				return 8
+			}
 			return uint64(v.(*schemapb.ScalarField).XXX_Size())
 		},
 	}
 
 	sizeOfBytes := func(v any) uint64 {
+		if v == nil {
+			return 8
+		}
 		return uint64(len(v.([]byte)))
 	}
 
@@ -432,12 +510,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return arrow.BinaryTypes.Binary
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
 				return arr.Value(i), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
 				if v, ok := v.([]byte); ok {
 					builder.Append(v)
@@ -452,12 +537,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 	m[schemapb.DataType_JSON] = byteEntry
 
 	fixedSizeDeserializer := func(a arrow.Array, i int) (any, bool) {
+		if a.IsNull(i) {
+			return nil, true
+		}
 		if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
 			return arr.Value(i), true
 		}
 		return nil, false
 	}
 	fixedSizeSerializer := func(b array.Builder, v any) bool {
+		if v == nil {
+			b.AppendNull()
+			return true
+		}
 		if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 			if v, ok := v.([]byte); ok {
 				builder.Append(v)
@@ -496,12 +588,19 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return &arrow.FixedSizeBinaryType{ByteWidth: i * 4}
 		},
 		func(a arrow.Array, i int) (any, bool) {
+			if a.IsNull(i) {
+				return nil, true
+			}
 			if arr, ok := a.(*array.FixedSizeBinary); ok && i < arr.Len() {
 				return arrow.Float32Traits.CastFromBytes(arr.Value(i)), true
 			}
 			return nil, false
 		},
 		func(b array.Builder, v any) bool {
+			if v == nil {
+				b.AppendNull()
+				return true
+			}
 			if builder, ok := b.(*array.FixedSizeBinaryBuilder); ok {
 				if vv, ok := v.([]float32); ok {
 					dim := len(vv)
@@ -518,6 +617,9 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			return false
 		},
 		func(v any) uint64 {
+			if v == nil {
+				return 8
+			}
 			return uint64(len(v.([]float32)) * 4)
 		},
 	}
@@ -639,11 +741,15 @@ func NewBinlogDeserializeReader(blobs []*Blob, PKfieldID UniqueID) (*Deserialize
 
 			m := value.Value.(map[FieldID]interface{})
 			for j, dt := range r.Schema() {
-				d, ok := serdeMap[dt].deserialize(r.Column(j), i)
-				if ok {
-					m[j] = d // TODO: avoid memory copy here.
+				if r.Column(j).IsNull(i) {
+					m[j] = nil
 				} else {
-					return errors.New(fmt.Sprintf("unexpected type %s", dt))
+					d, ok := serdeMap[dt].deserialize(r.Column(j), i)
+					if ok {
+						m[j] = d // TODO: avoid memory copy here.
+					} else {
+						return errors.New(fmt.Sprintf("unexpected type %s", dt))
+					}
 				}
 			}
 
@@ -900,8 +1006,9 @@ func (bsw *BinlogStreamWriter) GetRecordWriter() (RecordWriter, error) {
 	fid := bsw.fieldSchema.FieldID
 	dim, _ := typeutil.GetDim(bsw.fieldSchema)
 	rw, err := newSingleFieldRecordWriter(fid, arrow.Field{
-		Name: strconv.Itoa(int(fid)),
-		Type: serdeMap[bsw.fieldSchema.DataType].arrowType(int(dim)),
+		Name:     strconv.Itoa(int(fid)),
+		Type:     serdeMap[bsw.fieldSchema.DataType].arrowType(int(dim)),
+		Nullable: true, // No nullable check here.
 	}, &bsw.buf)
 	if err != nil {
 		return nil, err
@@ -1028,8 +1135,9 @@ func NewBinlogSerializeWriter(schema *schemapb.CollectionSchema, partitionID, se
 			arrays[i] = builder.NewArray()
 			builder.Release()
 			fields[i] = arrow.Field{
-				Name: strconv.Itoa(int(fid)),
-				Type: arrays[i].DataType(),
+				Name:     strconv.Itoa(int(fid)),
+				Type:     arrays[i].DataType(),
+				Nullable: true, // No nullable check here.
 			}
 			field2Col[fid] = i
 			i++

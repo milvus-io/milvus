@@ -433,6 +433,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 					CollectionID:  collMeta.ID,
 					PartitionID:   1,
 					InsertChannel: insertChannelName,
+					State:         commonpb.SegmentState_Flushed,
 				},
 
 				1: {
@@ -440,6 +441,7 @@ func (s *DataSyncServiceSuite) TestStartStop() {
 					CollectionID:  collMeta.ID,
 					PartitionID:   1,
 					InsertChannel: insertChannelName,
+					State:         commonpb.SegmentState_Flushed,
 				},
 			}
 			return lo.FilterMap(segmentIDs, func(id int64, _ int) (*datapb.SegmentInfo, bool) {

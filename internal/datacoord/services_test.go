@@ -44,7 +44,9 @@ type ServerSuite struct {
 
 func WithChannelManager(cm ChannelManager) Option {
 	return func(svr *Server) {
+		svr.sessionManager = NewSessionManagerImpl(withSessionCreator(svr.dataNodeCreator))
 		svr.channelManager = cm
+		svr.cluster = NewClusterImpl(svr.sessionManager, svr.channelManager)
 	}
 }
 

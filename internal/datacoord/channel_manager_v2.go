@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -522,9 +523,11 @@ func (m *ChannelManagerImplV2) advanceToNotifies(ctx context.Context, toNotifies
 		)
 		for _, ch := range nodeAssign.Channels {
 			innerCh := ch
+			tmpWatchInfo := proto.Clone(innerCh.GetWatchInfo()).(*datapb.ChannelWatchInfo)
+			tmpWatchInfo.Vchan = m.h.GetDataVChanPositions(innerCh, allPartitionID)
 
 			future := getOrCreateIOPool().Submit(func() (any, error) {
-				err := m.Notify(ctx, nodeAssign.NodeID, innerCh.GetWatchInfo())
+				err := m.Notify(ctx, nodeAssign.NodeID, tmpWatchInfo)
 				return innerCh, err
 			})
 			futures = append(futures, future)
@@ -694,7 +697,7 @@ func (m *ChannelManagerImplV2) fillChannelWatchInfo(op *ChannelOp) error {
 		}
 
 		info := &datapb.ChannelWatchInfo{
-			Vchan:   vcInfo,
+			Vchan:   reduceVChanSize(vcInfo),
 			StartTs: startTs,
 			State:   inferStateByOpType(op.Type),
 			Schema:  ch.GetSchema(),
@@ -714,4 +717,17 @@ func inferStateByOpType(opType ChannelOpType) datapb.ChannelWatchState {
 	default:
 		return datapb.ChannelWatchState_ToWatch
 	}
+}
+
+// Clear segmentID in vChannelInfo to reduce meta size.
+// About 200k segments will exceed default meta size limit,
+// clear it would make meta size way smaller and support infinite segments count
+//
+// NOTE: all the meta and in-mem watchInfo contains partial VChanInfo that dones't include segmentIDs
+// Need to recalulate and fill-in segmentIDs before notify to DataNode
+func reduceVChanSize(vChan *datapb.VchannelInfo) *datapb.VchannelInfo {
+	vChan.DroppedSegmentIds = nil
+	vChan.FlushedSegmentIds = nil
+	vChan.UnflushedSegmentIds = nil
+	return vChan
 }

@@ -27,7 +27,9 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/kv"
 	mockkv "github.com/milvus-io/milvus/internal/kv/mocks"
 	"github.com/milvus-io/milvus/internal/metastore/kv/datacoord"
@@ -1128,4 +1130,90 @@ func Test_meta_GcConfirm(t *testing.T) {
 		Return(false)
 
 	assert.False(t, m.GcConfirm(context.TODO(), 100, 10000))
+}
+
+func Test_meta_ReloadCollectionsFromRootcoords(t *testing.T) {
+	t.Run("fail to list database", func(t *testing.T) {
+		m := &meta{
+			collections: make(map[UniqueID]*collectionInfo),
+		}
+		mockBroker := broker.NewMockBroker(t)
+		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(nil, errors.New("list database failed, mocked"))
+		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to show collections", func(t *testing.T) {
+		m := &meta{
+			collections: make(map[UniqueID]*collectionInfo),
+		}
+		mockBroker := broker.NewMockBroker(t)
+
+		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			DbNames: []string{"db1"},
+		}, nil)
+		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(nil, errors.New("show collections failed, mocked"))
+		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to describe collection", func(t *testing.T) {
+		m := &meta{
+			collections: make(map[UniqueID]*collectionInfo),
+		}
+		mockBroker := broker.NewMockBroker(t)
+
+		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			DbNames: []string{"db1"},
+		}, nil)
+		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			CollectionNames: []string{"coll1"},
+			CollectionIds:   []int64{1000},
+		}, nil)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(nil, errors.New("describe collection failed, mocked"))
+		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
+		assert.Error(t, err)
+	})
+
+	t.Run("fail to show partitions", func(t *testing.T) {
+		m := &meta{
+			collections: make(map[UniqueID]*collectionInfo),
+		}
+		mockBroker := broker.NewMockBroker(t)
+
+		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			DbNames: []string{"db1"},
+		}, nil)
+		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			CollectionNames: []string{"coll1"},
+			CollectionIds:   []int64{1000},
+		}, nil)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{}, nil)
+		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return(nil, errors.New("show partitions failed, mocked"))
+		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
+		assert.Error(t, err)
+	})
+
+	t.Run("success", func(t *testing.T) {
+		m := &meta{
+			collections: make(map[UniqueID]*collectionInfo),
+		}
+		mockBroker := broker.NewMockBroker(t)
+
+		mockBroker.EXPECT().ListDatabases(mock.Anything).Return(&milvuspb.ListDatabasesResponse{
+			DbNames: []string{"db1"},
+		}, nil)
+		mockBroker.EXPECT().ShowCollections(mock.Anything, mock.Anything).Return(&milvuspb.ShowCollectionsResponse{
+			CollectionNames: []string{"coll1"},
+			CollectionIds:   []int64{1000},
+		}, nil)
+		mockBroker.EXPECT().DescribeCollectionInternal(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			CollectionID: 1000,
+		}, nil)
+		mockBroker.EXPECT().ShowPartitionsInternal(mock.Anything, mock.Anything).Return([]int64{2000}, nil)
+		err := m.reloadCollectionsFromRootcoord(context.TODO(), mockBroker)
+		assert.NoError(t, err)
+		c := m.GetCollection(UniqueID(1000))
+		assert.NotNil(t, c)
+	})
 }

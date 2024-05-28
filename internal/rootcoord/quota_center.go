@@ -437,10 +437,8 @@ func (q *QuotaCenter) collectMetrics() error {
 		q.diskMu.Lock()
 		if dataCoordTopology.Cluster.Self.QuotaMetrics != nil {
 			q.dataCoordMetrics = dataCoordTopology.Cluster.Self.QuotaMetrics
-			for _, metricCollections := range q.dataCoordMetrics.PartitionsBinlogSize {
-				for metricCollection := range metricCollections {
-					datacoordQuotaCollections = append(datacoordQuotaCollections, metricCollection)
-				}
+			for metricCollection := range q.dataCoordMetrics.PartitionsBinlogSize {
+				datacoordQuotaCollections = append(datacoordQuotaCollections, metricCollection)
 			}
 		}
 		q.diskMu.Unlock()
