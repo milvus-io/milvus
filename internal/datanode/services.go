@@ -276,6 +276,11 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
+	if len(req.GetSegmentInfos()) <= 0 {
+		log.Info("sync segments is empty, skip it")
+		return merr.Success(), nil
+	}
+
 	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
 	if !ok {
 		node.compactionExecutor.discardPlan(req.GetChannelName())
