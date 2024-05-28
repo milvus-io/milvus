@@ -165,7 +165,8 @@ type LocationsCache struct {
 
 func (lc LocationsCache) Locations(k uint) []uint64 {
 	if k > lc.k {
-		lc.locations, lc.k = Locations(lc.pk, k), k
+		lc.k = k
+		lc.locations = Locations(lc.pk, lc.k)
 	}
 
 	return lc.locations
