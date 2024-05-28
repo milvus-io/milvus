@@ -938,7 +938,12 @@ func TestServer_GetSegmentIndexState(t *testing.T) {
 			WriteHandoff:  false,
 		})
 		s.meta.segments.SetSegment(segID, &SegmentInfo{
-			SegmentInfo:     nil,
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "ch",
+			},
 			currRows:        0,
 			allocations:     nil,
 			lastFlushTime:   time.Time{},
