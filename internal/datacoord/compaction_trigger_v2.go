@@ -101,14 +101,16 @@ func (m *CompactionTriggerManager) startLoop(policy CompactionPolicy) {
 			log.Info("Compaction View checkLoop quit")
 			return
 		case <-policy.Ticker().C:
-			ctx := context.Background()
-			events, err := policy.Trigger(ctx)
-			if err != nil {
-				log.Warn("Fail to trigger policy", zap.Error(err))
-			}
-			if len(events) > 0 {
-				for triggerType, views := range events {
-					m.notify(ctx, triggerType, views)
+			if policy.Enable() {
+				ctx := context.Background()
+				events, err := policy.Trigger(ctx)
+				if err != nil {
+					log.Warn("Fail to trigger policy", zap.Error(err))
+				}
+				if len(events) > 0 {
+					for triggerType, views := range events {
+						m.notify(ctx, triggerType, views)
+					}
 				}
 			}
 		}
