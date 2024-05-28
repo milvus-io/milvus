@@ -188,4 +188,17 @@ func TestMarshal(t *testing.T) {
 	for _, key := range keys {
 		assert.True(t, bf2.Test(key))
 	}
+
+	// test empty bloom filter
+	emptyBF := AlwaysTrueBloomFilter
+	for _, key := range keys {
+		bf.Add(key)
+	}
+	data, err = emptyBF.MarshalJSON()
+	assert.NoError(t, err)
+	emptyBF2, err := UnmarshalJSON(data, AlwaysTrueBF)
+	assert.NoError(t, err)
+	for _, key := range keys {
+		assert.True(t, emptyBF2.Test(key))
+	}
 }

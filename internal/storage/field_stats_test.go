@@ -575,8 +575,9 @@ func TestFieldStatsUnMarshal(t *testing.T) {
 		assert.Error(t, err)
 		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": \"b\"}"))
 		assert.Error(t, err)
+		// return AlwaysTrueBloomFilter when deserialize bloom filter failed.
 		err = stats.UnmarshalJSON([]byte("{\"fieldID\":1,\"max\":10, \"maxPk\":10, \"minPk\": 1, \"bf\": \"2\"}"))
-		assert.Error(t, err)
+		assert.NoError(t, err)
 	})
 
 	t.Run("succeed", func(t *testing.T) {

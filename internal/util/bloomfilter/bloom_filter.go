@@ -28,20 +28,27 @@ import (
 
 type BFType int
 
+var AlwaysTrueBloomFilter = &alwaysTrueBloomFilter{}
+
 const (
-	BlockBFName = "BlockedBloomFilter"
-	BasicBFName = "BasicBloomFilter"
+	UnsupportedBFName = "Unsupported BloomFilter"
+	BlockBFName       = "BlockedBloomFilter"
+	BasicBFName       = "BasicBloomFilter"
+	AlwaysTrueBFName  = "AlwaysTrueBloomFilter"
 )
 
 const (
 	UnsupportedBF BFType = iota + 1
+	AlwaysTrueBF         // empty bloom filter
 	BasicBF
 	BlockedBF
 )
 
 var bfNames = map[BFType]string{
-	BasicBF:   BlockBFName,
-	BlockedBF: BasicBFName,
+	BasicBF:       BlockBFName,
+	BlockedBF:     BasicBFName,
+	AlwaysTrueBF:  AlwaysTrueBFName,
+	UnsupportedBF: UnsupportedBFName,
 }
 
 func (t BFType) String() string {
@@ -54,6 +61,8 @@ func BFTypeFromString(name string) BFType {
 		return BasicBF
 	case BlockBFName:
 		return BlockedBF
+	case AlwaysTrueBFName:
+		return AlwaysTrueBF
 	default:
 		return UnsupportedBF
 	}
@@ -195,6 +204,48 @@ func (b *blockedBloomFilter) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// always true bloom filter is used when deserialize stat log failed.
+// Notice: add item to empty bloom filter is not permitted. and all Test Func will return false positive.
+type alwaysTrueBloomFilter struct{}
+
+func (b *alwaysTrueBloomFilter) Type() BFType {
+	return AlwaysTrueBF
+}
+
+func (b *alwaysTrueBloomFilter) Cap() uint {
+	return 0
+}
+
+func (b *alwaysTrueBloomFilter) K() uint {
+	return 0
+}
+
+func (b *alwaysTrueBloomFilter) Add(data []byte) {
+}
+
+func (b *alwaysTrueBloomFilter) AddString(data string) {
+}
+
+func (b *alwaysTrueBloomFilter) Test(data []byte) bool {
+	return true
+}
+
+func (b *alwaysTrueBloomFilter) TestString(data string) bool {
+	return true
+}
+
+func (b *alwaysTrueBloomFilter) TestLocations(locs []uint64) bool {
+	return true
+}
+
+func (b *alwaysTrueBloomFilter) MarshalJSON() ([]byte, error) {
+	return []byte{}, nil
+}
+
+func (b *alwaysTrueBloomFilter) UnmarshalJSON(data []byte) error {
+	return nil
+}
+
 func NewBloomFilterWithType(capacity uint, fp float64, typeName string) BloomFilterInterface {
 	bfType := BFTypeFromString(typeName)
 	switch bfType {
@@ -224,6 +275,8 @@ func UnmarshalJSON(data []byte, bfType BFType) (BloomFilterInterface, error) {
 			return nil, errors.Wrap(err, "failed to unmarshal blocked bloom filter")
 		}
 		return bf, nil
+	case AlwaysTrueBF:
+		return AlwaysTrueBloomFilter, nil
 	default:
 		return nil, errors.Errorf("unsupported bloom filter type: %d", bfType)
 	}
@@ -235,6 +288,8 @@ func Locations(data []byte, k uint, bfType BFType) []uint64 {
 		return bloom.Locations(data, k)
 	case BlockedBF:
 		return blobloom.Locations(xxh3.Hash(data), k)
+	case AlwaysTrueBF:
+		return nil
 	default:
 		log.Info("unsupported bloom filter type, using block bloom filter", zap.String("type", bfType.String()))
 		return nil
