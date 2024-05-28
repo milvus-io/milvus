@@ -186,7 +186,7 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.metacache.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false).Once()
 		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
 		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})
@@ -215,7 +215,7 @@ func (s *L0WriteBufferSuite) TestBufferData() {
 		s.metacache.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 		s.metacache.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 
 		metrics.DataNodeFlowGraphBufferDataSize.Reset()
 		err = wb.BufferData([]*msgstream.InsertMsg{msg}, []*msgstream.DeleteMsg{delMsg}, &msgpb.MsgPosition{Timestamp: 100}, &msgpb.MsgPosition{Timestamp: 200})

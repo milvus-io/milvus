@@ -60,18 +60,32 @@ type PkStatsFactory func(vchannel *datapb.SegmentInfo) *BloomFilterSet
 type metaCacheImpl struct {
 	collectionID int64
 	vChannelName string
-	segmentInfos map[int64]*SegmentInfo
 	schema       *schemapb.CollectionSchema
-	mu           sync.RWMutex
+
+	mu            sync.RWMutex
+	segmentInfos  map[int64]*SegmentInfo
+	stateSegments map[commonpb.SegmentState]map[int64]*SegmentInfo
 }
 
 func NewMetaCache(info *datapb.ChannelWatchInfo, factory PkStatsFactory) MetaCache {
 	vchannel := info.GetVchan()
 	cache := &metaCacheImpl{
-		collectionID: vchannel.GetCollectionID(),
-		vChannelName: vchannel.GetChannelName(),
-		segmentInfos: make(map[int64]*SegmentInfo),
-		schema:       info.GetSchema(),
+		collectionID:  vchannel.GetCollectionID(),
+		vChannelName:  vchannel.GetChannelName(),
+		segmentInfos:  make(map[int64]*SegmentInfo),
+		stateSegments: make(map[commonpb.SegmentState]map[int64]*SegmentInfo),
+		schema:        info.GetSchema(),
+	}
+
+	for _, state := range []commonpb.SegmentState{
+		commonpb.SegmentState_Growing,
+		commonpb.SegmentState_Sealed,
+		commonpb.SegmentState_Flushing,
+		commonpb.SegmentState_Flushed,
+		commonpb.SegmentState_Dropped,
+		commonpb.SegmentState_Importing,
+	} {
+		cache.stateSegments[state] = make(map[int64]*SegmentInfo)
 	}
 
 	cache.init(vchannel, factory)
@@ -80,13 +94,13 @@ func NewMetaCache(info *datapb.ChannelWatchInfo, factory PkStatsFactory) MetaCac
 
 func (c *metaCacheImpl) init(vchannel *datapb.VchannelInfo, factory PkStatsFactory) {
 	for _, seg := range vchannel.FlushedSegments {
-		c.segmentInfos[seg.GetID()] = NewSegmentInfo(seg, factory(seg))
+		c.addSegment(NewSegmentInfo(seg, factory(seg)))
 	}
 
 	for _, seg := range vchannel.UnflushedSegments {
 		// segment state could be sealed for growing segment if flush request processed before datanode watch
 		seg.State = commonpb.SegmentState_Growing
-		c.segmentInfos[seg.GetID()] = NewSegmentInfo(seg, factory(seg))
+		c.addSegment(NewSegmentInfo(seg, factory(seg)))
 	}
 }
 
@@ -110,7 +124,13 @@ func (c *metaCacheImpl) AddSegment(segInfo *datapb.SegmentInfo, factory PkStatsF
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	c.segmentInfos[segInfo.GetID()] = segment
+	c.addSegment(segment)
+}
+
+func (c *metaCacheImpl) addSegment(segment *SegmentInfo) {
+	segID := segment.SegmentID()
+	c.segmentInfos[segID] = segment
+	c.stateSegments[segment.State()][segID] = segment
 }
 
 func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64) {
@@ -121,7 +141,7 @@ func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRo
 	if numOfRows > 0 {
 		compactTo = newSegmentID
 		if _, ok := c.segmentInfos[newSegmentID]; !ok {
-			c.segmentInfos[newSegmentID] = &SegmentInfo{
+			c.addSegment(&SegmentInfo{
 				segmentID:        newSegmentID,
 				partitionID:      partitionID,
 				state:            commonpb.SegmentState_Flushed,
@@ -129,7 +149,7 @@ func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRo
 				flushedRows:      numOfRows,
 				startPosRecorded: true,
 				bfs:              bfs,
-			}
+			})
 		}
 		log.Info("add compactTo segment info metacache", zap.Int64("segmentID", compactTo))
 	}
@@ -140,7 +160,10 @@ func (c *metaCacheImpl) CompactSegments(newSegmentID, partitionID int64, numOfRo
 			oldSet.Contain(segment.compactTo) {
 			updated := segment.Clone()
 			updated.compactTo = compactTo
+			updated.state = commonpb.SegmentState_Dropped
 			c.segmentInfos[segment.segmentID] = updated
+			delete(c.stateSegments[commonpb.SegmentState_Flushed], segment.segmentID)
+			c.stateSegments[commonpb.SegmentState_Dropped][segment.segmentID] = segment
 			log.Info("update segment compactTo",
 				zap.Int64("segmentID", segment.segmentID),
 				zap.Int64("originalCompactTo", segment.compactTo),
@@ -160,6 +183,7 @@ func (c *metaCacheImpl) RemoveSegments(filters ...SegmentFilter) []int64 {
 	var result []int64
 	process := func(id int64, info *SegmentInfo) {
 		delete(c.segmentInfos, id)
+		delete(c.stateSegments[info.State()], id)
 		result = append(result, id)
 	}
 	c.rangeWithFilter(process, filters...)
@@ -207,6 +231,8 @@ func (c *metaCacheImpl) UpdateSegments(action SegmentAction, filters ...SegmentF
 		nInfo := info.Clone()
 		action(nInfo)
 		c.segmentInfos[id] = nInfo
+		delete(c.stateSegments[info.State()], info.SegmentID())
+		c.stateSegments[nInfo.State()][nInfo.SegmentID()] = nInfo
 	}, filters...)
 }
 
@@ -223,38 +249,38 @@ func (c *metaCacheImpl) PredictSegments(pk storage.PrimaryKey, filters ...Segmen
 }
 
 func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), filters ...SegmentFilter) {
-	var hasIDs bool
-	set := typeutil.NewSet[int64]()
-	filtered := make([]SegmentFilter, 0, len(filters))
+	criterion := &segmentCriterion{}
 	for _, filter := range filters {
-		ids, ok := filter.SegmentIDs()
-		if ok {
-			set.Insert(ids...)
-			hasIDs = true
-		} else {
-			filtered = append(filtered, filter)
-		}
-	}
-	mergedFilter := func(info *SegmentInfo) bool {
-		for _, filter := range filtered {
-			if !filter.Filter(info) {
-				return false
-			}
-		}
-		return true
+		filter.AddFilter(criterion)
 	}
 
-	if hasIDs {
-		for id := range set {
-			info, has := c.segmentInfos[id]
-			if has && mergedFilter(info) {
-				fn(id, info)
-			}
-		}
+	var candidates []map[int64]*SegmentInfo
+	if criterion.states != nil {
+		candidates = lo.Map(criterion.states.Collect(), func(state commonpb.SegmentState, _ int) map[int64]*SegmentInfo {
+			return c.stateSegments[state]
+		})
 	} else {
-		for id, info := range c.segmentInfos {
-			if mergedFilter(info) {
-				fn(id, info)
+		candidates = []map[int64]*SegmentInfo{
+			c.segmentInfos,
+		}
+	}
+
+	for _, candidate := range candidates {
+		var segments map[int64]*SegmentInfo
+		if criterion.ids != nil {
+			segments = lo.SliceToMap(lo.FilterMap(criterion.ids.Collect(), func(id int64, _ int) (*SegmentInfo, bool) {
+				segment, ok := candidate[id]
+				return segment, ok
+			}), func(segment *SegmentInfo) (int64, *SegmentInfo) {
+				return segment.SegmentID(), segment
+			})
+		} else {
+			segments = candidate
+		}
+
+		for id, segment := range segments {
+			if criterion.Match(segment) {
+				fn(id, segment)
 			}
 		}
 	}
