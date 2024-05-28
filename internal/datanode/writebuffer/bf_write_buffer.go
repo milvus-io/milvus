@@ -98,7 +98,8 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	// update pk oracle
 	for _, inData := range groups {
 		// segment shall always exists after buffer insert
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(inData.segmentID))
+		segments := wb.metaCache.GetSegmentsBy(
+			metacache.WithSegmentIDs(inData.segmentID))
 		for _, segment := range segments {
 			for _, fieldData := range inData.pkField {
 				err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)
