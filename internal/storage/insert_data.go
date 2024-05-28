@@ -194,62 +194,96 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 	case schemapb.DataType_SparseFloatVector:
 		return &SparseFloatVectorFieldData{}, nil
 	case schemapb.DataType_Bool:
-		return &BoolFieldData{
-			Data:      make([]bool, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &BoolFieldData{
+			Data: make([]bool, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 
 	case schemapb.DataType_Int8:
-		return &Int8FieldData{
-			Data:      make([]int8, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &Int8FieldData{
+			Data: make([]int8, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 
 	case schemapb.DataType_Int16:
-		return &Int16FieldData{
-			Data:      make([]int16, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &Int16FieldData{
+			Data: make([]int16, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 
 	case schemapb.DataType_Int32:
-		return &Int32FieldData{
-			Data:      make([]int32, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &Int32FieldData{
+			Data: make([]int32, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 
 	case schemapb.DataType_Int64:
-		return &Int64FieldData{
-			Data:      make([]int64, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &Int64FieldData{
+			Data: make([]int64, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
+
 	case schemapb.DataType_Float:
-		return &FloatFieldData{
-			Data:      make([]float32, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &FloatFieldData{
+			Data: make([]float32, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 
 	case schemapb.DataType_Double:
-		return &DoubleFieldData{
-			Data:      make([]float64, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &DoubleFieldData{
+			Data: make([]float64, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
+
 	case schemapb.DataType_JSON:
-		return &JSONFieldData{
-			Data:      make([][]byte, 0),
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &JSONFieldData{
+			Data: make([][]byte, 0, cap),
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
+
 	case schemapb.DataType_Array:
-		return &ArrayFieldData{
+		data := &ArrayFieldData{
 			Data:        make([]*schemapb.ScalarField, 0, cap),
 			ElementType: fieldSchema.GetElementType(),
-			ValidData:   make([]bool, 0),
-		}, nil
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
+
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
-		return &StringFieldData{
-			Data:      make([]string, 0),
-			DataType:  dataType,
-			ValidData: make([]bool, 0),
-		}, nil
+		data := &StringFieldData{
+			Data:     make([]string, 0, cap),
+			DataType: dataType,
+		}
+		if fieldSchema.GetNullable() {
+			data.ValidData = make([]bool, 0, cap)
+		}
+		return data, nil
 	default:
 		return nil, fmt.Errorf("Unexpected schema data type: %d", dataType)
 	}

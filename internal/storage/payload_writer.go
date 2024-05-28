@@ -192,17 +192,11 @@ func (w *NativePayloadWriter) AddDataToPayload(data interface{}, validData []boo
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		if w.nullable {
-			return merr.WrapErrParameterInvalidMsg("BinaryVector not support null")
-		}
 		return w.AddBinaryVectorToPayload(val, w.dim)
 	case schemapb.DataType_FloatVector:
 		val, ok := data.([]float32)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
-		}
-		if w.nullable {
-			return merr.WrapErrParameterInvalidMsg("BinaryVector not support null")
 		}
 		return w.AddFloatVectorToPayload(val, w.dim)
 	case schemapb.DataType_Float16Vector:
@@ -210,26 +204,17 @@ func (w *NativePayloadWriter) AddDataToPayload(data interface{}, validData []boo
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		if w.nullable {
-			return merr.WrapErrParameterInvalidMsg("BinaryVector not support null")
-		}
 		return w.AddFloat16VectorToPayload(val, w.dim)
 	case schemapb.DataType_BFloat16Vector:
 		val, ok := data.([]byte)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
 		}
-		if w.nullable {
-			return merr.WrapErrParameterInvalidMsg("BFloat16Vector not support null")
-		}
 		return w.AddBFloat16VectorToPayload(val, w.dim)
 	case schemapb.DataType_SparseFloatVector:
 		val, ok := data.(*SparseFloatVectorFieldData)
 		if !ok {
 			return merr.WrapErrParameterInvalidMsg("incorrect data type")
-		}
-		if w.nullable {
-			return merr.WrapErrParameterInvalidMsg("SparseFloatVector not support null")
 		}
 		return w.AddSparseFloatVectorToPayload(val)
 	default:

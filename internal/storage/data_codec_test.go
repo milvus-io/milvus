@@ -201,6 +201,62 @@ func genTestCollectionMeta() *etcdpb.CollectionMeta {
 	}
 }
 
+func TestInsertCodecFailed(t *testing.T) {
+	t.Run("vector field not support null", func(t *testing.T) {
+		tests := []struct {
+			description string
+			dataType    schemapb.DataType
+		}{
+			{"nullable FloatVector field", schemapb.DataType_FloatVector},
+			{"nullable Float16Vector field", schemapb.DataType_Float16Vector},
+			{"nullable BinaryVector field", schemapb.DataType_BinaryVector},
+			{"nullable BFloat16Vector field", schemapb.DataType_BFloat16Vector},
+			{"nullable SparseFloatVector field", schemapb.DataType_SparseFloatVector},
+		}
+
+		for _, test := range tests {
+			t.Run(test.description, func(t *testing.T) {
+				schema := &etcdpb.CollectionMeta{
+					ID:            CollectionID,
+					CreateTime:    1,
+					SegmentIDs:    []int64{SegmentID},
+					PartitionTags: []string{"partition_0", "partition_1"},
+					Schema: &schemapb.CollectionSchema{
+						Name:        "schema",
+						Description: "schema",
+						Fields: []*schemapb.FieldSchema{
+							{
+								FieldID:     RowIDField,
+								Name:        "row_id",
+								Description: "row_id",
+								DataType:    schemapb.DataType_Int64,
+							},
+							{
+								FieldID:     TimestampField,
+								Name:        "Timestamp",
+								Description: "Timestamp",
+								DataType:    schemapb.DataType_Int64,
+							},
+							{
+								DataType: test.dataType,
+							},
+						},
+					},
+				}
+				insertCodec := NewInsertCodecWithSchema(schema)
+				insertDataEmpty := &InsertData{
+					Data: map[int64]FieldData{
+						RowIDField:     &Int64FieldData{[]int64{}, nil},
+						TimestampField: &Int64FieldData{[]int64{}, nil},
+					},
+				}
+				_, err := insertCodec.Serialize(PartitionID, SegmentID, insertDataEmpty)
+				assert.Error(t, err)
+			})
+		}
+	})
+}
+
 func TestInsertCodec(t *testing.T) {
 	schema := genTestCollectionMeta()
 	insertCodec := NewInsertCodecWithSchema(schema)
@@ -920,24 +976,24 @@ func TestDeleteData(t *testing.T) {
 }
 
 func TestAddFieldDataToPayload(t *testing.T) {
-	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40)
-	e, _ := w.NextInsertEventWriter()
+	w := NewInsertBinlogWriter(schemapb.DataType_Int64, 10, 20, 30, 40, false)
+	e, _ := w.NextInsertEventWriter(false)
 	var err error
-	err = AddFieldDataToPayload(e, schemapb.DataType_Bool, &BoolFieldData{[]bool{}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Bool, &BoolFieldData{[]bool{}, nil})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int8, &Int8FieldData{[]int8{}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int8, &Int8FieldData{[]int8{}, nil})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int16, &Int16FieldData{[]int16{}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int16, &Int16FieldData{[]int16{}, nil})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int32, &Int32FieldData{[]int32{}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int32, &Int32FieldData{[]int32{}, nil})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Int64, &Int64FieldData{[]int64{}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Int64, &Int64FieldData{[]int64{}, nil})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Float, &FloatFieldData{[]float32{}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Float, &FloatFieldData{[]float32{}, nil})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_Double, &DoubleFieldData{[]float64{}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_Double, &DoubleFieldData{[]float64{}, nil})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_String, &StringFieldData{[]string{"test"}, schemapb.DataType_VarChar})
+	err = AddFieldDataToPayload(e, schemapb.DataType_String, &StringFieldData{[]string{"test"}, schemapb.DataType_VarChar, nil})
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_Array, &ArrayFieldData{
 		ElementType: schemapb.DataType_VarChar,
@@ -948,7 +1004,7 @@ func TestAddFieldDataToPayload(t *testing.T) {
 		}},
 	})
 	assert.Error(t, err)
-	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{[][]byte{[]byte(`"batch":2}`)}})
+	err = AddFieldDataToPayload(e, schemapb.DataType_JSON, &JSONFieldData{[][]byte{[]byte(`"batch":2}`)}, nil})
 	assert.Error(t, err)
 	err = AddFieldDataToPayload(e, schemapb.DataType_BinaryVector, &BinaryVectorFieldData{[]byte{}, 8})
 	assert.Error(t, err)

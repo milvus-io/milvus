@@ -247,10 +247,14 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 	for _, field := range insertCodec.Schema.Schema.Fields {
 		// encode fields
+		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID, field.GetNullable())
 		var eventWriter *insertEventWriter
 		var err error
 		var dim int64
 		if typeutil.IsVectorType(field.DataType) {
+			if field.GetNullable() {
+				return nil, merr.WrapErrParameterInvalidMsg(fmt.Sprintf("vectorType not support null, fieldName: %s", field.GetName()))
+			}
 			switch field.DataType {
 			case schemapb.DataType_FloatVector,
 				schemapb.DataType_BinaryVector,
@@ -326,35 +330,34 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 			return err
 		}
 	case schemapb.DataType_Int8:
-		if err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data, singleData.(*BoolFieldData).ValidData); err != nil {
+		if err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data, singleData.(*Int8FieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_Int16:
-		if err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data, singleData.(*BoolFieldData).ValidData); err != nil {
+		if err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data, singleData.(*Int16FieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_Int32:
-		if err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data, singleData.(*BoolFieldData).ValidData); err != nil {
+		if err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data, singleData.(*Int32FieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_Int64:
-		if err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data, singleData.(*BoolFieldData).ValidData); err != nil {
+		if err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data, singleData.(*Int64FieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_Float:
-		if err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data, singleData.(*BoolFieldData).ValidData); err != nil {
+		if err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data, singleData.(*FloatFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_Double:
-		if err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data, singleData.(*BoolFieldData).ValidData); err != nil {
+		if err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data, singleData.(*DoubleFieldData).ValidData); err != nil {
 			return err
 		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
 		for i, singleString := range singleData.(*StringFieldData).Data {
 			isValid := true
-			if len(singleData.(*ArrayFieldData).ValidData) != 0 {
-				isValid = singleData.(*ArrayFieldData).ValidData[i]
-
+			if len(singleData.(*StringFieldData).ValidData) != 0 {
+				isValid = singleData.(*StringFieldData).ValidData[i]
 			}
 			if err = eventWriter.AddOneStringToPayload(singleString, isValid); err != nil {
 				return err
@@ -365,7 +368,6 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 			isValid := true
 			if len(singleData.(*ArrayFieldData).ValidData) != 0 {
 				isValid = singleData.(*ArrayFieldData).ValidData[i]
-
 			}
 			if err = eventWriter.AddOneArrayToPayload(singleArray, isValid); err != nil {
 				return err
@@ -374,9 +376,8 @@ func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.Dat
 	case schemapb.DataType_JSON:
 		for i, singleJSON := range singleData.(*JSONFieldData).Data {
 			isValid := true
-			if len(singleData.(*ArrayFieldData).ValidData) != 0 {
-				isValid = singleData.(*ArrayFieldData).ValidData[i]
-
+			if len(singleData.(*JSONFieldData).ValidData) != 0 {
+				isValid = singleData.(*JSONFieldData).ValidData[i]
 			}
 			if err = eventWriter.AddOneJSONToPayload(singleJSON, isValid); err != nil {
 				return err

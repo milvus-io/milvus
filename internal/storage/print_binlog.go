@@ -224,80 +224,59 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 	fmt.Println("\tpayload values:")
 	switch colType {
 	case schemapb.DataType_Bool:
-		val, valids, err := reader.GetBoolFromPayload()
+		val, _, err := reader.GetBoolFromPayload()
 		if err != nil {
 			return err
 		}
 		for i, v := range val {
-			fmt.Printf("\t\t%d : %v\n", i, v)
-		}
-		for i, v := range valids {
 			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_Int8:
-		val, valids, err := reader.GetInt8FromPayload()
+		val, _, err := reader.GetInt8FromPayload()
 		if err != nil {
 			return err
 		}
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
-		}
-		for i, v := range valids {
-			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_Int16:
-		val, valids, err := reader.GetInt16FromPayload()
+		val, _, err := reader.GetInt16FromPayload()
 		if err != nil {
 			return err
 		}
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
-		}
-		for i, v := range valids {
-			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_Int32:
-		val, valids, err := reader.GetInt32FromPayload()
+		val, _, err := reader.GetInt32FromPayload()
 		if err != nil {
 			return err
 		}
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
-		}
-		for i, v := range valids {
-			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_Int64:
-		val, valids, err := reader.GetInt64FromPayload()
+		val, _, err := reader.GetInt64FromPayload()
 		if err != nil {
 			return err
 		}
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %d\n", i, v)
 		}
-		for i, v := range valids {
-			fmt.Printf("\t\t%d : %v\n", i, v)
-		}
 	case schemapb.DataType_Float:
-		val, valids, err := reader.GetFloatFromPayload()
+		val, _, err := reader.GetFloatFromPayload()
 		if err != nil {
 			return err
 		}
 		for i, v := range val {
 			fmt.Printf("\t\t%d : %f\n", i, v)
 		}
-		for i, v := range valids {
-			fmt.Printf("\t\t%d : %v\n", i, v)
-		}
 	case schemapb.DataType_Double:
-		val, valids, err := reader.GetDoubleFromPayload()
+		val, _, err := reader.GetDoubleFromPayload()
 		if err != nil {
 			return err
 		}
 		for i, v := range val {
-			fmt.Printf("\t\t%d : %v\n", i, v)
-		}
-		for i, v := range valids {
 			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_String, schemapb.DataType_VarChar:
@@ -306,15 +285,12 @@ func printPayloadValues(colType schemapb.DataType, reader PayloadReaderInterface
 			return err
 		}
 
-		val, valids, err := reader.GetStringFromPayload()
+		val, _, err := reader.GetStringFromPayload()
 		if err != nil {
 			return err
 		}
 		for i := 0; i < rows; i++ {
 			fmt.Printf("\t\t%d : %s\n", i, val[i])
-		}
-		for i, v := range valids {
-			fmt.Printf("\t\t%d : %v\n", i, v)
 		}
 	case schemapb.DataType_BinaryVector:
 		val, dim, err := reader.GetBinaryVectorFromPayload()
