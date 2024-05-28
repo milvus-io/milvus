@@ -169,7 +169,7 @@ func (lc *LocationsCache) Locations(k uint) []uint64 {
 		lc.locations = Locations(lc.pk, lc.k)
 	}
 
-	return lc.locations
+	return lc.locations[:k]
 }
 
 func NewLocationsCache(pk PrimaryKey) *LocationsCache {
