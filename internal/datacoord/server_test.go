@@ -42,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
+	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -3017,6 +3018,12 @@ var globalTestTikv = tikv.SetupLocalTxn()
 func WithMeta(meta *meta) Option {
 	return func(svr *Server) {
 		svr.meta = meta
+
+		svr.watchClient = etcdkv.NewEtcdKV(svr.etcdCli, Params.EtcdCfg.MetaRootPath.GetValue(),
+			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
+		metaRootPath := Params.EtcdCfg.MetaRootPath.GetValue()
+		svr.kv = etcdkv.NewEtcdKV(svr.etcdCli, metaRootPath,
+			etcdkv.WithRequestTimeout(paramtable.Get().ServiceParam.EtcdCfg.RequestTimeout.GetAsDuration(time.Millisecond)))
 	}
 }
 
@@ -3049,6 +3056,10 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 		return newMockRootCoordClient(), nil
 	}
 
+	for _, opt := range opts {
+		opt(svr)
+	}
+
 	err = svr.Init()
 	assert.NoError(t, err)
 
@@ -3069,10 +3080,6 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	} else {
 		assert.Equal(t, commonpb.StateCode_Initializing, svr.stateCode.Load().(commonpb.StateCode))
 		close(signal)
-	}
-
-	for _, opt := range opts {
-		opt(svr)
 	}
 
 	err = svr.Register()
