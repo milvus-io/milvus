@@ -273,9 +273,12 @@ func (c *compactionPlanHandler) enqueueCompaction(task CompactionTask) error {
 	// todo optimize @wayblink
 	// currently compaction trigger v1 v2 both exist and have no shared lock between them to protect
 	// temporarily refuse the enqueue
-	succeed := c.checkAndSetSegmentsCompacting(task)
+	exist, succeed := c.checkAndSetSegmentsCompacting(task)
+	if !exist {
+		return merr.WrapErrIllegalCompactionPlan("segment not exist")
+	}
 	if !succeed {
-		return errors.New("compaction plan conflict")
+		return merr.WrapErrCompactionPlanConflict("segment is compacting")
 	}
 
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", task.GetType()))
@@ -331,7 +334,7 @@ func (c *compactionPlanHandler) setSegmentsCompacting(task CompactionTask, compa
 	}
 }
 
-func (c *compactionPlanHandler) checkAndSetSegmentsCompacting(task CompactionTask) bool {
+func (c *compactionPlanHandler) checkAndSetSegmentsCompacting(task CompactionTask) (bool, bool) {
 	return c.meta.CheckAndSetSegmentsCompacting(task.GetInputSegments())
 }
 

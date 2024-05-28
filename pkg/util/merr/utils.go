@@ -1056,6 +1056,14 @@ func WrapErrIllegalCompactionPlan(msg ...string) error {
 	return err
 }
 
+func WrapErrCompactionPlanConflict(msg ...string) error {
+	err := error(ErrCompactionPlanConflict)
+	if len(msg) > 0 {
+		err = errors.Wrap(err, strings.Join(msg, "->"))
+	}
+	return err
+}
+
 func WrapErrClusteringCompactionClusterNotSupport(msg ...string) error {
 	err := error(ErrClusteringCompactionClusterNotSupport)
 	if len(msg) > 0 {

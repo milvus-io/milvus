@@ -21,17 +21,27 @@ func (_m *MockCompactionMeta) EXPECT() *MockCompactionMeta_Expecter {
 }
 
 // CheckAndSetSegmentsCompacting provides a mock function with given fields: segmentIDs
-func (_m *MockCompactionMeta) CheckAndSetSegmentsCompacting(segmentIDs []int64) bool {
+func (_m *MockCompactionMeta) CheckAndSetSegmentsCompacting(segmentIDs []int64) (bool, bool) {
 	ret := _m.Called(segmentIDs)
 
 	var r0 bool
+	var r1 bool
+	if rf, ok := ret.Get(0).(func([]int64) (bool, bool)); ok {
+		return rf(segmentIDs)
+	}
 	if rf, ok := ret.Get(0).(func([]int64) bool); ok {
 		r0 = rf(segmentIDs)
 	} else {
 		r0 = ret.Get(0).(bool)
 	}
 
-	return r0
+	if rf, ok := ret.Get(1).(func([]int64) bool); ok {
+		r1 = rf(segmentIDs)
+	} else {
+		r1 = ret.Get(1).(bool)
+	}
+
+	return r0, r1
 }
 
 // MockCompactionMeta_CheckAndSetSegmentsCompacting_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CheckAndSetSegmentsCompacting'
@@ -52,12 +62,12 @@ func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) Run(run func(se
 	return _c
 }
 
-func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) Return(_a0 bool) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
-	_c.Call.Return(_a0)
+func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) Return(_a0 bool, _a1 bool) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
+	_c.Call.Return(_a0, _a1)
 	return _c
 }
 
-func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) RunAndReturn(run func([]int64) bool) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
+func (_c *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call) RunAndReturn(run func([]int64) (bool, bool)) *MockCompactionMeta_CheckAndSetSegmentsCompacting_Call {
 	_c.Call.Return(run)
 	return _c
 }

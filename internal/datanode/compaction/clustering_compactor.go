@@ -549,15 +549,17 @@ func (t *clusteringCompactionTask) mappingSegment(
 			remained++
 
 			currentSize := t.totalBufferSize.Load()
-			// trigger spill
-			if clusterBuffer.writer.GetRowNum() > t.plan.GetMaxSegmentRows() || clusterBuffer.writer.IsFull() {
-				// reach segment/binlog max size
-				t.spillChan <- SpillSignal{
-					buffer: clusterBuffer,
+			if (remained+1)%20 == 0 {
+				// trigger spill
+				if clusterBuffer.writer.GetRowNum() > t.plan.GetMaxSegmentRows() || clusterBuffer.writer.IsFull() {
+					// reach segment/binlog max size
+					t.spillChan <- SpillSignal{
+						buffer: clusterBuffer,
+					}
+				} else if currentSize >= t.getMemoryBufferMiddleWatermark() {
+					// reach spill trigger threshold
+					t.spillChan <- SpillSignal{}
 				}
-			} else if currentSize >= t.getMemoryBufferMiddleWatermark() {
-				// reach spill trigger threshold
-				t.spillChan <- SpillSignal{}
 			}
 
 			// if the total buffer size is too large, block here, wait for memory release by spill
@@ -751,6 +753,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 }
 
 func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuffer) error {
+	log := log.With(zap.Int("bufferID", buffer.id), zap.Int64("bufferSize", buffer.bufferRowNum.Load()))
 	if buffer.writer.IsEmpty() {
 		return nil
 	}
@@ -780,6 +783,7 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 	buffer.bufferSize.Store(0)
 	buffer.bufferRowNum.Store(0)
 
+	log.Info("finish spill binlogs")
 	if buffer.flushedRowNum > t.plan.GetMaxSegmentRows() {
 		if err := t.packBufferToSegment(ctx, buffer); err != nil {
 			return err
