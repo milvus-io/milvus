@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -39,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -159,6 +161,42 @@ func (m *meta) reloadFromKV() error {
 		m.channelCPs.checkpoints[vChannel] = pos
 	}
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	return nil
+}
+
+func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker.Broker) error {
+	resp, err := broker.ListDatabases(ctx)
+	if err != nil {
+		return err
+	}
+	for _, dbName := range resp.GetDbNames() {
+		resp, err := broker.ShowCollections(ctx, dbName)
+		if err != nil {
+			return err
+		}
+		for _, collectionID := range resp.GetCollectionIds() {
+			resp, err := broker.DescribeCollectionInternal(ctx, collectionID)
+			if err != nil {
+				return err
+			}
+			partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
+			if err != nil {
+				return err
+			}
+			collection := &collectionInfo{
+				ID:             collectionID,
+				Schema:         resp.GetSchema(),
+				Partitions:     partitionIDs,
+				StartPositions: resp.GetStartPositions(),
+				Properties:     funcutil.KeyValuePair2Map(resp.GetProperties()),
+				CreatedAt:      resp.GetCreatedTimestamp(),
+				DatabaseName:   resp.GetDbName(),
+				DatabaseID:     resp.GetDbId(),
+				VChannelNames:  resp.GetVirtualChannelNames(),
+			}
+			m.AddCollection(collection)
+		}
+	}
 	return nil
 }
 

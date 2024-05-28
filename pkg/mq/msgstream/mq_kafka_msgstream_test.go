@@ -145,7 +145,7 @@ func TestStream_KafkaMsgStream_SeekToLast(t *testing.T) {
 	defer outputStream2.Close()
 	assert.NoError(t, err)
 
-	err = outputStream2.Seek(ctx, []*msgpb.MsgPosition{seekPosition})
+	err = outputStream2.Seek(ctx, []*msgpb.MsgPosition{seekPosition}, false)
 	assert.NoError(t, err)
 
 	cnt := 0
@@ -482,6 +482,6 @@ func getKafkaTtOutputStreamAndSeek(ctx context.Context, kafkaAddress string, pos
 		consumerName = append(consumerName, c.ChannelName)
 	}
 	outputStream.AsConsumer(context.Background(), consumerName, funcutil.RandomString(8), mqwrapper.SubscriptionPositionUnknown)
-	outputStream.Seek(context.Background(), positions)
+	outputStream.Seek(context.Background(), positions, false)
 	return outputStream
 }

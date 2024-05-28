@@ -8,7 +8,6 @@ import "common.proto";
 import "internal.proto";
 import "milvus.proto";
 import "schema.proto";
-import "index_cgo_msg.proto";
 
 service IndexCoord {
   rpc GetComponentStates(milvus.GetComponentStatesRequest) returns (milvus.ComponentStates) {}

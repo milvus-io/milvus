@@ -298,7 +298,7 @@ func (ms *simpleMockMsgStream) GetProduceChannels() []string {
 	return nil
 }
 
-func (ms *simpleMockMsgStream) Seek(ctx context.Context, offset []*msgstream.MsgPosition) error {
+func (ms *simpleMockMsgStream) Seek(ctx context.Context, msgPositions []*msgstream.MsgPosition, includeCurrentMsg bool) error {
 	return nil
 }
 

@@ -2100,6 +2100,7 @@ type queryNodeConfig struct {
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
+	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2357,7 +2358,7 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.ChunkCacheWarmingUp = ParamItem{
 		Key:          "queryNode.cache.warmup",
 		Version:      "2.3.6",
-		DefaultValue: "async",
+		DefaultValue: "off",
 		Doc: `options: async, sync, off. 
 Specifies the necessity for warming up the chunk cache. 
 1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
@@ -2683,6 +2684,15 @@ user-task-polling:
 		Doc:          "use stream search mode when searching or querying",
 	}
 	p.UseStreamComputing.Init(base.mgr)
+
+	p.QueryStreamBatchSize = ParamItem{
+		Key:          "queryNode.queryStreamBatchSize",
+		Version:      "2.4.1",
+		DefaultValue: "4194304",
+		Doc:          "return batch size of stream query",
+		Export:       true,
+	}
+	p.QueryStreamBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

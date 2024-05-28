@@ -16,6 +16,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 const (
@@ -178,21 +179,45 @@ func generateVectorFieldData(vectorType schemapb.DataType) schemapb.FieldData {
 			},
 			IsDynamic: false,
 		}
-	}
-	return schemapb.FieldData{
-		Type:      schemapb.DataType_FloatVector,
-		FieldName: FieldBookIntro,
-		Field: &schemapb.FieldData_Vectors{
-			Vectors: &schemapb.VectorField{
-				Dim: 2,
-				Data: &schemapb.VectorField_FloatVector{
-					FloatVector: &schemapb.FloatArray{
-						Data: []float32{0.1, 0.11, 0.2, 0.22, 0.3, 0.33},
+	case schemapb.DataType_FloatVector:
+		return schemapb.FieldData{
+			Type:      schemapb.DataType_FloatVector,
+			FieldName: FieldBookIntro,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: 2,
+					Data: &schemapb.VectorField_FloatVector{
+						FloatVector: &schemapb.FloatArray{
+							Data: []float32{0.1, 0.11, 0.2, 0.22, 0.3, 0.33},
+						},
 					},
 				},
 			},
-		},
-		IsDynamic: false,
+			IsDynamic: false,
+		}
+	case schemapb.DataType_SparseFloatVector:
+		contents := make([][]byte, 0, 3)
+		contents = append(contents, typeutil.CreateSparseFloatRow([]uint32{1, 2, 3}, []float32{0.1, 0.11, 0.2}))
+		contents = append(contents, typeutil.CreateSparseFloatRow([]uint32{100, 200, 300}, []float32{10.1, 20.11, 30.2}))
+		contents = append(contents, typeutil.CreateSparseFloatRow([]uint32{1000, 2000, 3000}, []float32{5000.1, 7000.11, 9000.2}))
+		return schemapb.FieldData{
+			Type:      schemapb.DataType_SparseFloatVector,
+			FieldName: FieldBookIntro,
+			Field: &schemapb.FieldData_Vectors{
+				Vectors: &schemapb.VectorField{
+					Dim: int64(3001),
+					Data: &schemapb.VectorField_SparseFloatVector{
+						SparseFloatVector: &schemapb.SparseFloatArray{
+							Dim:      int64(3001),
+							Contents: contents,
+						},
+					},
+				},
+			},
+			IsDynamic: false,
+		}
+	default:
+		panic("unsupported vector type")
 	}
 }
 
@@ -1005,7 +1030,7 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 
 	switch firstFieldType {
 	case schemapb.DataType_None:
-		break
+		return fieldDatas
 	case schemapb.DataType_Bool:
 		return []*schemapb.FieldData{&fieldData1}
 	case schemapb.DataType_Int8:
@@ -1038,6 +1063,9 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 		return []*schemapb.FieldData{&fieldData10}
 	case schemapb.DataType_JSON:
 		return []*schemapb.FieldData{&fieldData9}
+	case schemapb.DataType_SparseFloatVector:
+		vectorField := generateVectorFieldData(firstFieldType)
+		return []*schemapb.FieldData{&vectorField}
 	default:
 		return []*schemapb.FieldData{
 			{
@@ -1046,8 +1074,6 @@ func newFieldData(fieldDatas []*schemapb.FieldData, firstFieldType schemapb.Data
 			},
 		}
 	}
-
-	return fieldDatas
 }
 
 func newSearchResult(results []map[string]interface{}) []map[string]interface{} {
@@ -1225,26 +1251,30 @@ func TestVector(t *testing.T) {
 	binaryVector := "vector-binary"
 	float16Vector := "vector-float16"
 	bfloat16Vector := "vector-bfloat16"
+	sparseFloatVector := "vector-sparse-float"
 	row1 := map[string]interface{}{
-		FieldBookID:    int64(1),
-		floatVector:    []float32{0.1, 0.11},
-		binaryVector:   []byte{1},
-		float16Vector:  []byte{1, 1, 11, 11},
-		bfloat16Vector: []byte{1, 1, 11, 11},
+		FieldBookID:       int64(1),
+		floatVector:       []float32{0.1, 0.11},
+		binaryVector:      []byte{1},
+		float16Vector:     []byte{1, 1, 11, 11},
+		bfloat16Vector:    []byte{1, 1, 11, 11},
+		sparseFloatVector: map[uint32]float32{0: 0.1, 1: 0.11},
 	}
 	row2 := map[string]interface{}{
-		FieldBookID:    int64(2),
-		floatVector:    []float32{0.2, 0.22},
-		binaryVector:   []byte{2},
-		float16Vector:  []byte{2, 2, 22, 22},
-		bfloat16Vector: []byte{2, 2, 22, 22},
+		FieldBookID:       int64(2),
+		floatVector:       []float32{0.2, 0.22},
+		binaryVector:      []byte{2},
+		float16Vector:     []byte{2, 2, 22, 22},
+		bfloat16Vector:    []byte{2, 2, 22, 22},
+		sparseFloatVector: map[uint32]float32{1000: 0.3, 200: 0.44},
 	}
 	row3 := map[string]interface{}{
-		FieldBookID:    int64(3),
-		floatVector:    []float32{0.3, 0.33},
-		binaryVector:   []byte{3},
-		float16Vector:  []byte{3, 3, 33, 33},
-		bfloat16Vector: []byte{3, 3, 33, 33},
+		FieldBookID:       int64(3),
+		floatVector:       []float32{0.3, 0.33},
+		binaryVector:      []byte{3},
+		float16Vector:     []byte{3, 3, 33, 33},
+		bfloat16Vector:    []byte{3, 3, 33, 33},
+		sparseFloatVector: map[uint32]float32{987621: 32190.31, 32189: 0.0001},
 	}
 	body, _ := wrapRequestBody([]map[string]interface{}{row1, row2, row3})
 	primaryField := generatePrimaryField(schemapb.DataType_Int64)
@@ -1256,12 +1286,14 @@ func TestVector(t *testing.T) {
 	float16VectorField.Name = float16Vector
 	bfloat16VectorField := generateVectorFieldSchema(schemapb.DataType_BFloat16Vector)
 	bfloat16VectorField.Name = bfloat16Vector
+	sparseFloatVectorField := generateVectorFieldSchema(schemapb.DataType_SparseFloatVector)
+	sparseFloatVectorField.Name = sparseFloatVector
 	collectionSchema := &schemapb.CollectionSchema{
 		Name:        DefaultCollectionName,
 		Description: "",
 		AutoID:      false,
 		Fields: []*schemapb.FieldSchema{
-			&primaryField, &floatVectorField, &binaryVectorField, &float16VectorField, &bfloat16VectorField,
+			&primaryField, &floatVectorField, &binaryVectorField, &float16VectorField, &bfloat16VectorField, &sparseFloatVectorField,
 		},
 		EnableDynamicField: true,
 	}
@@ -1271,27 +1303,29 @@ func TestVector(t *testing.T) {
 		assert.Equal(t, 1, len(row[binaryVector].([]byte)))
 		assert.Equal(t, 4, len(row[float16Vector].([]byte)))
 		assert.Equal(t, 4, len(row[bfloat16Vector].([]byte)))
+		// all test sparse rows have 2 elements, each should be of 8 bytes
+		assert.Equal(t, 16, len(row[sparseFloatVector].([]byte)))
 	}
 	data, err := anyToColumns(rows, collectionSchema)
 	assert.Equal(t, nil, err)
 	assert.Equal(t, len(collectionSchema.Fields)+1, len(data))
 
-	row1[bfloat16Vector] = []int64{99999999, -99999999}
-	body, _ = wrapRequestBody([]map[string]interface{}{row1})
-	err, _ = checkAndSetData(string(body), collectionSchema)
-	assert.Error(t, err)
-	row1[float16Vector] = []int64{99999999, -99999999}
-	body, _ = wrapRequestBody([]map[string]interface{}{row1})
-	err, _ = checkAndSetData(string(body), collectionSchema)
-	assert.Error(t, err)
-	row1[binaryVector] = []int64{99999999, -99999999}
-	body, _ = wrapRequestBody([]map[string]interface{}{row1})
-	err, _ = checkAndSetData(string(body), collectionSchema)
-	assert.Error(t, err)
-	row1[floatVector] = []float64{math.MaxFloat64, 0}
-	body, _ = wrapRequestBody([]map[string]interface{}{row1})
-	err, _ = checkAndSetData(string(body), collectionSchema)
-	assert.Error(t, err)
+	assertError := func(field string, value interface{}) {
+		row := make(map[string]interface{})
+		for k, v := range row1 {
+			row[k] = v
+		}
+		row[field] = value
+		body, _ = wrapRequestBody([]map[string]interface{}{row})
+		err, _ = checkAndSetData(string(body), collectionSchema)
+		assert.Error(t, err)
+	}
+
+	assertError(bfloat16Vector, []int64{99999999, -99999999})
+	assertError(float16Vector, []int64{99999999, -99999999})
+	assertError(binaryVector, []int64{99999999, -99999999})
+	assertError(floatVector, []float64{math.MaxFloat64, 0})
+	assertError(sparseFloatVector, map[uint32]float32{0: -0.1, 1: 0.11, 2: 0.12})
 }
 
 func TestBuildQueryResps(t *testing.T) {
@@ -1305,7 +1339,7 @@ func TestBuildQueryResps(t *testing.T) {
 	}
 
 	dataTypes := []schemapb.DataType{
-		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector,
+		schemapb.DataType_FloatVector, schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector,
 		schemapb.DataType_Bool, schemapb.DataType_Int8, schemapb.DataType_Int16, schemapb.DataType_Int32,
 		schemapb.DataType_Float, schemapb.DataType_Double,
 		schemapb.DataType_String, schemapb.DataType_VarChar,

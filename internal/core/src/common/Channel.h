@@ -14,6 +14,7 @@
 #include <atomic>
 #include <exception>
 #include <optional>
+#include "Exception.h"
 
 namespace milvus {
 template <typename T>
@@ -55,7 +56,7 @@ class Channel {
     }
 
     void
-    close(std::optional<std::exception> ex = std::nullopt) {
+    close(std::optional<MilvusException> ex = std::nullopt) {
         if (ex.has_value()) {
             ex_ = std::move(ex);
         }
@@ -64,6 +65,6 @@ class Channel {
 
  private:
     oneapi::tbb::concurrent_bounded_queue<std::optional<T>> inner_{};
-    std::optional<std::exception> ex_{};
+    std::optional<MilvusException> ex_{};
 };
 }  // namespace milvus
