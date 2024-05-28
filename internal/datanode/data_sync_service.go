@@ -23,6 +23,7 @@ import (
 	"sync"
 	"time"
 
+	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -250,8 +251,11 @@ func loadStatsV2(storageCache *metacache.StorageV2Cache, segment *datapb.Segment
 }
 
 func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *schemapb.CollectionSchema, segmentID int64, statsBinlogs []*datapb.FieldBinlog) ([]*storage.PkStatistics, error) {
+	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "loadStats")
+	defer span.End()
+
 	startTs := time.Now()
-	log := log.With(zap.Int64("segmentID", segmentID))
+	log := log.Ctx(ctx).With(zap.Int64("segmentID", segmentID))
 	log.Info("begin to init pk bloom filter", zap.Int("statsBinLogsLen", len(statsBinlogs)))
 
 	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
