@@ -210,16 +210,16 @@ func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(colle
 	return false, 0
 }
 
-func fillClusteringCompactionTask(segments []*SegmentInfo) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64) {
-	for _, s := range segments {
-		totalRows += s.GetNumOfRows()
-		segmentIDs = append(segmentIDs, s.GetID())
+func calculateClusteringCompactionConfig(view CompactionView) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64) {
+	for _, s := range view.GetSegmentsView() {
+		totalRows += s.NumOfRows
+		segmentIDs = append(segmentIDs, s.ID)
 	}
 	clusteringMaxSegmentSize := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSize.GetAsSize()
 	clusteringPreferSegmentSize := paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize()
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	maxSegmentRows = segments[0].MaxRowNum * clusteringMaxSegmentSize / segmentMaxSize
-	preferSegmentRows = segments[0].MaxRowNum * clusteringPreferSegmentSize / segmentMaxSize
+	maxSegmentRows = view.GetSegmentsView()[0].MaxRowNum * clusteringMaxSegmentSize / segmentMaxSize
+	preferSegmentRows = view.GetSegmentsView()[0].MaxRowNum * clusteringPreferSegmentSize / segmentMaxSize
 	return
 }
 

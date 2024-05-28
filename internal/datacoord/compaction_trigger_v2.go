@@ -5,12 +5,12 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"sync"
+	"time"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type CompactionTriggerType int8
@@ -254,7 +254,8 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		AnalyzeTaskID:      taskID + 1,
 	}
 	err = m.compactionHandler.enqueueCompaction(&clusteringCompactionTask{
-		CompactionTask: task,
+		CompactionTask:      task,
+		lastUpdateStateTime: time.Now().UnixMilli(),
 	})
 	if err != nil {
 		log.Warn("failed to execute compaction task",
@@ -267,19 +268,6 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		zap.Int64("taskID", taskID),
 		zap.String("type", task.GetType().String()),
 	)
-}
-
-func calculateClusteringCompactionConfig(view CompactionView) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64) {
-	for _, s := range view.GetSegmentsView() {
-		totalRows += s.NumOfRows
-		segmentIDs = append(segmentIDs, s.ID)
-	}
-	clusteringMaxSegmentSize := paramtable.Get().DataCoordCfg.ClusteringCompactionMaxSegmentSize.GetAsSize()
-	clusteringPreferSegmentSize := paramtable.Get().DataCoordCfg.ClusteringCompactionPreferSegmentSize.GetAsSize()
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
-	maxSegmentRows = view.GetSegmentsView()[0].MaxRowNum * clusteringMaxSegmentSize / segmentMaxSize
-	preferSegmentRows = view.GetSegmentsView()[0].MaxRowNum * clusteringPreferSegmentSize / segmentMaxSize
-	return
 }
 
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName

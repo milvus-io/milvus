@@ -151,7 +151,8 @@ func (c *compactionPlanHandler) start() {
 		for _, task := range tasks {
 			if task.State != datapb.CompactionTaskState_indexed && task.State != datapb.CompactionTaskState_cleaned {
 				c.enqueueCompaction(&clusteringCompactionTask{
-					CompactionTask: task,
+					CompactionTask:      task,
+					lastUpdateStateTime: time.Now().UnixMilli(),
 				})
 			}
 		}

@@ -203,6 +203,7 @@ var (
 		}, []string{
 			isVectorFieldLabelName,
 			compactionTypeLabelName,
+			stageLabelName,
 		})
 
 	FlushedSegmentFileNum = prometheus.NewHistogramVec(

@@ -20,6 +20,7 @@ import (
 	"context"
 	"fmt"
 	"path"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -41,10 +42,11 @@ var _ CompactionTask = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
 	*datapb.CompactionTask
-	dataNodeID int64
-	plan       *datapb.CompactionPlan
-	result     *datapb.CompactionPlanResult
-	span       trace.Span
+	dataNodeID          int64
+	plan                *datapb.CompactionPlan
+	result              *datapb.CompactionPlanResult
+	span                trace.Span
+	lastUpdateStateTime int64
 }
 
 func (task *clusteringCompactionTask) processInitTask(handler *compactionPlanHandler) error {
@@ -105,7 +107,8 @@ func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPl
 				return err
 			}
 			handler.setSegmentsCompacting(task, false)
-			handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), cleanLogPath(), endSpan())
+			task.CleanLogPath()
+			task.State = datapb.CompactionTaskState_failed
 			handler.scheduler.Finish(task.GetNodeID(), task)
 			return nil
 		}
@@ -118,7 +121,15 @@ func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPl
 		})
 		task.CompactionTask.ResultSegments = resultSegmentIDs
 		UpdateCompactionSegmentSizeMetrics(planResult.GetSegments())
-		handler.plans[task.GetPlanID()] = task.ShadowClone(setTask(task.CompactionTask), setState(datapb.CompactionTaskState_indexing), setResult(planResult), cleanLogPath(), endSpan())
+		ts := time.Now().UnixMilli()
+		compactionStageTime := ts - task.lastUpdateStateTime
+		log.Debug("clustering compaction compact task elapse", zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.Int64("planID", task.GetPlanID()), zap.Int64("elapse", compactionStageTime))
+		metrics.DataCoordCompactionLatency.
+			WithLabelValues(fmt.Sprint(typeutil.IsVectorType(task.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), "compacting").
+			Observe(float64(compactionStageTime))
+		task.result = planResult
+		task.lastUpdateStateTime = ts
+		handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_indexing), endSpan())
 		handler.scheduler.Finish(task.GetNodeID(), task)
 	case commonpb.CompactionState_Executing:
 		ts := tsoutil.GetCurrentTime()
@@ -151,8 +162,6 @@ func (task *clusteringCompactionTask) processIndexingTask(handler *compactionPla
 	log.Debug("check compaction result segments index states", zap.Bool("indexed", indexed), zap.Int64("planID", task.GetPlanID()), zap.Int64s("segments", task.ResultSegments))
 	if indexed {
 		task.processIndexedTask(handler)
-	} else {
-		task.State = datapb.CompactionTaskState_indexing
 	}
 	return nil
 }
@@ -179,16 +188,23 @@ func (task *clusteringCompactionTask) processIndexedTask(handler *compactionPlan
 		return merr.WrapErrClusteringCompactionMetaError("UpdateSegmentPartitionStatsVersion", err)
 	}
 
+	ts := time.Now().UnixMilli()
+	indexStageTime := ts - task.lastUpdateStateTime
+	log.Debug("clustering compaction index task elapse", zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.Int64("planID", task.GetPlanID()), zap.Int64("elapse", indexStageTime))
+	metrics.DataCoordCompactionLatency.
+		WithLabelValues(fmt.Sprint(typeutil.IsVectorType(task.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), "indexing").
+		Observe(float64(indexStageTime))
+	task.lastUpdateStateTime = ts
 	task.State = datapb.CompactionTaskState_indexed
-	ts, err := handler.allocator.allocTimestamp(context.Background())
+	globalTs, err := handler.allocator.allocTimestamp(context.Background())
 	if err != nil {
 		return err
 	}
-	task.EndTime = ts
-	elapse := tsoutil.PhysicalTime(ts).UnixMilli() - tsoutil.PhysicalTime(task.StartTime).UnixMilli()
+	task.EndTime = globalTs
+	elapse := tsoutil.PhysicalTime(globalTs).UnixMilli() - tsoutil.PhysicalTime(task.StartTime).UnixMilli()
 	log.Info("clustering compaction task elapse", zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.Int64("planID", task.GetPlanID()), zap.Int64("elapse", elapse))
 	metrics.DataCoordCompactionLatency.
-		WithLabelValues(fmt.Sprint(typeutil.IsVectorType(task.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String()).
+		WithLabelValues(fmt.Sprint(typeutil.IsVectorType(task.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), "total").
 		Observe(float64(elapse))
 	return nil
 }
@@ -208,6 +224,15 @@ func (task *clusteringCompactionTask) processAnalyzingTask(handler *compactionPl
 		} else {
 			task.AnalyzeVersionID = analyzeTask.GetVersion()
 			task.submitToCompact(handler)
+			ts := time.Now().UnixMilli()
+			analyzeStageTime := ts - task.lastUpdateStateTime
+			log.Debug("clustering compaction analyze task elapse", zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.Int64("planID", task.GetPlanID()), zap.Int64("elapse", analyzeStageTime))
+			metrics.DataCoordCompactionLatency.
+				WithLabelValues(fmt.Sprint(typeutil.IsVectorType(task.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), "analyzing").
+				Observe(float64(analyzeStageTime))
+			task.State = datapb.CompactionTaskState_executing
+			task.lastUpdateStateTime = ts
+			task.AnalyzeVersionID = analyzeTask.GetVersion()
 		}
 	case indexpb.JobState_JobStateFailed:
 		log.Warn("analyze task fail", zap.Int64("analyzeID", task.GetAnalyzeTaskID()))
@@ -278,7 +303,6 @@ func (task *clusteringCompactionTask) submitToAnalyze(handler *compactionPlanHan
 
 func (task *clusteringCompactionTask) submitToCompact(handler *compactionPlanHandler) error {
 	handler.scheduler.Submit(task)
-	handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_pipelining))
 	log.Info("send compaction task to execute", zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
@@ -375,11 +399,12 @@ func (task *clusteringCompactionTask) GetSpan() trace.Span {
 
 func (task *clusteringCompactionTask) ShadowClone(opts ...compactionTaskOpt) CompactionTask {
 	ctask := &clusteringCompactionTask{
-		CompactionTask: task.CompactionTask,
-		plan:           task.plan,
-		dataNodeID:     task.dataNodeID,
-		span:           task.span,
-		result:         task.result,
+		CompactionTask:      task.CompactionTask,
+		plan:                task.plan,
+		dataNodeID:          task.dataNodeID,
+		span:                task.span,
+		result:              task.result,
+		lastUpdateStateTime: task.lastUpdateStateTime,
 	}
 	for _, opt := range opts {
 		opt(ctask)
@@ -421,19 +446,23 @@ func (task *clusteringCompactionTask) SetTask(ct *datapb.CompactionTask) {
 	task.CompactionTask = ct
 }
 
+func (task *clusteringCompactionTask) SetLastUpdateStateTime(ts int64) {
+	task.lastUpdateStateTime = ts
+}
+
 func (task *clusteringCompactionTask) CleanLogPath() {
-	//if task.plan.GetSegmentBinlogs() != nil {
-	//	for _, binlogs := range task.plan.GetSegmentBinlogs() {
-	//		binlogs.FieldBinlogs = nil
-	//		binlogs.Field2StatslogPaths = nil
-	//		binlogs.Deltalogs = nil
-	//	}
-	//}
-	//if task.result.GetSegments() != nil {
-	//	for _, segment := range task.result.GetSegments() {
-	//		segment.InsertLogs = nil
-	//		segment.Deltalogs = nil
-	//		segment.Field2StatslogPaths = nil
-	//	}
-	//}
+	if task.plan.GetSegmentBinlogs() != nil {
+		for _, binlogs := range task.plan.GetSegmentBinlogs() {
+			binlogs.FieldBinlogs = nil
+			binlogs.Field2StatslogPaths = nil
+			binlogs.Deltalogs = nil
+		}
+	}
+	if task.result.GetSegments() != nil {
+		for _, segment := range task.result.GetSegments() {
+			segment.InsertLogs = nil
+			segment.Deltalogs = nil
+			segment.Field2StatslogPaths = nil
+		}
+	}
 }

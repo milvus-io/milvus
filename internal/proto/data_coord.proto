@@ -889,13 +889,13 @@ enum CompactionTaskState {
 message CompactionTask {
   int64 planID = 1;
   int64 triggerID = 2;
-  CompactionTaskState state = 3;
-  string fail_reason = 4;
-  int32 retry_times = 5;
+  CompactionType type = 3;
+  CompactionTaskState state = 4;
+  string fail_reason = 5;
   uint64 start_time = 6;
   uint64 end_time = 7;
   int32 timeout_in_seconds = 8;
-  CompactionType type = 9;
+  int32 retry_times = 9;
   int64 collection_ttl = 10;
   int64 total_rows = 11;
   int64 collectionID = 12;
