@@ -159,22 +159,20 @@ func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
 // Note that this helper is not concurrent safe and shall be used in same goroutine.
 type LocationsCache struct {
 	pk        PrimaryKey
-	locations map[uint][]uint64
+	k         uint
+	locations []uint64
 }
 
 func (lc LocationsCache) Locations(k uint) []uint64 {
-	locs, ok := lc.locations[k]
-	if ok {
-		return locs
+	if k > lc.k {
+		lc.locations, lc.k = Locations(lc.pk, k), k
 	}
-	locs = Locations(lc.pk, k)
-	lc.locations[k] = locs
-	return locs
+
+	return lc.locations
 }
 
 func NewLocationsCache(pk PrimaryKey) LocationsCache {
 	return LocationsCache{
-		pk:        pk,
-		locations: make(map[uint][]uint64),
+		pk: pk,
 	}
 }
