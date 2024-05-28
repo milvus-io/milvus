@@ -231,7 +231,6 @@ func (task *clusteringCompactionTask) processFailedOrTimeoutTask(handler *compac
 		log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
 	}
 
-	// todo gc @wayblink
 	//drop partition stats if uploaded
 	partitionStatsInfo := &datapb.PartitionStatsInfo{
 		CollectionID: task.GetCollectionID(),

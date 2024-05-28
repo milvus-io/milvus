@@ -50,21 +50,16 @@ type compactTime struct {
 type trigger interface {
 	start()
 	stop()
-	// todo: remove soon
-	// deprecated
-	// triggerCompaction triggers a compaction if any compaction condition satisfy.
-	triggerCompaction() error
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
 	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error
 	// triggerManualCompaction force to start a compaction
-	triggerManualCompaction(collectionID int64, clusteringCompaction bool) (UniqueID, error)
+	triggerManualCompaction(collectionID int64) (UniqueID, error)
 }
 
 type compactionSignal struct {
 	id           UniqueID
 	isForce      bool
 	isGlobal     bool
-	isClustering bool
 	collectionID UniqueID
 	partitionID  UniqueID
 	channel      string
@@ -293,7 +288,7 @@ func (t *compactionTrigger) triggerSingleCompaction(collectionID, partitionID, s
 
 // triggerManualCompaction force to start a compaction
 // invoked by user `ManualCompaction` operation
-func (t *compactionTrigger) triggerManualCompaction(collectionID int64, clusteringCompaction bool) (UniqueID, error) {
+func (t *compactionTrigger) triggerManualCompaction(collectionID int64) (UniqueID, error) {
 	id, err := t.allocSignalID()
 	if err != nil {
 		return -1, err
@@ -302,7 +297,6 @@ func (t *compactionTrigger) triggerManualCompaction(collectionID int64, clusteri
 		id:           id,
 		isForce:      true,
 		isGlobal:     true,
-		isClustering: clusteringCompaction,
 		collectionID: collectionID,
 	}
 

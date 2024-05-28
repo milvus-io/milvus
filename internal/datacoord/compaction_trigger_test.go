@@ -38,7 +38,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
@@ -490,7 +489,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 				testingOnly:                  true,
 			}
-			_, err := tr.triggerManualCompaction(tt.collectionID, false)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 			plan := <-spy.spyChan
@@ -515,7 +514,7 @@ func Test_compactionTrigger_force(t *testing.T) {
 				testingOnly:                  true,
 			}
 			tt.collectionID = 1000
-			_, err := tr.triggerManualCompaction(tt.collectionID, false)
+			_, err := tr.triggerManualCompaction(tt.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			// expect max row num =  2048*1024*1024/(128*4) = 4194304
 			// assert.EqualValues(t, 4194304, tt.fields.meta.segments.GetSegments()[0].MaxRowNum)
@@ -832,7 +831,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 				estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 				testingOnly:                  true,
 			}
-			_, err := tr.triggerManualCompaction(tt.args.collectionID, false)
+			_, err := tr.triggerManualCompaction(tt.args.collectionID)
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
@@ -2633,51 +2632,51 @@ func (s *CompactionTriggerSuite) TestSqueezeSmallSegments() {
 	log.Info("buckets", zap.Any("buckets", buckets))
 }
 
-func Test_compactionTrigger_clustering(t *testing.T) {
-	paramtable.Init()
-	catalog := mocks.NewDataCoordCatalog(t)
-	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
-	vecFieldID := int64(201)
-	meta := &meta{
-		catalog: catalog,
-		collections: map[int64]*collectionInfo{
-			1: {
-				ID: 1,
-				Schema: &schemapb.CollectionSchema{
-					Fields: []*schemapb.FieldSchema{
-						{
-							FieldID:  vecFieldID,
-							DataType: schemapb.DataType_FloatVector,
-							TypeParams: []*commonpb.KeyValuePair{
-								{
-									Key:   common.DimKey,
-									Value: "128",
-								},
-							},
-						},
-					},
-				},
-			},
-		},
-	}
-
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "false")
-	allocator := &MockAllocator0{}
-	tr := &compactionTrigger{
-		handler:                      newMockHandlerWithMeta(meta),
-		allocator:                    allocator,
-		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
-		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
-		testingOnly:                  true,
-	}
-	_, err := tr.triggerManualCompaction(1, true)
-	assert.Error(t, err)
-	assert.True(t, errors.Is(err, merr.ErrClusteringCompactionClusterNotSupport))
-	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "true")
-	_, err2 := tr.triggerManualCompaction(1, true)
-	assert.Error(t, err2)
-	assert.True(t, errors.Is(err2, merr.ErrClusteringCompactionCollectionNotSupport))
-}
+//func Test_compactionTrigger_clustering(t *testing.T) {
+//	paramtable.Init()
+//	catalog := mocks.NewDataCoordCatalog(t)
+//	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
+//	vecFieldID := int64(201)
+//	meta := &meta{
+//		catalog: catalog,
+//		collections: map[int64]*collectionInfo{
+//			1: {
+//				ID: 1,
+//				Schema: &schemapb.CollectionSchema{
+//					Fields: []*schemapb.FieldSchema{
+//						{
+//							FieldID:  vecFieldID,
+//							DataType: schemapb.DataType_FloatVector,
+//							TypeParams: []*commonpb.KeyValuePair{
+//								{
+//									Key:   common.DimKey,
+//									Value: "128",
+//								},
+//							},
+//						},
+//					},
+//				},
+//			},
+//		},
+//	}
+//
+//	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "false")
+//	allocator := &MockAllocator0{}
+//	tr := &compactionTrigger{
+//		handler:                      newMockHandlerWithMeta(meta),
+//		allocator:                    allocator,
+//		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
+//		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
+//		testingOnly:                  true,
+//	}
+//	_, err := tr.triggerManualCompaction(1, true)
+//	assert.Error(t, err)
+//	assert.True(t, errors.Is(err, merr.ErrClusteringCompactionClusterNotSupport))
+//	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "true")
+//	_, err2 := tr.triggerManualCompaction(1, true)
+//	assert.Error(t, err2)
+//	assert.True(t, errors.Is(err2, merr.ErrClusteringCompactionCollectionNotSupport))
+//}
 
 func TestCompactionTriggerSuite(t *testing.T) {
 	suite.Run(t, new(CompactionTriggerSuite))

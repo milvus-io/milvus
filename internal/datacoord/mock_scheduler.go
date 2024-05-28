@@ -92,6 +92,48 @@ func (_c *MockScheduler_GetTaskCount_Call) RunAndReturn(run func() int) *MockSch
 	return _c
 }
 
+// GetTaskExecuting provides a mock function with given fields: planID
+func (_m *MockScheduler) GetTaskExecuting(planID int64) bool {
+	ret := _m.Called(planID)
+
+	var r0 bool
+	if rf, ok := ret.Get(0).(func(int64) bool); ok {
+		r0 = rf(planID)
+	} else {
+		r0 = ret.Get(0).(bool)
+	}
+
+	return r0
+}
+
+// MockScheduler_GetTaskExecuting_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetTaskExecuting'
+type MockScheduler_GetTaskExecuting_Call struct {
+	*mock.Call
+}
+
+// GetTaskExecuting is a helper method to define mock.On call
+//   - planID int64
+func (_e *MockScheduler_Expecter) GetTaskExecuting(planID interface{}) *MockScheduler_GetTaskExecuting_Call {
+	return &MockScheduler_GetTaskExecuting_Call{Call: _e.mock.On("GetTaskExecuting", planID)}
+}
+
+func (_c *MockScheduler_GetTaskExecuting_Call) Run(run func(planID int64)) *MockScheduler_GetTaskExecuting_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockScheduler_GetTaskExecuting_Call) Return(_a0 bool) *MockScheduler_GetTaskExecuting_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockScheduler_GetTaskExecuting_Call) RunAndReturn(run func(int64) bool) *MockScheduler_GetTaskExecuting_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // LogStatus provides a mock function with given fields:
 func (_m *MockScheduler) LogStatus() {
 	_m.Called()

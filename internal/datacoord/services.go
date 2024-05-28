@@ -1090,7 +1090,7 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 	if req.MajorCompaction {
 		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
 	} else {
-		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID, req.GetMajorCompaction())
+		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
 	}
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
