@@ -2350,10 +2350,10 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 		DefaultValue: "disable",
 		Doc: `options: async, sync, disable. 
 Specifies the necessity for warming up the chunk cache. 
-1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
+1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
 chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
 for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
-2. If set to "disable," original vector data will only be loaded into the chunk cache during search/query.`,
+2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.`,
 		Export: true,
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
