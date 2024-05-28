@@ -19,11 +19,16 @@ package binlog
 import (
 	"context"
 	"encoding/json"
+	"fmt"
+	"io"
+
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus-storage/go/common/log"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"go.uber.org/zap"
-	"io"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 )
 
 type L0Reader interface {
@@ -43,7 +48,7 @@ type l0Reader struct {
 func NewL0Reader(ctx context.Context,
 	cm storage.ChunkManager,
 	pkField *schemapb.FieldSchema,
-	path string,
+	importFile *internalpb.ImportFile,
 	bufferSize int,
 ) (*l0Reader, error) {
 	r := &l0Reader{
@@ -52,6 +57,11 @@ func NewL0Reader(ctx context.Context,
 		pkField:    pkField,
 		bufferSize: bufferSize,
 	}
+	if len(importFile.GetPaths()) != 1 {
+		return nil, merr.WrapErrImportFailed(
+			fmt.Sprintf("there should be one prefix, but got %s", importFile.GetPaths()))
+	}
+	path := importFile.GetPaths()[0]
 	deltaLogs, _, err := storage.ListAllChunkWithPrefix(context.Background(), r.cm, path, true)
 	if err != nil {
 		return nil, err
@@ -67,6 +77,9 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 	deleteData := storage.NewDeleteData(nil, nil)
 	for {
 		if r.readIdx == len(r.deltaLogs) {
+			if deleteData.RowCount != 0 {
+				return deleteData, nil
+			}
 			return nil, io.EOF
 		}
 		path := r.deltaLogs[r.readIdx]
@@ -85,6 +98,7 @@ func (r *l0Reader) Read() (*storage.DeleteData, error) {
 				if err != nil {
 					return nil, err
 				}
+				deleteData.Append(dl.Pk, dl.Ts)
 			}
 		}
 		r.readIdx++

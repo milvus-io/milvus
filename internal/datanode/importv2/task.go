@@ -28,13 +28,17 @@ import (
 type TaskType int
 
 const (
-	PreImportTaskType TaskType = 0
-	ImportTaskType    TaskType = 1
+	PreImportTaskType   TaskType = 0
+	ImportTaskType      TaskType = 1
+	L0PreImportTaskType TaskType = 2
+	L0ImportTaskType    TaskType = 3
 )
 
 var ImportTaskTypeName = map[TaskType]string{
 	0: "PreImportTask",
 	1: "ImportTask",
+	2: "L0PreImportTaskType",
+	3: "L0ImportTaskType",
 }
 
 func (t TaskType) String() string {
@@ -69,6 +73,10 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 			t.(*PreImportTask).PreImportTask.State = state
 		case ImportTaskType:
 			t.(*ImportTask).ImportTaskV2.State = state
+		case L0PreImportTaskType:
+			t.(*L0PreImportTask).PreImportTask.State = state
+		case L0ImportTaskType:
+			t.(*L0ImportTask).ImportTaskV2.State = state
 		}
 	}
 }
@@ -80,6 +88,10 @@ func UpdateReason(reason string) UpdateAction {
 			t.(*PreImportTask).PreImportTask.Reason = reason
 		case ImportTaskType:
 			t.(*ImportTask).ImportTaskV2.Reason = reason
+		case L0PreImportTaskType:
+			t.(*L0PreImportTask).PreImportTask.Reason = reason
+		case L0ImportTaskType:
+			t.(*L0ImportTask).ImportTaskV2.Reason = reason
 		}
 	}
 }

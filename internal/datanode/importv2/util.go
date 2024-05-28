@@ -38,21 +38,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func WrapNoTaskError(taskID int64, taskType TaskType) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find %s with id %d", taskType.String(), taskID))
+func WrapNoTaskError(taskID int64) error {
+	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find import task with id %d", taskID))
 }
 
-func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) (syncmgr.Task, error) {
+func NewSyncTask(ctx context.Context,
+	metaCaches map[string]metacache.MetaCache,
+	ts uint64,
+	segmentID, partitionID, collectionID int64, vchannel string,
+	insertData *storage.InsertData,
+	deleteData *storage.DeleteData,
+) (syncmgr.Task, error) {
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
 		return nil, merr.WrapErrImportFailed("storage v2 is not supported") // TODO: dyh, resolve storage v2
 	}
 
-	metaCache := task.metaCaches[vchannel]
+	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		metaCache.AddSegment(&datapb.SegmentInfo{
 			ID:            segmentID,
 			State:         commonpb.SegmentState_Importing,
-			CollectionID:  task.GetCollectionID(),
+			CollectionID:  collectionID,
 			PartitionID:   partitionID,
 			InsertChannel: vchannel,
 		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
@@ -73,20 +79,21 @@ func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID i
 
 	syncPack := &syncmgr.SyncPack{}
 	syncPack.WithInsertData(insertData).
-		WithCollectionID(task.GetCollectionID()).
+		WithDeleteData(deleteData).
+		WithCollectionID(collectionID).
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
-		WithTimeRange(task.req.GetTs(), task.req.GetTs()).
+		WithTimeRange(ts, ts).
 		WithBatchSize(int64(insertData.GetRowNum()))
 
 	return serializer.EncodeBuffer(ctx, syncPack)
 }
 
-func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.ImportSegmentInfo, error) {
+func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
 	segmentID := syncTask.SegmentID()
 	insertBinlogs, statsBinlog, _ := syncTask.(*syncmgr.SyncTask).Binlogs()
-	metaCache := task.metaCaches[syncTask.ChannelName()]
+	metaCache := metaCaches[syncTask.ChannelName()]
 	segment, ok := metaCache.GetSegmentByID(segmentID)
 	if !ok {
 		return nil, merr.WrapErrSegmentNotFound(segmentID, "import failed")
@@ -99,8 +106,14 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.Impo
 	}, nil
 }
 
-func PickSegment(task *ImportTask, segmentImportedSizes map[int64]int, vchannel string, partitionID int64, sizeToImport int) int64 {
-	candidates := lo.Filter(task.req.GetRequestSegments(), func(info *datapb.ImportRequestSegment, _ int) bool {
+func PickSegment(
+	requestSegments []*datapb.ImportRequestSegment,
+	segmentsInfo []*datapb.ImportSegmentInfo,
+	segmentImportedSizes map[int64]int,
+	vchannel string, partitionID int64,
+	sizeToImport int,
+) int64 {
+	candidates := lo.Filter(requestSegments, func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
@@ -112,14 +125,14 @@ func PickSegment(task *ImportTask, segmentImportedSizes map[int64]int, vchannel 
 			return candidate.GetSegmentID()
 		}
 	}
-	segmentID := lo.MinBy(task.GetSegmentsInfo(), func(s1, s2 *datapb.ImportSegmentInfo) bool {
+	segmentID := lo.MinBy(segmentsInfo, func(s1, s2 *datapb.ImportSegmentInfo) bool {
 		return segmentImportedSizes[s1.GetSegmentID()] < segmentImportedSizes[s2.GetSegmentID()]
 	}).GetSegmentID()
 	log.Warn("failed to pick an appropriate segment, opt for the smallest one instead",
-		WrapLogFields(task, zap.Int64("segmentID", segmentID),
-			zap.Int("sizeToImport", sizeToImport),
-			zap.Int("sizeImported", segmentImportedSizes[segmentID]),
-			zap.Int("segmentMaxSize", segmentMaxSize))...)
+		zap.Int64("segmentID", segmentID),
+		zap.Int("sizeToImport", sizeToImport),
+		zap.Int("sizeImported", segmentImportedSizes[segmentID]),
+		zap.Int("segmentMaxSize", segmentMaxSize))
 	return segmentID
 }
 
@@ -225,4 +238,23 @@ func UnsetAutoID(schema *schemapb.CollectionSchema) {
 			return
 		}
 	}
+}
+
+func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
+	metaCaches := make(map[string]metacache.MetaCache)
+	schema := typeutil.AppendSystemFields(req.GetSchema())
+	for _, channel := range req.GetVchannels() {
+		info := &datapb.ChannelWatchInfo{
+			Vchan: &datapb.VchannelInfo{
+				CollectionID: req.GetCollectionID(),
+				ChannelName:  channel,
+			},
+			Schema: schema,
+		}
+		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		metaCaches[channel] = metaCache
+	}
+	return metaCaches
 }

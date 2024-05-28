@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
@@ -364,7 +365,12 @@ func (node *DataNode) PreImport(ctx context.Context, req *datapb.PreImportReques
 		return merr.Status(err), nil
 	}
 
-	task := importv2.NewPreImportTask(req, node.importTaskMgr, node.chunkManager)
+	var task importv2.Task
+	if importutilv2.IsL0Import(req.GetOptions()) {
+		task = importv2.NewL0PreImportTask(req, node.importTaskMgr, node.chunkManager)
+	} else {
+		task = importv2.NewPreImportTask(req, node.importTaskMgr, node.chunkManager)
+	}
 	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added preimport task")
@@ -383,7 +389,12 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return merr.Status(err), nil
 	}
-	task := importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+	var task importv2.Task
+	if importutilv2.IsL0Import(req.GetOptions()) {
+		task = importv2.NewTaskL0Import(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+	} else {
+		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+	}
 	node.importTaskMgr.Add(task)
 
 	log.Info("datanode added import task")
@@ -399,17 +410,19 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 	}
 	status := merr.Success()
 	task := node.importTaskMgr.Get(req.GetTaskID())
-	if task == nil || task.GetType() != importv2.PreImportTaskType {
-		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.PreImportTaskType))
+	if task == nil {
+		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID()))
 	}
 	log.RatedInfo(10, "datanode query preimport", zap.String("state", task.GetState().String()),
 		zap.String("reason", task.GetReason()))
 	return &datapb.QueryPreImportResponse{
-		Status:    status,
-		TaskID:    task.GetTaskID(),
-		State:     task.GetState(),
-		Reason:    task.GetReason(),
-		FileStats: task.(*importv2.PreImportTask).GetFileStats(),
+		Status: status,
+		TaskID: task.GetTaskID(),
+		State:  task.GetState(),
+		Reason: task.GetReason(),
+		FileStats: task.(interface {
+			GetFileStats() []*datapb.ImportFileStats
+		}).GetFileStats(),
 	}, nil
 }
 
@@ -433,17 +446,19 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 
 	// query import
 	task := node.importTaskMgr.Get(req.GetTaskID())
-	if task == nil || task.GetType() != importv2.ImportTaskType {
-		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID(), importv2.ImportTaskType))
+	if task == nil {
+		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID()))
 	}
 	log.RatedInfo(10, "datanode query import", zap.String("state", task.GetState().String()),
 		zap.String("reason", task.GetReason()))
 	return &datapb.QueryImportResponse{
-		Status:             status,
-		TaskID:             task.GetTaskID(),
-		State:              task.GetState(),
-		Reason:             task.GetReason(),
-		ImportSegmentsInfo: task.(*importv2.ImportTask).GetSegmentsInfo(),
+		Status: status,
+		TaskID: task.GetTaskID(),
+		State:  task.GetState(),
+		Reason: task.GetReason(),
+		ImportSegmentsInfo: task.(interface {
+			GetSegmentsInfo() []*datapb.ImportSegmentInfo
+		}).GetSegmentsInfo(),
 	}, nil
 }
 
