@@ -80,6 +80,10 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 	collIDs := sss.meta.ListCollections()
 	for _, collID := range collIDs {
 		collInfo := sss.meta.GetCollection(collID)
+		if collInfo == nil {
+			log.Warn("collection info is nil, skip it", zap.Int64("collectionID", collID))
+			continue
+		}
 		pkField, err := typeutil.GetPrimaryFieldSchema(collInfo.Schema)
 		if err != nil {
 			log.Warn("get primary field from schema failed", zap.Int64("collectionID", collID),

@@ -70,6 +70,7 @@ func (s *SyncSegmentsSchedulerSuite) initParams() {
 				Partitions:    []int64{2, 3},
 				VChannelNames: []string{"channel1", "channel2"},
 			},
+			2: nil,
 		},
 		segments: &SegmentsInfo{
 			segments: map[UniqueID]*SegmentInfo{
