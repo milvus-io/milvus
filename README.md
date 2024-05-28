@@ -75,6 +75,7 @@ Linux systems (Ubuntu 20.04 or later recommended):
 go: >= 1.21
 cmake: >= 3.26.4
 gcc: 7.5
+python: > 3.8 and  <= 3.11
 ```
 
 MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
@@ -82,6 +83,7 @@ MacOS systems with x86_64 (Big Sur 11.5 or later recommended):
 go: >= 1.21
 cmake: >= 3.26.4
 llvm: >= 15
+python: > 3.8 and  <= 3.11
 ```
 
 MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
@@ -89,6 +91,7 @@ MacOS systems with Apple Silicon (Monterey 12.0.1 or later recommended):
 go: >= 1.21 (Arch=ARM64)
 cmake: >= 3.26.4
 llvm: >= 15
+python: > 3.8 and  <= 3.11
 ```
 
 Clone Milvus repo and build.
