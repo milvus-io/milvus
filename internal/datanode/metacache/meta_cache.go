@@ -292,7 +292,8 @@ func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), fi
 func (c *metaCacheImpl) AddAndRemoveSegments(partitionID int64,
 	newSegments map[int64]*datapb.SyncSegmentInfo,
 	newSegmentsBF map[int64]*BloomFilterSet,
-	oldSegments map[int64]int64) {
+	oldSegments map[int64]int64,
+) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 

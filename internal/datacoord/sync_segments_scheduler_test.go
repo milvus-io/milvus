@@ -17,24 +17,25 @@
 package datacoord
 
 import (
-	"errors"
+	"sync/atomic"
 	"testing"
 
+	"github.com/cockroachdb/errors"
 	"github.com/stretchr/testify/mock"
+	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/stretchr/testify/suite"
 )
 
 type SyncSegmentsSchedulerSuite struct {
 	suite.Suite
 
 	m   *meta
-	new int
-	old int
+	new atomic.Int64
+	old atomic.Int64
 }
 
 func Test_SyncSegmentsSchedulerSuite(t *testing.T) {
@@ -323,10 +324,10 @@ func (s *SyncSegmentsSchedulerSuite) Test_newSyncSegmentsScheduler() {
 	sm.EXPECT().SyncSegments(mock.Anything, mock.Anything).RunAndReturn(func(i int64, request *datapb.SyncSegmentsRequest) error {
 		for _, seg := range request.GetSegmentInfos() {
 			if seg.GetState() == commonpb.SegmentState_Flushed {
-				s.new++
+				s.new.Add(1)
 			}
 			if seg.GetState() == commonpb.SegmentState_Dropped {
-				s.old++
+				s.old.Add(1)
 			}
 		}
 		return nil
@@ -338,7 +339,7 @@ func (s *SyncSegmentsSchedulerSuite) Test_newSyncSegmentsScheduler() {
 	sss.Start()
 
 	// 2 channels, 2 partitions, 2 segments
-	for s.new != 4 || s.old != 4 {
+	for s.new.Load() < 4 || s.old.Load() < 4 {
 	}
 	sss.Stop()
 }

@@ -23,11 +23,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
-	"github.com/milvus-io/milvus/internal/storage"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -35,8 +30,11 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
