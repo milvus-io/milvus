@@ -32,6 +32,7 @@ func SetMaxRowCount(maxRow int64) SegmentOperator {
 type segmentCriterion struct {
 	collectionID int64
 	channel      string
+	partitionID  int64
 	others       []SegmentFilter
 }
 
@@ -78,12 +79,6 @@ func WithChannel(channel string) SegmentFilter {
 	return ChannelFilter(channel)
 }
 
-func WithPartition(partitionID int64) SegmentFilter {
-	return SegmentFilterFunc(func(si *SegmentInfo) bool {
-		return si.GetPartitionID() == partitionID
-	})
-}
-
 type SegmentFilterFunc func(*SegmentInfo) bool
 
 func (f SegmentFilterFunc) Match(segment *SegmentInfo) bool {
@@ -92,4 +87,18 @@ func (f SegmentFilterFunc) Match(segment *SegmentInfo) bool {
 
 func (f SegmentFilterFunc) AddFilter(criterion *segmentCriterion) {
 	criterion.others = append(criterion.others, f)
+}
+
+type PartitionFilter int64
+
+func (f PartitionFilter) Match(segment *SegmentInfo) bool {
+	return segment.GetPartitionID() == int64(f)
+}
+
+func (f PartitionFilter) AddFilter(criterion *segmentCriterion) {
+	criterion.partitionID = int64(f)
+}
+
+func WithPartition(partitionID int64) SegmentFilter {
+	return CollectionFilter(partitionID)
 }

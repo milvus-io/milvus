@@ -114,7 +114,7 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
-	segments := sss.meta.SelectSegments(WithChannel(channelName), WithPartition(partitionID))
+	segments := sss.meta.SelectSegments(WithCollection(collectionID), WithChannel(channelName), WithPartition(partitionID))
 	req := &datapb.SyncSegmentsRequest{
 		ChannelName:  channelName,
 		PartitionId:  partitionID,
