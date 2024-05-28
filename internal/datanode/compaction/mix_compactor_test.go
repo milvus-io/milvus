@@ -139,7 +139,7 @@ func (s *MixCompactionTaskSuite) TestCompactDupPK() {
 		//}
 		//bfs := metacache.NewBloomFilterSet(statistic)
 
-		kvs, fBinlogs, err := s.task.serializeWrite(context.TODO(), s.segWriter)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 			left, right := lo.Difference(keys, lo.Keys(kvs))
@@ -191,7 +191,7 @@ func (s *MixCompactionTaskSuite) TestCompactTwoToOne() {
 		//	MaxPK:    s.segWriter.pkstats.MaxPk,
 		//}
 		//bfs := metacache.NewBloomFilterSet(statistic)
-		kvs, fBinlogs, err := s.task.serializeWrite(context.TODO(), s.segWriter)
+		kvs, fBinlogs, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 		s.Require().NoError(err)
 		s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.MatchedBy(func(keys []string) bool {
 			left, right := lo.Difference(keys, lo.Keys(kvs))
@@ -252,7 +252,7 @@ func (s *MixCompactionTaskSuite) TestMergeBufferFull() {
 	s.Require().NoError(err)
 
 	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil).Times(2)
-	kvs, _, err := s.task.serializeWrite(context.TODO(), s.segWriter)
+	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 	s.Require().NoError(err)
 
 	s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
@@ -281,7 +281,7 @@ func (s *MixCompactionTaskSuite) TestMergeEntityExpired() {
 	s.task.plan.CollectionTtl = int64(collTTL)
 	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil)
 
-	kvs, _, err := s.task.serializeWrite(context.TODO(), s.segWriter)
+	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 	s.Require().NoError(err)
 	s.mockAlloc.EXPECT().AllocOne().Return(888888, nil)
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).RunAndReturn(
@@ -314,7 +314,7 @@ func (s *MixCompactionTaskSuite) TestMergeNoExpiration() {
 	}
 
 	s.mockAlloc.EXPECT().Alloc(mock.Anything).Return(888888, 999999, nil)
-	kvs, _, err := s.task.serializeWrite(context.TODO(), s.segWriter)
+	kvs, _, err := serializeWrite(context.TODO(), s.task.Allocator, s.segWriter)
 	s.Require().NoError(err)
 	for _, test := range tests {
 		s.Run(test.description, func() {
@@ -421,7 +421,7 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsMultiSegment() {
 			s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).
 				Return(dValues, nil)
 
-			got, err := s.task.mergeDeltalogs(s.task.ctx, map[int64][]string{100: {"random"}})
+			got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, map[int64][]string{100: {"random"}})
 			s.NoError(err)
 
 			s.Equal(len(test.expectedpk2ts), len(got))
@@ -452,12 +452,12 @@ func (s *MixCompactionTaskSuite) TestMergeDeltalogsOneSegment() {
 		Return(nil, errors.New("mock_error")).Once()
 
 	invalidPaths := map[int64][]string{2000: {"mock_error"}}
-	got, err := s.task.mergeDeltalogs(s.task.ctx, invalidPaths)
+	got, err := mergeDeltalogs(s.task.ctx, s.task.binlogIO, invalidPaths)
 	s.Error(err)
 	s.Nil(got)
 
 	dpaths := map[int64][]string{1000: {"a"}}
-	got, err = s.task.mergeDeltalogs(s.task.ctx, dpaths)
+	got, err = mergeDeltalogs(s.task.ctx, s.task.binlogIO, dpaths)
 	s.NoError(err)
 	s.NotNil(got)
 	s.Equal(len(expectedMap), len(got))
