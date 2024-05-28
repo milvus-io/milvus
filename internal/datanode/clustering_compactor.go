@@ -298,10 +298,10 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 		}
 		buffer := &ClusterBuffer{
 			id:                      id,
+			flushedBinlogs:          make(map[UniqueID]*datapb.FieldBinlog, 0),
 			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
 			uploadedSegmentStats:    make(map[UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
-			//buffer:                  writeBuffer, // no need
 		}
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, key := range bucket {
@@ -346,6 +346,7 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 		fieldStats.SetVectorCentroids(storage.NewVectorFieldValue(t.clusteringKeyField.DataType, centroid))
 		clusterBuffer := &ClusterBuffer{
 			id:                      id,
+			flushedBinlogs:          make(map[UniqueID]*datapb.FieldBinlog, 0),
 			uploadedSegments:        make([]*datapb.CompactionSegment, 0),
 			uploadedSegmentStats:    make(map[UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
@@ -605,10 +606,14 @@ func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuf
 			return err
 		}
 	}
+	err := clusterBuffer.writer.Write(value)
+	if err != nil {
+		return err
+	}
 	clusterBuffer.bufferSize.Add(int64(rowSize))
 	clusterBuffer.bufferRowNum.Add(1)
 	t.totalBufferSize.Add(int64(rowSize))
-	return clusterBuffer.writer.Write(value)
+	return nil
 }
 
 func (t *clusteringCompactionTask) getWorkerPoolSize() int {
@@ -746,7 +751,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 	t.refreshBufferWriter(buffer)
 	buffer.flushedRowNum = 0
 	buffer.flushedBinlogs = make(map[UniqueID]*datapb.FieldBinlog, 0)
-	log.Debug("finish pack segment", zap.Int64("partitionID", t.partitionID), zap.Int64("segID", buffer.writer.GetSegmentID()), zap.String("seg", seg.String()), zap.Any("segStats", segmentStats))
+	log.Info("finish pack segment", zap.Int64("partitionID", t.partitionID), zap.Int64("segID", buffer.writer.GetSegmentID()), zap.String("seg", seg.String()), zap.Any("segStats", segmentStats))
 	return nil
 }
 
@@ -777,10 +782,8 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 
 	// clean buffer
 	t.totalBufferSize.Add(-buffer.bufferSize.Load())
-	err = t.refreshBufferWriter(buffer)
-	if err != nil {
-		return err
-	}
+	buffer.bufferSize.Store(0)
+	buffer.bufferRowNum.Store(0)
 
 	if buffer.flushedRowNum > t.plan.GetMaxSegmentRows() {
 		if err := t.packBufferToSegment(ctx, buffer); err != nil {
