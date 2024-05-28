@@ -140,7 +140,7 @@ func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
 	return st.MinPK.LE(pk) && st.MaxPK.GE(pk)
 }
 
-func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
+func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
 	// empty pkStatics
 	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
 		return false
@@ -163,7 +163,7 @@ type LocationsCache struct {
 	locations []uint64
 }
 
-func (lc LocationsCache) Locations(k uint) []uint64 {
+func (lc *LocationsCache) Locations(k uint) []uint64 {
 	if k > lc.k {
 		lc.k = k
 		lc.locations = Locations(lc.pk, lc.k)
@@ -172,8 +172,8 @@ func (lc LocationsCache) Locations(k uint) []uint64 {
 	return lc.locations
 }
 
-func NewLocationsCache(pk PrimaryKey) LocationsCache {
-	return LocationsCache{
+func NewLocationsCache(pk PrimaryKey) *LocationsCache {
+	return &LocationsCache{
 		pk: pk,
 	}
 }
