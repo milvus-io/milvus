@@ -164,6 +164,7 @@ func (c *StateChannelStore) addAssignment(nodeID int64, channel RWChannel) {
 // DELETE + WATCH ---> from bufferID    to nodeID
 // DELETE + WATCH ---> from lagecyID    to nodeID
 // DELETE + WATCH ---> from deletedNode to nodeID/bufferID
+// DELETE + WATCH ---> from releasedNode to nodeID/bufferID
 // RELEASE        ---> release from nodeID
 // WATCH          ---> watch to a new channel
 // DELETE         ---> remove the channel
@@ -223,7 +224,7 @@ func (c *StateChannelStore) getChannel(nodeID int64, channelName string) *StateC
 		if storedChannel, ok := cInfo.Channels[channelName]; ok {
 			return storedChannel.(*StateChannel)
 		}
-		log.Error("Channel doesn't exist in Node", zap.String("channel", channelName), zap.Int64("nodeID", nodeID))
+		log.Debug("Channel doesn't exist in Node", zap.String("channel", channelName), zap.Int64("nodeID", nodeID))
 	} else {
 		log.Error("Node doesn't exist", zap.Int64("NodeID", nodeID))
 	}

@@ -34,6 +34,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/dependency"
 	"github.com/milvus-io/milvus/pkg/common"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 // waitAndStore simulates DataNode's action
@@ -401,8 +402,11 @@ func TestChannelManager(t *testing.T) {
 	}()
 
 	Params.Save(Params.DataCoordCfg.AutoBalance.Key, "true")
-
 	prefix := Params.CommonCfg.DataCoordWatchSubPath.GetValue()
+
+	enableRPCK := paramtable.Get().DataCoordCfg.EnableBalanceChannelWithRPC.Key
+	paramtable.Get().Save(enableRPCK, "false")
+	defer paramtable.Get().Reset(enableRPCK)
 	t.Run("test AddNode with avalible node", func(t *testing.T) {
 		// Note: this test is based on the default registerPolicy
 		defer watchkv.RemoveWithPrefix("")
