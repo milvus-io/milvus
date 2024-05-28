@@ -75,6 +75,7 @@ func (s *CompactionScheduler) Schedule() []CompactionTask {
 
 	l0ChannelExcludes := typeutil.NewSet[string]()
 	mixChannelExcludes := typeutil.NewSet[string]()
+	clusteringChannelExcludes := typeutil.NewSet[string]()
 
 	for _, tasks := range s.parallelTasks {
 		for _, t := range tasks {
@@ -83,6 +84,8 @@ func (s *CompactionScheduler) Schedule() []CompactionTask {
 				l0ChannelExcludes.Insert(t.GetChannel())
 			case datapb.CompactionType_MixCompaction:
 				mixChannelExcludes.Insert(t.GetChannel())
+			case datapb.CompactionType_ClusteringCompaction:
+				clusteringChannelExcludes.Insert(t.GetChannel())
 			}
 		}
 	}
@@ -115,6 +118,14 @@ func (s *CompactionScheduler) Schedule() []CompactionTask {
 			t.SetNodeID(nodeID)
 			picked = append(picked, t)
 			mixChannelExcludes.Insert(t.GetChannel())
+			nodeSlots[nodeID]--
+		case datapb.CompactionType_ClusteringCompaction:
+			if l0ChannelExcludes.Contain(t.GetChannel()) {
+				continue
+			}
+			t.SetNodeID(nodeID)
+			picked = append(picked, t)
+			clusteringChannelExcludes.Insert(t.GetChannel())
 			nodeSlots[nodeID]--
 		}
 	}
