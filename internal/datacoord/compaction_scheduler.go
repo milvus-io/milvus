@@ -20,7 +20,7 @@ type Scheduler interface {
 	Finish(nodeID int64, task CompactionTask)
 	GetTaskCount() int
 	LogStatus()
-
+	GetTaskExecuting(planID int64) bool
 	// Start()
 	// Stop()
 	// IsFull() bool
@@ -205,6 +205,18 @@ func (s *CompactionScheduler) LogStatus() {
 
 func (s *CompactionScheduler) GetTaskCount() int {
 	return int(s.taskNumber.Load())
+}
+
+func (s *CompactionScheduler) GetTaskExecuting(planId int64) bool {
+	s.taskGuard.RLock()
+	defer s.taskGuard.RUnlock()
+	executing := true
+	for _, task := range s.queuingTasks {
+		if task.GetPlanID() == planId {
+			executing = false
+		}
+	}
+	return executing
 }
 
 func (s *CompactionScheduler) pickAnyNode(nodeSlots map[int64]int64) int64 {

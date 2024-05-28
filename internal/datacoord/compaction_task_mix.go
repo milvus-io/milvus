@@ -47,6 +47,9 @@ func (task *mixCompactionTask) processPipeliningTask(handler *compactionPlanHand
 }
 
 func (task *mixCompactionTask) processExecutingTask(handler *compactionPlanHandler) error {
+	if !handler.scheduler.GetTaskExecuting(task.PlanID) {
+		return nil
+	}
 	nodePlan, exist := handler.compactionResults[task.GetPlanID()]
 	if !exist {
 		// compaction task in DC but not found in DN means the compaction plan has failed

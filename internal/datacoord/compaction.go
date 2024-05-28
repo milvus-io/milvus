@@ -396,8 +396,6 @@ func (c *compactionPlanHandler) getCompaction(planID int64) CompactionTask {
 }
 
 func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
-	// Get executing executingTasks before GetCompactionState from DataNode to prevent false failure,
-	//  for DC might add new task while GetCompactionState.
 	tasks := c.getTasks()
 	planStates, err := c.sessions.GetCompactionPlansResults()
 	if err != nil {

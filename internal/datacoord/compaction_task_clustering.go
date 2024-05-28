@@ -19,12 +19,12 @@ package datacoord
 import (
 	"context"
 	"fmt"
+	"path"
+
 	"github.com/cockroachdb/errors"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	"path"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -75,6 +76,9 @@ func (task *clusteringCompactionTask) processInitTask(handler *compactionPlanHan
 }
 
 func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPlanHandler) error {
+	if !handler.scheduler.GetTaskExecuting(task.PlanID) {
+		return nil
+	}
 	nodePlan, exist := handler.compactionResults[task.GetPlanID()]
 	if !exist {
 		// compaction task in DC but not found in DN means the compaction plan has failed
@@ -275,7 +279,7 @@ func (task *clusteringCompactionTask) submitToAnalyze(handler *compactionPlanHan
 
 func (task *clusteringCompactionTask) submitToCompact(handler *compactionPlanHandler) error {
 	handler.scheduler.Submit(task)
-	handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_executing))
+	handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_pipelining))
 	log.Info("send compaction task to execute", zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
