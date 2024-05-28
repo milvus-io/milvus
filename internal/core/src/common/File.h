@@ -39,7 +39,12 @@ class File {
                    "failed to create mmap file {}: {}",
                    filepath,
                    strerror(errno));
-        return File(fd);
+        return File(fd, filepath);
+    }
+
+    const std::string_view
+    Path() const {
+        return path_;
     }
 
     int
@@ -64,8 +69,10 @@ class File {
     }
 
  private:
-    explicit File(int fd) : fd_(fd) {
+    explicit File(int fd, const std::string_view filepath)
+        : fd_(fd), path_(filepath) {
     }
     int fd_{-1};
+    std::string path_;
 };
 }  // namespace milvus

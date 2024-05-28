@@ -24,6 +24,7 @@
 #include <queue>
 #include <string>
 #include <vector>
+#include <optional>
 
 #include "common/Array.h"
 #include "common/EasyAssert.h"
@@ -89,7 +90,8 @@ class ColumnBase {
                          ? 1
                          : field_meta.get_sizeof()),
           is_map_anonymous_(false),
-          num_rows_(size / type_size_) {
+          num_rows_(size / type_size_),
+          filepath_(std::make_optional(file.Path())) {
         SetPaddingSize(field_meta.get_data_type());
 
         size_ = size;
@@ -114,7 +116,8 @@ class ColumnBase {
           num_rows_(size / GetDataTypeSize(data_type, dim)),
           size_(size),
           cap_size_(size),
-          is_map_anonymous_(false) {
+          is_map_anonymous_(false),
+          filepath_(std::make_optional(file.Path())) {
         SetPaddingSize(data_type);
 
         size_t mapped_size = cap_size_ + padding_;
@@ -137,6 +140,14 @@ class ColumnBase {
             }
             UpdateMetricWhenMunmap(mapped_size);
         }
+        if (filepath_.has_value()) {
+            auto code = unlink(filepath_->c_str());
+            if (code != 0) {
+                LOG_WARN("failed to unlink mmap column file {}: {}",
+                         filepath_.value(),
+                         strerror(errno));
+            }
+        }
     }
 
     ColumnBase(ColumnBase&& column) noexcept
@@ -145,7 +156,9 @@ class ColumnBase {
           padding_(column.padding_),
           type_size_(column.type_size_),
           num_rows_(column.num_rows_),
-          size_(column.size_) {
+          size_(column.size_),
+          is_map_anonymous_(column.is_map_anonymous_),
+          filepath_(std::move(column.filepath_)) {
         column.data_ = nullptr;
         column.cap_size_ = 0;
         column.padding_ = 0;
@@ -267,6 +280,15 @@ class ColumnBase {
         data_ = data;
         cap_size_ = new_size;
         is_map_anonymous_ = true;
+        if (filepath_.has_value()) {
+            auto code = unlink(filepath_->c_str());
+            if (code != 0) {
+                LOG_WARN("failed to unlink mmap column file {}: {}",
+                         filepath_.value(),
+                         strerror(errno));
+            }
+            filepath_.reset();
+        }
     }
 
     char* data_{nullptr};
@@ -314,6 +336,7 @@ class ColumnBase {
  private:
     // is MAP_ANONYMOUS
     bool is_map_anonymous_;
+    std::optional<std::string> filepath_;
 };
 
 class Column : public ColumnBase {

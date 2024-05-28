@@ -600,12 +600,6 @@ SegmentSealedImpl::MapFieldData(const FieldId field_id, FieldDataInfo& data) {
         fields_.emplace(field_id, column);
     }
 
-    auto ok = unlink(filepath.c_str());
-    AssertInfo(ok == 0,
-               fmt::format("failed to unlink mmap data file {}, err: {}",
-                           filepath.c_str(),
-                           strerror(errno)));
-
     // set pks to offset
     if (schema_->get_primary_field_id() == field_id) {
         AssertInfo(field_id.get() != -1, "Primary key is -1");

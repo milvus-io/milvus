@@ -249,14 +249,8 @@ func (node *QueryNode) InitSegcore() error {
 		return err
 	}
 
+	// mmapDirPath is fallback to use local storage path, so it's should never be empty.
 	mmapDirPath := paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	if len(mmapDirPath) == 0 {
-		paramtable.Get().Save(
-			paramtable.Get().QueryNodeCfg.MmapDirPath.Key,
-			path.Join(paramtable.Get().LocalStorageCfg.Path.GetValue(), "mmap"),
-		)
-		mmapDirPath = paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue()
-	}
 	chunkCachePath := path.Join(mmapDirPath, "chunk_cache")
 	policy := paramtable.Get().QueryNodeCfg.ReadAheadPolicy.GetValue()
 	err = initcore.InitChunkCache(chunkCachePath, policy)

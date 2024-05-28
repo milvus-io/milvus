@@ -43,6 +43,9 @@ class VectorMemIndex : public VectorIndex {
     explicit VectorMemIndex(const CreateIndexInfo& create_index_info,
                             const storage::FileManagerContext& file_manager,
                             std::shared_ptr<milvus_storage::Space> space);
+
+    virtual ~VectorMemIndex();
+
     BinarySet
     Serialize(const Config& config) override;
 
@@ -116,6 +119,7 @@ class VectorMemIndex : public VectorIndex {
     knowhere::Index<knowhere::IndexNode> index_;
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<milvus_storage::Space> space_;
+    std::vector<std::string> filepaths_;
 
     CreateIndexInfo create_index_info_;
 };

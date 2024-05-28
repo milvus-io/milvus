@@ -831,11 +831,7 @@ void VectorMemIndex<T>::LoadFromFile(const Config& config) {
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
 
-    auto ok = unlink(filepath->data());
-    AssertInfo(ok == 0,
-               "failed to unlink mmap index file {}: {}",
-               filepath.value(),
-               strerror(errno));
+    filepaths_.push_back(filepath.value());
     LOG_INFO(
         "load vector index done, mmap_file_path:{}, download_duration:{}, "
         "write_files_duration:{}, deserialize_duration:{}",
@@ -946,13 +942,23 @@ VectorMemIndex<T>::LoadFromFileV2(const Config& config) {
     auto dim = index_.Dim();
     this->SetDim(index_.Dim());
 
-    auto ok = unlink(filepath->data());
-    AssertInfo(ok == 0,
-               "failed to unlink mmap index file {}: {}",
-               filepath.value(),
-               strerror(errno));
+    filepaths_.push_back(filepath.value());
     LOG_INFO("load vector index done");
 }
+
+template <typename T>
+VectorMemIndex<T>::~VectorMemIndex() {
+    // unlink all mmap index files.
+    for (auto& filepath : filepaths_) {
+        auto ok = unlink(filepath.data());
+        if (ok != 0) {
+            LOG_WARN("failed to unlink mmap index file {}: {}",
+                     filepath,
+                     strerror(errno));
+        }
+    }
+}
+
 template class VectorMemIndex<float>;
 template class VectorMemIndex<uint8_t>;
 template class VectorMemIndex<float16>;

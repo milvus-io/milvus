@@ -106,14 +106,6 @@ ChunkCache::Mmap(const std::filesystem::path& path,
     } else {
         column = std::make_shared<Column>(file, data_size, dim, data_type);
     }
-
-    // unlink
-    auto ok = unlink(path.c_str());
-    AssertInfo(ok == 0,
-               "failed to unlink mmap data file {}, err: {}",
-               path.c_str(),
-               strerror(errno));
-
     return column;
 }
 
