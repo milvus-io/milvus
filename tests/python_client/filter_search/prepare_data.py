@@ -36,7 +36,7 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition
     schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
     logger.info(schema)
     collection = Collection(name=collection_name, schema=schema)
-    index_params = {"metric_type": "L2", "index_type": "FLAT", "params": {}}
+    index_params = {"metric_type": "L2", "index_type": "HNSW", "params": {"M": 48, "efConstruction": 500}}
     logger.info(f"collection {collection_name} created")
 
     batch_files = glob.glob("/root/dataset/laion_with_scalar_medium_10m/train*.parquet")
