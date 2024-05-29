@@ -57,7 +57,7 @@ func (s *CompactionScheduler) Submit(tasks ...CompactionTask) {
 	s.taskNumber.Add(int32(len(tasks)))
 	lo.ForEach(tasks, func(t CompactionTask, _ int) {
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(t.GetNodeID()), t.GetState().String(), metrics.Pending).Inc()
+			WithLabelValues(fmt.Sprint(t.GetNodeID()), t.GetType().String(), metrics.Pending).Inc()
 	})
 	s.LogStatus()
 }
@@ -76,6 +76,7 @@ func (s *CompactionScheduler) Schedule() []CompactionTask {
 	l0ChannelExcludes := typeutil.NewSet[string]()
 	mixChannelExcludes := typeutil.NewSet[string]()
 	clusteringChannelExcludes := typeutil.NewSet[string]()
+	// todo minor compaction/single compaction
 
 	for _, tasks := range s.parallelTasks {
 		for _, t := range tasks {

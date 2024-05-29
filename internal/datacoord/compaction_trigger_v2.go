@@ -103,6 +103,7 @@ func (m *CompactionTriggerManager) startLoop(policy CompactionPolicy) {
 			return
 		case <-policy.Ticker().C:
 			if policy.Enable() {
+				// todo add a lock to avoid conflict between policy
 				ctx := context.Background()
 				events, err := policy.Trigger(ctx)
 				if err != nil {

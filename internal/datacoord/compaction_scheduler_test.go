@@ -26,14 +26,14 @@ func (s *SchedulerSuite) SetupTest() {
 	s.scheduler = NewCompactionScheduler(cluster)
 	s.scheduler.parallelTasks = map[int64][]CompactionTask{
 		100: {
-			&mixCompactionTask{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
-			&mixCompactionTask{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 100, CompactionTask: &datapb.CompactionTask{PlanID: 1, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 100, CompactionTask: &datapb.CompactionTask{PlanID: 2, Channel: "ch-1", Type: datapb.CompactionType_MixCompaction}},
 		},
 		101: {
-			&mixCompactionTask{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 101, CompactionTask: &datapb.CompactionTask{PlanID: 3, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction}},
 		},
 		102: {
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 4, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 4, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
 		},
 	}
 	s.scheduler.taskNumber.Add(4)
@@ -59,12 +59,12 @@ func (s *SchedulerSuite) TestScheduleParallelTaskFull() {
 		expectedOut []UniqueID // planID
 	}{
 		{"with L0 tasks", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			&mixCompactionTask{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 100, CompactionTask: &datapb.CompactionTask{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			&mixCompactionTask{dataNodeID: 100, CompactionTask: &datapb.CompactionTask{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{}},
 		{"without L0 tasks", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_MinorCompaction}},
-			&mixCompactionTask{dataNodeID: 100, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+			&mixCompactionTask{dataNodeID: 100, CompactionTask: &datapb.CompactionTask{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_MinorCompaction}},
+			&mixCompactionTask{dataNodeID: 100, CompactionTask: &datapb.CompactionTask{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
 		}, []UniqueID{}},
 		{"empty tasks", []CompactionTask{}, []UniqueID{}},
 	}
@@ -99,18 +99,18 @@ func (s *SchedulerSuite) TestScheduleNodeWith1ParallelTask() {
 		tasks       []CompactionTask
 		expectedOut []UniqueID // planID
 	}{
-		{"with L0 tasks diff channel", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			&mixCompactionTask{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{10}},
+		{"with L0 tasks diff 1channel", []CompactionTask{
+			&l0CompactionTask{dataNodeID: 101, CompactionTask: &datapb.CompactionTask{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			&mixCompactionTask{dataNodeID: 101, CompactionTask: &datapb.CompactionTask{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+		}, []UniqueID{10, 11}},
 		{"with L0 tasks same channel", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-2", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			&mixCompactionTask{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+			&l0CompactionTask{dataNodeID: 101, CompactionTask: &datapb.CompactionTask{PlanID: 10, Channel: "ch-2", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			&mixCompactionTask{dataNodeID: 101, CompactionTask: &datapb.CompactionTask{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{11}},
 		{"without L0 tasks", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MinorCompaction}},
-			&mixCompactionTask{dataNodeID: 101, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{14}},
+			&mixCompactionTask{dataNodeID: 101, CompactionTask: &datapb.CompactionTask{PlanID: 14, Channel: "ch-2", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 101, CompactionTask: &datapb.CompactionTask{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+		}, []UniqueID{14, 13}},
 		{"empty tasks", []CompactionTask{}, []UniqueID{}},
 	}
 
@@ -148,17 +148,17 @@ func (s *SchedulerSuite) TestScheduleNodeWithL0Executing() {
 		expectedOut []UniqueID // planID
 	}{
 		{"with L0 tasks diff channel", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
-		}, []UniqueID{10}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 10, Channel: "ch-10", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+		}, []UniqueID{10, 11}},
 		{"with L0 tasks same channel", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-3", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 10, Channel: "ch-3", Type: datapb.CompactionType_Level0DeleteCompaction}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 11, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 13, Channel: "ch-3", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{11}},
 		{"without L0 tasks", []CompactionTask{
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 14, Channel: "ch-3", Type: datapb.CompactionType_MinorCompaction}},
-			&mixCompactionTask{dataNodeID: 102, plan: &datapb.CompactionPlan{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MinorCompaction}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 14, Channel: "ch-3", Type: datapb.CompactionType_MixCompaction}},
+			&mixCompactionTask{dataNodeID: 102, CompactionTask: &datapb.CompactionTask{PlanID: 13, Channel: "ch-11", Type: datapb.CompactionType_MixCompaction}},
 		}, []UniqueID{13}},
 		{"empty tasks", []CompactionTask{}, []UniqueID{}},
 	}
@@ -193,7 +193,7 @@ func (s *SchedulerSuite) TestFinish() {
 		s.SetupTest()
 		metrics.DataCoordCompactionTaskNum.Reset()
 
-		s.scheduler.Finish(100, &mixCompactionTask{plan: &datapb.CompactionPlan{PlanID: 1, Type: datapb.CompactionType_MixCompaction}})
+		s.scheduler.Finish(100, &mixCompactionTask{CompactionTask: &datapb.CompactionTask{PlanID: 1, Type: datapb.CompactionType_MixCompaction}})
 		taskNum, err := metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues("100", datapb.CompactionType_MixCompaction.String(), metrics.Executing)
 		s.NoError(err)
 		s.MetricsEqual(taskNum, -1)
@@ -208,8 +208,7 @@ func (s *SchedulerSuite) TestFinish() {
 		metrics.DataCoordCompactionTaskNum.Reset()
 		var datanodeID int64 = 10000
 
-		plan := &datapb.CompactionPlan{PlanID: 19530, Type: datapb.CompactionType_Level0DeleteCompaction}
-		task := &mixCompactionTask{plan: plan, dataNodeID: datanodeID}
+		task := &mixCompactionTask{CompactionTask: &datapb.CompactionTask{PlanID: 19530, Type: datapb.CompactionType_Level0DeleteCompaction}, dataNodeID: datanodeID}
 		s.scheduler.Submit(task)
 
 		taskNum, err := metrics.DataCoordCompactionTaskNum.GetMetricWithLabelValues(fmt.Sprint(datanodeID), datapb.CompactionType_Level0DeleteCompaction.String(), metrics.Pending)
