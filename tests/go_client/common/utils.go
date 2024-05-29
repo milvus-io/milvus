@@ -3,14 +3,15 @@ package common
 import (
 	"encoding/binary"
 	"fmt"
-	"log"
 	"math"
 	"math/rand"
 	"strings"
 	"time"
 
 	"github.com/milvus-io/milvus/client/v2/entity"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/x448/float16"
+	"go.uber.org/zap"
 )
 
 var letterRunes = []rune("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ")
@@ -116,7 +117,7 @@ func GenSparseVector(maxLen int) entity.SparseEmbedding {
 	}
 	vector, err := entity.NewSliceSparseEmbedding(positions, values)
 	if err != nil {
-		log.Fatalf("Generate vector failed %s", err)
+		log.Fatal("Generate vector failed %s", zap.Error(err))
 	}
 	return vector
 }
