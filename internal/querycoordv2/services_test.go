@@ -207,6 +207,8 @@ func (suite *ServiceSuite) SetupTest() {
 	}
 
 	suite.server.UpdateStateCode(commonpb.StateCode_Healthy)
+
+	suite.broker.EXPECT().GetCollectionLoadInfo(mock.Anything, mock.Anything).Return([]string{meta.DefaultResourceGroupName}, 1, nil).Maybe()
 }
 
 func (suite *ServiceSuite) TestShowCollections() {
