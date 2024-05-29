@@ -397,6 +397,16 @@ KmeansClustering::Run(const milvus::proto::clustering::AnalyzeInfo& config) {
             false;  // all data are used for training, no need to random sampling
         trained_segments_num = segment_ids.size();
     }
+    if (train_num < num_clusters) {
+        LOG_WARN(msg_header_ +
+                     "kmeans train num: {} less than num_clusters: {}, skip "
+                     "clustering",
+                 train_num,
+                 num_clusters);
+        throw SegcoreError(ErrorCode::ClusterSkip,
+                           "sample data num less than num clusters");
+    }
+
     size_t train_size_final = train_num * dim * sizeof(T);
     knowhere::TimeRecorder rc(msg_header_ + "kmeans clustering",
                               2 /* log level: info */);

@@ -234,6 +234,25 @@ test_run() {
                                   config["num_clusters"],
                                   true);
     }
+    // num clusters larger than train num
+    {
+        EXPECT_THROW(
+            try {
+                config["min_cluster_ratio"] = 0.01;
+                config["insert_files"] = remote_files;
+                config["num_clusters"] = 100000;
+                config["train_size"] = 25L * 1024 * 1024 * 1024;  // 25GB
+                config["dim"] = dim;
+                config["num_rows"] = num_rows;
+                auto clusteringJob =
+                    std::make_unique<clustering::KmeansClustering>(ctx);
+                clusteringJob->Run<T>(transforConfigToPB(config));
+            } catch (SegcoreError& e) {
+                ASSERT_EQ(e.get_error_code(), ErrorCode::ClusterSkip);
+                throw e;
+            },
+            SegcoreError);
+    }
 
     // data skew
     {

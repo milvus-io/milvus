@@ -29,35 +29,6 @@ CStatus
 DeleteAnalyze(CAnalyze analyze);
 
 CStatus
-NewAnalyzeInfo(CAnalyzeInfo* c_analyze_info, CStorageConfig c_storage_config);
-
-void
-DeleteAnalyzeInfo(CAnalyzeInfo c_analyze_info);
-
-CStatus
-AppendAnalyzeInfo(CAnalyzeInfo c_analyze_info,
-                  int64_t collection_id,
-                  int64_t partition_id,
-                  int64_t field_id,
-                  int64_t task_id,
-                  int64_t version,
-                  const char* field_name,
-                  enum CDataType field_type,
-                  int64_t dim,
-                  int64_t num_clusters,
-                  int64_t train_size);
-
-CStatus
-AppendSegmentInsertFile(CAnalyzeInfo c_analyze_info,
-                        int64_t segID,
-                        const char* file_path);
-
-CStatus
-AppendSegmentNumRows(CAnalyzeInfo c_analyze_info,
-                     int64_t segID,
-                     int64_t num_rows);
-
-CStatus
 GetAnalyzeResultMeta(CAnalyze analyze,
                      char** centroid_path,
                      int64_t* centroid_file_size,
