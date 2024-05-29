@@ -529,7 +529,7 @@ func (s *MixCompactionTaskSuite) TestIsExpiredEntity() {
 				},
 				currentTs: test.nowTs,
 			}
-			got := t.isExpiredEntity(test.entityTs)
+			got := isExpiredEntity(t.plan.GetCollectionTtl(), test.entityTs, t.currentTs)
 			s.Equal(test.expect, got)
 		})
 	}

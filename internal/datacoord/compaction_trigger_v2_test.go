@@ -44,14 +44,13 @@ func (s *CompactionTriggerManagerSuite) SetupTest() {
 		s.meta.segments.SetSegment(id, segment)
 	}
 
-	s.m = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext)
+	s.m = NewCompactionTriggerManager(s.mockAlloc, s.handler, s.mockPlanContext, s.meta)
 }
 
 func (s *CompactionTriggerManagerSuite) TestNotifyToFullScheduler() {
 	s.mockPlanContext.EXPECT().isFull().Return(true)
-	viewManager := NewCompactionViewManager(s.meta, s.m, s.m.allocator)
+	viewManager := NewCompactionTriggerManager(s.meta, s.m, s.m.allocator, s.meta)
 	collSegs := s.meta.GetCompactableSegmentGroupByCollection()
-
 	segments, found := collSegs[1]
 	s.Require().True(found)
 

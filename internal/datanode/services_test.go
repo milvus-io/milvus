@@ -255,7 +255,7 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 			Channel: dmChannelName,
 			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
 				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
-				{SegmentID: growingSegmentID, Level: datapb.SegmentLevel_L1},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
 			},
 			Type: datapb.CompactionType_ClusteringCompaction,
 		}

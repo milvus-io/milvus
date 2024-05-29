@@ -28,7 +28,7 @@ type CompactionViewManagerSuite struct {
 	mockTriggerManager *MockTriggerManager
 	testLabel          *CompactionGroupLabel
 
-	m *CompactionViewManager
+	m *CompactionTriggerManager
 }
 
 const MB = 1024 * 1024
@@ -86,7 +86,8 @@ func (s *CompactionViewManagerSuite) SetupTest() {
 		meta.segments.SetSegment(id, segment)
 	}
 
-	s.m = NewCompactionViewManager(meta, s.mockTriggerManager, s.mockAlloc)
+	s.m = (meta, s.mockTriggerManager, s.mockAlloc)
+	s.m = NewCompactionTriggerManager(s.mockAlloc, )
 }
 
 func (s *CompactionViewManagerSuite) TestCheckLoop() {

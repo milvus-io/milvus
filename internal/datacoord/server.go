@@ -538,7 +538,7 @@ func (s *Server) stopCompactionHandler() {
 }
 
 func (s *Server) createCompactionTrigger() {
-	s.compactionTrigger = newCompactionTrigger(s.ctx, s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
+	s.compactionTrigger = newCompactionTrigger(s.meta, s.compactionHandler, s.allocator, s.handler, s.indexEngineVersionManager)
 }
 
 func (s *Server) stopCompactionTrigger() {

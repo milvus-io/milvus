@@ -70,7 +70,6 @@ type compactionSignal struct {
 var _ trigger = (*compactionTrigger)(nil)
 
 type compactionTrigger struct {
-	ctx               context.Context
 	handler           Handler
 	meta              *meta
 	allocator         allocator
@@ -91,7 +90,6 @@ type compactionTrigger struct {
 }
 
 func newCompactionTrigger(
-	ctx context.Context,
 	meta *meta,
 	compactionHandler compactionPlanContext,
 	allocator allocator,
@@ -99,7 +97,6 @@ func newCompactionTrigger(
 	indexVersionManager IndexEngineVersionManager,
 ) *compactionTrigger {
 	return &compactionTrigger{
-		ctx:                          ctx,
 		meta:                         meta,
 		allocator:                    allocator,
 		signals:                      make(chan *compactionSignal, 100),
