@@ -1,7 +1,11 @@
 from locust import HttpUser, task, events, LoadTestShape
 import random
 import pandas as pd
+import re
 
+def convert_numbers_to_quoted_strings(text):
+    result = re.sub(r'\d+', lambda x: f"'{x.group()}'", text)
+    return result
 
 @events.init_command_line_parser.add_listener
 def _(parser):
@@ -36,6 +40,7 @@ class MilvusUser(HttpUser):
     @task
     def search(self):
         filter = self.environment.parsed_options.filter
+        filter = convert_numbers_to_quoted_strings(filter)
         # print(filter)
         random_id = random.randint(0, len(self.vectors_to_search) - 1)
         # print([self.vectors_to_search[random_id].tolist()])

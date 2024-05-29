@@ -8,7 +8,11 @@ import numba as nb
 import glob
 import os
 import argparse
+import re
 
+def convert_numbers_to_quoted_strings(text):
+    result = re.sub(r'\d+', lambda x: f"'{x.group()}'", text)
+    return result
 
 @nb.njit('int64[:,::1](float32[:,::1])', parallel=True)
 def fastSort(a):
@@ -138,12 +142,11 @@ if __name__ == "__main__":
         print("File exists")
         exit(0)
     neighbors_file_name_list = []
+    expr = convert_numbers_to_quoted_strings(expr)
     for train_data_f in train_data_file_name:
         print(train_data_f)
         neighbors_file_name = compute_neighbors(train_data_f, test_data_file_name, expr)
         neighbors_file_name_list.append(neighbors_file_name)
-    ascii_codes = [str(ord(char)) for char in expr]
-    expr_ascii = "".join(ascii_codes)
     if expr_ascii:
         merge_neighbors(neighbors_file_name_list, f"{neighbor_dir}/neighbors-{expr_ascii}.parquet")
     else:
