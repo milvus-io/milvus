@@ -878,12 +878,9 @@ enum CompactionTaskState {
   completed = 3;
   failed = 4;
   timeout = 5;
-  init = 6;
-  analyzing = 7;
-  analyzed = 8;
-  indexing = 9;
-  indexed = 10;
-  cleaned = 11;
+  analyzing = 6;
+  indexing = 7;
+  cleaned = 8;
 }
 
 message CompactionTask {

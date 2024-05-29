@@ -1208,8 +1208,8 @@ func getCompactionMergeInfo(task CompactionTask) *milvuspb.CompactionMergeInfo {
 
 func getCompactionState(tasks []CompactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, failedCnt, timeoutCnt int) {
 	summary := summaryCompactionState(tasks)
-	executingCnt = summary.executingCnt + summary.pipeliningCnt + summary.completedCnt + summary.initCnt + summary.analyzingCnt + summary.analyzedCnt + summary.indexingCnt
-	completedCnt = summary.indexedCnt
+	executingCnt = summary.executingCnt + summary.pipeliningCnt + summary.analyzingCnt + summary.indexingCnt
+	completedCnt = summary.completedCnt
 	timeoutCnt = summary.timeoutCnt
 	failedCnt = summary.failedCnt
 	state = summary.state

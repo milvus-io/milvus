@@ -195,7 +195,7 @@ func (task *clusteringCompactionTask) processIndexedTask(handler *compactionPlan
 		WithLabelValues(fmt.Sprint(typeutil.IsVectorType(task.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), "indexing").
 		Observe(float64(indexStageTime))
 	task.lastUpdateStateTime = ts
-	task.State = datapb.CompactionTaskState_indexed
+	task.State = datapb.CompactionTaskState_completed
 	globalTs, err := handler.allocator.allocTimestamp(context.Background())
 	if err != nil {
 		return err
@@ -312,7 +312,7 @@ func (task *clusteringCompactionTask) submitToCompact(handler *compactionPlanHan
 }
 
 func (task *clusteringCompactionTask) ProcessTask(handler *compactionPlanHandler) error {
-	if task.State == datapb.CompactionTaskState_indexed || task.State == datapb.CompactionTaskState_cleaned {
+	if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
 		return nil
 	}
 	//coll, err := c.handler.GetCollection(t.ctx, task.GetCollectionID())
@@ -326,9 +326,9 @@ func (task *clusteringCompactionTask) ProcessTask(handler *compactionPlanHandler
 	//}
 
 	switch task.State {
-	case datapb.CompactionTaskState_init:
+	case datapb.CompactionTaskState_pipelining:
 		return task.processInitTask(handler)
-	case datapb.CompactionTaskState_pipelining, datapb.CompactionTaskState_executing:
+	case datapb.CompactionTaskState_executing:
 		return task.processExecutingTask(handler)
 	case datapb.CompactionTaskState_analyzing:
 		return task.processAnalyzingTask(handler)

@@ -239,7 +239,7 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 	task := &datapb.CompactionTask{
 		PlanID:             taskID,
 		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
-		State:              datapb.CompactionTaskState_init,
+		State:              datapb.CompactionTaskState_pipelining,
 		StartTime:          view.(*ClusteringSegmentsView).compactionTime.startTime,
 		CollectionTtl:      view.(*ClusteringSegmentsView).compactionTime.collectionTTL.Nanoseconds(),
 		TimeoutInSeconds:   Params.DataCoordCfg.ClusteringCompactionTimeoutInSeconds.GetAsInt32(),

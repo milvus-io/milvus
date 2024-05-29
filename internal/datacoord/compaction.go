@@ -149,7 +149,7 @@ func (c *compactionPlanHandler) start() {
 	triggers := c.meta.GetClusteringCompactionTasks()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
-			if task.State != datapb.CompactionTaskState_indexed && task.State != datapb.CompactionTaskState_cleaned {
+			if task.State != datapb.CompactionTaskState_completed && task.State != datapb.CompactionTaskState_cleaned {
 				c.enqueueCompaction(&clusteringCompactionTask{
 					CompactionTask:      task,
 					lastUpdateStateTime: time.Now().UnixMilli(),
@@ -218,7 +218,7 @@ func (c *compactionPlanHandler) Clean() {
 	for id, task := range c.plans {
 		switch task.GetType() {
 		case datapb.CompactionType_ClusteringCompaction:
-			if task.GetState() != datapb.CompactionTaskState_cleaned || task.GetState() != datapb.CompactionTaskState_indexed {
+			if task.GetState() != datapb.CompactionTaskState_cleaned || task.GetState() != datapb.CompactionTaskState_completed {
 				continue
 			}
 		default:
@@ -573,7 +573,7 @@ func (c *compactionPlanHandler) gcPartitionStats() error {
 	triggers := c.meta.GetClusteringCompactionTasks()
 	checkTaskFunc := func(task *datapb.CompactionTask) {
 		// indexed is the final state of a clustering compaction task
-		if task.State == datapb.CompactionTaskState_indexed || task.State == datapb.CompactionTaskState_cleaned {
+		if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
 			if time.Since(tsoutil.PhysicalTime(task.StartTime)) > Params.DataCoordCfg.ClusteringCompactionDropTolerance.GetAsDuration(time.Second) {
 				// skip handle this error, try best to delete meta
 				err := c.meta.DropClusteringCompactionTask(task)
@@ -638,17 +638,14 @@ type CompactionTriggerSummary struct {
 	completedCnt  int
 	failedCnt     int
 	timeoutCnt    int
-	initCnt       int
 	analyzingCnt  int
-	analyzedCnt   int
 	indexingCnt   int
-	indexedCnt    int
 	cleanedCnt    int
 }
 
 func summaryCompactionState(compactionTasks []CompactionTask) CompactionTriggerSummary {
 	var state commonpb.CompactionState
-	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, initCnt, analyzingCnt, analyzedCnt, indexingCnt, indexedCnt, cleanedCnt int
+	var executingCnt, pipeliningCnt, completedCnt, failedCnt, timeoutCnt, analyzingCnt, indexingCnt, cleanedCnt int
 	for _, task := range compactionTasks {
 		if task == nil {
 			continue
@@ -664,16 +661,10 @@ func summaryCompactionState(compactionTasks []CompactionTask) CompactionTriggerS
 			failedCnt++
 		case datapb.CompactionTaskState_timeout:
 			timeoutCnt++
-		case datapb.CompactionTaskState_init:
-			initCnt++
 		case datapb.CompactionTaskState_analyzing:
 			analyzingCnt++
-		case datapb.CompactionTaskState_analyzed:
-			analyzedCnt++
 		case datapb.CompactionTaskState_indexing:
 			indexingCnt++
-		case datapb.CompactionTaskState_indexed:
-			indexedCnt++
 		case datapb.CompactionTaskState_cleaned:
 			cleanedCnt++
 		default:
@@ -681,7 +672,7 @@ func summaryCompactionState(compactionTasks []CompactionTask) CompactionTriggerS
 	}
 
 	// fail and timeout task must be cleaned first before mark the job complete
-	if executingCnt+pipeliningCnt+completedCnt+initCnt+analyzingCnt+analyzedCnt+indexingCnt+failedCnt+timeoutCnt != 0 {
+	if executingCnt+pipeliningCnt+analyzingCnt+indexingCnt+failedCnt+timeoutCnt != 0 {
 		state = commonpb.CompactionState_Executing
 	} else {
 		state = commonpb.CompactionState_Completed
@@ -695,11 +686,8 @@ func summaryCompactionState(compactionTasks []CompactionTask) CompactionTriggerS
 		zap.Int("completedCnt", completedCnt),
 		zap.Int("failedCnt", failedCnt),
 		zap.Int("timeoutCnt", timeoutCnt),
-		zap.Int("initCnt", initCnt),
 		zap.Int("analyzingCnt", analyzingCnt),
-		zap.Int("analyzedCnt", analyzedCnt),
 		zap.Int("indexingCnt", indexingCnt),
-		zap.Int("indexedCnt", indexedCnt),
 		zap.Int("cleanedCnt", cleanedCnt))
 	return CompactionTriggerSummary{
 		state:         state,
@@ -708,11 +696,8 @@ func summaryCompactionState(compactionTasks []CompactionTask) CompactionTriggerS
 		completedCnt:  completedCnt,
 		failedCnt:     failedCnt,
 		timeoutCnt:    timeoutCnt,
-		initCnt:       initCnt,
 		analyzingCnt:  analyzingCnt,
-		analyzedCnt:   analyzedCnt,
 		indexingCnt:   indexingCnt,
-		indexedCnt:    indexedCnt,
 		cleanedCnt:    cleanedCnt,
 	}
 }
