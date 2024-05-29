@@ -140,7 +140,7 @@ func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
 	return st.MinPK.LE(pk) && st.MaxPK.GE(pk)
 }
 
-func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
+func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
 	// empty pkStatics
 	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
 		return false
@@ -159,22 +159,21 @@ func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
 // Note that this helper is not concurrent safe and shall be used in same goroutine.
 type LocationsCache struct {
 	pk        PrimaryKey
-	locations map[uint][]uint64
+	k         uint
+	locations []uint64
 }
 
-func (lc LocationsCache) Locations(k uint) []uint64 {
-	locs, ok := lc.locations[k]
-	if ok {
-		return locs
+func (lc *LocationsCache) Locations(k uint) []uint64 {
+	if k > lc.k {
+		lc.k = k
+		lc.locations = Locations(lc.pk, lc.k)
 	}
-	locs = Locations(lc.pk, k)
-	lc.locations[k] = locs
-	return locs
+
+	return lc.locations[:k]
 }
 
-func NewLocationsCache(pk PrimaryKey) LocationsCache {
-	return LocationsCache{
-		pk:        pk,
-		locations: make(map[uint][]uint64),
+func NewLocationsCache(pk PrimaryKey) *LocationsCache {
+	return &LocationsCache{
+		pk: pk,
 	}
 }
