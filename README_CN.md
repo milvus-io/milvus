@@ -68,10 +68,11 @@ Milvus 基于 [Apache 2.0 License](https://github.com/milvus-io/milvus/blob/mast
 请先安装相关依赖。
 
 ```
-go: 1.21
-cmake: >=3.18
+go: >=1.21
+cmake: >=3.26.4
 gcc: 7.5
 protobuf: >=3.7
+python: > 3.8 and  <= 3.11
 ```
 
 克隆 Milvus 项目并编译。
