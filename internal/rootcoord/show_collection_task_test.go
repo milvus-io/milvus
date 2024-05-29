@@ -298,7 +298,9 @@ func TestShowCollectionsAuth(t *testing.T) {
 			{
 				Object: &milvuspb.ObjectEntity{Name: commonpb.ObjectType_Global.String()},
 				Grantor: &milvuspb.GrantorEntity{
-					Privilege: &milvuspb.PrivilegeEntity{Name: commonpb.ObjectPrivilege_PrivilegeAll.String()},
+					Privilege: &milvuspb.PrivilegeEntity{
+						Name: util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeAll.String()),
+					},
 				},
 			},
 		}, nil).Once()
