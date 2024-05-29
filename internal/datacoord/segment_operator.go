@@ -88,17 +88,3 @@ func (f SegmentFilterFunc) Match(segment *SegmentInfo) bool {
 func (f SegmentFilterFunc) AddFilter(criterion *segmentCriterion) {
 	criterion.others = append(criterion.others, f)
 }
-
-type PartitionFilter int64
-
-func (f PartitionFilter) Match(segment *SegmentInfo) bool {
-	return segment.GetPartitionID() == int64(f)
-}
-
-func (f PartitionFilter) AddFilter(criterion *segmentCriterion) {
-	criterion.partitionID = int64(f)
-}
-
-func WithPartition(partitionID int64) SegmentFilter {
-	return CollectionFilter(partitionID)
-}

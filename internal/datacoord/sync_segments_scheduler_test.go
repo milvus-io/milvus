@@ -309,6 +309,240 @@ func (s *SyncSegmentsSchedulerSuite) initParams() {
 				7: 11,
 				8: 12,
 			},
+			secondaryIndexes: segmentInfoIndexes{
+				coll2Segments: map[UniqueID]map[UniqueID]*SegmentInfo{
+					1: {
+						5: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            5,
+								CollectionID:  1,
+								PartitionID:   2,
+								InsertChannel: "channel1",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Dropped,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 1,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 2,
+											},
+										},
+									},
+								},
+							},
+						},
+						6: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            6,
+								CollectionID:  1,
+								PartitionID:   3,
+								InsertChannel: "channel1",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Dropped,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 3,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 4,
+											},
+										},
+									},
+								},
+							},
+						},
+						7: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            7,
+								CollectionID:  1,
+								PartitionID:   2,
+								InsertChannel: "channel2",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Dropped,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 5,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 6,
+											},
+										},
+									},
+								},
+							},
+						},
+						8: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            8,
+								CollectionID:  1,
+								PartitionID:   3,
+								InsertChannel: "channel2",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Dropped,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 7,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 8,
+											},
+										},
+									},
+								},
+							},
+						},
+						9: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            9,
+								CollectionID:  1,
+								PartitionID:   2,
+								InsertChannel: "channel1",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Flushed,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 9,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 10,
+											},
+										},
+									},
+								},
+								CompactionFrom: []int64{5},
+							},
+						},
+						10: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            10,
+								CollectionID:  1,
+								PartitionID:   3,
+								InsertChannel: "channel1",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Flushed,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 7,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 8,
+											},
+										},
+									},
+								},
+								CompactionFrom: []int64{6},
+							},
+						},
+						11: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            11,
+								CollectionID:  1,
+								PartitionID:   2,
+								InsertChannel: "channel2",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Flushed,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 5,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 6,
+											},
+										},
+									},
+								},
+								CompactionFrom: []int64{7},
+							},
+						},
+						12: {
+							SegmentInfo: &datapb.SegmentInfo{
+								ID:            12,
+								CollectionID:  1,
+								PartitionID:   3,
+								InsertChannel: "channel2",
+								NumOfRows:     3000,
+								State:         commonpb.SegmentState_Flushed,
+								Statslogs: []*datapb.FieldBinlog{
+									{
+										FieldID: 100,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 7,
+											},
+										},
+									},
+									{
+										FieldID: 101,
+										Binlogs: []*datapb.Binlog{
+											{
+												LogID: 8,
+											},
+										},
+									},
+								},
+								CompactionFrom: []int64{8},
+							},
+						},
+					},
+				},
+			},
 		},
 	}
 }
