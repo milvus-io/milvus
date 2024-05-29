@@ -26,16 +26,16 @@ import "C"
 
 import (
 	"context"
-	"github.com/golang/protobuf/proto"
-	"github.com/milvus-io/milvus/internal/proto/cgopb"
 	"runtime"
 	"unsafe"
 
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/proto/cgopb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/common"
