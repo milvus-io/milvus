@@ -14,24 +14,23 @@ import faker
 fake = faker.Faker()
 
 
-def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1"):
+def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition_key="scalar_3"):
 
     connections.connect(
         host=host,
         port=port,
     )
-
     collection_name = "test_restful_perf"
     if collection_name in list_collections():
         logger.info(f"collection {collection_name} exists, drop it")
         Collection(name=collection_name).drop()
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-        FieldSchema(name="scalar_3", dtype=DataType.INT64),
-        FieldSchema(name="scalar_6", dtype=DataType.INT64),
-        FieldSchema(name="scalar_9", dtype=DataType.INT64),
-        FieldSchema(name="scalar_12", dtype=DataType.INT64),
-        FieldSchema(name="scalar_5_linear", dtype=DataType.INT64),
+        FieldSchema(name="scalar_3", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_3")),
+        FieldSchema(name="scalar_6", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_6")),
+        FieldSchema(name="scalar_9", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_9")),
+        FieldSchema(name="scalar_12", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_12")),
+        FieldSchema(name="scalar_5_linear", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_5_linear")),
         FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=768)
     ]
     schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
@@ -91,5 +90,6 @@ if __name__ == "__main__":
     parser.add_argument("--host", type=str, default="10.255.136.47")
     parser.add_argument("--minio_host", type=str, default="10.255.117.95")
     parser.add_argument("--port", type=int, default=19530)
+    parser.add_argument("--partition_key", type=str, default="scalar_3")
     args = parser.parse_args()
-    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host)
+    prepare_data(host=args.host, port=args.port, minio_host=args.minio_host, partition_key=args.partition_key)
