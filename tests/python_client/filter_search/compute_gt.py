@@ -17,30 +17,27 @@ def fastSort(a):
     return b
 
 def compute_neighbors(train_data_file_name, test_data_file_name, expr=None, top_k=1000):
+    logger.info(f"train data file {train_data_file_name}, test data file {test_data_file_name}, expr {expr}")
     t0 = time.time()
     test_df = pd.read_parquet(test_data_file_name)
     train_df = pd.read_parquet(train_data_file_name)
     tt= time.time() - t0
     logger.info(f"read parquet cost {tt}")
-    print(train_df)
     if expr:
         logger.info(f"expr {expr}")
         train_df.query(expr=expr, inplace=True)
-    print(train_df)
     test_data = test_df["emb"].tolist()
     test_id_list = test_df["id"].tolist()
     # logger.info(f"test data {len(test_data)}")
     train_data = train_df["emb"].tolist()
-    # logger.info(f"train data {len(train_data)}")
+    logger.info(f"train data after filter: {len(train_data)}")
     t0 = time.time()
     distance = pairwise_distances(train_data, Y=test_data, metric="euclidean")
-    tt = time.time() -t0
+    tt = time.time() - t0
     logger.info(f"compute distance cost {tt}")
     distance = transpose(distance)
     distance = np.array(distance, dtype=np.float32, order='C')
-    # logger.info(distance.shape)
-    # logger.info(distance[0])
-    # logger.info(len(distance[0]))
+
     idx = train_df["id"].tolist()
     t0 = time.time()
     distance_sorted_arg = fastSort(distance)
@@ -72,6 +69,7 @@ def compute_neighbors(train_data_file_name, test_data_file_name, expr=None, top_
 
 
 def merge_neighbors(file_list, final_file_name):
+    logger.info(f"{file_list}, final file name {final_file_name}")
     t0 = time.time()
     files_num = len(file_list)
     # logger.info(f"merge neighbors files {files_num}")
