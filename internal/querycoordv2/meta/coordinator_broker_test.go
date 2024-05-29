@@ -18,6 +18,7 @@ package meta
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -32,6 +33,8 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	"github.com/milvus-io/milvus/internal/proto/rootcoordpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
@@ -486,6 +489,90 @@ func (s *CoordinatorBrokerDataCoordSuite) TestGetIndexInfo() {
 
 		_, err := s.broker.GetIndexInfo(ctx, collectionID, segmentID)
 		s.NoError(err)
+		s.resetMock()
+	})
+}
+
+func (s *CoordinatorBrokerRootCoordSuite) TestDescribeDatabase() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("normal_case", func() {
+		s.rootcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
+			Return(&rootcoordpb.DescribeDatabaseResponse{
+				Status: merr.Success(),
+			}, nil)
+		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
+		s.NoError(err)
+		s.resetMock()
+	})
+
+	s.Run("rootcoord_return_error", func() {
+		s.rootcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, errors.New("fake error"))
+		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
+		s.Error(err)
+		s.resetMock()
+	})
+
+	s.Run("rootcoord_return_failure_status", func() {
+		s.rootcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
+			Return(&rootcoordpb.DescribeDatabaseResponse{
+				Status: merr.Status(errors.New("fake error")),
+			}, nil)
+		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
+		s.Error(err)
+		s.resetMock()
+	})
+
+	s.Run("rootcoord_return_unimplemented", func() {
+		s.rootcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).Return(nil, merr.ErrServiceUnimplemented)
+		_, err := s.broker.DescribeDatabase(ctx, "fake_db1")
+		s.Error(err)
+		s.resetMock()
+	})
+}
+
+func (s *CoordinatorBrokerRootCoordSuite) TestGetCollectionLoadInfo() {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	s.Run("normal_case", func() {
+		s.rootcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			DbName: "fake_db1",
+		}, nil)
+		s.rootcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
+			Return(&rootcoordpb.DescribeDatabaseResponse{
+				Status: merr.Success(),
+				Properties: []*commonpb.KeyValuePair{
+					{
+						Key:   common.DatabaseReplicaNumber,
+						Value: "3",
+					},
+					{
+						Key:   common.DatabaseResourceGroups,
+						Value: strings.Join([]string{"rg1", "rg2"}, ","),
+					},
+				},
+			}, nil)
+		rgs, replicas, err := s.broker.GetCollectionLoadInfo(ctx, 1)
+		s.NoError(err)
+		s.Equal(int64(3), replicas)
+		s.Contains(rgs, "rg1")
+		s.Contains(rgs, "rg2")
+		s.resetMock()
+	})
+
+	s.Run("props not set", func() {
+		s.rootcoord.EXPECT().DescribeCollection(mock.Anything, mock.Anything).Return(&milvuspb.DescribeCollectionResponse{
+			DbName: "fake_db1",
+		}, nil)
+		s.rootcoord.EXPECT().DescribeDatabase(mock.Anything, mock.Anything).
+			Return(&rootcoordpb.DescribeDatabaseResponse{
+				Status:     merr.Success(),
+				Properties: []*commonpb.KeyValuePair{},
+			}, nil)
+		_, _, err := s.broker.GetCollectionLoadInfo(ctx, 1)
+		s.Error(err)
 		s.resetMock()
 	})
 }
