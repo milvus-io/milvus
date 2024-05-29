@@ -47,6 +47,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type meta struct {
@@ -363,6 +364,8 @@ func (m *meta) GetCollectionIndexFilesSize() uint64 {
 	m.RLock()
 	defer m.RUnlock()
 	var total uint64
+
+	missingCollections := make(typeutil.Set[int64])
 	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
 		coll, ok := m.collections[segmentIdx.CollectionID]
 		if ok {
@@ -370,8 +373,11 @@ func (m *meta) GetCollectionIndexFilesSize() uint64 {
 				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
 			total += segmentIdx.IndexSize
 		} else {
-			log.Warn("not found database name", zap.Int64("collectionID", segmentIdx.CollectionID))
+			missingCollections.Insert(segmentIdx.CollectionID)
 		}
+	}
+	if missingCollections.Len() > 0 {
+		log.Warn("collection info not found when calculating index file sizes", zap.Int64s("collectionIDs", missingCollections.Collect()))
 	}
 	return total
 }
