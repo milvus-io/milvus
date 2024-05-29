@@ -502,7 +502,6 @@ message SyncSegmentInfo {
   common.SegmentState state = 3;
   SegmentLevel level = 4;
   int64 num_of_rows = 5;
-  int64 compaction_to = 6;
 }
 
 message SyncSegmentsRequest {

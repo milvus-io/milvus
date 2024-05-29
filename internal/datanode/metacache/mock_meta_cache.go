@@ -25,7 +25,7 @@ func (_m *MockMetaCache) EXPECT() *MockMetaCache_Expecter {
 }
 
 // AddAndRemoveSegments provides a mock function with given fields: partitionID, newSegments, newSegmentsBF, oldSegments
-func (_m *MockMetaCache) AddAndRemoveSegments(partitionID int64, newSegments map[int64]*datapb.SyncSegmentInfo, newSegmentsBF map[int64]*BloomFilterSet, oldSegments map[int64]int64) {
+func (_m *MockMetaCache) AddAndRemoveSegments(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, oldSegments []int64) {
 	_m.Called(partitionID, newSegments, newSegmentsBF, oldSegments)
 }
 
@@ -36,16 +36,16 @@ type MockMetaCache_AddAndRemoveSegments_Call struct {
 
 // AddAndRemoveSegments is a helper method to define mock.On call
 //   - partitionID int64
-//   - newSegments map[int64]*datapb.SyncSegmentInfo
-//   - newSegmentsBF map[int64]*BloomFilterSet
-//   - oldSegments map[int64]int64
+//   - newSegments []*datapb.SyncSegmentInfo
+//   - newSegmentsBF []*BloomFilterSet
+//   - oldSegments []int64
 func (_e *MockMetaCache_Expecter) AddAndRemoveSegments(partitionID interface{}, newSegments interface{}, newSegmentsBF interface{}, oldSegments interface{}) *MockMetaCache_AddAndRemoveSegments_Call {
 	return &MockMetaCache_AddAndRemoveSegments_Call{Call: _e.mock.On("AddAndRemoveSegments", partitionID, newSegments, newSegmentsBF, oldSegments)}
 }
 
-func (_c *MockMetaCache_AddAndRemoveSegments_Call) Run(run func(partitionID int64, newSegments map[int64]*datapb.SyncSegmentInfo, newSegmentsBF map[int64]*BloomFilterSet, oldSegments map[int64]int64)) *MockMetaCache_AddAndRemoveSegments_Call {
+func (_c *MockMetaCache_AddAndRemoveSegments_Call) Run(run func(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, oldSegments []int64)) *MockMetaCache_AddAndRemoveSegments_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64), args[1].(map[int64]*datapb.SyncSegmentInfo), args[2].(map[int64]*BloomFilterSet), args[3].(map[int64]int64))
+		run(args[0].(int64), args[1].([]*datapb.SyncSegmentInfo), args[2].([]*BloomFilterSet), args[3].([]int64))
 	})
 	return _c
 }
@@ -55,7 +55,7 @@ func (_c *MockMetaCache_AddAndRemoveSegments_Call) Return() *MockMetaCache_AddAn
 	return _c
 }
 
-func (_c *MockMetaCache_AddAndRemoveSegments_Call) RunAndReturn(run func(int64, map[int64]*datapb.SyncSegmentInfo, map[int64]*BloomFilterSet, map[int64]int64)) *MockMetaCache_AddAndRemoveSegments_Call {
+func (_c *MockMetaCache_AddAndRemoveSegments_Call) RunAndReturn(run func(int64, []*datapb.SyncSegmentInfo, []*BloomFilterSet, []int64)) *MockMetaCache_AddAndRemoveSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -146,57 +146,6 @@ func (_c *MockMetaCache_Collection_Call) Return(_a0 int64) *MockMetaCache_Collec
 }
 
 func (_c *MockMetaCache_Collection_Call) RunAndReturn(run func() int64) *MockMetaCache_Collection_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
-// CompactSegments provides a mock function with given fields: newSegmentID, partitionID, numRows, bfs, oldSegmentIDs
-func (_m *MockMetaCache) CompactSegments(newSegmentID int64, partitionID int64, numRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64) {
-	_va := make([]interface{}, len(oldSegmentIDs))
-	for _i := range oldSegmentIDs {
-		_va[_i] = oldSegmentIDs[_i]
-	}
-	var _ca []interface{}
-	_ca = append(_ca, newSegmentID, partitionID, numRows, bfs)
-	_ca = append(_ca, _va...)
-	_m.Called(_ca...)
-}
-
-// MockMetaCache_CompactSegments_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'CompactSegments'
-type MockMetaCache_CompactSegments_Call struct {
-	*mock.Call
-}
-
-// CompactSegments is a helper method to define mock.On call
-//   - newSegmentID int64
-//   - partitionID int64
-//   - numRows int64
-//   - bfs *BloomFilterSet
-//   - oldSegmentIDs ...int64
-func (_e *MockMetaCache_Expecter) CompactSegments(newSegmentID interface{}, partitionID interface{}, numRows interface{}, bfs interface{}, oldSegmentIDs ...interface{}) *MockMetaCache_CompactSegments_Call {
-	return &MockMetaCache_CompactSegments_Call{Call: _e.mock.On("CompactSegments",
-		append([]interface{}{newSegmentID, partitionID, numRows, bfs}, oldSegmentIDs...)...)}
-}
-
-func (_c *MockMetaCache_CompactSegments_Call) Run(run func(newSegmentID int64, partitionID int64, numRows int64, bfs *BloomFilterSet, oldSegmentIDs ...int64)) *MockMetaCache_CompactSegments_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]int64, len(args)-4)
-		for i, a := range args[4:] {
-			if a != nil {
-				variadicArgs[i] = a.(int64)
-			}
-		}
-		run(args[0].(int64), args[1].(int64), args[2].(int64), args[3].(*BloomFilterSet), variadicArgs...)
-	})
-	return _c
-}
-
-func (_c *MockMetaCache_CompactSegments_Call) Return() *MockMetaCache_CompactSegments_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockMetaCache_CompactSegments_Call) RunAndReturn(run func(int64, int64, int64, *BloomFilterSet, ...int64)) *MockMetaCache_CompactSegments_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -114,7 +114,7 @@ func (sss *SyncSegmentsScheduler) SyncSegmentsForCollections() {
 func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, channelName string, nodeID, pkFieldID int64) error {
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
-	segments := sss.meta.SelectSegments(WithCollection(collectionID), WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
+	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return info.GetPartitionID() == partitionID
 	}))
 	req := &datapb.SyncSegmentsRequest{
@@ -125,20 +125,14 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 	}
 
 	for _, seg := range segments {
-		compactTo := int64(-1)
-		compactToInfo, exist := sss.meta.GetCompactionTo(seg.GetID())
-		if exist && compactToInfo != nil {
-			compactTo = compactToInfo.GetID()
-		}
 		for _, statsLog := range seg.GetStatslogs() {
 			if statsLog.GetFieldID() == pkFieldID {
 				req.SegmentInfos[seg.ID] = &datapb.SyncSegmentInfo{
-					SegmentId:    seg.GetID(),
-					PkStatsLog:   statsLog,
-					State:        seg.GetState(),
-					Level:        seg.GetLevel(),
-					NumOfRows:    seg.GetNumOfRows(),
-					CompactionTo: compactTo,
+					SegmentId:  seg.GetID(),
+					PkStatsLog: statsLog,
+					State:      seg.GetState(),
+					Level:      seg.GetLevel(),
+					NumOfRows:  seg.GetNumOfRows(),
 				}
 			}
 		}

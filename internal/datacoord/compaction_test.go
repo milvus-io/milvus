@@ -698,14 +698,6 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 		},
 	}
 
-	//s.mockSessMgr.EXPECT().SyncSegments(int64(222), mock.Anything).RunAndReturn(func(nodeID int64, req *datapb.SyncSegmentsRequest) error {
-	//	s.EqualValues(nodeID, 222)
-	//	s.NotNil(req)
-	//	s.Empty(req.GetCompactedFrom())
-	//	s.EqualValues(5, req.GetPlanID())
-	//	return nil
-	//}).Once()
-	//s.mockSessMgr.EXPECT().SyncSegments(int64(111), mock.Anything).Return(nil)
 	s.mockCm.EXPECT().Match(int64(111), "ch-1").Return(true)
 	s.mockCm.EXPECT().Match(int64(111), "ch-2").Return(false).Once()
 

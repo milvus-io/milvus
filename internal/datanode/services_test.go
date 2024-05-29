@@ -515,12 +515,11 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			CollectionId: 1,
 			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
 				3: {
-					SegmentId:    3,
-					PkStatsLog:   nil,
-					State:        commonpb.SegmentState_Dropped,
-					Level:        2,
-					NumOfRows:    1024,
-					CompactionTo: 4,
+					SegmentId:  3,
+					PkStatsLog: nil,
+					State:      commonpb.SegmentState_Dropped,
+					Level:      2,
+					NumOfRows:  1024,
 				},
 			},
 		}
