@@ -51,7 +51,7 @@ class MilvusUser(HttpUser):
                               headers={"Content-Type": "application/json", "Authorization": "Bearer root:Milvus"},
                               catch_response=True
                               ) as resp:
-            if resp.status_code != 200 or resp.json()["code"] != 200:
+            if resp.status_code != 200 or resp.json()["code"] != 0:
                 resp.failure(f"search failed with error {resp.text}")
             else:
                 # compute recall

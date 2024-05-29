@@ -6,6 +6,7 @@ from loguru import logger
 import time
 import numba as nb
 import glob
+import os
 import argparse
 
 
@@ -111,6 +112,9 @@ def merge_neighbors(file_list, final_file_name):
     # print(df)
     df.to_parquet(final_file_name)
 
+def check_file_exists(file_path):
+    return os.path.exists(file_path)
+
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
@@ -119,7 +123,20 @@ if __name__ == "__main__":
     train_data_file_name = glob.glob('/root/dataset/laion_with_scalar_medium_10m/train*.parquet')
     test_data_file_name = "/root/dataset/laion_with_scalar_medium_10m/test.parquet"
     neighbor_dir = "/root/dataset/laion_with_scalar_medium_10m"
+
     expr = args.filter
+    ascii_codes = [str(ord(char)) for char in expr]
+    expr_ascii = "".join(ascii_codes)
+    # check neighbors file is exist
+    if expr_ascii:
+        neighbors_file_name = f"{neighbor_dir}/neighbors-{expr_ascii}.parquet"
+    else:
+        neighbors_file_name = f"{neighbor_dir}/neighbors.parquet"
+    if check_file_exists(neighbors_file_name):
+        df = pd.read_parquet(neighbors_file_name)
+        print(df.head())
+        print("File exists")
+        exit(0)
     neighbors_file_name_list = []
     for train_data_f in train_data_file_name:
         print(train_data_f)
