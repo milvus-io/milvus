@@ -224,6 +224,16 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		growing = []SegmentEntry{}
 	}
 
+	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
+		func() {
+			sd.partitionStatsMut.RLock()
+			defer sd.partitionStatsMut.RUnlock()
+			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
+				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
+		}()
+	}
+
+	// get final sealedNum after possible segment prune
 	sealedNum := lo.SumBy(sealed, func(item SnapshotItem) int { return len(item.Segments) })
 	log.Debug("search segments...",
 		zap.Int("sealedNum", sealedNum),
@@ -235,15 +245,6 @@ func (sd *shardDelegator) search(ctx context.Context, req *querypb.SearchRequest
 		log.Warn("failed to optimize search params", zap.Error(err))
 		return nil, err
 	}
-	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		func() {
-			sd.partitionStatsMut.RLock()
-			defer sd.partitionStatsMut.RUnlock()
-			PruneSegments(ctx, sd.partitionStats, req.GetReq(), nil, sd.collection.Schema(), sealed,
-				PruneInfo{filterRatio: paramtable.Get().QueryNodeCfg.DefaultSegmentFilterRatio.GetAsFloat()})
-		}()
-	}
-
 	tasks, err := organizeSubTask(ctx, req, sealed, growing, sd, sd.modifySearchRequest)
 	if err != nil {
 		log.Warn("Search organizeSubTask failed", zap.Error(err))
