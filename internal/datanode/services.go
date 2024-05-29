@@ -22,7 +22,7 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/pkg/util/conc"
+
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -40,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -299,7 +300,6 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 			seg.GetState() != commonpb.SegmentState_NotExist &&
 			seg.GetState() != commonpb.SegmentState_Dropped {
 			newSegments = append(newSegments, seg)
-
 		} else {
 			oldSegments = append(oldSegments, seg.GetSegmentId())
 		}
