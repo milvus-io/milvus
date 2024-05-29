@@ -89,7 +89,7 @@ func (t *showCollectionTask) Execute(ctx context.Context) error {
 			for _, entity := range entities {
 				objectType := entity.GetObject().GetName()
 				if objectType == commonpb.ObjectType_Global.String() &&
-					entity.GetGrantor().GetPrivilege().GetName() == commonpb.ObjectPrivilege_PrivilegeAll.String() {
+					entity.GetGrantor().GetPrivilege().GetName() == util.PrivilegeNameForAPI(commonpb.ObjectPrivilege_PrivilegeAll.String()) {
 					privilegeColls.Insert(util.AnyWord)
 					return privilegeColls, nil
 				}
