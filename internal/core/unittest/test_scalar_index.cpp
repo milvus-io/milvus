@@ -49,6 +49,14 @@ TYPED_TEST_P(TypedScalarIndexTest, Dummy) {
     std::cout << milvus::GetDType<T>() << std::endl;
 }
 
+auto
+GetTempFileManagerCtx(CDataType data_type) {
+    auto ctx = milvus::storage::FileManagerContext();
+    ctx.fieldDataMeta.schema.set_data_type(
+        static_cast<milvus::proto::schema::DataType>(data_type));
+    return ctx;
+}
+
 TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
     using T = TypeParam;
     auto dtype = milvus::GetDType<T>();
@@ -59,7 +67,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
     }
 }
 
@@ -73,7 +81,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Count) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -92,7 +100,7 @@ TYPED_TEST_P(TypedScalarIndexTest, HasRawData) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -112,7 +120,7 @@ TYPED_TEST_P(TypedScalarIndexTest, In) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -131,7 +139,7 @@ TYPED_TEST_P(TypedScalarIndexTest, NotIn) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -150,7 +158,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Reverse) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -169,7 +177,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Range) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -188,7 +196,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -197,7 +205,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         auto binary_set = index->Serialize(nullptr);
         auto copy_index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         copy_index->Load(binary_set);
 
         auto copy_scalar_index =
@@ -368,6 +376,8 @@ TYPED_TEST_P(TypedScalarIndexTestV2, Base) {
         auto space = TestSpace<T>(temp_path, vec_size, dataset, scalars);
         milvus::storage::FileManagerContext file_manager_context(
             {}, {.field_name = "scalar"}, chunk_manager, space);
+        file_manager_context.fieldDataMeta.schema.set_data_type(
+            static_cast<milvus::proto::schema::DataType>(dtype));
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
                 create_index_info, file_manager_context, space);

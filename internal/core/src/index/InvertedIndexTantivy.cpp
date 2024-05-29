@@ -23,12 +23,50 @@
 #include "InvertedIndexTantivy.h"
 
 namespace milvus::index {
+inline TantivyDataType
+get_tantivy_data_type(proto::schema::DataType data_type) {
+    switch (data_type) {
+        case proto::schema::DataType::Bool: {
+            return TantivyDataType::Bool;
+        }
+
+        case proto::schema::DataType::Int8:
+        case proto::schema::DataType::Int16:
+        case proto::schema::DataType::Int32:
+        case proto::schema::DataType::Int64: {
+            return TantivyDataType::I64;
+        }
+
+        case proto::schema::DataType::Float:
+        case proto::schema::DataType::Double: {
+            return TantivyDataType::F64;
+        }
+
+        case proto::schema::DataType::VarChar: {
+            return TantivyDataType::Keyword;
+        }
+
+        default:
+            PanicInfo(ErrorCode::NotImplemented,
+                      fmt::format("not implemented data type: {}", data_type));
+    }
+}
+
+inline TantivyDataType
+get_tantivy_data_type(const proto::schema::FieldSchema& schema) {
+    switch (schema.data_type()) {
+        case proto::schema::Array:
+            return get_tantivy_data_type(schema.element_type());
+        default:
+            return get_tantivy_data_type(schema.data_type());
+    }
+}
+
 template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
-    const TantivyConfig& cfg,
     const storage::FileManagerContext& ctx,
     std::shared_ptr<milvus_storage::Space> space)
-    : cfg_(cfg), space_(space) {
+    : space_(space), schema_(ctx.fieldDataMeta.schema) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx, ctx.space_);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx, ctx.space_);
     auto field =
@@ -36,7 +74,7 @@ InvertedIndexTantivy<T>::InvertedIndexTantivy(
     auto prefix = disk_file_manager_->GetLocalIndexObjectPrefix();
     path_ = prefix;
     boost::filesystem::create_directories(path_);
-    d_type_ = cfg_.to_tantivy_data_type();
+    d_type_ = get_tantivy_data_type(schema_);
     if (tantivy_index_exist(path_.c_str())) {
         LOG_INFO(
             "index {} already exists, which should happen in loading progress",
@@ -114,152 +152,7 @@ InvertedIndexTantivy<T>::Build(const Config& config) {
     AssertInfo(insert_files.has_value(), "insert_files were empty");
     auto field_datas =
         mem_file_manager_->CacheRawDataToMemory(insert_files.value());
-
-    switch (cfg_.data_type_) {
-        case DataType::BOOL: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<bool>(static_cast<const bool*>(data->Data()),
-                                         n);
-            }
-            break;
-        }
-
-        case DataType::INT8: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int8_t>(
-                    static_cast<const int8_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::INT16: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int16_t>(
-                    static_cast<const int16_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::INT32: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int32_t>(
-                    static_cast<const int32_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::INT64: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int64_t>(
-                    static_cast<const int64_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::FLOAT: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<float>(
-                    static_cast<const float*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::DOUBLE: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<double>(
-                    static_cast<const double*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::VARCHAR: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<std::string>(
-                    static_cast<const std::string*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::ARRAY: {
-            switch (cfg_.element_type_) {
-                case DataType::BOOL: {
-                    build_index_for_array<bool>(field_datas);
-                    break;
-                }
-
-                case DataType::INT8: {
-                    build_index_for_array<int8_t>(field_datas);
-                    break;
-                }
-
-                case DataType::INT16: {
-                    build_index_for_array<int16_t>(field_datas);
-                    break;
-                }
-
-                case DataType::INT32: {
-                    build_index_for_array<int32_t>(field_datas);
-                    break;
-                }
-
-                case DataType::INT64: {
-                    build_index_for_array<int64_t>(field_datas);
-                    break;
-                }
-
-                case DataType::FLOAT: {
-                    build_index_for_array<float>(field_datas);
-                    break;
-                }
-
-                case DataType::DOUBLE: {
-                    build_index_for_array<double>(field_datas);
-                    break;
-                }
-
-                case DataType::VARCHAR: {
-                    for (const auto& data : field_datas) {
-                        auto n = data->get_num_rows();
-                        auto array_column =
-                            static_cast<const Array*>(data->Data());
-                        for (int64_t i = 0; i < n; i++) {
-                            assert(array_column[i].get_element_type() ==
-                                   cfg_.element_type_);
-                            std::vector<std::string> output;
-                            for (int64_t j = 0; j < array_column[i].length();
-                                 j++) {
-                                output.push_back(
-                                    array_column[i]
-                                        .template get_data<std::string>(j));
-                            }
-                            wrapper_->template add_multi_data(output.data(),
-                                                              output.size());
-                        }
-                    }
-                    break;
-                }
-
-                default:
-                    PanicInfo(ErrorCode::NotImplemented,
-                              fmt::format("Inverted index not supported on {}",
-                                          cfg_.element_type_));
-            }
-            break;
-        }
-
-        default:
-            PanicInfo(ErrorCode::NotImplemented,
-                      fmt::format("Inverted index not supported on {}",
-                                  cfg_.data_type_));
-    }
+    build_index(field_datas);
 }
 
 template <typename T>
@@ -280,85 +173,7 @@ InvertedIndexTantivy<T>::BuildV2(const Config& config) {
         field_data->FillFieldData(col_data);
         field_datas.push_back(field_data);
     }
-
-    switch (cfg_.data_type_) {
-        case DataType::BOOL: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<bool>(static_cast<const bool*>(data->Data()),
-                                         n);
-            }
-            break;
-        }
-
-        case DataType::INT8: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int8_t>(
-                    static_cast<const int8_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::INT16: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int16_t>(
-                    static_cast<const int16_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::INT32: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int32_t>(
-                    static_cast<const int32_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::INT64: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int64_t>(
-                    static_cast<const int64_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::FLOAT: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<float>(
-                    static_cast<const float*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::DOUBLE: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<double>(
-                    static_cast<const double*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case DataType::VARCHAR: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<std::string>(
-                    static_cast<const std::string*>(data->Data()), n);
-            }
-            break;
-        }
-
-        default:
-            PanicInfo(ErrorCode::NotImplemented,
-                      fmt::format("Inverted index not supported on {}",
-                                  cfg_.data_type_));
-    }
+    build_index(field_datas);
 }
 
 template <typename T>
@@ -403,7 +218,8 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
-    TargetBitmap bitset(Count(), true);
+    TargetBitmap bitset(Count());
+    bitset.set();
     for (size_t i = 0; i < n; ++i) {
         auto array = wrapper_->term_query(values[i]);
         apply_hits(bitset, array, false);
@@ -504,16 +320,166 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
         auto prefix = boost::uuids::to_string(uuid);
         path_ = fmt::format("/tmp/{}", prefix);
         boost::filesystem::create_directories(path_);
-        cfg_ = TantivyConfig{
-            .data_type_ = DataType::VARCHAR,
-        };
-        d_type_ = cfg_.to_tantivy_data_type();
+        schema_.set_data_type(proto::schema::DataType::VarChar);
+        d_type_ = get_tantivy_data_type(schema_);
         std::string field = "test_inverted_index";
         wrapper_ = std::make_shared<TantivyIndexWrapper>(
             field.c_str(), d_type_, path_.c_str());
         wrapper_->add_data<std::string>(static_cast<const std::string*>(values),
                                         n);
         finish();
+    }
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::build_index(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    switch (schema_.data_type()) {
+        case proto::schema::DataType::Bool: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<bool>(static_cast<const bool*>(data->Data()),
+                                         n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::Int8: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int8_t>(
+                    static_cast<const int8_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::Int16: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int16_t>(
+                    static_cast<const int16_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::Int32: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int32_t>(
+                    static_cast<const int32_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::Int64: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<int64_t>(
+                    static_cast<const int64_t*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::Float: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<float>(
+                    static_cast<const float*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::Double: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<double>(
+                    static_cast<const double*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::VarChar: {
+            for (const auto& data : field_datas) {
+                auto n = data->get_num_rows();
+                wrapper_->add_data<std::string>(
+                    static_cast<const std::string*>(data->Data()), n);
+            }
+            break;
+        }
+
+        case proto::schema::DataType::Array: {
+            switch (schema_.element_type()) {
+                case proto::schema::DataType::Bool: {
+                    build_index_for_array<bool>(field_datas);
+                    break;
+                }
+
+                case proto::schema::DataType::Int8: {
+                    build_index_for_array<int8_t>(field_datas);
+                    break;
+                }
+
+                case proto::schema::DataType::Int16: {
+                    build_index_for_array<int16_t>(field_datas);
+                    break;
+                }
+
+                case proto::schema::DataType::Int32: {
+                    build_index_for_array<int32_t>(field_datas);
+                    break;
+                }
+
+                case proto::schema::DataType::Int64: {
+                    build_index_for_array<int64_t>(field_datas);
+                    break;
+                }
+
+                case proto::schema::DataType::Float: {
+                    build_index_for_array<float>(field_datas);
+                    break;
+                }
+
+                case proto::schema::DataType::Double: {
+                    build_index_for_array<double>(field_datas);
+                    break;
+                }
+
+                case proto::schema::DataType::VarChar: {
+                    for (const auto& data : field_datas) {
+                        auto n = data->get_num_rows();
+                        auto array_column =
+                            static_cast<const Array*>(data->Data());
+                        for (int64_t i = 0; i < n; i++) {
+                            assert(
+                                array_column[i].get_element_type() ==
+                                static_cast<DataType>(schema_.element_type()));
+                            std::vector<std::string> output;
+                            for (int64_t j = 0; j < array_column[i].length();
+                                 j++) {
+                                output.push_back(
+                                    array_column[i]
+                                        .template get_data<std::string>(j));
+                            }
+                            wrapper_->template add_multi_data(output.data(),
+                                                              output.size());
+                        }
+                    }
+                    break;
+                }
+
+                default:
+                    PanicInfo(ErrorCode::NotImplemented,
+                              fmt::format("Inverted index not supported on {}",
+                                          schema_.element_type()));
+            }
+            break;
+        }
+
+        default:
+            PanicInfo(ErrorCode::NotImplemented,
+                      fmt::format("Inverted index not supported on {}",
+                                  schema_.data_type()));
     }
 }
 
@@ -526,7 +492,8 @@ InvertedIndexTantivy<T>::build_index_for_array(
         auto n = data->get_num_rows();
         auto array_column = static_cast<const Array*>(data->Data());
         for (int64_t i = 0; i < n; i++) {
-            assert(array_column[i].get_element_type() == cfg_.element_type_);
+            assert(array_column[i].get_element_type() ==
+                   static_cast<DataType>(schema_.element_type()));
             wrapper_->template add_multi_data(
                 reinterpret_cast<const ElementT*>(array_column[i].data()),
                 array_column[i].length());
