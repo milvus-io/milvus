@@ -215,24 +215,23 @@ func (task *clusteringCompactionTask) processAnalyzingTask(handler *compactionPl
 		log.Warn("analyzeTask not found", zap.Int64("id", task.GetAnalyzeTaskID()))
 		return errors.New("analyzeTask not found")
 	}
-	log.Info("check analyze task state", zap.Int64("id", task.GetAnalyzeTaskID()), zap.String("state", analyzeTask.State.String()))
+	log.Info("check analyze task state", zap.Int64("id", task.GetAnalyzeTaskID()), zap.Int64("version", analyzeTask.GetVersion()), zap.String("state", analyzeTask.State.String()))
 	switch analyzeTask.State {
 	case indexpb.JobState_JobStateFinished:
 		if analyzeTask.GetCentroidsFile() == "" {
 			// fake finished vector clustering is not supported in opensource
 			return merr.WrapErrClusteringCompactionNotSupportVector()
 		} else {
-			task.AnalyzeVersionID = analyzeTask.GetVersion()
+			task.AnalyzeVersion = analyzeTask.GetVersion()
 			task.submitToCompact(handler)
 			ts := time.Now().UnixMilli()
 			analyzeStageTime := ts - task.lastUpdateStateTime
-			log.Debug("clustering compaction analyze task elapse", zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.Int64("planID", task.GetPlanID()), zap.Int64("elapse", analyzeStageTime))
+			log.Info("clustering compaction analyze task elapse", zap.Int64("triggerID", task.GetTriggerID()), zap.Int64("collectionID", task.GetCollectionID()), zap.Int64("planID", task.GetPlanID()), zap.Int64("elapse", analyzeStageTime))
 			metrics.DataCoordCompactionLatency.
 				WithLabelValues(fmt.Sprint(typeutil.IsVectorType(task.GetClusteringKeyField().DataType)), datapb.CompactionType_ClusteringCompaction.String(), "analyzing").
 				Observe(float64(analyzeStageTime))
 			task.State = datapb.CompactionTaskState_executing
 			task.lastUpdateStateTime = ts
-			task.AnalyzeVersionID = analyzeTask.GetVersion()
 		}
 	case indexpb.JobState_JobStateFailed:
 		log.Warn("analyze task fail", zap.Int64("analyzeID", task.GetAnalyzeTaskID()))
@@ -256,7 +255,7 @@ func (task *clusteringCompactionTask) processFailedOrTimeoutTask(handler *compac
 		log.Warn("UpdateSegmentsInfo fail", zap.Error(err))
 	}
 
-	//drop partition stats if uploaded
+	// drop partition stats if uploaded
 	partitionStatsInfo := &datapb.PartitionStatsInfo{
 		CollectionID: task.GetCollectionID(),
 		PartitionID:  task.GetPartitionID(),
@@ -355,7 +354,7 @@ func (task *clusteringCompactionTask) BuildCompactionRequest(handler *compaction
 		ClusteringKeyField: task.GetClusteringKeyField().GetFieldID(),
 		MaxSegmentRows:     task.GetMaxSegmentRows(),
 		PreferSegmentRows:  task.GetPreferSegmentRows(),
-		AnalyzeResultPath:  path.Join(metautil.JoinIDPath(task.AnalyzeTaskID, task.AnalyzeVersionID)),
+		AnalyzeResultPath:  path.Join(metautil.JoinIDPath(task.AnalyzeTaskID, task.AnalyzeVersion)),
 		AnalyzeSegmentIds:  task.GetInputSegments(), // todo: if need
 	}
 	log := log.With(zap.Int64("taskID", task.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))

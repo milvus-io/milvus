@@ -2278,7 +2278,7 @@ func TestGetCompactionState(t *testing.T) {
 
 		mockHandler := NewMockCompactionPlanContext(t)
 		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*defaultCompactionTask{{state: completed}})
+			[]CompactionTask{&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_completed}}})
 		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
@@ -2292,17 +2292,17 @@ func TestGetCompactionState(t *testing.T) {
 
 		mockHandler := NewMockCompactionPlanContext(t)
 		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*defaultCompactionTask{
-				{state: executing},
-				{state: executing},
-				{state: executing},
-				{state: completed},
-				{state: completed},
-				{state: failed, plan: &datapb.CompactionPlan{PlanID: 1}},
-				{state: timeout, plan: &datapb.CompactionPlan{PlanID: 2}},
-				{state: timeout},
-				{state: timeout},
-				{state: timeout},
+			[]CompactionTask{
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_executing}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_executing}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_executing}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_completed}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_completed}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_failed, PlanID: 1}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_timeout, PlanID: 2}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_timeout}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_timeout}},
+				&mixCompactionTask{CompactionTask: &datapb.CompactionTask{State: datapb.CompactionTaskState_timeout}},
 			})
 		svr.compactionHandler = mockHandler
 
@@ -2342,10 +2342,12 @@ func TestManualCompaction(t *testing.T) {
 
 		mockHandler := NewMockCompactionPlanContext(t)
 		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*defaultCompactionTask{
-				{
-					triggerInfo: &compactionSignal{id: 1},
-					state:       executing,
+			[]CompactionTask{
+				&mixCompactionTask{
+					CompactionTask: &datapb.CompactionTask{
+						TriggerID: 1,
+						State:     datapb.CompactionTaskState_executing,
+					},
 				},
 			})
 		svr.compactionHandler = mockHandler
@@ -2403,10 +2405,12 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 
 		mockHandler := NewMockCompactionPlanContext(t)
 		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*defaultCompactionTask{
-				{
-					triggerInfo: &compactionSignal{id: 1},
-					state:       executing,
+			[]CompactionTask{
+				&mixCompactionTask{
+					CompactionTask: &datapb.CompactionTask{
+						TriggerID: 1,
+						State:     datapb.CompactionTaskState_executing,
+					},
 				},
 			})
 		svr.compactionHandler = mockHandler

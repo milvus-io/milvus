@@ -53,6 +53,10 @@ func (w *SegmentWriter) GetPkID() int64 {
 	return w.pkstats.FieldID
 }
 
+func (w *SegmentWriter) WrittenMemorySize() uint64 {
+	return w.writer.WrittenMemorySize()
+}
+
 func (w *SegmentWriter) Write(v *storage.Value) error {
 	ts := typeutil.Timestamp(v.Timestamp)
 	if ts < w.tsFrom {

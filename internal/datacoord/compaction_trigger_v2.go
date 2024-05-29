@@ -2,10 +2,11 @@ package datacoord
 
 import (
 	"context"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 	"sync"
 	"time"
+
+	"github.com/samber/lo"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"

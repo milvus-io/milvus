@@ -628,7 +628,7 @@ func TestMeta_Basic(t *testing.T) {
 	})
 
 	t.Run("Test GetCollectionBinlogSize", func(t *testing.T) {
-		meta := createMetaTable(&datacoord.Catalog{})
+		meta := createMeta(&datacoord.Catalog{}, nil, nil)
 		ret := meta.GetCollectionIndexFilesSize()
 		assert.Equal(t, uint64(0), ret)
 

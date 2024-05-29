@@ -2,13 +2,13 @@ package datacoord
 
 import (
 	"github.com/cockroachdb/errors"
+	"go.opentelemetry.io/otel/trace"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"go.opentelemetry.io/otel/trace"
-	"go.uber.org/zap"
 )
 
 var _ CompactionTask = (*mixCompactionTask)(nil)
@@ -36,7 +36,6 @@ func (task *mixCompactionTask) ProcessTask(handler *compactionPlanHandler) error
 	default:
 		return errors.New("not supported state")
 	}
-	return nil
 }
 
 func (task *mixCompactionTask) processPipeliningTask(handler *compactionPlanHandler) error {
@@ -89,7 +88,10 @@ func (task *mixCompactionTask) processExecutingTask(handler *compactionPlanHandl
 		handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_completed), setResult(planResult), cleanLogPath(), endSpan())
 		handler.scheduler.Finish(task.GetNodeID(), task)
 	case commonpb.CompactionState_Executing:
-		ts := tsoutil.GetCurrentTime()
+		ts, err := handler.GetCurrentTS()
+		if err != nil {
+			return err
+		}
 		if isTimeout(ts, task.GetStartTime(), task.GetTimeoutInSeconds()) {
 			log.Warn("compaction timeout",
 				zap.Int32("timeout in seconds", task.GetTimeoutInSeconds()),

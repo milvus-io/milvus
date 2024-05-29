@@ -5,13 +5,12 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/merr"
-
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 

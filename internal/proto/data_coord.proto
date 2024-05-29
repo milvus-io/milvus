@@ -905,7 +905,7 @@ message CompactionTask {
   repeated int64 inputSegments = 19;
   repeated int64 resultSegments = 20;
   int64 analyzeTaskID = 21;
-  int64 analyzeVersionID = 22;
+  int64 analyzeVersion = 22;
   msg.MsgPosition pos = 23;
 }
 

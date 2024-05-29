@@ -51,7 +51,7 @@ var _ compactionPlanContext = (*spyCompactionHandler)(nil)
 func (h *spyCompactionHandler) removeTasksByChannel(channel string) {}
 
 func (h *spyCompactionHandler) enqueueCompaction(task CompactionTask) error {
-	//TODO implement me
+	// TODO implement me
 	panic("implement me")
 }
 

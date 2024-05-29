@@ -6,6 +6,9 @@ import (
 	"sort"
 	"time"
 
+	"github.com/samber/lo"
+	"go.uber.org/zap"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -13,8 +16,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
-	"github.com/samber/lo"
-	"go.uber.org/zap"
 )
 
 var _ CompactionPolicy = (*clusteringCompactionPolicy)(nil)
@@ -321,6 +322,6 @@ func (v *ClusteringSegmentsView) Trigger() (CompactionView, string) {
 }
 
 func (v *ClusteringSegmentsView) ForceTrigger() (CompactionView, string) {
-	//TODO implement me
+	// TODO implement me
 	panic("implement me")
 }

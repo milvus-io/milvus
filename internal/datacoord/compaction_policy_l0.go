@@ -159,8 +159,9 @@ func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, 
 	return partChanView
 }
 
-func (policy *l0CompactionPolicy) generateEventForLevelZeroViewIDLE() (events map[CompactionTriggerType][]CompactionView) {
+func (policy *l0CompactionPolicy) generateEventForLevelZeroViewIDLE() map[CompactionTriggerType][]CompactionView {
 	log.Info("Views idle for a long time, try to trigger a TriggerTypeLevelZeroViewIDLE compaction event")
+	events := make(map[CompactionTriggerType][]CompactionView, 0)
 	for collID := range policy.view.collections {
 		cachedViews := policy.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
 			return v.Level == datapb.SegmentLevel_L0

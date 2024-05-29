@@ -17,9 +17,10 @@
 package datacoord
 
 import (
+	"go.opentelemetry.io/otel/trace"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"go.opentelemetry.io/otel/trace"
 )
 
 type CompactionTask interface {
