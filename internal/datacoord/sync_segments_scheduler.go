@@ -50,11 +50,11 @@ func newSyncSegmentsScheduler(m *meta, channelManager ChannelManager, sessions S
 
 func (sss *SyncSegmentsScheduler) Start() {
 	sss.quit = make(chan struct{})
-	ticker := time.NewTicker(Params.DataCoordCfg.SyncSegmentsInterval.GetAsDuration(time.Second))
 	sss.wg.Add(1)
 
 	go func() {
 		defer logutil.LogPanic()
+		ticker := time.NewTicker(Params.DataCoordCfg.SyncSegmentsInterval.GetAsDuration(time.Second))
 		defer sss.wg.Done()
 
 		for {
@@ -115,7 +115,7 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
 	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetPartitionID() == partitionID
+		return info.GetPartitionID() == partitionID && isSegmentHealthy(info)
 	}))
 	req := &datapb.SyncSegmentsRequest{
 		ChannelName:  channelName,

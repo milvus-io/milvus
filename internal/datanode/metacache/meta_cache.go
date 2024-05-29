@@ -49,8 +49,10 @@ type MetaCache interface {
 	GetSegmentIDsBy(filters ...SegmentFilter) []int64
 	// PredictSegments returns the segment ids which may contain the provided primary key.
 	PredictSegments(pk storage.PrimaryKey, filters ...SegmentFilter) ([]int64, bool)
-	// AddAndRemoveSegments update the segments BF from datacoord view.
-	AddAndRemoveSegments(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, oldSegments []int64)
+	// DetectMissingSegments returns the segment ids which is missing in datanode.
+	DetectMissingSegments(segments map[int64]struct{}) []int64
+	// UpdateSegmentView updates the segments BF from datacoord view.
+	UpdateSegmentView(partitionID int64, newSegments []*datapb.SyncSegmentInfo, newSegmentsBF []*BloomFilterSet, allSegments map[int64]struct{})
 }
 
 var _ MetaCache = (*metaCacheImpl)(nil)
@@ -247,15 +249,31 @@ func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), fi
 	}
 }
 
-func (c *metaCacheImpl) AddAndRemoveSegments(partitionID int64,
+func (c *metaCacheImpl) DetectMissingSegments(segments map[int64]struct{}) []int64 {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	missingSegments := make([]int64, 0)
+
+	for segID := range segments {
+		if _, ok := c.segmentInfos[segID]; !ok {
+			missingSegments = append(missingSegments, segID)
+		}
+	}
+
+	return missingSegments
+}
+
+func (c *metaCacheImpl) UpdateSegmentView(partitionID int64,
 	newSegments []*datapb.SyncSegmentInfo,
 	newSegmentsBF []*BloomFilterSet,
-	oldSegments []int64,
+	allSegments map[int64]struct{},
 ) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
 	for i, info := range newSegments {
+		// check again
 		if _, ok := c.segmentInfos[info.GetSegmentId()]; !ok {
 			segInfo := &SegmentInfo{
 				segmentID:        info.GetSegmentId(),
@@ -272,9 +290,12 @@ func (c *metaCacheImpl) AddAndRemoveSegments(partitionID int64,
 		}
 	}
 
-	for _, segID := range oldSegments {
-		log.Info("remove dropped segment", zap.Int64("segmentID", segID))
-		if info, ok := c.segmentInfos[segID]; ok {
+	for segID, info := range c.segmentInfos {
+		if info.partitionID != partitionID {
+			continue
+		}
+		if _, ok := allSegments[segID]; !ok {
+			log.Info("remove dropped segment", zap.Int64("segmentID", segID))
 			delete(c.segmentInfos, segID)
 			delete(c.stateSegments[info.State()], segID)
 		}

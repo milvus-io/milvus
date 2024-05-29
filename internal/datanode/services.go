@@ -291,23 +291,20 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	newSegments := make([]*datapb.SyncSegmentInfo, 0, len(req.GetSegmentInfos()))
-	oldSegments := make([]int64, 0, len(req.GetSegmentInfos()))
-	futures := make([]*conc.Future[any], 0, len(req.GetSegmentInfos()))
-	for _, seg := range req.GetSegmentInfos() {
-		if seg != nil &&
-			seg.GetState() != commonpb.SegmentState_SegmentStateNone &&
-			seg.GetState() != commonpb.SegmentState_NotExist &&
-			seg.GetState() != commonpb.SegmentState_Dropped {
-			newSegments = append(newSegments, seg)
-		} else {
-			oldSegments = append(oldSegments, seg.GetSegmentId())
-		}
+	allSegments := make(map[int64]struct{})
+	for segID := range req.GetSegmentInfos() {
+		allSegments[segID] = struct{}{}
 	}
 
-	for _, newSeg := range newSegments {
-		newSeg := newSeg
+	missingSegments := ds.metacache.DetectMissingSegments(allSegments)
+
+	newSegments := make([]*datapb.SyncSegmentInfo, 0, len(missingSegments))
+	futures := make([]*conc.Future[any], 0, len(missingSegments))
+
+	for _, segID := range missingSegments {
+		segID := segID
 		future := node.pool.Submit(func() (any, error) {
+			newSeg := req.GetSegmentInfos()[segID]
 			var val *metacache.BloomFilterSet
 			var err error
 			err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
@@ -335,7 +332,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return future.Value().(*metacache.BloomFilterSet)
 	})
 
-	ds.metacache.AddAndRemoveSegments(req.GetPartitionId(), newSegments, newSegmentsBF, oldSegments)
+	ds.metacache.UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
 	return merr.Success(), nil
 }
 

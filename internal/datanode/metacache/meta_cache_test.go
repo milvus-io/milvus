@@ -189,7 +189,16 @@ func (s *MetaCacheSuite) TestPredictSegments() {
 	s.EqualValues(1, predict[0])
 }
 
-func (s *MetaCacheSuite) TestAddAndRemoveSegments() {
+func (s *MetaCacheSuite) Test_DetectMissingSegments() {
+	segments := map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 9: {}, 10: {},
+	}
+
+	missingSegments := s.cache.DetectMissingSegments(segments)
+	s.ElementsMatch(missingSegments, []int64{9, 10})
+}
+
+func (s *MetaCacheSuite) Test_UpdateSegmentView() {
 	addSegments := []*datapb.SyncSegmentInfo{
 		{
 			SegmentId:  100,
@@ -202,8 +211,11 @@ func (s *MetaCacheSuite) TestAddAndRemoveSegments() {
 	addSegmentsBF := []*BloomFilterSet{
 		NewBloomFilterSet(),
 	}
+	segments := map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 100: {},
+	}
 
-	s.cache.AddAndRemoveSegments(1, addSegments, addSegmentsBF, nil)
+	s.cache.UpdateSegmentView(1, addSegments, addSegmentsBF, segments)
 
 	addSegments = []*datapb.SyncSegmentInfo{
 		{
@@ -215,8 +227,10 @@ func (s *MetaCacheSuite) TestAddAndRemoveSegments() {
 		},
 	}
 
-	removedSegments := []int64{100}
-	s.cache.AddAndRemoveSegments(1, addSegments, addSegmentsBF, removedSegments)
+	segments = map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 101: {},
+	}
+	s.cache.UpdateSegmentView(1, addSegments, addSegmentsBF, segments)
 }
 
 func TestMetaCacheSuite(t *testing.T) {
