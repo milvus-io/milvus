@@ -399,6 +399,7 @@ func (m *meta) GetCollectionIndexFilesSize() uint64 {
 	m.RLock()
 	defer m.RUnlock()
 	var total uint64
+
 	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
 		coll, ok := m.collections[segmentIdx.CollectionID]
 		if ok {
