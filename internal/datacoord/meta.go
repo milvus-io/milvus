@@ -1572,3 +1572,10 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 		segToUpdate.DroppedAt = uint64(time.Now().UnixNano())
 	}
 }
+
+func (m *meta) ListCollections() []int64 {
+	m.RLock()
+	defer m.RUnlock()
+
+	return lo.Keys(m.collections)
+}

@@ -297,6 +297,7 @@ func (node *DataNode) Init() error {
 		} else {
 			node.eventManager = NewEventManager()
 		}
+
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})
 	return initError
