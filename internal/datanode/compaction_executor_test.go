@@ -80,7 +80,6 @@ func TestCompactionExecutor(t *testing.T) {
 					ex.executeWithState(mockC)
 					<-signal
 				} else {
-					mockC.EXPECT().InjectDone().Return().Maybe()
 					mockC.EXPECT().Compact().RunAndReturn(
 						func() (*datapb.CompactionPlanResult, error) {
 							signal <- struct{}{}

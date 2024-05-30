@@ -48,6 +48,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgdispatcher"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/expr"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
@@ -125,6 +126,7 @@ type DataNode struct {
 	factory    dependency.Factory
 
 	reportImportRetryTimes uint // unitest set this value to 1 to save time, default is 10
+	pool                   *conc.Pool[any]
 }
 
 // NewDataNode will return a DataNode with abnormal state.
@@ -297,6 +299,7 @@ func (node *DataNode) Init() error {
 		} else {
 			node.eventManager = NewEventManager()
 		}
+		node.pool = getOrCreateIOPool()
 
 		log.Info("init datanode done", zap.String("Address", node.address))
 	})

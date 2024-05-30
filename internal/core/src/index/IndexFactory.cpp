@@ -27,7 +27,7 @@
 #include "index/StringIndexMarisa.h"
 #include "index/BoolIndex.h"
 #include "index/InvertedIndexTantivy.h"
-#include "index/BitmapIndex.h"
+#include "index/HybridScalarIndex.h"
 
 namespace milvus::index {
 
@@ -40,7 +40,7 @@ IndexFactory::CreateScalarIndex(
         return std::make_unique<InvertedIndexTantivy<T>>(file_manager_context);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
-        return std::make_unique<BitmapIndex<T>>(file_manager_context);
+        return std::make_unique<HybridScalarIndex<T>>(file_manager_context);
     }
     return CreateScalarIndexSort<T>(file_manager_context);
 }
@@ -63,7 +63,8 @@ IndexFactory::CreateScalarIndex<std::string>(
             file_manager_context);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
-        return std::make_unique<BitmapIndex<std::string>>(file_manager_context);
+        return std::make_unique<HybridScalarIndex<std::string>>(
+            file_manager_context);
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else
@@ -82,7 +83,8 @@ IndexFactory::CreateScalarIndex(
                                                          space);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
-        return std::make_unique<BitmapIndex<T>>(file_manager_context, space);
+        return std::make_unique<HybridScalarIndex<T>>(file_manager_context,
+                                                      space);
     }
     return CreateScalarIndexSort<T>(file_manager_context, space);
 }
@@ -99,8 +101,8 @@ IndexFactory::CreateScalarIndex<std::string>(
             file_manager_context, space);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
-        return std::make_unique<BitmapIndex<std::string>>(file_manager_context,
-                                                          space);
+        return std::make_unique<HybridScalarIndex<std::string>>(
+            file_manager_context, space);
     }
     return CreateStringIndexMarisa(file_manager_context, space);
 #else

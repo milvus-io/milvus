@@ -482,6 +482,7 @@ dataCoord:
     serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 536870912
+  syncSegmentsInterval: 300
 
 dataNode:
   dataSync:

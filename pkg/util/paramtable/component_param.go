@@ -42,13 +42,14 @@ const (
 	DefaultSessionTTL        = 30 // s
 	DefaultSessionRetryTimes = 30
 
-	DefaultMaxDegree                = 56
-	DefaultSearchListSize           = 100
-	DefaultPQCodeBudgetGBRatio      = 0.125
-	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
-	DefaultBeamWidthRatio           = 4.0
+	DefaultMaxDegree                   = 56
+	DefaultSearchListSize              = 100
+	DefaultPQCodeBudgetGBRatio         = 0.125
+	DefaultBuildNumThreadsRatio        = 1.0
+	DefaultSearchCacheBudgetGBRatio    = 0.10
+	DefaultLoadNumThreadRatio          = 8.0
+	DefaultBeamWidthRatio              = 4.0
+	DefaultBitmapIndexCardinalityBound = 500
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -212,6 +213,7 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
+	BitmapIndexCardinalityBound         ParamItem `refreshable:"false"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -442,6 +444,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
+
+	p.BitmapIndexCardinalityBound = ParamItem{
+		Key:          "common.bitmapIndexCardinalityBound",
+		Version:      "2.5.0",
+		DefaultValue: strconv.Itoa(DefaultBitmapIndexCardinalityBound),
+		Export:       true,
+	}
+	p.BitmapIndexCardinalityBound.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
@@ -2740,6 +2750,7 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 	ChannelCheckpointMaxLag           ParamItem `refreshable:"true"`
+	SyncSegmentsInterval              ParamItem `refreshable:"false"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -3079,6 +3090,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "900", // 15 * 60 seconds
 	}
 	p.ChannelCheckpointMaxLag.Init(base.mgr)
+
+	p.SyncSegmentsInterval = ParamItem{
+		Key:          "dataCoord.sync.interval",
+		Version:      "2.4.3",
+		Doc:          "The time interval for regularly syncing segments",
+		DefaultValue: "600", // 10 * 60 seconds
+	}
+	p.SyncSegmentsInterval.Init(base.mgr)
 
 	// LevelZeroCompaction
 	p.EnableLevelZeroSegment = ParamItem{

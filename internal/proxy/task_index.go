@@ -332,6 +332,13 @@ func fillDimension(field *schemapb.FieldSchema, indexParams map[string]string) e
 func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) error {
 	indexType := indexParams[common.IndexTypeKey]
 
+	if indexType == indexparamcheck.IndexBitmap {
+		_, exist := indexParams[common.BitmapCardinalityLimitKey]
+		if !exist {
+			indexParams[common.BitmapCardinalityLimitKey] = paramtable.Get().CommonCfg.BitmapIndexCardinalityBound.GetValue()
+		}
+	}
+
 	checker, err := indexparamcheck.GetIndexCheckerMgrInstance().GetChecker(indexType)
 	if err != nil {
 		log.Warn("Failed to get index checker", zap.String(common.IndexTypeKey, indexType))

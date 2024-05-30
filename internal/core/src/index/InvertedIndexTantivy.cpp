@@ -312,8 +312,34 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
                                           const void* values,
                                           const Config& config) {
     if constexpr (!std::is_same_v<T, std::string>) {
-        PanicInfo(Unsupported,
-                  "InvertedIndex.BuildWithRawData only support string");
+        TantivyConfig cfg;
+        if constexpr (std::is_same_v<int8_t, T>) {
+            cfg.data_type_ = DataType::INT8;
+        }
+        if constexpr (std::is_same_v<int16_t, T>) {
+            cfg.data_type_ = DataType::INT16;
+        }
+        if constexpr (std::is_same_v<int32_t, T>) {
+            cfg.data_type_ = DataType::INT32;
+        }
+        if constexpr (std::is_same_v<int64_t, T>) {
+            cfg.data_type_ = DataType::INT64;
+        }
+        if constexpr (std::is_same_v<std::string, T>) {
+            cfg.data_type_ = DataType::VARCHAR;
+        }
+        boost::uuids::random_generator generator;
+        auto uuid = generator();
+        auto prefix = boost::uuids::to_string(uuid);
+        path_ = fmt::format("/tmp/{}", prefix);
+        boost::filesystem::create_directories(path_);
+        cfg_ = cfg;
+        d_type_ = cfg_.to_tantivy_data_type();
+        std::string field = "test_inverted_index";
+        wrapper_ = std::make_shared<TantivyIndexWrapper>(
+            field.c_str(), d_type_, path_.c_str());
+        wrapper_->add_data<T>(static_cast<const T*>(values), n);
+        finish();
     } else {
         boost::uuids::random_generator generator;
         auto uuid = generator();
