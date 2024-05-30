@@ -92,7 +92,7 @@ func NewSyncTask(ctx context.Context,
 
 func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
 	segmentID := syncTask.SegmentID()
-	insertBinlogs, statsBinlog, _ := syncTask.(*syncmgr.SyncTask).Binlogs()
+	insertBinlogs, statsBinlog, deltaLog := syncTask.(*syncmgr.SyncTask).Binlogs()
 	metaCache := metaCaches[syncTask.ChannelName()]
 	segment, ok := metaCache.GetSegmentByID(segmentID)
 	if !ok {
@@ -103,6 +103,7 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 		ImportedRows: segment.FlushedRows(),
 		Binlogs:      lo.Values(insertBinlogs),
 		Statslogs:    lo.Values(statsBinlog),
+		Deltalogs:    []*datapb.FieldBinlog{deltaLog},
 	}, nil
 }
 
@@ -189,13 +190,20 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
 		}
 	}
-	data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
-	tss := make([]int64, rowNum)
-	ts := int64(task.req.GetTs())
-	for i := 0; i < rowNum; i++ {
-		tss[i] = ts
+	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, no need to append rowID and ts
+		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	}
-	data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
+	if _, ok := data.Data[common.TimeStampField]; ok {
+		log.Info("sheep debug 5", zap.Any("ts", data.Data[common.TimeStampField].GetRow(0).(int64)))
+	}
+	if _, ok := data.Data[common.TimeStampField]; !ok {
+		tss := make([]int64, rowNum)
+		ts := int64(task.req.GetTs())
+		for i := 0; i < rowNum; i++ {
+			tss[i] = ts
+		}
+		data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
+	}
 	return nil
 }
 

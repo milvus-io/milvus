@@ -394,9 +394,10 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 	s.segments = append(s.segments, id)
 	log.Info("add import segment done",
 		zap.Int64("taskID", taskID),
-		zap.Int64("CollectionID", segmentInfo.CollectionID),
-		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.String("Channel", segmentInfo.InsertChannel))
+		zap.Int64("collectionID", segmentInfo.CollectionID),
+		zap.Int64("segmentID", segmentInfo.ID),
+		zap.String("channel", segmentInfo.InsertChannel),
+		zap.String("level", level.String()))
 
 	return segment, nil
 }

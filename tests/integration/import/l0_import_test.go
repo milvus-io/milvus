@@ -19,6 +19,8 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"time"
 
 	"github.com/golang/protobuf/proto"
@@ -29,13 +31,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metric"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -164,9 +164,34 @@ func (s *BulkInsertSuite) PrepareCollectionWithL0(dim, rowNum, delNum, delBatch 
 	s.NoError(err)
 	s.Equal(nq*topk, len(searchResult.GetResults().GetScores()))
 
+	// query
+	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
+	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName: collectionName,
+		Expr:           expr,
+		OutputFields:   []string{"count(*)"},
+	})
+	err = merr.CheckRPCCall(queryResult, err)
+	s.NoError(err)
+	count := int(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+	s.Equal(rowNum-delNum, count)
+
+	// query 2
+	expr = fmt.Sprintf("%s < %d", integration.Int64Field, insertedIDs.GetIntId().GetData()[10])
+	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName: collectionName,
+		Expr:           expr,
+		OutputFields:   []string{},
+	})
+	err = merr.CheckRPCCall(queryResult, err)
+	s.NoError(err)
+	count = len(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal(0, count)
+
 	// get collectionID and partitionID
 	collectionID := showCollectionsResp.GetCollectionIds()[0]
 	partitionID := showPartitionsResp.GetPartitionIDs()[0]
+	fmt.Println("sheep debug 7, ts", insertResult.GetTimestamp())
 	return collectionID, partitionID, insertedIDs
 }
 
@@ -178,6 +203,7 @@ func (s *BulkInsertSuite) TestL0Import() {
 		delBatch = 10
 	)
 
+	//_, _, _ = s.PrepareCollectionWithL0(dim, rowNum, delNum, delBatch)
 	collectionID, partitionID, insertedIDs := s.PrepareCollectionWithL0(dim, rowNum, delNum, delBatch)
 
 	c := s.Cluster
@@ -278,11 +304,18 @@ func (s *BulkInsertSuite) TestL0Import() {
 	segments, err = c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
+	segments = lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+		return segment.GetCollectionID() == newCollectionID
+	})
+	log.Info("Show segments", zap.Any("segments", segments))
 	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
 		return segment.GetCollectionID() == newCollectionID && segment.GetLevel() == datapb.SegmentLevel_L0
 	})
-	log.Info("Show segments", zap.Any("segments", segments))
 	s.Equal(1, len(l0Segments))
+	s.Equal(commonpb.SegmentState_Flushed, l0Segments[0].GetState())
+	s.True(len(l0Segments[0].GetDeltalogs()) > 0)
+
+	s.T().Logf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 1\n")
 
 	// load refresh
 	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
@@ -317,6 +350,8 @@ func (s *BulkInsertSuite) TestL0Import() {
 		s.True(ok)
 	}
 
+	s.T().Logf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 2\n")
+
 	// query
 	expr = fmt.Sprintf("%s >= 0", integration.Int64Field)
 	queryResult, err := c.Proxy.Query(ctx, &milvuspb.QueryRequest{
@@ -326,6 +361,18 @@ func (s *BulkInsertSuite) TestL0Import() {
 	})
 	err = merr.CheckRPCCall(queryResult, err)
 	s.NoError(err)
-	count := queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0]
-	s.Equal(rowNum-delNum, int(count))
+	count := int(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData()[0])
+	s.Equal(rowNum-delNum, count)
+
+	// query 2
+	expr = fmt.Sprintf("%s < %d", integration.Int64Field, insertedIDs.GetIntId().GetData()[10])
+	queryResult, err = c.Proxy.Query(ctx, &milvuspb.QueryRequest{
+		CollectionName: collectionName,
+		Expr:           expr,
+		OutputFields:   []string{},
+	})
+	err = merr.CheckRPCCall(queryResult, err)
+	s.NoError(err)
+	count = len(queryResult.GetFieldsData()[0].GetScalars().GetLongData().GetData())
+	s.Equal(0, count)
 }

@@ -98,11 +98,18 @@ func UpdateReason(reason string) UpdateAction {
 
 func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 	return func(task Task) {
-		if it, ok := task.(*PreImportTask); ok {
-			it.PreImportTask.FileStats[idx].FileSize = fileStat.GetFileSize()
-			it.PreImportTask.FileStats[idx].TotalRows = fileStat.GetTotalRows()
-			it.PreImportTask.FileStats[idx].TotalMemorySize = fileStat.GetTotalMemorySize()
-			it.PreImportTask.FileStats[idx].HashedStats = fileStat.GetHashedStats()
+		var t *datapb.PreImportTask
+		switch it := task.(type) {
+		case *PreImportTask:
+			t = it.PreImportTask
+		case *L0PreImportTask:
+			t = it.PreImportTask
+		}
+		if t != nil {
+			t.FileStats[idx].FileSize = fileStat.GetFileSize()
+			t.FileStats[idx].TotalRows = fileStat.GetTotalRows()
+			t.FileStats[idx].TotalMemorySize = fileStat.GetTotalMemorySize()
+			t.FileStats[idx].HashedStats = fileStat.GetHashedStats()
 		}
 	}
 }
@@ -122,15 +129,23 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 		return current
 	}
 	return func(task Task) {
-		if it, ok := task.(*ImportTask); ok {
+		var segmentsInfo map[int64]*datapb.ImportSegmentInfo
+		switch it := task.(type) {
+		case *ImportTask:
+			segmentsInfo = it.segmentsInfo
+		case *L0ImportTask:
+			segmentsInfo = it.segmentsInfo
+		}
+		if segmentsInfo != nil {
 			segment := info.GetSegmentID()
-			if _, ok = it.segmentsInfo[segment]; ok {
-				it.segmentsInfo[segment].ImportedRows = info.GetImportedRows()
-				it.segmentsInfo[segment].Binlogs = mergeFn(it.segmentsInfo[segment].Binlogs, info.GetBinlogs())
-				it.segmentsInfo[segment].Statslogs = mergeFn(it.segmentsInfo[segment].Statslogs, info.GetStatslogs())
+			if _, ok := segmentsInfo[segment]; ok {
+				segmentsInfo[segment].ImportedRows = info.GetImportedRows()
+				segmentsInfo[segment].Binlogs = mergeFn(segmentsInfo[segment].Binlogs, info.GetBinlogs())
+				segmentsInfo[segment].Statslogs = mergeFn(segmentsInfo[segment].Statslogs, info.GetStatslogs())
+				segmentsInfo[segment].Deltalogs = mergeFn(segmentsInfo[segment].Deltalogs, info.GetDeltalogs())
 				return
 			}
-			it.segmentsInfo[segment] = info
+			segmentsInfo[segment] = info
 		}
 	}
 }

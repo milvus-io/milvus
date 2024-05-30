@@ -84,7 +84,7 @@ func (s *MiniClusterSuite) TearDownSuite() {
 }
 
 func (s *MiniClusterSuite) SetupTest() {
-	log.SetLevel(zapcore.InfoLevel)
+	log.SetLevel(zapcore.DebugLevel)
 	s.T().Log("Setup test...")
 	// setup mini cluster to use embed etcd
 	endpoints := etcd.GetEmbedEtcdEndpoints(s.EtcdServer)

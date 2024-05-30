@@ -29,6 +29,7 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
@@ -614,6 +615,9 @@ func (ex *Executor) getLoadInfo(ctx context.Context, collectionID, segmentID int
 	}
 	segment := resp.GetInfos()[0]
 	log = log.With(zap.String("level", segment.GetLevel().String()))
+	if segment.GetLevel() == datapb.SegmentLevel_L0 {
+		log.Info("sheep debug 4", zap.Any("segment", segment))
+	}
 
 	indexes, err := ex.broker.GetIndexInfo(ctx, collectionID, segment.GetID())
 	if err != nil {
