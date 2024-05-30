@@ -1309,10 +1309,7 @@ class TestIndexInvalid(TestcaseBase):
         collection_w = self.init_collection_wrap(schema=schema)
         # 2. create index
         scalar_index_params = {"index_type": "INVERTED"}
-        collection_w.create_index(ct.default_int32_array_field_name, index_params=scalar_index_params,
-                                  check_task=CheckTasks.err_res,
-                                  check_items={ct.err_code: 1100,
-                                               ct.err_msg: "create index on Array field is not supported"})
+        collection_w.create_index(ct.default_int32_array_field_name, index_params=scalar_index_params)
 
     @pytest.mark.tags(CaseLabel.L1)
     def test_create_inverted_index_no_vector_index(self):
