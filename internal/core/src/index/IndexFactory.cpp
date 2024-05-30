@@ -133,58 +133,54 @@ IndexFactory::CreateIndex(
 }
 
 IndexBasePtr
+IndexFactory::CreatePrimitiveScalarIndex(
+    DataType data_type,
+    IndexType index_type,
+    const storage::FileManagerContext& file_manager_context) {
+    switch (data_type) {
+        // create scalar index
+        case DataType::BOOL:
+            return CreateScalarIndex<bool>(index_type, file_manager_context);
+        case DataType::INT8:
+            return CreateScalarIndex<int8_t>(index_type, file_manager_context);
+        case DataType::INT16:
+            return CreateScalarIndex<int16_t>(index_type, file_manager_context);
+        case DataType::INT32:
+            return CreateScalarIndex<int32_t>(index_type, file_manager_context);
+        case DataType::INT64:
+            return CreateScalarIndex<int64_t>(index_type, file_manager_context);
+        case DataType::FLOAT:
+            return CreateScalarIndex<float>(index_type, file_manager_context);
+        case DataType::DOUBLE:
+            return CreateScalarIndex<double>(index_type, file_manager_context);
+
+            // create string index
+        case DataType::STRING:
+        case DataType::VARCHAR:
+            return CreateScalarIndex<std::string>(index_type,
+                                                  file_manager_context);
+        default:
+            throw SegcoreError(
+                DataTypeInvalid,
+                fmt::format("invalid data type to build index: {}", data_type));
+    }
+}
+
+IndexBasePtr
 IndexFactory::CreateScalarIndex(
     const CreateIndexInfo& create_index_info,
     const storage::FileManagerContext& file_manager_context) {
-    auto data_type = create_index_info.field_type;
-    auto index_type = create_index_info.index_type;
-
-    auto create_index = [index_type, &file_manager_context, this](
-                            DataType data_type) -> IndexBasePtr {
-        switch (data_type) {
-            // create scalar index
-            case DataType::BOOL:
-                return CreateScalarIndex<bool>(index_type,
-                                               file_manager_context);
-            case DataType::INT8:
-                return CreateScalarIndex<int8_t>(index_type,
-                                                 file_manager_context);
-            case DataType::INT16:
-                return CreateScalarIndex<int16_t>(index_type,
-                                                  file_manager_context);
-            case DataType::INT32:
-                return CreateScalarIndex<int32_t>(index_type,
-                                                  file_manager_context);
-            case DataType::INT64:
-                return CreateScalarIndex<int64_t>(index_type,
-                                                  file_manager_context);
-            case DataType::FLOAT:
-                return CreateScalarIndex<float>(index_type,
-                                                file_manager_context);
-            case DataType::DOUBLE:
-                return CreateScalarIndex<double>(index_type,
-                                                 file_manager_context);
-
-                // create string index
-            case DataType::STRING:
-            case DataType::VARCHAR:
-                return CreateScalarIndex<std::string>(index_type,
-                                                      file_manager_context);
-            default:
-                throw SegcoreError(
-                    DataTypeInvalid,
-                    fmt::format("invalid data type to build index: {}",
-                                data_type));
-        }
-    };
-
-    switch (data_type) {
+    switch (create_index_info.field_type) {
         case DataType::ARRAY:
-            // or use Array?
-            return create_index(static_cast<DataType>(
-                file_manager_context.fieldDataMeta.schema.element_type()));
+            return CreatePrimitiveScalarIndex(
+                static_cast<DataType>(
+                    file_manager_context.fieldDataMeta.schema.element_type()),
+                create_index_info.index_type,
+                file_manager_context);
         default:
-            return create_index(data_type);
+            return CreatePrimitiveScalarIndex(create_index_info.field_type,
+                                              create_index_info.index_type,
+                                              file_manager_context);
     }
 }
 

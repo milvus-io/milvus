@@ -336,143 +336,24 @@ void
 InvertedIndexTantivy<T>::build_index(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
     switch (schema_.data_type()) {
-        case proto::schema::DataType::Bool: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<bool>(static_cast<const bool*>(data->Data()),
-                                         n);
-            }
-            break;
-        }
-
-        case proto::schema::DataType::Int8: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int8_t>(
-                    static_cast<const int8_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case proto::schema::DataType::Int16: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int16_t>(
-                    static_cast<const int16_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case proto::schema::DataType::Int32: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int32_t>(
-                    static_cast<const int32_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case proto::schema::DataType::Int64: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<int64_t>(
-                    static_cast<const int64_t*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case proto::schema::DataType::Float: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<float>(
-                    static_cast<const float*>(data->Data()), n);
-            }
-            break;
-        }
-
-        case proto::schema::DataType::Double: {
-            for (const auto& data : field_datas) {
-                auto n = data->get_num_rows();
-                wrapper_->add_data<double>(
-                    static_cast<const double*>(data->Data()), n);
-            }
-            break;
-        }
-
+        case proto::schema::DataType::Bool:
+        case proto::schema::DataType::Int8:
+        case proto::schema::DataType::Int16:
+        case proto::schema::DataType::Int32:
+        case proto::schema::DataType::Int64:
+        case proto::schema::DataType::Float:
+        case proto::schema::DataType::Double:
+        case proto::schema::DataType::String:
         case proto::schema::DataType::VarChar: {
             for (const auto& data : field_datas) {
                 auto n = data->get_num_rows();
-                wrapper_->add_data<std::string>(
-                    static_cast<const std::string*>(data->Data()), n);
+                wrapper_->add_data<T>(static_cast<const T*>(data->Data()), n);
             }
             break;
         }
 
         case proto::schema::DataType::Array: {
-            switch (schema_.element_type()) {
-                case proto::schema::DataType::Bool: {
-                    build_index_for_array<bool>(field_datas);
-                    break;
-                }
-
-                case proto::schema::DataType::Int8: {
-                    build_index_for_array<int8_t>(field_datas);
-                    break;
-                }
-
-                case proto::schema::DataType::Int16: {
-                    build_index_for_array<int16_t>(field_datas);
-                    break;
-                }
-
-                case proto::schema::DataType::Int32: {
-                    build_index_for_array<int32_t>(field_datas);
-                    break;
-                }
-
-                case proto::schema::DataType::Int64: {
-                    build_index_for_array<int64_t>(field_datas);
-                    break;
-                }
-
-                case proto::schema::DataType::Float: {
-                    build_index_for_array<float>(field_datas);
-                    break;
-                }
-
-                case proto::schema::DataType::Double: {
-                    build_index_for_array<double>(field_datas);
-                    break;
-                }
-
-                case proto::schema::DataType::VarChar: {
-                    for (const auto& data : field_datas) {
-                        auto n = data->get_num_rows();
-                        auto array_column =
-                            static_cast<const Array*>(data->Data());
-                        for (int64_t i = 0; i < n; i++) {
-                            assert(
-                                array_column[i].get_element_type() ==
-                                static_cast<DataType>(schema_.element_type()));
-                            std::vector<std::string> output;
-                            for (int64_t j = 0; j < array_column[i].length();
-                                 j++) {
-                                output.push_back(
-                                    array_column[i]
-                                        .template get_data<std::string>(j));
-                            }
-                            wrapper_->template add_multi_data(output.data(),
-                                                              output.size());
-                        }
-                    }
-                    break;
-                }
-
-                default:
-                    PanicInfo(ErrorCode::NotImplemented,
-                              fmt::format("Inverted index not supported on {}",
-                                          schema_.element_type()));
-            }
+            build_index_for_array(field_datas);
             break;
         }
 
@@ -484,7 +365,6 @@ InvertedIndexTantivy<T>::build_index(
 }
 
 template <typename T>
-template <typename ElementT>
 void
 InvertedIndexTantivy<T>::build_index_for_array(
     const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
@@ -495,8 +375,28 @@ InvertedIndexTantivy<T>::build_index_for_array(
             assert(array_column[i].get_element_type() ==
                    static_cast<DataType>(schema_.element_type()));
             wrapper_->template add_multi_data(
-                reinterpret_cast<const ElementT*>(array_column[i].data()),
+                reinterpret_cast<const T*>(array_column[i].data()),
                 array_column[i].length());
+        }
+    }
+}
+
+template <>
+void
+InvertedIndexTantivy<std::string>::build_index_for_array(
+    const std::vector<std::shared_ptr<FieldDataBase>>& field_datas) {
+    for (const auto& data : field_datas) {
+        auto n = data->get_num_rows();
+        auto array_column = static_cast<const Array*>(data->Data());
+        for (int64_t i = 0; i < n; i++) {
+            assert(array_column[i].get_element_type() ==
+                   static_cast<DataType>(schema_.element_type()));
+            std::vector<std::string> output;
+            for (int64_t j = 0; j < array_column[i].length(); j++) {
+                output.push_back(
+                    array_column[i].template get_data<std::string>(j));
+            }
+            wrapper_->template add_multi_data(output.data(), output.size());
         }
     }
 }

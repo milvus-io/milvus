@@ -202,7 +202,7 @@ test_32717() {
 
 template <typename T>
 std::map<T, std::set<uint32_t>>
-build_inverted_index(std::vector<std::vector<T>> vec_of_array) {
+build_inverted_index(const std::vector<std::vector<T>>& vec_of_array) {
     std::map<T, std::set<uint32_t>> inverted_index;
     for (uint32_t i = 0; i < vec_of_array.size(); i++) {
         for (const auto& term : vec_of_array[i]) {
