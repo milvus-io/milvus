@@ -2750,6 +2750,7 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 	ChannelCheckpointMaxLag           ParamItem `refreshable:"true"`
+	SyncSegmentsInterval              ParamItem `refreshable:"false"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -3089,6 +3090,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "900", // 15 * 60 seconds
 	}
 	p.ChannelCheckpointMaxLag.Init(base.mgr)
+
+	p.SyncSegmentsInterval = ParamItem{
+		Key:          "dataCoord.sync.interval",
+		Version:      "2.4.3",
+		Doc:          "The time interval for regularly syncing segments",
+		DefaultValue: "600", // 10 * 60 seconds
+	}
+	p.SyncSegmentsInterval.Init(base.mgr)
 
 	// LevelZeroCompaction
 	p.EnableLevelZeroSegment = ParamItem{

@@ -32,6 +32,7 @@ func SetMaxRowCount(maxRow int64) SegmentOperator {
 type segmentCriterion struct {
 	collectionID int64
 	channel      string
+	partitionID  int64
 	others       []SegmentFilter
 }
 
