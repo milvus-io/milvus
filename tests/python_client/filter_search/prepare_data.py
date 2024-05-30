@@ -26,11 +26,11 @@ def prepare_data(host="127.0.0.1", port=19530, minio_host="127.0.0.1", partition
         Collection(name=collection_name).drop()
     fields = [
         FieldSchema(name="id", dtype=DataType.INT64, is_primary=True),
-        FieldSchema(name="scalar_3", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_3")),
-        FieldSchema(name="scalar_6", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_6")),
-        FieldSchema(name="scalar_9", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_9")),
-        FieldSchema(name="scalar_12", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_12")),
-        FieldSchema(name="scalar_5_linear", dtype=DataType.VARCHAR, max_length=1000, is_partition=bool(partition_key == "scalar_5_linear")),
+        FieldSchema(name="scalar_3", dtype=DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_3")),
+        FieldSchema(name="scalar_6", dtype=DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_6")),
+        FieldSchema(name="scalar_9", dtype=DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_9")),
+        FieldSchema(name="scalar_12", dtype=DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_12")),
+        FieldSchema(name="scalar_5_linear", dtype=DataType.VARCHAR, max_length=1000, is_partition_key=bool(partition_key == "scalar_5_linear")),
         FieldSchema(name="emb", dtype=DataType.FLOAT_VECTOR, dim=768)
     ]
     schema = CollectionSchema(fields=fields, description="test collection", enable_dynamic_field=True)
