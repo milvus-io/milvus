@@ -131,6 +131,10 @@ func (i *RestfulInfo) ErrorMsg() string {
 	return fmt.Sprint(message)
 }
 
+func (i *RestfulInfo) ErrorType() string {
+	return Unknown
+}
+
 func (i *RestfulInfo) SdkVersion() string {
 	return "Restful"
 }

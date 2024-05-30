@@ -2550,7 +2550,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		log.Warn("Failed to enqueue insert task: " + err.Error())
 		metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method,
 			metrics.AbandonLabel, request.GetDbName(), request.GetCollectionName()).Inc()
-		return constructFailedResponse(err), nil
+		return constructFailedResponse(merr.WrapErrAsInputErrorWhen(err, merr.ErrCollectionNotFound, merr.ErrDatabaseNotFound)), nil
 	}
 
 	log.Debug("Detail of insert request in Proxy")

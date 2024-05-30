@@ -26,6 +26,22 @@ const (
 	TimeoutCode  int32 = 10001
 )
 
+type ErrorType int32
+
+const (
+	SystemError ErrorType = 0
+	InputError  ErrorType = 1
+)
+
+var ErrorTypeName = map[ErrorType]string{
+	SystemError: "system_error",
+	InputError:  "input_error",
+}
+
+func (err ErrorType) String() string {
+	return ErrorTypeName[err]
+}
+
 // Define leaf errors here,
 // WARN: take care to add new error,
 // check whether you can use the errors below before adding a new one.
@@ -190,29 +206,40 @@ var (
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)
 )
 
+type errorOption func(*milvusError)
+
+func WithDetail(detail string) errorOption {
+	return func(err *milvusError) {
+		err.detail = detail
+	}
+}
+
+func WithErrorType(etype ErrorType) errorOption {
+	return func(err *milvusError) {
+		err.errType = etype
+	}
+}
+
 type milvusError struct {
 	msg       string
 	detail    string
 	retriable bool
 	errCode   int32
+	errType   ErrorType
 }
 
-func newMilvusError(msg string, code int32, retriable bool) milvusError {
-	return milvusError{
+func newMilvusError(msg string, code int32, retriable bool, options ...errorOption) milvusError {
+	err := milvusError{
 		msg:       msg,
 		detail:    msg,
 		retriable: retriable,
 		errCode:   code,
 	}
-}
 
-func newMilvusErrorWithDetail(msg string, detail string, code int32, retriable bool) milvusError {
-	return milvusError{
-		msg:       msg,
-		detail:    detail,
-		retriable: retriable,
-		errCode:   code,
+	for _, option := range options {
+		option(&err)
 	}
+	return err
 }
 
 func (e milvusError) code() int32 {
