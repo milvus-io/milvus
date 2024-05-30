@@ -2,6 +2,8 @@ from locust import HttpUser, task, events, LoadTestShape
 import random
 import pandas as pd
 import re
+from datetime import datetime
+import uuid
 
 def convert_numbers_to_quoted_strings(text):
     result = re.sub(r'\d+', lambda x: f"'{x.group()}'", text)
@@ -27,6 +29,7 @@ class MilvusUser(HttpUser):
     df = pd.read_parquet(test_data_file_name)
     vectors_to_search = df["emb"].tolist()
     recall_list = []
+    ts_list = []
     recall = 0
 
     def on_start(self):
@@ -69,6 +72,8 @@ class MilvusUser(HttpUser):
                 tmp = set(true_ids).intersection(set(result_ids))
                 self.recall = len(tmp) / len(result_ids)
                 self.recall_list.append(self.recall)
+                cur_time = datetime.now().timestamp()
+                self.ts_list.append(cur_time)
 
     def on_stop(self):
         # this is a good place to clean up/release any user-specific test data
@@ -76,7 +81,9 @@ class MilvusUser(HttpUser):
               f"avg recall is {sum(self.recall_list) / len(self.recall_list)}, "
               f"max recall is {max(self.recall_list)}, "
               f"min recall is {min(self.recall_list)}")
-
+        data = {"ts": self.ts_list, "recall": self.recall_list}
+        df = pd.DataFrame(data)
+        df.to_csv(f"/tmp/ci_logs/recall.csv-{uuid.uuid4()}", index=False)
 
 class StagesShape(LoadTestShape):
     """
