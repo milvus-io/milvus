@@ -10,6 +10,7 @@ message RetrieveResults {
   repeated int64 offset = 2;
   repeated schema.FieldData fields_data = 3;
   int64 all_retrieve_count = 4;
+  bool has_more_result = 5;
 }
 
 message LoadFieldMeta {

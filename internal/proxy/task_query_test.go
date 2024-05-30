@@ -479,8 +479,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				},
 				FieldsData: fieldDataArray2,
 			}
-
-			result, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result1, result2}, nil)
+			result, err := reduceRetrieveResults(context.Background(), []*internalpb.RetrieveResults{result1, result2}, &queryParams{limit: 2})
 			assert.NoError(t, err)
 			assert.Equal(t, 2, len(result.GetFieldsData()))
 			assert.Equal(t, Int64Array, result.GetFieldsData()[0].GetScalars().GetLongData().Data)
@@ -488,7 +487,7 @@ func TestTaskQuery_functions(t *testing.T) {
 		})
 
 		t.Run("test nil results", func(t *testing.T) {
-			ret, err := reduceRetrieveResults(context.Background(), nil, nil)
+			ret, err := reduceRetrieveResults(context.Background(), nil, &queryParams{})
 			assert.NoError(t, err)
 			assert.Empty(t, ret.GetFieldsData())
 		})
@@ -594,6 +593,8 @@ func TestTaskQuery_functions(t *testing.T) {
 			})
 
 			t.Run("test stop reduce for best for limit", func(t *testing.T) {
+				r1.HasMoreResult = true
+				r2.HasMoreResult = false
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: 2, reduceStopForBest: true})
@@ -605,6 +606,8 @@ func TestTaskQuery_functions(t *testing.T) {
 			})
 
 			t.Run("test stop reduce for best for limit and offset", func(t *testing.T) {
+				r1.HasMoreResult = true
+				r2.HasMoreResult = true
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: 1, offset: 1, reduceStopForBest: true})
@@ -614,6 +617,8 @@ func TestTaskQuery_functions(t *testing.T) {
 			})
 
 			t.Run("test stop reduce for best for limit and offset", func(t *testing.T) {
+				r1.HasMoreResult = false
+				r2.HasMoreResult = true
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: 2, offset: 1, reduceStopForBest: true})
@@ -625,6 +630,8 @@ func TestTaskQuery_functions(t *testing.T) {
 			})
 
 			t.Run("test stop reduce for best for unlimited set", func(t *testing.T) {
+				r1.HasMoreResult = false
+				r2.HasMoreResult = false
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: typeutil.Unlimited, reduceStopForBest: true})
@@ -635,7 +642,7 @@ func TestTaskQuery_functions(t *testing.T) {
 				assert.InDeltaSlice(t, resultFloat[0:(len)*Dim], result.FieldsData[1].GetVectors().GetFloatVector().Data, 10e-10)
 			})
 
-			t.Run("test stop reduce for best for unlimited set amd pffset", func(t *testing.T) {
+			t.Run("test stop reduce for best for unlimited set amd offset", func(t *testing.T) {
 				result, err := reduceRetrieveResults(context.Background(),
 					[]*internalpb.RetrieveResults{r1, r2},
 					&queryParams{limit: typeutil.Unlimited, offset: 3, reduceStopForBest: true})

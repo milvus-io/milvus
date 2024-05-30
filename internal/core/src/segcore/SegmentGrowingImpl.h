@@ -268,7 +268,7 @@ class SegmentGrowingImpl : public SegmentGrowing {
         return true;
     }
 
-    std::vector<OffsetMap::OffsetType>
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const override {
