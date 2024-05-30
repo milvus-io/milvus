@@ -51,7 +51,7 @@ func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 	for _, delMsg := range deleteMsgs {
 		l0SegmentID := wb.getL0SegmentID(delMsg.GetPartitionID(), startPos)
 		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
-		lcs := lo.Map(pks, func(pk storage.PrimaryKey, _ int) storage.LocationsCache { return storage.NewLocationsCache(pk) })
+		lcs := lo.Map(pks, func(pk storage.PrimaryKey, _ int) *storage.LocationsCache { return storage.NewLocationsCache(pk) })
 		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
 			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
 		for _, segment := range segments {

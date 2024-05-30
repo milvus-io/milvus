@@ -228,38 +228,6 @@ func (_c *MockCompactor_GetPlanID_Call) RunAndReturn(run func() int64) *MockComp
 	return _c
 }
 
-// InjectDone provides a mock function with given fields:
-func (_m *MockCompactor) InjectDone() {
-	_m.Called()
-}
-
-// MockCompactor_InjectDone_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'InjectDone'
-type MockCompactor_InjectDone_Call struct {
-	*mock.Call
-}
-
-// InjectDone is a helper method to define mock.On call
-func (_e *MockCompactor_Expecter) InjectDone() *MockCompactor_InjectDone_Call {
-	return &MockCompactor_InjectDone_Call{Call: _e.mock.On("InjectDone")}
-}
-
-func (_c *MockCompactor_InjectDone_Call) Run(run func()) *MockCompactor_InjectDone_Call {
-	_c.Call.Run(func(args mock.Arguments) {
-		run()
-	})
-	return _c
-}
-
-func (_c *MockCompactor_InjectDone_Call) Return() *MockCompactor_InjectDone_Call {
-	_c.Call.Return()
-	return _c
-}
-
-func (_c *MockCompactor_InjectDone_Call) RunAndReturn(run func()) *MockCompactor_InjectDone_Call {
-	_c.Call.Return(run)
-	return _c
-}
-
 // Stop provides a mock function with given fields:
 func (_m *MockCompactor) Stop() {
 	_m.Called()

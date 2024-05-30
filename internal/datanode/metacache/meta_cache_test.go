@@ -103,27 +103,6 @@ func (s *MetaCacheSuite) TestMetaInfo() {
 	s.Equal(s.collSchema, s.cache.Schema())
 }
 
-func (s *MetaCacheSuite) TestCompactSegments() {
-	for i, seg := range s.newSegments {
-		// compaction from flushed[i], unflushed[i] and invalidSeg to new[i]
-		s.cache.CompactSegments(seg, s.partitionIDs[i], 100, NewBloomFilterSet(), s.flushedSegments[i], s.growingSegments[i], s.invaliedSeg)
-	}
-
-	for i, partitionID := range s.partitionIDs {
-		segs := s.cache.GetSegmentsBy(WithPartitionID(partitionID))
-		for _, seg := range segs {
-			if seg.SegmentID() == s.newSegments[i] {
-				s.Equal(commonpb.SegmentState_Flushed, seg.State())
-				s.Equal(int64(100), seg.NumOfRows())
-				s.Equal(datapb.SegmentLevel_L1, seg.Level())
-			}
-			if seg.SegmentID() == s.flushedSegments[i] {
-				s.Equal(s.newSegments[i], seg.CompactTo())
-			}
-		}
-	}
-}
-
 func (s *MetaCacheSuite) TestAddSegment() {
 	testSegs := []int64{100, 101, 102}
 	for _, segID := range testSegs {
@@ -208,6 +187,50 @@ func (s *MetaCacheSuite) TestPredictSegments() {
 	s.NotEmpty(predict)
 	s.Equal(1, len(predict))
 	s.EqualValues(1, predict[0])
+}
+
+func (s *MetaCacheSuite) Test_DetectMissingSegments() {
+	segments := map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 9: {}, 10: {},
+	}
+
+	missingSegments := s.cache.DetectMissingSegments(segments)
+	s.ElementsMatch(missingSegments, []int64{9, 10})
+}
+
+func (s *MetaCacheSuite) Test_UpdateSegmentView() {
+	addSegments := []*datapb.SyncSegmentInfo{
+		{
+			SegmentId:  100,
+			PkStatsLog: nil,
+			State:      commonpb.SegmentState_Flushed,
+			Level:      datapb.SegmentLevel_L1,
+			NumOfRows:  10240,
+		},
+	}
+	addSegmentsBF := []*BloomFilterSet{
+		NewBloomFilterSet(),
+	}
+	segments := map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 100: {},
+	}
+
+	s.cache.UpdateSegmentView(1, addSegments, addSegmentsBF, segments)
+
+	addSegments = []*datapb.SyncSegmentInfo{
+		{
+			SegmentId:  101,
+			PkStatsLog: nil,
+			State:      commonpb.SegmentState_Flushed,
+			Level:      datapb.SegmentLevel_L1,
+			NumOfRows:  10240,
+		},
+	}
+
+	segments = map[int64]struct{}{
+		1: {}, 2: {}, 3: {}, 4: {}, 5: {}, 6: {}, 7: {}, 8: {}, 101: {},
+	}
+	s.cache.UpdateSegmentView(1, addSegments, addSegmentsBF, segments)
 }
 
 func TestMetaCacheSuite(t *testing.T) {

@@ -80,6 +80,16 @@ class ScalarIndex : public IndexBase {
     RegexQuery(const std::string& pattern) {
         PanicInfo(Unsupported, "regex query is not supported");
     }
+
+    virtual void
+    BuildWithFieldData(const std::vector<FieldDataPtr>& field_datas) {
+        PanicInfo(Unsupported, "BuildwithFieldData is not supported");
+    }
+
+    virtual void
+    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config) {
+        PanicInfo(Unsupported, "LoadWithoutAssemble is not supported");
+    }
 };
 
 template <typename T>

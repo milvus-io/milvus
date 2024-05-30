@@ -23,6 +23,7 @@ import (
 	"context"
 	"fmt"
 
+	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -30,12 +31,16 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
+	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/tracer"
+	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -261,6 +266,9 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 	log := log.Ctx(ctx).With(
 		zap.Int64("planID", req.GetPlanID()),
 		zap.Int64("nodeID", node.GetNodeID()),
+		zap.Int64("collectionID", req.GetCollectionId()),
+		zap.Int64("partitionID", req.GetPartitionId()),
+		zap.String("channel", req.GetChannelName()),
 	)
 
 	log.Info("DataNode receives SyncSegments")
@@ -270,8 +278,61 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 		return merr.Status(err), nil
 	}
 
-	// TODO: sheep, add a new DropCompaction interface, deprecate SyncSegments
-	node.compactionExecutor.removeTask(req.GetPlanID())
+	if len(req.GetSegmentInfos()) <= 0 {
+		log.Info("sync segments is empty, skip it")
+		return merr.Success(), nil
+	}
+
+	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
+	if !ok {
+		node.compactionExecutor.discardPlan(req.GetChannelName())
+		err := merr.WrapErrChannelNotFound(req.GetChannelName())
+		log.Warn("failed to get flow graph service", zap.Error(err))
+		return merr.Status(err), nil
+	}
+
+	allSegments := make(map[int64]struct{})
+	for segID := range req.GetSegmentInfos() {
+		allSegments[segID] = struct{}{}
+	}
+
+	missingSegments := ds.metacache.DetectMissingSegments(allSegments)
+
+	newSegments := make([]*datapb.SyncSegmentInfo, 0, len(missingSegments))
+	futures := make([]*conc.Future[any], 0, len(missingSegments))
+
+	for _, segID := range missingSegments {
+		segID := segID
+		future := node.pool.Submit(func() (any, error) {
+			newSeg := req.GetSegmentInfos()[segID]
+			var val *metacache.BloomFilterSet
+			var err error
+			err = binlog.DecompressBinLog(storage.StatsBinlog, req.GetCollectionId(), req.GetPartitionId(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+			if err != nil {
+				log.Warn("failed to DecompressBinLog", zap.Error(err))
+				return val, err
+			}
+			pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+			if err != nil {
+				log.Warn("failed to load segment stats log", zap.Error(err))
+				return val, err
+			}
+			val = metacache.NewBloomFilterSet(pks...)
+			return val, nil
+		})
+		futures = append(futures, future)
+	}
+
+	err := conc.AwaitAll(futures...)
+	if err != nil {
+		return merr.Status(err), nil
+	}
+
+	newSegmentsBF := lo.Map(futures, func(future *conc.Future[any], _ int) *metacache.BloomFilterSet {
+		return future.Value().(*metacache.BloomFilterSet)
+	})
+
+	ds.metacache.UpdateSegmentView(req.GetPartitionId(), newSegments, newSegmentsBF, allSegments)
 	return merr.Success(), nil
 }
 

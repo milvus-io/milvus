@@ -17,6 +17,7 @@
 
 #include "common/Tracer.h"
 #include "index/BitmapIndex.h"
+#include "index/HybridScalarIndex.h"
 #include "storage/Util.h"
 #include "storage/InsertData.h"
 #include "indexbuilder/IndexFactory.h"
@@ -60,7 +61,7 @@ GenerateData<std::string>(const size_t size, const size_t cardinality) {
 }
 
 template <typename T>
-class BitmapIndexTest : public testing::Test {
+class HybridIndexTestV1 : public testing::Test {
  protected:
     void
     Init(int64_t collection_id,
@@ -88,7 +89,8 @@ class BitmapIndexTest : public testing::Test {
 
         auto serialized_bytes = insert_data.Serialize(storage::Remote);
 
-        auto log_path = fmt::format("{}/{}/{}/{}/{}",
+        auto log_path = fmt::format("/{}/{}/{}/{}/{}/{}",
+                                    "/tmp/test_hybrid/",
                                     collection_id,
                                     partition_id,
                                     segment_id,
@@ -103,6 +105,7 @@ class BitmapIndexTest : public testing::Test {
         Config config;
         config["index_type"] = milvus::index::BITMAP_INDEX_TYPE;
         config["insert_files"] = std::vector<std::string>{log_path};
+        config["bitmap_cardinality_limit"] = "1000";
 
         auto build_index =
             indexbuilder::IndexFactory::GetInstance().CreateIndex(
@@ -125,10 +128,14 @@ class BitmapIndexTest : public testing::Test {
         index_->Load(milvus::tracer::TraceContext{}, config);
     }
 
-    void
-    SetUp() override {
+    virtual void
+    SetParam() {
         nb_ = 10000;
         cardinality_ = 30;
+    }
+    void
+    SetUp() override {
+        SetParam();
 
         if constexpr (std::is_same_v<T, int8_t>) {
             type_ = DataType::INT8;
@@ -162,7 +169,7 @@ class BitmapIndexTest : public testing::Test {
              index_version);
     }
 
-    virtual ~BitmapIndexTest() override {
+    virtual ~HybridIndexTestV1() override {
         boost::filesystem::remove_all(chunk_manager_->GetRootPath());
     }
 
@@ -176,7 +183,8 @@ class BitmapIndexTest : public testing::Test {
             test_data.push_back(data_[i]);
             s.insert(data_[i]);
         }
-        auto index_ptr = dynamic_cast<index::BitmapIndex<T>*>(index_.get());
+        auto index_ptr =
+            dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->In(test_data.size(), test_data.data());
         for (size_t i = 0; i < bitset.size(); i++) {
             ASSERT_EQ(bitset[i], s.find(data_[i]) != s.end());
@@ -192,7 +200,8 @@ class BitmapIndexTest : public testing::Test {
             test_data.push_back(data_[i]);
             s.insert(data_[i]);
         }
-        auto index_ptr = dynamic_cast<index::BitmapIndex<T>*>(index_.get());
+        auto index_ptr =
+            dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
         auto bitset = index_ptr->NotIn(test_data.size(), test_data.data());
         for (size_t i = 0; i < bitset.size(); i++) {
             ASSERT_EQ(bitset[i], s.find(data_[i]) == s.end());
@@ -219,7 +228,7 @@ class BitmapIndexTest : public testing::Test {
             };
             for (const auto& [test_value, op, ref] : test_cases) {
                 auto index_ptr =
-                    dynamic_cast<index::BitmapIndex<T>*>(index_.get());
+                    dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
                 auto bitset = index_ptr->Range(test_value, op);
                 for (size_t i = 0; i < bitset.size(); i++) {
                     auto ans = bitset[i];
@@ -232,8 +241,65 @@ class BitmapIndexTest : public testing::Test {
         }
     }
 
- private:
-    std::shared_ptr<storage::ChunkManager> chunk_manager_;
+    void
+    TestRangeCompareFunc() {
+        if constexpr (!std::is_same_v<T, std::string>) {
+            using RefFunc = std::function<bool(int64_t)>;
+            struct TestParam {
+                int64_t lower_val;
+                int64_t upper_val;
+                bool lower_inclusive;
+                bool upper_inclusive;
+                RefFunc ref;
+            };
+            std::vector<TestParam> test_cases = {
+                {
+                    10,
+                    30,
+                    false,
+                    false,
+                    [&](int64_t i) { return 10 < data_[i] && data_[i] < 30; },
+                },
+                {
+                    10,
+                    30,
+                    true,
+                    false,
+                    [&](int64_t i) { return 10 <= data_[i] && data_[i] < 30; },
+                },
+                {
+                    10,
+                    30,
+                    true,
+                    true,
+                    [&](int64_t i) { return 10 <= data_[i] && data_[i] <= 30; },
+                },
+                {
+                    10,
+                    30,
+                    false,
+                    true,
+                    [&](int64_t i) { return 10 < data_[i] && data_[i] <= 30; },
+                }};
+
+            for (const auto& test_case : test_cases) {
+                auto index_ptr =
+                    dynamic_cast<index::HybridScalarIndex<T>*>(index_.get());
+                auto bitset = index_ptr->Range(test_case.lower_val,
+                                               test_case.lower_inclusive,
+                                               test_case.upper_val,
+                                               test_case.upper_inclusive);
+                for (size_t i = 0; i < bitset.size(); i++) {
+                    auto ans = bitset[i];
+                    auto should = test_case.ref(i);
+                    ASSERT_EQ(ans, should)
+                        << "lower:" << test_case.lower_val
+                        << "upper:" << test_case.upper_val << ", @" << i
+                        << ", ans: " << ans << ", ref: " << should;
+                }
+            }
+        }
+    }
 
  public:
     IndexBasePtr index_;
@@ -241,34 +307,92 @@ class BitmapIndexTest : public testing::Test {
     size_t nb_;
     size_t cardinality_;
     boost::container::vector<T> data_;
+    std::shared_ptr<storage::ChunkManager> chunk_manager_;
 };
 
-TYPED_TEST_SUITE_P(BitmapIndexTest);
+TYPED_TEST_SUITE_P(HybridIndexTestV1);
 
-TYPED_TEST_P(BitmapIndexTest, CountFuncTest) {
+TYPED_TEST_P(HybridIndexTestV1, CountFuncTest) {
     auto count = this->index_->Count();
     EXPECT_EQ(count, this->nb_);
 }
 
-TYPED_TEST_P(BitmapIndexTest, INFuncTest) {
+TYPED_TEST_P(HybridIndexTestV1, INFuncTest) {
     this->TestInFunc();
 }
 
-TYPED_TEST_P(BitmapIndexTest, NotINFuncTest) {
+TYPED_TEST_P(HybridIndexTestV1, NotINFuncTest) {
     this->TestNotInFunc();
 }
 
-TYPED_TEST_P(BitmapIndexTest, CompareValFuncTest) {
+TYPED_TEST_P(HybridIndexTestV1, CompareValFuncTest) {
     this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV1, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
 }
 
 using BitmapType =
     testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
 
-REGISTER_TYPED_TEST_SUITE_P(BitmapIndexTest,
+REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV1,
                             CountFuncTest,
                             INFuncTest,
                             NotINFuncTest,
-                            CompareValFuncTest);
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest);
 
-INSTANTIATE_TYPED_TEST_SUITE_P(BitmapE2ECheck, BitmapIndexTest, BitmapType);
+INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_LowCardinality,
+                               HybridIndexTestV1,
+                               BitmapType);
+
+template <typename T>
+class HybridIndexTestV2 : public HybridIndexTestV1<T> {
+ public:
+    virtual void
+    SetParam() override {
+        this->nb_ = 10000;
+        this->cardinality_ = 2000;
+    }
+
+    virtual ~HybridIndexTestV2() {
+    }
+};
+
+TYPED_TEST_SUITE_P(HybridIndexTestV2);
+
+TYPED_TEST_P(HybridIndexTestV2, CountFuncTest) {
+    auto count = this->index_->Count();
+    EXPECT_EQ(count, this->nb_);
+}
+
+TYPED_TEST_P(HybridIndexTestV2, INFuncTest) {
+    this->TestInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV2, NotINFuncTest) {
+    this->TestNotInFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV2, CompareValFuncTest) {
+    this->TestCompareValueFunc();
+}
+
+TYPED_TEST_P(HybridIndexTestV2, TestRangeCompareFuncTest) {
+    this->TestRangeCompareFunc();
+}
+
+using BitmapType =
+    testing::Types<int8_t, int16_t, int32_t, int64_t, std::string>;
+
+REGISTER_TYPED_TEST_SUITE_P(HybridIndexTestV2,
+                            CountFuncTest,
+                            INFuncTest,
+                            NotINFuncTest,
+                            CompareValFuncTest,
+                            TestRangeCompareFuncTest);
+
+INSTANTIATE_TYPED_TEST_SUITE_P(HybridIndexE2ECheck_HighCardinality,
+                               HybridIndexTestV2,
+                               BitmapType);

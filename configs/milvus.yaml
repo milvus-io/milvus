@@ -68,7 +68,7 @@ tikv:
     tlsCACert:  # path to your CACert file
 
 localStorage:
-  path: /tmp/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
+  path: /var/lib/milvus/data/ # please adjust in embedded Milvus: /tmp/milvus/data/
 
 # Related configuration of MinIO/S3/GCS or any other service supports S3 API, which is responsible for data persistence for Milvus.
 # We refer to the storage service as MinIO/S3 in the following description for simplicity.
@@ -329,13 +329,13 @@ queryNode:
     enabled: true
     memoryLimit: 2147483648 # 2 GB, 2 * 1024 *1024 *1024
     readAheadPolicy: willneed # The read ahead policy of chunk cache, options: `normal, random, sequential, willneed, dontneed`
-    # options: async, sync, off. 
+    # options: async, sync, disable.
     # Specifies the necessity for warming up the chunk cache. 
-    # 1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
+    # 1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the
     # chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
     # for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
-    # 2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.
-    warmup: off
+    # 2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.
+    warmup: disable
   mmap:
     mmapEnabled: false # Enable mmap for loading data
   lazyload:
@@ -482,6 +482,7 @@ dataCoord:
     serverMaxRecvSize: 268435456
     clientMaxSendSize: 268435456
     clientMaxRecvSize: 536870912
+  syncSegmentsInterval: 300
 
 dataNode:
   dataSync:
