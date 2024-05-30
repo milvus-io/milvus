@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
@@ -734,6 +735,10 @@ func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {
 	for _, id := range logIDs {
 		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id})
 	}
+	err := binlog.CompressFieldBinlogs([]*datapb.FieldBinlog{l})
+	if err != nil {
+		panic(err)
+	}
 	return l
 }
 
@@ -745,6 +750,10 @@ func getFieldBinlogPaths(fieldID int64, paths ...string) *datapb.FieldBinlog {
 	for _, path := range paths {
 		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogPath: path})
 	}
+	err := binlog.CompressFieldBinlogs([]*datapb.FieldBinlog{l})
+	if err != nil {
+		panic(err)
+	}
 	return l
 }
 
@@ -755,6 +764,10 @@ func getFieldBinlogIDsWithEntry(fieldID int64, entry int64, logIDs ...int64) *da
 	}
 	for _, id := range logIDs {
 		l.Binlogs = append(l.Binlogs, &datapb.Binlog{LogID: id, EntriesNum: entry})
+	}
+	err := binlog.CompressFieldBinlogs([]*datapb.FieldBinlog{l})
+	if err != nil {
+		panic(err)
 	}
 	return l
 }

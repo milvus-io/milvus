@@ -679,8 +679,8 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Growing,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 		}}
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
@@ -690,7 +690,7 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 			AddBinlogsOperator(1,
 				[]*datapb.FieldBinlog{getFieldBinlogIDsWithEntry(1, 10, 1)},
 				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 1)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1)}}}},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog1", 1), LogID: 2}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),
@@ -730,8 +730,8 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		// normal
 		segment1 := &SegmentInfo{SegmentInfo: &datapb.SegmentInfo{
 			ID: 1, State: commonpb.SegmentState_Flushed,
-			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
-			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
+			Binlogs:   []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+			Statslogs: []*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
 		}}
 		err = meta.AddSegment(context.TODO(), segment1)
 		assert.NoError(t, err)
@@ -829,9 +829,9 @@ func TestUpdateSegmentsInfo(t *testing.T) {
 		err = meta.UpdateSegmentsInfo(
 			UpdateStatusOperator(1, commonpb.SegmentState_Flushing),
 			AddBinlogsOperator(1,
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
-				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 0)},
-				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1)}}}},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+				[]*datapb.FieldBinlog{getFieldBinlogIDs(1, 2)},
+				[]*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{EntriesNum: 1, TimestampFrom: 100, TimestampTo: 200, LogSize: 1000, LogPath: getDeltaLogPath("deltalog", 1), LogID: 2}}}},
 			),
 			UpdateStartPosition([]*datapb.SegmentStartPosition{{SegmentID: 1, StartPosition: &msgpb.MsgPosition{MsgID: []byte{1, 2, 3}}}}),
 			UpdateCheckPointOperator(1, []*datapb.CheckPoint{{SegmentID: 1, NumOfRows: 10}}),

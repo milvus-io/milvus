@@ -321,14 +321,17 @@ func TestGetSegmentInfo(t *testing.T) {
 						{
 							EntriesNum: 20,
 							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 801),
+							LogID:      801,
 						},
 						{
 							EntriesNum: 20,
 							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 802),
+							LogID:      802,
 						},
 						{
 							EntriesNum: 20,
 							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 803),
+							LogID:      803,
 						},
 					},
 				},
@@ -1822,14 +1825,17 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 901),
+						LogID:      901,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 902),
+						LogID:      902,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 903),
+						LogID:      903,
 					},
 				},
 			},
@@ -1842,10 +1848,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 30,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 801),
+						LogID:      801,
 					},
 					{
 						EntriesNum: 70,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 802),
+						LogID:      802,
 					},
 				},
 			},
@@ -1919,14 +1927,17 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 901),
+						LogID:      901,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 902),
+						LogID:      902,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 903),
+						LogID:      903,
 					},
 				},
 			},
@@ -1939,10 +1950,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 30,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 801),
+						LogID:      801,
 					},
 					{
 						EntriesNum: 70,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 802),
+						LogID:      802,
 					},
 				},
 			},
