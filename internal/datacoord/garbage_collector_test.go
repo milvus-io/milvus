@@ -465,7 +465,14 @@ func createMetaForRecycleUnusedSegIndexes(catalog metastore.DataCoordCatalog) *m
 			},
 		},
 		segID + 1: {
-			SegmentInfo: nil,
+			SegmentInfo: &datapb.SegmentInfo{
+				ID:            segID + 1,
+				CollectionID:  collID,
+				PartitionID:   partID,
+				InsertChannel: "",
+				NumOfRows:     1026,
+				State:         commonpb.SegmentState_Dropped,
+			},
 		},
 	}
 	meta := &meta{

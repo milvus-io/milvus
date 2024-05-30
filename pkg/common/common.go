@@ -18,6 +18,8 @@ package common
 
 import (
 	"encoding/binary"
+	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -110,6 +112,8 @@ const (
 	MaxCapacityKey = "max_capacity"
 
 	DropRatioBuildKey = "drop_ratio_build"
+
+	BitmapCardinalityLimitKey = "bitmap_cardinality_limit"
 )
 
 //  Collection properties key
@@ -134,6 +138,10 @@ const (
 	CollectionDiskQuotaKey       = "collection.diskProtection.diskQuota.mb"
 
 	PartitionDiskQuotaKey = "partition.diskProtection.diskQuota.mb"
+
+	// database level properties
+	DatabaseReplicaNumber  = "database.replica.number"
+	DatabaseResourceGroups = "database.resource_groups"
 )
 
 // common properties
@@ -205,3 +213,38 @@ const (
 	// LatestVerision is the magic number for watch latest revision
 	LatestRevision = int64(-1)
 )
+
+func DatabaseLevelReplicaNumber(kvs []*commonpb.KeyValuePair) (int64, error) {
+	for _, kv := range kvs {
+		if kv.Key == DatabaseReplicaNumber {
+			replicaNum, err := strconv.ParseInt(kv.Value, 10, 64)
+			if err != nil {
+				return 0, fmt.Errorf("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			}
+
+			return replicaNum, nil
+		}
+	}
+
+	return 0, fmt.Errorf("database property not found: %s", DatabaseReplicaNumber)
+}
+
+func DatabaseLevelResourceGroups(kvs []*commonpb.KeyValuePair) ([]string, error) {
+	for _, kv := range kvs {
+		if kv.Key == DatabaseResourceGroups {
+			invalidPropValue := fmt.Errorf("invalid database property: [key=%s] [value=%s]", kv.Key, kv.Value)
+			if len(kv.Value) == 0 {
+				return nil, invalidPropValue
+			}
+
+			rgs := strings.Split(kv.Value, ",")
+			if len(rgs) == 0 {
+				return nil, invalidPropValue
+			}
+
+			return rgs, nil
+		}
+	}
+
+	return nil, fmt.Errorf("database property not found: %s", DatabaseResourceGroups)
+}

@@ -1549,11 +1549,6 @@ func (t *loadCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	// To compat with LoadCollcetion before Milvus@2.1
-	if t.ReplicaNumber == 0 {
-		t.ReplicaNumber = 1
-	}
-
 	return nil
 }
 

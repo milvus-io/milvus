@@ -18,6 +18,7 @@
 
 #include <memory>
 #include <boost/dynamic_bitset.hpp>
+#include "common/FieldData.h"
 #include "common/EasyAssert.h"
 #include "knowhere/comp/index_param.h"
 #include "knowhere/dataset.h"

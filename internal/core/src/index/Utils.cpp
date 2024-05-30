@@ -154,6 +154,15 @@ GetIndexEngineVersionFromConfig(const Config& config) {
     return (std::stoi(index_engine_version.value()));
 }
 
+int32_t
+GetBitmapCardinalityLimitFromConfig(const Config& config) {
+    auto bitmap_limit = GetValueFromConfig<std::string>(
+        config, index::BITMAP_INDEX_CARDINALITY_LIMIT);
+    AssertInfo(bitmap_limit.has_value(),
+               "bitmap cardinality limit not exist in config");
+    return (std::stoi(bitmap_limit.value()));
+}
+
 // TODO :: too ugly
 storage::FieldDataMeta
 GetFieldDataMetaFromConfig(const Config& config) {
