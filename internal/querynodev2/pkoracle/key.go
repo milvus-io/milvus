@@ -28,7 +28,7 @@ type candidateKey struct {
 }
 
 // MayPkExist checks whether primary key could exists in this candidate.
-func (k candidateKey) MayPkExist(lc storage.LocationsCache) bool {
+func (k candidateKey) MayPkExist(lc *storage.LocationsCache) bool {
 	// always return true to prevent miuse
 	return true
 }

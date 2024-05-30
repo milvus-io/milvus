@@ -83,11 +83,14 @@ type BloomFilterInterface interface {
 
 type basicBloomFilter struct {
 	inner *bloom.BloomFilter
+	k     uint
 }
 
 func newBasicBloomFilter(capacity uint, fp float64) *basicBloomFilter {
+	inner := bloom.NewWithEstimates(capacity, fp)
 	return &basicBloomFilter{
-		inner: bloom.NewWithEstimates(capacity, fp),
+		inner: inner,
+		k:     inner.K(),
 	}
 }
 
@@ -100,7 +103,7 @@ func (b *basicBloomFilter) Cap() uint {
 }
 
 func (b *basicBloomFilter) K() uint {
-	return b.inner.K()
+	return b.k
 }
 
 func (b *basicBloomFilter) Add(data []byte) {
@@ -120,11 +123,7 @@ func (b *basicBloomFilter) TestString(data string) bool {
 }
 
 func (b *basicBloomFilter) TestLocations(locs []uint64) bool {
-	if len(locs) == 0 {
-		// make empty locations false positive
-		return true
-	}
-	return b.inner.TestLocations(locs)
+	return b.inner.TestLocations(locs[:b.k])
 }
 
 func (b basicBloomFilter) MarshalJSON() ([]byte, error) {
@@ -135,20 +134,24 @@ func (b *basicBloomFilter) UnmarshalJSON(data []byte) error {
 	inner := &bloom.BloomFilter{}
 	inner.UnmarshalJSON(data)
 	b.inner = inner
+	b.k = inner.K()
 	return nil
 }
 
-// impl Blocked Bloom filter with blobloom and xx3h hash
+// impl Blocked Bloom filter with blobloom and xxh3 hash
 type blockedBloomFilter struct {
 	inner *blobloom.Filter
+	k     uint
 }
 
 func newBlockedBloomFilter(capacity uint, fp float64) *blockedBloomFilter {
+	inner := blobloom.NewOptimized(blobloom.Config{
+		Capacity: uint64(capacity),
+		FPRate:   fp,
+	})
 	return &blockedBloomFilter{
-		inner: blobloom.NewOptimized(blobloom.Config{
-			Capacity: uint64(capacity),
-			FPRate:   fp,
-		}),
+		inner: inner,
+		k:     inner.K(),
 	}
 }
 
@@ -161,7 +164,7 @@ func (b *blockedBloomFilter) Cap() uint {
 }
 
 func (b *blockedBloomFilter) K() uint {
-	return b.inner.K()
+	return b.k
 }
 
 func (b *blockedBloomFilter) Add(data []byte) {
@@ -185,10 +188,6 @@ func (b *blockedBloomFilter) TestString(data string) bool {
 }
 
 func (b *blockedBloomFilter) TestLocations(locs []uint64) bool {
-	if len(locs) == 0 {
-		// make empty locations false positive
-		return true
-	}
 	return b.inner.TestLocations(locs)
 }
 
@@ -200,6 +199,7 @@ func (b *blockedBloomFilter) UnmarshalJSON(data []byte) error {
 	inner := &blobloom.Filter{}
 	inner.UnmarshalJSON(data)
 	b.inner = inner
+	b.k = inner.K()
 
 	return nil
 }

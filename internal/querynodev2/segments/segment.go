@@ -182,7 +182,7 @@ func (s *baseSegment) UpdateBloomFilter(pks []storage.PrimaryKey) {
 // MayPkExist returns true if the given PK exists in the PK range and being positive through the bloom filter,
 // false otherwise,
 // may returns true even the PK doesn't exist actually
-func (s *baseSegment) MayPkExist(lc storage.LocationsCache) bool {
+func (s *baseSegment) MayPkExist(lc *storage.LocationsCache) bool {
 	return s.bloomFilterSet.MayPkExist(lc)
 }
 

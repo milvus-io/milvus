@@ -75,7 +75,7 @@ func TestPerformance_MultiBF(t *testing.T) {
 
 	keys := make([][]byte, 0)
 	for i := 0; i < capacity; i++ {
-		keys = append(keys, []byte(fmt.Sprintf("key%d", i)))
+		keys = append(keys, []byte(fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))))
 	}
 
 	bfNum := 100
@@ -90,14 +90,6 @@ func TestPerformance_MultiBF(t *testing.T) {
 	}
 
 	log.Info("Block BF construct cost", zap.Duration("time", time.Since(start1)))
-
-	start2 := time.Now()
-	for _, key := range keys {
-		for i := 0; i < bfNum; i++ {
-			bfs1[i].Test(key)
-		}
-	}
-	log.Info("Block BF Test cost", zap.Duration("time", time.Since(start2)))
 
 	start3 := time.Now()
 	for _, key := range keys {
@@ -120,14 +112,6 @@ func TestPerformance_MultiBF(t *testing.T) {
 
 	log.Info("Basic BF construct cost", zap.Duration("time", time.Since(start1)))
 
-	start2 = time.Now()
-	for _, key := range keys {
-		for i := 0; i < bfNum; i++ {
-			bfs2[i].Test(key)
-		}
-	}
-	log.Info("Basic BF Test cost", zap.Duration("time", time.Since(start2)))
-
 	start3 = time.Now()
 	for _, key := range keys {
 		locations := Locations(key, bfs1[0].K(), BasicBF)
@@ -136,6 +120,38 @@ func TestPerformance_MultiBF(t *testing.T) {
 		}
 	}
 	log.Info("Basic BF TestLocation cost", zap.Duration("time", time.Since(start3)))
+}
+
+func TestPerformance_Capacity(t *testing.T) {
+	fpr := 0.001
+
+	for _, capacity := range []int64{100, 1000, 10000, 100000, 1000000} {
+		keys := make([][]byte, 0)
+		for i := 0; i < int(capacity); i++ {
+			keys = append(keys, []byte(fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))))
+		}
+
+		start1 := time.Now()
+		bf1 := newBlockedBloomFilter(uint(capacity), fpr)
+		for _, key := range keys {
+			bf1.Add(key)
+		}
+
+		log.Info("Block BF construct cost", zap.Duration("time", time.Since(start1)))
+
+		testKeys := make([][]byte, 0)
+		for i := 0; i < 10000; i++ {
+			testKeys = append(testKeys, []byte(fmt.Sprintf("key%d", time.Now().UnixNano()+int64(i))))
+		}
+
+		start3 := time.Now()
+		for _, key := range testKeys {
+			locations := Locations(key, bf1.K(), bf1.Type())
+			bf1.TestLocations(locations)
+		}
+		_, k := bloom.EstimateParameters(uint(capacity), fpr)
+		log.Info("Block BF TestLocation cost", zap.Duration("time", time.Since(start3)), zap.Int("k", int(k)), zap.Int64("capacity", capacity))
+	}
 }
 
 func TestMarshal(t *testing.T) {

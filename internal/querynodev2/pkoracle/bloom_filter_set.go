@@ -40,12 +40,10 @@ type BloomFilterSet struct {
 	segType      commonpb.SegmentState
 	currentStat  *storage.PkStatistics
 	historyStats []*storage.PkStatistics
-
-	kHashFunc uint
 }
 
 // MayPkExist returns whether any bloom filters returns positive.
-func (s *BloomFilterSet) MayPkExist(lc storage.LocationsCache) bool {
+func (s *BloomFilterSet) MayPkExist(lc *storage.LocationsCache) bool {
 	s.statsMutex.RLock()
 	defer s.statsMutex.RUnlock()
 	if s.currentStat != nil && s.currentStat.TestLocationCache(lc) {
@@ -86,9 +84,6 @@ func (s *BloomFilterSet) UpdateBloomFilter(pks []storage.PrimaryKey) {
 			paramtable.Get().CommonCfg.BloomFilterSize.GetAsUint(),
 			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
 			paramtable.Get().CommonCfg.BloomFilterType.GetValue())
-		if bf.K() > s.kHashFunc {
-			s.kHashFunc = bf.K()
-		}
 		s.currentStat = &storage.PkStatistics{
 			PkFilter: bf,
 		}
@@ -117,9 +112,6 @@ func (s *BloomFilterSet) AddHistoricalStats(stats *storage.PkStatistics) {
 	s.statsMutex.Lock()
 	defer s.statsMutex.Unlock()
 
-	if stats.PkFilter.K() > s.kHashFunc {
-		s.kHashFunc = stats.PkFilter.K()
-	}
 	s.historyStats = append(s.historyStats, stats)
 }
 

@@ -258,7 +258,7 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			ms.EXPECT().MayPkExist(mock.Anything).RunAndReturn(func(lc storage.LocationsCache) bool {
+			ms.EXPECT().MayPkExist(mock.Anything).RunAndReturn(func(lc *storage.LocationsCache) bool {
 				return lc.GetPk().EQ(storage.NewInt64PrimaryKey(10))
 			})
 			return ms

@@ -251,6 +251,7 @@ replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20231218130003-94d085776dc5
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
+	github.com/greatroar/blobloom => github.com/weiliu1031/blobloom v0.0.0-20240530105622-1e0e104a7160
 	// github.com/milvus-io/milvus-storage/go => ../milvus-storage/go
 	github.com/milvus-io/milvus/pkg => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1
@@ -258,5 +259,3 @@ replace (
 )
 
 exclude github.com/apache/pulsar-client-go/oauth2 v0.0.0-20211108044248-fe3b7c4e445b
-
-replace github.com/greatroar/blobloom => github.com/weiliu1031/blobloom v0.0.0-20240523093007-a7ada2e941d2

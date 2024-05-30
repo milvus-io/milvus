@@ -712,11 +712,11 @@ func (_c *MockSegment_LoadInfo_Call) RunAndReturn(run func() *querypb.SegmentLoa
 }
 
 // MayPkExist provides a mock function with given fields: lc
-func (_m *MockSegment) MayPkExist(lc storage.LocationsCache) bool {
+func (_m *MockSegment) MayPkExist(lc *storage.LocationsCache) bool {
 	ret := _m.Called(lc)
 
 	var r0 bool
-	if rf, ok := ret.Get(0).(func(storage.LocationsCache) bool); ok {
+	if rf, ok := ret.Get(0).(func(*storage.LocationsCache) bool); ok {
 		r0 = rf(lc)
 	} else {
 		r0 = ret.Get(0).(bool)
@@ -731,14 +731,14 @@ type MockSegment_MayPkExist_Call struct {
 }
 
 // MayPkExist is a helper method to define mock.On call
-//   - lc storage.LocationsCache
+//   - lc *storage.LocationsCache
 func (_e *MockSegment_Expecter) MayPkExist(lc interface{}) *MockSegment_MayPkExist_Call {
 	return &MockSegment_MayPkExist_Call{Call: _e.mock.On("MayPkExist", lc)}
 }
 
-func (_c *MockSegment_MayPkExist_Call) Run(run func(lc storage.LocationsCache)) *MockSegment_MayPkExist_Call {
+func (_c *MockSegment_MayPkExist_Call) Run(run func(lc *storage.LocationsCache)) *MockSegment_MayPkExist_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(storage.LocationsCache))
+		run(args[0].(*storage.LocationsCache))
 	})
 	return _c
 }
@@ -748,7 +748,7 @@ func (_c *MockSegment_MayPkExist_Call) Return(_a0 bool) *MockSegment_MayPkExist_
 	return _c
 }
 
-func (_c *MockSegment_MayPkExist_Call) RunAndReturn(run func(storage.LocationsCache) bool) *MockSegment_MayPkExist_Call {
+func (_c *MockSegment_MayPkExist_Call) RunAndReturn(run func(*storage.LocationsCache) bool) *MockSegment_MayPkExist_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -155,40 +155,37 @@ func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
 	return st.MinPK.LE(lc.pk) && st.MaxPK.GE(lc.pk)
 }
 
-type KLocations map[uint][]uint64 // from hash_func_num to locations
-
 // LocationsCache is a helper struct caching pk bloom filter locations.
 // Note that this helper is not concurrent safe and shall be used in same goroutine.
 type LocationsCache struct {
-	pk        PrimaryKey
-	locations map[bloomfilter.BFType]KLocations
+	pk               PrimaryKey
+	basicBFLocations []uint64
+	blockBFLocations []uint64
 }
 
-func (lc LocationsCache) GetPk() PrimaryKey {
+func (lc *LocationsCache) GetPk() PrimaryKey {
 	return lc.pk
 }
 
-func (lc LocationsCache) Locations(k uint, bfType bloomfilter.BFType) []uint64 {
-	// get kLocations by bf type
-	locations, ok := lc.locations[bfType]
-	if !ok {
-		locations = make(KLocations)
-		lc.locations[bfType] = locations
+func (lc *LocationsCache) Locations(k uint, bfType bloomfilter.BFType) []uint64 {
+	switch bfType {
+	case bloomfilter.BasicBF:
+		if int(k) > len(lc.basicBFLocations) {
+			lc.basicBFLocations = Locations(lc.pk, k, bfType)
+		}
+		return lc.basicBFLocations[:k]
+	case bloomfilter.BlockedBF:
+		if int(k) > len(lc.blockBFLocations) {
+			lc.blockBFLocations = Locations(lc.pk, k, bfType)
+		}
+		return lc.blockBFLocations[:k]
+	default:
+		return nil
 	}
-
-	// get locations by k
-	locs, ok := locations[k]
-	if ok {
-		return locs
-	}
-	locs = Locations(lc.pk, k, bfType)
-	locations[k] = locs
-	return locs
 }
 
-func NewLocationsCache(pk PrimaryKey) LocationsCache {
-	return LocationsCache{
-		pk:        pk,
-		locations: make(map[bloomfilter.BFType]KLocations),
+func NewLocationsCache(pk PrimaryKey) *LocationsCache {
+	return &LocationsCache{
+		pk: pk,
 	}
 }
