@@ -246,11 +246,11 @@ func (s *BulkInsertSuite) TestL0Import() {
 	s.NoError(merr.CheckRPCCall(loadStatus, err))
 	s.WaitForLoad(ctx, collectionName)
 
-	// binlog import
+	// l0 import
 	files := []*internalpb.ImportFile{
 		{
 			Paths: []string{
-				fmt.Sprintf("/tmp/%s/insert_log/%d/%d/", paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, partitionID),
+				fmt.Sprintf("/tmp/%s/delta_log/%d/%d/", paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, common.AllPartitionsID),
 			},
 		},
 	}
@@ -259,7 +259,7 @@ func (s *BulkInsertSuite) TestL0Import() {
 		PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 		Files:          files,
 		Options: []*commonpb.KeyValuePair{
-			{Key: "backup", Value: "true"},
+			{Key: "l0_import", Value: "true"},
 		},
 	})
 	s.NoError(merr.CheckRPCCall(importResp, err))
@@ -276,13 +276,20 @@ func (s *BulkInsertSuite) TestL0Import() {
 		return segment.GetCollectionID() == newCollectionID
 	})
 	log.Info("Show segments", zap.Any("segments", segments))
-	s.Equal(1, len(segments))
+	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
+		return segment.GetCollectionID() == newCollectionID && segment.GetLevel() == datapb.SegmentLevel_L0
+	})
+	s.Equal(1, len(l0Segments))
+	s.Equal(commonpb.SegmentState_Flushed, l0Segments[0].GetState())
+	//s.True(len(l0Segments[0].GetDeltalogs()) > 0)
 
-	// l0 import
+	s.T().Logf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 1\n")
+
+	// binlog import
 	files = []*internalpb.ImportFile{
 		{
 			Paths: []string{
-				fmt.Sprintf("/tmp/%s/delta_log/%d/%d/", paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, common.AllPartitionsID),
+				fmt.Sprintf("/tmp/%s/insert_log/%d/%d/", paramtable.Get().EtcdCfg.RootPath.GetValue(), collectionID, partitionID),
 			},
 		},
 	}
@@ -291,7 +298,7 @@ func (s *BulkInsertSuite) TestL0Import() {
 		PartitionName:  paramtable.Get().CommonCfg.DefaultPartitionName.GetValue(),
 		Files:          files,
 		Options: []*commonpb.KeyValuePair{
-			{Key: "l0_import", Value: "true"},
+			{Key: "backup", Value: "true"},
 		},
 	})
 	s.NoError(merr.CheckRPCCall(importResp, err))
@@ -308,14 +315,7 @@ func (s *BulkInsertSuite) TestL0Import() {
 		return segment.GetCollectionID() == newCollectionID
 	})
 	log.Info("Show segments", zap.Any("segments", segments))
-	l0Segments := lo.Filter(segments, func(segment *datapb.SegmentInfo, _ int) bool {
-		return segment.GetCollectionID() == newCollectionID && segment.GetLevel() == datapb.SegmentLevel_L0
-	})
-	s.Equal(1, len(l0Segments))
-	s.Equal(commonpb.SegmentState_Flushed, l0Segments[0].GetState())
-	s.True(len(l0Segments[0].GetDeltalogs()) > 0)
-
-	s.T().Logf(">>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>> 1\n")
+	s.Equal(2, len(segments))
 
 	// load refresh
 	loadStatus, err = c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{

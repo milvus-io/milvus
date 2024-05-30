@@ -840,6 +840,14 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
 			zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
 		)
+		log.Info("sheep debug datacoord append channelInfo in GetRecoveryInfo",
+			zap.String("channel", channelInfo.GetChannelName()),
+			zap.Any("# of unflushed segments", channelInfo.GetUnflushedSegmentIds()),
+			zap.Any("# of flushed segments", channelInfo.GetFlushedSegmentIds()),
+			zap.Any("# of dropped segments", channelInfo.GetDroppedSegmentIds()),
+			zap.Any("# of indexed segments", channelInfo.GetIndexedSegmentIds()),
+			zap.Any("# of l0 segments", channelInfo.GetLevelZeroSegmentIds()),
+		)
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
 
