@@ -340,7 +340,8 @@ func (s *SyncSegmentsSchedulerSuite) Test_newSyncSegmentsScheduler() {
 	sss.Start()
 
 	// 2 channels, 2 partitions, 2 segments
-	for s.new.Load() < 4 || s.old.Load() < 4 {
+	// no longer sync dropped segments
+	for s.new.Load() < 4 {
 	}
 	sss.Stop()
 }
