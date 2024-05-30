@@ -30,6 +30,11 @@
 namespace milvus {
 namespace index {
 
+enum class BitmapIndexBuildMode {
+    ROARING,
+    BITSET,
+};
+
 /*
 * @brief Implementation of Bitmap Index 
 * @details This index only for scalar Integral type.
@@ -44,6 +49,17 @@ class BitmapIndex : public ScalarIndex<T> {
     explicit BitmapIndex(
         const storage::FileManagerContext& file_manager_context,
         std::shared_ptr<milvus_storage::Space> space);
+
+    explicit BitmapIndex(
+        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager)
+        : file_manager_(file_manager) {
+    }
+
+    explicit BitmapIndex(
+        const std::shared_ptr<storage::MemFileManagerImpl>& file_manager,
+        std::shared_ptr<milvus_storage::Space> space)
+        : file_manager_(file_manager), space_(space) {
+    }
 
     ~BitmapIndex() override = default;
 
@@ -61,7 +77,7 @@ class BitmapIndex : public ScalarIndex<T> {
 
     int64_t
     Count() override {
-        return bitsets_.begin()->second.size();
+        return total_num_rows_;
     }
 
     void
@@ -69,6 +85,9 @@ class BitmapIndex : public ScalarIndex<T> {
 
     void
     Build(const Config& config = {}) override;
+
+    void
+    BuildWithFieldData(const std::vector<FieldDataPtr>& datas) override;
 
     void
     BuildV2(const Config& config = {}) override;
@@ -108,8 +127,16 @@ class BitmapIndex : public ScalarIndex<T> {
 
     int64_t
     Cardinality() {
-        return bitsets_.size();
+        if (build_mode_ == BitmapIndexBuildMode::ROARING) {
+            return data_.size();
+        } else {
+            return bitsets_.size();
+        }
     }
+
+    void
+    LoadWithoutAssemble(const BinarySet& binary_set,
+                        const Config& config) override;
 
  private:
     size_t
@@ -118,8 +145,17 @@ class BitmapIndex : public ScalarIndex<T> {
     void
     SerializeIndexData(uint8_t* index_data_ptr);
 
+    std::pair<std::shared_ptr<uint8_t[]>, size_t>
+    SerializeIndexMeta();
+
+    std::pair<size_t, size_t>
+    DeserializeIndexMeta(const uint8_t* data_ptr, size_t data_size);
+
     void
     DeserializeIndexData(const uint8_t* data_ptr, size_t index_length);
+
+    void
+    ChooseIndexBuildMode();
 
     bool
     ShouldSkip(const T lower_value, const T upper_value, const OpType op);
@@ -127,15 +163,31 @@ class BitmapIndex : public ScalarIndex<T> {
     TargetBitmap
     ConvertRoaringToBitset(const roaring::Roaring& values);
 
-    void
-    LoadWithoutAssemble(const BinarySet& binary_set, const Config& config);
+    TargetBitmap
+    RangeForRoaring(T value, OpType op);
 
- private:
-    bool is_built_;
+    TargetBitmap
+    RangeForBitset(T value, OpType op);
+
+    TargetBitmap
+    RangeForRoaring(T lower_bound_value,
+                    bool lb_inclusive,
+                    T upper_bound_value,
+                    bool ub_inclusive);
+
+    TargetBitmap
+    RangeForBitset(T lower_bound_value,
+                   bool lb_inclusive,
+                   T upper_bound_value,
+                   bool ub_inclusive);
+
+ public:
+    bool is_built_{false};
     Config config_;
+    BitmapIndexBuildMode build_mode_;
     std::map<T, roaring::Roaring> data_;
     std::map<T, TargetBitmap> bitsets_;
-    size_t total_num_rows_;
+    size_t total_num_rows_{0};
     std::shared_ptr<storage::MemFileManagerImpl> file_manager_;
     std::shared_ptr<milvus_storage::Space> space_;
 };
