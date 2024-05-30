@@ -250,8 +250,8 @@ func (c *metaCacheImpl) rangeWithFilter(fn func(id int64, info *SegmentInfo), fi
 }
 
 func (c *metaCacheImpl) DetectMissingSegments(segments map[int64]struct{}) []int64 {
-	c.mu.Lock()
-	defer c.mu.Unlock()
+	c.mu.RLock()
+	defer c.mu.RUnlock()
 
 	missingSegments := make([]int64, 0)
 
