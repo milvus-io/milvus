@@ -290,7 +290,7 @@ class SegmentInternalInterface : public SegmentInterface {
      * @param false_filtered_out
      * @return All candidates offsets.
      */
-    virtual std::vector<OffsetMap::OffsetType>
+    virtual std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const = 0;
