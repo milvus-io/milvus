@@ -797,13 +797,13 @@ class BitsetBase {
             this->data(), other.data(), this->offset(), other.offset(), size);
     }
 
- private:
     // Return the starting bit offset in our container.
     inline size_type
     offset() const {
         return as_derived().offset_impl();
     }
 
+ private:
     // CRTP
     inline ImplT&
     as_derived() {

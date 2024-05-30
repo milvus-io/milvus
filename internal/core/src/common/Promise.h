@@ -72,4 +72,11 @@ class MilvusPromise : public folly::Promise<T> {
 using ContinuePromise = MilvusPromise<folly::Unit>;
 using ContinueFuture = folly::SemiFuture<folly::Unit>;
 
+static inline std::pair<ContinuePromise, ContinueFuture>
+MakeMilvusContinuePromiseContract(const std::string& context = "") {
+    auto p = ContinuePromise(context);
+    auto f = p.getSemiFuture();
+    return std::make_pair(std::move(p), std::move(f));
+}
+
 }  // namespace milvus

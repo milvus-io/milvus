@@ -16,11 +16,9 @@
 
 #include "common/Tracer.h"
 #include "pb/plan.pb.h"
-#include "query/Expr.h"
 #include "query/PlanProto.h"
 #include "query/SearchBruteForce.h"
 #include "query/Utils.h"
-#include "query/generated/ExecExprVisitor.h"
 #include "query/generated/PlanNodeVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
@@ -30,6 +28,11 @@ using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
 
+extern BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp);
 namespace {
 auto
 GenQueryInfo(int64_t topk,
@@ -282,12 +285,12 @@ TEST(StringExpr, Term) {
     for (const auto& [_, term] : terms) {
         auto plan_proto = GenTermPlan(fvec_meta, str_meta, term);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -396,12 +399,12 @@ TEST(StringExpr, Compare) {
     for (const auto& [op, ref_func] : testcases) {
         auto plan_proto = gen_compare_plan(op);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -492,12 +495,12 @@ TEST(StringExpr, UnaryRange) {
     for (const auto& [op, value, ref_func] : testcases) {
         auto plan_proto = gen_unary_range_plan(op, value);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -606,12 +609,12 @@ TEST(StringExpr, BinaryRange) {
         auto plan_proto =
             gen_binary_range_plan(lb_inclusive, ub_inclusive, lb, ub);
         auto plan = ProtoParser(*schema).CreatePlan(*plan_proto);
-        query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {

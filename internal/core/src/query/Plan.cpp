@@ -17,7 +17,6 @@
 #include "Plan.h"
 #include "common/Utils.h"
 #include "PlanProto.h"
-#include "generated/ShowPlanNodeVisitor.h"
 
 namespace milvus::query {
 
@@ -86,7 +85,15 @@ CreateSearchPlanByExpr(const Schema& schema,
                        const int64_t size) {
     // Note: serialized_expr_plan is of binary format
     proto::plan::PlanNode plan_node;
-    plan_node.ParseFromArray(serialized_expr_plan, size);
+    google::protobuf::io::ArrayInputStream array_stream(serialized_expr_plan,
+                                                        size);
+    google::protobuf::io::CodedInputStream input_stream(&array_stream);
+    input_stream.SetRecursionLimit(std::numeric_limits<int32_t>::max());
+
+    auto res = plan_node.ParsePartialFromCodedStream(&input_stream);
+    if (!res) {
+        throw SegcoreError(UnexpectedError, "parse plan node proto failed");
+    }
     return ProtoParser(schema).CreatePlan(plan_node);
 }
 
@@ -131,21 +138,5 @@ GetNumOfQueries(const PlaceholderGroup* group) {
 //    }
 //    return plan;
 //}
-
-void
-Plan::check_identical(Plan& other) {
-    Assert(&schema_ == &other.schema_);
-    auto json = ShowPlanNodeVisitor().call_child(*this->plan_node_);
-    auto other_json = ShowPlanNodeVisitor().call_child(*other.plan_node_);
-    Assert(json.dump(2) == other_json.dump(2));
-    Assert(this->extra_info_opt_.has_value() ==
-           other.extra_info_opt_.has_value());
-    if (this->extra_info_opt_.has_value()) {
-        Assert(this->extra_info_opt_->involved_fields_ ==
-               other.extra_info_opt_->involved_fields_);
-    }
-    Assert(this->tag2field_ == other.tag2field_);
-    Assert(this->target_entries_ == other.target_entries_);
-}
 
 }  // namespace milvus::query

@@ -17,12 +17,9 @@
 #include <vector>
 #include <chrono>
 
-#include "query/Expr.h"
 #include "query/PlanImpl.h"
 #include "query/PlanNode.h"
 #include "query/generated/ExecPlanNodeVisitor.h"
-#include "query/generated/ExprVisitor.h"
-#include "query/generated/ShowPlanNodeVisitor.h"
 #include "segcore/SegmentSealed.h"
 #include "test_utils/AssertUtils.h"
 #include "test_utils/DataGen.h"

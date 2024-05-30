@@ -21,11 +21,8 @@
 #include "index/IndexFactory.h"
 #include "pb/plan.pb.h"
 #include "plan/PlanNode.h"
-#include "query/Expr.h"
-#include "query/ExprImpl.h"
 #include "query/Plan.h"
 #include "query/PlanNode.h"
-#include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "simdjson/padded_string.h"
 #include "test_utils/DataGen.h"
@@ -33,6 +30,12 @@
 using namespace milvus;
 using namespace milvus::query;
 using namespace milvus::segcore;
+
+extern BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp);
 
 TEST(Expr, TestArrayRange) {
     std::vector<std::tuple<std::string,
@@ -598,7 +601,6 @@ TEST(Expr, TestArrayRange) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto [clause, array_type, ref_func] : testcases) {
         auto loc = raw_plan_tmp.find("@@@@");
         auto raw_plan = raw_plan_tmp;
@@ -607,10 +609,11 @@ TEST(Expr, TestArrayRange) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -715,7 +718,6 @@ TEST(Expr, TestArrayEqual) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     for (auto [clause, ref_func] : testcases) {
         auto loc = raw_plan_tmp.find("@@@@");
         auto raw_plan = raw_plan_tmp;
@@ -724,10 +726,11 @@ TEST(Expr, TestArrayEqual) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -888,7 +891,6 @@ TEST(Expr, TestArrayContains) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     std::vector<ArrayTestcase<bool>> bool_testcases{{{true, true}, {}},
                                                     {{false, false}, {}}};
@@ -918,7 +920,8 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -972,7 +975,8 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1016,7 +1020,8 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1070,7 +1075,8 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1115,7 +1121,8 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1167,7 +1174,8 @@ TEST(Expr, TestArrayContains) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -1234,7 +1242,6 @@ TEST(Expr, TestArrayBinaryArith) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     std::vector<std::tuple<std::string,
                            std::string,
@@ -2115,10 +2122,11 @@ TEST(Expr, TestArrayBinaryArith) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2165,7 +2173,6 @@ TEST(Expr, TestArrayStringMatch) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     std::vector<UnaryRangeTestcase<std::string>> prefix_testcases{
         {OpType::PrefixMatch,
@@ -2203,7 +2210,8 @@ TEST(Expr, TestArrayStringMatch) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)
@@ -2265,7 +2273,6 @@ TEST(Expr, TestArrayInTerm) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     std::vector<std::tuple<std::string,
                            std::string,
@@ -2408,10 +2415,11 @@ TEST(Expr, TestArrayInTerm) {
         auto plan =
             CreateSearchPlanByExpr(*schema, plan_str.data(), plan_str.size());
         BitsetType final;
-        visitor.ExecuteExprNode(plan->plan_node_->filter_plannode_.value(),
-                                seg_promote,
-                                N * num_iters,
-                                final);
+        final = ExecuteQueryExpr(
+            plan->plan_node_->plannodes_->sources()[0]->sources()[0],
+            seg_promote,
+            N * num_iters,
+            MAX_TIMESTAMP);
         EXPECT_EQ(final.size(), N * num_iters);
 
         for (int i = 0; i < N * num_iters; ++i) {
@@ -2448,7 +2456,6 @@ TEST(Expr, TestTermInArray) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
 
     struct TermTestCases {
         std::vector<int64_t> values;
@@ -2496,7 +2503,8 @@ TEST(Expr, TestTermInArray) {
         BitsetType final;
         auto plan =
             std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-        visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+        final =
+            ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
         std::cout << "cost"
                   << std::chrono::duration_cast<std::chrono::microseconds>(
                          std::chrono::steady_clock::now() - start)

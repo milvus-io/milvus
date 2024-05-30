@@ -16,12 +16,20 @@
 #include <chrono>
 
 #include "common/Types.h"
-#include "query/Expr.h"
-#include "query/generated/ExecExprVisitor.h"
 #include "segcore/SegmentGrowingImpl.h"
 #include "test_utils/DataGen.h"
+#include "test_utils/GenExprProto.h"
 #include "expr/ITypeExpr.h"
 #include "plan/PlanNode.h"
+
+using namespace milvus;
+using namespace milvus::query;
+
+extern BitsetType
+ExecuteQueryExpr(std::shared_ptr<milvus::plan::PlanNode> plannode,
+                 const milvus::segcore::SegmentInternalInterface* segment,
+                 uint64_t active_count,
+                 uint64_t timestamp);
 
 class ExprAlwaysTrueTest : public ::testing::TestWithParam<milvus::DataType> {};
 
@@ -61,12 +69,10 @@ TEST_P(ExprAlwaysTrueTest, AlwaysTrue) {
     }
 
     auto seg_promote = dynamic_cast<SegmentGrowingImpl*>(seg.get());
-    query::ExecPlanNodeVisitor visitor(*seg_promote, MAX_TIMESTAMP);
     auto expr = std::make_shared<milvus::expr::AlwaysTrueExpr>();
+    auto plan = milvus::test::CreateRetrievePlanByExpr(expr);
     BitsetType final;
-    std::shared_ptr<milvus::plan::PlanNode> plan =
-        std::make_shared<plan::FilterBitsNode>(DEFAULT_PLANNODE_ID, expr);
-    visitor.ExecuteExprNode(plan, seg_promote, N * num_iters, final);
+    final = ExecuteQueryExpr(plan, seg_promote, N * num_iters, MAX_TIMESTAMP);
     EXPECT_EQ(final.size(), N * num_iters);
 
     for (int i = 0; i < N * num_iters; ++i) {

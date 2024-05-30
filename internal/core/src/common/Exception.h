@@ -201,6 +201,22 @@ class ArrowException : public std::runtime_error {
 };
 
 // Exceptions for executor module
+class ExecTaskException : public std::exception {
+ public:
+    explicit ExecTaskException(const std::string& msg)
+        : std::exception(), exception_message_(msg) {
+    }
+
+    const char*
+    what() const noexcept {
+        return exception_message_.c_str();
+    }
+    virtual ~ExecTaskException() {
+    }
+
+ private:
+    std::string exception_message_;
+};
 class ExecDriverException : public std::exception {
  public:
     explicit ExecDriverException(const std::string& msg)

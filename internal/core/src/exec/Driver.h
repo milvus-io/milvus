@@ -19,6 +19,7 @@
 #include <functional>
 #include <memory>
 #include <string>
+#include <sys/syscall.h>
 #include <vector>
 
 #include "common/Types.h"
@@ -47,7 +48,32 @@ enum class StopReason {
     // No more data to produce.
     kAtEnd,
     kAlreadyOnThread
-};
+
+};  // namespace milvus
+
+inline std::string
+StopReasonToString(StopReason reason) {
+    switch (reason) {
+        case StopReason::kNone:
+            return "None";
+        case StopReason::kPause:
+            return "Pause";
+        case StopReason::kTerminate:
+            return "Terminate";
+        case StopReason::kAlreadyTerminated:
+            return "AlreadyTerminated";
+        case StopReason::kYield:
+            return "Yield";
+        case StopReason::kBlock:
+            return "Block";
+        case StopReason::kAtEnd:
+            return "AtEnd";
+        case StopReason::kAlreadyOnThread:
+            return "AlreadyOnThread";
+        default:
+            return "Unknown";
+    }
+}
 
 enum class BlockingReason {
     kNotBlocked,
@@ -68,6 +94,32 @@ enum class BlockingReason {
     /// spill on all of them.
     kWaitForSpill,
 };
+
+inline std::string
+BlockingReasonToString(BlockingReason reason) {
+    switch (reason) {
+        case BlockingReason::kNotBlocked:
+            return "Not Blocked";
+        case BlockingReason::kWaitForConsumer:
+            return "Waiting for Consumer";
+        case BlockingReason::kWaitForSplit:
+            return "Waiting for Split";
+        case BlockingReason::kWaitForExchange:
+            return "Waiting for Exchange";
+        case BlockingReason::kWaitForJoinBuild:
+            return "Waiting for Join Build";
+        case BlockingReason::kWaitForJoinProbe:
+            return "Waiting for Join Probe";
+        case BlockingReason::kWaitForMemory:
+            return "Waiting for Memory";
+        case BlockingReason::kWaitForConnector:
+            return "Waiting for Connector";
+        case BlockingReason::kWaitForSpill:
+            return "Waiting for Spill";
+        default:
+            return "Unknown Blocking Reason";
+    }
+}
 
 class Driver;
 class Operator;
@@ -122,7 +174,6 @@ class BlockingState {
     ContinueFuture future_;
     Operator* operator_;
     BlockingReason reason_;
-
     static std::atomic_uint64_t num_blocked_drivers_;
 };
 
@@ -180,6 +231,34 @@ struct DriverFactory {
     }
 };
 
+struct ThreadState {
+    std::atomic<std::thread::id> thread_id_{std::thread::id()};
+    std::atomic<int32_t> tid_{0};
+    // Whether have enqueued to executor
+    std::atomic<bool> is_enqueued_{false};
+    std::atomic<bool> is_terminated_{false};
+    bool has_blocking_future_{false};
+    bool is_suspended{false};
+
+    bool
+    IsOnThread() const {
+        return thread_id_.load() == std::this_thread::get_id();
+    }
+
+    void
+    SetThread() {
+        thread_id_.store(std::this_thread::get_id());
+#if !defined(__APPLE__)
+        tid_.store(syscall(SYS_gettid));
+#endif
+    }
+
+    void
+    ClearThread() {
+        thread_id_.store(std::thread::id());
+        tid_.store(0);
+    }
+};
 class Driver : public std::enable_shared_from_this<Driver> {
  public:
     static void
@@ -189,17 +268,27 @@ class Driver : public std::enable_shared_from_this<Driver> {
     Next(std::shared_ptr<BlockingState>& blocking_state);
 
     DriverContext*
-    get_driver_context() const {
+    driver_context() const {
         return ctx_.get();
     }
 
+    bool
+    IsClosed() const {
+        return closed_;
+    }
+
     const std::shared_ptr<Task>&
-    get_task() const {
+    task() const {
         return ctx_->task_;
     }
 
+    ThreadState&
+    state() {
+        return state_;
+    }
+
     BlockingReason
-    GetBlockingReason() const {
+    blocking_reason() const {
         return blocking_reason_;
     }
 
@@ -207,20 +296,36 @@ class Driver : public std::enable_shared_from_this<Driver> {
     Init(std::unique_ptr<DriverContext> driver_ctx,
          std::vector<std::unique_ptr<Operator>> operators);
 
-    void
-    CloseByTask() {
-        Close();
+    bool
+    IsOnThread() const {
+        return state_.IsOnThread();
     }
 
- private:
-    Driver() = default;
+    bool
+    IsTerminated() const {
+        return state_.is_terminated_;
+    }
+
+    std::string
+    ToString() const;
+
+    void
+    CloseOperators();
+
+    void
+    CloseByTask();
 
     void
     EnqueueInternal() {
+        Assert(!state_.is_enqueued_);
+        state_.is_enqueued_ = true;
     }
 
     static void
     Run(std::shared_ptr<Driver> self);
+
+ private:
+    Driver() = default;
 
     StopReason
     RunInternal(std::shared_ptr<Driver>& self,
@@ -239,6 +344,8 @@ class Driver : public std::enable_shared_from_this<Driver> {
     size_t current_operator_index_{0};
 
     BlockingReason blocking_reason_{BlockingReason::kNotBlocked};
+
+    ThreadState state_;
 
     friend struct DriverFactory;
 };

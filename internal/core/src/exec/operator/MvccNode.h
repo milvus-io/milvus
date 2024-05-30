@@ -26,24 +26,25 @@
 
 namespace milvus {
 namespace exec {
-class FilterBits : public Operator {
+
+class PhyMvccNode : public Operator {
  public:
-    FilterBits(int32_t operator_id,
-               DriverContext* ctx,
-               const std::shared_ptr<const plan::FilterBitsNode>& filter);
+    PhyMvccNode(int32_t operator_id,
+                DriverContext* ctx,
+                const std::shared_ptr<const plan::MvccNode>& mvcc_node);
 
     bool
     IsFilter() override {
-        return true;
+        return false;
     }
 
     bool
     NeedInput() const override {
-        return !input_;
+        return !is_finished_;
     }
 
     void
-    AddInput(RowVectorPtr& input) override;
+    AddInput(RowVectorPtr& input);
 
     RowVectorPtr
     GetOutput() override;
@@ -53,8 +54,6 @@ class FilterBits : public Operator {
 
     void
     Close() override {
-        Operator::Close();
-        exprs_->Clear();
     }
 
     BlockingReason
@@ -62,19 +61,18 @@ class FilterBits : public Operator {
         return BlockingReason::kNotBlocked;
     }
 
-    bool
-    AllInputProcessed();
-
     virtual std::string
     ToString() const override {
-        return "FilterBits";
+        return "PhyMvccNode";
     }
 
  private:
-    std::unique_ptr<ExprSet> exprs_;
-    QueryContext* query_context_;
-    int64_t num_processed_rows_;
-    int64_t need_process_rows_;
+    const segcore::SegmentInternalInterface* segment_;
+    milvus::Timestamp query_timestamp_;
+    int64_t active_count_;
+    bool is_finished_{false};
+    bool is_source_node_{false};
 };
+
 }  // namespace exec
 }  // namespace milvus

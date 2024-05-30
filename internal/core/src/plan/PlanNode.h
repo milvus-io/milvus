@@ -25,11 +25,11 @@
 #include "expr/ITypeExpr.h"
 #include "common/EasyAssert.h"
 #include "segcore/SegmentInterface.h"
+#include "plan/PlanNodeIdGenerator.h"
 
 namespace milvus {
 namespace plan {
 
-typedef std::string PlanNodeId;
 /** 
  * @brief Base class for all logic plan node
  * 
@@ -67,6 +67,16 @@ class PlanNode {
     GatherInfo() const {
         return {};
     };
+
+    std::string
+    SourceToString() const {
+        std::vector<std::string> sources_str;
+        for (auto& source : sources()) {
+            sources_str.emplace_back(source->ToString());
+        }
+        return std::accumulate(
+            sources_str.begin(), sources_str.end(), std::string(" "));
+    }
 
  private:
     PlanNodeId id_;
@@ -260,6 +270,106 @@ class FilterBitsNode : public PlanNode {
     const expr::TypedExprPtr filter_;
 };
 
+class MvccNode : public PlanNode {
+ public:
+    MvccNode(const PlanNodeId& id,
+             std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::BOOL;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "MvccNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("MvccNode: [source node:{}]", SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+};
+
+class VectorSearchNode : public PlanNode {
+ public:
+    VectorSearchNode(
+        const PlanNodeId& id,
+        std::vector<PlanNodePtr> sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::BOOL;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "VectorSearchNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("VectorSearchNode: [source node:{}]",
+                           SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+};
+
+class CountNode : public PlanNode {
+ public:
+    CountNode(
+        const PlanNodeId& id,
+        const std::vector<PlanNodePtr>& sources = std::vector<PlanNodePtr>{})
+        : PlanNode(id), sources_{std::move(sources)} {
+    }
+
+    DataType
+    output_type() const override {
+        return DataType::INT64;
+    }
+
+    std::vector<PlanNodePtr>
+    sources() const override {
+        return sources_;
+    }
+
+    std::string_view
+    name() const override {
+        return "CountNode";
+    }
+
+    std::string
+    ToString() const override {
+        return fmt::format("MvccNode: [source node:{}]", SourceToString());
+    }
+
+ private:
+    const std::vector<PlanNodePtr> sources_;
+};
+class AggregationNode : public PlanNode {
+ public:
+    enum class Step { kPartial, kFinal, kIntermediate, kSingle };
+};
+
 enum class ExecutionStrategy {
     // Process splits as they come in any available driver.
     kUngrouped,
@@ -270,10 +380,23 @@ enum class ExecutionStrategy {
     // join.
     kGrouped,
 };
+
+inline std::string
+ExecutionStrategyToString(ExecutionStrategy strategy) {
+    switch (strategy) {
+        case ExecutionStrategy::kGrouped:
+            return "GROUPED";
+        case ExecutionStrategy::kUngrouped:
+            return "UNGROUPED";
+        default:
+            return fmt::format("UNKNOWN: {}", static_cast<int>(strategy));
+    }
+}
 struct PlanFragment {
     std::shared_ptr<const PlanNode> plan_node_;
     ExecutionStrategy execution_strategy_{ExecutionStrategy::kUngrouped};
     int32_t num_splitgroups_{0};
+    std::unordered_set<PlanNodeId> grouped_execution_leaf_node_ids_;
 
     PlanFragment() = default;
 
@@ -282,12 +405,21 @@ struct PlanFragment {
         return execution_strategy_ == ExecutionStrategy::kGrouped;
     }
 
-    explicit PlanFragment(std::shared_ptr<const PlanNode> top_node,
-                          ExecutionStrategy strategy,
-                          int32_t num_splitgroups)
+    inline bool
+    LeafNodeRunGroupedExecution(const PlanNodeId& plan_id) const {
+        return grouped_execution_leaf_node_ids_.find(plan_id) !=
+               grouped_execution_leaf_node_ids_.end();
+    }
+
+    explicit PlanFragment(
+        std::shared_ptr<const PlanNode> top_node,
+        ExecutionStrategy strategy,
+        int32_t num_splitgroups,
+        const std::unordered_set<PlanNodeId>& grouped_execution_leaf_node_ids)
         : plan_node_(std::move(top_node)),
           execution_strategy_(strategy),
-          num_splitgroups_(num_splitgroups) {
+          num_splitgroups_(num_splitgroups),
+          grouped_execution_leaf_node_ids_(grouped_execution_leaf_node_ids) {
     }
 
     explicit PlanFragment(std::shared_ptr<const PlanNode> top_node)

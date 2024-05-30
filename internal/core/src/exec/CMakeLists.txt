@@ -24,6 +24,10 @@ set(MILVUS_EXEC_SRCS
         expression/ExistsExpr.cpp
         operator/FilterBits.cpp
         operator/Operator.cpp
+        operator/MvccNode.cpp
+        operator/VectorSearch.cpp
+        operator/CountNode.cpp
+        operator/GroupByOperator.cpp
         Driver.cpp
         Task.cpp
         )

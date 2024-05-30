@@ -17,6 +17,8 @@
 #include "segcore/SegmentGrowing.h"
 #include <utility>
 #include "PlanNodeVisitor.h"
+#include "plan/PlanNode.h"
+#include "exec/QueryContext.h"
 
 namespace milvus::query {
 
@@ -78,54 +80,9 @@ class ExecPlanNodeVisitor : public PlanNodeVisitor {
         return ret;
     }
 
-    void
-    SetExprCacheOffsets(std::vector<int64_t>&& offsets) {
-        expr_cached_pk_id_offsets_ = std::move(offsets);
-    }
-
-    void
-    AddExprCacheOffset(int64_t offset) {
-        expr_cached_pk_id_offsets_.push_back(offset);
-    }
-
-    const std::vector<int64_t>&
-    GetExprCacheOffsets() {
-        return expr_cached_pk_id_offsets_;
-    }
-
-    void
-    SetExprUsePkIndex(bool use_pk_index) {
-        expr_use_pk_index_ = use_pk_index;
-    }
-
-    bool
-    GetExprUsePkIndex() {
-        return expr_use_pk_index_;
-    }
-
-    void
-    ExecuteExprNodeInternal(
-        const std::shared_ptr<milvus::plan::PlanNode>& plannode,
-        const milvus::segcore::SegmentInternalInterface* segment,
-        int64_t active_count,
-        BitsetType& result,
-        bool& cache_offset_getted,
-        std::vector<int64_t>& cache_offset);
-
-    void
-    ExecuteExprNode(const std::shared_ptr<milvus::plan::PlanNode>& plannode,
-                    const milvus::segcore::SegmentInternalInterface* segment,
-                    int64_t active_count,
-                    BitsetType& result) {
-        bool get_cache_offset;
-        std::vector<int64_t> cache_offsets;
-        ExecuteExprNodeInternal(plannode,
-                                segment,
-                                active_count,
-                                result,
-                                get_cache_offset,
-                                cache_offsets);
-    }
+    static BitsetType
+    ExecuteTask(plan::PlanFragment& plan,
+                std::shared_ptr<milvus::exec::QueryContext> query_context);
 
  private:
     template <typename VectorType>
