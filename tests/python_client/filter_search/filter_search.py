@@ -9,12 +9,16 @@ def convert_numbers_to_quoted_strings(text):
 
 @events.init_command_line_parser.add_listener
 def _(parser):
-    parser.add_argument("--filter", type=str, env_var="LOCUST_FILTER", default="", help="filter expr")
+    parser.add_argument("--filter_field", type=str, env_var="LOCUST_FILTER", default="", help="filter field")
+    parser.add_argument("--filter_op", type=str, env_var="LOCUST_FILTER", default="==", help="filter op")
+    parser.add_argument("--filter_value", type=str, env_var="LOCUST_FILTER", default="0", help="filter value")
 
 
 @events.test_start.add_listener
 def _(environment, **kw):
-    print(f"Custom argument supplied: {environment.parsed_options.filter}")
+    print(f"Custom argument supplied: {environment.parsed_options.filter_field}")
+    print(f"Custom argument supplied: {environment.parsed_options.filter_op}")
+    print(f"Custom argument supplied: {environment.parsed_options.filter_value}")
 
 
 class MilvusUser(HttpUser):
@@ -27,10 +31,11 @@ class MilvusUser(HttpUser):
 
     def on_start(self):
         print("X. Here's where you would put things you want to run the first time a User is started")
-        expr = self.environment.parsed_options.filter
+        filter_field = self.environment.parsed_options.filter_field
+        expr = f"{self.environment.parsed_options.filter_field} {self.environment.parsed_options.filter_op} {self.environment.parsed_options.filter_value}"
         ascii_codes = [str(ord(char)) for char in expr]
         expr_ascii = "".join(ascii_codes)
-        if expr_ascii:
+        if filter_field:
             ground_truth_file_name = f"/root/dataset/laion_with_scalar_medium_10m/neighbors-{expr_ascii}.parquet"
         else:
             ground_truth_file_name = f"/root/dataset/laion_with_scalar_medium_10m/neighbors.parquet"
@@ -39,9 +44,8 @@ class MilvusUser(HttpUser):
 
     @task
     def search(self):
-        filter = self.environment.parsed_options.filter
-        filter = convert_numbers_to_quoted_strings(filter)
-        # print(filter)
+        filter =f"{self.environment.parsed_options.filter_field} {self.environment.parsed_options.filter_op} '{self.environment.parsed_options.filter_value}'"
+        print(filter)
         random_id = random.randint(0, len(self.vectors_to_search) - 1)
         # print([self.vectors_to_search[random_id].tolist()])
         data = [self.vectors_to_search[random_id].tolist()]
