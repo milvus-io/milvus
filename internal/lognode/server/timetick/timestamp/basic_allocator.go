@@ -88,11 +88,13 @@ func (ta *remoteAllocator) allocate(ctx context.Context, count uint32) (uint64, 
 	if err != nil {
 		return 0, 0, fmt.Errorf("syncTimestamp Failed:%w", err)
 	}
-	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		return 0, 0, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
-	}
+
 	if resp == nil {
 		return 0, 0, fmt.Errorf("empty AllocTimestampResponse")
+	}
+
+	if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+		return 0, 0, fmt.Errorf("syncTimeStamp Failed:%s", resp.GetStatus().GetReason())
 	}
 	return resp.GetTimestamp(), int(resp.GetCount()), nil
 }

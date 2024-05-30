@@ -16,6 +16,7 @@ func (ad *ackDetails) AddDetails(details []*timestamp.AckDetail) {
 	}
 	if len(ad.detail) == 0 {
 		ad.detail = details
+		return
 	}
 	ad.detail = append(ad.detail, details...)
 }
