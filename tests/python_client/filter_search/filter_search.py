@@ -30,7 +30,7 @@ class MilvusUser(HttpUser):
     recall = 0
 
     def on_start(self):
-        print("X. Here's where you would put things you want to run the first time a User is started")
+        # print("X. Here's where you would put things you want to run the first time a User is started")
         filter_field = self.environment.parsed_options.filter_field
         expr = f"{self.environment.parsed_options.filter_field} {self.environment.parsed_options.filter_op} {self.environment.parsed_options.filter_value}"
         ascii_codes = [str(ord(char)) for char in expr]
@@ -45,7 +45,7 @@ class MilvusUser(HttpUser):
     @task
     def search(self):
         filter =f"{self.environment.parsed_options.filter_field} {self.environment.parsed_options.filter_op} '{self.environment.parsed_options.filter_value}'"
-        print(filter)
+        # print(filter)
         random_id = random.randint(0, len(self.vectors_to_search) - 1)
         # print([self.vectors_to_search[random_id].tolist()])
         data = [self.vectors_to_search[random_id].tolist()]
