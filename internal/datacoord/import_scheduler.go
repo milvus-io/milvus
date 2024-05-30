@@ -304,7 +304,7 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
 			// try to parse path and fill logID
-			err = binlog.CompressFieldBinlogs(info.GetBinlogs())
+			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetStatslogs())
 			if err != nil {
 				log.Warn("fail to CompressFieldBinlogs for import binlogs",
 					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
