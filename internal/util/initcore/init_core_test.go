@@ -20,6 +20,7 @@ import (
 	"testing"
 
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/stretchr/testify/assert"
 )
 
 func TestTracer(t *testing.T) {
@@ -28,4 +29,18 @@ func TestTracer(t *testing.T) {
 
 	paramtable.Get().Save(paramtable.Get().TraceCfg.Exporter.Key, "stdout")
 	ResetTraceConfig(paramtable.Get())
+}
+
+func TestOtlpHang(t *testing.T) {
+	paramtable.Init()
+	InitTraceConfig(paramtable.Get())
+
+	paramtable.Get().Save(paramtable.Get().TraceCfg.Exporter.Key, "otlp")
+	paramtable.Get().Save(paramtable.Get().TraceCfg.InitTimeoutSeconds.Key, "1")
+	defer paramtable.Get().Reset(paramtable.Get().TraceCfg.Exporter.Key)
+	defer paramtable.Get().Reset(paramtable.Get().TraceCfg.InitTimeoutSeconds.Key)
+
+	assert.Panics(t, func() {
+		ResetTraceConfig(paramtable.Get())
+	})
 }
