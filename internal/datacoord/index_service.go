@@ -383,10 +383,9 @@ func (s *Server) GetIndexState(ctx context.Context, req *indexpb.GetIndexStateRe
 		}, nil
 	}
 	if len(indexes) > 1 {
-		log.Warn(msgAmbiguousIndexName())
-		err := merr.WrapErrIndexDuplicate(req.GetIndexName())
+		log.Warn(msgAmbiguousIndexName(req.GetIndexName()))
 		return &indexpb.GetIndexStateResponse{
-			Status: merr.Status(err),
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg(msgAmbiguousIndexName(req.GetIndexName()))),
 		}, nil
 	}
 	ret := &indexpb.GetIndexStateResponse{
@@ -631,10 +630,9 @@ func (s *Server) GetIndexBuildProgress(ctx context.Context, req *indexpb.GetInde
 	}
 
 	if len(indexes) > 1 {
-		log.Warn(msgAmbiguousIndexName())
-		err := merr.WrapErrIndexDuplicate(req.GetIndexName())
+		log.Warn(msgAmbiguousIndexName(req.GetIndexName()))
 		return &indexpb.GetIndexBuildProgressResponse{
-			Status: merr.Status(err),
+			Status: merr.Status(merr.WrapErrParameterInvalidMsg(msgAmbiguousIndexName(req.GetIndexName()))),
 		}, nil
 	}
 	indexInfo := &indexpb.IndexInfo{
@@ -809,9 +807,8 @@ func (s *Server) DropIndex(ctx context.Context, req *indexpb.DropIndexRequest) (
 	}
 
 	if !req.GetDropAll() && len(indexes) > 1 {
-		log.Warn(msgAmbiguousIndexName())
-		err := merr.WrapErrIndexDuplicate(req.GetIndexName())
-		return merr.Status(err), nil
+		log.Warn(msgAmbiguousIndexName(req.GetIndexName()))
+		return merr.Status(merr.WrapErrParameterInvalidMsg(msgAmbiguousIndexName(req.GetIndexName()))), nil
 	}
 	indexIDs := make([]UniqueID, 0)
 	for _, index := range indexes {

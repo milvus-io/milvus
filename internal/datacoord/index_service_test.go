@@ -845,7 +845,7 @@ func TestServer_GetIndexState(t *testing.T) {
 		}
 		resp, err := s.GetIndexState(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -1154,7 +1154,7 @@ func TestServer_GetIndexBuildProgress(t *testing.T) {
 		}
 		resp, err := s.GetIndexBuildProgress(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetStatus().GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetStatus().GetErrorCode())
 	})
 }
 
@@ -2139,7 +2139,7 @@ func TestServer_DropIndex(t *testing.T) {
 		}
 		resp, err := s.DropIndex(ctx, req)
 		assert.NoError(t, err)
-		assert.Equal(t, commonpb.ErrorCode_UnexpectedError, resp.GetErrorCode())
+		assert.Equal(t, commonpb.ErrorCode_IllegalArgument, resp.GetErrorCode())
 	})
 
 	t.Run("drop all indexes", func(t *testing.T) {

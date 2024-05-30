@@ -41,6 +41,6 @@ func msgSegmentNotFound(segID UniqueID) string {
 	return fmt.Sprintf("failed to get segment %d", segID)
 }
 
-func msgAmbiguousIndexName() string {
-	return "there are multiple indexes, please specify the index_name"
+func msgAmbiguousIndexName(name string) string {
+	return fmt.Sprintf("there are multiple indexes, please specify the index_name, index_name: %s", name)
 }
