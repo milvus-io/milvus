@@ -698,7 +698,7 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadBF() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	bfs, err := s.task.loadBF(plan.SegmentBinlogs)
+	bfs, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
 	s.NoError(err)
 
 	s.Len(bfs, 1)
@@ -733,7 +733,7 @@ func (s *LevelZeroCompactionTaskSuite) TestFailed() {
 
 		s.task.plan = plan
 
-		_, err := s.task.loadBF(plan.SegmentBinlogs)
+		_, err := s.task.loadBF(context.Background(), plan.SegmentBinlogs)
 		s.Error(err)
 	})
 
