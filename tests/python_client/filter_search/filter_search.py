@@ -76,6 +76,7 @@ class MilvusUser(HttpUser):
                 self.ts_list.append(cur_time)
 
     def on_stop(self):
+        filter = f"{self.environment.parsed_options.filter_field}-eq-{self.environment.parsed_options.filter_value}"
         # this is a good place to clean up/release any user-specific test data
         print(f"current recall is {self.recall}, "
               f"avg recall is {sum(self.recall_list) / len(self.recall_list)}, "
@@ -83,7 +84,7 @@ class MilvusUser(HttpUser):
               f"min recall is {min(self.recall_list)}")
         data = {"ts": self.ts_list, "recall": self.recall_list}
         df = pd.DataFrame(data)
-        df.to_csv(f"/tmp/ci_logs/recall.csv-{uuid.uuid4()}", index=False)
+        df.to_parquet(f"/tmp/ci_logs/recall-of-{filter}-{uuid.uuid4()}.parquet", index=False)
 
 class StagesShape(LoadTestShape):
     """
