@@ -97,31 +97,7 @@ func (c *FieldReader) Next(count int64) (any, error) {
 	case schemapb.DataType_VarChar, schemapb.DataType_String:
 		return ReadStringData(c, count)
 	case schemapb.DataType_JSON:
-		// JSON field read data from string array Parquet
-		data, err := ReadStringData(c, count)
-		if err != nil {
-			return nil, err
-		}
-		if data == nil {
-			return nil, nil
-		}
-		byteArr := make([][]byte, 0)
-		for _, str := range data.([]string) {
-			var dummy interface{}
-			err = json.Unmarshal([]byte(str), &dummy)
-			if err != nil {
-				return nil, err
-			}
-			if c.field.GetIsDynamic() {
-				var dummy2 map[string]interface{}
-				err = json.Unmarshal([]byte(str), &dummy2)
-				if err != nil {
-					return nil, err
-				}
-			}
-			byteArr = append(byteArr, []byte(str))
-		}
-		return byteArr, nil
+		return ReadJSONData(c, count)
 	case schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return ReadBinaryData(c, count)
 	case schemapb.DataType_FloatVector:
@@ -135,152 +111,9 @@ func (c *FieldReader) Next(count int64) (any, error) {
 		vectors := lo.Flatten(arrayData.([][]float32))
 		return vectors, nil
 	case schemapb.DataType_SparseFloatVector:
-		return ReadBinaryDataForSparseFloatVector(c, count)
+		return ReadSparseFloatVectorData(c, count)
 	case schemapb.DataType_Array:
-		data := make([]*schemapb.ScalarField, 0, count)
-		elementType := c.field.GetElementType()
-		switch elementType {
-		case schemapb.DataType_Bool:
-			boolArray, err := ReadBoolArrayData(c, count)
-			if err != nil {
-				return nil, err
-			}
-			if boolArray == nil {
-				return nil, nil
-			}
-			for _, elementArray := range boolArray.([][]bool) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_BoolData{
-						BoolData: &schemapb.BoolArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		case schemapb.DataType_Int8:
-			int8Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
-			if err != nil {
-				return nil, err
-			}
-			if int8Array == nil {
-				return nil, nil
-			}
-			for _, elementArray := range int8Array.([][]int32) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{
-						IntData: &schemapb.IntArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		case schemapb.DataType_Int16:
-			int16Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
-			if err != nil {
-				return nil, err
-			}
-			if int16Array == nil {
-				return nil, nil
-			}
-			for _, elementArray := range int16Array.([][]int32) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{
-						IntData: &schemapb.IntArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		case schemapb.DataType_Int32:
-			int32Array, err := ReadIntegerOrFloatArrayData[int32](c, count)
-			if err != nil {
-				return nil, err
-			}
-			if int32Array == nil {
-				return nil, nil
-			}
-			for _, elementArray := range int32Array.([][]int32) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{
-						IntData: &schemapb.IntArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		case schemapb.DataType_Int64:
-			int64Array, err := ReadIntegerOrFloatArrayData[int64](c, count)
-			if err != nil {
-				return nil, err
-			}
-			if int64Array == nil {
-				return nil, nil
-			}
-			for _, elementArray := range int64Array.([][]int64) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_LongData{
-						LongData: &schemapb.LongArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		case schemapb.DataType_Float:
-			float32Array, err := ReadIntegerOrFloatArrayData[float32](c, count)
-			if err != nil {
-				return nil, err
-			}
-			if float32Array == nil {
-				return nil, nil
-			}
-			for _, elementArray := range float32Array.([][]float32) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_FloatData{
-						FloatData: &schemapb.FloatArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		case schemapb.DataType_Double:
-			float64Array, err := ReadIntegerOrFloatArrayData[float64](c, count)
-			if err != nil {
-				return nil, err
-			}
-			if float64Array == nil {
-				return nil, nil
-			}
-			for _, elementArray := range float64Array.([][]float64) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_DoubleData{
-						DoubleData: &schemapb.DoubleArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		case schemapb.DataType_VarChar, schemapb.DataType_String:
-			stringArray, err := ReadStringArrayData(c, count)
-			if err != nil {
-				return nil, err
-			}
-			if stringArray == nil {
-				return nil, nil
-			}
-			for _, elementArray := range stringArray.([][]string) {
-				data = append(data, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_StringData{
-						StringData: &schemapb.StringArray{
-							Data: elementArray,
-						},
-					},
-				})
-			}
-		default:
-			return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
-				elementType.String(), c.field.GetName()))
-		}
-		return data, nil
+		return ReadArrayData(c, count)
 	default:
 		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for field '%s'",
 			c.field.GetDataType().String(), c.field.GetName()))
@@ -382,6 +215,34 @@ func ReadStringData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
+func ReadJSONData(pcr *FieldReader, count int64) (any, error) {
+	// JSON field read data from string array Parquet
+	data, err := ReadStringData(pcr, count)
+	if err != nil {
+		return nil, err
+	}
+	if data == nil {
+		return nil, nil
+	}
+	byteArr := make([][]byte, 0)
+	for _, str := range data.([]string) {
+		var dummy interface{}
+		err = json.Unmarshal([]byte(str), &dummy)
+		if err != nil {
+			return nil, err
+		}
+		if pcr.field.GetIsDynamic() {
+			var dummy2 map[string]interface{}
+			err = json.Unmarshal([]byte(str), &dummy2)
+			if err != nil {
+				return nil, err
+			}
+		}
+		byteArr = append(byteArr, []byte(str))
+	}
+	return byteArr, nil
+}
+
 func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 	dataType := pcr.field.GetDataType()
 	chunked, err := pcr.columnReader.NextBatch(count)
@@ -417,38 +278,32 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 	return data, nil
 }
 
-func ReadBinaryDataForSparseFloatVector(pcr *FieldReader, count int64) (any, error) {
-	chunked, err := pcr.columnReader.NextBatch(count)
+func ReadSparseFloatVectorData(pcr *FieldReader, count int64) (any, error) {
+	data, err := ReadStringData(pcr, count)
 	if err != nil {
 		return nil, err
 	}
-	data := make([][]byte, 0, count)
+	if data == nil {
+		return nil, nil
+	}
+	byteArr := make([][]byte, 0, count)
 	maxDim := uint32(0)
-	for _, chunk := range chunked.Chunks() {
-		listReader := chunk.(*array.List)
-		offsets := listReader.Offsets()
-		if !isVectorAligned(offsets, pcr.dim, schemapb.DataType_SparseFloatVector) {
-			return nil, merr.WrapErrImportFailed("%s not aligned", schemapb.DataType_SparseFloatVector.String())
+	for _, str := range data.([]string) {
+		rowVec, err := typeutil.CreateSparseFloatRowFromJSON([]byte(str))
+		if err != nil {
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("Invalid JSON string for SparseFloatVector: '%s', err = %v", str, err))
 		}
-		uint8Reader, ok := listReader.ListValues().(*array.Uint8)
-		if !ok {
-			return nil, WrapTypeErr("binary", listReader.ListValues().DataType().Name(), pcr.field)
-		}
-		vecData := uint8Reader.Uint8Values()
-		for i := 1; i < len(offsets); i++ {
-			elemCount := int((offsets[i] - offsets[i-1]) / 8)
-			rowVec := vecData[offsets[i-1]:offsets[i]]
-			data = append(data, rowVec)
-			maxIdx := typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1)
-			if maxIdx+1 > maxDim {
-				maxDim = maxIdx + 1
-			}
+		byteArr = append(byteArr, rowVec)
+		elemCount := len(rowVec) / 8
+		maxIdx := typeutil.SparseFloatRowIndexAt(rowVec, elemCount-1)
+		if maxIdx+1 > maxDim {
+			maxDim = maxIdx + 1
 		}
 	}
 	return &storage.SparseFloatVectorFieldData{
 		SparseFloatArray: schemapb.SparseFloatArray{
 			Dim:      int64(maxDim),
-			Contents: data,
+			Contents: byteArr,
 		},
 	}, nil
 }
@@ -456,16 +311,6 @@ func ReadBinaryDataForSparseFloatVector(pcr *FieldReader, count int64) (any, err
 func checkVectorAlignWithDim(offsets []int32, dim int32) bool {
 	for i := 1; i < len(offsets); i++ {
 		if offsets[i]-offsets[i-1] != dim {
-			return false
-		}
-	}
-	return true
-}
-
-func checkSparseFloatVectorAlign(offsets []int32) bool {
-	// index: 4 bytes, value: 4 bytes
-	for i := 1; i < len(offsets); i++ {
-		if (offsets[i]-offsets[i-1])%8 != 0 {
 			return false
 		}
 	}
@@ -484,7 +329,8 @@ func isVectorAligned(offsets []int32, dim int, dataType schemapb.DataType) bool 
 	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
 		return checkVectorAlignWithDim(offsets, int32(dim*2))
 	case schemapb.DataType_SparseFloatVector:
-		return checkSparseFloatVectorAlign(offsets)
+		// JSON format, skip alignment check
+		return true
 	default:
 		return false
 	}
@@ -617,6 +463,153 @@ func ReadStringArrayData(pcr *FieldReader, count int64) (any, error) {
 	}
 	if len(data) == 0 {
 		return nil, nil
+	}
+	return data, nil
+}
+
+func ReadArrayData(pcr *FieldReader, count int64) (any, error) {
+	data := make([]*schemapb.ScalarField, 0, count)
+	elementType := pcr.field.GetElementType()
+	switch elementType {
+	case schemapb.DataType_Bool:
+		boolArray, err := ReadBoolArrayData(pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if boolArray == nil {
+			return nil, nil
+		}
+		for _, elementArray := range boolArray.([][]bool) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_BoolData{
+					BoolData: &schemapb.BoolArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	case schemapb.DataType_Int8:
+		int8Array, err := ReadIntegerOrFloatArrayData[int32](pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if int8Array == nil {
+			return nil, nil
+		}
+		for _, elementArray := range int8Array.([][]int32) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	case schemapb.DataType_Int16:
+		int16Array, err := ReadIntegerOrFloatArrayData[int32](pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if int16Array == nil {
+			return nil, nil
+		}
+		for _, elementArray := range int16Array.([][]int32) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	case schemapb.DataType_Int32:
+		int32Array, err := ReadIntegerOrFloatArrayData[int32](pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if int32Array == nil {
+			return nil, nil
+		}
+		for _, elementArray := range int32Array.([][]int32) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_IntData{
+					IntData: &schemapb.IntArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	case schemapb.DataType_Int64:
+		int64Array, err := ReadIntegerOrFloatArrayData[int64](pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if int64Array == nil {
+			return nil, nil
+		}
+		for _, elementArray := range int64Array.([][]int64) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_LongData{
+					LongData: &schemapb.LongArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	case schemapb.DataType_Float:
+		float32Array, err := ReadIntegerOrFloatArrayData[float32](pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if float32Array == nil {
+			return nil, nil
+		}
+		for _, elementArray := range float32Array.([][]float32) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_FloatData{
+					FloatData: &schemapb.FloatArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	case schemapb.DataType_Double:
+		float64Array, err := ReadIntegerOrFloatArrayData[float64](pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if float64Array == nil {
+			return nil, nil
+		}
+		for _, elementArray := range float64Array.([][]float64) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_DoubleData{
+					DoubleData: &schemapb.DoubleArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	case schemapb.DataType_VarChar, schemapb.DataType_String:
+		stringArray, err := ReadStringArrayData(pcr, count)
+		if err != nil {
+			return nil, err
+		}
+		if stringArray == nil {
+			return nil, nil
+		}
+		for _, elementArray := range stringArray.([][]string) {
+			data = append(data, &schemapb.ScalarField{
+				Data: &schemapb.ScalarField_StringData{
+					StringData: &schemapb.StringArray{
+						Data: elementArray,
+					},
+				},
+			})
+		}
+	default:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("unsupported data type '%s' for array field '%s'",
+			elementType.String(), pcr.field.GetName()))
 	}
 	return data, nil
 }
