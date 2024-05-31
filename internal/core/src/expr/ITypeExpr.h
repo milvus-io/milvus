@@ -113,11 +113,13 @@ IsMaterializedViewSupported(const DataType& data_type) {
 struct ColumnInfo {
     FieldId field_id_;
     DataType data_type_;
+    DataType element_type_;
     std::vector<std::string> nested_path_;
 
     ColumnInfo(const proto::plan::ColumnInfo& column_info)
         : field_id_(column_info.field_id()),
           data_type_(static_cast<DataType>(column_info.data_type())),
+          element_type_(static_cast<DataType>(column_info.element_type())),
           nested_path_(column_info.nested_path().begin(),
                        column_info.nested_path().end()) {
     }
@@ -127,6 +129,7 @@ struct ColumnInfo {
                std::vector<std::string> nested_path = {})
         : field_id_(field_id),
           data_type_(data_type),
+          element_type_(DataType::NONE),
           nested_path_(std::move(nested_path)) {
     }
 
@@ -137,6 +140,10 @@ struct ColumnInfo {
         }
 
         if (data_type_ != other.data_type_) {
+            return false;
+        }
+
+        if (element_type_ != other.element_type_) {
             return false;
         }
 
@@ -151,10 +158,12 @@ struct ColumnInfo {
 
     std::string
     ToString() const {
-        return fmt::format("[FieldId:{}, data_type:{}, nested_path:{}]",
-                           std::to_string(field_id_.get()),
-                           data_type_,
-                           milvus::Join<std::string>(nested_path_, ","));
+        return fmt::format(
+            "[FieldId:{}, data_type:{}, element_type:{}, nested_path:{}]",
+            std::to_string(field_id_.get()),
+            data_type_,
+            element_type_,
+            milvus::Join<std::string>(nested_path_, ","));
     }
 };
 

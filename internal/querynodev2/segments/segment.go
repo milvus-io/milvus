@@ -45,6 +45,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	milvus_storage "github.com/milvus-io/milvus-storage/go/storage"
 	"github.com/milvus-io/milvus-storage/go/storage/options"
+	"github.com/milvus-io/milvus/internal/proto/cgopb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
@@ -56,6 +57,9 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
+	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
+	"github.com/milvus-io/milvus/pkg/util/indexparams"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -1266,18 +1270,58 @@ func (s *LocalSegment) LoadIndex(ctx context.Context, indexInfo *querypb.FieldIn
 		return err
 	}
 	defer deleteLoadIndexInfo(loadIndexInfo)
+
+	schema, err := typeutil.CreateSchemaHelper(s.GetCollection().Schema())
+	if err != nil {
+		return err
+	}
+	fieldSchema, err := schema.GetFieldFromID(indexInfo.GetFieldID())
+	if err != nil {
+		return err
+	}
+
+	indexParams := funcutil.KeyValuePair2Map(indexInfo.IndexParams)
+	// as Knowhere reports error if encounter an unknown param, we need to delete it
+	delete(indexParams, common.MmapEnabledKey)
+
+	// some build params also exist in indexParams, which are useless during loading process
+	if indexParams["index_type"] == indexparamcheck.IndexDISKANN {
+		if err := indexparams.SetDiskIndexLoadParams(paramtable.Get(), indexParams, indexInfo.GetNumRows()); err != nil {
+			return err
+		}
+	}
+
+	if err := indexparams.AppendPrepareLoadParams(paramtable.Get(), indexParams); err != nil {
+		return err
+	}
+
+	indexInfoProto := &cgopb.LoadIndexInfo{
+		CollectionID:       s.Collection(),
+		PartitionID:        s.Partition(),
+		SegmentID:          s.ID(),
+		Field:              fieldSchema,
+		EnableMmap:         isIndexMmapEnable(indexInfo),
+		MmapDirPath:        paramtable.Get().QueryNodeCfg.MmapDirPath.GetValue(),
+		IndexID:            indexInfo.GetIndexID(),
+		IndexBuildID:       indexInfo.GetBuildID(),
+		IndexVersion:       indexInfo.GetIndexVersion(),
+		IndexParams:        indexParams,
+		IndexFiles:         indexInfo.GetIndexFilePaths(),
+		IndexEngineVersion: indexInfo.GetCurrentIndexVersion(),
+		IndexStoreVersion:  indexInfo.GetIndexStoreVersion(),
+	}
+
 	if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
 		uri, err := typeutil_internal.GetStorageURI(paramtable.Get().CommonCfg.StorageScheme.GetValue(), paramtable.Get().CommonCfg.StoragePathPrefix.GetValue(), s.ID())
 		if err != nil {
 			return err
 		}
-		loadIndexInfo.appendStorageInfo(uri, indexInfo.IndexStoreVersion)
+		indexInfoProto.Uri = uri
 	}
 	newLoadIndexInfoSpan := tr.RecordSpan()
 
 	// 2.
-	err = loadIndexInfo.appendLoadIndexInfo(ctx, indexInfo, s.Collection(), s.Partition(), s.ID(), fieldType)
-	if err != nil {
+	if err := loadIndexInfo.finish(ctx, indexInfoProto); err != nil {
 		if loadIndexInfo.cleanLocalData(ctx) != nil {
 			log.Warn("failed to clean cached data on disk after append index failed",
 				zap.Int64("buildID", indexInfo.BuildID),

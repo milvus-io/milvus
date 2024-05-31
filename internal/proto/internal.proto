@@ -198,6 +198,7 @@ message RetrieveResults {
    // query request cost
   CostAggregation costAggregation = 13;
   int64 all_retrieve_count = 14;
+  bool has_more_result = 15;
 }
 
 message LoadIndex {
