@@ -6127,6 +6127,19 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 			}
 			partitionIDs = []UniqueID{partitionID}
 		}
+		// Currently, querynodes first load L0 segments and then load L1 segments.
+		// Therefore, to ensure the deletes from L0 import take effect,
+		// the collection needs to be in an unloaded state,
+		// and then all L0 and L1 segments should be loaded at once.
+		loaded, err := isCollectionLoaded(ctx, node.queryCoord, collectionID)
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		if loaded {
+			resp.Status = merr.Status(merr.WrapErrImportFailed("for l0 import, collection cannot be loaded, please release it first"))
+			return resp, nil
+		}
 	} else {
 		if hasPartitionKey {
 			if req.GetPartitionName() != "" {
