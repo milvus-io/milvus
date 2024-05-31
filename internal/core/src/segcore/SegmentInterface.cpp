@@ -88,6 +88,7 @@ SegmentInternalInterface::Retrieve(const query::RetrievePlan* plan,
     query::ExecPlanNodeVisitor visitor(*this, timestamp);
     auto retrieve_results = visitor.get_retrieve_result(*plan->plan_node_);
     retrieve_results.segment_ = (void*)this;
+    results->set_has_more_result(retrieve_results.has_more_result);
 
     auto result_rows = retrieve_results.result_offsets_.size();
     int64_t output_data_size = 0;

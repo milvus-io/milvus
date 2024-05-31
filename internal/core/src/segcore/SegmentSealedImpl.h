@@ -124,7 +124,7 @@ class SegmentSealedImpl : public SegmentSealed {
            const IdArray* pks,
            const Timestamp* timestamps) override;
 
-    std::vector<OffsetMap::OffsetType>
+    std::pair<std::vector<OffsetMap::OffsetType>, bool>
     find_first(int64_t limit,
                const BitsetType& bitset,
                bool false_filtered_out) const override {
