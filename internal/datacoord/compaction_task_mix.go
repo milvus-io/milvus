@@ -40,13 +40,8 @@ func (task *mixCompactionTask) ProcessTask(handler *compactionPlanHandler) error
 }
 
 func (task *mixCompactionTask) processPipeliningTask(handler *compactionPlanHandler) error {
-	nodeID, err := handler.assignNodeID(task.GetChannel())
-	if err != nil {
-		return err
-	}
-	task.dataNodeID = nodeID
 	handler.scheduler.Submit(task)
-	handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setNodeID(nodeID), setState(datapb.CompactionTaskState_executing))
+	handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_executing))
 	log.Info("Compaction plan submited")
 	return nil
 }
@@ -56,7 +51,7 @@ func (task *mixCompactionTask) processExecutingTask(handler *compactionPlanHandl
 	if !exist {
 		// compaction task in DC but not found in DN means the compaction plan has failed
 		log.Info("compaction failed")
-		handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), endSpan())
+		handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), endSpan())
 		handler.setSegmentsCompacting(task, false)
 		handler.scheduler.Finish(task.GetPlanID(), task)
 		return nil
@@ -78,7 +73,7 @@ func (task *mixCompactionTask) processExecutingTask(handler *compactionPlanHandl
 				return err
 			}
 			handler.setSegmentsCompacting(task, false)
-			handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), cleanLogPath(), endSpan())
+			handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), cleanLogPath(), endSpan())
 			handler.scheduler.Finish(task.GetNodeID(), task)
 			return nil
 		}
@@ -88,7 +83,7 @@ func (task *mixCompactionTask) processExecutingTask(handler *compactionPlanHandl
 		}
 
 		UpdateCompactionSegmentSizeMetrics(planResult.GetSegments())
-		handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_completed), setResult(planResult), cleanLogPath(), endSpan())
+		handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_completed), setResult(planResult), cleanLogPath(), endSpan())
 		handler.scheduler.Finish(task.GetNodeID(), task)
 	case commonpb.CompactionState_Executing:
 		ts := tsoutil.GetCurrentTime()
@@ -98,7 +93,7 @@ func (task *mixCompactionTask) processExecutingTask(handler *compactionPlanHandl
 				zap.Uint64("startTime", task.GetStartTime()),
 				zap.Uint64("now", ts),
 			)
-			handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_timeout), endSpan())
+			handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_timeout), endSpan())
 		}
 	}
 	return nil
@@ -118,7 +113,7 @@ func (task *mixCompactionTask) processTimeoutTask(handler *compactionPlanHandler
 	} else {
 		// compaction task in DC but not found in DN means the compaction plan has failed
 		log.Info("compaction failed for timeout")
-		handler.queueTasks[planID] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), endSpan())
+		handler.plans[planID] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), endSpan())
 		handler.setSegmentsCompacting(task, false)
 		handler.scheduler.Finish(task.GetNodeID(), task)
 	}
@@ -265,6 +260,6 @@ func (task *mixCompactionTask) BuildCompactionRequest(handler *compactionPlanHan
 		segIDMap[segID] = segInfo.GetDeltalogs()
 	}
 	log.Info("Compaction handler refreshed mix compaction plan", zap.Any("segID2DeltaLogs", segIDMap))
-	handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setPlan(plan))
+	handler.plans[task.GetPlanID()] = task.ShadowClone(setPlan(plan))
 	return plan, nil
 }

@@ -29,10 +29,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
-const (
-	reqTimeoutInterval = time.Second * 10
-)
-
 type taskScheduler struct {
 	sync.RWMutex
 

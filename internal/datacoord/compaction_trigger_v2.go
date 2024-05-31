@@ -38,7 +38,7 @@ type TriggerManager interface {
 
 // CompactionTriggerManager registers Triggers to TriggerType
 // so that when the certain TriggerType happens, the corresponding triggers can
-// trigger the correct compaction queueTasks.
+// trigger the correct compaction plans.
 // Trigger types:
 // 1. Change of Views
 //   - LevelZeroViewTrigger

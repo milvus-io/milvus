@@ -145,13 +145,8 @@ func (task *defaultCompactionTask) ProcessTask(handler *compactionPlanHandler) e
 }
 
 func (task *defaultCompactionTask) processPipeliningTask(handler *compactionPlanHandler) error {
-	nodeID, err := handler.findNode(task.GetChannel())
-	if err != nil {
-		return err
-	}
-	task.dataNodeID = nodeID
 	handler.scheduler.Submit(task)
-	handler.plans[task.GetPlanID()] = task.ShadowClone(setNodeID(nodeID), setState(datapb.CompactionTaskState_executing))
+	handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_executing))
 	log.Info("Compaction plan submited")
 	return nil
 }

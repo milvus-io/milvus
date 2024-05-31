@@ -551,7 +551,7 @@ message CompactionPlan {
   int64 collection_ttl = 8;
   int64 total_rows = 9;
   schema.CollectionSchema schema = 10;
-  schema.FieldSchema clustering_key_field = 11;
+  int64 clustering_key_field = 11;
   int64 max_segment_rows = 12;
   int64 prefer_segment_rows = 13;
   string analyze_result_path = 14;

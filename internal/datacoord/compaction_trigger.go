@@ -740,15 +740,7 @@ func (t *compactionTrigger) generatePlans(segments []*SegmentInfo, signal *compa
 		pair := typeutil.NewPair(totalRows, segmentIDs)
 		tasks[i] = &pair
 	}
-<<<<<<< HEAD
-
-	log.Info("generate a plan for priority candidates", zap.Any("plan", plan),
-		zap.Int("len(segments)", len(plan.GetSegmentBinlogs())),
-		zap.Int64("target segment row", plan.TotalRows), zap.Int64("target segment size", size))
-	return plan
-=======
 	return tasks
->>>>>>> ff049f6c50 (Refactor compaction handler)
 }
 
 func greedySelect(candidates []*SegmentInfo, free int64, maxSegment int) ([]*SegmentInfo, []*SegmentInfo, int64) {
@@ -912,7 +904,7 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 		if !isExpandableSmallSegment(s, expectedSize) {
 			continue
 		}
-		// Try squeeze this segment into existing queueTasks. This could cause segment size to exceed maxSize.
+		// Try squeeze this segment into existing plans. This could cause segment size to exceed maxSize.
 		for bidx, b := range buckets {
 			totalSize := lo.SumBy(b, func(s *SegmentInfo) int64 { return s.getSegmentSize() })
 			if totalSize+s.getSegmentSize() > int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(expectedSize)) {

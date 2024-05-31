@@ -75,8 +75,8 @@ var (
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	mu         lock.RWMutex
-	queueTasks map[int64]CompactionTask // planID -> task
+	mu    lock.RWMutex
+	plans map[int64]CompactionTask // planID -> task
 
 	meta             CompactionMeta
 	allocator        allocator
@@ -95,7 +95,7 @@ type compactionPlanHandler struct {
 func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator, analyzeScheduler *taskScheduler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
-		queueTasks:       make(map[int64]CompactionTask),
+		plans:            make(map[int64]CompactionTask),
 		chManager:        cm,
 		meta:             meta,
 		sessions:         sessions,
@@ -214,7 +214,7 @@ func (c *compactionPlanHandler) Clean() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for id, task := range c.queueTasks {
+	for id, task := range c.plans {
 		switch task.GetType() {
 		case datapb.CompactionType_ClusteringCompaction:
 			if task.GetState() != datapb.CompactionTaskState_cleaned || task.GetState() != datapb.CompactionTaskState_indexed {
@@ -227,7 +227,7 @@ func (c *compactionPlanHandler) Clean() {
 		}
 		// after timeout + 1h, the plan will be cleaned
 		if isTimeout(current, task.GetStartTime(), task.GetTimeoutInSeconds()+60*60) {
-			delete(c.queueTasks, id)
+			delete(c.plans, id)
 		}
 	}
 }
@@ -242,7 +242,7 @@ func (c *compactionPlanHandler) stop() {
 func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for id, task := range c.queueTasks {
+	for id, task := range c.plans {
 		if task.GetChannel() == channel {
 			log.Info("Compaction handler removing tasks by channel",
 				zap.String("channel", channel),
@@ -250,7 +250,7 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 				zap.Int64("node", task.GetNodeID()),
 			)
 			c.scheduler.Finish(task.GetNodeID(), task)
-			delete(c.queueTasks, id)
+			delete(c.plans, id)
 		}
 	}
 }
@@ -258,8 +258,8 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if plan, ok := c.queueTasks[planID]; ok {
-		c.queueTasks[planID] = plan.ShadowClone(opts...)
+	if plan, ok := c.plans[planID]; ok {
+		c.plans[planID] = plan.ShadowClone(opts...)
 	}
 }
 
@@ -279,7 +279,7 @@ func (c *compactionPlanHandler) enqueueCompaction(task CompactionTask) error {
 
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", task.GetType()))
 	task.SetSpan(span)
-	c.queueTasks[task.GetPlanID()] = task
+	c.plans[task.GetPlanID()] = task
 	log.Info("Compaction plan enqueue")
 	return nil
 }
@@ -392,7 +392,7 @@ func (c *compactionPlanHandler) getCompaction(planID int64) CompactionTask {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.queueTasks[planID]
+	return c.plans[planID]
 }
 
 func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
@@ -402,7 +402,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	planStates, err := c.sessions.GetCompactionPlansResults()
 	if err != nil {
 		// if there is a data node alive but we failed to get info,
-		log.Warn("failed to get compaction queueTasks from all nodes", zap.Error(err))
+		log.Warn("failed to get compaction plans from all nodes", zap.Error(err))
 		return err
 	}
 	c.compactionResults = planStates
@@ -450,7 +450,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	}
 	c.mu.Unlock()
 
-	// Compaction queueTasks in DN but not in DC are unknown queueTasks, need to notify DN to clear it.
+	// Compaction plans in DN but not in DC are unknown plans, need to notify DN to clear it.
 	// No locks needed, because no changes in DC memeory
 	completedPlans := lo.PickBy(planStates, func(planID int64, planState *typeutil.Pair[int64, *datapb.CompactionPlanResult]) bool {
 		return planState.B.GetState() == commonpb.CompactionState_Completed
@@ -483,8 +483,8 @@ func (c *compactionPlanHandler) isFull() bool {
 func (c *compactionPlanHandler) getTasks() []CompactionTask {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	tasks := make([]CompactionTask, 0, len(c.queueTasks))
-	for _, plan := range c.queueTasks {
+	tasks := make([]CompactionTask, 0, len(c.plans))
+	for _, plan := range c.plans {
 		tasks = append(tasks, plan)
 	}
 	return tasks
@@ -496,7 +496,7 @@ func (c *compactionPlanHandler) getCompactionTasksBySignalID(signalID int64) []C
 	defer c.mu.RUnlock()
 
 	var tasks []CompactionTask
-	for _, t := range c.queueTasks {
+	for _, t := range c.plans {
 		if signalID == 0 {
 			tasks = append(tasks, t)
 			continue

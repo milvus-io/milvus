@@ -836,7 +836,7 @@ func Test_compactionTrigger_force_maxSegmentLimit(t *testing.T) {
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
-			// should be split into two queueTasks
+			// should be split into two plans
 			plan := <-spy.spyChan
 			assert.Equal(t, len(plan.SegmentBinlogs), 30)
 
@@ -1724,7 +1724,7 @@ func Test_compactionTrigger_noplan_random_size(t *testing.T) {
 			assert.Equal(t, tt.wantErr, err != nil)
 			spy := (tt.fields.compactionHandler).(*spyCompactionHandler)
 
-			// should be split into two queueTasks
+			// should be split into two plans
 			var plans []*datapb.CompactionPlan
 			ticker := time.NewTicker(3 * time.Second)
 			defer ticker.Stop()
