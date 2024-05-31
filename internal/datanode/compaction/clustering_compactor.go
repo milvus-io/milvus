@@ -292,6 +292,7 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
+		t.refreshBufferWriter(buffer)
 		t.clusterBuffers = append(t.clusterBuffers, buffer)
 		for _, key := range bucket {
 			scalarToClusterBufferMap[key] = buffer
@@ -340,6 +341,7 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 			uploadedSegmentStats:    make(map[typeutil.UniqueID]storage.SegmentStats, 0),
 			clusteringKeyFieldStats: fieldStats,
 		}
+		t.refreshBufferWriter(clusterBuffer)
 		t.clusterBuffers = append(t.clusterBuffers, clusterBuffer)
 	}
 	t.offsetToBufferFunc = func(offset int64, idMapping []uint32) *ClusterBuffer {
@@ -611,7 +613,6 @@ func (t *clusteringCompactionTask) writeToBuffer(ctx context.Context, clusterBuf
 		return err
 	}
 	t.writtenRowNum.Inc()
-	clusterBuffer.writer.IsFull()
 	clusterBuffer.bufferRowNum.Add(1)
 	return nil
 }

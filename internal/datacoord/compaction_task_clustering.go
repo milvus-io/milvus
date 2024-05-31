@@ -93,33 +93,14 @@ func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPl
 	planResult := nodePlan.B
 	switch planResult.GetState() {
 	case commonpb.CompactionState_Completed:
-		// channels are balanced to other nodes, yet the old datanode still have the compaction results
-		// task.dataNodeID == planState.A, but
-		// task.dataNodeID not match with channel
-		// Mark this compaction as failure and skip processing the meta
-		if !handler.chManager.Match(task.GetNodeID(), task.GetChannel()) {
-			// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
-			// without changing the meta
-			log.Warn("compaction failed for channel nodeID not match")
-			err := handler.sessions.SyncSegments(task.GetNodeID(), &datapb.SyncSegmentsRequest{PlanID: task.GetPlanID()})
-			if err != nil {
-				log.Warn("compaction failed to sync segments with node", zap.Error(err))
-				return err
-			}
-			handler.setSegmentsCompacting(task, false)
-			task.CleanLogPath()
-			task.State = datapb.CompactionTaskState_failed
-			handler.scheduler.Finish(task.GetNodeID(), task)
-			return nil
-		}
-		err := handler.handleMergeCompactionResult(task.plan, planResult)
-		if err != nil {
-			return err
-		}
 		resultSegmentIDs := lo.Map(planResult.Segments, func(segment *datapb.CompactionSegment, _ int) int64 {
 			return segment.GetSegmentID()
 		})
 		task.CompactionTask.ResultSegments = resultSegmentIDs
+		err := handler.handleMergeCompactionResult(task.GetPlan(), planResult)
+		if err != nil {
+			return err
+		}
 		UpdateCompactionSegmentSizeMetrics(planResult.GetSegments())
 		ts := time.Now().UnixMilli()
 		compactionStageTime := ts - task.lastUpdateStateTime

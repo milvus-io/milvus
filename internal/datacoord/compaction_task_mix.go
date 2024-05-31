@@ -2,6 +2,7 @@ package datacoord
 
 import (
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 
@@ -61,29 +62,13 @@ func (task *mixCompactionTask) processExecutingTask(handler *compactionPlanHandl
 	planResult := nodePlan.B
 	switch planResult.GetState() {
 	case commonpb.CompactionState_Completed:
-		// channels are balanced to other nodes, yet the old datanode still have the compaction results
-		// task.dataNodeID == planState.A, but
-		// task.dataNodeID not match with channel
-		// Mark this compaction as failure and skip processing the meta
-		if !handler.chManager.Match(task.GetNodeID(), task.GetChannel()) {
-			// Sync segments without CompactionFrom segmentsIDs to make sure DN clear the task
-			// without changing the meta
-			log.Warn("compaction failed for channel nodeID not match")
-			err := handler.sessions.SyncSegments(task.GetNodeID(), &datapb.SyncSegmentsRequest{PlanID: task.GetPlanID()})
-			if err != nil {
-				log.Warn("compaction failed to sync segments with node", zap.Error(err))
-				return err
-			}
-			handler.setSegmentsCompacting(task, false)
-			handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), cleanLogPath(), endSpan())
-			handler.scheduler.Finish(task.GetNodeID(), task)
-			return nil
-		}
-
+		resultSegmentIDs := lo.Map(planResult.Segments, func(segment *datapb.CompactionSegment, _ int) int64 {
+			return segment.GetSegmentID()
+		})
+		task.CompactionTask.ResultSegments = resultSegmentIDs
 		if err := handler.handleMergeCompactionResult(task.GetPlan(), planResult); err != nil {
 			return err
 		}
-
 		UpdateCompactionSegmentSizeMetrics(planResult.GetSegments())
 		handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_completed), setResult(planResult), cleanLogPath(), endSpan())
 		handler.scheduler.Finish(task.GetNodeID(), task)

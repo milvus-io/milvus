@@ -328,14 +328,6 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	}
 }
 
-func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
-	c.mu.Lock()
-	defer c.mu.Unlock()
-	if plan, ok := c.plans[planID]; ok {
-		c.plans[planID] = plan.ShadowClone(opts...)
-	}
-}
-
 func (c *compactionPlanHandler) enqueueCompaction(task CompactionTask) error {
 	log := log.With(zap.Int64("planID", task.GetPlanID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
 	// c.setSegmentsCompacting(task, true)
@@ -359,7 +351,16 @@ func (c *compactionPlanHandler) enqueueCompaction(task CompactionTask) error {
 	return nil
 }
 
+func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
+	if plan, ok := c.plans[planID]; ok {
+		c.plans[planID] = plan.ShadowClone(opts...)
+	}
+}
+
 func (c *compactionPlanHandler) notifyTasks(tasks []CompactionTask) {
+	// todo minimize the lock range
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	for _, task := range tasks {
 		// avoid closure capture iteration variable
 		innerTask := task
@@ -429,6 +430,7 @@ func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.Compaction
 	return c.meta.UpdateSegmentsInfo(operators...)
 }
 
+// todo move into state machine
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
 	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.String("type", plan.GetType().String()))
 	if plan.GetType() == datapb.CompactionType_ClusteringCompaction {
