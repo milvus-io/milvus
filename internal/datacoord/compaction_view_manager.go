@@ -2,7 +2,6 @@ package datacoord
 
 import (
 	"context"
-	"sync"
 	"time"
 
 	"github.com/samber/lo"
@@ -11,156 +10,78 @@ import (
 
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/lock"
-	"github.com/milvus-io/milvus/pkg/util/logutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type CompactionViewManager struct {
-	view      *FullViews
-	viewGuard lock.RWMutex
+var _ CompactionPolicy = (*l0CompactionPolicy)(nil)
 
-	meta      *meta
-	trigger   TriggerManager
-	allocator allocator
+type l0CompactionPolicy struct {
+	meta   *meta
+	view   *FullViews
+	ticker *time.Ticker
 
-	closeSig chan struct{}
-	closeWg  sync.WaitGroup
+	emptyLoopCount int
 }
 
-func NewCompactionViewManager(meta *meta, trigger TriggerManager, allocator allocator) *CompactionViewManager {
-	return &CompactionViewManager{
-		view: &FullViews{
-			collections: make(map[int64][]*SegmentView),
-		},
-		meta:      meta,
-		trigger:   trigger,
-		allocator: allocator,
-		closeSig:  make(chan struct{}),
-	}
-}
-
-func (m *CompactionViewManager) Start() {
-	m.closeWg.Add(1)
-	go m.checkLoop()
-}
-
-func (m *CompactionViewManager) Close() {
-	close(m.closeSig)
-	m.closeWg.Wait()
-}
-
-func (m *CompactionViewManager) checkLoop() {
-	defer logutil.LogPanic()
-	defer m.closeWg.Done()
-
-	if !Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() {
-		return
-	}
-
-	// TODO: Only process L0 compaction now, so just return if its not enabled
-	if !Params.DataCoordCfg.EnableLevelZeroSegment.GetAsBool() {
-		return
-	}
-
+func newL0CompactionPolicy(meta *meta, view *FullViews) *l0CompactionPolicy {
 	interval := Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second)
-	checkTicker := time.NewTicker(interval)
-	defer checkTicker.Stop()
-
-	idleTicker := time.NewTicker(interval * 3)
-	defer idleTicker.Stop()
-
-	// each time when triggers a compaction, the idleTicker would reset
-	refreshViewsAndTrigger := func(ctx context.Context) bool {
-		events := m.Check(ctx)
-		if len(events) != 0 {
-			m.notifyTrigger(ctx, events)
-			idleTicker.Reset(interval * 3)
-			return true
-		}
-
-		return false
-	}
-
-	log.Info("Compaction view manager start", zap.Duration("check interval", interval), zap.Duration("idle check interval", interval*3))
-	for {
-		select {
-		case <-m.closeSig:
-			log.Info("Compaction View checkLoop quit")
-			return
-		case <-checkTicker.C:
-			refreshViewsAndTrigger(context.Background())
-
-		case <-idleTicker.C:
-			// idelTicker will be reset everytime when Check's able to
-			// generates compaction events
-
-			// if no views are refreshed, try to get cached views and trigger a
-			// TriggerTypeViewIDLE event
-			if !refreshViewsAndTrigger(context.Background()) {
-				m.triggerEventForIDLEView()
-			}
-		}
+	ticker := time.NewTicker(interval)
+	return &l0CompactionPolicy{
+		meta:   meta,
+		view:   view,
+		ticker: ticker,
 	}
 }
 
-func (m *CompactionViewManager) triggerEventForIDLEView() {
-	log.Info("Views idle for a long time, try to trigger a TriggerTypeLevelZeroViewIDLE compaction event")
-	events := make(map[CompactionTriggerType][]CompactionView)
-	for collID := range m.view.collections {
-		cachedViews := m.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
-			return v.Level == datapb.SegmentLevel_L0
-		})
-		if len(cachedViews) > 0 {
-			grouped := m.groupL0ViewsByPartChan(collID, cachedViews)
-			events[TriggerTypeLevelZeroViewIDLE] = lo.Map(lo.Values(grouped),
-				func(l0View *LevelZeroSegmentsView, _ int) CompactionView {
-					return l0View
-				})
-			log.Info("Generate TriggerTypeLevelZeroViewIDLE compaction event", zap.Int64("collectionID", collID))
-			break
-		}
-	}
-
-	if len(events) > 0 {
-		m.notifyTrigger(context.Background(), events)
-	}
+func (policy *l0CompactionPolicy) Enable() bool {
+	return Params.DataCoordCfg.EnableAutoCompaction.GetAsBool() && Params.DataCoordCfg.EnableLevelZeroSegment.GetAsBool()
 }
 
-func (m *CompactionViewManager) notifyTrigger(ctx context.Context, events map[CompactionTriggerType][]CompactionView) {
-	taskID, err := m.allocator.allocID(ctx)
-	if err != nil {
-		log.Warn("CompactionViewManager notify trigger failed, unable to allocate taskID",
-			zap.Error(err))
-		return
-	}
-
-	for eType, views := range events {
-		m.trigger.Notify(taskID, eType, views)
-	}
+func (policy *l0CompactionPolicy) Stop() {
+	policy.ticker.Stop()
 }
 
-// Global check could take some time, we need to record the time.
-func (m *CompactionViewManager) Check(ctx context.Context) (events map[CompactionTriggerType][]CompactionView) {
+func (policy *l0CompactionPolicy) Ticker() *time.Ticker {
+	return policy.ticker
+}
+
+func (policy *l0CompactionPolicy) Trigger(ctx context.Context) (map[CompactionTriggerType][]CompactionView, error) {
+	// support config hot refresh
+	defer policy.ticker.Reset(Params.DataCoordCfg.GlobalCompactionInterval.GetAsDuration(time.Second))
+	if !policy.Enable() {
+		return make(map[CompactionTriggerType][]CompactionView, 0), nil
+	}
+
+	events := policy.generateEventForLevelZeroViewChange(ctx)
+	if len(events) != 0 {
+		// each time when triggers a compaction, the idleTicker would reset
+		policy.emptyLoopCount = 0
+		return events, nil
+	}
+	if policy.emptyLoopCount >= 3 {
+		idleEvents := policy.generateEventForLevelZeroViewIDLE()
+		return idleEvents, nil
+	}
+	return make(map[CompactionTriggerType][]CompactionView, 0), nil
+}
+
+func (policy *l0CompactionPolicy) generateEventForLevelZeroViewChange(ctx context.Context) (events map[CompactionTriggerType][]CompactionView) {
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "CompactionView-Check")
 	defer span.End()
 
-	m.viewGuard.Lock()
-	defer m.viewGuard.Unlock()
-
 	span.AddEvent("CompactionView GetCompactableSegment")
-	latestCollSegs := m.meta.GetCompactableSegmentGroupByCollection()
+	latestCollSegs := policy.meta.GetCompactableSegmentGroupByCollection()
 	latestCollIDs := lo.Keys(latestCollSegs)
-	viewCollIDs := lo.Keys(m.view.collections)
+	viewCollIDs := lo.Keys(policy.view.collections)
 
 	_, diffRemove := lo.Difference(latestCollIDs, viewCollIDs)
 	for _, collID := range diffRemove {
-		delete(m.view.collections, collID)
+		delete(policy.view.collections, collID)
 	}
 
 	// TODO: update all segments views. For now, just update Level Zero Segments
 	span.AddEvent("CompactionView Refresh L0 views")
-	refreshedL0Views := m.RefreshLevelZeroViews(latestCollSegs)
+	refreshedL0Views := policy.RefreshLevelZeroViews(latestCollSegs)
 	if len(refreshedL0Views) > 0 {
 		events = make(map[CompactionTriggerType][]CompactionView)
 		events[TriggerTypeLevelZeroViewChange] = refreshedL0Views
@@ -169,7 +90,7 @@ func (m *CompactionViewManager) Check(ctx context.Context) (events map[Compactio
 	return events
 }
 
-func (m *CompactionViewManager) RefreshLevelZeroViews(latestCollSegs map[int64][]*SegmentInfo) []CompactionView {
+func (policy *l0CompactionPolicy) RefreshLevelZeroViews(latestCollSegs map[int64][]*SegmentInfo) []CompactionView {
 	var allRefreshedL0Veiws []CompactionView
 	for collID, segments := range latestCollSegs {
 		levelZeroSegments := lo.Filter(segments, func(info *SegmentInfo, _ int) bool {
@@ -177,7 +98,7 @@ func (m *CompactionViewManager) RefreshLevelZeroViews(latestCollSegs map[int64][
 		})
 
 		latestL0Segments := GetViewsByInfo(levelZeroSegments...)
-		needRefresh, collRefreshedViews := m.getChangedLevelZeroViews(collID, latestL0Segments)
+		needRefresh, collRefreshedViews := policy.getChangedLevelZeroViews(collID, latestL0Segments)
 		if needRefresh {
 			log.Info("Refresh compaction level zero views",
 				zap.Int64("collectionID", collID),
@@ -185,7 +106,7 @@ func (m *CompactionViewManager) RefreshLevelZeroViews(latestCollSegs map[int64][
 					return view.String()
 				})))
 
-			m.view.collections[collID] = latestL0Segments
+			policy.view.collections[collID].l0 = latestL0Segments
 		}
 
 		if len(collRefreshedViews) > 0 {
@@ -196,8 +117,8 @@ func (m *CompactionViewManager) RefreshLevelZeroViews(latestCollSegs map[int64][
 	return allRefreshedL0Veiws
 }
 
-func (m *CompactionViewManager) getChangedLevelZeroViews(collID UniqueID, LevelZeroViews []*SegmentView) (needRefresh bool, refreshed []CompactionView) {
-	cachedViews := m.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
+func (policy *l0CompactionPolicy) getChangedLevelZeroViews(collID UniqueID, LevelZeroViews []*SegmentView) (needRefresh bool, refreshed []CompactionView) {
+	cachedViews := policy.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
 		return v.Level == datapb.SegmentLevel_L0
 	})
 
@@ -206,7 +127,7 @@ func (m *CompactionViewManager) getChangedLevelZeroViews(collID UniqueID, LevelZ
 		return
 	}
 
-	latestViews := m.groupL0ViewsByPartChan(collID, LevelZeroViews)
+	latestViews := policy.groupL0ViewsByPartChan(collID, LevelZeroViews)
 	for _, latestView := range latestViews {
 		views := lo.Filter(cachedViews, func(v *SegmentView, _ int) bool {
 			return v.label.Equal(latestView.GetGroupLabel())
@@ -220,7 +141,7 @@ func (m *CompactionViewManager) getChangedLevelZeroViews(collID UniqueID, LevelZ
 	return
 }
 
-func (m *CompactionViewManager) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView) map[string]*LevelZeroSegmentsView {
+func (policy *l0CompactionPolicy) groupL0ViewsByPartChan(collectionID UniqueID, levelZeroSegments []*SegmentView) map[string]*LevelZeroSegmentsView {
 	partChanView := make(map[string]*LevelZeroSegmentsView) // "part-chan" as key
 	for _, view := range levelZeroSegments {
 		key := view.label.Key()
@@ -228,7 +149,7 @@ func (m *CompactionViewManager) groupL0ViewsByPartChan(collectionID UniqueID, le
 			partChanView[key] = &LevelZeroSegmentsView{
 				label:                     view.label,
 				segments:                  []*SegmentView{view},
-				earliestGrowingSegmentPos: m.meta.GetEarliestStartPositionOfGrowingSegments(view.label),
+				earliestGrowingSegmentPos: policy.meta.GetEarliestStartPositionOfGrowingSegments(view.label),
 			}
 		} else {
 			partChanView[key].Append(view)
@@ -236,4 +157,24 @@ func (m *CompactionViewManager) groupL0ViewsByPartChan(collectionID UniqueID, le
 	}
 
 	return partChanView
+}
+
+func (policy *l0CompactionPolicy) generateEventForLevelZeroViewIDLE() (events map[CompactionTriggerType][]CompactionView) {
+	log.Info("Views idle for a long time, try to trigger a TriggerTypeLevelZeroViewIDLE compaction event")
+	for collID := range policy.view.collections {
+		cachedViews := policy.view.GetSegmentViewBy(collID, func(v *SegmentView) bool {
+			return v.Level == datapb.SegmentLevel_L0
+		})
+		if len(cachedViews) > 0 {
+			grouped := policy.groupL0ViewsByPartChan(collID, cachedViews)
+			events[TriggerTypeLevelZeroViewIDLE] = lo.Map(lo.Values(grouped),
+				func(l0View *LevelZeroSegmentsView, _ int) CompactionView {
+					return l0View
+				})
+			log.Info("Generate TriggerTypeLevelZeroViewIDLE compaction event", zap.Int64("collectionID", collID))
+			break
+		}
+	}
+
+	return events
 }

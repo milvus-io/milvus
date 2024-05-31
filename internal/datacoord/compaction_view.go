@@ -19,8 +19,14 @@ type CompactionView interface {
 	ForceTrigger() (CompactionView, string)
 }
 
+type CollectionView struct {
+	l0 []*SegmentView
+	l1 []*SegmentView
+	l2 []*SegmentView
+}
+
 type FullViews struct {
-	collections map[int64][]*SegmentView // collectionID
+	collections map[int64]*CollectionView // collectionID
 }
 
 type SegmentViewSelector func(view *SegmentView) bool
@@ -33,7 +39,17 @@ func (v *FullViews) GetSegmentViewBy(collectionID UniqueID, selector SegmentView
 
 	var ret []*SegmentView
 
-	for _, view := range views {
+	for _, view := range views.l0 {
+		if selector == nil || selector(view) {
+			ret = append(ret, view.Clone())
+		}
+	}
+	for _, view := range views.l1 {
+		if selector == nil || selector(view) {
+			ret = append(ret, view.Clone())
+		}
+	}
+	for _, view := range views.l2 {
 		if selector == nil || selector(view) {
 			ret = append(ret, view.Clone())
 		}
@@ -84,6 +100,9 @@ type SegmentView struct {
 	ExpireSize float64
 	DeltaSize  float64
 
+	NumOfRows int64
+	MaxRowNum int64
+
 	// file numbers
 	BinlogCount   int
 	StatslogCount int
@@ -104,6 +123,8 @@ func (s *SegmentView) Clone() *SegmentView {
 		BinlogCount:   s.BinlogCount,
 		StatslogCount: s.StatslogCount,
 		DeltalogCount: s.DeltalogCount,
+		NumOfRows:     s.NumOfRows,
+		MaxRowNum:     s.MaxRowNum,
 	}
 }
 
@@ -131,6 +152,8 @@ func GetViewsByInfo(segments ...*SegmentInfo) []*SegmentView {
 			BinlogCount:   GetBinlogCount(segment.GetBinlogs()),
 			StatslogCount: GetBinlogCount(segment.GetStatslogs()),
 
+			NumOfRows: segment.NumOfRows,
+			MaxRowNum: segment.MaxRowNum,
 			// TODO: set the following
 			// ExpireSize float64
 		}

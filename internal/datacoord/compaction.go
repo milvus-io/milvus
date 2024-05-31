@@ -702,7 +702,7 @@ func summaryCompactionState(compactionTasks []CompactionTask) CompactionTriggerS
 	}
 
 	log.Debug("compaction states",
-		zap.Int64("triggerID", compactionTasks[0].GetTriggerID()),
+		//zap.Int64("triggerID", compactionTasks[0].GetTriggerID()),
 		zap.String("state", state.String()),
 		zap.Int("executingCnt", executingCnt),
 		zap.Int("pipeliningCnt", pipeliningCnt),
