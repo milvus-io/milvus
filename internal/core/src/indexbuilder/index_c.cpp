@@ -121,10 +121,11 @@ CreateIndex(CIndex* res_index, CBuildIndexInfo c_build_index_info) {
 
         // init file manager
         milvus::storage::FieldDataMeta field_meta{
-            build_index_info->collection_id,
-            build_index_info->partition_id,
-            build_index_info->segment_id,
-            build_index_info->field_id};
+            build_index_info->collectionid(),
+            build_index_info->partitionid(),
+            build_index_info->segmentid(),
+            build_index_info->field_schema().fieldid(),
+            build_index_info->field_schema()};
 
         milvus::storage::IndexMeta index_meta{build_index_info->segment_id,
                                               build_index_info->field_id,

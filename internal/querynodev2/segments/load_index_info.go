@@ -29,11 +29,13 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/pingcap/log"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datacoord"
+	"github.com/milvus-io/milvus/internal/proto/cgopb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -244,4 +246,34 @@ func (li *LoadIndexInfo) appendIndexEngineVersion(ctx context.Context, indexEngi
 	}).Await()
 
 	return HandleCStatus(ctx, &status, "AppendIndexEngineVersion failed")
+}
+
+func (li *LoadIndexInfo) finish(ctx context.Context, info *cgopb.LoadIndexInfo) error {
+	marshaled, err := proto.Marshal(info)
+	if err != nil {
+		return err
+	}
+
+	var status C.CStatus
+	_, _ = GetDynamicPool().Submit(func() (any, error) {
+		status = C.FinishLoadIndexInfo(li.cLoadIndexInfo, (*C.uint8_t)(unsafe.Pointer(&marshaled[0])), (C.uint64_t)(len(marshaled)))
+		return nil, nil
+	}).Await()
+
+	if err := HandleCStatus(ctx, &status, "FinishLoadIndexInfo failed"); err != nil {
+		return err
+	}
+
+	_, _ = GetLoadPool().Submit(func() (any, error) {
+		if paramtable.Get().CommonCfg.EnableStorageV2.GetAsBool() {
+			status = C.AppendIndexV3(li.cLoadIndexInfo)
+		} else {
+			traceCtx := ParseCTraceContext(ctx)
+			status = C.AppendIndexV2(traceCtx.ctx, li.cLoadIndexInfo)
+			runtime.KeepAlive(traceCtx)
+		}
+		return nil, nil
+	}).Await()
+
+	return HandleCStatus(ctx, &status, "AppendIndex failed")
 }
