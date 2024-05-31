@@ -52,10 +52,20 @@ import (
 )
 
 type CompactionMeta interface {
+	GetSegment(segID UniqueID) *SegmentInfo
 	SelectSegments(filters ...SegmentFilter) []*SegmentInfo
 	GetHealthySegment(segID UniqueID) *SegmentInfo
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
+
+	SaveClusteringCompactionTask(task *datapb.CompactionTask) error
+	DropClusteringCompactionTask(task *datapb.CompactionTask) error
+	GetClusteringCompactionTasks() map[int64][]*datapb.CompactionTask
+	GetClusteringCompactionTasksByCollection(collectionID int64) map[int64][]*datapb.CompactionTask
+	GetClusteringCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask
+
+	SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error
+	DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error
 
 	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 }

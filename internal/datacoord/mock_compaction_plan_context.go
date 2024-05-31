@@ -55,15 +55,15 @@ func (_c *MockCompactionPlanContext_execCompactionPlan_Call) RunAndReturn(run fu
 }
 
 // getCompaction provides a mock function with given fields: planID
-func (_m *MockCompactionPlanContext) getCompaction(planID int64) *compactionTask {
+func (_m *MockCompactionPlanContext) getCompaction(planID int64) *defaultCompactionTask {
 	ret := _m.Called(planID)
 
-	var r0 *compactionTask
-	if rf, ok := ret.Get(0).(func(int64) *compactionTask); ok {
+	var r0 *defaultCompactionTask
+	if rf, ok := ret.Get(0).(func(int64) *defaultCompactionTask); ok {
 		r0 = rf(planID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(*compactionTask)
+			r0 = ret.Get(0).(*defaultCompactionTask)
 		}
 	}
 
@@ -88,26 +88,26 @@ func (_c *MockCompactionPlanContext_getCompaction_Call) Run(run func(planID int6
 	return _c
 }
 
-func (_c *MockCompactionPlanContext_getCompaction_Call) Return(_a0 *compactionTask) *MockCompactionPlanContext_getCompaction_Call {
+func (_c *MockCompactionPlanContext_getCompaction_Call) Return(_a0 *defaultCompactionTask) *MockCompactionPlanContext_getCompaction_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCompactionPlanContext_getCompaction_Call) RunAndReturn(run func(int64) *compactionTask) *MockCompactionPlanContext_getCompaction_Call {
+func (_c *MockCompactionPlanContext_getCompaction_Call) RunAndReturn(run func(int64) *defaultCompactionTask) *MockCompactionPlanContext_getCompaction_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // getCompactionTasksBySignalID provides a mock function with given fields: signalID
-func (_m *MockCompactionPlanContext) getCompactionTasksBySignalID(signalID int64) []*compactionTask {
+func (_m *MockCompactionPlanContext) getCompactionTasksBySignalID(signalID int64) []*defaultCompactionTask {
 	ret := _m.Called(signalID)
 
-	var r0 []*compactionTask
-	if rf, ok := ret.Get(0).(func(int64) []*compactionTask); ok {
+	var r0 []*defaultCompactionTask
+	if rf, ok := ret.Get(0).(func(int64) []*defaultCompactionTask); ok {
 		r0 = rf(signalID)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*compactionTask)
+			r0 = ret.Get(0).([]*defaultCompactionTask)
 		}
 	}
 
@@ -132,12 +132,12 @@ func (_c *MockCompactionPlanContext_getCompactionTasksBySignalID_Call) Run(run f
 	return _c
 }
 
-func (_c *MockCompactionPlanContext_getCompactionTasksBySignalID_Call) Return(_a0 []*compactionTask) *MockCompactionPlanContext_getCompactionTasksBySignalID_Call {
+func (_c *MockCompactionPlanContext_getCompactionTasksBySignalID_Call) Return(_a0 []*defaultCompactionTask) *MockCompactionPlanContext_getCompactionTasksBySignalID_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockCompactionPlanContext_getCompactionTasksBySignalID_Call) RunAndReturn(run func(int64) []*compactionTask) *MockCompactionPlanContext_getCompactionTasksBySignalID_Call {
+func (_c *MockCompactionPlanContext_getCompactionTasksBySignalID_Call) RunAndReturn(run func(int64) []*defaultCompactionTask) *MockCompactionPlanContext_getCompactionTasksBySignalID_Call {
 	_c.Call.Return(run)
 	return _c
 }

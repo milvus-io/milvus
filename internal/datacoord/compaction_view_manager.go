@@ -95,7 +95,7 @@ func (m *CompactionViewManager) checkLoop() {
 			// idelTicker will be reset everytime when Check's able to
 			// generates compaction events
 
-			// if no views are freshed, try to get cached views and trigger a
+			// if no views are refreshed, try to get cached views and trigger a
 			// TriggerTypeViewIDLE event
 			if !refreshViewsAndTrigger(context.Background()) {
 				m.triggerEventForIDLEView()

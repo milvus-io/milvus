@@ -1092,19 +1092,13 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	if req.GetMajorCompaction() {
-		resp.CompactionID = id
-		compactionTasks := s.clusteringCompactionManager.getByTriggerId(id)
-		resp.CompactionPlanCount = int32(len(compactionTasks))
+	plans := s.compactionHandler.getCompactionTasksBySignalID(id)
+	if len(plans) == 0 {
+		resp.CompactionID = -1
+		resp.CompactionPlanCount = 0
 	} else {
-		plans := s.compactionHandler.getCompactionTasksBySignalID(id)
-		if len(plans) == 0 {
-			resp.CompactionID = -1
-			resp.CompactionPlanCount = 0
-		} else {
-			resp.CompactionID = id
-			resp.CompactionPlanCount = int32(len(plans))
-		}
+		resp.CompactionID = id
+		resp.CompactionPlanCount = int32(len(plans))
 	}
 
 	log.Info("success to trigger manual compaction", zap.Int64("compactionID", id))
@@ -1132,36 +1126,9 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	var (
-		executingCnt int
-		completedCnt int
-		timeoutCnt   int
-		failedCnt    int
-		state        commonpb.CompactionState
-		plans        []int64
-	)
+	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
+	state, executingCnt, completedCnt, failedCnt, timeoutCnt := getCompactionState(tasks)
 
-	var compactionTasks []*datapb.CompactionTask
-	if s.clusteringCompactionManager != nil {
-		compactionTasks = s.clusteringCompactionManager.getByTriggerId(req.GetCompactionID())
-	}
-	if len(compactionTasks) > 0 {
-		summary := s.clusteringCompactionManager.summaryCompactionTaskState(compactionTasks)
-		executingCnt = summary.executingCnt + summary.pipeliningCnt + summary.completedCnt + summary.initCnt + summary.analyzingCnt + summary.analyzedCnt + summary.indexingCnt
-		completedCnt = summary.indexedCnt
-		timeoutCnt = summary.timeoutCnt
-		failedCnt = summary.failedCnt
-		state = summary.state
-	} else {
-		tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
-		plans = lo.Map(tasks, func(t *compactionTask, _ int) int64 {
-			if t.plan == nil {
-				return -1
-			}
-			return t.plan.PlanID
-		})
-		state, executingCnt, completedCnt, failedCnt, timeoutCnt = getCompactionState(tasks)
-	}
 	resp.State = state
 	resp.ExecutingPlanNo = int64(executingCnt)
 	resp.CompletedPlanNo = int64(completedCnt)
@@ -1170,7 +1137,9 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 
 	log.Info("success to get compaction state", zap.Any("state", resp.GetState()), zap.Int64("executing", resp.GetExecutingPlanNo()),
 		zap.Int64("completed", resp.GetCompletedPlanNo()), zap.Int64("failed", resp.GetFailedPlanNo()), zap.Int64("timeout", resp.GetTimeoutPlanNo()),
-		zap.Int64s("plans", plans))
+		zap.Int64s("plans", lo.Map(tasks, func(t CompactionTask, _ int) int64 {
+			return t.GetPlanID()
+		})))
 	return resp, nil
 }
 
@@ -1204,25 +1173,22 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 
 	resp.State = state
 	log.Info("success to get state with plans", zap.Any("state", state), zap.Any("merge infos", resp.MergeInfos),
-		zap.Int64s("plans", lo.Map(tasks, func(t *compactionTask, _ int) int64 {
-			if t.plan == nil {
-				return -1
-			}
-			return t.plan.PlanID
+		zap.Int64s("plans", lo.Map(tasks, func(t CompactionTask, _ int) int64 {
+			return t.GetPlanID()
 		})))
 	return resp, nil
 }
 
-func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo {
-	segments := task.plan.GetSegmentBinlogs()
+func getCompactionMergeInfo(task CompactionTask) *milvuspb.CompactionMergeInfo {
+	segments := task.GetPlan().GetSegmentBinlogs()
 	var sources []int64
 	for _, s := range segments {
 		sources = append(sources, s.GetSegmentID())
 	}
 
 	var target int64 = -1
-	if task.result != nil {
-		segments := task.result.GetSegments()
+	if task.GetResult() != nil {
+		segments := task.GetResult().GetSegments()
 		if len(segments) > 0 {
 			target = segments[0].GetSegmentID()
 		}
@@ -1234,26 +1200,13 @@ func getCompactionMergeInfo(task *compactionTask) *milvuspb.CompactionMergeInfo 
 	}
 }
 
-func getCompactionState(tasks []*compactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, failedCnt, timeoutCnt int) {
-	for _, t := range tasks {
-		switch t.state {
-		case pipelining:
-			executingCnt++
-		case executing:
-			executingCnt++
-		case completed:
-			completedCnt++
-		case failed:
-			failedCnt++
-		case timeout:
-			timeoutCnt++
-		}
-	}
-	if executingCnt != 0 {
-		state = commonpb.CompactionState_Executing
-	} else {
-		state = commonpb.CompactionState_Completed
-	}
+func getCompactionState(tasks []CompactionTask) (state commonpb.CompactionState, executingCnt, completedCnt, failedCnt, timeoutCnt int) {
+	summary := summaryCompactionState(tasks)
+	executingCnt = summary.executingCnt + summary.pipeliningCnt + summary.completedCnt + summary.initCnt + summary.analyzingCnt + summary.analyzedCnt + summary.indexingCnt
+	completedCnt = summary.indexedCnt
+	timeoutCnt = summary.timeoutCnt
+	failedCnt = summary.failedCnt
+	state = summary.state
 	return
 }
 

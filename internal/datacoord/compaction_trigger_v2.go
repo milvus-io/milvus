@@ -90,62 +90,46 @@ func (m *CompactionTriggerManager) Notify(taskID UniqueID, eventType CompactionT
 }
 
 func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(taskID int64, outView CompactionView) {
-	plan := m.buildL0CompactionPlan(outView)
-	if plan == nil {
+	task := m.buildL0CompactionTask(taskID, outView)
+	if task == nil {
 		return
 	}
 
-	label := outView.GetGroupLabel()
-	signal := &compactionSignal{
-		id:           taskID,
-		isForce:      false,
-		isGlobal:     true,
-		collectionID: label.CollectionID,
-		partitionID:  label.PartitionID,
-		pos:          outView.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
-	}
-
-	// TODO, remove handler, use scheduler
-	// m.scheduler.Submit(plan)
-	m.compactionHandler.execCompactionPlan(signal, plan)
+	m.handler.enqueueCompaction(&defaultCompactionTask{
+		CompactionTask: task,
+	})
 	log.Info("Finish to submit a LevelZeroCompaction plan",
 		zap.Int64("taskID", taskID),
-		zap.Int64("planID", plan.GetPlanID()),
-		zap.String("type", plan.GetType().String()),
+		zap.Int64("planID", task.GetPlanID()),
+		zap.String("type", task.GetType().String()),
 	)
 }
 
-func (m *CompactionTriggerManager) buildL0CompactionPlan(view CompactionView) *datapb.CompactionPlan {
-	var segmentBinlogs []*datapb.CompactionSegmentBinlogs
-	levelZeroSegs := lo.Map(view.GetSegmentsView(), func(segView *SegmentView, _ int) *datapb.CompactionSegmentBinlogs {
-		return &datapb.CompactionSegmentBinlogs{
-			SegmentID:    segView.ID,
-			Level:        datapb.SegmentLevel_L0,
-			CollectionID: view.GetGroupLabel().CollectionID,
-			PartitionID:  view.GetGroupLabel().PartitionID,
-			// Deltalogs:   deltalogs are filled before executing the plan
-		}
+func (m *CompactionTriggerManager) buildL0CompactionTask(taskID int64, view CompactionView) *datapb.CompactionTask {
+	levelZeroSegs := lo.Map(view.GetSegmentsView(), func(segView *SegmentView, _ int) int64 {
+		return segView.ID
 	})
-	segmentBinlogs = append(segmentBinlogs, levelZeroSegs...)
 
-	plan := &datapb.CompactionPlan{
-		Type:           datapb.CompactionType_Level0DeleteCompaction,
-		SegmentBinlogs: segmentBinlogs,
-		Channel:        view.GetGroupLabel().Channel,
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-	collection, err := m.handler.GetCollection(ctx, view.GetGroupLabel().CollectionID)
+	// todo optimize allocate
+	id, err := m.allocator.allocID(context.TODO())
 	if err != nil {
 		return nil
 	}
 
-	if err := fillOriginPlan(collection.Schema, m.allocator, plan); err != nil {
-		return nil
+	task := &datapb.CompactionTask{
+		PlanID:           id,
+		Type:             datapb.CompactionType_Level0DeleteCompaction,
+		InputSegments:    levelZeroSegs,
+		Channel:          view.GetGroupLabel().Channel,
+		TriggerID:        taskID,
+		CollectionID:     view.GetGroupLabel().CollectionID,
+		PartitionID:      view.GetGroupLabel().PartitionID,
+		Pos:              view.(*LevelZeroSegmentsView).earliestGrowingSegmentPos,
+		TimeoutInSeconds: Params.DataCoordCfg.CompactionTimeoutInSeconds.GetAsInt32(),
+		// collectionSchema todo wayblink
 	}
 
-	return plan
+	return task
 }
 
 // chanPartSegments is an internal result struct, which is aggregates of SegmentInfos with same collectionID, partitionID and channelName

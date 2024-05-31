@@ -15,23 +15,23 @@ import (
 )
 
 type Scheduler interface {
-	Submit(t ...*compactionTask)
-	Schedule() []*compactionTask
-	Finish(nodeID int64, plan *datapb.CompactionPlan)
+	Submit(t ...CompactionTask)
+	Schedule() []CompactionTask
+	Finish(nodeID int64, task CompactionTask)
 	GetTaskCount() int
 	LogStatus()
 
 	// Start()
 	// Stop()
 	// IsFull() bool
-	// GetCompactionTasksBySignalID(signalID int64) []compactionTask
+	// GetCompactionTasksBySignalID(signalID int64) []defaultCompactionTask
 }
 
 type CompactionScheduler struct {
 	taskNumber *atomic.Int32
 
-	queuingTasks  []*compactionTask
-	parallelTasks map[int64][]*compactionTask // parallel by nodeID
+	queuingTasks  []CompactionTask
+	parallelTasks map[int64][]CompactionTask // parallel by nodeID
 	taskGuard     lock.RWMutex
 
 	planHandler *compactionPlanHandler
@@ -43,27 +43,27 @@ var _ Scheduler = (*CompactionScheduler)(nil)
 func NewCompactionScheduler(cluster Cluster) *CompactionScheduler {
 	return &CompactionScheduler{
 		taskNumber:    atomic.NewInt32(0),
-		queuingTasks:  make([]*compactionTask, 0),
-		parallelTasks: make(map[int64][]*compactionTask),
+		queuingTasks:  make([]CompactionTask, 0),
+		parallelTasks: make(map[int64][]CompactionTask),
 		cluster:       cluster,
 	}
 }
 
-func (s *CompactionScheduler) Submit(tasks ...*compactionTask) {
+func (s *CompactionScheduler) Submit(tasks ...CompactionTask) {
 	s.taskGuard.Lock()
 	s.queuingTasks = append(s.queuingTasks, tasks...)
 	s.taskGuard.Unlock()
 
 	s.taskNumber.Add(int32(len(tasks)))
-	lo.ForEach(tasks, func(t *compactionTask, _ int) {
+	lo.ForEach(tasks, func(t CompactionTask, _ int) {
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(t.dataNodeID), t.plan.GetType().String(), metrics.Pending).Inc()
+			WithLabelValues(fmt.Sprint(t.GetNodeID()), t.GetState().String(), metrics.Pending).Inc()
 	})
 	s.LogStatus()
 }
 
 // Schedule pick 1 or 0 tasks for 1 node
-func (s *CompactionScheduler) Schedule() []*compactionTask {
+func (s *CompactionScheduler) Schedule() []CompactionTask {
 	s.taskGuard.RLock()
 	if len(s.queuingTasks) == 0 {
 		s.taskGuard.RUnlock()
@@ -78,11 +78,11 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 
 	for _, tasks := range s.parallelTasks {
 		for _, t := range tasks {
-			switch t.plan.GetType() {
+			switch t.GetType() {
 			case datapb.CompactionType_Level0DeleteCompaction:
-				l0ChannelExcludes.Insert(t.plan.GetChannel())
+				l0ChannelExcludes.Insert(t.GetChannel())
 			case datapb.CompactionType_MixCompaction:
-				mixChannelExcludes.Insert(t.plan.GetChannel())
+				mixChannelExcludes.Insert(t.GetChannel())
 			}
 		}
 	}
@@ -90,52 +90,52 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 	s.taskGuard.Lock()
 	defer s.taskGuard.Unlock()
 
-	picked := make([]*compactionTask, 0)
+	picked := make([]CompactionTask, 0)
 	for _, t := range s.queuingTasks {
 		nodeID := s.pickAnyNode(nodeSlots)
 		if nodeID == NullNodeID {
 			log.Warn("cannot find datanode for compaction task",
-				zap.Int64("planID", t.plan.PlanID), zap.String("vchannel", t.plan.Channel))
+				zap.Int64("planID", t.GetPlanID()), zap.String("vchannel", t.GetChannel()))
 			continue
 		}
-		switch t.plan.GetType() {
+		switch t.GetType() {
 		case datapb.CompactionType_Level0DeleteCompaction:
-			if l0ChannelExcludes.Contain(t.plan.GetChannel()) ||
-				mixChannelExcludes.Contain(t.plan.GetChannel()) {
+			if l0ChannelExcludes.Contain(t.GetChannel()) ||
+				mixChannelExcludes.Contain(t.GetChannel()) {
 				continue
 			}
-			t.dataNodeID = nodeID
+			t.SetNodeID(nodeID)
 			picked = append(picked, t)
-			l0ChannelExcludes.Insert(t.plan.GetChannel())
+			l0ChannelExcludes.Insert(t.GetChannel())
 			nodeSlots[nodeID]--
 		case datapb.CompactionType_MixCompaction:
-			if l0ChannelExcludes.Contain(t.plan.GetChannel()) {
+			if l0ChannelExcludes.Contain(t.GetChannel()) {
 				continue
 			}
-			t.dataNodeID = nodeID
+			t.SetNodeID(nodeID)
 			picked = append(picked, t)
-			mixChannelExcludes.Insert(t.plan.GetChannel())
+			mixChannelExcludes.Insert(t.GetChannel())
 			nodeSlots[nodeID]--
 		}
 	}
 
 	var pickPlans []int64
 	for _, task := range picked {
-		node := task.dataNodeID
-		pickPlans = append(pickPlans, task.plan.PlanID)
+		node := task.GetNodeID()
+		pickPlans = append(pickPlans, task.GetPlanID())
 		if _, ok := s.parallelTasks[node]; !ok {
-			s.parallelTasks[node] = []*compactionTask{task}
+			s.parallelTasks[node] = []CompactionTask{task}
 		} else {
 			s.parallelTasks[node] = append(s.parallelTasks[node], task)
 		}
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(node), task.plan.GetType().String(), metrics.Executing).Inc()
+			WithLabelValues(fmt.Sprint(node), task.GetType().String(), metrics.Executing).Inc()
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(node), task.plan.GetType().String(), metrics.Pending).Dec()
+			WithLabelValues(fmt.Sprint(node), task.GetType().String(), metrics.Pending).Dec()
 	}
 
-	s.queuingTasks = lo.Filter(s.queuingTasks, func(t *compactionTask, _ int) bool {
-		return !lo.Contains(pickPlans, t.plan.PlanID)
+	s.queuingTasks = lo.Filter(s.queuingTasks, func(t CompactionTask, _ int) bool {
+		return !lo.Contains(pickPlans, t.GetPlanID())
 	})
 
 	// clean parallelTasks with nodes of no running tasks
@@ -148,34 +148,34 @@ func (s *CompactionScheduler) Schedule() []*compactionTask {
 	return picked
 }
 
-func (s *CompactionScheduler) Finish(nodeID UniqueID, plan *datapb.CompactionPlan) {
-	planID := plan.GetPlanID()
+func (s *CompactionScheduler) Finish(nodeID UniqueID, task CompactionTask) {
+	planID := task.GetPlanID()
 	log := log.With(zap.Int64("planID", planID), zap.Int64("nodeID", nodeID))
 
 	s.taskGuard.Lock()
 	if parallel, ok := s.parallelTasks[nodeID]; ok {
-		tasks := lo.Filter(parallel, func(t *compactionTask, _ int) bool {
-			return t.plan.PlanID != planID
+		tasks := lo.Filter(parallel, func(t CompactionTask, _ int) bool {
+			return t.GetPlanID() != planID
 		})
 		s.parallelTasks[nodeID] = tasks
 		s.taskNumber.Dec()
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Executing).Dec()
+			WithLabelValues(fmt.Sprint(nodeID), task.GetType().String(), metrics.Executing).Dec()
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Done).Inc()
+			WithLabelValues(fmt.Sprint(nodeID), task.GetType().String(), metrics.Done).Inc()
 		log.Info("Compaction scheduler remove task from executing")
 	}
 
-	filtered := lo.Filter(s.queuingTasks, func(t *compactionTask, _ int) bool {
-		return t.plan.PlanID != planID
+	filtered := lo.Filter(s.queuingTasks, func(t CompactionTask, _ int) bool {
+		return t.GetPlanID() != planID
 	})
 	if len(filtered) < len(s.queuingTasks) {
 		s.queuingTasks = filtered
 		s.taskNumber.Dec()
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Pending).Dec()
+			WithLabelValues(fmt.Sprint(nodeID), task.GetType().String(), metrics.Pending).Dec()
 		metrics.DataCoordCompactionTaskNum.
-			WithLabelValues(fmt.Sprint(nodeID), plan.GetType().String(), metrics.Done).Inc()
+			WithLabelValues(fmt.Sprint(nodeID), task.GetType().String(), metrics.Done).Inc()
 		log.Info("Compaction scheduler remove task from queue")
 	}
 
@@ -188,14 +188,14 @@ func (s *CompactionScheduler) LogStatus() {
 	defer s.taskGuard.RUnlock()
 
 	if s.GetTaskCount() > 0 {
-		waiting := lo.Map(s.queuingTasks, func(t *compactionTask, _ int) int64 {
-			return t.plan.PlanID
+		waiting := lo.Map(s.queuingTasks, func(t CompactionTask, _ int) int64 {
+			return t.GetPlanID()
 		})
 
 		var executing []int64
 		for _, tasks := range s.parallelTasks {
-			executing = append(executing, lo.Map(tasks, func(t *compactionTask, _ int) int64 {
-				return t.plan.PlanID
+			executing = append(executing, lo.Map(tasks, func(t CompactionTask, _ int) int64 {
+				return t.GetPlanID()
 			})...)
 		}
 

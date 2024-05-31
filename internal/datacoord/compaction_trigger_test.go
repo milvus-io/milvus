@@ -62,7 +62,7 @@ func (h *spyCompactionHandler) completeCompaction(result *datapb.CompactionPlanR
 }
 
 // getCompaction return compaction task. If planId does not exist, return nil.
-func (h *spyCompactionHandler) getCompaction(planID int64) *compactionTask {
+func (h *spyCompactionHandler) getCompaction(planID int64) *defaultCompactionTask {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -77,7 +77,7 @@ func (h *spyCompactionHandler) isFull() bool {
 }
 
 // get compaction tasks by signal id
-func (h *spyCompactionHandler) getCompactionTasksBySignalID(signalID int64) []*compactionTask {
+func (h *spyCompactionHandler) getCompactionTasksBySignalID(signalID int64) []*defaultCompactionTask {
 	panic("not implemented") // TODO: Implement
 }
 
@@ -2663,14 +2663,12 @@ func Test_compactionTrigger_clustering(t *testing.T) {
 
 	paramtable.Get().Save(paramtable.Get().DataCoordCfg.ClusteringCompactionEnable.Key, "false")
 	allocator := &MockAllocator0{}
-	handler := newMockHandlerWithMeta(meta)
 	tr := &compactionTrigger{
 		handler:                      newMockHandlerWithMeta(meta),
 		allocator:                    allocator,
 		estimateDiskSegmentPolicy:    calBySchemaPolicyWithDiskIndex,
 		estimateNonDiskSegmentPolicy: calBySchemaPolicy,
 		testingOnly:                  true,
-		clusteringCompactionManager:  newClusteringCompactionManager(context.Background(), meta, allocator, nil, nil, handler),
 	}
 	_, err := tr.triggerManualCompaction(1, true)
 	assert.Error(t, err)

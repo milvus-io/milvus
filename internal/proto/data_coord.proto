@@ -551,7 +551,7 @@ message CompactionPlan {
   int64 collection_ttl = 8;
   int64 total_rows = 9;
   schema.CollectionSchema schema = 10;
-  int64 clustering_key_id = 11;
+  schema.FieldSchema clustering_key_field = 11;
   int64 max_segment_rows = 12;
   int64 prefer_segment_rows = 13;
   string analyze_result_path = 14;
@@ -873,9 +873,9 @@ message QuerySlotResponse {
 
 enum CompactionTaskState {
   unknown = 0;
-  compact_executing = 1; // => executing
-  compact_pipelining = 2;
-  compact_completed = 3; // => completed
+  executing = 1;
+  pipelining = 2;
+  completed = 3;
   failed = 4;
   timeout = 5;
   init = 6;
@@ -909,6 +909,7 @@ message CompactionTask {
   repeated int64 resultSegments = 20;
   int64 analyzeTaskID = 21;
   int64 analyzeVersionID = 22;
+  msg.MsgPosition pos = 23;
 }
 
 message PartitionStatsInfo {

@@ -190,18 +190,13 @@ func (t *clusteringCompactionTask) init() error {
 	t.partitionID = partitionID
 	t.collectionMeta = meta
 
-	clusteringKeyID := t.plan.GetClusteringKeyId()
-	var clusteringKeyField *schemapb.FieldSchema
 	var pkField *schemapb.FieldSchema
 	for _, field := range meta.Schema.Fields {
-		if field.FieldID == clusteringKeyID {
-			clusteringKeyField = field
-		}
 		if field.GetIsPrimaryKey() && field.GetFieldID() >= 100 && typeutil.IsPrimaryFieldType(field.GetDataType()) {
 			pkField = field
 		}
 	}
-	t.clusteringKeyField = clusteringKeyField
+	t.clusteringKeyField = t.plan.GetClusteringKeyField()
 	t.primaryKeyField = pkField
 	t.isVectorClusteringKey = typeutil.IsVectorType(t.clusteringKeyField.DataType)
 	t.currentTs = tsoutil.GetCurrentTime()
@@ -573,7 +568,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 				return errors.New("unexpected error")
 			}
 
-			clusteringKey := row[t.plan.GetClusteringKeyId()]
+			clusteringKey := row[t.plan.GetClusteringKeyField().GetFieldID()]
 			var clusterBuffer *ClusterBuffer
 			if t.isVectorClusteringKey {
 				clusterBuffer = t.offsetToBufferFunc(offset, mappingStats.GetCentroidIdMapping())

@@ -128,15 +128,15 @@ func (_c *MockScheduler_LogStatus_Call) RunAndReturn(run func()) *MockScheduler_
 }
 
 // Schedule provides a mock function with given fields:
-func (_m *MockScheduler) Schedule() []*compactionTask {
+func (_m *MockScheduler) Schedule() []*defaultCompactionTask {
 	ret := _m.Called()
 
-	var r0 []*compactionTask
-	if rf, ok := ret.Get(0).(func() []*compactionTask); ok {
+	var r0 []*defaultCompactionTask
+	if rf, ok := ret.Get(0).(func() []*defaultCompactionTask); ok {
 		r0 = rf()
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).([]*compactionTask)
+			r0 = ret.Get(0).([]*defaultCompactionTask)
 		}
 	}
 
@@ -160,18 +160,18 @@ func (_c *MockScheduler_Schedule_Call) Run(run func()) *MockScheduler_Schedule_C
 	return _c
 }
 
-func (_c *MockScheduler_Schedule_Call) Return(_a0 []*compactionTask) *MockScheduler_Schedule_Call {
+func (_c *MockScheduler_Schedule_Call) Return(_a0 []*defaultCompactionTask) *MockScheduler_Schedule_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockScheduler_Schedule_Call) RunAndReturn(run func() []*compactionTask) *MockScheduler_Schedule_Call {
+func (_c *MockScheduler_Schedule_Call) RunAndReturn(run func() []*defaultCompactionTask) *MockScheduler_Schedule_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
 // Submit provides a mock function with given fields: t
-func (_m *MockScheduler) Submit(t ...*compactionTask) {
+func (_m *MockScheduler) Submit(t ...*defaultCompactionTask) {
 	_va := make([]interface{}, len(t))
 	for _i := range t {
 		_va[_i] = t[_i]
@@ -187,18 +187,18 @@ type MockScheduler_Submit_Call struct {
 }
 
 // Submit is a helper method to define mock.On call
-//   - t ...*compactionTask
+//   - t ...*defaultCompactionTask
 func (_e *MockScheduler_Expecter) Submit(t ...interface{}) *MockScheduler_Submit_Call {
 	return &MockScheduler_Submit_Call{Call: _e.mock.On("Submit",
 		append([]interface{}{}, t...)...)}
 }
 
-func (_c *MockScheduler_Submit_Call) Run(run func(t ...*compactionTask)) *MockScheduler_Submit_Call {
+func (_c *MockScheduler_Submit_Call) Run(run func(t ...*defaultCompactionTask)) *MockScheduler_Submit_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		variadicArgs := make([]*compactionTask, len(args)-0)
+		variadicArgs := make([]*defaultCompactionTask, len(args)-0)
 		for i, a := range args[0:] {
 			if a != nil {
-				variadicArgs[i] = a.(*compactionTask)
+				variadicArgs[i] = a.(*defaultCompactionTask)
 			}
 		}
 		run(variadicArgs...)
@@ -211,7 +211,7 @@ func (_c *MockScheduler_Submit_Call) Return() *MockScheduler_Submit_Call {
 	return _c
 }
 
-func (_c *MockScheduler_Submit_Call) RunAndReturn(run func(...*compactionTask)) *MockScheduler_Submit_Call {
+func (_c *MockScheduler_Submit_Call) RunAndReturn(run func(...*defaultCompactionTask)) *MockScheduler_Submit_Call {
 	_c.Call.Return(run)
 	return _c
 }
