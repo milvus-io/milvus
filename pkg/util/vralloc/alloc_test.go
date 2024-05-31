@@ -19,8 +19,9 @@ package vralloc
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
 func TestFixedSizeAllocator(t *testing.T) {

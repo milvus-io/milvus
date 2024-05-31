@@ -19,20 +19,21 @@ package vralloc
 import (
 	"sync"
 
-	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/shirou/gopsutil/v3/disk"
+
+	"github.com/milvus-io/milvus/pkg/util/hardware"
 )
 
 type Resource struct {
 	Memory uint64 // Memory occupation in bytes
-	Cpu    uint64 // CPU in cycles per second
+	CPU    uint64 // CPU in cycles per second
 	Disk   uint64 // Disk occpuation in bytes
 }
 
 // Add adds r2 to r
 func (r *Resource) Add(r2 *Resource) *Resource {
 	r.Memory += r2.Memory
-	r.Cpu += r2.Cpu
+	r.CPU += r2.CPU
 	r.Disk += r2.Disk
 	return r
 }
@@ -40,7 +41,7 @@ func (r *Resource) Add(r2 *Resource) *Resource {
 // Sub subtracts r2 from r
 func (r *Resource) Sub(r2 *Resource) *Resource {
 	r.Memory -= r2.Memory
-	r.Cpu -= r2.Cpu
+	r.CPU -= r2.CPU
 	r.Disk -= r2.Disk
 	return r
 }
@@ -48,14 +49,14 @@ func (r *Resource) Sub(r2 *Resource) *Resource {
 func (r *Resource) Diff(r2 *Resource) *Resource {
 	return &Resource{
 		Memory: r.Memory - r2.Memory,
-		Cpu:    r.Cpu - r2.Cpu,
+		CPU:    r.CPU - r2.CPU,
 		Disk:   r.Disk - r2.Disk,
 	}
 }
 
 // Le tests if the resource is less than or equal to the limit
 func (r Resource) Le(limit *Resource) bool {
-	return r.Memory <= limit.Memory && r.Cpu <= limit.Cpu && r.Disk <= limit.Disk
+	return r.Memory <= limit.Memory && r.CPU <= limit.CPU && r.Disk <= limit.Disk
 }
 
 type Allocator interface {
