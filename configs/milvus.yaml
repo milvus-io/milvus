@@ -467,7 +467,7 @@ dataCoord:
   checkAutoBalanceConfigInterval: 10 # the interval of check auto balance config
   import:
     filesPerPreImportTask: 2 # The maximum number of files allowed per pre-import task.
-    taskRetention: 10800 # The retention period in seconds for tasks in the Completed or Failed state.
+    taskRetention: 120 # The retention period in seconds for tasks in the Completed or Failed state.
     maxSizeInMBPerImportTask: 6144 # To prevent generating of small segments, we will re-group imported files. This parameter represents the sum of file sizes in each group (each ImportTask).
     scheduleInterval: 2 # The interval for scheduling import, measured in seconds.
     checkIntervalHigh: 2 # The interval for checking import, measured in seconds, is set to a high frequency for the import checker.
