@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -20,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -383,7 +383,10 @@ type inData struct {
 
 func (id *inData) generatePkStats() {
 	id.batchBF = &storage.PkStatistics{
-		PkFilter: bloom.NewWithEstimates(uint(id.rowNum), paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
+		PkFilter: bloomfilter.NewBloomFilterWithType(
+			uint(id.rowNum),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			paramtable.Get().CommonCfg.BloomFilterType.GetValue()),
 	}
 
 	for _, ids := range id.pkField {

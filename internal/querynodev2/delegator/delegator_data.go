@@ -526,7 +526,8 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 		if segment.Partition() == partitionID || segment.Partition() == common.AllPartitionsID {
 			segmentPks, segmentTss := segment.DeleteRecords()
 			for i, pk := range segmentPks {
-				if candidate.MayPkExist(pk) {
+				lc := storage.NewLocationsCache(pk)
+				if candidate.MayPkExist(lc) {
 					pks = append(pks, pk)
 					tss = append(tss, segmentTss[i])
 				}
@@ -637,7 +638,8 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					continue
 				}
 				for i, pk := range record.DeleteData.Pks {
-					if candidate.MayPkExist(pk) {
+					lc := storage.NewLocationsCache(pk)
+					if candidate.MayPkExist(lc) {
 						deleteData.Append(pk, record.DeleteData.Tss[i])
 					}
 				}
@@ -733,7 +735,8 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 					}
 
 					for idx, pk := range storage.ParseIDs2PrimaryKeys(dmsg.GetPrimaryKeys()) {
-						if candidate.MayPkExist(pk) {
+						lc := storage.NewLocationsCache(pk)
+						if candidate.MayPkExist(lc) {
 							result.Pks = append(result.Pks, pk)
 							result.Tss = append(result.Tss, dmsg.Timestamps[idx])
 						}
