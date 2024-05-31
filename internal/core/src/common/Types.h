@@ -258,6 +258,34 @@ IsBinaryDataType(DataType data_type) {
 }
 
 inline bool
+IsPrimitiveType(proto::schema::DataType type) {
+    switch (type) {
+        case proto::schema::DataType::Bool:
+        case proto::schema::DataType::Int8:
+        case proto::schema::DataType::Int16:
+        case proto::schema::DataType::Int32:
+        case proto::schema::DataType::Int64:
+        case proto::schema::DataType::Float:
+        case proto::schema::DataType::Double:
+        case proto::schema::DataType::String:
+        case proto::schema::DataType::VarChar:
+            return true;
+        default:
+            return false;
+    }
+}
+
+inline bool
+IsJsonType(proto::schema::DataType type) {
+    return type == proto::schema::DataType::JSON;
+}
+
+inline bool
+IsArrayType(proto::schema::DataType type) {
+    return type == proto::schema::DataType::Array;
+}
+
+inline bool
 IsBinaryVectorDataType(DataType data_type) {
     return data_type == DataType::VECTOR_BINARY;
 }

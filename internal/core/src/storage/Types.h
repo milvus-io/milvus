@@ -64,7 +64,7 @@ struct FieldDataMeta {
     int64_t partition_id;
     int64_t segment_id;
     int64_t field_id;
-    proto::schema::FieldSchema schema;
+    proto::schema::FieldSchema field_schema;
 };
 
 enum CodecType {

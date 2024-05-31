@@ -24,6 +24,7 @@
 #include "index/IndexFactory.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "index/Meta.h"
+#include "pb/schema.pb.h"
 
 using namespace milvus::index;
 using namespace milvus::indexbuilder;
@@ -70,8 +71,24 @@ class HybridIndexTestV1 : public testing::Test {
          int64_t field_id,
          int64_t index_build_id,
          int64_t index_version) {
+        proto::schema::FieldSchema field_schema;
+        if constexpr (std::is_same_v<int8_t, T>) {
+            field_schema.set_data_type(proto::schema::DataType::Int8);
+        } else if constexpr (std::is_same_v<int16_t, T>) {
+            field_schema.set_data_type(proto::schema::DataType::Int16);
+        } else if constexpr (std::is_same_v<int32_t, T>) {
+            field_schema.set_data_type(proto::schema::DataType::Int32);
+        } else if constexpr (std::is_same_v<int64_t, T>) {
+            field_schema.set_data_type(proto::schema::DataType::Int64);
+        } else if constexpr (std::is_same_v<float, T>) {
+            field_schema.set_data_type(proto::schema::DataType::Float);
+        } else if constexpr (std::is_same_v<double, T>) {
+            field_schema.set_data_type(proto::schema::DataType::Double);
+        } else if constexpr (std::is_same_v<std::string, T>) {
+            field_schema.set_data_type(proto::schema::DataType::String);
+        }
         auto field_meta = storage::FieldDataMeta{
-            collection_id, partition_id, segment_id, field_id};
+            collection_id, partition_id, segment_id, field_id, field_schema};
         auto index_meta = storage::IndexMeta{
             segment_id, field_id, index_build_id, index_version};
 

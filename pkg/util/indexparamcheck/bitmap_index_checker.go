@@ -21,8 +21,8 @@ func (c *BITMAPChecker) CheckTrain(params map[string]string) error {
 }
 
 func (c *BITMAPChecker) CheckValidDataType(dType schemapb.DataType) error {
-	if !typeutil.IsArithmetic(dType) && !typeutil.IsStringType(dType) {
-		return fmt.Errorf("bitmap index are only supported on numeric and string field")
+	if !typeutil.IsArithmetic(dType) && !typeutil.IsStringType(dType) && !typeutil.IsArrayType(dType) {
+		return fmt.Errorf("bitmap index are only supported on numeric, string and array field")
 	}
 	return nil
 }

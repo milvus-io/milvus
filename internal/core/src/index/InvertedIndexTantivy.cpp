@@ -66,7 +66,7 @@ template <typename T>
 InvertedIndexTantivy<T>::InvertedIndexTantivy(
     const storage::FileManagerContext& ctx,
     std::shared_ptr<milvus_storage::Space> space)
-    : space_(space), schema_(ctx.fieldDataMeta.schema) {
+    : space_(space), schema_(ctx.fieldDataMeta.field_schema) {
     mem_file_manager_ = std::make_shared<MemFileManager>(ctx, ctx.space_);
     disk_file_manager_ = std::make_shared<DiskFileManager>(ctx, ctx.space_);
     auto field =
@@ -218,8 +218,7 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::NotIn(size_t n, const T* values) {
-    TargetBitmap bitset(Count());
-    bitset.set();
+    TargetBitmap bitset(Count(), true);
     for (size_t i = 0; i < n; ++i) {
         auto array = wrapper_->term_query(values[i]);
         apply_hits(bitset, array, false);
