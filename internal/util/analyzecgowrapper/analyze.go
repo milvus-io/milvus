@@ -29,6 +29,10 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
+
+	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -37,9 +41,16 @@ type CodecAnalyze interface {
 	GetResult(size int) (string, int64, []string, []int64, error)
 }
 
-func Analyze(ctx context.Context, analyzeInfo *AnalyzeInfo) (CodecAnalyze, error) {
+func Analyze(ctx context.Context, analyzeInfo *clusteringpb.AnalyzeInfo) (CodecAnalyze, error) {
+	analyzeInfoBlob, err := proto.Marshal(analyzeInfo)
+	if err != nil {
+		log.Ctx(ctx).Warn("marshal analyzeInfo failed",
+			zap.Int64("buildID", analyzeInfo.GetBuildID()),
+			zap.Error(err))
+		return nil, err
+	}
 	var analyzePtr C.CAnalyze
-	status := C.Analyze(&analyzePtr, analyzeInfo.cAnalyzeInfo)
+	status := C.Analyze(&analyzePtr, (*C.uint8_t)(unsafe.Pointer(&analyzeInfoBlob[0])), (C.uint64_t)(len(analyzeInfoBlob)))
 	if err := HandleCStatus(&status, "failed to analyze task"); err != nil {
 		return nil, err
 	}

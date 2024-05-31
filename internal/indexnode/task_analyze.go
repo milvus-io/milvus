@@ -22,6 +22,8 @@ import (
 
 	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/util/analyzecgowrapper"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -71,53 +73,83 @@ func (at *analyzeTask) LoadData(ctx context.Context) error {
 
 func (at *analyzeTask) BuildIndex(ctx context.Context) error {
 	var err error
-	var analyzeInfo *analyzecgowrapper.AnalyzeInfo
+
 	log := log.Ctx(ctx).With(zap.String("clusterID", at.req.GetClusterID()),
 		zap.Int64("taskID", at.req.GetTaskID()), zap.Int64("Collection", at.req.GetCollectionID()),
 		zap.Int64("partitionID", at.req.GetPartitionID()), zap.Int64("fieldID", at.req.GetFieldID()))
 
 	log.Info("Begin to build analyze task")
-	analyzeInfo, err = analyzecgowrapper.NewAnalyzeInfo(at.req.GetStorageConfig())
-	defer analyzecgowrapper.DeleteAnalyzeInfo(analyzeInfo)
 	if err != nil {
 		log.Warn("create analyze info failed", zap.Error(err))
 		return err
 	}
 
+	storageConfig := &clusteringpb.StorageConfig{
+		Address:          at.req.GetStorageConfig().GetAddress(),
+		AccessKeyID:      at.req.GetStorageConfig().GetAccessKeyID(),
+		SecretAccessKey:  at.req.GetStorageConfig().GetSecretAccessKey(),
+		UseSSL:           at.req.GetStorageConfig().GetUseSSL(),
+		BucketName:       at.req.GetStorageConfig().GetBucketName(),
+		RootPath:         at.req.GetStorageConfig().GetRootPath(),
+		UseIAM:           at.req.GetStorageConfig().GetUseIAM(),
+		IAMEndpoint:      at.req.GetStorageConfig().GetIAMEndpoint(),
+		StorageType:      at.req.GetStorageConfig().GetStorageType(),
+		UseVirtualHost:   at.req.GetStorageConfig().GetUseVirtualHost(),
+		Region:           at.req.GetStorageConfig().GetRegion(),
+		CloudProvider:    at.req.GetStorageConfig().GetCloudProvider(),
+		RequestTimeoutMs: at.req.GetStorageConfig().GetRequestTimeoutMs(),
+		SslCACert:        at.req.GetStorageConfig().GetSslCACert(),
+	}
+
+	numRowsMap := make(map[int64]int64)
+	segmentInsertFilesMap := make(map[int64]*clusteringpb.InsertFiles)
+
 	for segID, stats := range at.req.GetSegmentStats() {
 		numRows := stats.GetNumRows()
-		err = analyzeInfo.AppendNumRows(segID, numRows)
+		numRowsMap[segID] = numRows
 		log.Info("append segment rows", zap.Int64("segment id", segID), zap.Int64("rows", numRows))
 		if err != nil {
 			log.Warn("append segment num rows failed", zap.Error(err))
 			return err
 		}
+		insertFiles := make([]string, 0, len(stats.GetLogIDs()))
 		for _, id := range stats.GetLogIDs() {
 			path := metautil.BuildInsertLogPath(at.req.GetStorageConfig().RootPath,
 				at.req.GetCollectionID(), at.req.GetPartitionID(), segID, at.req.GetFieldID(), id)
-			err = analyzeInfo.AppendSegmentInsertFile(segID, path)
+			insertFiles = append(insertFiles, path)
 			if err != nil {
 				log.Warn("append insert binlog path failed", zap.Error(err))
 				return err
 			}
 		}
+		segmentInsertFilesMap[segID] = &clusteringpb.InsertFiles{InsertFiles: insertFiles}
 	}
 
-	err = analyzeInfo.AppendAnalyzeInfo(
-		at.req.GetCollectionID(),
-		at.req.GetPartitionID(),
-		at.req.GetFieldID(),
-		at.req.GetTaskID(),
-		at.req.GetVersion(),
-		at.req.GetFieldName(),
-		at.req.GetFieldType(),
-		at.req.GetDim(),
-		at.req.GetNumClusters(),
-		int64(float64(hardware.GetMemoryCount())*at.req.GetMaxTrainSizeRatio()),
-	)
-	if err != nil {
-		log.Warn("append analyze info failed", zap.Error(err))
-		return err
+	field := at.req.GetField()
+	if field == nil || field.GetDataType() == schemapb.DataType_None {
+		field = &schemapb.FieldSchema{
+			FieldID:  at.req.GetFieldID(),
+			Name:     at.req.GetFieldName(),
+			DataType: at.req.GetFieldType(),
+		}
+	}
+
+	analyzeInfo := &clusteringpb.AnalyzeInfo{
+		ClusterID:       at.req.GetClusterID(),
+		BuildID:         at.req.GetTaskID(),
+		CollectionID:    at.req.GetCollectionID(),
+		PartitionID:     at.req.GetPartitionID(),
+		Version:         at.req.GetVersion(),
+		Dim:             at.req.GetDim(),
+		StorageConfig:   storageConfig,
+		NumClusters:     at.req.GetNumClusters(),
+		TrainSize:       int64(float64(hardware.GetMemoryCount()) * at.req.GetMaxTrainSizeRatio()),
+		MinClusterRatio: at.req.GetMinClusterSizeRatio(),
+		MaxClusterRatio: at.req.GetMaxClusterSizeRatio(),
+		MaxClusterSize:  at.req.GetMaxClusterSize(),
+		NumRows:         numRowsMap,
+		InsertFiles:     segmentInsertFilesMap,
+		FieldSchema:     field,
 	}
 
 	at.analyze, err = analyzecgowrapper.Analyze(ctx, analyzeInfo)
@@ -147,21 +179,7 @@ func (at *analyzeTask) SaveResult(ctx context.Context) error {
 		log.Error("failed to upload index", zap.Error(err))
 		return err
 	}
-	log.Info("debug for analyze result", zap.String("centroidsFile", centroidsFile))
-	//segmentsOffsetMappingFiles := make(map[int64]string)
-	//segmentsOffsetMappingFilesSize := make(map[string]int64)
-	//for i, file := range offsetMappingFiles {
-	//	for segID := range at.req.GetSegmentStats() {
-	//		if strings.Contains(file, fmt.Sprintf("%d", segID)) {
-	//			segmentsOffsetMappingFiles[segID] = file
-	//			segmentsOffsetMappingFilesSize[file] = offsetMappingFilesSize[i]
-	//			log.Info("debug for analyze result", zap.Int64("segID", segID),
-	//				zap.String("offsetMappingFile", file),
-	//				zap.Int64("offsetMappingFileSize", offsetMappingFilesSize[i]))
-	//			break
-	//		}
-	//	}
-	//}
+	log.Info("analyze result", zap.String("centroidsFile", centroidsFile))
 
 	at.endTime = time.Now().UnixMicro()
 	at.node.storeAnalyzeFilesAndStatistic(at.req.GetClusterID(),

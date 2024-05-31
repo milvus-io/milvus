@@ -233,7 +233,7 @@ message GetIndexBuildProgressResponse {
     int64 pending_index_rows = 4;
 }
 
-// Synchronously modify StorageConfig in index_cgo_msg.proto file
+// Synchronously modify StorageConfig in index_cgo_msg.proto/clustering.proto file
 message StorageConfig {
     string address = 1;
     string access_keyID = 2;
@@ -379,7 +379,7 @@ message SegmentStats {
 
 message AnalyzeRequest {
     string clusterID = 1;
-    int64 taskID =2;
+    int64 taskID = 2;
     int64 collectionID = 3;
     int64 partitionID = 4;
     int64 fieldID = 5;
@@ -391,6 +391,10 @@ message AnalyzeRequest {
     int64 dim = 11;
     double max_train_size_ratio = 12;
     int64 num_clusters = 13;
+    schema.FieldSchema field = 14;
+    double min_cluster_size_ratio = 15;
+    double max_cluster_size_ratio = 16;
+    int64 max_cluster_size = 17;
 }
 
 message AnalyzeResult {

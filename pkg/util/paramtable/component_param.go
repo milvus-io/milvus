@@ -2796,6 +2796,9 @@ type dataCoordConfig struct {
 	ClusteringCompactionTimeoutInSeconds     ParamItem `refreshable:"true"`
 	ClusteringCompactionMaxCentroidsNum      ParamItem `refreshable:"true"`
 	ClusteringCompactionMinCentroidsNum      ParamItem `refreshable:"true"`
+	ClusteringCompactionMinClusterSizeRatio  ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSizeRatio  ParamItem `refreshable:"true"`
+	ClusteringCompactionMaxClusterSize       ParamItem `refreshable:"true"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -3311,6 +3314,33 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.ClusteringCompactionMinCentroidsNum.Init(base.mgr)
+
+	p.ClusteringCompactionMinClusterSizeRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.minClusterSizeRatio",
+		Version:      "2.4.2",
+		DefaultValue: "0.01",
+		Doc:          "minimum cluster size / avg size in Kmeans train",
+		Export:       true,
+	}
+	p.ClusteringCompactionMinClusterSizeRatio.Init(base.mgr)
+
+	p.ClusteringCompactionMaxClusterSizeRatio = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxClusterSizeRatio",
+		Version:      "2.4.2",
+		DefaultValue: "10",
+		Doc:          "maximum cluster size / avg size in Kmeans train",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxClusterSizeRatio.Init(base.mgr)
+
+	p.ClusteringCompactionMaxClusterSize = ParamItem{
+		Key:          "dataCoord.compaction.clustering.maxClusterSize",
+		Version:      "2.4.2",
+		DefaultValue: "5g",
+		Doc:          "maximum cluster size in Kmeans train",
+		Export:       true,
+	}
+	p.ClusteringCompactionMaxClusterSize.Init(base.mgr)
 
 	p.EnableGarbageCollection = ParamItem{
 		Key:          "dataCoord.enableGarbageCollection",

@@ -42,7 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/etcdpb"
-	"github.com/milvus-io/milvus/internal/proto/segcorepb"
+	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -327,7 +327,7 @@ func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) e
 	if err != nil {
 		return err
 	}
-	centroids := &segcorepb.ClusteringCentroidsStats{}
+	centroids := &clusteringpb.ClusteringCentroidsStats{}
 	err = proto.Unmarshal(centroidBytes[0], centroids)
 	if err != nil {
 		return err
@@ -456,7 +456,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 		return false
 	}
 
-	mappingStats := &segcorepb.ClusteringCentroidIdMappingStats{}
+	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
 		offSetPath := t.segmentIDOffsetMapping[segment.SegmentID]
 		offsetBytes, err := t.io.Download(ctx, []string{offSetPath})

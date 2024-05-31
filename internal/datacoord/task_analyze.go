@@ -190,7 +190,11 @@ func (at *analyzeTask) AssignTask(ctx context.Context, client types.IndexNodeCli
 		numClusters = Params.DataCoordCfg.ClusteringCompactionMaxCentroidsNum.GetAsInt64()
 	}
 	req.NumClusters = numClusters
-	req.MaxTrainSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat()
+	req.MaxTrainSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxTrainSizeRatio.GetAsFloat() // control clustering train data size
+	// config to detect data skewness
+	req.MinClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMinClusterSizeRatio.GetAsFloat()
+	req.MaxClusterSizeRatio = Params.DataCoordCfg.ClusteringCompactionMaxClusterSizeRatio.GetAsFloat()
+	req.MaxClusterSize = Params.DataCoordCfg.ClusteringCompactionMaxClusterSize.GetAsSize()
 
 	ctx, cancel := context.WithTimeout(context.Background(), reqTimeoutInterval)
 	defer cancel()

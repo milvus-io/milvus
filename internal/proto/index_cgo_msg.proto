@@ -32,7 +32,7 @@ message BinarySet {
   repeated Binary datas = 1;
 }
 
-// Synchronously modify StorageConfig in index_coord.proto file
+// Synchronously modify StorageConfig in index_coord.proto/clustering.proto file
 message StorageConfig {
   string address = 1;
   string access_keyID = 2;

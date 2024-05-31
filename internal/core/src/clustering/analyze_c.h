@@ -21,7 +21,9 @@ extern "C" {
 #include "clustering/type_c.h"
 
 CStatus
-Analyze(CAnalyze* res_analyze, CAnalyzeInfo c_analyze_info);
+Analyze(CAnalyze* res_analyze,
+        const uint8_t* serialized_analyze_info,
+        const uint64_t len);
 
 CStatus
 DeleteAnalyze(CAnalyze analyze);

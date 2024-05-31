@@ -22,6 +22,7 @@
 
 #include "storage/MemFileManagerImpl.h"
 #include "storage/space.h"
+#include "pb/clustering.pb.h"
 #include "knowhere/cluster/cluster_factory.h"
 
 namespace milvus::clustering {
@@ -43,7 +44,7 @@ class KmeansClustering {
     // every time is a brand new kmeans training
     template <typename T>
     void
-    Run(const Config& config);
+    Run(const milvus::proto::clustering::AnalyzeInfo& config);
 
     // should never be called before run
     ClusteringResultMeta
@@ -91,9 +92,11 @@ class KmeansClustering {
     void
     StreamingAssignandUpload(
         knowhere::Cluster<knowhere::ClusterNode>& cluster_node,
-        const milvus::proto::segcore::ClusteringCentroidsStats& centroid_stats,
+        const milvus::proto::clustering::AnalyzeInfo& config,
+        const milvus::proto::clustering::ClusteringCentroidsStats&
+            centroid_stats,
         const std::vector<
-            milvus::proto::segcore::ClusteringCentroidIdMappingStats>&
+            milvus::proto::clustering::ClusteringCentroidIdMappingStats>&
             id_mapping_stats,
         const std::vector<int64_t>& segment_ids,
         const std::map<int64_t, std::vector<std::string>>& insert_files,
@@ -102,45 +105,52 @@ class KmeansClustering {
         const int64_t trained_segments_num,
         const int64_t num_clusters);
 
-    // bool to indicate if the whole segment data are fetched
     template <typename T>
-    bool
-    FetchSegmentData(uint8_t* buf,
-                     const int64_t expected_train_size,
-                     const std::vector<std::string>& files,
-                     const int64_t num_rows,
-                     const int64_t dim,
-                     int64_t& offset);
+    void
+    FetchDataFiles(uint8_t* buf,
+                   const int64_t expected_train_size,
+                   const int64_t expected_remote_file_size,
+                   const std::vector<std::string>& files,
+                   const int64_t dim,
+                   int64_t& offset);
 
     // given all possible segments, sample data to buffer
     template <typename T>
-    int64_t
+    void
     SampleTrainData(
         const std::vector<int64_t>& segment_ids,
         const std::map<int64_t, std::vector<std::string>>& segment_file_paths,
         const std::map<int64_t, int64_t>& segment_num_rows,
         const int64_t expected_train_size,
         const int64_t dim,
+        const bool random_sample,
         uint8_t* buf);
 
     // transform centroids result to PB format for future usage of golang side
     template <typename T>
-    milvus::proto::segcore::ClusteringCentroidsStats
+    milvus::proto::clustering::ClusteringCentroidsStats
     CentroidsToPB(const T* centroids,
                   const int64_t num_clusters,
                   const int64_t dim);
 
     // transform flattened id mapping result to several PB files by each segment for future usage of golang side
-    std::vector<milvus::proto::segcore::ClusteringCentroidIdMappingStats>
+    std::vector<milvus::proto::clustering::ClusteringCentroidIdMappingStats>
     CentroidIdMappingToPB(const uint32_t* centroid_id_mapping,
                           const std::vector<int64_t>& segment_ids,
                           const int64_t trained_segments_num,
                           const std::map<int64_t, int64_t>& num_row_map,
                           const int64_t num_clusters);
 
+    template <typename T>
+    bool
+    IsDataSkew(const milvus::proto::clustering::AnalyzeInfo& config,
+               const int64_t dim,
+               std::vector<int64_t>& num_in_each_centroid);
+
     std::unique_ptr<storage::MemFileManagerImpl> file_manager_;
     ClusteringResultMeta cluster_result_;
     bool is_runned_ = false;
+    std::string msg_header_;
 };
 
 using KmeansClusteringPtr = std::unique_ptr<KmeansClustering>;

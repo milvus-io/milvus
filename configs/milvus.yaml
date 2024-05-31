@@ -468,6 +468,9 @@ dataCoord:
       maxTrainSizeRatio: 0.8 # max data size ratio in analyze, if data is larger than it, will down sampling to meet this limit
       maxCentroidsNum: 10240
       minCentroidsNum: 16
+      minClusterSizeRatio: 0.01
+      maxClusterSizeRatio: 10
+      maxClusterSize: 5g
 
     levelzero:
       forceTrigger:
