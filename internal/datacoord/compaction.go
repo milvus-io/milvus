@@ -146,7 +146,7 @@ func (c *compactionPlanHandler) start() {
 	c.stopWg.Add(3)
 
 	// todo: make it compatible to all types of compaction with persist meta
-	triggers := c.meta.GetClusteringCompactionTasks()
+	triggers := c.meta.(*meta).compactionTaskMeta.GetCompactionTasks()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State != datapb.CompactionTaskState_completed && task.State != datapb.CompactionTaskState_cleaned {
@@ -204,13 +204,18 @@ func (c *compactionPlanHandler) start() {
 				return
 			case <-cleanTicker.C:
 				c.Clean()
-				c.gcPartitionStats()
 			}
 		}
 	}()
 }
 
 func (c *compactionPlanHandler) Clean() {
+	c.cleanPlans()
+	c.cleanCompactionTaskMeta()
+	c.cleanPartitionStats()
+}
+
+func (c *compactionPlanHandler) cleanPlans() {
 	current := tsoutil.GetCurrentTime()
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -231,6 +236,73 @@ func (c *compactionPlanHandler) Clean() {
 			delete(c.plans, id)
 		}
 	}
+}
+
+func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
+	// gc clustering compaction tasks
+	triggers := c.meta.(*meta).compactionTaskMeta.GetCompactionTasks()
+	checkTaskFunc := func(task *datapb.CompactionTask) {
+		// indexed is the final state of a clustering compaction task
+		if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
+			if time.Since(tsoutil.PhysicalTime(task.StartTime)) > Params.DataCoordCfg.ClusteringCompactionDropTolerance.GetAsDuration(time.Second) {
+				// skip handle this error, try best to delete meta
+				err := c.meta.(*meta).compactionTaskMeta.DropCompactionTask(task)
+				if err != nil {
+					log.Warn("fail to drop task", zap.Int64("taskPlanID", task.PlanID), zap.Error(err))
+				}
+			}
+		}
+	}
+	for _, tasks := range triggers {
+		for _, task := range tasks {
+			checkTaskFunc(task)
+		}
+	}
+}
+
+func (c *compactionPlanHandler) cleanPartitionStats() error {
+	log.Debug("start gc partitionStats meta and files")
+	// gc partition stats
+	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo)
+	unusedPartStats := make([]*datapb.PartitionStatsInfo, 0)
+	infos := c.meta.(*meta).partitionStatsMeta.ListAllPartitionStatsInfos()
+	for _, info := range infos {
+		collInfo := c.meta.(*meta).GetCollection(info.GetCollectionID())
+		if collInfo == nil {
+			unusedPartStats = append(unusedPartStats, info)
+			continue
+		}
+		channel := fmt.Sprintf("%d/%d/%s", info.CollectionID, info.PartitionID, info.VChannel)
+		if _, ok := channelPartitionStatsInfos[channel]; !ok {
+			channelPartitionStatsInfos[channel] = make([]*datapb.PartitionStatsInfo, 0)
+		}
+		channelPartitionStatsInfos[channel] = append(channelPartitionStatsInfos[channel], info)
+	}
+	log.Debug("channels with PartitionStats meta", zap.Int("len", len(channelPartitionStatsInfos)))
+
+	for _, info := range unusedPartStats {
+		log.Debug("collection has been dropped, remove partition stats",
+			zap.Int64("collID", info.GetCollectionID()))
+		if err := c.gcPartitionStatsInfo(info); err != nil {
+			return err
+		}
+	}
+
+	for channel, infos := range channelPartitionStatsInfos {
+		sort.Slice(infos, func(i, j int) bool {
+			return infos[i].Version > infos[j].Version
+		})
+		log.Debug("PartitionStats in channel", zap.String("channel", channel), zap.Int("len", len(infos)))
+		if len(infos) > 2 {
+			for i := 2; i < len(infos); i++ {
+				info := infos[i]
+				if err := c.gcPartitionStatsInfo(info); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
 }
 
 func (c *compactionPlanHandler) stop() {
@@ -436,7 +508,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 				clusterTask.RetryTimes = 0
 			}
 			log.Debug("process task", zap.String("stateBefore", stateBefore), zap.String("stateAfter", clusterTask.State.String()))
-			c.meta.SaveClusteringCompactionTask(clusterTask.CompactionTask)
+			c.meta.(*meta).compactionTaskMeta.SaveCompactionTask(clusterTask.CompactionTask)
 		default:
 			log := log.With(
 				zap.Int64("planID", task.GetPlanID()),
@@ -562,70 +634,6 @@ func (c *compactionPlanHandler) gcPartitionStatsInfo(info *datapb.PartitionStats
 		zap.Int64("planID", info.GetVersion()))
 	if err != nil {
 		return err
-	}
-	return nil
-}
-
-func (c *compactionPlanHandler) gcPartitionStats() error {
-	log.Debug("start gc clustering compaction related meta and files")
-	// gc clustering compaction tasks
-	triggers := c.meta.GetClusteringCompactionTasks()
-	checkTaskFunc := func(task *datapb.CompactionTask) {
-		// indexed is the final state of a clustering compaction task
-		if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
-			if time.Since(tsoutil.PhysicalTime(task.StartTime)) > Params.DataCoordCfg.ClusteringCompactionDropTolerance.GetAsDuration(time.Second) {
-				// skip handle this error, try best to delete meta
-				err := c.meta.DropClusteringCompactionTask(task)
-				if err != nil {
-					log.Warn("fail to drop task", zap.Int64("taskPlanID", task.PlanID), zap.Error(err))
-				}
-			}
-		}
-	}
-	for _, tasks := range triggers {
-		for _, task := range tasks {
-			checkTaskFunc(task)
-		}
-	}
-	// gc partition stats
-	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo)
-	unusedPartStats := make([]*datapb.PartitionStatsInfo, 0)
-	infos := c.meta.(*meta).partitionStatsMeta.ListAllPartitionStatsInfos()
-	for _, info := range infos {
-		collInfo := c.meta.(*meta).GetCollection(info.GetCollectionID())
-		if collInfo == nil {
-			unusedPartStats = append(unusedPartStats, info)
-			continue
-		}
-		channel := fmt.Sprintf("%d/%d/%s", info.CollectionID, info.PartitionID, info.VChannel)
-		if _, ok := channelPartitionStatsInfos[channel]; !ok {
-			channelPartitionStatsInfos[channel] = make([]*datapb.PartitionStatsInfo, 0)
-		}
-		channelPartitionStatsInfos[channel] = append(channelPartitionStatsInfos[channel], info)
-	}
-	log.Debug("channels with PartitionStats meta", zap.Int("len", len(channelPartitionStatsInfos)))
-
-	for _, info := range unusedPartStats {
-		log.Debug("collection has been dropped, remove partition stats",
-			zap.Int64("collID", info.GetCollectionID()))
-		if err := c.gcPartitionStatsInfo(info); err != nil {
-			return err
-		}
-	}
-
-	for channel, infos := range channelPartitionStatsInfos {
-		sort.Slice(infos, func(i, j int) bool {
-			return infos[i].Version > infos[j].Version
-		})
-		log.Debug("PartitionStats in channel", zap.String("channel", channel), zap.Int("len", len(infos)))
-		if len(infos) > 2 {
-			for i := 2; i < len(infos); i++ {
-				info := infos[i]
-				if err := c.gcPartitionStatsInfo(info); err != nil {
-					return err
-				}
-			}
-		}
 	}
 	return nil
 }

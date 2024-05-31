@@ -57,16 +57,6 @@ type CompactionMeta interface {
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
 	CheckAndSetSegmentsCompacting(segmentIDs []int64) (bool, bool)
-
-	SaveClusteringCompactionTask(task *datapb.CompactionTask) error
-	DropClusteringCompactionTask(task *datapb.CompactionTask) error
-	GetClusteringCompactionTasks() map[int64][]*datapb.CompactionTask
-	GetClusteringCompactionTasksByCollection(collectionID int64) map[int64][]*datapb.CompactionTask
-	GetClusteringCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask
-
-	// SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error
-	// DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error
-
 	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 }
 
@@ -81,11 +71,10 @@ type meta struct {
 	channelCPs   *channelCPs                  // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	clusteringCompactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
-
 	indexMeta          *indexMeta
 	analyzeMeta        *analyzeMeta
 	partitionStatsMeta *partitionStatsMeta
+	compactionTaskMeta *compactionTaskMeta
 }
 
 type channelCPs struct {
@@ -134,17 +123,22 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	ctm, err := newCompactionTaskMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
 	mt := &meta{
-		ctx:                       ctx,
-		catalog:                   catalog,
-		collections:               make(map[UniqueID]*collectionInfo),
-		segments:                  NewSegmentsInfo(),
-		channelCPs:                newChannelCps(),
-		indexMeta:                 im,
-		analyzeMeta:               am,
-		chunkManager:              chunkManager,
-		clusteringCompactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
-		partitionStatsMeta:        psm,
+		ctx:                ctx,
+		catalog:            catalog,
+		collections:        make(map[UniqueID]*collectionInfo),
+		segments:           NewSegmentsInfo(),
+		channelCPs:         newChannelCps(),
+		indexMeta:          im,
+		analyzeMeta:        am,
+		chunkManager:       chunkManager,
+		partitionStatsMeta: psm,
+		compactionTaskMeta: ctm,
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -198,14 +192,6 @@ func (m *meta) reloadFromKV() error {
 		// for 2.2.2 issue https://github.com/milvus-io/milvus/issues/22181
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
-	}
-
-	compactionTasks, err := m.catalog.ListCompactionTask(m.ctx)
-	if err != nil {
-		return err
-	}
-	for _, task := range compactionTasks {
-		m.saveClusteringCompactionTaskMemory(task)
 	}
 
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
@@ -1795,91 +1781,4 @@ func (m *meta) ListCollections() []int64 {
 	defer m.RUnlock()
 
 	return lo.Keys(m.collections)
-}
-
-// CompactionTaskSelector is the function type to select CompactionTask from meta
-type CompactionTaskSelector func(*datapb.CompactionTask) bool
-
-// GetClusteringCompactionTasks returns clustering compaction tasks from local cache
-func (m *meta) GetClusteringCompactionTasks() map[int64][]*datapb.CompactionTask {
-	m.RLock()
-	defer m.RUnlock()
-	res := make(map[int64][]*datapb.CompactionTask, 0)
-	for triggerID, tasks := range m.clusteringCompactionTasks {
-		triggerTasks := make([]*datapb.CompactionTask, 0)
-		for _, task := range tasks {
-			triggerTasks = append(triggerTasks, proto.Clone(task).(*datapb.CompactionTask))
-		}
-		res[triggerID] = triggerTasks
-	}
-	return res
-}
-
-func (m *meta) GetClusteringCompactionTasksByCollection(collectionID int64) map[int64][]*datapb.CompactionTask {
-	m.RLock()
-	defer m.RUnlock()
-	res := make(map[int64][]*datapb.CompactionTask, 0)
-	for _, tasks := range m.clusteringCompactionTasks {
-		for _, task := range tasks {
-			if task.CollectionID == collectionID {
-				_, exist := res[task.TriggerID]
-				if !exist {
-					res[task.TriggerID] = make([]*datapb.CompactionTask, 0)
-				}
-				res[task.TriggerID] = append(res[task.TriggerID], proto.Clone(task).(*datapb.CompactionTask))
-			} else {
-				break
-			}
-		}
-	}
-	return res
-}
-
-func (m *meta) GetClusteringCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask {
-	m.RLock()
-	defer m.RUnlock()
-	res := make([]*datapb.CompactionTask, 0)
-	tasks, triggerIDExist := m.clusteringCompactionTasks[triggerID]
-	if triggerIDExist {
-		for _, task := range tasks {
-			res = append(res, proto.Clone(task).(*datapb.CompactionTask))
-		}
-	}
-	return res
-}
-
-func (m *meta) SaveClusteringCompactionTask(task *datapb.CompactionTask) error {
-	m.Lock()
-	defer m.Unlock()
-	if err := m.catalog.SaveCompactionTask(m.ctx, task); err != nil {
-		log.Error("meta update: update compaction task fail", zap.Error(err))
-		return err
-	}
-	return m.saveClusteringCompactionTaskMemory(task)
-}
-
-func (m *meta) saveClusteringCompactionTaskMemory(task *datapb.CompactionTask) error {
-	_, triggerIDExist := m.clusteringCompactionTasks[task.TriggerID]
-	if !triggerIDExist {
-		m.clusteringCompactionTasks[task.TriggerID] = make(map[int64]*datapb.CompactionTask, 0)
-	}
-	m.clusteringCompactionTasks[task.TriggerID][task.PlanID] = task
-	return nil
-}
-
-func (m *meta) DropClusteringCompactionTask(task *datapb.CompactionTask) error {
-	m.Lock()
-	defer m.Unlock()
-	if err := m.catalog.DropCompactionTask(m.ctx, task); err != nil {
-		log.Error("meta update: drop compaction task fail", zap.Int64("triggerID", task.TriggerID), zap.Int64("planID", task.PlanID), zap.Int64("collectionID", task.CollectionID), zap.Error(err))
-		return err
-	}
-	_, triggerIDExist := m.clusteringCompactionTasks[task.TriggerID]
-	if triggerIDExist {
-		delete(m.clusteringCompactionTasks[task.TriggerID], task.PlanID)
-	}
-	if len(m.clusteringCompactionTasks[task.TriggerID]) == 0 {
-		delete(m.clusteringCompactionTasks, task.TriggerID)
-	}
-	return nil
 }

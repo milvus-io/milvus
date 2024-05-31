@@ -55,7 +55,7 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 }
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
-	//s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return().Once()
+	// s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return().Once()
 	handler := newCompactionPlanHandler(nil, nil, nil, nil, nil, nil)
 	handler.scheduler = s.mockSch
 
@@ -564,7 +564,7 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 		s.mockMeta.EXPECT().CompleteCompactionMutation(mock.Anything, mock.Anything).Return(
 			[]*SegmentInfo{segment},
 			&segMetricMutation{}, nil).Once()
-		//s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return()
+		// s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return()
 
 		dataNodeID := UniqueID(111)
 

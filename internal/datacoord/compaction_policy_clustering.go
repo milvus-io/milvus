@@ -187,7 +187,7 @@ func (policy *clusteringCompactionPolicy) triggerOneCollection(ctx context.Conte
 }
 
 func (policy *clusteringCompactionPolicy) collectionIsClusteringCompacting(collectionID UniqueID) (bool, int64) {
-	triggers := policy.meta.GetClusteringCompactionTasksByCollection(collectionID)
+	triggers := policy.meta.compactionTaskMeta.GetCompactionTasksByCollection(collectionID)
 	if len(triggers) == 0 {
 		return false, 0
 	}
