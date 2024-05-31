@@ -43,8 +43,8 @@ type BinlogIoImpl struct {
 	pool *conc.Pool[any]
 }
 
-func NewBinlogIO(cm storage.ChunkManager, ioPool *conc.Pool[any]) BinlogIO {
-	return &BinlogIoImpl{cm, ioPool}
+func NewBinlogIO(cm storage.ChunkManager) BinlogIO {
+	return &BinlogIoImpl{cm, GetOrCreateIOPool()}
 }
 
 func (b *BinlogIoImpl) Download(ctx context.Context, paths []string) ([][]byte, error) {
