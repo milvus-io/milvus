@@ -11,12 +11,10 @@
 
 find_package(Protobuf REQUIRED)
 
+file(GLOB_RECURSE milvus_proto_srcs
+        "${CMAKE_CURRENT_SOURCE_DIR}/*.cc")
 add_library(milvus_proto STATIC
-    common.pb.cc
-    index_cgo_msg.pb.cc
-    plan.pb.cc
-    schema.pb.cc
-    segcore.pb.cc
+    ${milvus_proto_srcs}
     )
 message(STATUS "milvus proto sources: " ${milvus_proto_srcs})
 

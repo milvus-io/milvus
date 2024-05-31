@@ -10,6 +10,7 @@ mod log;
 mod util;
 mod util_c;
 mod vec_collector;
+mod demo_c;
 
 pub fn add(left: usize, right: usize) -> usize {
     left + right
