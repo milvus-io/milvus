@@ -19,8 +19,9 @@ package initcore
 import (
 	"testing"
 
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/stretchr/testify/assert"
+
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 func TestTracer(t *testing.T) {
