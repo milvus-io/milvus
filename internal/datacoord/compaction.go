@@ -84,6 +84,7 @@ type compactionPlanHandler struct {
 	scheduler        Scheduler
 	sessions         SessionManager
 	analyzeScheduler *taskScheduler
+	handler          Handler
 
 	stopCh   chan struct{}
 	stopOnce sync.Once
@@ -92,7 +93,7 @@ type compactionPlanHandler struct {
 	compactionResults map[int64]*typeutil.Pair[int64, *datapb.CompactionPlanResult]
 }
 
-func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator, analyzeScheduler *taskScheduler,
+func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator, analyzeScheduler *taskScheduler, handler Handler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
 		plans:            make(map[int64]CompactionTask),
@@ -102,6 +103,7 @@ func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm Chann
 		allocator:        allocator,
 		scheduler:        NewCompactionScheduler(cluster),
 		analyzeScheduler: analyzeScheduler,
+		handler:          handler,
 	}
 }
 
@@ -488,39 +490,14 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	for _, task := range tasks {
 		planID := task.GetPlanID()
 		cachedPlans = append(cachedPlans, planID)
-		switch task.GetType() {
-		case datapb.CompactionType_ClusteringCompaction:
-			clusterTask := task.(*clusteringCompactionTask)
-			log := log.With(zap.Int64("PlanID", task.GetPlanID()))
-			stateBefore := clusterTask.GetState().String()
-			err := clusterTask.ProcessTask(c)
-			if err != nil {
-				log.Warn("fail in process task", zap.Error(err))
-				if merr.IsRetryableErr(err) && clusterTask.RetryTimes < taskMaxRetryTimes {
-					// retry in next loop
-					clusterTask.RetryTimes = clusterTask.RetryTimes + 1
-				} else {
-					log.Error("task fail with unretryable reason or meet max retry times", zap.Error(err))
-					clusterTask.State = datapb.CompactionTaskState_failed
-					clusterTask.FailReason = err.Error()
-				}
-			}
-			// task state update, refresh retry times count
-			if clusterTask.State.String() != stateBefore {
-				clusterTask.RetryTimes = 0
-			}
-			log.Debug("process task", zap.String("stateBefore", stateBefore), zap.String("stateAfter", clusterTask.State.String()))
-			c.meta.(*meta).compactionTaskMeta.SaveCompactionTask(clusterTask.CompactionTask)
-		default:
-			log := log.With(
-				zap.Int64("planID", task.GetPlanID()),
-				zap.Int64("nodeID", task.GetNodeID()),
-				zap.String("channel", task.GetChannel()))
-			err := task.ProcessTask(c)
-			if err != nil {
-				log.Warn("fail in process task", zap.Error(err))
-				return err
-			}
+		log := log.With(
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64("nodeID", task.GetNodeID()),
+			zap.String("channel", task.GetChannel()))
+		err := task.ProcessTask(c)
+		if err != nil {
+			log.Warn("fail in process task", zap.Error(err))
+			return err
 		}
 	}
 	c.mu.Unlock()

@@ -83,12 +83,7 @@ func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPl
 	}
 	nodePlan, exist := handler.compactionResults[task.GetPlanID()]
 	if !exist {
-		// compaction task in DC but not found in DN means the compaction plan has failed
-		log.Info("compaction failed")
-		handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), endSpan())
-		handler.setSegmentsCompacting(task, false)
-		handler.scheduler.Finish(task.GetPlanID(), task)
-		return nil
+		return merr.WrapErrCompactionResultNotFound()
 	}
 	planResult := nodePlan.B
 	switch planResult.GetState() {
@@ -292,32 +287,57 @@ func (task *clusteringCompactionTask) submitToCompact(handler *compactionPlanHan
 }
 
 func (task *clusteringCompactionTask) ProcessTask(handler *compactionPlanHandler) error {
+	log := log.With(zap.Int64("PlanID", task.GetPlanID()))
+	stateBefore := task.GetState().String()
+	err := task.innerProcessTask(handler)
+	if err != nil {
+		log.Warn("fail in process task", zap.Error(err))
+		if merr.IsRetryableErr(err) && task.RetryTimes < taskMaxRetryTimes {
+			// retry in next loop
+			task.RetryTimes = task.RetryTimes + 1
+		} else {
+			log.Error("task fail with unretryable reason or meet max retry times", zap.Error(err))
+			task.State = datapb.CompactionTaskState_failed
+			task.FailReason = err.Error()
+		}
+	}
+	// task state update, refresh retry times count
+	if task.State.String() != stateBefore {
+		task.RetryTimes = 0
+	}
+	log.Debug("process task", zap.String("stateBefore", stateBefore), zap.String("stateAfter", task.State.String()))
+	handler.meta.(*meta).compactionTaskMeta.SaveCompactionTask(task.CompactionTask)
+	return err
+}
+
+func (task *clusteringCompactionTask) innerProcessTask(compactionHandler *compactionPlanHandler) error {
 	if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
 		return nil
 	}
-	//coll, err := c.handler.GetCollection(t.ctx, task.GetCollectionID())
-	//if err != nil {
-	//	log.Warn("fail to get collection", zap.Int64("collectionID", task.GetCollectionID()), zap.Error(err))
-	//	return merr.WrapErrClusteringCompactionGetCollectionFail(task.GetCollectionID(), err)
-	//}
-	//if coll == nil {
-	//	log.Warn("collection not found, it may be dropped, stop clustering compaction task", zap.Int64("collectionID", task.GetCollectionID()))
-	//	return merr.WrapErrCollectionNotFound(task.GetCollectionID())
-	//}
+
+	coll, err := compactionHandler.handler.GetCollection(context.Background(), task.GetCollectionID())
+	if err != nil {
+		log.Warn("fail to get collection", zap.Int64("collectionID", task.GetCollectionID()), zap.Error(err))
+		return merr.WrapErrClusteringCompactionGetCollectionFail(task.GetCollectionID(), err)
+	}
+	if coll == nil {
+		log.Warn("collection not found, it may be dropped, stop clustering compaction task", zap.Int64("collectionID", task.GetCollectionID()))
+		return merr.WrapErrCollectionNotFound(task.GetCollectionID())
+	}
 
 	switch task.State {
 	case datapb.CompactionTaskState_pipelining:
-		return task.processInitTask(handler)
+		return task.processInitTask(compactionHandler)
 	case datapb.CompactionTaskState_executing:
-		return task.processExecutingTask(handler)
+		return task.processExecutingTask(compactionHandler)
 	case datapb.CompactionTaskState_analyzing:
-		return task.processAnalyzingTask(handler)
+		return task.processAnalyzingTask(compactionHandler)
 	case datapb.CompactionTaskState_indexing:
-		return task.processIndexingTask(handler)
+		return task.processIndexingTask(compactionHandler)
 	case datapb.CompactionTaskState_timeout:
-		return task.processFailedOrTimeoutTask(handler)
+		return task.processFailedOrTimeoutTask(compactionHandler)
 	case datapb.CompactionTaskState_failed:
-		return task.processFailedOrTimeoutTask(handler)
+		return task.processFailedOrTimeoutTask(compactionHandler)
 	}
 	return nil
 }
