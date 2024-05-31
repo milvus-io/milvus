@@ -3,6 +3,7 @@ import json
 from pymilvus.grpc_gen import milvus_pb2 as milvus_types
 from pymilvus import connections
 from utils.util_log import test_log as log
+from utils.util_log import test_log as log
 sys_info_req = ujson.dumps({"metric_type": "system_info"})
 sys_statistics_req = ujson.dumps({"metric_type": "system_statistics"})
 sys_logs_req = ujson.dumps({"metric_type": "system_logs"})
@@ -17,8 +18,23 @@ class MilvusSys:
 
         # TODO: for now it only supports non_orm style API for getMetricsRequest
         req = milvus_types.GetMetricsRequest(request=sys_info_req)
+        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        # req = milvus_types.GetMetricsRequest(request=sys_statistics_req)
+        # self.sys_statistics = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        # req = milvus_types.GetMetricsRequest(request=sys_logs_req)
+        # self.sys_logs = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
         self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=60)
         log.debug(f"sys_info: {self.sys_info}")
+
+    def refresh(self):
+        req = milvus_types.GetMetricsRequest(request=sys_info_req)
+        self.sys_info = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        # req = milvus_types.GetMetricsRequest(request=sys_statistics_req)
+        # self.sys_statistics = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        # req = milvus_types.GetMetricsRequest(request=sys_logs_req)
+        # self.sys_logs = self.handler._stub.GetMetrics(req, wait_for_ready=True, timeout=None)
+        log.debug(f"sys info response: {self.sys_info.response}")
+
 
     @property
     def build_version(self):
@@ -84,6 +100,7 @@ class MilvusSys:
     @property
     def nodes(self):
         """get all the nodes in Milvus deployment"""
+        self.refresh()
         all_nodes = json.loads(self.sys_info.response).get('nodes_info')
         online_nodes = [node for node in all_nodes if node["infos"]["has_error"] is False]
         return online_nodes

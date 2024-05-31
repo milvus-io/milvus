@@ -7,11 +7,11 @@ metadata:
   labels:
     app: milvus
 spec:
-  mode: standalone
+  mode: cluster
   config:
     dataNode:
       memory:
-        forceSyncEnable: false    
+        forceSyncEnable: false
     rootCoord:
       enableActiveStandby: true
     dataCoord:
@@ -29,7 +29,7 @@ spec:
   components:
     enableRollingUpdate: true
     imageUpdateMode: rollingUpgrade
-    image: milvusdb/milvus:2.2.0-20230208-2e4d64ec
+    image: harbor.milvus.io/milvus/milvus:master-20240426-4fb8044a-amd64
     disableMetric: false
     dataNode:
       replicas: 3
@@ -45,7 +45,7 @@ spec:
         pvcDeletion: false
         values:
           replicaCount: 3
-    kafka: 
+    kafka:
       inCluster:
         deletionPolicy: Retain
         pvcDeletion: false
@@ -58,13 +58,13 @@ spec:
               serviceMonitor:
                 enabled: true
             jmx:
-              enabled: true      
+              enabled: true
     pulsar:
       inCluster:
         deletionPolicy: Retain
         pvcDeletion: false
         values:
-          components: 
+          components:
             autorecovery: false
             functions: false
             toolset: false
@@ -158,4 +158,3 @@ spec:
         pvcDeletion: false
         values:
           mode: distributed
-  
