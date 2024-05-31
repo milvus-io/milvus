@@ -122,17 +122,23 @@ def check_file_exists(file_path):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="prepare data for perf test")
-    parser.add_argument("--filter", type=str, default="")
+    parser.add_argument("--filter_field", type=str, default="")
+    parser.add_argument("--filter_op", type=str, default="==")
+    parser.add_argument("--filter_value", type=str, default="")
     args = parser.parse_args()
     train_data_file_name = glob.glob('/root/dataset/laion_with_scalar_medium_10m/train*.parquet')
     test_data_file_name = "/root/dataset/laion_with_scalar_medium_10m/test.parquet"
     neighbor_dir = "/root/dataset/laion_with_scalar_medium_10m"
 
-    expr = args.filter
+    filter_field = args.filter_field
+    filter_op = args.filter_op
+    filter_value = args.filter_value
+
+    expr = f"{filter_field} {filter_op} {filter_value}"
     ascii_codes = [str(ord(char)) for char in expr]
     expr_ascii = "".join(ascii_codes)
     # check neighbors file is exist
-    if expr_ascii:
+    if filter_field and expr_ascii:
         neighbors_file_name = f"{neighbor_dir}/neighbors-{expr_ascii}.parquet"
     else:
         neighbors_file_name = f"{neighbor_dir}/neighbors.parquet"
@@ -142,12 +148,12 @@ if __name__ == "__main__":
         print("File exists")
         exit(0)
     neighbors_file_name_list = []
-    expr = convert_numbers_to_quoted_strings(expr)
+    expr = f"{filter_field} {filter_op} '{filter_value}'"
     for train_data_f in train_data_file_name:
         print(train_data_f)
         neighbors_file_name = compute_neighbors(train_data_f, test_data_file_name, expr)
         neighbors_file_name_list.append(neighbors_file_name)
-    if expr_ascii:
+    if filter_field and expr_ascii:
         merge_neighbors(neighbors_file_name_list, f"{neighbor_dir}/neighbors-{expr_ascii}.parquet")
     else:
         merge_neighbors(neighbors_file_name_list, f"{neighbor_dir}/neighbors.parquet")
