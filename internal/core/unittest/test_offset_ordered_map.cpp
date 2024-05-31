@@ -60,12 +60,13 @@ using TypeOfPks = testing::Types<int64_t, std::string>;
 TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest);
 
 TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
-    std::vector<int64_t> offsets;
-
     // no data.
-    offsets = this->map_.find_first(Unlimited, {}, true);
-    ASSERT_EQ(0, offsets.size());
-
+    {
+        auto [offsets, has_more_res] =
+            this->map_.find_first(Unlimited, {}, true);
+        ASSERT_EQ(0, offsets.size());
+        ASSERT_FALSE(has_more_res);
+    }
     // insert 10 entities.
     int num = 10;
     auto data = this->random_generate(num);
@@ -76,38 +77,63 @@ TYPED_TEST_P(TypedOffsetOrderedMapTest, find_first) {
     // all is satisfied.
     BitsetType all(num);
     all.set();
-    offsets = this->map_.find_first(num / 2, all, true);
-    ASSERT_EQ(num / 2, offsets.size());
-    for (int i = 1; i < offsets.size(); i++) {
-        ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+
+    {
+        auto [offsets, has_more_res] =
+            this->map_.find_first(num / 2, all, true);
+        ASSERT_EQ(num / 2, offsets.size());
+        ASSERT_TRUE(has_more_res);
+        for (int i = 1; i < offsets.size(); i++) {
+            ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+        }
     }
-    offsets = this->map_.find_first(Unlimited, all, true);
-    ASSERT_EQ(num, offsets.size());
-    for (int i = 1; i < offsets.size(); i++) {
-        ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+    {
+        auto [offsets, has_more_res] =
+            this->map_.find_first(Unlimited, all, true);
+        ASSERT_EQ(num, offsets.size());
+        ASSERT_FALSE(has_more_res);
+        for (int i = 1; i < offsets.size(); i++) {
+            ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+        }
     }
 
     // corner case, segment offset exceeds the size of bitset.
     BitsetType all_minus_1(num - 1);
     all_minus_1.set();
-    offsets = this->map_.find_first(num / 2, all_minus_1, true);
-    ASSERT_EQ(num / 2, offsets.size());
-    for (int i = 1; i < offsets.size(); i++) {
-        ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+    {
+        auto [offsets, has_more_res] =
+            this->map_.find_first(num / 2, all_minus_1, true);
+        ASSERT_EQ(num / 2, offsets.size());
+        ASSERT_TRUE(has_more_res);
+        for (int i = 1; i < offsets.size(); i++) {
+            ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+        }
     }
-    offsets = this->map_.find_first(Unlimited, all_minus_1, true);
-    ASSERT_EQ(all_minus_1.size(), offsets.size());
-    for (int i = 1; i < offsets.size(); i++) {
-        ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+    {
+        auto [offsets, has_more_res] =
+            this->map_.find_first(Unlimited, all_minus_1, true);
+        ASSERT_EQ(all_minus_1.size(), offsets.size());
+        ASSERT_FALSE(has_more_res);
+        for (int i = 1; i < offsets.size(); i++) {
+            ASSERT_TRUE(data[offsets[i - 1]] <= data[offsets[i]]);
+        }
     }
 
     // none is satisfied.
     BitsetType none(num);
     none.reset();
-    offsets = this->map_.find_first(num / 2, none, true);
-    ASSERT_EQ(0, offsets.size());
-    offsets = this->map_.find_first(NoLimit, none, true);
-    ASSERT_EQ(0, offsets.size());
+    {
+        auto [offsets, has_more_res] =
+            this->map_.find_first(num / 2, none, true);
+        ASSERT_TRUE(has_more_res);
+        ASSERT_EQ(0, offsets.size());
+    }
+    {
+        auto [offsets, has_more_res] =
+            this->map_.find_first(NoLimit, none, true);
+        ASSERT_TRUE(has_more_res);
+        ASSERT_EQ(0, offsets.size());
+    }
 }
 
 REGISTER_TYPED_TEST_SUITE_P(TypedOffsetOrderedMapTest, find_first);

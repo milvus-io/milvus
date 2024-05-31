@@ -133,10 +133,6 @@ PrepareVectorIteratorsFromIndex(const SearchInfo& search_info,
     if (search_info.group_by_field_id_.has_value()) {
         try {
             auto search_conf = search_info.search_params_;
-            if (search_conf.contains(knowhere::indexparam::EF)) {
-                search_conf[knowhere::indexparam::SEED_EF] =
-                    search_conf[knowhere::indexparam::EF];
-            }
             knowhere::expected<
                 std::vector<std::shared_ptr<knowhere::IndexNode::iterator>>>
                 iterators_val =

@@ -71,3 +71,9 @@ target_link_libraries(bench_tantivy
         boost_filesystem
         dl
         )
+
+add_executable(ffi_demo ffi_demo.cpp)
+target_link_libraries(ffi_demo
+        tantivy_binding
+        dl
+        )

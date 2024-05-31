@@ -35,13 +35,9 @@ template <typename T>
 ScalarIndexPtr<T>
 IndexFactory::CreateScalarIndex(
     const IndexType& index_type,
-    const storage::FileManagerContext& file_manager_context,
-    DataType d_type) {
+    const storage::FileManagerContext& file_manager_context) {
     if (index_type == INVERTED_INDEX_TYPE) {
-        TantivyConfig cfg;
-        cfg.data_type_ = d_type;
-        return std::make_unique<InvertedIndexTantivy<T>>(cfg,
-                                                         file_manager_context);
+        return std::make_unique<InvertedIndexTantivy<T>>(file_manager_context);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<T>>(file_manager_context);
@@ -60,14 +56,11 @@ template <>
 ScalarIndexPtr<std::string>
 IndexFactory::CreateScalarIndex<std::string>(
     const IndexType& index_type,
-    const storage::FileManagerContext& file_manager_context,
-    DataType d_type) {
+    const storage::FileManagerContext& file_manager_context) {
 #if defined(__linux__) || defined(__APPLE__)
     if (index_type == INVERTED_INDEX_TYPE) {
-        TantivyConfig cfg;
-        cfg.data_type_ = d_type;
         return std::make_unique<InvertedIndexTantivy<std::string>>(
-            cfg, file_manager_context);
+            file_manager_context);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<std::string>>(
@@ -84,13 +77,10 @@ ScalarIndexPtr<T>
 IndexFactory::CreateScalarIndex(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space,
-    DataType d_type) {
+    std::shared_ptr<milvus_storage::Space> space) {
     if (index_type == INVERTED_INDEX_TYPE) {
-        TantivyConfig cfg;
-        cfg.data_type_ = d_type;
-        return std::make_unique<InvertedIndexTantivy<T>>(
-            cfg, file_manager_context, space);
+        return std::make_unique<InvertedIndexTantivy<T>>(file_manager_context,
+                                                         space);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<T>>(file_manager_context,
@@ -104,14 +94,11 @@ ScalarIndexPtr<std::string>
 IndexFactory::CreateScalarIndex<std::string>(
     const IndexType& index_type,
     const storage::FileManagerContext& file_manager_context,
-    std::shared_ptr<milvus_storage::Space> space,
-    DataType d_type) {
+    std::shared_ptr<milvus_storage::Space> space) {
 #if defined(__linux__) || defined(__APPLE__)
     if (index_type == INVERTED_INDEX_TYPE) {
-        TantivyConfig cfg;
-        cfg.data_type_ = d_type;
         return std::make_unique<InvertedIndexTantivy<std::string>>(
-            cfg, file_manager_context, space);
+            file_manager_context, space);
     }
     if (index_type == BITMAP_INDEX_TYPE) {
         return std::make_unique<HybridScalarIndex<std::string>>(
@@ -148,45 +135,54 @@ IndexFactory::CreateIndex(
 }
 
 IndexBasePtr
-IndexFactory::CreateScalarIndex(
-    const CreateIndexInfo& create_index_info,
+IndexFactory::CreatePrimitiveScalarIndex(
+    DataType data_type,
+    IndexType index_type,
     const storage::FileManagerContext& file_manager_context) {
-    auto data_type = create_index_info.field_type;
-    auto index_type = create_index_info.index_type;
-
     switch (data_type) {
         // create scalar index
         case DataType::BOOL:
-            return CreateScalarIndex<bool>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<bool>(index_type, file_manager_context);
         case DataType::INT8:
-            return CreateScalarIndex<int8_t>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<int8_t>(index_type, file_manager_context);
         case DataType::INT16:
-            return CreateScalarIndex<int16_t>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<int16_t>(index_type, file_manager_context);
         case DataType::INT32:
-            return CreateScalarIndex<int32_t>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<int32_t>(index_type, file_manager_context);
         case DataType::INT64:
-            return CreateScalarIndex<int64_t>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<int64_t>(index_type, file_manager_context);
         case DataType::FLOAT:
-            return CreateScalarIndex<float>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<float>(index_type, file_manager_context);
         case DataType::DOUBLE:
-            return CreateScalarIndex<double>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<double>(index_type, file_manager_context);
 
             // create string index
         case DataType::STRING:
         case DataType::VARCHAR:
-            return CreateScalarIndex<std::string>(
-                index_type, file_manager_context, data_type);
+            return CreateScalarIndex<std::string>(index_type,
+                                                  file_manager_context);
         default:
             throw SegcoreError(
                 DataTypeInvalid,
                 fmt::format("invalid data type to build index: {}", data_type));
+    }
+}
+
+IndexBasePtr
+IndexFactory::CreateScalarIndex(
+    const CreateIndexInfo& create_index_info,
+    const storage::FileManagerContext& file_manager_context) {
+    switch (create_index_info.field_type) {
+        case DataType::ARRAY:
+            return CreatePrimitiveScalarIndex(
+                static_cast<DataType>(
+                    file_manager_context.fieldDataMeta.schema.element_type()),
+                create_index_info.index_type,
+                file_manager_context);
+        default:
+            return CreatePrimitiveScalarIndex(create_index_info.field_type,
+                                              create_index_info.index_type,
+                                              file_manager_context);
     }
 }
 
@@ -257,32 +253,25 @@ IndexFactory::CreateScalarIndex(const CreateIndexInfo& create_index_info,
     switch (data_type) {
         // create scalar index
         case DataType::BOOL:
-            return CreateScalarIndex<bool>(
-                index_type, file_manager, space, data_type);
+            return CreateScalarIndex<bool>(index_type, file_manager, space);
         case DataType::INT8:
-            return CreateScalarIndex<int8_t>(
-                index_type, file_manager, space, data_type);
+            return CreateScalarIndex<int8_t>(index_type, file_manager, space);
         case DataType::INT16:
-            return CreateScalarIndex<int16_t>(
-                index_type, file_manager, space, data_type);
+            return CreateScalarIndex<int16_t>(index_type, file_manager, space);
         case DataType::INT32:
-            return CreateScalarIndex<int32_t>(
-                index_type, file_manager, space, data_type);
+            return CreateScalarIndex<int32_t>(index_type, file_manager, space);
         case DataType::INT64:
-            return CreateScalarIndex<int64_t>(
-                index_type, file_manager, space, data_type);
+            return CreateScalarIndex<int64_t>(index_type, file_manager, space);
         case DataType::FLOAT:
-            return CreateScalarIndex<float>(
-                index_type, file_manager, space, data_type);
+            return CreateScalarIndex<float>(index_type, file_manager, space);
         case DataType::DOUBLE:
-            return CreateScalarIndex<double>(
-                index_type, file_manager, space, data_type);
+            return CreateScalarIndex<double>(index_type, file_manager, space);
 
             // create string index
         case DataType::STRING:
         case DataType::VARCHAR:
             return CreateScalarIndex<std::string>(
-                index_type, file_manager, space, data_type);
+                index_type, file_manager, space);
         default:
             throw SegcoreError(
                 DataTypeInvalid,
