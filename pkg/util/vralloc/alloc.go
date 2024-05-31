@@ -25,9 +25,9 @@ import (
 )
 
 type Resource struct {
-	Memory uint64 // Memory occupation in bytes
-	CPU    uint64 // CPU in cycles per second
-	Disk   uint64 // Disk occpuation in bytes
+	Memory int64 // Memory occupation in bytes
+	CPU    int64 // CPU in cycles per second
+	Disk   int64 // Disk occpuation in bytes
 }
 
 // Add adds r2 to r
@@ -139,10 +139,10 @@ type PhysicalAwareFixedSizeAllocator struct {
 var _ Allocator = (*PhysicalAwareFixedSizeAllocator)(nil)
 
 func (a *PhysicalAwareFixedSizeAllocator) Allocate(id string, r *Resource) (allocated bool, short *Resource) {
-	memoryUsage := hardware.GetUsedMemoryCount()
-	diskUsage := uint64(0)
+	memoryUsage := int64(hardware.GetUsedMemoryCount())
+	diskUsage := int64(0)
 	if usageStats, err := disk.Usage(a.dir); err != nil {
-		diskUsage = uint64(usageStats.Used)
+		diskUsage = int64(usageStats.Used)
 	}
 
 	// Check if memory usage + future request estimation will exceed the memory limit
@@ -158,7 +158,7 @@ func (a *PhysicalAwareFixedSizeAllocator) Allocate(id string, r *Resource) (allo
 	return false, expected.Diff(a.hwLimit)
 }
 
-func NewPhysicalAwareFixedSizeAllocator(limit *Resource, hwMemoryLimit, hwDiskLimit uint64, dir string) *PhysicalAwareFixedSizeAllocator {
+func NewPhysicalAwareFixedSizeAllocator(limit *Resource, hwMemoryLimit, hwDiskLimit int64, dir string) *PhysicalAwareFixedSizeAllocator {
 	return &PhysicalAwareFixedSizeAllocator{
 		FixedSizeAllocator: FixedSizeAllocator{
 			limit:  limit,

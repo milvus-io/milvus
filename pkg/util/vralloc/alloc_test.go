@@ -39,11 +39,13 @@ func TestFixedSizeAllocator(t *testing.T) {
 	assert.Equal(t, true, allocated)
 	m := a.Inspect()
 	assert.Equal(t, 2, len(m))
+	allocated, _ = a.Allocate("a1", &Resource{10, 0, 0})
+	assert.Equal(t, false, allocated)
 }
 
 func TestPhysicalAwareFixedSizeAllocator(t *testing.T) {
-	hwMemoryLimit := uint64(float32(hardware.GetMemoryCount()) * 0.9)
-	hwDiskLimit := ^uint64(0)
+	hwMemoryLimit := int64(float32(hardware.GetMemoryCount()) * 0.9)
+	hwDiskLimit := int64(1<<63 - 1)
 	a := NewPhysicalAwareFixedSizeAllocator(&Resource{100, 100, 100}, hwMemoryLimit, hwDiskLimit, "/tmp")
 
 	allocated, _ := a.Allocate("a1", &Resource{10, 10, 10})
