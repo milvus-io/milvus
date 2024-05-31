@@ -234,12 +234,14 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		ID:            flushedSegmentID,
 		CollectionID:  1,
 		PartitionID:   2,
+		State:         commonpb.SegmentState_Flushed,
 		StartPosition: &msgpb.MsgPosition{},
 	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
 	fgservice.metacache.AddSegment(&datapb.SegmentInfo{
 		ID:            growingSegmentID,
 		CollectionID:  1,
 		PartitionID:   2,
+		State:         commonpb.SegmentState_Flushed,
 		StartPosition: &msgpb.MsgPosition{},
 	}, func(_ *datapb.SegmentInfo) *metacache.BloomFilterSet { return metacache.NewBloomFilterSet() })
 	s.Run("service_not_ready", func() {
@@ -565,7 +567,7 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		_, result := fg.metacache.GetSegmentByID(req.GetCompactedTo(), metacache.WithSegmentState(commonpb.SegmentState_Flushed))
 		s.True(result)
 		for _, compactFrom := range req.GetCompactedFrom() {
-			seg, result := fg.metacache.GetSegmentByID(compactFrom, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+			seg, result := fg.metacache.GetSegmentByID(compactFrom, metacache.WithSegmentState(commonpb.SegmentState_Dropped))
 			s.True(result)
 			s.Equal(req.CompactedTo, seg.CompactTo())
 		}
@@ -604,13 +606,13 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s.Assert().NoError(err)
 		s.Assert().True(merr.Ok(status))
 
-		seg, result := fg.metacache.GetSegmentByID(100, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		seg, result := fg.metacache.GetSegmentByID(100, metacache.WithSegmentState(commonpb.SegmentState_Dropped))
 		s.True(result)
 		s.Equal(metacache.NullSegment, seg.CompactTo())
-		seg, result = fg.metacache.GetSegmentByID(200, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		seg, result = fg.metacache.GetSegmentByID(200, metacache.WithSegmentState(commonpb.SegmentState_Dropped))
 		s.True(result)
 		s.Equal(metacache.NullSegment, seg.CompactTo())
-		_, result = fg.metacache.GetSegmentByID(301, metacache.WithSegmentState(commonpb.SegmentState_Flushed))
+		_, result = fg.metacache.GetSegmentByID(301, metacache.WithSegmentState(commonpb.SegmentState_Dropped))
 		s.False(result)
 	})
 }
