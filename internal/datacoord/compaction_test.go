@@ -474,6 +474,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 				}
 				return nil
 			}).Once()
+		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		handler.plans[plan.PlanID] = &compactionTask{dataNodeID: 111, plan: plan}

@@ -77,17 +77,6 @@ var (
 	errChannelInBuffer   = errors.New("channel is in buffer")
 )
 
-type CompactionMeta interface {
-	SelectSegments(filters ...SegmentFilter) []*SegmentInfo
-	GetHealthySegment(segID UniqueID) *SegmentInfo
-	UpdateSegmentsInfo(operators ...UpdateOperator) error
-	SetSegmentCompacting(segmentID int64, compacting bool)
-
-	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
-}
-
-var _ CompactionMeta = (*meta)(nil)
-
 type compactionTask struct {
 	triggerInfo *compactionSignal
 	plan        *datapb.CompactionPlan
@@ -438,6 +427,11 @@ func (c *compactionPlanHandler) completeCompaction(result *datapb.CompactionPlan
 		if err := c.handleL0CompactionResult(plan, result); err != nil {
 			return err
 		}
+	case datapb.CompactionType_ClusteringCompaction:
+		// todo we may need to create a bew handleMajorCompactionResult method if the logic differs a lot
+		if err := c.handleMergeCompactionResult(plan, result); err != nil {
+			return err
+		}
 	default:
 		return errors.New("unknown compaction type")
 	}
@@ -467,14 +461,21 @@ func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.Compaction
 }
 
 func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
-	log := log.With(zap.Int64("planID", plan.GetPlanID()))
-	if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
-		// should never happen
-		log.Warn("illegal compaction results")
-		return fmt.Errorf("Illegal compaction results: %v", result)
+	log := log.With(zap.Int64("planID", plan.GetPlanID()), zap.String("type", plan.GetType().String()))
+	if plan.GetType() == datapb.CompactionType_ClusteringCompaction {
+		if len(result.GetSegments()) == 0 {
+			// should never happen
+			log.Warn("illegal compaction results")
+			return fmt.Errorf("Illegal compaction results: %v", result)
+		}
+	} else {
+		if len(result.GetSegments()) == 0 || len(result.GetSegments()) > 1 {
+			// should never happen
+			log.Warn("illegal compaction results")
+			return fmt.Errorf("Illegal compaction results: %v", result)
+		}
 	}
 
-	// Merge compaction has one and only one segment
 	newSegmentInfo := c.meta.GetHealthySegment(result.GetSegments()[0].SegmentID)
 	if newSegmentInfo != nil {
 		log.Info("meta has already been changed, skip meta change and retry sync segments")
@@ -489,7 +490,7 @@ func (c *compactionPlanHandler) handleMergeCompactionResult(plan *datapb.Compact
 	}
 	// TODO @xiaocai2333: drop compaction plan on datanode
 
-	log.Info("handleCompactionResult: success to handle merge compaction result")
+	log.Info("handleCompactionResult: success to handle compaction result")
 	return nil
 }
 

@@ -17,7 +17,7 @@
 package indexnode
 
 /*
-#cgo pkg-config: milvus_common milvus_indexbuilder milvus_segcore
+#cgo pkg-config: milvus_common milvus_indexbuilder milvus_clustering milvus_segcore
 
 #include <stdlib.h>
 #include <stdint.h>
@@ -105,9 +105,10 @@ type IndexNode struct {
 	etcdCli *clientv3.Client
 	address string
 
-	initOnce  sync.Once
-	stateLock sync.Mutex
-	tasks     map[taskKey]*taskInfo
+	initOnce     sync.Once
+	stateLock    sync.Mutex
+	indexTasks   map[taskKey]*indexTaskInfo
+	analyzeTasks map[taskKey]*analyzeTaskInfo
 }
 
 // NewIndexNode creates a new IndexNode component.
@@ -120,7 +121,8 @@ func NewIndexNode(ctx context.Context, factory dependency.Factory) *IndexNode {
 		loopCancel:     cancel,
 		factory:        factory,
 		storageFactory: NewChunkMgrFactory(),
-		tasks:          map[taskKey]*taskInfo{},
+		indexTasks:     make(map[taskKey]*indexTaskInfo),
+		analyzeTasks:   make(map[taskKey]*analyzeTaskInfo),
 		lifetime:       lifetime.NewLifetime(commonpb.StateCode_Abnormal),
 	}
 	sc := NewTaskScheduler(b.loopCtx)
@@ -251,10 +253,16 @@ func (i *IndexNode) Stop() error {
 		i.lifetime.Wait()
 		log.Info("Index node abnormal")
 		// cleanup all running tasks
-		deletedTasks := i.deleteAllTasks()
-		for _, task := range deletedTasks {
-			if task.cancel != nil {
-				task.cancel()
+		deletedIndexTasks := i.deleteAllIndexTasks()
+		for _, t := range deletedIndexTasks {
+			if t.cancel != nil {
+				t.cancel()
+			}
+		}
+		deletedAnalyzeTasks := i.deleteAllAnalyzeTasks()
+		for _, t := range deletedAnalyzeTasks {
+			if t.cancel != nil {
+				t.cancel()
 			}
 		}
 		if i.sched != nil {

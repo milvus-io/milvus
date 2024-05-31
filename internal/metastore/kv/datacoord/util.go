@@ -227,6 +227,33 @@ func buildSegmentKv(segment *datapb.SegmentInfo) (string, string, error) {
 	return key, segBytes, nil
 }
 
+func buildCompactionTaskKV(task *datapb.CompactionTask) (string, string, error) {
+	valueBytes, err := proto.Marshal(task)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal CompactionTask: %d/%d/%d, err: %w", task.TriggerID, task.PlanID, task.CollectionID, err)
+	}
+	key := buildCompactionTaskPath(task)
+	return key, string(valueBytes), nil
+}
+
+func buildCompactionTaskPath(task *datapb.CompactionTask) string {
+	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
+}
+
+func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
+	valueBytes, err := proto.Marshal(info)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal collection clustering compaction info: %d, err: %w", info.CollectionID, err)
+	}
+	key := buildPartitionStatsInfoPath(info)
+	return key, string(valueBytes), nil
+}
+
+// buildPartitionStatsInfoPath
+func buildPartitionStatsInfoPath(info *datapb.PartitionStatsInfo) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%d", PartitionStatsInfoPrefix, info.CollectionID, info.PartitionID, info.VChannel, info.Version)
+}
+
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store
 func buildSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d", SegmentPrefix, collectionID, partitionID, segmentID)
@@ -293,4 +320,8 @@ func buildImportTaskKey(taskID int64) string {
 
 func buildPreImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", PreImportTaskPrefix, taskID)
+}
+
+func buildAnalyzeTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", AnalyzeTaskPrefix, taskID)
 }

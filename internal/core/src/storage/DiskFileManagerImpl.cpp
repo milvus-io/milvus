@@ -442,6 +442,7 @@ SortByPath(std::vector<std::string>& paths) {
                          std::stol(b.substr(b.find_last_of("/") + 1));
               });
 }
+
 template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {

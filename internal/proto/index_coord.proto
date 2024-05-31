@@ -60,6 +60,13 @@ service IndexNode {
     rpc GetMetrics(milvus.GetMetricsRequest)
         returns (milvus.GetMetricsResponse) {
     }
+
+    rpc CreateJobV2(CreateJobV2Request) returns (common.Status) {
+    }
+    rpc QueryJobsV2(QueryJobsV2Request) returns (QueryJobsV2Response) {
+    }
+    rpc DropJobsV2(DropJobsV2Request) returns (common.Status) {
+    }
 }
 
 message IndexInfo {
@@ -346,4 +353,105 @@ message ListIndexesRequest {
 message ListIndexesResponse {
     common.Status status = 1;
     repeated IndexInfo index_infos = 2;
+}
+
+message AnalyzeTask {
+    int64 collectionID = 1;
+    int64 partitionID = 2;
+    int64 fieldID = 3;
+    string field_name = 4;
+    schema.DataType field_type = 5;
+    int64 taskID = 6;
+    int64 version = 7;
+    repeated int64 segmentIDs = 8;
+    int64 nodeID = 9;
+    JobState state = 10;
+    string fail_reason = 11;
+    int64 dim = 12;
+    string centroids_file = 13;
+}
+
+message SegmentStats {
+    int64 ID = 1;
+    int64 num_rows = 2;
+    repeated int64 logIDs = 3;
+}
+
+message AnalyzeRequest {
+    string clusterID = 1;
+    int64 taskID =2;
+    int64 collectionID = 3;
+    int64 partitionID = 4;
+    int64 fieldID = 5;
+    string fieldName = 6;
+    schema.DataType field_type = 7;
+    map<int64, SegmentStats> segment_stats = 8;
+    int64 version = 9;
+    StorageConfig storage_config = 10;
+    int64 dim = 11;
+    double max_train_size_ratio = 12;
+    int64 num_clusters = 13;
+}
+
+message AnalyzeResult {
+    int64 taskID = 1;
+    JobState state = 2;
+    string fail_reason = 3;
+    string centroids_file = 4;
+}
+
+enum JobType {
+    JobTypeNone = 0;
+    JobTypeIndexJob = 1;
+    JobTypeAnalyzeJob = 2;
+}
+
+message CreateJobV2Request {
+    string clusterID = 1;
+    int64 taskID = 2;
+    JobType job_type = 3;
+    oneof request {
+        AnalyzeRequest analyze_request = 4;
+        CreateJobRequest index_request = 5;
+    }
+//    JobDescriptor job = 3;
+}
+
+message QueryJobsV2Request {
+    string clusterID = 1;
+    repeated int64 taskIDs = 2;
+    JobType job_type = 3;
+}
+
+message IndexJobResults {
+    repeated IndexTaskInfo results = 1;
+}
+
+message AnalyzeResults {
+    repeated AnalyzeResult results = 1;
+}
+
+message QueryJobsV2Response {
+    common.Status status = 1;
+    string clusterID = 2;
+    oneof result {
+        IndexJobResults index_job_results = 3;
+        AnalyzeResults analyze_job_results = 4;
+    }
+}
+
+message DropJobsV2Request {
+    string clusterID = 1;
+    repeated int64 taskIDs = 2;
+    JobType job_type = 3;
+}
+
+
+enum JobState {
+    JobStateNone = 0;
+    JobStateInit = 1;
+    JobStateInProgress = 2;
+    JobStateFinished = 3;
+    JobStateFailed = 4;
+    JobStateRetry = 5;
 }

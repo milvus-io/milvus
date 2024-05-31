@@ -25,7 +25,7 @@ enum SegmentLevel {
   Legacy = 0; // zero value for legacy logic
   L0 = 1; // L0 segment, contains delta data for current channel
   L1 = 2; // L1 segment, normal segment, with no extra compaction attribute
-  L2 = 3; // L2 segemnt, segment with extra data distribution info
+  L2 = 3; // L2 segment, segment with extra data distribution info
 }
 
 service DataCoord {
@@ -267,6 +267,7 @@ message VchannelInfo {
   repeated int64 indexed_segmentIds = 10;
   repeated SegmentInfo indexed_segments = 11;
   repeated int64 level_zero_segment_ids = 12;
+  map<int64, int64> partition_stats_versions = 13;
 }
 
 message WatchDmChannelsRequest {
@@ -323,6 +324,12 @@ message SegmentInfo {
   // so segments with Legacy level shall be treated as L1 segment
   SegmentLevel level = 20;
   int64 storage_version = 21;
+
+  int64 partition_stats_version = 22;
+  // use in major compaction, if compaction fail, should revert segment level to last value
+  SegmentLevel last_level = 23;
+  // use in major compaction, if compaction fail, should revert partition stats version to last value 
+  int64 last_partition_stats_version = 24;
 }
 
 message SegmentStartPosition {
@@ -490,6 +497,7 @@ enum CompactionType {
   MinorCompaction = 5;
   MajorCompaction = 6;
   Level0DeleteCompaction = 7;
+  ClusteringCompaction = 8;
 }
 
 message CompactionStateRequest {
@@ -543,6 +551,12 @@ message CompactionPlan {
   int64 collection_ttl = 8;
   int64 total_rows = 9;
   schema.CollectionSchema schema = 10;
+  int64 clustering_key_id = 11;
+  int64 max_segment_rows = 12;
+  int64 prefer_segment_rows = 13;
+  string analyze_result_path = 14;
+  repeated int64 analyze_segment_ids = 15;
+  int32 state = 16;
 }
 
 message CompactionSegment {
@@ -855,4 +869,53 @@ message QuerySlotRequest {}
 message QuerySlotResponse {
   common.Status status = 1;
   int64 num_slots = 2;
+}
+
+enum CompactionTaskState {
+  unknown = 0;
+  compact_executing = 1; // => executing
+  compact_pipelining = 2;
+  compact_completed = 3; // => completed
+  failed = 4;
+  timeout = 5;
+  init = 6;
+  analyzing = 7;
+  analyzed = 8;
+  indexing = 9;
+  indexed = 10;
+  cleaned = 11;
+}
+
+message CompactionTask {
+  int64 planID = 1;
+  int64 triggerID = 2;
+  CompactionTaskState state = 3;
+  string fail_reason = 4;
+  int32 retry_times = 5;
+  uint64 start_time = 6;
+  uint64 end_time = 7;
+  int32 timeout_in_seconds = 8;
+  CompactionType type = 9;
+  uint64 timetravel = 10;
+  int64 collection_ttl = 11;
+  int64 total_rows = 12;
+  int64 collectionID = 13;
+  int64 partitionID = 14;
+  string channel = 15;
+  schema.FieldSchema clustering_key_field = 16;
+  int64 max_segment_rows = 17;
+  int64 prefer_segment_rows = 18;
+  repeated int64 inputSegments = 19;
+  repeated int64 resultSegments = 20;
+  int64 analyzeTaskID = 21;
+  int64 analyzeVersionID = 22;
+}
+
+message PartitionStatsInfo {
+  int64 collectionID = 1;
+  int64 partitionID = 2;
+  string vChannel = 3;
+  int64 version = 4;
+  repeated int64 segmentIDs = 5;
+  int64 analyzeTaskID = 6;
 }

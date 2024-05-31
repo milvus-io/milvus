@@ -21,6 +21,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -50,6 +51,17 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+type CompactionMeta interface {
+	SelectSegments(filters ...SegmentFilter) []*SegmentInfo
+	GetHealthySegment(segID UniqueID) *SegmentInfo
+	UpdateSegmentsInfo(operators ...UpdateOperator) error
+	SetSegmentCompacting(segmentID int64, compacting bool)
+
+	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
+}
+
+var _ CompactionMeta = (*meta)(nil)
+
 type meta struct {
 	lock.RWMutex
 	ctx          context.Context
@@ -59,7 +71,11 @@ type meta struct {
 	channelCPs   *channelCPs                  // vChannel -> channel checkpoint/see position
 	chunkManager storage.ChunkManager
 
-	indexMeta *indexMeta
+	clusteringCompactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
+	partitionStatsInfos       map[string]*datapb.PartitionStatsInfo
+
+	indexMeta   *indexMeta
+	analyzeMeta *analyzeMeta
 }
 
 type channelCPs struct {
@@ -94,19 +110,26 @@ type collectionInfo struct {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
-	indexMeta, err := newIndexMeta(ctx, catalog)
+	im, err := newIndexMeta(ctx, catalog)
 	if err != nil {
 		return nil, err
 	}
 
+	am, err := newAnalyzeMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
 	mt := &meta{
-		ctx:          ctx,
-		catalog:      catalog,
-		collections:  make(map[UniqueID]*collectionInfo),
-		segments:     NewSegmentsInfo(),
-		channelCPs:   newChannelCps(),
-		indexMeta:    indexMeta,
-		chunkManager: chunkManager,
+		ctx:                       ctx,
+		catalog:                   catalog,
+		collections:               make(map[UniqueID]*collectionInfo),
+		segments:                  NewSegmentsInfo(),
+		channelCPs:                newChannelCps(),
+		indexMeta:                 im,
+		analyzeMeta:               am,
+		chunkManager:              chunkManager,
+		clusteringCompactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
+		partitionStatsInfos:       make(map[string]*datapb.PartitionStatsInfo, 0),
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -161,6 +184,23 @@ func (m *meta) reloadFromKV() error {
 		pos.ChannelName = vChannel
 		m.channelCPs.checkpoints[vChannel] = pos
 	}
+
+	compactionTasks, err := m.catalog.ListCompactionTask(m.ctx)
+	if err != nil {
+		return err
+	}
+	for _, task := range compactionTasks {
+		m.saveClusteringCompactionTaskMemory(task)
+	}
+
+	partitionStatsInfos, err := m.catalog.ListPartitionStatsInfos(m.ctx)
+	if err != nil {
+		return err
+	}
+	for _, info := range partitionStatsInfos {
+		m.partitionStatsInfos[fmt.Sprintf("%d/%d/%s/%d", info.CollectionID, info.PartitionID, info.VChannel, info.Version)] = info
+	}
+
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
 	return nil
 }
@@ -234,6 +274,17 @@ func (m *meta) GetCollection(collectionID UniqueID) *collectionInfo {
 	return collection
 }
 
+// GetCollections returns collections from local cache
+func (m *meta) GetCollections() []*collectionInfo {
+	m.RLock()
+	defer m.RUnlock()
+	collections := make([]*collectionInfo, 0)
+	for _, coll := range m.collections {
+		collections = append(collections, coll)
+	}
+	return collections
+}
+
 func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 	m.RLock()
 	defer m.RUnlock()
@@ -265,6 +316,7 @@ func (m *meta) GetSegmentsChanPart(selector SegmentInfoSelector) []*chanPartSegm
 	defer m.RUnlock()
 	mDimEntry := make(map[string]*chanPartSegments)
 
+	log.Debug("GetSegmentsChanPart segment number", zap.Int("length", len(m.segments.GetSegments())))
 	for _, segmentInfo := range m.segments.segments {
 		if !selector(segmentInfo) {
 			continue
@@ -695,6 +747,60 @@ func UpdateCompactedOperator(segmentID int64) UpdateOperator {
 			return false
 		}
 		segment.Compacted = true
+		return true
+	}
+}
+
+func UpdateSegmentLevelOperator(segmentID int64, level datapb.SegmentLevel) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update level fail - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.LastLevel = segment.Level
+		segment.Level = level
+		return true
+	}
+}
+
+func UpdateSegmentPartitionStatsVersionOperator(segmentID int64, version int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: update partition stats version fail - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.LastPartitionStatsVersion = segment.PartitionStatsVersion
+		segment.PartitionStatsVersion = version
+		return true
+	}
+}
+
+func RevertSegmentLevelOperator(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: revert level fail - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.Level = segment.LastLevel
+		return true
+	}
+}
+
+func RevertSegmentPartitionStatsVersionOperator(segmentID int64) UpdateOperator {
+	return func(modPack *updateSegmentPack) bool {
+		segment := modPack.Get(segmentID)
+		if segment == nil {
+			log.Warn("meta update: revert level fail - segment not found",
+				zap.Int64("segmentID", segmentID))
+			return false
+		}
+		segment.PartitionStatsVersion = segment.LastPartitionStatsVersion
 		return true
 	}
 }
@@ -1186,6 +1292,14 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	m.segments.SetIsCompacting(segmentID, compacting)
 }
 
+// SetSegmentLevel sets level for segment
+func (m *meta) SetSegmentLevel(segmentID UniqueID, level datapb.SegmentLevel) {
+	m.Lock()
+	defer m.Unlock()
+
+	m.segments.SetLevel(segmentID, level)
+}
+
 func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error) {
 	m.Lock()
 	defer m.Unlock()
@@ -1221,6 +1335,81 @@ func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *d
 		}
 	}
 
+	getMinPosition := func(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
+		var minPos *msgpb.MsgPosition
+		for _, pos := range positions {
+			if minPos == nil ||
+				pos != nil && pos.GetTimestamp() < minPos.GetTimestamp() {
+				minPos = pos
+			}
+		}
+		return minPos
+	}
+
+	if plan.GetType() == datapb.CompactionType_ClusteringCompaction {
+		newSegments := make([]*SegmentInfo, 0)
+		for _, seg := range result.GetSegments() {
+			segmentInfo := &datapb.SegmentInfo{
+				ID:                  seg.GetSegmentID(),
+				CollectionID:        latestCompactFromSegments[0].CollectionID,
+				PartitionID:         latestCompactFromSegments[0].PartitionID,
+				InsertChannel:       plan.GetChannel(),
+				NumOfRows:           seg.NumOfRows,
+				State:               commonpb.SegmentState_Flushed,
+				MaxRowNum:           latestCompactFromSegments[0].MaxRowNum,
+				Binlogs:             seg.GetInsertLogs(),
+				Statslogs:           seg.GetField2StatslogPaths(),
+				CreatedByCompaction: true,
+				CompactionFrom:      compactFromSegIDs,
+				LastExpireTime:      plan.GetStartTime(),
+				Level:               datapb.SegmentLevel_L2,
+				StartPosition: getMinPosition(lo.Map(latestCompactFromSegments, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+					return info.GetStartPosition()
+				})),
+				DmlPosition: getMinPosition(lo.Map(latestCompactFromSegments, func(info *SegmentInfo, _ int) *msgpb.MsgPosition {
+					return info.GetDmlPosition()
+				})),
+			}
+			segment := NewSegmentInfo(segmentInfo)
+			newSegments = append(newSegments, segment)
+			metricMutation.addNewSeg(segment.GetState(), segment.GetLevel(), segment.GetNumOfRows())
+		}
+		compactionTo := make([]UniqueID, 0, len(newSegments))
+		for _, s := range newSegments {
+			compactionTo = append(compactionTo, s.GetID())
+		}
+
+		log.Info("meta update: prepare for complete compaction mutation - complete",
+			zap.Int64("collectionID", latestCompactFromSegments[0].CollectionID),
+			zap.Int64("partitionID", latestCompactFromSegments[0].PartitionID),
+			zap.Any("compacted from", compactFromSegIDs),
+			zap.Any("compacted to", compactionTo))
+
+		compactFromInfos := lo.Map(latestCompactFromSegments, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
+			return info.SegmentInfo
+		})
+
+		newSegmentInfos := lo.Map(newSegments, func(info *SegmentInfo, _ int) *datapb.SegmentInfo {
+			return info.SegmentInfo
+		})
+
+		binlogs := make([]metastore.BinlogsIncrement, 0)
+		for _, seg := range newSegmentInfos {
+			binlogs = append(binlogs, metastore.BinlogsIncrement{Segment: seg})
+		}
+		if err := m.catalog.AlterSegments(m.ctx, append(compactFromInfos, newSegmentInfos...), binlogs...); err != nil {
+			log.Warn("fail to alter segments and new segment", zap.Error(err))
+			return nil, nil, err
+		}
+		lo.ForEach(latestCompactFromSegments, func(info *SegmentInfo, _ int) {
+			m.segments.SetSegment(info.GetID(), info)
+		})
+		lo.ForEach(newSegments, func(info *SegmentInfo, _ int) {
+			m.segments.SetSegment(info.GetID(), info)
+		})
+		return newSegments, metricMutation, nil
+	}
+
 	// MixCompaction / MergeCompaction will generates one and only one segment
 	compactToSegment := result.GetSegments()[0]
 
@@ -1232,17 +1421,6 @@ func (m *meta) CompleteCompactionMutation(plan *datapb.CompactionPlan, result *d
 	}
 	if len(newDeltalogs) > 0 {
 		compactToSegment.Deltalogs = append(compactToSegment.GetDeltalogs(), &datapb.FieldBinlog{Binlogs: newDeltalogs})
-	}
-
-	getMinPosition := func(positions []*msgpb.MsgPosition) *msgpb.MsgPosition {
-		var minPos *msgpb.MsgPosition
-		for _, pos := range positions {
-			if minPos == nil ||
-				pos != nil && pos.GetTimestamp() < minPos.GetTimestamp() {
-				minPos = pos
-			}
-		}
-		return minPos
 	}
 
 	compactToSegmentInfo := NewSegmentInfo(
@@ -1587,4 +1765,145 @@ func (m *meta) ListCollections() []int64 {
 	defer m.RUnlock()
 
 	return lo.Keys(m.collections)
+}
+
+// CompactionTaskSelector is the function type to select CompactionTask from meta
+type CompactionTaskSelector func(*datapb.CompactionTask) bool
+
+// GetClusteringCompactionTasks returns clustering compaction tasks from local cache
+func (m *meta) GetClusteringCompactionTasks() map[int64][]*datapb.CompactionTask {
+	m.RLock()
+	defer m.RUnlock()
+	res := make(map[int64][]*datapb.CompactionTask, 0)
+	for triggerID, tasks := range m.clusteringCompactionTasks {
+		triggerTasks := make([]*datapb.CompactionTask, 0)
+		for _, task := range tasks {
+			triggerTasks = append(triggerTasks, proto.Clone(task).(*datapb.CompactionTask))
+		}
+		res[triggerID] = triggerTasks
+	}
+	return res
+}
+
+func (m *meta) GetClusteringCompactionTasksByCollection(collectionID int64) map[int64][]*datapb.CompactionTask {
+	m.RLock()
+	defer m.RUnlock()
+	res := make(map[int64][]*datapb.CompactionTask, 0)
+	for _, tasks := range m.clusteringCompactionTasks {
+		for _, task := range tasks {
+			if task.CollectionID == collectionID {
+				_, exist := res[task.TriggerID]
+				if !exist {
+					res[task.TriggerID] = make([]*datapb.CompactionTask, 0)
+				}
+				res[task.TriggerID] = append(res[task.TriggerID], proto.Clone(task).(*datapb.CompactionTask))
+			} else {
+				break
+			}
+		}
+	}
+	return res
+}
+
+func (m *meta) GetClusteringCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask {
+	m.RLock()
+	defer m.RUnlock()
+	res := make([]*datapb.CompactionTask, 0)
+	tasks, triggerIDExist := m.clusteringCompactionTasks[triggerID]
+	if triggerIDExist {
+		for _, task := range tasks {
+			res = append(res, proto.Clone(task).(*datapb.CompactionTask))
+		}
+	}
+	return res
+}
+
+func (m *meta) SaveClusteringCompactionTask(task *datapb.CompactionTask) error {
+	m.Lock()
+	defer m.Unlock()
+	if err := m.catalog.SaveCompactionTask(m.ctx, task); err != nil {
+		log.Error("meta update: update compaction task fail", zap.Error(err))
+		return err
+	}
+	return m.saveClusteringCompactionTaskMemory(task)
+}
+
+func (m *meta) saveClusteringCompactionTaskMemory(task *datapb.CompactionTask) error {
+	_, triggerIDExist := m.clusteringCompactionTasks[task.TriggerID]
+	if !triggerIDExist {
+		m.clusteringCompactionTasks[task.TriggerID] = make(map[int64]*datapb.CompactionTask, 0)
+	}
+	m.clusteringCompactionTasks[task.TriggerID][task.PlanID] = task
+	return nil
+}
+
+func (m *meta) DropClusteringCompactionTask(task *datapb.CompactionTask) error {
+	m.Lock()
+	defer m.Unlock()
+	if err := m.catalog.DropCompactionTask(m.ctx, task); err != nil {
+		log.Error("meta update: drop compaction task fail", zap.Int64("triggerID", task.TriggerID), zap.Int64("planID", task.PlanID), zap.Int64("collectionID", task.CollectionID), zap.Error(err))
+		return err
+	}
+	_, triggerIDExist := m.clusteringCompactionTasks[task.TriggerID]
+	if triggerIDExist {
+		delete(m.clusteringCompactionTasks[task.TriggerID], task.PlanID)
+	}
+	return nil
+}
+
+func (m *meta) ListAllPartitionStatsInfos() []*datapb.PartitionStatsInfo {
+	m.RLock()
+	defer m.RUnlock()
+	res := make([]*datapb.PartitionStatsInfo, 0)
+	for _, partitionStats := range m.partitionStatsInfos {
+		res = append(res, partitionStats)
+	}
+	return res
+}
+
+func (m *meta) ListPartitionStatsInfos(collectionID int64, partitionID int64, vchannel string, filters ...func([]*datapb.PartitionStatsInfo) []*datapb.PartitionStatsInfo) []*datapb.PartitionStatsInfo {
+	m.RLock()
+	defer m.RUnlock()
+	res := make([]*datapb.PartitionStatsInfo, 0)
+	keyPrefix := fmt.Sprintf("%d/%d/%s/", collectionID, partitionID, vchannel)
+	for key, partitionStats := range m.partitionStatsInfos {
+		if strings.HasPrefix(key, keyPrefix) {
+			res = append(res, partitionStats)
+		}
+	}
+	for _, filter := range filters {
+		res = filter(res)
+	}
+	return res
+}
+
+func (m *meta) PartitionStatsKey(info *datapb.PartitionStatsInfo) string {
+	return fmt.Sprintf("%d/%d/%s/%d", info.CollectionID, info.PartitionID, info.VChannel, info.Version)
+}
+
+func (m *meta) SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
+	m.Lock()
+	defer m.Unlock()
+	if err := m.catalog.SavePartitionStatsInfo(m.ctx, info); err != nil {
+		log.Error("meta update: update PartitionStatsInfo info fail", zap.Error(err))
+		return err
+	}
+	m.partitionStatsInfos[m.PartitionStatsKey(info)] = info
+	return nil
+}
+
+func (m *meta) DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
+	m.Lock()
+	defer m.Unlock()
+	if err := m.catalog.DropPartitionStatsInfo(m.ctx, info); err != nil {
+		log.Error("meta update: drop PartitionStatsInfo info fail",
+			zap.Int64("collectionID", info.CollectionID),
+			zap.Int64("partitionID", info.PartitionID),
+			zap.String("vchannel", info.VChannel),
+			zap.Int64("version", info.Version),
+			zap.Error(err))
+		return err
+	}
+	delete(m.partitionStatsInfos, m.PartitionStatsKey(info))
+	return nil
 }

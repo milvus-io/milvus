@@ -44,3 +44,12 @@ message CollectionIndexMeta {
   int64 maxIndexRowCount = 1;
   repeated FieldIndexMeta index_metas = 2;
 }
+
+message ClusteringCentroidsStats {
+  repeated schema.VectorField centroids = 1;
+}
+
+message ClusteringCentroidIdMappingStats {
+  repeated uint32 centroid_id_mapping = 1;
+  repeated int64 num_in_centroid = 2;
+}

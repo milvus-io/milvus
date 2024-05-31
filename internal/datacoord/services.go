@@ -1085,20 +1085,26 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 		return resp, nil
 	}
 
-	id, err := s.compactionTrigger.forceTriggerCompaction(req.CollectionID)
+	id, err := s.compactionTrigger.triggerManualCompaction(req.CollectionID, req.GetMajorCompaction())
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	plans := s.compactionHandler.getCompactionTasksBySignalID(id)
-	if len(plans) == 0 {
-		resp.CompactionID = -1
-		resp.CompactionPlanCount = 0
-	} else {
+	if req.GetMajorCompaction() {
 		resp.CompactionID = id
-		resp.CompactionPlanCount = int32(len(plans))
+		compactionTasks := s.clusteringCompactionManager.getByTriggerId(id)
+		resp.CompactionPlanCount = int32(len(compactionTasks))
+	} else {
+		plans := s.compactionHandler.getCompactionTasksBySignalID(id)
+		if len(plans) == 0 {
+			resp.CompactionID = -1
+			resp.CompactionPlanCount = 0
+		} else {
+			resp.CompactionID = id
+			resp.CompactionPlanCount = int32(len(plans))
+		}
 	}
 
 	log.Info("success to trigger manual compaction", zap.Int64("compactionID", id))
@@ -1126,22 +1132,45 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 		return resp, nil
 	}
 
-	tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
-	state, executingCnt, completedCnt, failedCnt, timeoutCnt := getCompactionState(tasks)
+	var (
+		executingCnt int
+		completedCnt int
+		timeoutCnt   int
+		failedCnt    int
+		state        commonpb.CompactionState
+		plans        []int64
+	)
 
+	var compactionTasks []*datapb.CompactionTask
+	if s.clusteringCompactionManager != nil {
+		compactionTasks = s.clusteringCompactionManager.getByTriggerId(req.GetCompactionID())
+	}
+	if len(compactionTasks) > 0 {
+		summary := s.clusteringCompactionManager.summaryCompactionTaskState(compactionTasks)
+		executingCnt = summary.executingCnt + summary.pipeliningCnt + summary.completedCnt + summary.initCnt + summary.analyzingCnt + summary.analyzedCnt + summary.indexingCnt
+		completedCnt = summary.indexedCnt
+		timeoutCnt = summary.timeoutCnt
+		failedCnt = summary.failedCnt
+		state = summary.state
+	} else {
+		tasks := s.compactionHandler.getCompactionTasksBySignalID(req.GetCompactionID())
+		plans = lo.Map(tasks, func(t *compactionTask, _ int) int64 {
+			if t.plan == nil {
+				return -1
+			}
+			return t.plan.PlanID
+		})
+		state, executingCnt, completedCnt, failedCnt, timeoutCnt = getCompactionState(tasks)
+	}
 	resp.State = state
 	resp.ExecutingPlanNo = int64(executingCnt)
 	resp.CompletedPlanNo = int64(completedCnt)
 	resp.TimeoutPlanNo = int64(timeoutCnt)
 	resp.FailedPlanNo = int64(failedCnt)
-	log.Info("success to get compaction state", zap.Any("state", state), zap.Int("executing", executingCnt),
-		zap.Int("completed", completedCnt), zap.Int("failed", failedCnt), zap.Int("timeout", timeoutCnt),
-		zap.Int64s("plans", lo.Map(tasks, func(t *compactionTask, _ int) int64 {
-			if t.plan == nil {
-				return -1
-			}
-			return t.plan.PlanID
-		})))
+
+	log.Info("success to get compaction state", zap.Any("state", resp.GetState()), zap.Int64("executing", resp.GetExecutingPlanNo()),
+		zap.Int64("completed", resp.GetCompletedPlanNo()), zap.Int64("failed", resp.GetFailedPlanNo()), zap.Int64("timeout", resp.GetTimeoutPlanNo()),
+		zap.Int64s("plans", plans))
 	return resp, nil
 }
 

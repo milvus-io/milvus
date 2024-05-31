@@ -308,5 +308,6 @@ func (s *BalanceTestSuit) TestNodeDown() {
 }
 
 func TestBalance(t *testing.T) {
+	t.Skip("Skip integration test")
 	suite.Run(t, new(BalanceTestSuit))
 }

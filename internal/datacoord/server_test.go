@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -1439,6 +1440,29 @@ func TestGetQueryVChanPositions(t *testing.T) {
 	})
 }
 
+func TestGetQueryVChanPositions_PartitionStats(t *testing.T) {
+	svr := newTestServer(t)
+	defer closeTestServer(t, svr)
+	schema := newTestSchema()
+	collectionID := int64(0)
+	partitionID := int64(1)
+	vchannel := "test_vchannel"
+	verstion := 100
+	svr.meta.AddCollection(&collectionInfo{
+		ID:     collectionID,
+		Schema: schema,
+	})
+	svr.meta.partitionStatsInfos[fmt.Sprintf("%d/%d/%s/%d", collectionID, partitionID, vchannel, verstion)] = &datapb.PartitionStatsInfo{
+		Version: 100,
+	}
+	partitionIDs := make([]UniqueID, 0)
+	partitionIDs = append(partitionIDs, partitionID)
+	vChannelInfo := svr.handler.GetQueryVChanPositions(&channelMeta{Name: vchannel, CollectionID: collectionID}, partitionIDs...)
+	statsVersions := vChannelInfo.GetPartitionStatsVersions()
+	assert.Equal(t, 1, len(statsVersions))
+	assert.Equal(t, int64(100), statsVersions[partitionID])
+}
+
 func TestGetQueryVChanPositions_Retrieve_unIndexed(t *testing.T) {
 	t.Run("ab GC-ed, cde unIndexed", func(t *testing.T) {
 		svr := newTestServer(t)
@@ -2304,7 +2328,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},
@@ -2332,7 +2356,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 0, errors.New("mock error")
 				},
 			},
@@ -2351,7 +2375,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},

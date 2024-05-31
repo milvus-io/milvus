@@ -244,6 +244,26 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		s.NoError(err)
 		s.False(merr.Ok(resp))
 	})
+
+	s.Run("compact_clustering", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
+				{SegmentID: growingSegmentID, Level: datapb.SegmentLevel_L1},
+			},
+			Type: datapb.CompactionType_ClusteringCompaction,
+		}
+
+		resp, err := node.Compaction(ctx, req)
+		s.NoError(err)
+		s.False(merr.Ok(resp))
+	})
 }
 
 func (s *DataNodeServicesSuite) TestFlushSegments() {

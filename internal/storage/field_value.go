@@ -1013,3 +1013,37 @@ func (ifv *FloatVectorFieldValue) GetValue() interface{} {
 func (ifv *FloatVectorFieldValue) Size() int64 {
 	return int64(len(ifv.Value) * 8)
 }
+
+func NewScalarFieldValue(dtype schemapb.DataType, data interface{}) ScalarFieldValue {
+	switch dtype {
+	case schemapb.DataType_Int8:
+		return NewInt8FieldValue(data.(int8))
+	case schemapb.DataType_Int16:
+		return NewInt16FieldValue(data.(int16))
+	case schemapb.DataType_Int32:
+		return NewInt32FieldValue(data.(int32))
+	case schemapb.DataType_Int64:
+		return NewInt64FieldValue(data.(int64))
+	case schemapb.DataType_Float:
+		return NewFloatFieldValue(data.(float32))
+	case schemapb.DataType_Double:
+		return NewDoubleFieldValue(data.(float64))
+	case schemapb.DataType_String:
+		return NewStringFieldValue(data.(string))
+	case schemapb.DataType_VarChar:
+		return NewVarCharFieldValue(data.(string))
+	default:
+		// should not be reach
+		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
+	}
+}
+
+func NewVectorFieldValue(dtype schemapb.DataType, data *schemapb.VectorField) VectorFieldValue {
+	switch dtype {
+	case schemapb.DataType_FloatVector:
+		return NewFloatVectorFieldValue(data.GetFloatVector().GetData())
+	default:
+		// should not be reach
+		panic(fmt.Sprintf("not supported datatype: %s", dtype.String()))
+	}
+}

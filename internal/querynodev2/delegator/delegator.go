@@ -65,6 +65,8 @@ type ShardDelegator interface {
 	Version() int64
 	GetSegmentInfo(readable bool) (sealed []SnapshotItem, growing []SegmentEntry)
 	SyncDistribution(ctx context.Context, entries ...SegmentEntry)
+	SyncPartitionStats(ctx context.Context, partVersions map[int64]int64)
+	GetPartitionStatsVersions(ctx context.Context) map[int64]int64
 	Search(ctx context.Context, req *querypb.SearchRequest) ([]*internalpb.SearchResults, error)
 	Query(ctx context.Context, req *querypb.QueryRequest) ([]*internalpb.RetrieveResults, error)
 	QueryStream(ctx context.Context, req *querypb.QueryRequest, srv streamrpc.QueryStreamServer) error
@@ -178,6 +180,23 @@ func (sd *shardDelegator) SyncDistribution(ctx context.Context, entries ...Segme
 	log.Info("sync distribution", zap.Any("entries", entries))
 
 	sd.distribution.AddDistributions(entries...)
+}
+
+// SyncDistribution revises distribution.
+func (sd *shardDelegator) SyncPartitionStats(ctx context.Context, partVersions map[int64]int64) {
+	log := sd.getLogger(ctx)
+	log.Info("update partition stats versions")
+	sd.loadPartitionStats(ctx, partVersions)
+}
+
+func (sd *shardDelegator) GetPartitionStatsVersions(ctx context.Context) map[int64]int64 {
+	sd.partitionStatsMut.RLock()
+	defer sd.partitionStatsMut.RUnlock()
+	partStatMap := make(map[int64]int64)
+	for partID, partStats := range sd.partitionStats {
+		partStatMap[partID] = partStats.GetVersion()
+	}
+	return partStatMap
 }
 
 func (sd *shardDelegator) modifySearchRequest(req *querypb.SearchRequest, scope querypb.DataScope, segmentIDs []int64, targetID int64) *querypb.SearchRequest {
@@ -772,74 +791,40 @@ func (sd *shardDelegator) Close() {
 // As partition stats is an optimization for search/query which is not mandatory for milvus instance,
 // loading partitionStats will be a try-best process and will skip+logError when running across errors rather than
 // return an error status
-func (sd *shardDelegator) maybeReloadPartitionStats(ctx context.Context, partIDs ...UniqueID) {
-	var partsToReload []UniqueID
-	if len(partIDs) > 0 {
-		partsToReload = partIDs
-	} else {
-		partsToReload = append(partsToReload, sd.collection.GetPartitions()...)
-	}
-
+func (sd *shardDelegator) loadPartitionStats(ctx context.Context, partStatsVersions map[int64]int64) {
 	colID := sd.Collection()
-	findMaxVersion := func(filePaths []string) (int64, string) {
-		maxVersion := int64(-1)
-		maxVersionFilePath := ""
-		for _, filePath := range filePaths {
-			versionStr := path.Base(filePath)
-			version, err := strconv.ParseInt(versionStr, 10, 64)
-			if err != nil {
-				continue
-			}
-			if version > maxVersion {
-				maxVersion = version
-				maxVersionFilePath = filePath
-			}
+	log := log.Ctx(ctx)
+	for partID, newVersion := range partStatsVersions {
+		curStats, exist := sd.partitionStats[partID]
+		if exist && curStats.Version >= newVersion {
+			log.Warn("Input partition stats' version is less or equal than current partition stats, skip",
+				zap.Int64("partID", partID),
+				zap.Int64("curVersion", curStats.Version),
+				zap.Int64("inputVersion", newVersion),
+			)
+			continue
 		}
-		return maxVersion, maxVersionFilePath
-	}
-	for _, partID := range partsToReload {
 		idPath := metautil.JoinIDPath(colID, partID)
 		idPath = path.Join(idPath, sd.vchannelName)
-		statsPathPrefix := path.Join(sd.chunkManager.RootPath(), common.PartitionStatsPath, idPath)
-		filePaths, _, err := storage.ListAllChunkWithPrefix(ctx, sd.chunkManager, statsPathPrefix, true)
+		statsFilePath := path.Join(sd.chunkManager.RootPath(), common.PartitionStatsPath, idPath, strconv.FormatInt(newVersion, 10))
+		statsBytes, err := sd.chunkManager.Read(ctx, statsFilePath)
 		if err != nil {
-			log.Error("Skip initializing partition stats for failing to list files with prefix",
-				zap.String("statsPathPrefix", statsPathPrefix))
+			log.Error("failed to read stats file from object storage", zap.String("path", statsFilePath))
 			continue
 		}
-		maxVersion, maxVersionFilePath := findMaxVersion(filePaths)
-		if maxVersion < 0 {
-			log.Info("failed to find valid partition stats file for partition", zap.Int64("partitionID", partID))
+		partStats, err := storage.DeserializePartitionsStatsSnapshot(statsBytes)
+		if err != nil {
+			log.Error("failed to parse partition stats from bytes",
+				zap.Int("bytes_length", len(statsBytes)), zap.Error(err))
 			continue
 		}
-
-		var partStats *storage.PartitionStatsSnapshot
-		var exists bool
+		partStats.SetVersion(newVersion)
 		func() {
-			sd.partitionStatsMut.RLock()
-			defer sd.partitionStatsMut.RUnlock()
-			partStats, exists = sd.partitionStats[partID]
+			sd.partitionStatsMut.Lock()
+			defer sd.partitionStatsMut.Unlock()
+			sd.partitionStats[partID] = partStats
 		}()
-		if !exists || (exists && partStats.GetVersion() < maxVersion) {
-			statsBytes, err := sd.chunkManager.Read(ctx, maxVersionFilePath)
-			if err != nil {
-				log.Error("failed to read stats file from object storage", zap.String("path", maxVersionFilePath))
-				continue
-			}
-			partStats, err := storage.DeserializePartitionsStatsSnapshot(statsBytes)
-			if err != nil {
-				log.Error("failed to parse partition stats from bytes", zap.Int("bytes_length", len(statsBytes)))
-				continue
-			}
-			partStats.SetVersion(maxVersion)
-
-			func() {
-				sd.partitionStatsMut.Lock()
-				defer sd.partitionStatsMut.Unlock()
-				sd.partitionStats[partID] = partStats
-			}()
-			log.Info("Updated partitionStats for partition", zap.Int64("partitionID", partID))
-		}
+		log.Info("Updated partitionStats for partition", zap.Int64("partitionID", partID))
 	}
 }
 
@@ -892,8 +877,5 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		go sd.watchTSafe()
 	}
 	log.Info("finish build new shardDelegator")
-	if paramtable.Get().QueryNodeCfg.EnableSegmentPrune.GetAsBool() {
-		sd.maybeReloadPartitionStats(ctx)
-	}
 	return sd, nil
 }

@@ -19,10 +19,6 @@ package indexnode
 import (
 	"context"
 	"fmt"
-	"runtime/debug"
-	"strconv"
-	"strings"
-	"time"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -32,18 +28,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-	"github.com/milvus-io/milvus/pkg/common"
-	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/metrics"
-	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/hardware"
-	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
-	"github.com/milvus-io/milvus/pkg/util/indexparams"
-	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
 var (
@@ -53,29 +37,16 @@ var (
 
 type Blob = storage.Blob
 
-type taskInfo struct {
-	cancel              context.CancelFunc
-	state               commonpb.IndexState
-	fileKeys            []string
-	serializedSize      uint64
-	failReason          string
-	currentIndexVersion int32
-	indexStoreVersion   int64
-
-	// task statistics
-	statistic *indexpb.JobInfo
-}
-
 type task interface {
 	Ctx() context.Context
 	Name() string
 	Prepare(context.Context) error
 	LoadData(context.Context) error
 	BuildIndex(context.Context) error
-	SaveIndexFiles(context.Context) error
+	SaveResult(context.Context) error
 	OnEnqueue(context.Context) error
-	SetState(state commonpb.IndexState, failReason string)
-	GetState() commonpb.IndexState
+	SetState(state indexpb.JobState, failReason string)
+	GetState() indexpb.JobState
 	Reset()
 }
 
