@@ -11,6 +11,7 @@ type mockSnapshotKV struct {
 	MultiSaveFunc                    func(kvs map[string]string, ts typeutil.Timestamp) error
 	LoadWithPrefixFunc               func(key string, ts typeutil.Timestamp) ([]string, []string, error)
 	MultiSaveAndRemoveWithPrefixFunc func(saves map[string]string, removals []string, ts typeutil.Timestamp) error
+	MultiSaveAndRemoveFunc           func(saves map[string]string, removals []string, ts typeutil.Timestamp) error
 }
 
 func NewMockSnapshotKV() *mockSnapshotKV {
@@ -48,6 +49,13 @@ func (m mockSnapshotKV) LoadWithPrefix(key string, ts typeutil.Timestamp) ([]str
 func (m mockSnapshotKV) MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	if m.MultiSaveAndRemoveWithPrefixFunc != nil {
 		return m.MultiSaveAndRemoveWithPrefixFunc(saves, removals, ts)
+	}
+	return nil
+}
+
+func (m mockSnapshotKV) MultiSaveAndRemove(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	if m.MultiSaveAndRemoveFunc != nil {
+		return m.MultiSaveAndRemoveFunc(saves, removals, ts)
 	}
 	return nil
 }

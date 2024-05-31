@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"sort"
 
 	"github.com/cockroachdb/errors"
 	"github.com/golang/protobuf/proto"
@@ -85,7 +84,7 @@ func BuildAliasPrefixWithDB(dbID int64) string {
 
 // since SnapshotKV may save both snapshot key and the original key if the original key is newest
 // MaxEtcdTxnNum need to divided by 2
-func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, limit int, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+func batchMultiSaveAndRemove(snapshot kv.SnapShotKV, limit int, saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 	saveFn := func(partialKvs map[string]string) error {
 		return snapshot.MultiSave(partialKvs, ts)
 	}
@@ -93,14 +92,8 @@ func batchMultiSaveAndRemoveWithPrefix(snapshot kv.SnapShotKV, limit int, saves 
 		return err
 	}
 
-	// avoid a case that the former key is the prefix of the later key.
-	// for example, `root-coord/fields/collection_id/1` is the prefix of `root-coord/fields/collection_id/100`.
-	sort.Slice(removals, func(i, j int) bool {
-		return removals[i] > removals[j]
-	})
-
 	removeFn := func(partialKeys []string) error {
-		return snapshot.MultiSaveAndRemoveWithPrefix(nil, partialKeys, ts)
+		return snapshot.MultiSaveAndRemove(nil, partialKeys, ts)
 	}
 	return etcd.RemoveByBatchWithLimit(removals, limit, removeFn)
 }
@@ -127,7 +120,7 @@ func (kc *Catalog) AlterDatabase(ctx context.Context, newColl *model.Database, t
 
 func (kc *Catalog) DropDatabase(ctx context.Context, dbID int64, ts typeutil.Timestamp) error {
 	key := BuildDatabaseKey(dbID)
-	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{key}, ts)
+	return kc.Snapshot.MultiSaveAndRemove(nil, []string{key}, ts)
 }
 
 func (kc *Catalog) ListDatabases(ctx context.Context, ts typeutil.Timestamp) ([]*model.Database, error) {
@@ -300,7 +293,7 @@ func (kc *Catalog) CreateAlias(ctx context.Context, alias *model.Alias, ts typeu
 		return err
 	}
 	kvs := map[string]string{k: string(v)}
-	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(kvs, []string{oldKBefore210, oldKeyWithoutDb}, ts)
+	return kc.Snapshot.MultiSaveAndRemove(kvs, []string{oldKBefore210, oldKeyWithoutDb}, ts)
 }
 
 func (kc *Catalog) CreateCredential(ctx context.Context, credential *model.Credential) error {
@@ -455,12 +448,12 @@ func (kc *Catalog) DropCollection(ctx context.Context, collectionInfo *model.Col
 	// However, if we remove collection first, we cannot remove other metas.
 	// since SnapshotKV may save both snapshot key and the original key if the original key is newest
 	// MaxEtcdTxnNum need to divided by 2
-	if err := batchMultiSaveAndRemoveWithPrefix(kc.Snapshot, util.MaxEtcdTxnNum/2, nil, delMetakeysSnap, ts); err != nil {
+	if err := batchMultiSaveAndRemove(kc.Snapshot, util.MaxEtcdTxnNum/2, nil, delMetakeysSnap, ts); err != nil {
 		return err
 	}
 
 	// if we found collection dropping, we should try removing related resources.
-	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, collectionKeys, ts)
+	return kc.Snapshot.MultiSaveAndRemove(nil, collectionKeys, ts)
 }
 
 func (kc *Catalog) alterModifyCollection(oldColl *model.Collection, newColl *model.Collection, ts typeutil.Timestamp) error {
@@ -491,7 +484,7 @@ func (kc *Catalog) alterModifyCollection(oldColl *model.Collection, newColl *mod
 	if oldKey == newKey {
 		return kc.Snapshot.Save(newKey, string(value), ts)
 	}
-	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(saves, []string{oldKey}, ts)
+	return kc.Snapshot.MultiSaveAndRemove(saves, []string{oldKey}, ts)
 }
 
 func (kc *Catalog) AlterCollection(ctx context.Context, oldColl *model.Collection, newColl *model.Collection, alterType metastore.AlterType, ts typeutil.Timestamp) error {
@@ -559,7 +552,7 @@ func (kc *Catalog) DropPartition(ctx context.Context, dbID int64, collectionID t
 
 	if partitionVersionAfter210(collMeta) {
 		k := BuildPartitionKey(collectionID, partitionID)
-		return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{k}, ts)
+		return kc.Snapshot.MultiSaveAndRemove(nil, []string{k}, ts)
 	}
 
 	k := BuildCollectionKey(util.NonDBID, collectionID)
@@ -601,7 +594,7 @@ func (kc *Catalog) DropAlias(ctx context.Context, dbID int64, alias string, ts t
 	oldKBefore210 := BuildAliasKey210(alias)
 	oldKeyWithoutDb := BuildAliasKey(alias)
 	k := BuildAliasKeyWithDB(dbID, alias)
-	return kc.Snapshot.MultiSaveAndRemoveWithPrefix(nil, []string{k, oldKeyWithoutDb, oldKBefore210}, ts)
+	return kc.Snapshot.MultiSaveAndRemove(nil, []string{k, oldKeyWithoutDb, oldKBefore210}, ts)
 }
 
 func (kc *Catalog) GetCollectionByName(ctx context.Context, dbID int64, collectionName string, ts typeutil.Timestamp) (*model.Collection, error) {
