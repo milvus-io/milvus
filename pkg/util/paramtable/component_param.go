@@ -2482,7 +2482,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				}
 				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
-					// panic(err)
 					log.Fatal("failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
 				}
 				return strconv.FormatUint(diskUsage.Total, 10)
@@ -3799,9 +3798,16 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Version: "2.2.0",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				diskUsage, err := disk.Usage("/")
+				// use local storage path to check correct device
+				localStoragePath := base.Get("localStorage.path")
+				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
+					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
+						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+					}
+				}
+				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
-					panic(err)
+					log.Fatal("failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
 				}
 				return strconv.FormatUint(diskUsage.Total, 10)
 			}
