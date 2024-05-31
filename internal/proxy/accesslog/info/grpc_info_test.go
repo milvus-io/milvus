@@ -190,6 +190,17 @@ func (s *GrpcAccessInfoSuite) TestOutputFields() {
 	s.Equal(fmt.Sprint(fields), result[0])
 }
 
+func (s *GrpcAccessInfoSuite) TestConsistencyLevel() {
+	result := Get(s.info, "$consistency_level")
+	s.Equal(Unknown, result[0])
+
+	s.info.req = &milvuspb.QueryRequest{
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	}
+	result = Get(s.info, "$consistency_level")
+	s.Equal(commonpb.ConsistencyLevel_Bounded.String(), result[0])
+}
+
 func (s *GrpcAccessInfoSuite) TestClusterPrefix() {
 	cluster := "instance-test"
 	paramtable.Init()

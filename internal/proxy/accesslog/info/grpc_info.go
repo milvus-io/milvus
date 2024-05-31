@@ -262,3 +262,11 @@ func (i *GrpcAccessInfo) OutputFields() string {
 	}
 	return Unknown
 }
+
+func (i *GrpcAccessInfo) ConsistencyLevel() string {
+	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
+	if ok {
+		return level.String()
+	}
+	return Unknown
+}

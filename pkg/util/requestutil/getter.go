@@ -156,6 +156,18 @@ func GetStatusFromResponse(resp interface{}) (*commonpb.Status, bool) {
 	return getter.GetStatus(), true
 }
 
+type ConsistencyLevelGetter interface {
+	GetConsistencyLevel() commonpb.ConsistencyLevel
+}
+
+func GetConsistencyLevelFromRequst(req interface{}) (commonpb.ConsistencyLevel, bool) {
+	getter, ok := req.(ConsistencyLevelGetter)
+	if !ok {
+		return 0, false
+	}
+	return getter.GetConsistencyLevel(), true
+}
+
 var TraceLogBaseInfoFuncMap = map[string]func(interface{}) (any, bool){
 	"collection_name": GetCollectionNameFromRequest,
 	"db_name":         GetDbNameFromRequest,
