@@ -1,4 +1,3 @@
-from numpy.core.fromnumeric import _partition_dispatcher
 import pytest
 import sys
 from pymilvus import DefaultConfig
@@ -33,7 +32,7 @@ class Base:
     collection_object_list = []
     resource_group_list = []
     high_level_api_wrap = None
-
+    skip_connection = False
     def setup_class(self):
         log.info("[setup_class] Start setup class...")
 
@@ -128,6 +127,9 @@ class TestcaseBase(Base):
 
     def _connect(self, enable_milvus_client_api=False):
         """ Add a connection and create the connect """
+        if self.skip_connection:
+            return None
+
         if enable_milvus_client_api:
             if cf.param_info.param_uri:
                 uri = cf.param_info.param_uri
@@ -252,8 +254,8 @@ class TestcaseBase(Base):
         insert_ids = []
         time_stamp = 0
         # 1 create collection
-        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field, 
-                                                          enable_dynamic_field=enable_dynamic_field, 
+        default_schema = cf.gen_default_collection_schema(auto_id=auto_id, dim=dim, primary_field=primary_field,
+                                                          enable_dynamic_field=enable_dynamic_field,
                                                           with_json=with_json, multiple_dim_array=multiple_dim_array,
                                                           is_partition_key=is_partition_key,
                                                           vector_data_type=vector_data_type)

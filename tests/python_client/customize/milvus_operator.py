@@ -3,6 +3,7 @@ import os
 import time
 from benedict import benedict
 from utils.util_log import test_log as log
+from utils.util_k8s import get_pod_ip_name_pairs
 from common.cus_resource_opts import CustomResourceOperations as CusResource
 
 template_yaml = os.path.join(os.path.dirname(__file__), 'template/default.yaml')
@@ -81,11 +82,13 @@ class MilvusOperator(object):
         if delete_depends:
             del_configs = {'spec.dependencies.etcd.inCluster.deletionPolicy': 'Delete',
                            'spec.dependencies.pulsar.inCluster.deletionPolicy': 'Delete',
+                           'spec.dependencies.kafka.inCluster.deletionPolicy': 'Delete',
                            'spec.dependencies.storage.inCluster.deletionPolicy': 'Delete'
                            }
         if delete_pvc:
             del_configs.update({'spec.dependencies.etcd.inCluster.pvcDeletion': True,
                                 'spec.dependencies.pulsar.inCluster.pvcDeletion': True,
+                                'spec.dependencies.kafka.inCluster.pvcDeletion': True,
                                 'spec.dependencies.storage.inCluster.pvcDeletion': True
                                 })
         if delete_depends or delete_pvc:
@@ -113,6 +116,40 @@ class MilvusOperator(object):
                               version=self.version, namespace=namespace)
         log.debug(f"upgrade milvus with configs: {d_configs}")
         cus_res.patch(release_name, d_configs)
+        self.wait_for_healthy(release_name, namespace=namespace)
+
+    def rolling_update(self, release_name, new_image_name, namespace='default'):
+        """
+        Method: patch custom resource object to rolling update milvus
+        Params:
+            release_name: release name of milvus
+            namespace: namespace that the milvus is running in
+        """
+        cus_res = CusResource(kind=self.plural, group=self.group,
+                              version=self.version, namespace=namespace)
+        rolling_configs = {'spec.components.enableRollingUpdate': True,
+                           'spec.components.imageUpdateMode': "rollingUpgrade",
+                           'spec.components.image': new_image_name}
+        log.debug(f"rolling update milvus with configs: {rolling_configs}")
+        cus_res.patch(release_name, rolling_configs)
+        self.wait_for_healthy(release_name, namespace=namespace)
+
+    def scale(self, release_name, component, replicas, namespace='default'):
+        """
+        Method: scale milvus components by replicas
+        Params:
+            release_name: release name of milvus
+            replicas: the number of replicas to scale
+            component: the component to scale, e.g: dataNode, queryNode, indexNode, proxy
+            namespace: namespace that the milvus is running in
+        """
+        cus_res = CusResource(kind=self.plural, group=self.group,
+                              version=self.version, namespace=namespace)
+        component = component.replace('node', 'Node')
+        scale_configs = {f'spec.components.{component}.replicas': replicas}
+        log.info(f"scale milvus with configs: {scale_configs}")
+        self.upgrade(release_name, scale_configs, namespace=namespace)
+        self.wait_for_healthy(release_name, namespace=namespace)
 
     def wait_for_healthy(self, release_name, namespace='default', timeout=600):
         """
@@ -152,3 +189,24 @@ class MilvusOperator(object):
             endpoint = res_object['status']['endpoint']
 
         return endpoint
+
+    def etcd_endpoints(self, release_name, namespace='default'):
+        """
+        Method: get etcd endpoints by name and namespace
+        Return: a string type etcd endpoints. e.g: host:port
+        """
+        etcd_endpoints = None
+        cus_res = CusResource(kind=self.plural, group=self.group,
+                              version=self.version, namespace=namespace)
+        res_object = cus_res.get(release_name)
+        try:
+            etcd_endpoints = res_object['spec']['dependencies']['etcd']['endpoints']
+        except KeyError:
+            log.info("etcd endpoints not found")
+        # get pod ip by pod name
+        label_selector = f"app.kubernetes.io/instance={release_name}-etcd, app.kubernetes.io/name=etcd"
+        res = get_pod_ip_name_pairs(namespace, label_selector)
+        if res:
+            etcd_endpoints = [f"{pod_ip}:2379" for pod_ip in res.keys()]
+        return etcd_endpoints[0]
+
