@@ -750,8 +750,9 @@ class TestSearchVector(TestBase):
     @pytest.mark.parametrize("enable_dynamic_schema", [True])
     @pytest.mark.parametrize("nb", [3000])
     @pytest.mark.parametrize("dim", [128])
+    @pytest.mark.parametrize("nq", [1, 2])
     def test_search_vector_with_float_vector_datatype(self, nb, dim, insert_round, auto_id,
-                                                      is_partition_key, enable_dynamic_schema):
+                                                      is_partition_key, enable_dynamic_schema, nq):
         """
         Insert a vector with a simple payload
         """
@@ -812,7 +813,7 @@ class TestSearchVector(TestBase):
         # search data
         payload = {
             "collectionName": name,
-            "data": [gen_vector(datatype="FloatVector", dim=dim)],
+            "data": [gen_vector(datatype="FloatVector", dim=dim) for _ in range(nq)],
             "filter": "word_count > 100",
             "groupingField": "user_id",
             "outputFields": ["*"],
@@ -827,7 +828,7 @@ class TestSearchVector(TestBase):
         }
         rsp = self.vector_client.vector_search(payload)
         assert rsp['code'] == 0
-        assert len(rsp['data']) == 100
+        assert len(rsp['data']) == 100 * nq
 
 
     @pytest.mark.parametrize("insert_round", [1])
