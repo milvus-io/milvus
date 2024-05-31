@@ -57,22 +57,21 @@ func (s *CompactionPlanHandlerSuite) SetupTest() {
 
 func (s *CompactionPlanHandlerSuite) TestRemoveTasksByChannel() {
 	s.mockSch.EXPECT().Finish(mock.Anything, mock.Anything).Return().Once()
-	handler := newCompactionPlanHandler(nil, nil, nil, nil, nil)
+	handler := newCompactionPlanHandler(nil, nil, nil, nil, nil, nil)
 	handler.scheduler = s.mockSch
 
 	var ch string = "ch1"
 	handler.mu.Lock()
-	handler.plans[1] = &defaultCompactionTask{
-		plan:        &datapb.CompactionPlan{PlanID: 19530},
-		dataNodeID:  1,
-		triggerInfo: &compactionSignal{channel: ch},
+	handler.queueTasks[1] = &mixCompactionTask{
+		plan:       &datapb.CompactionPlan{PlanID: 19530},
+		dataNodeID: 1,
 	}
 	handler.mu.Unlock()
 
 	handler.removeTasksByChannel(ch)
 
 	handler.mu.Lock()
-	s.Equal(0, len(handler.plans))
+	s.Equal(0, len(handler.queueTasks))
 	handler.mu.Unlock()
 }
 
@@ -102,7 +101,7 @@ func (s *CompactionPlanHandlerSuite) TestClean() {
 	cleanTime := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Hour), 0)
 	c := &compactionPlanHandler{
 		allocator: s.mockAlloc,
-		plans: map[int64]*defaultCompactionTask{
+		queueTasks: map[int64]*mixCompactionTask{
 			1: {
 				state: executing,
 			},
@@ -125,7 +124,7 @@ func (s *CompactionPlanHandlerSuite) TestClean() {
 	}
 
 	c.Clean()
-	s.Len(c.plans, 3)
+	s.Len(c.queueTasks, 3)
 }
 
 func (s *CompactionPlanHandlerSuite) TestHandleL0CompactionResults() {
@@ -477,7 +476,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 		s.mockSessMgr.EXPECT().SyncSegments(mock.Anything, mock.Anything).Return(nil).Maybe()
 
 		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil)
-		handler.plans[plan.PlanID] = &defaultCompactionTask{dataNodeID: 111, plan: plan}
+		handler.queueTasks[plan.PlanID] = &mixCompactionTask{dataNodeID: 111, plan: plan}
 
 		compactionResult := &datapb.CompactionPlanResult{
 			PlanID: plan.PlanID,
@@ -497,7 +496,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 			nil, nil, errors.New("mock error")).Once()
 
 		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil)
-		handler.plans[plan.PlanID] = &defaultCompactionTask{dataNodeID: 111, plan: plan}
+		handler.queueTasks[plan.PlanID] = &mixCompactionTask{dataNodeID: 111, plan: plan}
 		compactionResult := &datapb.CompactionPlanResult{
 			PlanID: plan.PlanID,
 			Segments: []*datapb.CompactionSegment{
@@ -518,7 +517,7 @@ func (s *CompactionPlanHandlerSuite) TestHandleMergeCompactionResult() {
 			&segMetricMutation{}, nil).Once()
 
 		handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc, nil)
-		handler.plans[plan.PlanID] = &defaultCompactionTask{dataNodeID: 111, plan: plan}
+		handler.queueTasks[plan.PlanID] = &mixCompactionTask{dataNodeID: 111, plan: plan}
 		compactionResult := &datapb.CompactionPlanResult{
 			PlanID: plan.PlanID,
 			Segments: []*datapb.CompactionSegment{
@@ -540,7 +539,7 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 
 	s.Run("test completed compaction task", func() {
 		c := &compactionPlanHandler{
-			plans: map[int64]*defaultCompactionTask{1: {state: completed}},
+			queueTasks: map[int64]*mixCompactionTask{1: {state: completed}},
 		}
 		err := c.completeCompaction(&datapb.CompactionPlanResult{PlanID: 1})
 		s.Error(err)
@@ -614,7 +613,7 @@ func (s *CompactionPlanHandlerSuite) TestCompleteCompaction() {
 
 		c := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
 		c.scheduler = s.mockSch
-		c.plans = plans
+		c.queueTasks = plans
 
 		err := c.completeCompaction(&compactionResult)
 		s.NoError(err)
@@ -645,7 +644,7 @@ func (s *CompactionPlanHandlerSuite) TestGetCompactionTask() {
 
 	expected := lo.Values(inPlans)
 
-	handler := &compactionPlanHandler{plans: inPlans}
+	handler := &compactionPlanHandler{queueTasks: inPlans}
 	got := handler.getCompactionTasksBySignalID(1)
 	s.ElementsMatch(expected, got)
 
@@ -703,27 +702,27 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.mockCm.EXPECT().Match(int64(111), "ch-2").Return(false).Once()
 
 	handler := newCompactionPlanHandler(nil, s.mockSessMgr, s.mockCm, s.mockMeta, s.mockAlloc)
-	handler.plans = inPlans
+	handler.queueTasks = inPlans
 
-	_, ok := handler.plans[5]
+	_, ok := handler.queueTasks[5]
 	s.Require().False(ok)
 
 	err := handler.updateCompaction(0)
 	s.NoError(err)
 
-	task := handler.plans[1]
+	task := handler.queueTasks[1]
 	s.Equal(timeout, task.state)
 
-	task = handler.plans[2]
+	task = handler.queueTasks[2]
 	s.Equal(executing, task.state)
 
-	task = handler.plans[3]
+	task = handler.queueTasks[3]
 	s.Equal(timeout, task.state)
 
-	task = handler.plans[4]
+	task = handler.queueTasks[4]
 	s.Equal(failed, task.state)
 
-	task = handler.plans[6]
+	task = handler.queueTasks[6]
 	s.Equal(failed, task.state)
 }
 

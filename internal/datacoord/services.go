@@ -1143,7 +1143,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 
 	log.Info("success to get compaction state", zap.Any("state", resp.GetState()), zap.Int64("executing", resp.GetExecutingPlanNo()),
 		zap.Int64("completed", resp.GetCompletedPlanNo()), zap.Int64("failed", resp.GetFailedPlanNo()), zap.Int64("timeout", resp.GetTimeoutPlanNo()),
-		zap.Int64s("plans", lo.Map(tasks, func(t CompactionTask, _ int) int64 {
+		zap.Int64s("queueTasks", lo.Map(tasks, func(t CompactionTask, _ int) int64 {
 			return t.GetPlanID()
 		})))
 	return resp, nil
@@ -1154,7 +1154,7 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	log := log.Ctx(ctx).With(
 		zap.Int64("compactionID", req.GetCompactionID()),
 	)
-	log.Info("received the request to get compaction state with plans")
+	log.Info("received the request to get compaction state with queueTasks")
 
 	if err := merr.CheckHealthy(s.GetStateCode()); err != nil {
 		return &milvuspb.GetCompactionPlansResponse{
@@ -1178,8 +1178,8 @@ func (s *Server) GetCompactionStateWithPlans(ctx context.Context, req *milvuspb.
 	state, _, _, _, _ := getCompactionState(tasks)
 
 	resp.State = state
-	log.Info("success to get state with plans", zap.Any("state", state), zap.Any("merge infos", resp.MergeInfos),
-		zap.Int64s("plans", lo.Map(tasks, func(t CompactionTask, _ int) int64 {
+	log.Info("success to get state with queueTasks", zap.Any("state", state), zap.Any("merge infos", resp.MergeInfos),
+		zap.Int64s("queueTasks", lo.Map(tasks, func(t CompactionTask, _ int) int64 {
 			return t.GetPlanID()
 		})))
 	return resp, nil

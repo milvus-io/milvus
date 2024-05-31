@@ -56,6 +56,7 @@ type CompactionMeta interface {
 	GetHealthySegment(segID UniqueID) *SegmentInfo
 	UpdateSegmentsInfo(operators ...UpdateOperator) error
 	SetSegmentCompacting(segmentID int64, compacting bool)
+	CheckAndSetSegmentsCompacting(segmentIDs []int64) bool
 
 	SaveClusteringCompactionTask(task *datapb.CompactionTask) error
 	DropClusteringCompactionTask(task *datapb.CompactionTask) error
@@ -1296,6 +1297,24 @@ func (m *meta) SetSegmentCompacting(segmentID UniqueID, compacting bool) {
 	defer m.Unlock()
 
 	m.segments.SetIsCompacting(segmentID, compacting)
+}
+
+// CheckAndSetSegmentsCompacting check all segments are not compacting
+// if true, set them compacting and return true
+// if false, skip setting and
+func (m *meta) CheckAndSetSegmentsCompacting(segmentIDs []UniqueID) (hasCompactingSegment bool) {
+	m.Lock()
+	defer m.Unlock()
+	for _, segmentID := range segmentIDs {
+		hasCompactingSegment = m.GetSegment(segmentID).isCompacting
+	}
+	if hasCompactingSegment {
+		return false
+	}
+	for _, segmentID := range segmentIDs {
+		m.segments.SetIsCompacting(segmentID, true)
+	}
+	return true
 }
 
 // SetSegmentLevel sets level for segment

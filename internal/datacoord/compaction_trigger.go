@@ -464,7 +464,7 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			}
 			err := t.compactionHandler.enqueueCompaction(task)
 			if err != nil {
-				log.Warn("failed to execute compaction plan",
+				log.Warn("failed to execute compaction task",
 					zap.Int64("collectionID", signal.collectionID),
 					zap.Int64("planID", planID),
 					zap.Int64s("segmentIDs", segIDs),
@@ -581,7 +581,7 @@ func (t *compactionTrigger) handleSignal(signal *compactionSignal) {
 				// collectionSchema
 			},
 		}); err != nil {
-			log.Warn("failed to execute compaction plan",
+			log.Warn("failed to execute compaction task",
 				zap.Int64("collection", collectionID),
 				zap.Int64("planID", planID),
 				zap.Int64s("segmentIDs", segmentIDS),
@@ -912,7 +912,7 @@ func (t *compactionTrigger) squeezeSmallSegmentsToBuckets(small []*SegmentInfo, 
 		if !isExpandableSmallSegment(s, expectedSize) {
 			continue
 		}
-		// Try squeeze this segment into existing plans. This could cause segment size to exceed maxSize.
+		// Try squeeze this segment into existing queueTasks. This could cause segment size to exceed maxSize.
 		for bidx, b := range buckets {
 			totalSize := lo.SumBy(b, func(s *SegmentInfo) int64 { return s.getSegmentSize() })
 			if totalSize+s.getSegmentSize() > int64(Params.DataCoordCfg.SegmentExpansionRate.GetAsFloat()*float64(expectedSize)) {

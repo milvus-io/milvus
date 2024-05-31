@@ -64,7 +64,6 @@ type compactionPlanContext interface {
 	isFull() bool
 	// get compaction tasks by signal id
 	getCompactionTasksBySignalID(signalID int64) []CompactionTask
-	collectionIsClusteringCompacting(collectionID int64) (bool, int64)
 	removeTasksByChannel(channel string)
 }
 
@@ -76,8 +75,8 @@ var (
 var _ compactionPlanContext = (*compactionPlanHandler)(nil)
 
 type compactionPlanHandler struct {
-	mu    lock.RWMutex
-	plans map[int64]CompactionTask // planID -> task
+	mu         lock.RWMutex
+	queueTasks map[int64]CompactionTask // planID -> task
 
 	meta             CompactionMeta
 	allocator        allocator
@@ -96,7 +95,7 @@ type compactionPlanHandler struct {
 func newCompactionPlanHandler(cluster Cluster, sessions SessionManager, cm ChannelManager, meta CompactionMeta, allocator allocator, analyzeScheduler *taskScheduler,
 ) *compactionPlanHandler {
 	return &compactionPlanHandler{
-		plans:            make(map[int64]CompactionTask),
+		queueTasks:       make(map[int64]CompactionTask),
 		chManager:        cm,
 		meta:             meta,
 		sessions:         sessions,
@@ -146,17 +145,14 @@ func (c *compactionPlanHandler) start() {
 	c.stopCh = make(chan struct{})
 	c.stopWg.Add(3)
 
+	// todo: make it compatible to all types of compaction with persist meta
 	triggers := c.meta.GetClusteringCompactionTasks()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State != datapb.CompactionTaskState_indexed && task.State != datapb.CompactionTaskState_cleaned {
-				// set segments state compacting
-				for _, segment := range task.InputSegments {
-					c.meta.SetSegmentCompacting(segment, true)
-				}
-				c.plans[task.PlanID] = &clusteringCompactionTask{
+				c.enqueueCompaction(&clusteringCompactionTask{
 					CompactionTask: task,
-				}
+				})
 			}
 		}
 	}
@@ -218,7 +214,7 @@ func (c *compactionPlanHandler) Clean() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	for id, task := range c.plans {
+	for id, task := range c.queueTasks {
 		switch task.GetType() {
 		case datapb.CompactionType_ClusteringCompaction:
 			if task.GetState() != datapb.CompactionTaskState_cleaned || task.GetState() != datapb.CompactionTaskState_indexed {
@@ -231,7 +227,7 @@ func (c *compactionPlanHandler) Clean() {
 		}
 		// after timeout + 1h, the plan will be cleaned
 		if isTimeout(current, task.GetStartTime(), task.GetTimeoutInSeconds()+60*60) {
-			delete(c.plans, id)
+			delete(c.queueTasks, id)
 		}
 	}
 }
@@ -246,7 +242,7 @@ func (c *compactionPlanHandler) stop() {
 func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	for id, task := range c.plans {
+	for id, task := range c.queueTasks {
 		if task.GetChannel() == channel {
 			log.Info("Compaction handler removing tasks by channel",
 				zap.String("channel", channel),
@@ -254,7 +250,7 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 				zap.Int64("node", task.GetNodeID()),
 			)
 			c.scheduler.Finish(task.GetNodeID(), task)
-			delete(c.plans, id)
+			delete(c.queueTasks, id)
 		}
 	}
 }
@@ -262,21 +258,28 @@ func (c *compactionPlanHandler) removeTasksByChannel(channel string) {
 func (c *compactionPlanHandler) updateTask(planID int64, opts ...compactionTaskOpt) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	if plan, ok := c.plans[planID]; ok {
-		c.plans[planID] = plan.ShadowClone(opts...)
+	if plan, ok := c.queueTasks[planID]; ok {
+		c.queueTasks[planID] = plan.ShadowClone(opts...)
 	}
 }
 
 func (c *compactionPlanHandler) enqueueCompaction(task CompactionTask) error {
+	// lock to protect setSegmentsCompacting
+	c.mu.Lock()
+	defer c.mu.Unlock()
 	log := log.With(zap.Int64("planID", task.GetPlanID()), zap.Int64("collectionID", task.GetCollectionID()), zap.String("type", task.GetType().String()))
-	c.setSegmentsCompacting(task, true)
+	// c.setSegmentsCompacting(task, true)
+	// todo optimize @wayblink
+	// currently compaction trigger v1 v2 both exist and have no shared lock between them to protect
+	// temporarily refuse the enqueue
+	succeed := c.checkAndSetSegmentsCompacting(task)
+	if !succeed {
+		return errors.New("compaction plan conflict")
+	}
 
 	_, span := otel.Tracer(typeutil.DataCoordRole).Start(context.Background(), fmt.Sprintf("Compaction-%s", task.GetType()))
 	task.SetSpan(span)
-
-	c.mu.Lock()
-	c.plans[task.GetPlanID()] = task
-	c.mu.Unlock()
+	c.queueTasks[task.GetPlanID()] = task
 	log.Info("Compaction plan enqueue")
 	return nil
 }
@@ -320,10 +323,15 @@ func (c *compactionPlanHandler) notifyTasks(tasks []CompactionTask) {
 	}
 }
 
+// set segments compacting, one segment can only participate one compactionTask
 func (c *compactionPlanHandler) setSegmentsCompacting(task CompactionTask, compacting bool) {
 	for _, segmentID := range task.GetInputSegments() {
 		c.meta.SetSegmentCompacting(segmentID, compacting)
 	}
+}
+
+func (c *compactionPlanHandler) checkAndSetSegmentsCompacting(task CompactionTask) bool {
+	return c.meta.CheckAndSetSegmentsCompacting(task.GetInputSegments())
 }
 
 func (c *compactionPlanHandler) handleL0CompactionResult(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) error {
@@ -384,7 +392,7 @@ func (c *compactionPlanHandler) getCompaction(planID int64) CompactionTask {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 
-	return c.plans[planID]
+	return c.queueTasks[planID]
 }
 
 func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
@@ -394,7 +402,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	planStates, err := c.sessions.GetCompactionPlansResults()
 	if err != nil {
 		// if there is a data node alive but we failed to get info,
-		log.Warn("failed to get compaction plans from all nodes", zap.Error(err))
+		log.Warn("failed to get compaction queueTasks from all nodes", zap.Error(err))
 		return err
 	}
 	c.compactionResults = planStates
@@ -442,7 +450,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 	}
 	c.mu.Unlock()
 
-	// Compaction plans in DN but not in DC are unknown plans, need to notify DN to clear it.
+	// Compaction queueTasks in DN but not in DC are unknown queueTasks, need to notify DN to clear it.
 	// No locks needed, because no changes in DC memeory
 	completedPlans := lo.PickBy(planStates, func(planID int64, planState *typeutil.Pair[int64, *datapb.CompactionPlanResult]) bool {
 		return planState.B.GetState() == commonpb.CompactionState_Completed
@@ -475,8 +483,8 @@ func (c *compactionPlanHandler) isFull() bool {
 func (c *compactionPlanHandler) getTasks() []CompactionTask {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	tasks := make([]CompactionTask, 0, len(c.plans))
-	for _, plan := range c.plans {
+	tasks := make([]CompactionTask, 0, len(c.queueTasks))
+	for _, plan := range c.queueTasks {
 		tasks = append(tasks, plan)
 	}
 	return tasks
@@ -488,7 +496,7 @@ func (c *compactionPlanHandler) getCompactionTasksBySignalID(signalID int64) []C
 	defer c.mu.RUnlock()
 
 	var tasks []CompactionTask
-	for _, t := range c.plans {
+	for _, t := range c.queueTasks {
 		if signalID == 0 {
 			tasks = append(tasks, t)
 			continue
@@ -621,31 +629,6 @@ func (c *compactionPlanHandler) gcPartitionStats() error {
 	return nil
 }
 
-func (c *compactionPlanHandler) collectionIsClusteringCompacting(collectionID UniqueID) (bool, int64) {
-	triggers := c.meta.GetClusteringCompactionTasksByCollection(collectionID)
-	if len(triggers) == 0 {
-		return false, 0
-	}
-	var latestTriggerID int64 = 0
-	for triggerID := range triggers {
-		if latestTriggerID > triggerID {
-			latestTriggerID = triggerID
-		}
-	}
-	tasks := triggers[latestTriggerID]
-	if len(tasks) > 0 {
-		cTasks := make([]CompactionTask, 0)
-		for _, task := range tasks {
-			cTasks = append(cTasks, &clusteringCompactionTask{
-				CompactionTask: task,
-			})
-		}
-		summary := summaryCompactionState(cTasks)
-		return summary.state == commonpb.CompactionState_Executing, tasks[0].TriggerID
-	}
-	return false, 0
-}
-
 type CompactionTriggerSummary struct {
 	state         commonpb.CompactionState
 	executingCnt  int
@@ -730,17 +713,6 @@ func summaryCompactionState(compactionTasks []CompactionTask) CompactionTriggerS
 		indexedCnt:    indexedCnt,
 		cleanedCnt:    cleanedCnt,
 	}
-}
-
-// 0.5*min(8, NumCPU/2)
-func calculateParallel() int {
-	// TODO after node memory management enabled, use this config as hard limit
-	return Params.DataCoordCfg.CompactionWorkerParalleTasks.GetAsInt()
-	//cores := hardware.GetCPUNum()
-	//if cores < 16 {
-	//return 4
-	//}
-	//return cores / 2
 }
 
 var (

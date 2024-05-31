@@ -38,7 +38,7 @@ type TriggerManager interface {
 
 // CompactionTriggerManager registers Triggers to TriggerType
 // so that when the certain TriggerType happens, the corresponding triggers can
-// trigger the correct compaction plans.
+// trigger the correct compaction queueTasks.
 // Trigger types:
 // 1. Change of Views
 //   - LevelZeroViewTrigger
@@ -202,9 +202,16 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 		// collectionSchema todo wayblink
 	}
 
-	m.compactionHandler.enqueueCompaction(&defaultCompactionTask{
+	err = m.compactionHandler.enqueueCompaction(&l0CompactionTask{
 		CompactionTask: task,
 	})
+	if err != nil {
+		log.Warn("failed to execute compaction task",
+			zap.Int64("collection", task.CollectionID),
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64s("segmentIDs", task.GetInputSegments()),
+			zap.Error(err))
+	}
 	log.Info("Finish to submit a LevelZeroCompaction plan",
 		zap.Int64("taskID", taskID),
 		zap.String("type", task.GetType().String()),
@@ -212,16 +219,16 @@ func (m *CompactionTriggerManager) SubmitL0ViewToScheduler(ctx context.Context, 
 }
 
 func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.Context, view CompactionView) {
-	taskID, analyzeID, err := m.allocator.allocN(2)
+	taskID, _, err := m.allocator.allocN(2)
 	if err != nil {
 		log.Warn("fail to submit compaction view to scheduler because allocate id fail", zap.String("view", view.String()))
 		return
 	}
 	view.GetSegmentsView()
-	_, totalRows, maxSegmentRows, preferSegmentRows := summaryClusteringCompactionView(view)
+	_, totalRows, maxSegmentRows, preferSegmentRows := calculateClusteringCompactionConfig(view)
 	task := &datapb.CompactionTask{
-		PlanID: taskID,
-		//TriggerID:          signal.id,
+		PlanID:             taskID,
+		TriggerID:          view.(*ClusteringSegmentsView).triggerID,
 		State:              datapb.CompactionTaskState_init,
 		StartTime:          view.(*ClusteringSegmentsView).compactionTime.startTime,
 		CollectionTtl:      view.(*ClusteringSegmentsView).compactionTime.collectionTTL.Nanoseconds(),
@@ -235,18 +242,25 @@ func (m *CompactionTriggerManager) SubmitClusteringViewToScheduler(ctx context.C
 		MaxSegmentRows:     maxSegmentRows,
 		PreferSegmentRows:  preferSegmentRows,
 		TotalRows:          totalRows,
-		AnalyzeTaskID:      analyzeID,
+		AnalyzeTaskID:      taskID + 1,
 	}
-	m.compactionHandler.enqueueCompaction(&clusteringCompactionTask{
+	err = m.compactionHandler.enqueueCompaction(&clusteringCompactionTask{
 		CompactionTask: task,
 	})
+	if err != nil {
+		log.Warn("failed to execute compaction task",
+			zap.Int64("collection", task.CollectionID),
+			zap.Int64("planID", task.GetPlanID()),
+			zap.Int64s("segmentIDs", task.GetInputSegments()),
+			zap.Error(err))
+	}
 	log.Info("Finish to submit a clustering compaction task",
 		zap.Int64("taskID", taskID),
 		zap.String("type", task.GetType().String()),
 	)
 }
 
-func summaryClusteringCompactionView(view CompactionView) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64) {
+func calculateClusteringCompactionConfig(view CompactionView) (segmentIDs []int64, totalRows, maxSegmentRows, preferSegmentRows int64) {
 	for _, s := range view.GetSegmentsView() {
 		totalRows += s.NumOfRows
 		segmentIDs = append(segmentIDs, s.ID)

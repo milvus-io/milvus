@@ -75,22 +75,11 @@ func (task *clusteringCompactionTask) processInitTask(handler *compactionPlanHan
 }
 
 func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPlanHandler) error {
-	//defaultCompactionTask, exist := handler.plans[task.GetPlanID()]
-	//if !exist {
-	//	// if one compaction task is lost, mark it as failed, and the clustering compaction will be marked failed as well
-	//	log.Warn("compaction task lost", zap.Int64("planID", task.GetPlanID()))
-	//	// trigger retry
-	//	oldPlanID := task.GetPlanID()
-	//	// todo: whether needs allocate a new planID
-	//	task.State = datapb.CompactionTaskState_pipelining
-	//	return merr.WrapErrClusteringCompactionCompactionTaskLost(oldPlanID)
-	//}
-
 	nodePlan, exist := handler.compactionResults[task.GetPlanID()]
 	if !exist {
 		// compaction task in DC but not found in DN means the compaction plan has failed
 		log.Info("compaction failed")
-		handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), endSpan())
+		handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), endSpan())
 		handler.setSegmentsCompacting(task, false)
 		handler.scheduler.Finish(task.GetPlanID(), task)
 		return nil
@@ -112,7 +101,7 @@ func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPl
 				return err
 			}
 			handler.setSegmentsCompacting(task, false)
-			handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), cleanLogPath(), endSpan())
+			handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_failed), cleanLogPath(), endSpan())
 			handler.scheduler.Finish(task.GetNodeID(), task)
 			return nil
 		}
@@ -125,7 +114,7 @@ func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPl
 		})
 		task.CompactionTask.ResultSegments = resultSegmentIDs
 		UpdateCompactionSegmentSizeMetrics(planResult.GetSegments())
-		handler.plans[task.GetPlanID()] = task.ShadowClone(setTask(task.CompactionTask), setState(datapb.CompactionTaskState_indexing), setResult(planResult), cleanLogPath(), endSpan())
+		handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setTask(task.CompactionTask), setState(datapb.CompactionTaskState_indexing), setResult(planResult), cleanLogPath(), endSpan())
 		handler.scheduler.Finish(task.GetNodeID(), task)
 	case commonpb.CompactionState_Executing:
 		ts := tsoutil.GetCurrentTime()
@@ -135,7 +124,7 @@ func (task *clusteringCompactionTask) processExecutingTask(handler *compactionPl
 				zap.Uint64("startTime", task.GetStartTime()),
 				zap.Uint64("now", ts),
 			)
-			handler.plans[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_timeout), endSpan())
+			handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setState(datapb.CompactionTaskState_timeout), endSpan())
 		}
 	}
 	return nil
@@ -285,14 +274,14 @@ func (task *clusteringCompactionTask) submitToAnalyze(handler *compactionPlanHan
 }
 
 func (task *clusteringCompactionTask) submitToCompact(handler *compactionPlanHandler) error {
-	nodeID, err := handler.findNode(task.Channel)
+	nodeID, err := handler.assignNodeID(task.Channel)
 	if err != nil {
 		log.Error("failed to find watcher", zap.Int64("planID", task.GetPlanID()), zap.Error(err))
 		return err
 	}
 	task.dataNodeID = nodeID
 	handler.scheduler.Submit(task)
-	handler.plans[task.GetPlanID()] = task.ShadowClone(setNodeID(nodeID), setState(datapb.CompactionTaskState_executing))
+	handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setNodeID(nodeID), setState(datapb.CompactionTaskState_executing))
 	log.Info("send compaction task to execute", zap.Int64("triggerID", task.GetTriggerID()),
 		zap.Int64("planID", task.GetPlanID()),
 		zap.Int64("collectionID", task.GetCollectionID()),
@@ -366,7 +355,7 @@ func (task *clusteringCompactionTask) BuildCompactionRequest(handler *compaction
 		})
 	}
 	log.Info("Compaction handler build clustering compaction plan")
-	handler.plans[task.GetPlanID()] = task.ShadowClone(setPlan(plan))
+	handler.queueTasks[task.GetPlanID()] = task.ShadowClone(setPlan(plan))
 	return plan, nil
 }
 
