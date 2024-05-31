@@ -172,6 +172,8 @@ func (s *Server) registerHTTPServer() {
 func (s *Server) startHTTPServer(errChan chan error) {
 	defer s.wg.Done()
 	ginHandler := gin.New()
+	ginHandler.Use(accesslog.AccessLogMiddleware)
+
 	ginLogger := gin.LoggerWithConfig(gin.LoggerConfig{
 		SkipPaths: proxy.Params.ProxyCfg.GinLogSkipPaths.GetAsStrings(),
 		Formatter: func(param gin.LogFormatterParams) string {
@@ -182,6 +184,8 @@ func (s *Server) startHTTPServer(errChan chan error) {
 			if !ok {
 				traceID = ""
 			}
+
+			accesslog.SetHTTPParams(&param)
 			return fmt.Sprintf("[%v] [GIN] [%s] [traceID=%s] [code=%3d] [latency=%v] [client=%s] [method=%s] [error=%s]\n",
 				param.TimeStamp.Format("2006/01/02 15:04:05.000 Z07:00"),
 				param.Path,
