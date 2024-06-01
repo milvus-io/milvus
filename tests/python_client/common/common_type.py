@@ -21,6 +21,7 @@ default_index = {"index_type": "IVF_SQ8", "metric_type": "COSINE", "params": {"n
 default_binary_index = {"index_type": "BIN_IVF_FLAT", "params": {"nlist": 128}, "metric_type": "JACCARD"}
 default_diskann_index = {"index_type": "DISKANN", "metric_type": "COSINE", "params": {}}
 default_diskann_search_params = {"metric_type": "COSINE", "params": {"search_list": 30}}
+default_sparse_search_params = {"metric_type": "IP", "params": {"drop_ratio_search": "0.2"}}
 max_top_k = 16384
 max_partition_num = 4096
 max_role_num = 10
@@ -52,6 +53,7 @@ float_type = "FLOAT_VECTOR"
 float16_type = "FLOAT16_VECTOR"
 bfloat16_type = "BFLOAT16_VECTOR"
 vector_data_type_all = [float_type, float16_type, bfloat16_type]
+default_sparse_vec_field_name = "sparse_vector"
 default_partition_name = "_default"
 default_resource_group_name = '__default_resource_group'
 default_resource_group_capacity = 1000000
@@ -110,6 +112,8 @@ default_bin_flat_index = {"index_type": "BIN_FLAT", "params": {}, "metric_type":
 default_count_output = "count(*)"
 
 rows_all_data_type_file_path = "/tmp/rows_all_data_type"
+default_sparse_inverted_index = {"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP",
+                                 "params": {"drop_ratio_build": 0.2}}
 
 """" List of parameters used to pass """
 get_invalid_strs = [
@@ -245,13 +249,14 @@ get_wrong_format_dict = [
 
 """ Specially defined list """
 all_index_types = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ", "HNSW", "SCANN", "DISKANN", "BIN_FLAT", "BIN_IVF_FLAT",
-                   "GPU_IVF_FLAT", "GPU_IVF_PQ"]
+                           "SPARSE_INVERTED_INDEX", "SPARSE_WAND", "GPU_IVF_FLAT", "GPU_IVF_PQ"]]
 
 default_index_params = [{"nlist": 128}, {"nlist": 128}, {"nlist": 128}, {"nlist": 128, "m": 16, "nbits": 8},
                         {"M": 48, "efConstruction": 500}, {"nlist": 128}, {}, {"nlist": 128}, {"nlist": 128},
                         {"nlist": 64}, {"nlist": 64, "m": 16, "nbits": 8}]
 
 Handler_type = ["GRPC", "HTTP"]
+ {"drop_ratio_build": 0.2}, {"drop_ratio_build": 0.2},
 binary_support = ["BIN_FLAT", "BIN_IVF_FLAT"]
 delete_support = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
 ivf = ["FLAT", "IVF_FLAT", "IVF_SQ8", "IVF_PQ"]
@@ -260,6 +265,7 @@ float_metrics = ["L2", "IP", "COSINE"]
 binary_metrics = ["JACCARD", "HAMMING", "SUBSTRUCTURE", "SUPERSTRUCTURE"]
 structure_metrics = ["SUBSTRUCTURE", "SUPERSTRUCTURE"]
 all_scalar_data_types = ['int8', 'int16', 'int32', 'int64', 'float', 'double', 'bool', 'varchar']
+sparse_support = ["SPARSE_INVERTED_INDEX", "SPARSE_WAND"]
 
 
 class CheckTasks:
