@@ -57,7 +57,7 @@ func newServerHandler(s *Server) *ServerHandler {
 
 // GetDataVChanPositions gets vchannel latest positions with provided dml channel names for DataNode.
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
-	segments := h.s.meta.SelectSegments(SegmentFilterFunc(func(s *SegmentInfo) bool {
+	segments := h.s.meta.SelectSegments(WithCollection(channel.GetCollectionID()), SegmentFilterFunc(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.GetName() && !s.GetIsFake()
 	}))
 	log.Info("GetDataVChanPositions",
@@ -105,7 +105,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 // the unflushed segments are actually the segments without index, even they are flushed.
 func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.SelectSegments(SegmentFilterFunc(func(s *SegmentInfo) bool {
+	segments := h.s.meta.SelectSegments(WithCollection(channel.GetCollectionID()), SegmentFilterFunc(func(s *SegmentInfo) bool {
 		return s.InsertChannel == channel.GetName() && !s.GetIsFake()
 	}))
 	segmentInfos := make(map[int64]*SegmentInfo)
@@ -219,11 +219,11 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 
 // getEarliestSegmentDMLPos returns the earliest dml position of segments,
 // this is mainly for COMPATIBILITY with old version <=2.1.x
-func (h *ServerHandler) getEarliestSegmentDMLPos(channel string, partitionIDs ...UniqueID) *msgpb.MsgPosition {
+func (h *ServerHandler) getEarliestSegmentDMLPos(collectionID int64, channel string, partitionIDs ...UniqueID) *msgpb.MsgPosition {
 	var minPos *msgpb.MsgPosition
 	var minPosSegID int64
 	var minPosTs uint64
-	segments := h.s.meta.SelectSegments(WithChannel(channel))
+	segments := h.s.meta.SelectSegments(WithCollection(collectionID), WithChannel(channel))
 
 	validPartitions := lo.Filter(partitionIDs, func(partitionID int64, _ int) bool { return partitionID > allPartitionID })
 	partitionSet := typeutil.NewUniqueSet(validPartitions...)
@@ -305,7 +305,7 @@ func (h *ServerHandler) GetChannelSeekPosition(channel RWChannel, partitionIDs .
 		return seekPosition
 	}
 
-	seekPosition = h.getEarliestSegmentDMLPos(channel.GetName(), partitionIDs...)
+	seekPosition = h.getEarliestSegmentDMLPos(channel.GetCollectionID(), channel.GetName(), partitionIDs...)
 	if seekPosition != nil {
 		log.Info("channel seek position set from earliest segment dml position",
 			zap.Uint64("posTs", seekPosition.Timestamp),

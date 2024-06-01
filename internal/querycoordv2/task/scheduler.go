@@ -843,13 +843,6 @@ func (scheduler *taskScheduler) getTaskMetricsLabel(task Task) string {
 }
 
 func (scheduler *taskScheduler) checkStale(task Task) error {
-	log := log.With(
-		zap.Int64("taskID", task.ID()),
-		zap.Int64("collectionID", task.CollectionID()),
-		zap.Int64("replicaID", task.ReplicaID()),
-		zap.String("source", task.Source().String()),
-	)
-
 	switch task := task.(type) {
 	case *SegmentTask:
 		if err := scheduler.checkSegmentTaskStale(task); err != nil {
@@ -871,11 +864,15 @@ func (scheduler *taskScheduler) checkStale(task Task) error {
 	}
 
 	for step, action := range task.Actions() {
-		log := log.With(
-			zap.Int64("nodeID", action.Node()),
-			zap.Int("step", step))
-
 		if scheduler.nodeMgr.Get(action.Node()) == nil {
+			log := log.With(
+				zap.Int64("taskID", task.ID()),
+				zap.Int64("collectionID", task.CollectionID()),
+				zap.Int64("replicaID", task.ReplicaID()),
+				zap.String("source", task.Source().String()),
+				zap.Int64("nodeID", action.Node()),
+				zap.Int("step", step),
+			)
 			log.Warn("the task is stale, the target node is offline")
 			return merr.WrapErrNodeNotFound(action.Node())
 		}

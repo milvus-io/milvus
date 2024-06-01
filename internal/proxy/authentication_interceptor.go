@@ -44,12 +44,6 @@ func validSourceID(ctx context.Context, authorization []string) bool {
 
 // AuthenticationInterceptor verify based on kv pair <"authorization": "token"> in header
 func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
-	// The keys within metadata.MD are normalized to lowercase.
-	// See: https://godoc.org/google.golang.org/grpc/metadata#New
-	md, ok := metadata.FromIncomingContext(ctx)
-	if !ok {
-		return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
-	}
 	if globalMetaCache == nil {
 		return nil, merr.WrapErrServiceUnavailable("internal: Milvus Proxy is not ready yet. please wait")
 	}
@@ -57,6 +51,12 @@ func AuthenticationInterceptor(ctx context.Context) (context.Context, error) {
 	//	1. if rpc call from a member (like index/query/data component)
 	// 	2. if rpc call from sdk
 	if Params.CommonCfg.AuthorizationEnabled.GetAsBool() {
+		// The keys within metadata.MD are normalized to lowercase.
+		// See: https://godoc.org/google.golang.org/grpc/metadata#New
+		md, ok := metadata.FromIncomingContext(ctx)
+		if !ok {
+			return nil, merr.WrapErrIoKeyNotFound("metadata", "auth check failure, due to occurs inner error: missing metadata")
+		}
 		if !validSourceID(ctx, md[strings.ToLower(util.HeaderSourceID)]) {
 			authStrArr := md[strings.ToLower(util.HeaderAuthorize)]
 
