@@ -295,7 +295,11 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, maxConcurrency in
 	}
 
 	for i := 0; i < iterCount; i++ {
-		batchSegments := targetSegments[i*maxConcurrency : (i+1)*maxConcurrency]
+		safeRight := (i + 1) * maxConcurrency
+		if (i+1)*maxConcurrency > len(targetSegments) {
+			safeRight = len(targetSegments)
+		}
+		batchSegments := targetSegments[i*maxConcurrency : safeRight]
 		segmentBFs, err := t.loadBF(ctx, batchSegments)
 		if err != nil {
 			log.Warn("L0 compaction loadBF fail", zap.Error(err))

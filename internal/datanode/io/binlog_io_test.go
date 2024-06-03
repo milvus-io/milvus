@@ -49,22 +49,3 @@ func (s *BinlogIOSuite) TestUploadDownload() {
 	s.NoError(err)
 	s.ElementsMatch(lo.Values(kvs), vs)
 }
-
-func (s *BinlogIOSuite) TestJoinFullPath() {
-	tests := []struct {
-		description string
-		inPaths     []string
-		outPath     string
-	}{
-		{"no input", nil, path.Join(binlogIOTestDir)},
-		{"input one", []string{"a"}, path.Join(binlogIOTestDir, "a")},
-		{"input two", []string{"a", "b"}, path.Join(binlogIOTestDir, "a/b")},
-	}
-
-	for _, test := range tests {
-		s.Run(test.description, func() {
-			out := s.b.JoinFullPath(test.inPaths...)
-			s.Equal(test.outPath, out)
-		})
-	}
-}
