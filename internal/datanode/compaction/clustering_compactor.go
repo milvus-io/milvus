@@ -178,7 +178,6 @@ func (t *clusteringCompactionTask) init() {
 	workerPoolSize := t.getWorkerPoolSize()
 	t.pool = conc.NewPool[any](workerPoolSize)
 	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryBufferSize), zap.Int("worker_pool_size", workerPoolSize))
-	return
 }
 
 func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {

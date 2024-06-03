@@ -100,7 +100,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    0,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 1: {
@@ -118,7 +118,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 2: {
@@ -136,7 +136,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     true,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 3: {
@@ -154,7 +154,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 4: {
@@ -172,7 +172,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 5: {
@@ -190,7 +190,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 6: {
@@ -208,7 +208,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 7: {
@@ -226,7 +226,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 8: {
@@ -244,7 +244,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 9: {
@@ -262,7 +262,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 			segID + 10: {
@@ -280,7 +280,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 					IsDeleted:     false,
 					CreateTime:    1111,
 					IndexFileKeys: nil,
-					IndexSize:     0,
+					IndexSize:     1,
 				},
 			},
 		},
@@ -299,7 +299,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    0,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 1: {
 				SegmentID:     segID + 1,
@@ -315,7 +315,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 2: {
 				SegmentID:     segID + 2,
@@ -331,7 +331,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     true,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 3: {
 				SegmentID:     segID + 3,
@@ -347,7 +347,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 4: {
 				SegmentID:     segID + 4,
@@ -363,7 +363,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 5: {
 				SegmentID:     segID + 5,
@@ -379,7 +379,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 6: {
 				SegmentID:     segID + 6,
@@ -395,7 +395,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 7: {
 				SegmentID:     segID + 7,
@@ -411,7 +411,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 8: {
 				SegmentID:     segID + 8,
@@ -427,7 +427,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 9: {
 				SegmentID:     segID + 9,
@@ -443,7 +443,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 			buildID + 10: {
 				SegmentID:     segID + 10,
@@ -459,7 +459,7 @@ func createIndexMeta(catalog metastore.DataCoordCatalog) *indexMeta {
 				IsDeleted:     false,
 				CreateTime:    1111,
 				IndexFileKeys: nil,
-				IndexSize:     0,
+				IndexSize:     1,
 			},
 		},
 	}

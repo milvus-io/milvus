@@ -18,6 +18,7 @@ package compaction
 
 import (
 	"context"
+	"fmt"
 	"testing"
 	"time"
 
