@@ -73,6 +73,11 @@ func (p *pipeline) Start() error {
 }
 
 func (p *pipeline) Close() {
+	for _, node := range p.nodes {
+		if node.checker != nil {
+			node.checker.Remove(p.checkerNames[node.node.Name()])
+		}
+	}
 }
 
 func (p *pipeline) process() {
