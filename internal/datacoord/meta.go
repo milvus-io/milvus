@@ -58,6 +58,11 @@ type CompactionMeta interface {
 	SetSegmentCompacting(segmentID int64, compacting bool)
 	CheckAndSetSegmentsCompacting(segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
+
+	GetIndexMeta() *indexMeta
+	GetAnalyzeMeta() *analyzeMeta
+	GetPartitionStatsMeta() *partitionStatsMeta
+	GetCompactionTaskMeta() *compactionTaskMeta
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -75,6 +80,22 @@ type meta struct {
 	analyzeMeta        *analyzeMeta
 	partitionStatsMeta *partitionStatsMeta
 	compactionTaskMeta *compactionTaskMeta
+}
+
+func (m *meta) GetIndexMeta() *indexMeta {
+	return m.indexMeta
+}
+
+func (m *meta) GetAnalyzeMeta() *analyzeMeta {
+	return m.analyzeMeta
+}
+
+func (m *meta) GetPartitionStatsMeta() *partitionStatsMeta {
+	return m.partitionStatsMeta
+}
+
+func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
+	return m.compactionTaskMeta
 }
 
 type channelCPs struct {

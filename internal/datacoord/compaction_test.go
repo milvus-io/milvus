@@ -98,8 +98,11 @@ func (s *CompactionPlanHandlerSuite) TestCheckResult() {
 func (s *CompactionPlanHandlerSuite) TestClean() {
 	startTime := tsoutil.ComposeTSByTime(time.Now(), 0)
 	cleanTime := tsoutil.ComposeTSByTime(time.Now().Add(-2*time.Hour), 0)
+	s.mockMeta.Mock.On("GetCompactionTaskMeta").Return(nil)
+	s.mockMeta.Mock.On("GetPartitionStatsMeta").Return(nil)
 	c := &compactionPlanHandler{
 		allocator: s.mockAlloc,
+		meta:      s.mockMeta,
 		plans: map[int64]CompactionTask{
 			1: &mixCompactionTask{
 				CompactionTask: &datapb.CompactionTask{
@@ -720,7 +723,6 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	//
 	//task = handler.plans[6]
 	//s.Equal(datapb.CompactionTaskState_failed, task.GetState())
-
 }
 
 func getFieldBinlogIDs(fieldID int64, logIDs ...int64) *datapb.FieldBinlog {

@@ -242,13 +242,16 @@ func (c *compactionPlanHandler) cleanPlans() {
 
 func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 	// gc clustering compaction tasks
-	triggers := c.meta.(*meta).compactionTaskMeta.GetCompactionTasks()
+	if c.meta.GetCompactionTaskMeta() == nil {
+		return
+	}
+	triggers := c.meta.GetCompactionTaskMeta().GetCompactionTasks()
 	checkTaskFunc := func(task *datapb.CompactionTask) {
 		// indexed is the final state of a clustering compaction task
 		if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
 			if time.Since(tsoutil.PhysicalTime(task.StartTime)) > Params.DataCoordCfg.ClusteringCompactionDropTolerance.GetAsDuration(time.Second) {
 				// skip handle this error, try best to delete meta
-				err := c.meta.(*meta).compactionTaskMeta.DropCompactionTask(task)
+				err := c.meta.GetCompactionTaskMeta().DropCompactionTask(task)
 				if err != nil {
 					log.Warn("fail to drop task", zap.Int64("taskPlanID", task.PlanID), zap.Error(err))
 				}
@@ -267,7 +270,10 @@ func (c *compactionPlanHandler) cleanPartitionStats() error {
 	// gc partition stats
 	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo)
 	unusedPartStats := make([]*datapb.PartitionStatsInfo, 0)
-	infos := c.meta.(*meta).partitionStatsMeta.ListAllPartitionStatsInfos()
+	if c.meta.GetPartitionStatsMeta() == nil {
+		return nil
+	}
+	infos := c.meta.GetPartitionStatsMeta().ListAllPartitionStatsInfos()
 	for _, info := range infos {
 		collInfo := c.meta.(*meta).GetCollection(info.GetCollectionID())
 		if collInfo == nil {
@@ -286,6 +292,7 @@ func (c *compactionPlanHandler) cleanPartitionStats() error {
 		log.Debug("collection has been dropped, remove partition stats",
 			zap.Int64("collID", info.GetCollectionID()))
 		if err := c.gcPartitionStatsInfo(info); err != nil {
+			log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
 			return err
 		}
 	}
@@ -299,6 +306,7 @@ func (c *compactionPlanHandler) cleanPartitionStats() error {
 			for i := 2; i < len(infos); i++ {
 				info := infos[i]
 				if err := c.gcPartitionStatsInfo(info); err != nil {
+					log.Warn("gcPartitionStatsInfo fail", zap.Error(err))
 					return err
 				}
 			}
