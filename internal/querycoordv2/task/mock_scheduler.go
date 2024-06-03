@@ -166,6 +166,50 @@ func (_c *MockScheduler_GetChannelTaskNum_Call) RunAndReturn(run func() int) *Mo
 	return _c
 }
 
+// GetExecutedFlag provides a mock function with given fields: nodeID
+func (_m *MockScheduler) GetExecutedFlag(nodeID int64) <-chan struct{} {
+	ret := _m.Called(nodeID)
+
+	var r0 <-chan struct{}
+	if rf, ok := ret.Get(0).(func(int64) <-chan struct{}); ok {
+		r0 = rf(nodeID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(<-chan struct{})
+		}
+	}
+
+	return r0
+}
+
+// MockScheduler_GetExecutedFlag_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetExecutedFlag'
+type MockScheduler_GetExecutedFlag_Call struct {
+	*mock.Call
+}
+
+// GetExecutedFlag is a helper method to define mock.On call
+//   - nodeID int64
+func (_e *MockScheduler_Expecter) GetExecutedFlag(nodeID interface{}) *MockScheduler_GetExecutedFlag_Call {
+	return &MockScheduler_GetExecutedFlag_Call{Call: _e.mock.On("GetExecutedFlag", nodeID)}
+}
+
+func (_c *MockScheduler_GetExecutedFlag_Call) Run(run func(nodeID int64)) *MockScheduler_GetExecutedFlag_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(int64))
+	})
+	return _c
+}
+
+func (_c *MockScheduler_GetExecutedFlag_Call) Return(_a0 <-chan struct{}) *MockScheduler_GetExecutedFlag_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockScheduler_GetExecutedFlag_Call) RunAndReturn(run func(int64) <-chan struct{}) *MockScheduler_GetExecutedFlag_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetNodeChannelDelta provides a mock function with given fields: nodeID
 func (_m *MockScheduler) GetNodeChannelDelta(nodeID int64) int {
 	ret := _m.Called(nodeID)

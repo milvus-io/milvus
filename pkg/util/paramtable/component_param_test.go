@@ -307,6 +307,16 @@ func TestComponentParam(t *testing.T) {
 		assert.Equal(t, true, Params.EnableStoppingBalance.GetAsBool())
 
 		assert.Equal(t, 4, Params.ChannelExclusiveNodeFactor.GetAsInt())
+
+		assert.Equal(t, 200, Params.CollectionObserverInterval.GetAsInt())
+		params.Save("queryCoord.collectionObserverInterval", "100")
+		assert.Equal(t, 100, Params.CollectionObserverInterval.GetAsInt())
+		params.Reset("queryCoord.collectionObserverInterval")
+
+		assert.Equal(t, 100, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Save("queryCoord.checkExecutedFlagInterval", "200")
+		assert.Equal(t, 200, Params.CheckExecutedFlagInterval.GetAsInt())
+		params.Reset("queryCoord.checkExecutedFlagInterval")
 	})
 
 	t.Run("test queryNodeConfig", func(t *testing.T) {
