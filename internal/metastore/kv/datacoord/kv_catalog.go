@@ -909,3 +909,24 @@ func (kc *Catalog) DropPartitionStatsInfo(ctx context.Context, info *datapb.Part
 	key := buildPartitionStatsInfoPath(info)
 	return kc.MetaKv.Remove(key)
 }
+
+func (kc *Catalog) SaveCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string, currentVersion int64) error {
+	key := buildCurrentPartitionStatsVersionPath(collID, partID, vChannel)
+	value := strconv.FormatInt(currentVersion, 10)
+	return kc.MetaKv.Save(key, value)
+}
+
+func (kc *Catalog) GetCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) (int64, error) {
+	key := buildCurrentPartitionStatsVersionPath(collID, partID, vChannel)
+	valueStr, err := kc.MetaKv.Load(key)
+	if err != nil {
+		return 0, err
+	}
+
+	return strconv.ParseInt(valueStr, 10, 64)
+}
+
+func (kc *Catalog) DropCurrentPartitionStatsVersion(ctx context.Context, collID, partID int64, vChannel string) error {
+	key := buildCurrentPartitionStatsVersionPath(collID, partID, vChannel)
+	return kc.MetaKv.Remove(key)
+}

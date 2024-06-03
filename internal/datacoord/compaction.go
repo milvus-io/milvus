@@ -545,7 +545,7 @@ func (c *compactionPlanHandler) gcPartitionStatsInfo(info *datapb.PartitionStats
 	}
 
 	// finally clean up the partition stats info, and make sure the analysis task is cleaned up
-	err = meta.DropPartitionStatsInfo(info)
+	err = meta.partitionStatsMeta.DropPartitionStatsInfo(info)
 	log.Debug("drop partition stats meta",
 		zap.Int64("collectionID", info.GetCollectionID()),
 		zap.Int64("partitionID", info.GetPartitionID()),
@@ -581,17 +581,18 @@ func (c *compactionPlanHandler) gcPartitionStats() error {
 	// gc partition stats
 	channelPartitionStatsInfos := make(map[string][]*datapb.PartitionStatsInfo)
 	unusedPartStats := make([]*datapb.PartitionStatsInfo, 0)
-	for _, partitionStatsInfo := range c.meta.(*meta).partitionStatsInfos {
-		collInfo := c.meta.(*meta).GetCollection(partitionStatsInfo.GetCollectionID())
+	infos := c.meta.(*meta).partitionStatsMeta.ListAllPartitionStatsInfos()
+	for _, info := range infos {
+		collInfo := c.meta.(*meta).GetCollection(info.GetCollectionID())
 		if collInfo == nil {
-			unusedPartStats = append(unusedPartStats, partitionStatsInfo)
+			unusedPartStats = append(unusedPartStats, info)
 			continue
 		}
-		channel := fmt.Sprintf("%d/%d/%s", partitionStatsInfo.CollectionID, partitionStatsInfo.PartitionID, partitionStatsInfo.VChannel)
+		channel := fmt.Sprintf("%d/%d/%s", info.CollectionID, info.PartitionID, info.VChannel)
 		if _, ok := channelPartitionStatsInfos[channel]; !ok {
 			channelPartitionStatsInfos[channel] = make([]*datapb.PartitionStatsInfo, 0)
 		}
-		channelPartitionStatsInfos[channel] = append(channelPartitionStatsInfos[channel], partitionStatsInfo)
+		channelPartitionStatsInfos[channel] = append(channelPartitionStatsInfos[channel], info)
 	}
 	log.Debug("channels with PartitionStats meta", zap.Int("len", len(channelPartitionStatsInfos)))
 
@@ -639,7 +640,7 @@ func (c *compactionPlanHandler) collectionIsClusteringCompacting(collectionID Un
 				CompactionTask: task,
 			})
 		}
-		summary := summaryClusteringCompactionState(cTasks)
+		summary := summaryCompactionState(cTasks)
 		return summary.state == commonpb.CompactionState_Executing, tasks[0].TriggerID
 	}
 	return false, 0

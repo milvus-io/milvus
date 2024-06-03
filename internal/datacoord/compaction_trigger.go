@@ -796,7 +796,8 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 			s.GetPartitionID() != partitionID ||
 			s.isCompacting ||
 			s.GetIsImporting() ||
-			s.GetLevel() == datapb.SegmentLevel_L0 {
+			s.GetLevel() == datapb.SegmentLevel_L0 ||
+			s.GetLevel() == datapb.SegmentLevel_L2 {
 			continue
 		}
 		res = append(res, s)

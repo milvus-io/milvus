@@ -167,7 +167,7 @@ func (task *clusteringCompactionTask) processIndexingTask(handler *compactionPla
 // indexed is the final state of a clustering compaction task
 // one task should only run this once
 func (task *clusteringCompactionTask) processIndexedTask(handler *compactionPlanHandler) error {
-	err := handler.meta.SavePartitionStatsInfo(&datapb.PartitionStatsInfo{
+	err := handler.meta.(*meta).partitionStatsMeta.SavePartitionStatsInfo(&datapb.PartitionStatsInfo{
 		CollectionID: task.GetCollectionID(),
 		PartitionID:  task.GetPartitionID(),
 		VChannel:     task.GetChannel(),

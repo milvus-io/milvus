@@ -836,7 +836,8 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 	}
 
 	iCodec := storage.NewInsertCodecWithSchema(t.collectionMeta)
-	inPaths, err := uploadInsertLog(ctx, t.io, t.allocator, t.collectionID, t.partitionID, buffer.currentSegmentID, buffer.buffer, iCodec)
+	bufferBlobs, err := iCodec.Serialize(t.partitionID, buffer.currentSegmentID, buffer.buffer)
+	inPaths, err := uploadInsertLog(ctx, t.io, t.allocator, t.collectionID, t.partitionID, buffer.currentSegmentID, bufferBlobs)
 	if err != nil {
 		return err
 	}

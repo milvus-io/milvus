@@ -254,6 +254,10 @@ func buildPartitionStatsInfoPath(info *datapb.PartitionStatsInfo) string {
 	return fmt.Sprintf("%s/%d/%d/%s/%d", PartitionStatsInfoPrefix, info.CollectionID, info.PartitionID, info.VChannel, info.Version)
 }
 
+func buildCurrentPartitionStatsVersionPath(collID, partID int64, channel string) string {
+	return fmt.Sprintf("%s/%d/%d/%s", PartitionStatsCurrentPlanIDPrefix, collID, partID, channel)
+}
+
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store
 func buildSegmentPath(collectionID typeutil.UniqueID, partitionID typeutil.UniqueID, segmentID typeutil.UniqueID) string {
 	return fmt.Sprintf("%s/%d/%d/%d", SegmentPrefix, collectionID, partitionID, segmentID)

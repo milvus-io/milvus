@@ -21,7 +21,6 @@ import (
 	"context"
 	"fmt"
 	"math"
-	"strings"
 	"time"
 
 	"github.com/cockroachdb/errors"
@@ -64,8 +63,8 @@ type CompactionMeta interface {
 	GetClusteringCompactionTasksByCollection(collectionID int64) map[int64][]*datapb.CompactionTask
 	GetClusteringCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask
 
-	SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error
-	DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error
+	//SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error
+	//DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error
 
 	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 }
@@ -82,10 +81,10 @@ type meta struct {
 	chunkManager storage.ChunkManager
 
 	clusteringCompactionTasks map[int64]map[int64]*datapb.CompactionTask // triggerID -> planID
-	partitionStatsInfos       map[string]*datapb.PartitionStatsInfo
 
-	indexMeta   *indexMeta
-	analyzeMeta *analyzeMeta
+	indexMeta          *indexMeta
+	analyzeMeta        *analyzeMeta
+	partitionStatsMeta *partitionStatsMeta
 }
 
 type channelCPs struct {
@@ -129,6 +128,11 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
+
+	psm, err := newPartitionStatsMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
 	mt := &meta{
 		ctx:                       ctx,
 		catalog:                   catalog,
@@ -139,7 +143,7 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 		analyzeMeta:               am,
 		chunkManager:              chunkManager,
 		clusteringCompactionTasks: make(map[int64]map[int64]*datapb.CompactionTask, 0),
-		partitionStatsInfos:       make(map[string]*datapb.PartitionStatsInfo, 0),
+		partitionStatsMeta:        psm,
 	}
 	err = mt.reloadFromKV()
 	if err != nil {
@@ -201,14 +205,6 @@ func (m *meta) reloadFromKV() error {
 	}
 	for _, task := range compactionTasks {
 		m.saveClusteringCompactionTaskMemory(task)
-	}
-
-	partitionStatsInfos, err := m.catalog.ListPartitionStatsInfos(m.ctx)
-	if err != nil {
-		return err
-	}
-	for _, info := range partitionStatsInfos {
-		m.partitionStatsInfos[fmt.Sprintf("%d/%d/%s/%d", info.CollectionID, info.PartitionID, info.VChannel, info.Version)] = info
 	}
 
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
@@ -1858,62 +1854,8 @@ func (m *meta) DropClusteringCompactionTask(task *datapb.CompactionTask) error {
 	if triggerIDExist {
 		delete(m.clusteringCompactionTasks[task.TriggerID], task.PlanID)
 	}
-	return nil
-}
-
-func (m *meta) ListAllPartitionStatsInfos() []*datapb.PartitionStatsInfo {
-	m.RLock()
-	defer m.RUnlock()
-	res := make([]*datapb.PartitionStatsInfo, 0)
-	for _, partitionStats := range m.partitionStatsInfos {
-		res = append(res, partitionStats)
+	if len(m.clusteringCompactionTasks[task.TriggerID]) == 0 {
+		delete(m.clusteringCompactionTasks, task.TriggerID)
 	}
-	return res
-}
-
-func (m *meta) ListPartitionStatsInfos(collectionID int64, partitionID int64, vchannel string, filters ...func([]*datapb.PartitionStatsInfo) []*datapb.PartitionStatsInfo) []*datapb.PartitionStatsInfo {
-	m.RLock()
-	defer m.RUnlock()
-	res := make([]*datapb.PartitionStatsInfo, 0)
-	keyPrefix := fmt.Sprintf("%d/%d/%s/", collectionID, partitionID, vchannel)
-	for key, partitionStats := range m.partitionStatsInfos {
-		if strings.HasPrefix(key, keyPrefix) {
-			res = append(res, partitionStats)
-		}
-	}
-	for _, filter := range filters {
-		res = filter(res)
-	}
-	return res
-}
-
-func (m *meta) PartitionStatsKey(info *datapb.PartitionStatsInfo) string {
-	return fmt.Sprintf("%d/%d/%s/%d", info.CollectionID, info.PartitionID, info.VChannel, info.Version)
-}
-
-func (m *meta) SavePartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
-	m.Lock()
-	defer m.Unlock()
-	if err := m.catalog.SavePartitionStatsInfo(m.ctx, info); err != nil {
-		log.Error("meta update: update PartitionStatsInfo info fail", zap.Error(err))
-		return err
-	}
-	m.partitionStatsInfos[m.PartitionStatsKey(info)] = info
-	return nil
-}
-
-func (m *meta) DropPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {
-	m.Lock()
-	defer m.Unlock()
-	if err := m.catalog.DropPartitionStatsInfo(m.ctx, info); err != nil {
-		log.Error("meta update: drop PartitionStatsInfo info fail",
-			zap.Int64("collectionID", info.CollectionID),
-			zap.Int64("partitionID", info.PartitionID),
-			zap.String("vchannel", info.VChannel),
-			zap.Int64("version", info.Version),
-			zap.Error(err))
-		return err
-	}
-	delete(m.partitionStatsInfos, m.PartitionStatsKey(info))
 	return nil
 }

@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"fmt"
 	"math/rand"
 	"os"
 	"os/signal"
@@ -1447,13 +1446,20 @@ func TestGetQueryVChanPositions_PartitionStats(t *testing.T) {
 	collectionID := int64(0)
 	partitionID := int64(1)
 	vchannel := "test_vchannel"
-	verstion := 100
+	version := int64(100)
 	svr.meta.AddCollection(&collectionInfo{
 		ID:     collectionID,
 		Schema: schema,
 	})
-	svr.meta.partitionStatsInfos[fmt.Sprintf("%d/%d/%s/%d", collectionID, partitionID, vchannel, verstion)] = &datapb.PartitionStatsInfo{
-		Version: 100,
+	svr.meta.partitionStatsMeta.partitionStatsInfos = map[string]map[int64]*partitionStatsInfo{
+		vchannel: {
+			partitionID: {
+				currentVersion: version,
+				infos: map[int64]*datapb.PartitionStatsInfo{
+					version: {Version: version},
+				},
+			},
+		},
 	}
 	partitionIDs := make([]UniqueID, 0)
 	partitionIDs = append(partitionIDs, partitionID)
