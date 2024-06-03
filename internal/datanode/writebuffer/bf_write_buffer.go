@@ -35,7 +35,7 @@ func (wb *bfWriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgs
 	// distribute delete msg for previous data
 	for _, delMsg := range deleteMsgs {
 		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
-		lcs := lo.Map(pks, func(pk storage.PrimaryKey, _ int) storage.LocationsCache { return storage.NewLocationsCache(pk) })
+		lcs := lo.Map(pks, func(pk storage.PrimaryKey, _ int) *storage.LocationsCache { return storage.NewLocationsCache(pk) })
 		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
 			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
 		for _, segment := range segments {
@@ -98,7 +98,8 @@ func (wb *bfWriteBuffer) BufferData(insertMsgs []*msgstream.InsertMsg, deleteMsg
 	// update pk oracle
 	for _, inData := range groups {
 		// segment shall always exists after buffer insert
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithSegmentIDs(inData.segmentID))
+		segments := wb.metaCache.GetSegmentsBy(
+			metacache.WithSegmentIDs(inData.segmentID))
 		for _, segment := range segments {
 			for _, fieldData := range inData.pkField {
 				err := segment.GetBloomFilterSet().UpdatePKRange(fieldData)

@@ -28,6 +28,22 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
+func HTTPReturn(c *gin.Context, code int, result gin.H) {
+	c.Set(HTTPReturnCode, result[HTTPReturnCode])
+	if errorMsg, ok := result[HTTPReturnMessage]; ok {
+		c.Set(HTTPReturnMessage, errorMsg)
+	}
+	c.JSON(code, result)
+}
+
+func HTTPAbortReturn(c *gin.Context, code int, result gin.H) {
+	c.Set(HTTPReturnCode, result[HTTPReturnCode])
+	if errorMsg, ok := result[HTTPReturnMessage]; ok {
+		c.Set(HTTPReturnMessage, errorMsg)
+	}
+	c.AbortWithStatusJSON(code, result)
+}
+
 func ParseUsernamePassword(c *gin.Context) (string, string, bool) {
 	username, password, ok := c.Request.BasicAuth()
 	if !ok {
@@ -1084,7 +1100,7 @@ func buildQueryResp(rowsNum int64, needFields []string, fieldDataList []*schemap
 	var queryResp []map[string]interface{}
 
 	columnNum := len(fieldDataList)
-	if rowsNum == int64(0) {
+	if rowsNum == int64(0) { // always
 		if columnNum > 0 {
 			switch fieldDataList[0].Type {
 			case schemapb.DataType_Bool:

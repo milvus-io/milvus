@@ -218,7 +218,7 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
 		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
@@ -248,7 +248,7 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 		s.metacacheVarchar.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
 		s.metacacheVarchar.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheVarchar.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacacheVarchar.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		s.metacacheVarchar.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewVarCharPrimaryKey(fmt.Sprintf("%v", id)) }))
@@ -273,7 +273,7 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
 		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_VarChar)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
@@ -294,7 +294,7 @@ func (s *BFWriteBufferSuite) TestBufferData() {
 		s.metacacheVarchar.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
 		s.metacacheVarchar.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheVarchar.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
-		s.metacacheVarchar.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		s.metacacheVarchar.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
@@ -325,7 +325,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1000)).Return(seg, true).Once()
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1002)).Return(seg1, true)
 		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})
-		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
@@ -363,7 +363,7 @@ func (s *BFWriteBufferSuite) TestBufferDataWithStorageV2() {
 	seg := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 1000}, metacache.NewBloomFilterSet())
 	s.metacacheInt64.EXPECT().GetSegmentsBy(mock.Anything, mock.Anything).Return([]*metacache.SegmentInfo{seg})
 	s.metacacheInt64.EXPECT().GetSegmentByID(int64(1000)).Return(nil, false)
-	s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{})
+	s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{})
 	s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 	s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 
@@ -409,7 +409,7 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1000)).Return(seg, true).Once()
 		s.metacacheInt64.EXPECT().GetSegmentByID(int64(1002)).Return(seg1, true)
 		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything).Return([]int64{1002})
-		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything).Return([]int64{1003}) // mocked compacted
+		s.metacacheInt64.EXPECT().GetSegmentIDsBy(mock.Anything, mock.Anything, mock.Anything).Return([]int64{1003}) // mocked compacted
 		s.metacacheInt64.EXPECT().RemoveSegments(mock.Anything).Return([]int64{1003})
 		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()

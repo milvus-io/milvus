@@ -31,6 +31,8 @@ func SetMaxRowCount(maxRow int64) SegmentOperator {
 
 type segmentCriterion struct {
 	collectionID int64
+	channel      string
+	partitionID  int64
 	others       []SegmentFilter
 }
 
@@ -62,6 +64,21 @@ func WithCollection(collectionID int64) SegmentFilter {
 	return CollectionFilter(collectionID)
 }
 
+type ChannelFilter string
+
+func (f ChannelFilter) Match(segment *SegmentInfo) bool {
+	return segment.GetInsertChannel() == string(f)
+}
+
+func (f ChannelFilter) AddFilter(criterion *segmentCriterion) {
+	criterion.channel = string(f)
+}
+
+// WithChannel WithCollection has a higher priority if both WithCollection and WithChannel are in condition together.
+func WithChannel(channel string) SegmentFilter {
+	return ChannelFilter(channel)
+}
+
 type SegmentFilterFunc func(*SegmentInfo) bool
 
 func (f SegmentFilterFunc) Match(segment *SegmentInfo) bool {
@@ -70,10 +87,4 @@ func (f SegmentFilterFunc) Match(segment *SegmentInfo) bool {
 
 func (f SegmentFilterFunc) AddFilter(criterion *segmentCriterion) {
 	criterion.others = append(criterion.others, f)
-}
-
-func WithChannel(channel string) SegmentFilter {
-	return SegmentFilterFunc(func(si *SegmentInfo) bool {
-		return si.GetInsertChannel() == channel
-	})
 }

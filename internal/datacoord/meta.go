@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
@@ -39,12 +40,14 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
+	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type meta struct {
@@ -159,6 +162,42 @@ func (m *meta) reloadFromKV() error {
 		m.channelCPs.checkpoints[vChannel] = pos
 	}
 	log.Info("DataCoord meta reloadFromKV done", zap.Duration("duration", record.ElapseSpan()))
+	return nil
+}
+
+func (m *meta) reloadCollectionsFromRootcoord(ctx context.Context, broker broker.Broker) error {
+	resp, err := broker.ListDatabases(ctx)
+	if err != nil {
+		return err
+	}
+	for _, dbName := range resp.GetDbNames() {
+		resp, err := broker.ShowCollections(ctx, dbName)
+		if err != nil {
+			return err
+		}
+		for _, collectionID := range resp.GetCollectionIds() {
+			resp, err := broker.DescribeCollectionInternal(ctx, collectionID)
+			if err != nil {
+				return err
+			}
+			partitionIDs, err := broker.ShowPartitionsInternal(ctx, collectionID)
+			if err != nil {
+				return err
+			}
+			collection := &collectionInfo{
+				ID:             collectionID,
+				Schema:         resp.GetSchema(),
+				Partitions:     partitionIDs,
+				StartPositions: resp.GetStartPositions(),
+				Properties:     funcutil.KeyValuePair2Map(resp.GetProperties()),
+				CreatedAt:      resp.GetCreatedTimestamp(),
+				DatabaseName:   resp.GetDbName(),
+				DatabaseID:     resp.GetDbId(),
+				VChannelNames:  resp.GetVirtualChannelNames(),
+			}
+			m.AddCollection(collection)
+		}
+	}
 	return nil
 }
 
@@ -325,6 +364,8 @@ func (m *meta) GetCollectionIndexFilesSize() uint64 {
 	m.RLock()
 	defer m.RUnlock()
 	var total uint64
+
+	missingCollections := make(typeutil.Set[int64])
 	for _, segmentIdx := range m.indexMeta.GetAllSegIndexes() {
 		coll, ok := m.collections[segmentIdx.CollectionID]
 		if ok {
@@ -332,8 +373,11 @@ func (m *meta) GetCollectionIndexFilesSize() uint64 {
 				fmt.Sprint(segmentIdx.CollectionID), fmt.Sprint(segmentIdx.SegmentID)).Set(float64(segmentIdx.IndexSize))
 			total += segmentIdx.IndexSize
 		} else {
-			log.Warn("not found database name", zap.Int64("collectionID", segmentIdx.CollectionID))
+			missingCollections.Insert(segmentIdx.CollectionID)
 		}
+	}
+	if missingCollections.Len() > 0 {
+		log.Warn("collection info not found when calculating index file sizes", zap.Int64s("collectionIDs", missingCollections.Collect()))
 	}
 	return total
 }
@@ -1074,6 +1118,12 @@ func (m *meta) SelectSegments(filters ...SegmentFilter) []*SegmentInfo {
 	return m.segments.GetSegmentsBySelector(filters...)
 }
 
+func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+	return m.segments.GetRealSegmentsForChannel(channel)
+}
+
 // AddAllocation add allocation in segment
 func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	log.Debug("meta update: add allocation",
@@ -1530,4 +1580,11 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
 	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetLevel(), segToUpdate.GetNumOfRows())
 	segToUpdate.State = targetState
+}
+
+func (m *meta) ListCollections() []int64 {
+	m.RLock()
+	defer m.RUnlock()
+
+	return lo.Keys(m.collections)
 }

@@ -42,13 +42,14 @@ const (
 	DefaultSessionTTL        = 30 // s
 	DefaultSessionRetryTimes = 30
 
-	DefaultMaxDegree                = 56
-	DefaultSearchListSize           = 100
-	DefaultPQCodeBudgetGBRatio      = 0.125
-	DefaultBuildNumThreadsRatio     = 1.0
-	DefaultSearchCacheBudgetGBRatio = 0.10
-	DefaultLoadNumThreadRatio       = 8.0
-	DefaultBeamWidthRatio           = 4.0
+	DefaultMaxDegree                   = 56
+	DefaultSearchListSize              = 100
+	DefaultPQCodeBudgetGBRatio         = 0.125
+	DefaultBuildNumThreadsRatio        = 1.0
+	DefaultSearchCacheBudgetGBRatio    = 0.10
+	DefaultLoadNumThreadRatio          = 8.0
+	DefaultBeamWidthRatio              = 4.0
+	DefaultBitmapIndexCardinalityBound = 500
 )
 
 // ComponentParam is used to quickly and easily access all components' configurations.
@@ -212,6 +213,7 @@ type commonConfig struct {
 	BeamWidthRatio                      ParamItem `refreshable:"true"`
 	GracefulTime                        ParamItem `refreshable:"true"`
 	GracefulStopTimeout                 ParamItem `refreshable:"true"`
+	BitmapIndexCardinalityBound         ParamItem `refreshable:"false"`
 
 	StorageType ParamItem `refreshable:"false"`
 	SimdType    ParamItem `refreshable:"false"`
@@ -243,6 +245,7 @@ type commonConfig struct {
 	TTMsgEnabled          ParamItem `refreshable:"true"`
 	TraceLogMode          ParamItem `refreshable:"true"`
 	BloomFilterSize       ParamItem `refreshable:"true"`
+	BloomFilterType       ParamItem `refreshable:"true"`
 	MaxBloomFalsePositive ParamItem `refreshable:"true"`
 	PanicWhenPluginFail   ParamItem `refreshable:"false"`
 }
@@ -442,6 +445,14 @@ This configuration is only used by querynode and indexnode, it selects CPU instr
 		Export:       true,
 	}
 	p.IndexSliceSize.Init(base.mgr)
+
+	p.BitmapIndexCardinalityBound = ParamItem{
+		Key:          "common.bitmapIndexCardinalityBound",
+		Version:      "2.5.0",
+		DefaultValue: strconv.Itoa(DefaultBitmapIndexCardinalityBound),
+		Export:       true,
+	}
+	p.BitmapIndexCardinalityBound.Init(base.mgr)
 
 	p.EnableMaterializedView = ParamItem{
 		Key:          "common.materializedView.enabled",
@@ -724,6 +735,15 @@ like the old password verification when updating the credential`,
 		Export:       true,
 	}
 	p.BloomFilterSize.Init(base.mgr)
+
+	p.BloomFilterType = ParamItem{
+		Key:          "common.bloomFilterType",
+		Version:      "2.4.3",
+		DefaultValue: "BlockedBloomFilter",
+		Doc:          "bloom filter type, support BasicBloomFilter and BlockedBloomFilter",
+		Export:       true,
+	}
+	p.BloomFilterType.Init(base.mgr)
 
 	p.MaxBloomFalsePositive = ParamItem{
 		Key:          "common.maxBloomFalsePositive",
@@ -2100,6 +2120,7 @@ type queryNodeConfig struct {
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
 	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
 	UseStreamComputing                      ParamItem `refreshable:"false"`
+	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2357,13 +2378,13 @@ func (p *queryNodeConfig) init(base *BaseTable) {
 	p.ChunkCacheWarmingUp = ParamItem{
 		Key:          "queryNode.cache.warmup",
 		Version:      "2.3.6",
-		DefaultValue: "off",
-		Doc: `options: async, sync, off. 
+		DefaultValue: "disable",
+		Doc: `options: async, sync, disable. 
 Specifies the necessity for warming up the chunk cache. 
-1. If set to "sync" or "async," the original vector data will be synchronously/asynchronously loaded into the 
+1. If set to "sync" or "async" the original vector data will be synchronously/asynchronously loaded into the 
 chunk cache during the load process. This approach has the potential to substantially reduce query/search latency
 for a specific duration post-load, albeit accompanied by a concurrent increase in disk usage;
-2. If set to "off," original vector data will only be loaded into the chunk cache during search/query.`,
+2. If set to "disable" original vector data will only be loaded into the chunk cache during search/query.`,
 		Export: true,
 	}
 	p.ChunkCacheWarmingUp.Init(base.mgr)
@@ -2471,7 +2492,6 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 				}
 				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
-					// panic(err)
 					log.Fatal("failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
 				}
 				return strconv.FormatUint(diskUsage.Total, 10)
@@ -2683,6 +2703,15 @@ user-task-polling:
 		Doc:          "use stream search mode when searching or querying",
 	}
 	p.UseStreamComputing.Init(base.mgr)
+
+	p.QueryStreamBatchSize = ParamItem{
+		Key:          "queryNode.queryStreamBatchSize",
+		Version:      "2.4.1",
+		DefaultValue: "4194304",
+		Doc:          "return batch size of stream query",
+		Export:       true,
+	}
+	p.QueryStreamBatchSize.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2730,6 +2759,7 @@ type dataCoordConfig struct {
 	SingleCompactionDeltalogMaxNum    ParamItem `refreshable:"true"`
 	GlobalCompactionInterval          ParamItem `refreshable:"false"`
 	ChannelCheckpointMaxLag           ParamItem `refreshable:"true"`
+	SyncSegmentsInterval              ParamItem `refreshable:"false"`
 
 	// LevelZero Segment
 	EnableLevelZeroSegment                   ParamItem `refreshable:"false"`
@@ -3069,6 +3099,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "900", // 15 * 60 seconds
 	}
 	p.ChannelCheckpointMaxLag.Init(base.mgr)
+
+	p.SyncSegmentsInterval = ParamItem{
+		Key:          "dataCoord.sync.interval",
+		Version:      "2.4.3",
+		Doc:          "The time interval for regularly syncing segments",
+		DefaultValue: "600", // 10 * 60 seconds
+	}
+	p.SyncSegmentsInterval.Init(base.mgr)
 
 	// LevelZeroCompaction
 	p.EnableLevelZeroSegment = ParamItem{
@@ -3770,9 +3808,16 @@ func (p *indexNodeConfig) init(base *BaseTable) {
 		Version: "2.2.0",
 		Formatter: func(v string) string {
 			if len(v) == 0 {
-				diskUsage, err := disk.Usage("/")
+				// use local storage path to check correct device
+				localStoragePath := base.Get("localStorage.path")
+				if _, err := os.Stat(localStoragePath); os.IsNotExist(err) {
+					if err := os.MkdirAll(localStoragePath, os.ModePerm); err != nil {
+						log.Fatal("failed to mkdir", zap.String("localStoragePath", localStoragePath), zap.Error(err))
+					}
+				}
+				diskUsage, err := disk.Usage(localStoragePath)
 				if err != nil {
-					panic(err)
+					log.Fatal("failed to get disk usage", zap.String("localStoragePath", localStoragePath), zap.Error(err))
 				}
 				return strconv.FormatUint(diskUsage.Total, 10)
 			}

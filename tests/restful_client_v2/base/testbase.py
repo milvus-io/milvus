@@ -80,7 +80,7 @@ class TestBase(Base):
             "vectorField": "vector",
         }
         rsp = self.collection_client.collection_create(schema_payload)
-        assert rsp['code'] == 200
+        assert rsp['code'] == 0
         self.wait_collection_load_completed(collection_name)
         batch_size = batch_size
         batch = nb // batch_size
@@ -97,7 +97,7 @@ class TestBase(Base):
             body_size = sys.getsizeof(json.dumps(payload))
             logger.debug(f"body size: {body_size / 1024 / 1024} MB")
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
             if return_insert_id:
                 insert_ids.extend(rsp['data']['insertIds'])
         # insert remainder data
@@ -109,7 +109,7 @@ class TestBase(Base):
                 "data": data
             }
             rsp = self.vector_client.vector_insert(payload)
-            assert rsp['code'] == 200
+            assert rsp['code'] == 0
             if return_insert_id:
                 insert_ids.extend(rsp['data']['insertIds'])
         if return_insert_id:

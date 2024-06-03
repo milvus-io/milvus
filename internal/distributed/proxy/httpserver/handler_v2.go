@@ -153,17 +153,17 @@ func wrapperPost(newReq newReqFunc, v2 handlerFuncV2) gin.HandlerFunc {
 			log.Warn("high level restful api, read parameters from request body fail", zap.Error(err),
 				zap.Any("url", c.Request.URL.Path), zap.Any("request", req))
 			if _, ok := err.(validator.ValidationErrors); ok {
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: " + err.Error(),
 				})
 			} else if err == io.EOF {
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", the request body should be nil, however {} is valid",
 				})
 			} else {
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 				})
@@ -230,14 +230,14 @@ func checkAuthorizationV2(ctx context.Context, c *gin.Context, ignoreErr bool, r
 	username, ok := c.Get(ContextUsername)
 	if !ok || username.(string) == "" {
 		if !ignoreErr {
-			c.JSON(http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
+			HTTPReturn(c, http.StatusUnauthorized, gin.H{HTTPReturnCode: merr.Code(merr.ErrNeedAuthenticate), HTTPReturnMessage: merr.ErrNeedAuthenticate.Error()})
 		}
 		return merr.ErrNeedAuthenticate
 	}
 	_, authErr := proxy.PrivilegeInterceptor(ctx, req)
 	if authErr != nil {
 		if !ignoreErr {
-			c.JSON(http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
+			HTTPReturn(c, http.StatusForbidden, gin.H{HTTPReturnCode: merr.Code(authErr), HTTPReturnMessage: authErr.Error()})
 		}
 		return authErr
 	}
@@ -267,7 +267,7 @@ func wrapperProxy(ctx context.Context, c *gin.Context, req any, checkAuth bool, 
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, grpc call failed", zap.Error(err), zap.Any("grpcRequest", req))
 		if !ignoreErr {
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+			HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		}
 	}
 	return response, err
@@ -290,7 +290,7 @@ func (h *HandlersV2) wrapperCheckDatabase(v2 handlerFuncV2) handlerFuncV2 {
 			}
 		}
 		log.Ctx(ctx).Warn("high level restful api, non-exist database", zap.String("database", dbName), zap.Any("request", req))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrDatabaseNotFound),
 			HTTPReturnMessage: merr.ErrDatabaseNotFound.Error() + ", database: " + dbName,
 		})
@@ -316,7 +316,7 @@ func (h *HandlersV2) hasCollection(ctx context.Context, c *gin.Context, anyReq a
 		}
 		has = resp.(*milvuspb.BoolResponse).Value
 	}
-	c.JSON(http.StatusOK, wrapperReturnHas(has))
+	HTTPReturn(c, http.StatusOK, wrapperReturnHas(has))
 	return has, nil
 }
 
@@ -324,11 +324,12 @@ func (h *HandlersV2) listCollections(ctx context.Context, c *gin.Context, anyReq
 	req := &milvuspb.ShowCollectionsRequest{
 		DbName: dbName,
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, false, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ShowCollections(reqCtx, req.(*milvuspb.ShowCollectionsRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnList(resp.(*milvuspb.ShowCollectionsResponse).CollectionNames))
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ShowCollectionsResponse).CollectionNames))
 	}
 	return resp, err
 }
@@ -340,6 +341,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (any, error) {
 		return h.proxy.DescribeCollection(reqCtx, req.(*milvuspb.DescribeCollectionRequest))
 	})
@@ -408,7 +410,7 @@ func (h *HandlersV2) getCollectionDetails(ctx context.Context, c *gin.Context, a
 	if coll.Properties == nil {
 		coll.Properties = []*commonpb.KeyValuePair{}
 	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+	HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 		HTTPCollectionName:    coll.CollectionName,
 		HTTPCollectionID:      coll.CollectionID,
 		HTTPReturnDescription: coll.Schema.Description,
@@ -432,11 +434,12 @@ func (h *HandlersV2) getCollectionStats(ctx context.Context, c *gin.Context, any
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (any, error) {
 		return h.proxy.GetCollectionStatistics(reqCtx, req.(*milvuspb.GetCollectionStatisticsRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnRowCount(resp.(*milvuspb.GetCollectionStatisticsResponse).Stats))
+		HTTPReturn(c, http.StatusOK, wrapperReturnRowCount(resp.(*milvuspb.GetCollectionStatisticsResponse).Stats))
 	}
 	return resp, err
 }
@@ -447,6 +450,7 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (any, error) {
 		return h.proxy.GetLoadState(reqCtx, req.(*milvuspb.GetLoadStateRequest))
 	})
@@ -455,10 +459,10 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	}
 	if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotExist {
 		err = merr.WrapErrCollectionNotFound(req.CollectionName)
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return resp, err
 	} else if resp.(*milvuspb.GetLoadStateResponse).State == commonpb.LoadState_LoadStateNotLoad {
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 			HTTPReturnLoadState: resp.(*milvuspb.GetLoadStateResponse).State.String(),
 		}})
 		return resp, err
@@ -483,7 +487,7 @@ func (h *HandlersV2) getCollectionLoadState(ctx context.Context, c *gin.Context,
 	if progress >= 100 {
 		state = commonpb.LoadState_LoadStateLoaded.String()
 	}
-	c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+	HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 		HTTPReturnLoadState:    state,
 		HTTPReturnLoadProgress: progress,
 	}, HTTPReturnMessage: errMessage})
@@ -496,11 +500,12 @@ func (h *HandlersV2) dropCollection(ctx context.Context, c *gin.Context, anyReq 
 		DbName:         dbName,
 		CollectionName: getter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropCollection(reqCtx, req.(*milvuspb.DropCollectionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -513,6 +518,7 @@ func (h *HandlersV2) renameCollection(ctx context.Context, c *gin.Context, anyRe
 		NewName:   httpReq.NewCollectionName,
 		NewDBName: httpReq.NewDbName,
 	}
+	c.Set(ContextRequest, req)
 	if req.NewDBName == "" {
 		req.NewDBName = dbName
 	}
@@ -520,7 +526,7 @@ func (h *HandlersV2) renameCollection(ctx context.Context, c *gin.Context, anyRe
 		return h.proxy.RenameCollection(reqCtx, req.(*milvuspb.RenameCollectionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -531,11 +537,12 @@ func (h *HandlersV2) loadCollection(ctx context.Context, c *gin.Context, anyReq 
 		DbName:         dbName,
 		CollectionName: getter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.LoadCollection(reqCtx, req.(*milvuspb.LoadCollectionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -546,11 +553,12 @@ func (h *HandlersV2) releaseCollection(ctx context.Context, c *gin.Context, anyR
 		DbName:         dbName,
 		CollectionName: getter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ReleaseCollection(reqCtx, req.(*milvuspb.ReleaseCollectionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -566,6 +574,7 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		QueryParams:           []*commonpb.KeyValuePair{},
 		UseDefaultConsistency: true,
 	}
+	c.Set(ContextRequest, req)
 	if httpReq.Offset > 0 {
 		req.QueryParams = append(req.QueryParams, &commonpb.KeyValuePair{Key: ParamOffset, Value: strconv.FormatInt(int64(httpReq.Offset), 10)})
 	}
@@ -581,13 +590,13 @@ func (h *HandlersV2) query(ctx context.Context, c *gin.Context, anyReq any, dbNa
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, fail to deal with query result", zap.Any("response", resp), zap.Error(err))
-			c.JSON(http.StatusOK, gin.H{
+			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: outputData,
 				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
 			})
@@ -605,7 +614,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 	body, _ := c.Get(gin.BodyBytesKey)
 	filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 	if err != nil {
-		c.JSON(http.StatusOK, gin.H{
+		HTTPReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 			HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: " + err.Error(),
 		})
@@ -619,6 +628,7 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		Expr:                  filter,
 		UseDefaultConsistency: true,
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Query(reqCtx, req.(*milvuspb.QueryRequest))
 	})
@@ -628,13 +638,13 @@ func (h *HandlersV2) get(ctx context.Context, c *gin.Context, anyReq any, dbName
 		outputData, err := buildQueryResp(int64(0), queryResp.OutputFields, queryResp.FieldsData, nil, nil, allowJS)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, fail to deal with get result", zap.Any("response", resp), zap.Error(err))
-			c.JSON(http.StatusOK, gin.H{
+			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 				HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 			})
 		} else {
-			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: outputData,
 				HTTPReturnCost: proxy.GetCostValue(queryResp.GetStatus()),
 			})
@@ -655,11 +665,12 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		PartitionName:  httpReq.PartitionName,
 		Expr:           httpReq.Filter,
 	}
+	c.Set(ContextRequest, req)
 	if req.Expr == "" {
 		body, _ := c.Get(gin.BodyBytesKey)
 		filter, err := checkGetPrimaryKey(collSchema, gjson.Get(string(body.([]byte)), DefaultPrimaryFieldName))
 		if err != nil {
-			c.JSON(http.StatusOK, gin.H{
+			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: " + err.Error(),
 			})
@@ -671,7 +682,7 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 		return h.proxy.Delete(reqCtx, req.(*milvuspb.DeleteRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefaultWithCost(
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefaultWithCost(
 			proxy.GetCostValue(resp.(*milvuspb.MutationResult).GetStatus()),
 		))
 	}
@@ -680,6 +691,14 @@ func (h *HandlersV2) delete(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionDataReq)
+	req := &milvuspb.InsertRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		PartitionName:  httpReq.PartitionName,
+		// PartitionName:  "_default",
+	}
+	c.Set(ContextRequest, req)
+
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -688,23 +707,18 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Error(err), zap.String("body", string(body.([]byte))))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
 		return nil, err
 	}
-	req := &milvuspb.InsertRequest{
-		DbName:         dbName,
-		CollectionName: httpReq.CollectionName,
-		PartitionName:  httpReq.PartitionName,
-		// PartitionName:  "_default",
-		NumRows: uint32(len(httpReq.Data)),
-	}
+
+	req.NumRows = uint32(len(httpReq.Data))
 	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with insert data", zap.Any("data", httpReq.Data), zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
@@ -720,26 +734,26 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		case *schemapb.IDs_IntId:
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
-				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
 					HTTPReturnCost: cost,
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": formatInt64(insertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
 					HTTPReturnCost: cost,
 				})
 			}
 		case *schemapb.IDs_StrId:
-			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: gin.H{"insertCount": insertResp.InsertCnt, "insertIds": insertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
 				HTTPReturnCost: cost,
 			})
 		default:
-			c.JSON(http.StatusOK, gin.H{
+			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: unsupported primary key data type",
 			})
@@ -750,36 +764,39 @@ func (h *HandlersV2) insert(ctx context.Context, c *gin.Context, anyReq any, dbN
 
 func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionDataReq)
+	req := &milvuspb.UpsertRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		PartitionName:  httpReq.PartitionName,
+		// PartitionName:  "_default",
+	}
+	c.Set(ContextRequest, req)
+
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
 	}
 	if collSchema.AutoID {
 		err := merr.WrapErrParameterInvalid("autoID: false", "autoID: true", "cannot upsert an autoID collection")
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
+		HTTPAbortReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(err), HTTPReturnMessage: err.Error()})
 		return nil, err
 	}
 	body, _ := c.Get(gin.BodyBytesKey)
 	err, httpReq.Data = checkAndSetData(string(body.([]byte)), collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("body", body), zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
 		return nil, err
 	}
-	req := &milvuspb.UpsertRequest{
-		DbName:         dbName,
-		CollectionName: httpReq.CollectionName,
-		PartitionName:  httpReq.PartitionName,
-		// PartitionName:  "_default",
-		NumRows: uint32(len(httpReq.Data)),
-	}
+
+	req.NumRows = uint32(len(httpReq.Data))
 	req.FieldsData, err = anyToColumns(httpReq.Data, collSchema)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, fail to deal with upsert data", zap.Any("data", httpReq.Data), zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrInvalidInsertData),
 			HTTPReturnMessage: merr.ErrInvalidInsertData.Error() + ", error: " + err.Error(),
 		})
@@ -795,26 +812,26 @@ func (h *HandlersV2) upsert(ctx context.Context, c *gin.Context, anyReq any, dbN
 		case *schemapb.IDs_IntId:
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			if allowJS {
-				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data},
 					HTTPReturnCost: cost,
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{
-					HTTPReturnCode: http.StatusOK,
+				HTTPReturn(c, http.StatusOK, gin.H{
+					HTTPReturnCode: merr.Code(nil),
 					HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": formatInt64(upsertResp.IDs.IdField.(*schemapb.IDs_IntId).IntId.Data)},
 					HTTPReturnCost: cost,
 				})
 			}
 		case *schemapb.IDs_StrId:
-			c.JSON(http.StatusOK, gin.H{
-				HTTPReturnCode: http.StatusOK,
+			HTTPReturn(c, http.StatusOK, gin.H{
+				HTTPReturnCode: merr.Code(nil),
 				HTTPReturnData: gin.H{"upsertCount": upsertResp.UpsertCnt, "upsertIds": upsertResp.IDs.IdField.(*schemapb.IDs_StrId).StrId.Data},
 				HTTPReturnCost: cost,
 			})
 		default:
-			c.JSON(http.StatusOK, gin.H{
+			HTTPReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrCheckPrimaryKey),
 				HTTPReturnMessage: merr.ErrCheckPrimaryKey.Error() + ", error: unsupported primary key data type",
 			})
@@ -873,7 +890,7 @@ func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[str
 		if rangeFilterOk {
 			if !radiusOk {
 				log.Ctx(ctx).Warn("high level restful api, search params invalid, because only " + ParamRangeFilter)
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 					HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: invalid search params",
 				})
@@ -894,6 +911,17 @@ func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[str
 
 func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*SearchReqV2)
+	req := &milvuspb.SearchRequest{
+		DbName:                dbName,
+		CollectionName:        httpReq.CollectionName,
+		Dsl:                   httpReq.Filter,
+		DslType:               commonpb.DslType_BoolExprV1,
+		OutputFields:          httpReq.OutputFields,
+		PartitionNames:        httpReq.PartitionNames,
+		UseDefaultConsistency: true,
+	}
+	c.Set(ContextRequest, req)
+
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -911,23 +939,14 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 	placeholderGroup, err := generatePlaceholderGroup(ctx, string(body.([]byte)), collSchema, httpReq.AnnsField)
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 			HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 		})
 		return nil, err
 	}
-	req := &milvuspb.SearchRequest{
-		DbName:                dbName,
-		CollectionName:        httpReq.CollectionName,
-		Dsl:                   httpReq.Filter,
-		PlaceholderGroup:      placeholderGroup,
-		DslType:               commonpb.DslType_BoolExprV1,
-		OutputFields:          httpReq.OutputFields,
-		PartitionNames:        httpReq.PartitionNames,
-		SearchParams:          searchParams,
-		UseDefaultConsistency: true,
-	}
+	req.SearchParams = searchParams
+	req.PlaceholderGroup = placeholderGroup
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.Search(reqCtx, req.(*milvuspb.SearchRequest))
 	})
@@ -935,18 +954,18 @@ func (h *HandlersV2) search(ctx context.Context, c *gin.Context, anyReq any, dbN
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
+			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
-			outputData, err := buildQueryResp(searchResp.Results.TopK, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
+			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
 			if err != nil {
 				log.Ctx(ctx).Warn("high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
-				c.JSON(http.StatusOK, gin.H{
+				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData, HTTPReturnCost: cost})
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost})
 			}
 		}
 	}
@@ -961,6 +980,8 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		Requests:       []*milvuspb.SearchRequest{},
 		OutputFields:   httpReq.OutputFields,
 	}
+	c.Set(ContextRequest, req)
+
 	collSchema, err := h.GetCollectionSchema(ctx, c, dbName, httpReq.CollectionName)
 	if err != nil {
 		return nil, err
@@ -980,7 +1001,7 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		placeholderGroup, err := generatePlaceholderGroup(ctx, searchArray[i].Raw, collSchema, subReq.AnnsField)
 		if err != nil {
 			log.Ctx(ctx).Warn("high level restful api, search with vector invalid", zap.Error(err))
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(merr.ErrIncorrectParameterFormat),
 				HTTPReturnMessage: merr.ErrIncorrectParameterFormat.Error() + ", error: " + err.Error(),
 			})
@@ -1013,18 +1034,18 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 		searchResp := resp.(*milvuspb.SearchResults)
 		cost := proxy.GetCostValue(searchResp.GetStatus())
 		if searchResp.Results.TopK == int64(0) {
-			c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
+			HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: []interface{}{}, HTTPReturnCost: cost})
 		} else {
 			allowJS, _ := strconv.ParseBool(c.Request.Header.Get(HTTPHeaderAllowInt64))
 			outputData, err := buildQueryResp(0, searchResp.Results.OutputFields, searchResp.Results.FieldsData, searchResp.Results.Ids, searchResp.Results.Scores, allowJS)
 			if err != nil {
 				log.Ctx(ctx).Warn("high level restful api, fail to deal with search result", zap.Any("result", searchResp.Results), zap.Error(err))
-				c.JSON(http.StatusOK, gin.H{
+				HTTPReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrInvalidSearchResult),
 					HTTPReturnMessage: merr.ErrInvalidSearchResult.Error() + ", error: " + err.Error(),
 				})
 			} else {
-				c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: outputData, HTTPReturnCost: cost})
+				HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: outputData, HTTPReturnCost: cost})
 			}
 		}
 	}
@@ -1033,6 +1054,13 @@ func (h *HandlersV2) advancedSearch(ctx context.Context, c *gin.Context, anyReq 
 
 func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	httpReq := anyReq.(*CollectionReq)
+	req := &milvuspb.CreateCollectionRequest{
+		DbName:         dbName,
+		CollectionName: httpReq.CollectionName,
+		Properties:     []*commonpb.KeyValuePair{},
+	}
+	c.Set(ContextRequest, req)
+
 	var schema []byte
 	var err error
 	fieldNames := map[string]bool{}
@@ -1042,7 +1070,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("collectionName & dimension", "collectionName",
 				"dimension is required for quickly create collection(default metric type: "+DefaultMetricType+")")
 			log.Ctx(ctx).Warn("high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -1064,7 +1092,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("Int64, Varchar", httpReq.IDType,
 				"idType can only be [Int64, VarChar], default: Int64")
 			log.Ctx(ctx).Warn("high level restful api, quickly create collection fail", zap.Error(err), zap.Any("request", anyReq))
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
@@ -1120,7 +1148,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			fieldDataType, ok := schemapb.DataType_value[field.DataType]
 			if !ok {
 				log.Ctx(ctx).Warn("field's data type is invalid(case sensitive).", zap.Any("fieldDataType", field.DataType), zap.Any("field", field))
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 					HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", data type " + field.DataType + " is invalid(case sensitive).",
 				})
@@ -1137,7 +1165,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			if dataType == schemapb.DataType_Array {
 				if _, ok := schemapb.DataType_value[field.ElementDataType]; !ok {
 					log.Ctx(ctx).Warn("element's data type is invalid(case sensitive).", zap.Any("elementDataType", field.ElementDataType), zap.Any("field", field))
-					c.AbortWithStatusJSON(http.StatusOK, gin.H{
+					HTTPAbortReturn(c, http.StatusOK, gin.H{
 						HTTPReturnCode:    merr.Code(merr.ErrParameterInvalid),
 						HTTPReturnMessage: merr.ErrParameterInvalid.Error() + ", element data type " + field.ElementDataType + " is invalid(case sensitive).",
 					})
@@ -1166,18 +1194,22 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 	}
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, marshal collection schema fail", zap.Error(err), zap.Any("request", anyReq))
-		c.AbortWithStatusJSON(http.StatusOK, gin.H{
+		HTTPAbortReturn(c, http.StatusOK, gin.H{
 			HTTPReturnCode:    merr.Code(merr.ErrMarshalCollectionSchema),
 			HTTPReturnMessage: merr.ErrMarshalCollectionSchema.Error() + ", error: " + err.Error(),
 		})
 		return nil, err
 	}
+	req.Schema = schema
+
 	shardsNum := int32(ShardNumDefault)
 	if shardsNumStr, ok := httpReq.Params["shardsNum"]; ok {
 		if shards, err := strconv.ParseInt(fmt.Sprintf("%v", shardsNumStr), 10, 64); err == nil {
 			shardsNum = int32(shards)
 		}
 	}
+	req.ShardsNum = shardsNum
+
 	consistencyLevel := commonpb.ConsistencyLevel_Bounded
 	if _, ok := httpReq.Params["consistencyLevel"]; ok {
 		if level, ok := commonpb.ConsistencyLevel_value[fmt.Sprintf("%s", httpReq.Params["consistencyLevel"])]; ok {
@@ -1186,21 +1218,15 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			err := merr.WrapErrParameterInvalid("Strong, Session, Bounded, Eventually, Customized", httpReq.Params["consistencyLevel"],
 				"consistencyLevel can only be [Strong, Session, Bounded, Eventually, Customized], default: Bounded")
 			log.Ctx(ctx).Warn("high level restful api, create collection fail", zap.Error(err), zap.Any("request", anyReq))
-			c.AbortWithStatusJSON(http.StatusOK, gin.H{
+			HTTPAbortReturn(c, http.StatusOK, gin.H{
 				HTTPReturnCode:    merr.Code(err),
 				HTTPReturnMessage: err.Error(),
 			})
 			return nil, err
 		}
 	}
-	req := &milvuspb.CreateCollectionRequest{
-		DbName:           dbName,
-		CollectionName:   httpReq.CollectionName,
-		Schema:           schema,
-		ShardsNum:        shardsNum,
-		ConsistencyLevel: consistencyLevel,
-		Properties:       []*commonpb.KeyValuePair{},
-	}
+	req.ConsistencyLevel = consistencyLevel
+
 	if partitionsNum > 0 {
 		req.NumPartitions = partitionsNum
 	}
@@ -1235,12 +1261,12 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		}
 	} else {
 		if len(httpReq.IndexParams) == 0 {
-			c.JSON(http.StatusOK, wrapperReturnDefault())
+			HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 			return nil, nil
 		}
 		for _, indexParam := range httpReq.IndexParams {
 			if _, ok := fieldNames[indexParam.FieldName]; !ok {
-				c.AbortWithStatusJSON(http.StatusOK, gin.H{
+				HTTPAbortReturn(c, http.StatusOK, gin.H{
 					HTTPReturnCode:    merr.Code(merr.ErrMissingRequiredParameters),
 					HTTPReturnMessage: merr.ErrMissingRequiredParameters.Error() + ", error: `" + indexParam.FieldName + "` hasn't defined in schema",
 				})
@@ -1272,7 +1298,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 		return h.proxy.LoadCollection(ctx, req.(*milvuspb.LoadCollectionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return statusResponse, err
 }
@@ -1283,11 +1309,13 @@ func (h *HandlersV2) listPartitions(ctx context.Context, c *gin.Context, anyReq 
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ShowPartitions(reqCtx, req.(*milvuspb.ShowPartitionsRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnList(resp.(*milvuspb.ShowPartitionsResponse).PartitionNames))
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ShowPartitionsResponse).PartitionNames))
 	}
 	return resp, err
 }
@@ -1300,11 +1328,12 @@ func (h *HandlersV2) hasPartitions(ctx context.Context, c *gin.Context, anyReq a
 		CollectionName: collectionGetter.GetCollectionName(),
 		PartitionName:  partitionGetter.GetPartitionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.HasPartition(reqCtx, req.(*milvuspb.HasPartitionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnHas(resp.(*milvuspb.BoolResponse).Value))
+		HTTPReturn(c, http.StatusOK, wrapperReturnHas(resp.(*milvuspb.BoolResponse).Value))
 	}
 	return resp, err
 }
@@ -1319,11 +1348,12 @@ func (h *HandlersV2) statsPartition(ctx context.Context, c *gin.Context, anyReq 
 		CollectionName: collectionGetter.GetCollectionName(),
 		PartitionName:  partitionGetter.GetPartitionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.GetPartitionStatistics(reqCtx, req.(*milvuspb.GetPartitionStatisticsRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnRowCount(resp.(*milvuspb.GetPartitionStatisticsResponse).Stats))
+		HTTPReturn(c, http.StatusOK, wrapperReturnRowCount(resp.(*milvuspb.GetPartitionStatisticsResponse).Stats))
 	}
 	return resp, err
 }
@@ -1336,11 +1366,12 @@ func (h *HandlersV2) createPartition(ctx context.Context, c *gin.Context, anyReq
 		CollectionName: collectionGetter.GetCollectionName(),
 		PartitionName:  partitionGetter.GetPartitionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreatePartition(reqCtx, req.(*milvuspb.CreatePartitionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1353,11 +1384,12 @@ func (h *HandlersV2) dropPartition(ctx context.Context, c *gin.Context, anyReq a
 		CollectionName: collectionGetter.GetCollectionName(),
 		PartitionName:  partitionGetter.GetPartitionName(),
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropPartition(reqCtx, req.(*milvuspb.DropPartitionRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1369,11 +1401,12 @@ func (h *HandlersV2) loadPartitions(ctx context.Context, c *gin.Context, anyReq 
 		CollectionName: httpReq.CollectionName,
 		PartitionNames: httpReq.PartitionNames,
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.LoadPartitions(reqCtx, req.(*milvuspb.LoadPartitionsRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1385,22 +1418,24 @@ func (h *HandlersV2) releasePartitions(ctx context.Context, c *gin.Context, anyR
 		CollectionName: httpReq.CollectionName,
 		PartitionNames: httpReq.PartitionNames,
 	}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ReleasePartitions(reqCtx, req.(*milvuspb.ReleasePartitionsRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
 
 func (h *HandlersV2) listUsers(ctx context.Context, c *gin.Context, anyReq any, dbName string) (interface{}, error) {
 	req := &milvuspb.ListCredUsersRequest{}
+	c.Set(ContextRequest, req)
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListCredUsers(reqCtx, req.(*milvuspb.ListCredUsersRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListCredUsersResponse).Usernames))
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListCredUsersResponse).Usernames))
 	}
 	return resp, err
 }
@@ -1414,6 +1449,8 @@ func (h *HandlersV2) describeUser(ctx context.Context, c *gin.Context, anyReq an
 		},
 		IncludeRoleInfo: true,
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.SelectUser(reqCtx, req.(*milvuspb.SelectUserRequest))
 	})
@@ -1426,7 +1463,7 @@ func (h *HandlersV2) describeUser(ctx context.Context, c *gin.Context, anyReq an
 				}
 			}
 		}
-		c.JSON(http.StatusOK, wrapperReturnList(roleNames))
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(roleNames))
 	}
 	return resp, err
 }
@@ -1441,7 +1478,7 @@ func (h *HandlersV2) createUser(ctx context.Context, c *gin.Context, anyReq any,
 		return h.proxy.CreateCredential(reqCtx, req.(*milvuspb.CreateCredentialRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1457,7 +1494,7 @@ func (h *HandlersV2) updateUser(ctx context.Context, c *gin.Context, anyReq any,
 		return h.proxy.UpdateCredential(reqCtx, req.(*milvuspb.UpdateCredentialRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1471,7 +1508,7 @@ func (h *HandlersV2) dropUser(ctx context.Context, c *gin.Context, anyReq any, d
 		return h.proxy.DeleteCredential(reqCtx, req.(*milvuspb.DeleteCredentialRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1486,7 +1523,7 @@ func (h *HandlersV2) operateRoleToUser(ctx context.Context, c *gin.Context, user
 		return h.proxy.OperateUserRole(reqCtx, req.(*milvuspb.OperateUserRoleRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1509,7 +1546,7 @@ func (h *HandlersV2) listRoles(ctx context.Context, c *gin.Context, anyReq any, 
 		for _, role := range resp.(*milvuspb.SelectRoleResponse).Results {
 			roleNames = append(roleNames, role.Role.Name)
 		}
-		c.JSON(http.StatusOK, wrapperReturnList(roleNames))
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(roleNames))
 	}
 	return resp, err
 }
@@ -1534,7 +1571,7 @@ func (h *HandlersV2) describeRole(ctx context.Context, c *gin.Context, anyReq an
 			}
 			privileges = append(privileges, privilege)
 		}
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: privileges})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: privileges})
 	}
 	return resp, err
 }
@@ -1548,7 +1585,7 @@ func (h *HandlersV2) createRole(ctx context.Context, c *gin.Context, anyReq any,
 		return h.proxy.CreateRole(reqCtx, req.(*milvuspb.CreateRoleRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1562,7 +1599,7 @@ func (h *HandlersV2) dropRole(ctx context.Context, c *gin.Context, anyReq any, d
 		return h.proxy.DropRole(reqCtx, req.(*milvuspb.DropRoleRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1584,7 +1621,7 @@ func (h *HandlersV2) operatePrivilegeToRole(ctx context.Context, c *gin.Context,
 		return h.proxy.OperatePrivilege(reqCtx, req.(*milvuspb.OperatePrivilegeRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1604,6 +1641,8 @@ func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (any, error) {
 		resp, err := h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
 		if errors.Is(err, merr.ErrIndexNotFound) {
@@ -1624,7 +1663,7 @@ func (h *HandlersV2) listIndexes(ctx context.Context, c *gin.Context, anyReq any
 	for _, index := range resp.(*milvuspb.DescribeIndexResponse).IndexDescriptions {
 		indexNames = append(indexNames, index.IndexName)
 	}
-	c.JSON(http.StatusOK, wrapperReturnList(indexNames))
+	HTTPReturn(c, http.StatusOK, wrapperReturnList(indexNames))
 	return resp, err
 }
 
@@ -1636,6 +1675,8 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 		CollectionName: collectionGetter.GetCollectionName(),
 		IndexName:      indexGetter.GetIndexName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DescribeIndex(reqCtx, req.(*milvuspb.DescribeIndexRequest))
 	})
@@ -1664,7 +1705,7 @@ func (h *HandlersV2) describeIndex(ctx context.Context, c *gin.Context, anyReq a
 			}
 			indexInfos = append(indexInfos, indexInfo)
 		}
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: indexInfos})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: indexInfos})
 	}
 	return resp, err
 }
@@ -1681,6 +1722,8 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 				{Key: common.MetricTypeKey, Value: indexParam.MetricType},
 			},
 		}
+		c.Set(ContextRequest, req)
+
 		for key, value := range indexParam.Params {
 			req.ExtraParams = append(req.ExtraParams, &commonpb.KeyValuePair{Key: key, Value: fmt.Sprintf("%v", value)})
 		}
@@ -1691,7 +1734,7 @@ func (h *HandlersV2) createIndex(ctx context.Context, c *gin.Context, anyReq any
 			return resp, err
 		}
 	}
-	c.JSON(http.StatusOK, wrapperReturnDefault())
+	HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	return httpReq.IndexParams, nil
 }
 
@@ -1703,11 +1746,13 @@ func (h *HandlersV2) dropIndex(ctx context.Context, c *gin.Context, anyReq any, 
 		CollectionName: collGetter.GetCollectionName(),
 		IndexName:      indexGetter.GetIndexName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropIndex(reqCtx, req.(*milvuspb.DropIndexRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1718,11 +1763,13 @@ func (h *HandlersV2) listAlias(ctx context.Context, c *gin.Context, anyReq any, 
 		DbName:         dbName,
 		CollectionName: collectionGetter.GetCollectionName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.ListAliases(reqCtx, req.(*milvuspb.ListAliasesRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListAliasesResponse).Aliases))
+		HTTPReturn(c, http.StatusOK, wrapperReturnList(resp.(*milvuspb.ListAliasesResponse).Aliases))
 	}
 	return resp, err
 }
@@ -1733,12 +1780,14 @@ func (h *HandlersV2) describeAlias(ctx context.Context, c *gin.Context, anyReq a
 		DbName: dbName,
 		Alias:  getter.GetAliasName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DescribeAlias(reqCtx, req.(*milvuspb.DescribeAliasRequest))
 	})
 	if err == nil {
 		response := resp.(*milvuspb.DescribeAliasResponse)
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: gin.H{
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: gin.H{
 			HTTPDbName:         response.DbName,
 			HTTPCollectionName: response.Collection,
 			HTTPAliasName:      response.Alias,
@@ -1755,11 +1804,13 @@ func (h *HandlersV2) createAlias(ctx context.Context, c *gin.Context, anyReq any
 		CollectionName: collectionGetter.GetCollectionName(),
 		Alias:          aliasGetter.GetAliasName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.CreateAlias(reqCtx, req.(*milvuspb.CreateAliasRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1770,11 +1821,13 @@ func (h *HandlersV2) dropAlias(ctx context.Context, c *gin.Context, anyReq any, 
 		DbName: dbName,
 		Alias:  getter.GetAliasName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.DropAlias(reqCtx, req.(*milvuspb.DropAliasRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1787,11 +1840,13 @@ func (h *HandlersV2) alterAlias(ctx context.Context, c *gin.Context, anyReq any,
 		CollectionName: collectionGetter.GetCollectionName(),
 		Alias:          aliasGetter.GetAliasName(),
 	}
+	c.Set(ContextRequest, req)
+
 	resp, err := wrapperProxy(ctx, c, req, h.checkAuth, false, func(reqCtx context.Context, req any) (interface{}, error) {
 		return h.proxy.AlterAlias(reqCtx, req.(*milvuspb.AlterAliasRequest))
 	})
 	if err == nil {
-		c.JSON(http.StatusOK, wrapperReturnDefault())
+		HTTPReturn(c, http.StatusOK, wrapperReturnDefault())
 	}
 	return resp, err
 }
@@ -1805,6 +1860,8 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 		DbName:         dbName,
 		CollectionName: collectionName,
 	}
+	c.Set(ContextRequest, req)
+
 	if h.checkAuth {
 		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ListImportsAuthPlaceholder{
 			DbName:         dbName,
@@ -1834,7 +1891,7 @@ func (h *HandlersV2) listImportJob(ctx context.Context, c *gin.Context, anyReq a
 			records = append(records, jobDetail)
 		}
 		returnData["records"] = records
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
 }
@@ -1855,6 +1912,8 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 		}),
 		Options: funcutil.Map2KeyValuePair(optionsGetter.GetOptions()),
 	}
+	c.Set(ContextRequest, req)
+
 	if h.checkAuth {
 		err := checkAuthorizationV2(ctx, c, false, &milvuspb.ImportAuthPlaceholder{
 			DbName:         dbName,
@@ -1871,7 +1930,7 @@ func (h *HandlersV2) createImportJob(ctx context.Context, c *gin.Context, anyReq
 	if err == nil {
 		returnData := make(map[string]interface{})
 		returnData["jobId"] = resp.(*internalpb.ImportResponse).GetJobID()
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
 }
@@ -1882,6 +1941,8 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		DbName: dbName,
 		JobID:  jobIDGetter.GetJobID(),
 	}
+	c.Set(ContextRequest, req)
+
 	if h.checkAuth {
 		err := checkAuthorizationV2(ctx, c, false, &milvuspb.GetImportProgressAuthPlaceholder{
 			DbName: dbName,
@@ -1927,7 +1988,7 @@ func (h *HandlersV2) getImportJobProcess(ctx context.Context, c *gin.Context, an
 		}
 		returnData["fileSize"] = totalFileSize
 		returnData["details"] = details
-		c.JSON(http.StatusOK, gin.H{HTTPReturnCode: http.StatusOK, HTTPReturnData: returnData})
+		HTTPReturn(c, http.StatusOK, gin.H{HTTPReturnCode: merr.Code(nil), HTTPReturnData: returnData})
 	}
 	return resp, err
 }

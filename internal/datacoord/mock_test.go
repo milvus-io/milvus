@@ -461,7 +461,9 @@ func (m *mockRootCoordClient) DropDatabase(ctx context.Context, in *milvuspb.Dro
 }
 
 func (m *mockRootCoordClient) ListDatabases(ctx context.Context, in *milvuspb.ListDatabasesRequest, opts ...grpc.CallOption) (*milvuspb.ListDatabasesResponse, error) {
-	panic("not implemented") // TODO: Implement
+	return &milvuspb.ListDatabasesResponse{
+		Status: merr.Success(),
+	}, nil
 }
 
 func (m *mockRootCoordClient) AlterDatabase(ctx context.Context, in *rootcoordpb.AlterDatabaseRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {

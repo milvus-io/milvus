@@ -158,71 +158,13 @@ func (ip *Int64PrimaryKey) Size() int64 {
 	return 16
 }
 
-type BaseStringPrimaryKey struct {
-	Value string
-}
-
-func (sp *BaseStringPrimaryKey) GT(key BaseStringPrimaryKey) bool {
-	return strings.Compare(sp.Value, key.Value) > 0
-}
-
-func (sp *BaseStringPrimaryKey) GE(key BaseStringPrimaryKey) bool {
-	return strings.Compare(sp.Value, key.Value) >= 0
-}
-
-func (sp *BaseStringPrimaryKey) LT(key BaseStringPrimaryKey) bool {
-	return strings.Compare(sp.Value, key.Value) < 0
-}
-
-func (sp *BaseStringPrimaryKey) LE(key BaseStringPrimaryKey) bool {
-	return strings.Compare(sp.Value, key.Value) <= 0
-}
-
-func (sp *BaseStringPrimaryKey) EQ(key BaseStringPrimaryKey) bool {
-	return strings.Compare(sp.Value, key.Value) == 0
-}
-
-func (sp *BaseStringPrimaryKey) MarshalJSON() ([]byte, error) {
-	ret, err := json.Marshal(sp.Value)
-	if err != nil {
-		return nil, err
-	}
-
-	return ret, nil
-}
-
-func (sp *BaseStringPrimaryKey) UnmarshalJSON(data []byte) error {
-	err := json.Unmarshal(data, &sp.Value)
-	if err != nil {
-		return err
-	}
-
-	return nil
-}
-
-func (sp *BaseStringPrimaryKey) SetValue(data interface{}) error {
-	value, ok := data.(string)
-	if !ok {
-		return fmt.Errorf("wrong type value when setValue for StringPrimaryKey")
-	}
-
-	sp.Value = value
-	return nil
-}
-
-func (sp *BaseStringPrimaryKey) GetValue() interface{} {
-	return sp.Value
-}
-
 type VarCharPrimaryKey struct {
-	BaseStringPrimaryKey
+	Value string
 }
 
 func NewVarCharPrimaryKey(v string) *VarCharPrimaryKey {
 	return &VarCharPrimaryKey{
-		BaseStringPrimaryKey: BaseStringPrimaryKey{
-			Value: v,
-		},
+		Value: v,
 	}
 }
 
@@ -233,7 +175,7 @@ func (vcp *VarCharPrimaryKey) GT(key PrimaryKey) bool {
 		return false
 	}
 
-	return vcp.BaseStringPrimaryKey.GT(pk.BaseStringPrimaryKey)
+	return strings.Compare(vcp.Value, pk.Value) > 0
 }
 
 func (vcp *VarCharPrimaryKey) GE(key PrimaryKey) bool {
@@ -243,7 +185,7 @@ func (vcp *VarCharPrimaryKey) GE(key PrimaryKey) bool {
 		return false
 	}
 
-	return vcp.BaseStringPrimaryKey.GE(pk.BaseStringPrimaryKey)
+	return strings.Compare(vcp.Value, pk.Value) >= 0
 }
 
 func (vcp *VarCharPrimaryKey) LT(key PrimaryKey) bool {
@@ -253,7 +195,7 @@ func (vcp *VarCharPrimaryKey) LT(key PrimaryKey) bool {
 		return false
 	}
 
-	return vcp.BaseStringPrimaryKey.LT(pk.BaseStringPrimaryKey)
+	return strings.Compare(vcp.Value, pk.Value) < 0
 }
 
 func (vcp *VarCharPrimaryKey) LE(key PrimaryKey) bool {
@@ -263,7 +205,7 @@ func (vcp *VarCharPrimaryKey) LE(key PrimaryKey) bool {
 		return false
 	}
 
-	return vcp.BaseStringPrimaryKey.LE(pk.BaseStringPrimaryKey)
+	return strings.Compare(vcp.Value, pk.Value) <= 0
 }
 
 func (vcp *VarCharPrimaryKey) EQ(key PrimaryKey) bool {
@@ -273,7 +215,39 @@ func (vcp *VarCharPrimaryKey) EQ(key PrimaryKey) bool {
 		return false
 	}
 
-	return vcp.BaseStringPrimaryKey.EQ(pk.BaseStringPrimaryKey)
+	return strings.Compare(vcp.Value, pk.Value) == 0
+}
+
+func (vcp *VarCharPrimaryKey) MarshalJSON() ([]byte, error) {
+	ret, err := json.Marshal(vcp.Value)
+	if err != nil {
+		return nil, err
+	}
+
+	return ret, nil
+}
+
+func (vcp *VarCharPrimaryKey) UnmarshalJSON(data []byte) error {
+	err := json.Unmarshal(data, &vcp.Value)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (vcp *VarCharPrimaryKey) SetValue(data interface{}) error {
+	value, ok := data.(string)
+	if !ok {
+		return fmt.Errorf("wrong type value when setValue for VarCharPrimaryKey")
+	}
+
+	vcp.Value = value
+	return nil
+}
+
+func (vcp *VarCharPrimaryKey) GetValue() interface{} {
+	return vcp.Value
 }
 
 func (vcp *VarCharPrimaryKey) Type() schemapb.DataType {
@@ -293,9 +267,7 @@ func GenPrimaryKeyByRawData(data interface{}, pkType schemapb.DataType) (Primary
 		}
 	case schemapb.DataType_VarChar:
 		result = &VarCharPrimaryKey{
-			BaseStringPrimaryKey: BaseStringPrimaryKey{
-				Value: data.(string),
-			},
+			Value: data.(string),
 		}
 	default:
 		return nil, fmt.Errorf("not supported primary data type")

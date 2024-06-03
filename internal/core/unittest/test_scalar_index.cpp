@@ -15,7 +15,11 @@
 
 #include "gtest/gtest-typed-test.h"
 #include "index/IndexFactory.h"
+#include "index/BitmapIndex.h"
+#include "index/InvertedIndexTantivy.h"
+#include "index/ScalarIndex.h"
 #include "common/CDataType.h"
+#include "common/Types.h"
 #include "knowhere/comp/index_param.h"
 #include "test_utils/indexbuilder_test_utils.h"
 #include "test_utils/AssertUtils.h"
@@ -49,6 +53,14 @@ TYPED_TEST_P(TypedScalarIndexTest, Dummy) {
     std::cout << milvus::GetDType<T>() << std::endl;
 }
 
+auto
+GetTempFileManagerCtx(CDataType data_type) {
+    auto ctx = milvus::storage::FileManagerContext();
+    ctx.fieldDataMeta.schema.set_data_type(
+        static_cast<milvus::proto::schema::DataType>(data_type));
+    return ctx;
+}
+
 TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
     using T = TypeParam;
     auto dtype = milvus::GetDType<T>();
@@ -59,7 +71,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Constructor) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
     }
 }
 
@@ -73,7 +85,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Count) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -92,7 +104,7 @@ TYPED_TEST_P(TypedScalarIndexTest, HasRawData) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -112,7 +124,7 @@ TYPED_TEST_P(TypedScalarIndexTest, In) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -131,7 +143,7 @@ TYPED_TEST_P(TypedScalarIndexTest, NotIn) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -150,7 +162,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Reverse) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -169,7 +181,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Range) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -188,7 +200,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         create_index_info.index_type = index_type;
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
         auto arr = GenSortedArr<T>(nb);
@@ -197,7 +209,7 @@ TYPED_TEST_P(TypedScalarIndexTest, Codec) {
         auto binary_set = index->Serialize(nullptr);
         auto copy_index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
-                create_index_info);
+                create_index_info, GetTempFileManagerCtx(dtype));
         copy_index->Load(binary_set);
 
         auto copy_scalar_index =
@@ -368,12 +380,18 @@ TYPED_TEST_P(TypedScalarIndexTestV2, Base) {
         auto space = TestSpace<T>(temp_path, vec_size, dataset, scalars);
         milvus::storage::FileManagerContext file_manager_context(
             {}, {.field_name = "scalar"}, chunk_manager, space);
+        file_manager_context.fieldDataMeta.schema.set_data_type(
+            static_cast<milvus::proto::schema::DataType>(dtype));
         auto index =
             milvus::index::IndexFactory::GetInstance().CreateScalarIndex(
                 create_index_info, file_manager_context, space);
         auto scalar_index =
             dynamic_cast<milvus::index::ScalarIndex<T>*>(index.get());
-        scalar_index->BuildV2();
+        milvus::Config config;
+        if (index_type == "BITMAP") {
+            config["bitmap_cardinality_limit"] = "1000";
+        }
+        scalar_index->BuildV2(config);
         scalar_index->UploadV2();
 
         auto new_index =
@@ -391,3 +409,260 @@ REGISTER_TYPED_TEST_SUITE_P(TypedScalarIndexTestV2, Base);
 INSTANTIATE_TYPED_TEST_SUITE_P(ArithmeticCheck,
                                TypedScalarIndexTestV2,
                                ScalarT);
+
+using namespace milvus::index;
+template <typename T>
+std::vector<T>
+GenerateRawData(int N, int cardinality) {
+    using std::vector;
+    std::default_random_engine random(60);
+    std::normal_distribution<> distr(0, 1);
+    vector<T> data(N);
+    for (auto& x : data) {
+        x = random() % (cardinality);
+    }
+    return data;
+}
+
+template <>
+std::vector<std::string>
+GenerateRawData(int N, int cardinality) {
+    using std::vector;
+    std::default_random_engine random(60);
+    std::normal_distribution<> distr(0, 1);
+    vector<std::string> data(N);
+    for (auto& x : data) {
+        x = std::to_string(random() % (cardinality));
+    }
+    return data;
+}
+
+template <typename T>
+IndexBasePtr
+TestBuildIndex(int N, int cardinality, int index_type) {
+    auto raw_data = GenerateRawData<T>(N, cardinality);
+    if (index_type == 0) {
+        auto index = std::make_unique<milvus::index::BitmapIndex<T>>();
+        index->Build(N, raw_data.data());
+        return std::move(index);
+    } else if (index_type == 1) {
+        if constexpr (std::is_same_v<T, std::string>) {
+            auto index = std::make_unique<milvus::index::StringIndexMarisa>();
+            index->Build(N, raw_data.data());
+            return std::move(index);
+        }
+        auto index = milvus::index::CreateScalarIndexSort<T>();
+        index->Build(N, raw_data.data());
+        return std::move(index);
+    }
+}
+
+template <typename T>
+void
+TestIndexSearchIn() {
+    // low data cardinality
+    {
+        int N = 1000;
+        std::vector<int> data_cardinality = {10, 20, 100};
+        for (auto& card : data_cardinality) {
+            auto bitmap_index = TestBuildIndex<T>(N, card, 0);
+            auto bitmap_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(bitmap_index.get());
+            auto sort_index = TestBuildIndex<T>(N, card, 1);
+            auto sort_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(sort_index.get());
+            std::vector<T> terms;
+            for (int i = 0; i < 10; i++) {
+                terms.push_back(static_cast<T>(i));
+            }
+            auto final1 = bitmap_index_ptr->In(10, terms.data());
+            auto final2 = sort_index_ptr->In(10, terms.data());
+            EXPECT_EQ(final1.size(), final2.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final1[i], final2[i]);
+            }
+
+            auto final3 = bitmap_index_ptr->NotIn(10, terms.data());
+            auto final4 = sort_index_ptr->NotIn(10, terms.data());
+            EXPECT_EQ(final4.size(), final3.size());
+            for (int i = 0; i < final3.size(); i++) {
+                EXPECT_EQ(final3[i], final4[i]);
+            }
+        }
+    }
+
+    // high data cardinality
+    {
+        int N = 10000;
+        std::vector<int> data_cardinality = {1001, 2000};
+        for (auto& card : data_cardinality) {
+            auto bitmap_index = TestBuildIndex<T>(N, card, 0);
+            auto bitmap_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(bitmap_index.get());
+            auto sort_index = TestBuildIndex<T>(N, card, 1);
+            auto sort_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(sort_index.get());
+            std::vector<T> terms;
+            for (int i = 0; i < 10; i++) {
+                terms.push_back(static_cast<T>(i));
+            }
+            auto final1 = bitmap_index_ptr->In(10, terms.data());
+            auto final2 = sort_index_ptr->In(10, terms.data());
+            EXPECT_EQ(final1.size(), final2.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final1[i], final2[i]);
+            }
+
+            auto final3 = bitmap_index_ptr->NotIn(10, terms.data());
+            auto final4 = sort_index_ptr->NotIn(10, terms.data());
+            EXPECT_EQ(final4.size(), final3.size());
+            for (int i = 0; i < final3.size(); i++) {
+                EXPECT_EQ(final3[i], final4[i]);
+            }
+        }
+    }
+}
+
+template <>
+void
+TestIndexSearchIn<std::string>() {
+    // low data cardinality
+    {
+        int N = 1000;
+        std::vector<int> data_cardinality = {10, 20, 100};
+        for (auto& card : data_cardinality) {
+            auto bitmap_index = TestBuildIndex<std::string>(N, card, 0);
+            auto bitmap_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(bitmap_index.get());
+            auto sort_index = TestBuildIndex<std::string>(N, card, 1);
+            auto sort_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(sort_index.get());
+            std::vector<std::string> terms;
+            for (int i = 0; i < 10; i++) {
+                terms.push_back(std::to_string(i));
+            }
+            auto final1 = bitmap_index_ptr->In(10, terms.data());
+            auto final2 = sort_index_ptr->In(10, terms.data());
+            EXPECT_EQ(final1.size(), final2.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final1[i], final2[i]);
+            }
+
+            auto final3 = bitmap_index_ptr->NotIn(10, terms.data());
+            auto final4 = sort_index_ptr->NotIn(10, terms.data());
+            EXPECT_EQ(final4.size(), final3.size());
+            for (int i = 0; i < final3.size(); i++) {
+                EXPECT_EQ(final3[i], final4[i]);
+            }
+        }
+    }
+    // high data cardinality
+    {
+        int N = 10000;
+        std::vector<int> data_cardinality = {1001, 2000};
+        for (auto& card : data_cardinality) {
+            auto bitmap_index = TestBuildIndex<std::string>(N, card, 0);
+            auto bitmap_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(bitmap_index.get());
+            auto sort_index = TestBuildIndex<std::string>(N, card, 1);
+            auto sort_index_ptr =
+                dynamic_cast<ScalarIndex<std::string>*>(sort_index.get());
+            std::vector<std::string> terms;
+            for (int i = 0; i < 10; i++) {
+                terms.push_back(std::to_string(i));
+            }
+            auto final1 = bitmap_index_ptr->In(10, terms.data());
+            auto final2 = sort_index_ptr->In(10, terms.data());
+            EXPECT_EQ(final1.size(), final2.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final1[i], final2[i]);
+            }
+
+            auto final3 = bitmap_index_ptr->NotIn(10, terms.data());
+            auto final4 = sort_index_ptr->NotIn(10, terms.data());
+            EXPECT_EQ(final4.size(), final3.size());
+            for (int i = 0; i < final3.size(); i++) {
+                EXPECT_EQ(final3[i], final4[i]);
+            }
+        }
+    }
+}
+
+TEST(ScalarTest, test_function_In) {
+    TestIndexSearchIn<int8_t>();
+    TestIndexSearchIn<int16_t>();
+    TestIndexSearchIn<int32_t>();
+    TestIndexSearchIn<int64_t>();
+    TestIndexSearchIn<float>();
+    TestIndexSearchIn<double>();
+    TestIndexSearchIn<std::string>();
+}
+
+template <typename T>
+void
+TestIndexSearchRange() {
+    // low data cordinality
+    {
+        int N = 1000;
+        std::vector<int> data_cardinality = {10, 20, 100};
+        for (auto& card : data_cardinality) {
+            auto bitmap_index = TestBuildIndex<T>(N, card, 0);
+            auto bitmap_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(bitmap_index.get());
+            auto sort_index = TestBuildIndex<T>(N, card, 1);
+            auto sort_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(sort_index.get());
+
+            auto final1 = bitmap_index_ptr->Range(10, milvus::OpType::LessThan);
+            auto final2 = sort_index_ptr->Range(10, milvus::OpType::LessThan);
+            EXPECT_EQ(final1.size(), final2.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final1[i], final2[i]);
+            }
+
+            auto final3 = bitmap_index_ptr->Range(10, true, 100, false);
+            auto final4 = sort_index_ptr->Range(10, true, 100, false);
+            EXPECT_EQ(final3.size(), final4.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final3[i], final4[i]);
+            }
+        }
+    }
+
+    // high data cordinality
+    {
+        int N = 10000;
+        std::vector<int> data_cardinality = {1001, 2000};
+        for (auto& card : data_cardinality) {
+            auto bitmap_index = TestBuildIndex<T>(N, card, 0);
+            auto bitmap_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(bitmap_index.get());
+            auto sort_index = TestBuildIndex<T>(N, card, 1);
+            auto sort_index_ptr =
+                dynamic_cast<ScalarIndex<T>*>(sort_index.get());
+
+            auto final1 = bitmap_index_ptr->Range(10, milvus::OpType::LessThan);
+            auto final2 = sort_index_ptr->Range(10, milvus::OpType::LessThan);
+            EXPECT_EQ(final1.size(), final2.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final1[i], final2[i]);
+            }
+
+            auto final3 = bitmap_index_ptr->Range(10, true, 100, false);
+            auto final4 = sort_index_ptr->Range(10, true, 100, false);
+            EXPECT_EQ(final3.size(), final4.size());
+            for (int i = 0; i < final1.size(); i++) {
+                EXPECT_EQ(final3[i], final4[i]);
+            }
+        }
+    }
+}
+
+TEST(ScalarTest, test_function_range) {
+    TestIndexSearchRange<int8_t>();
+    TestIndexSearchRange<int16_t>();
+    TestIndexSearchRange<int32_t>();
+    TestIndexSearchRange<int64_t>();
+    TestIndexSearchRange<float>();
+    TestIndexSearchRange<double>();
+}

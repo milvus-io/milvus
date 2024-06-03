@@ -495,7 +495,7 @@ func TestCatalog_CreateAliasV2(t *testing.T) {
 	ctx := context.Background()
 
 	snapshot := kv.NewMockSnapshotKV()
-	snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 		return errors.New("mock")
 	}
 
@@ -504,7 +504,7 @@ func TestCatalog_CreateAliasV2(t *testing.T) {
 	err := kc.CreateAlias(ctx, &model.Alias{}, 0)
 	assert.Error(t, err)
 
-	snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 		return nil
 	}
 	err = kc.CreateAlias(ctx, &model.Alias{}, 0)
@@ -623,7 +623,7 @@ func TestCatalog_AlterAliasV2(t *testing.T) {
 	ctx := context.Background()
 
 	snapshot := kv.NewMockSnapshotKV()
-	snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 		return errors.New("mock")
 	}
 
@@ -632,7 +632,7 @@ func TestCatalog_AlterAliasV2(t *testing.T) {
 	err := kc.AlterAlias(ctx, &model.Alias{}, 0)
 	assert.Error(t, err)
 
-	snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 		return nil
 	}
 	err = kc.AlterAlias(ctx, &model.Alias{}, 0)
@@ -706,7 +706,7 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 		snapshot.LoadFunc = func(key string, ts typeutil.Timestamp) (string, error) {
 			return string(value), nil
 		}
-		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+		snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 			return errors.New("mock")
 		}
 
@@ -715,7 +715,7 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 		err = kc.DropPartition(ctx, 0, 100, 101, 0)
 		assert.Error(t, err)
 
-		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+		snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 			return nil
 		}
 		err = kc.DropPartition(ctx, 0, 100, 101, 0)
@@ -758,7 +758,7 @@ func TestCatalog_DropAliasV2(t *testing.T) {
 	ctx := context.Background()
 
 	snapshot := kv.NewMockSnapshotKV()
-	snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 		return errors.New("mock")
 	}
 
@@ -767,7 +767,7 @@ func TestCatalog_DropAliasV2(t *testing.T) {
 	err := kc.DropAlias(ctx, testDb, "alias", 0)
 	assert.Error(t, err)
 
-	snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+	snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 		return nil
 	}
 	err = kc.DropAlias(ctx, testDb, "alias", 0)
@@ -942,14 +942,14 @@ func TestCatalog_ListAliasesV2(t *testing.T) {
 	})
 }
 
-func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
+func Test_batchMultiSaveAndRemove(t *testing.T) {
 	t.Run("failed to save", func(t *testing.T) {
 		snapshot := kv.NewMockSnapshotKV()
 		snapshot.MultiSaveFunc = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return errors.New("error mock MultiSave")
 		}
 		saves := map[string]string{"k": "v"}
-		err := batchMultiSaveAndRemoveWithPrefix(snapshot, util.MaxEtcdTxnNum/2, saves, []string{}, 0)
+		err := batchMultiSaveAndRemove(snapshot, util.MaxEtcdTxnNum/2, saves, []string{}, 0)
 		assert.Error(t, err)
 	})
 	t.Run("failed to remove", func(t *testing.T) {
@@ -957,12 +957,12 @@ func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
 		snapshot.MultiSaveFunc = func(kvs map[string]string, ts typeutil.Timestamp) error {
 			return nil
 		}
-		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
-			return errors.New("error mock MultiSaveAndRemoveWithPrefix")
+		snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+			return errors.New("error mock MultiSaveAndRemove")
 		}
 		saves := map[string]string{"k": "v"}
 		removals := []string{"prefix1", "prefix2"}
-		err := batchMultiSaveAndRemoveWithPrefix(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
+		err := batchMultiSaveAndRemove(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
 		assert.Error(t, err)
 	})
 	t.Run("normal case", func(t *testing.T) {
@@ -971,7 +971,7 @@ func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
 			log.Info("multi save", zap.Any("len", len(kvs)), zap.Any("saves", kvs))
 			return nil
 		}
-		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+		snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 			log.Info("multi save and remove with prefix", zap.Any("len of saves", len(saves)), zap.Any("len of removals", len(removals)),
 				zap.Any("saves", saves), zap.Any("removals", removals))
 			return nil
@@ -983,7 +983,7 @@ func Test_batchMultiSaveAndRemoveWithPrefix(t *testing.T) {
 			saves[fmt.Sprintf("k%d", i)] = fmt.Sprintf("v%d", i)
 			removals = append(removals, fmt.Sprintf("k%d", i))
 		}
-		err := batchMultiSaveAndRemoveWithPrefix(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
+		err := batchMultiSaveAndRemove(snapshot, util.MaxEtcdTxnNum/2, saves, removals, 0)
 		assert.NoError(t, err)
 	})
 }
@@ -1040,7 +1040,7 @@ func TestCatalog_AlterCollection(t *testing.T) {
 	t.Run("modify db name", func(t *testing.T) {
 		var collectionID int64 = 1
 		snapshot := kv.NewMockSnapshotKV()
-		snapshot.MultiSaveAndRemoveWithPrefixFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
+		snapshot.MultiSaveAndRemoveFunc = func(saves map[string]string, removals []string, ts typeutil.Timestamp) error {
 			assert.ElementsMatch(t, []string{BuildCollectionKey(0, collectionID)}, removals)
 			assert.Equal(t, len(saves), 1)
 			assert.Contains(t, maps.Keys(saves), BuildCollectionKey(1, collectionID))
@@ -1149,6 +1149,17 @@ func withMockMultiSaveAndRemoveWithPrefix(err error) mockSnapshotOpt {
 	}
 }
 
+func withMockMultiSaveAndRemove(err error) mockSnapshotOpt {
+	return func(ss *mocks.SnapShotKV) {
+		ss.On(
+			"MultiSaveAndRemove",
+			mock.AnythingOfType("map[string]string"),
+			mock.AnythingOfType("[]string"),
+			mock.AnythingOfType("uint64")).
+			Return(err)
+	}
+}
+
 func TestCatalog_CreateCollection(t *testing.T) {
 	t.Run("collection not creating", func(t *testing.T) {
 		kc := &Catalog{}
@@ -1198,7 +1209,7 @@ func TestCatalog_CreateCollection(t *testing.T) {
 
 func TestCatalog_DropCollection(t *testing.T) {
 	t.Run("failed to remove", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemoveWithPrefix(errors.New("error mock MultiSaveAndRemoveWithPrefix")))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(errors.New("error mock MultiSaveAndRemove")))
 		kc := &Catalog{Snapshot: mockSnapshot}
 		ctx := context.Background()
 		coll := &model.Collection{
@@ -1216,7 +1227,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 		removeOtherCalled := false
 		removeCollectionCalled := false
 		mockSnapshot.On(
-			"MultiSaveAndRemoveWithPrefix",
+			"MultiSaveAndRemove",
 			mock.AnythingOfType("map[string]string"),
 			mock.AnythingOfType("[]string"),
 			mock.AnythingOfType("uint64")).
@@ -1225,13 +1236,13 @@ func TestCatalog_DropCollection(t *testing.T) {
 				return nil
 			}).Once()
 		mockSnapshot.On(
-			"MultiSaveAndRemoveWithPrefix",
+			"MultiSaveAndRemove",
 			mock.AnythingOfType("map[string]string"),
 			mock.AnythingOfType("[]string"),
 			mock.AnythingOfType("uint64")).
 			Return(func(map[string]string, []string, typeutil.Timestamp) error {
 				removeCollectionCalled = true
-				return errors.New("error mock MultiSaveAndRemoveWithPrefix")
+				return errors.New("error mock MultiSaveAndRemove")
 			}).Once()
 		kc := &Catalog{Snapshot: mockSnapshot}
 		ctx := context.Background()
@@ -1248,7 +1259,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 	})
 
 	t.Run("normal case", func(t *testing.T) {
-		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemoveWithPrefix(nil))
+		mockSnapshot := newMockSnapshot(t, withMockMultiSaveAndRemove(nil))
 		kc := &Catalog{Snapshot: mockSnapshot}
 		ctx := context.Background()
 		coll := &model.Collection{

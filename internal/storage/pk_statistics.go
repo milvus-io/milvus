@@ -19,18 +19,18 @@ package storage
 import (
 	"fmt"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
 // pkStatistics contains pk field statistic information
 type PkStatistics struct {
-	PkFilter *bloom.BloomFilter //  bloom filter of pk inside a segment
-	MinPK    PrimaryKey         //	minimal pk value, shortcut for checking whether a pk is inside this segment
-	MaxPK    PrimaryKey         //  maximal pk value, same above
+	PkFilter bloomfilter.BloomFilterInterface //  bloom filter of pk inside a segment
+	MinPK    PrimaryKey                       //	minimal pk value, shortcut for checking whether a pk is inside this segment
+	MaxPK    PrimaryKey                       //  maximal pk value, same above
 }
 
 // update set pk min/max value if input value is beyond former range.
@@ -109,16 +109,16 @@ func (st *PkStatistics) PkExist(pk PrimaryKey) bool {
 }
 
 // Locations returns a list of hash locations representing a data item.
-func Locations(pk PrimaryKey, k uint) []uint64 {
+func Locations(pk PrimaryKey, k uint, bfType bloomfilter.BFType) []uint64 {
 	switch pk.Type() {
 	case schemapb.DataType_Int64:
 		buf := make([]byte, 8)
 		int64Pk := pk.(*Int64PrimaryKey)
 		common.Endian.PutUint64(buf, uint64(int64Pk.Value))
-		return bloom.Locations(buf, k)
+		return bloomfilter.Locations(buf, k, bfType)
 	case schemapb.DataType_VarChar:
 		varCharPk := pk.(*VarCharPrimaryKey)
-		return bloom.Locations([]byte(varCharPk.Value), k)
+		return bloomfilter.Locations([]byte(varCharPk.Value), k, bfType)
 	default:
 		// TODO::
 	}
@@ -140,14 +140,14 @@ func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
 	return st.MinPK.LE(pk) && st.MaxPK.GE(pk)
 }
 
-func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
+func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
 	// empty pkStatics
 	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
 		return false
 	}
 
 	// check bf first, TestLocation just do some bitset compute, cost is cheaper
-	if !st.PkFilter.TestLocations(lc.Locations(st.PkFilter.K())) {
+	if !st.PkFilter.TestLocations(lc.Locations(st.PkFilter.K(), st.PkFilter.Type())) {
 		return false
 	}
 
@@ -158,23 +158,34 @@ func (st *PkStatistics) TestLocationCache(lc LocationsCache) bool {
 // LocationsCache is a helper struct caching pk bloom filter locations.
 // Note that this helper is not concurrent safe and shall be used in same goroutine.
 type LocationsCache struct {
-	pk        PrimaryKey
-	locations map[uint][]uint64
+	pk               PrimaryKey
+	basicBFLocations []uint64
+	blockBFLocations []uint64
 }
 
-func (lc LocationsCache) Locations(k uint) []uint64 {
-	locs, ok := lc.locations[k]
-	if ok {
-		return locs
+func (lc *LocationsCache) GetPk() PrimaryKey {
+	return lc.pk
+}
+
+func (lc *LocationsCache) Locations(k uint, bfType bloomfilter.BFType) []uint64 {
+	switch bfType {
+	case bloomfilter.BasicBF:
+		if int(k) > len(lc.basicBFLocations) {
+			lc.basicBFLocations = Locations(lc.pk, k, bfType)
+		}
+		return lc.basicBFLocations[:k]
+	case bloomfilter.BlockedBF:
+		if int(k) > len(lc.blockBFLocations) {
+			lc.blockBFLocations = Locations(lc.pk, k, bfType)
+		}
+		return lc.blockBFLocations[:k]
+	default:
+		return nil
 	}
-	locs = Locations(lc.pk, k)
-	lc.locations[k] = locs
-	return locs
 }
 
-func NewLocationsCache(pk PrimaryKey) LocationsCache {
-	return LocationsCache{
-		pk:        pk,
-		locations: make(map[uint][]uint64),
+func NewLocationsCache(pk PrimaryKey) *LocationsCache {
+	return &LocationsCache{
+		pk: pk,
 	}
 }

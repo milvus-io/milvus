@@ -339,7 +339,7 @@ func TestComponentParam(t *testing.T) {
 
 		// chunk cache
 		assert.Equal(t, "willneed", Params.ReadAheadPolicy.GetValue())
-		assert.Equal(t, "false", Params.ChunkCacheWarmingUp.GetValue())
+		assert.Equal(t, "disable", Params.ChunkCacheWarmingUp.GetValue())
 
 		// test small indexNlist/NProbe default
 		params.Remove("queryNode.segcore.smallIndex.nlist")
@@ -528,6 +528,7 @@ func TestCachedParam(t *testing.T) {
 
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
 	assert.Equal(t, uint(100000), params.CommonCfg.BloomFilterSize.GetAsUint())
+	assert.Equal(t, "BlockedBloomFilter", params.CommonCfg.BloomFilterType.GetValue())
 
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())
 	assert.Equal(t, uint64(8388608), params.ServiceParam.MQCfg.PursuitBufferSize.GetAsUint64())

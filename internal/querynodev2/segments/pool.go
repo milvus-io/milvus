@@ -62,6 +62,7 @@ func initSQPool() {
 
 		pt.Watch(pt.QueryNodeCfg.MaxReadConcurrency.Key, config.NewHandler("qn.sqpool.maxconc", ResizeSQPool))
 		pt.Watch(pt.QueryNodeCfg.CGOPoolSizeRatio.Key, config.NewHandler("qn.sqpool.cgopoolratio", ResizeSQPool))
+		log.Info("init SQPool done", zap.Int("size", initPoolSize))
 	})
 }
 
@@ -75,6 +76,7 @@ func initDynamicPool() {
 		)
 
 		dp.Store(pool)
+		log.Info("init dynamicPool done", zap.Int("size", hardware.GetCPUNum()))
 	})
 }
 
@@ -92,6 +94,7 @@ func initLoadPool() {
 		loadPool.Store(pool)
 
 		pt.Watch(pt.CommonCfg.MiddlePriorityThreadCoreCoefficient.Key, config.NewHandler("qn.loadpool.middlepriority", ResizeLoadPool))
+		log.Info("init loadPool done", zap.Int("size", poolSize))
 	})
 }
 

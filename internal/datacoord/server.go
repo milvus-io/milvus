@@ -127,6 +127,7 @@ type Server struct {
 	compactionTrigger     trigger
 	compactionHandler     compactionPlanContext
 	compactionViewManager *CompactionViewManager
+	syncSegmentsScheduler *SyncSegmentsScheduler
 
 	metricsCacheManager *metricsinfo.MetricsCacheManager
 
@@ -392,6 +393,8 @@ func (s *Server) initDataCoord() error {
 	}
 	s.importScheduler = NewImportScheduler(s.meta, s.cluster, s.allocator, s.importMeta, s.buildIndexCh)
 	s.importChecker = NewImportChecker(s.meta, s.broker, s.cluster, s.allocator, s.segmentManager, s.importMeta)
+
+	s.syncSegmentsScheduler = newSyncSegmentsScheduler(s.meta, s.channelManager, s.sessionManager)
 
 	s.serverLoopCtx, s.serverLoopCancel = context.WithCancel(s.ctx)
 
@@ -674,6 +677,14 @@ func (s *Server) initMeta(chunkManager storage.ChunkManager) error {
 		if err != nil {
 			return err
 		}
+
+		// Load collection information asynchronously
+		// HINT: please make sure this is the last step in the `reloadEtcdFn` function !!!
+		go func() {
+			_ = retry.Do(s.ctx, func() error {
+				return s.meta.reloadCollectionsFromRootcoord(s.ctx, s.broker)
+			}, retry.Sleep(time.Second), retry.Attempts(connMetaMaxRetryTime))
+		}()
 		return nil
 	}
 	return retry.Do(s.ctx, reloadEtcdFn, retry.Attempts(connMetaMaxRetryTime))
@@ -704,6 +715,7 @@ func (s *Server) startServerLoop() {
 	go s.importScheduler.Start()
 	go s.importChecker.Start()
 	s.garbageCollector.start()
+	s.syncSegmentsScheduler.Start()
 }
 
 // startDataNodeTtLoop start a goroutine to recv data node tt msg from msgstream
@@ -1096,6 +1108,7 @@ func (s *Server) Stop() error {
 
 	s.importScheduler.Close()
 	s.importChecker.Close()
+	s.syncSegmentsScheduler.Stop()
 
 	if Params.DataCoordCfg.EnableCompaction.GetAsBool() {
 		s.stopCompactionTrigger()

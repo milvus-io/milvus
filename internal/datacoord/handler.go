@@ -57,9 +57,7 @@ func newServerHandler(s *Server) *ServerHandler {
 
 // GetDataVChanPositions gets vchannel latest positions with provided dml channel names for DataNode.
 func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID UniqueID) *datapb.VchannelInfo {
-	segments := h.s.meta.SelectSegments(SegmentFilterFunc(func(s *SegmentInfo) bool {
-		return s.InsertChannel == channel.GetName() && !s.GetIsFake()
-	}))
+	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 	log.Info("GetDataVChanPositions",
 		zap.Int64("collectionID", channel.GetCollectionID()),
 		zap.String("channel", channel.GetName()),
@@ -105,9 +103,7 @@ func (h *ServerHandler) GetDataVChanPositions(channel RWChannel, partitionID Uni
 // the unflushed segments are actually the segments without index, even they are flushed.
 func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs ...UniqueID) *datapb.VchannelInfo {
 	// cannot use GetSegmentsByChannel since dropped segments are needed here
-	segments := h.s.meta.SelectSegments(SegmentFilterFunc(func(s *SegmentInfo) bool {
-		return s.InsertChannel == channel.GetName() && !s.GetIsFake()
-	}))
+	segments := h.s.meta.GetRealSegmentsForChannel(channel.GetName())
 	segmentInfos := make(map[int64]*SegmentInfo)
 	indexedSegments := FilterInIndexedSegments(h, h.s.meta, segments...)
 	indexed := make(typeutil.UniqueSet)

@@ -341,6 +341,9 @@ func (c *importChecker) checkCollection(collectionID int64, jobs []ImportJob) {
 		return
 	}
 	if !has {
+		jobs = lo.Filter(jobs, func(job ImportJob, _ int) bool {
+			return job.GetState() != internalpb.ImportJobState_Failed
+		})
 		for _, job := range jobs {
 			err = c.imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Failed),
 				UpdateJobReason(fmt.Sprintf("collection %d dropped", collectionID)))
@@ -388,6 +391,8 @@ func (c *importChecker) checkGC(job ImportJob) {
 		err := c.imeta.RemoveJob(job.GetJobID())
 		if err != nil {
 			log.Warn("remove import job failed", zap.Int64("jobID", job.GetJobID()), zap.Error(err))
+			return
 		}
+		log.Info("import job removed", zap.Int64("jobID", job.GetJobID()))
 	}
 }

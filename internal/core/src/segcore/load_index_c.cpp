@@ -25,6 +25,7 @@
 #include "storage/Util.h"
 #include "storage/RemoteChunkManagerSingleton.h"
 #include "storage/LocalChunkManagerSingleton.h"
+#include "pb/cgo_msg.pb.h"
 
 bool
 IsLoadWithDisk(const char* index_type, int index_engine_version) {
@@ -258,7 +259,8 @@ AppendIndexV2(CTraceContext c_trace, CLoadIndexInfo c_load_index_info) {
             load_index_info->collection_id,
             load_index_info->partition_id,
             load_index_info->segment_id,
-            load_index_info->field_id};
+            load_index_info->field_id,
+            load_index_info->schema};
         milvus::storage::IndexMeta index_meta{load_index_info->segment_id,
                                               load_index_info->field_id,
                                               load_index_info->index_build_id,
@@ -483,4 +485,51 @@ AppendStorageInfo(CLoadIndexInfo c_load_index_info,
     auto load_index_info = (milvus::segcore::LoadIndexInfo*)c_load_index_info;
     load_index_info->uri = uri;
     load_index_info->index_store_version = version;
+}
+
+CStatus
+FinishLoadIndexInfo(CLoadIndexInfo c_load_index_info,
+                    const uint8_t* serialized_load_index_info,
+                    const uint64_t len) {
+    try {
+        auto info_proto = std::make_unique<milvus::proto::cgo::LoadIndexInfo>();
+        info_proto->ParseFromArray(serialized_load_index_info, len);
+        auto load_index_info =
+            static_cast<milvus::segcore::LoadIndexInfo*>(c_load_index_info);
+        // TODO: keep this since LoadIndexInfo is used by SegmentSealed.
+        {
+            load_index_info->collection_id = info_proto->collectionid();
+            load_index_info->partition_id = info_proto->partitionid();
+            load_index_info->segment_id = info_proto->segmentid();
+            load_index_info->field_id = info_proto->field().fieldid();
+            load_index_info->field_type =
+                static_cast<milvus::DataType>(info_proto->field().data_type());
+            load_index_info->enable_mmap = info_proto->enable_mmap();
+            load_index_info->mmap_dir_path = info_proto->mmap_dir_path();
+            load_index_info->index_id = info_proto->indexid();
+            load_index_info->index_build_id = info_proto->index_buildid();
+            load_index_info->index_version = info_proto->index_version();
+            for (const auto& [k, v] : info_proto->index_params()) {
+                load_index_info->index_params[k] = v;
+            }
+            load_index_info->index_files.assign(
+                info_proto->index_files().begin(),
+                info_proto->index_files().end());
+            load_index_info->uri = info_proto->uri();
+            load_index_info->index_store_version =
+                info_proto->index_store_version();
+            load_index_info->index_engine_version =
+                info_proto->index_engine_version();
+            load_index_info->schema = info_proto->field();
+        }
+        auto status = CStatus();
+        status.error_code = milvus::Success;
+        status.error_msg = "";
+        return status;
+    } catch (std::exception& e) {
+        auto status = CStatus();
+        status.error_code = milvus::UnexpectedError;
+        status.error_msg = strdup(e.what());
+        return status;
+    }
 }

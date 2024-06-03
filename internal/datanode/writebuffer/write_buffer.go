@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
@@ -20,6 +19,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -288,7 +288,10 @@ func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
 }
 
 func (wb *writeBufferBase) cleanupCompactedSegments() {
-	segmentIDs := wb.metaCache.GetSegmentIDsBy(metacache.WithCompacted(), metacache.WithNoSyncingTask())
+	segmentIDs := wb.metaCache.GetSegmentIDsBy(
+		metacache.WithSegmentState(commonpb.SegmentState_Dropped),
+		metacache.WithCompacted(),
+		metacache.WithNoSyncingTask())
 	// remove compacted only when there is no writebuffer
 	targetIDs := lo.Filter(segmentIDs, func(segmentID int64, _ int) bool {
 		_, ok := wb.buffers[segmentID]
@@ -397,7 +400,10 @@ type inData struct {
 
 func (id *inData) generatePkStats() {
 	id.batchBF = &storage.PkStatistics{
-		PkFilter: bloom.NewWithEstimates(uint(id.rowNum), paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
+		PkFilter: bloomfilter.NewBloomFilterWithType(
+			uint(id.rowNum),
+			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+			paramtable.Get().CommonCfg.BloomFilterType.GetValue()),
 	}
 
 	for _, ids := range id.pkField {
