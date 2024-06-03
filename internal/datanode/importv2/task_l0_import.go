@@ -176,7 +176,6 @@ func (t *L0ImportTask) importL0(reader binlog.L0Reader, task Task) error {
 		if err != nil {
 			return err
 		}
-		log.Info("sheep debug 6", zap.Uint64("ts", data.Tss[0]))
 		fs, sts, err := t.syncDelete(iTask, delData)
 		if err != nil {
 			return err

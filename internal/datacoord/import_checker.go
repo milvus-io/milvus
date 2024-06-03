@@ -19,7 +19,6 @@ package datacoord
 import (
 	"context"
 	"fmt"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"sync"
 	"time"
 
@@ -29,6 +28,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datacoord/broker"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
@@ -279,10 +279,6 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 			log.Warn("nil channel checkpoint")
 			return
 		}
-		seg := c.meta.GetSegment(segmentID)
-		if seg.GetLevel() == datapb.SegmentLevel_L0 {
-			log.Info("sheep debug 2", zap.Any("seg", seg))
-		}
 		op1 := UpdateStartPosition([]*datapb.SegmentStartPosition{{StartPosition: channelCP, SegmentID: segmentID}})
 		op2 := UpdateDmlPosition(segmentID, channelCP)
 		op3 := UpdateIsImporting(segmentID, false)
@@ -290,10 +286,6 @@ func (c *importChecker) checkImportingJob(job ImportJob) {
 		if err != nil {
 			log.Warn("update import segment failed", zap.Error(err))
 			return
-		}
-		seg = c.meta.GetSegment(segmentID)
-		if seg.GetLevel() == datapb.SegmentLevel_L0 {
-			log.Info("sheep debug 3", zap.Any("seg", seg))
 		}
 	}
 

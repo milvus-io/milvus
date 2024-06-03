@@ -193,9 +193,6 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, no need to append rowID and ts
 		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	}
-	if _, ok := data.Data[common.TimeStampField]; ok {
-		log.Info("sheep debug 5", zap.Any("ts", data.Data[common.TimeStampField].GetRow(0).(int64)))
-	}
 	if _, ok := data.Data[common.TimeStampField]; !ok {
 		tss := make([]int64, rowNum)
 		ts := int64(task.req.GetTs())

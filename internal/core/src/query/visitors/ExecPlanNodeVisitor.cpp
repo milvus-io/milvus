@@ -266,10 +266,8 @@ ExecPlanNodeVisitor::visit(RetrievePlanNode& node) {
     }
 
     segment->mask_with_timestamps(bitset_holder, timestamp_);
-    std::cout << "sheep debug segcore 2, after mask with ts, bitset_holder=" << bitset_holder.count() << std::endl;
 
     segment->mask_with_delete(bitset_holder, active_count, timestamp_);
-    std::cout << "sheep debug segcore 3, after mask with delete, bitset_holder=" << bitset_holder.count() << std::endl;
     // if bitset_holder is all 1's, we got empty result
     if (bitset_holder.all() && !node.is_count_) {
         retrieve_result_opt_ = std::move(retrieve_result);

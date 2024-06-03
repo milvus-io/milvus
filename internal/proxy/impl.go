@@ -6131,6 +6131,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 		// Therefore, to ensure the deletes from L0 import take effect,
 		// the collection needs to be in an unloaded state,
 		// and then all L0 and L1 segments should be loaded at once.
+		// We will remove this restriction after querynode supported to load L0 segments dynamically.
 		loaded, err := isCollectionLoaded(ctx, node.queryCoord, collectionID)
 		if err != nil {
 			resp.Status = merr.Status(err)

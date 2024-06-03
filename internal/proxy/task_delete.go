@@ -447,7 +447,6 @@ func (dr *deleteRunner) getStreamingQueryAndDelteFunc(plan *planpb.PlanNode) exe
 			}
 			dr.count.Add(task.count)
 			allQueryCnt += task.allQueryCnt
-			fmt.Println("sheep debug 8, deleteTs=", task.EndTs())
 		}
 
 		// query or produce task failed

@@ -317,10 +317,6 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 				log.Warn("update import segment binlogs failed", WrapTaskLog(task, zap.Error(err))...)
 				return
 			}
-			seg := s.meta.GetSegment(info.GetSegmentID())
-			if seg.GetLevel() == datapb.SegmentLevel_L0 {
-				log.Info("sheep debug 1", zap.Any("seg", seg))
-			}
 			select {
 			case s.buildIndexCh <- info.GetSegmentID(): // accelerate index building:
 			default:

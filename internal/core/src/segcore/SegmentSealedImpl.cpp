@@ -722,7 +722,6 @@ SegmentSealedImpl::mask_with_delete(BitsetType& bitset,
 
     auto bitmap_holder = get_deleted_bitmap(
         del_barrier, ins_barrier, deleted_record_, insert_record_, timestamp);
-    std::cout << "sheep debug segcore 2.5, bitmap_holder=" << bitmap_holder->bitmap_ptr->count() << ", del_cnt=" << deleted_record_.size() << std::endl;
     if (!bitmap_holder || !bitmap_holder->bitmap_ptr) {
         return;
     }
@@ -1499,7 +1498,6 @@ SegmentSealedImpl::Delete(int64_t reserved_offset,  // deprecated
     }
 
     deleted_record_.push(sort_pks, sort_timestamps.data());
-    std::cout << "sheep debug segcore 1, delete_count=" << deleted_record_.size() << ", len(pk)=" << sort_pks.size() << std::endl;
     return SegcoreError::success();
 }
 
