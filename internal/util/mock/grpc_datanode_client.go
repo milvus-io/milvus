@@ -108,3 +108,7 @@ func (m *GrpcDataNodeClient) DropImport(ctx context.Context, req *datapb.DropImp
 func (m *GrpcDataNodeClient) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest, opts ...grpc.CallOption) (*datapb.QuerySlotResponse, error) {
 	return &datapb.QuerySlotResponse{}, m.Err
 }
+
+func (m *GrpcDataNodeClient) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest, opts ...grpc.CallOption) (*commonpb.Status, error) {
+	return &commonpb.Status{}, m.Err
+}
