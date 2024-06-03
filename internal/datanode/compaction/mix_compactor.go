@@ -30,7 +30,6 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -323,12 +322,7 @@ func (t *mixCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
 		return binlogs.GetSegmentID()
 	})
 
-	if err := binlog.DecompressCompactionBinlogs(t.plan.GetSegmentBinlogs()); err != nil {
-		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
-		return nil, err
-	}
-
-	deltaPaths, allPath := loadDeltaMap(t.plan.GetSegmentBinlogs())
+	deltaPaths, allPath, err := loadDeltaMap(t.plan.GetSegmentBinlogs())
 	if err != nil {
 		log.Warn("fail to merge deltalogs", zap.Error(err))
 		return nil, err

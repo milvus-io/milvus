@@ -89,7 +89,12 @@ func mergeDeltalogs(ctx context.Context, io io.BinlogIO, dpaths map[typeutil.Uni
 	return pk2ts, nil
 }
 
-func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.UniqueID][]string, [][]string) {
+func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.UniqueID][]string, [][]string, error) {
+	if err := binlog.DecompressCompactionBinlogs(segments); err != nil {
+		log.Warn("compact wrong, fail to decompress compaction binlogs", zap.Error(err))
+		return nil, nil, err
+	}
+
 	deltaPaths := make(map[typeutil.UniqueID][]string) // segmentID to deltalog paths
 	allPath := make([][]string, 0)                     // group by binlog batch
 	for _, s := range segments {
@@ -122,7 +127,7 @@ func loadDeltaMap(segments []*datapb.CompactionSegmentBinlogs) (map[typeutil.Uni
 			}
 		}
 	}
-	return deltaPaths, allPath
+	return deltaPaths, allPath, nil
 }
 
 func serializeWrite(ctx context.Context, allocator allocator.Allocator, writer *SegmentWriter) (kvs map[string][]byte, fieldBinlogs map[int64]*datapb.FieldBinlog, err error) {

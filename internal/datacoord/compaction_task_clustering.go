@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -355,7 +356,7 @@ func (task *clusteringCompactionTask) BuildCompactionRequest(handler *compaction
 		ClusteringKeyField: task.GetClusteringKeyField().GetFieldID(),
 		MaxSegmentRows:     task.GetMaxSegmentRows(),
 		PreferSegmentRows:  task.GetPreferSegmentRows(),
-		AnalyzeResultPath:  path.Join(metautil.JoinIDPath(task.AnalyzeTaskID, task.AnalyzeVersion)),
+		AnalyzeResultPath:  path.Join(common.AnalyzeStatsPath, metautil.JoinIDPath(task.AnalyzeTaskID, task.AnalyzeVersion)),
 		AnalyzeSegmentIds:  task.GetInputSegments(), // todo: if need
 	}
 	log := log.With(zap.Int64("taskID", task.GetTriggerID()), zap.Int64("planID", plan.GetPlanID()))

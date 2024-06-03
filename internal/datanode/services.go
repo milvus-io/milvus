@@ -242,7 +242,6 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 			taskCtx,
 			binlogIO,
 			node.allocator,
-			node.syncMgr,
 			req,
 		)
 	default:

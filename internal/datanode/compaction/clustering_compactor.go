@@ -37,12 +37,8 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	"github.com/milvus-io/milvus/internal/datanode/metacache"
-	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
-	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/clusteringpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -62,10 +58,8 @@ import (
 var _ Compactor = (*clusteringCompactionTask)(nil)
 
 type clusteringCompactionTask struct {
-	io        io.BinlogIO
+	binlogIO  io.BinlogIO
 	allocator allocator.Allocator
-	metaCache metacache.MetaCache
-	syncMgr   syncmgr.SyncManager
 
 	ctx    context.Context
 	cancel context.CancelFunc
@@ -124,16 +118,14 @@ func NewClusteringCompactionTask(
 	ctx context.Context,
 	binlogIO io.BinlogIO,
 	alloc allocator.Allocator,
-	syncMgr syncmgr.SyncManager,
 	plan *datapb.CompactionPlan,
 ) *clusteringCompactionTask {
 	ctx, cancel := context.WithCancel(ctx)
 	return &clusteringCompactionTask{
 		ctx:                ctx,
 		cancel:             cancel,
-		io:                 binlogIO,
+		binlogIO:           binlogIO,
 		allocator:          alloc,
-		syncMgr:            syncMgr,
 		plan:               plan,
 		tr:                 timerecord.NewTimeRecorder("clustering_compaction"),
 		done:               make(chan struct{}, 1),
@@ -166,7 +158,7 @@ func (t *clusteringCompactionTask) GetCollection() int64 {
 	return t.plan.GetSegmentBinlogs()[0].GetCollectionID()
 }
 
-func (t *clusteringCompactionTask) init() error {
+func (t *clusteringCompactionTask) init() {
 	t.collectionID = t.GetCollection()
 	t.partitionID = t.plan.GetSegmentBinlogs()[0].GetPartitionID()
 
@@ -186,8 +178,7 @@ func (t *clusteringCompactionTask) init() error {
 	workerPoolSize := t.getWorkerPoolSize()
 	t.pool = conc.NewPool[any](workerPoolSize)
 	log.Info("clustering compaction task initialed", zap.Int64("memory_buffer_size", t.memoryBufferSize), zap.Int("worker_pool_size", workerPoolSize))
-
-	return nil
+	return
 }
 
 func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, error) {
@@ -207,29 +198,20 @@ func (t *clusteringCompactionTask) Compact() (*datapb.CompactionPlanResult, erro
 	ctxTimeout, cancelAll := context.WithTimeout(ctx, time.Duration(t.plan.GetTimeoutInSeconds())*time.Second)
 	defer cancelAll()
 
-	err := t.init()
-	if err != nil {
-		return nil, err
-	}
-	log.Info("compact start", zap.Int32("timeout in seconds", t.plan.GetTimeoutInSeconds()))
-
-	err = binlog.DecompressCompactionBinlogs(t.plan.GetSegmentBinlogs())
-	if err != nil {
-		log.Warn("DecompressCompactionBinlogs fails", zap.Error(err))
-		return nil, err
-	}
-
-	// 1, download delta logs to build deltaMap
-	deltaBlobs, _ := loadDeltaMap(t.plan.GetSegmentBinlogs())
-	deltaPk2Ts, err := mergeDeltalogs(ctxTimeout, t.io, deltaBlobs)
-	if err != nil {
-		return nil, err
-	}
-
-	// 2, final clean up
+	t.init()
 	defer t.cleanUp(ctx)
 
-	// todo move analyze to indexnode Analyze method
+	// 1, download delta logs to build deltaMap
+	deltaBlobs, _, err := loadDeltaMap(t.plan.GetSegmentBinlogs())
+	if err != nil {
+		return nil, err
+	}
+	deltaPk2Ts, err := mergeDeltalogs(ctxTimeout, t.binlogIO, deltaBlobs)
+	if err != nil {
+		return nil, err
+	}
+
+	// 2, get analyze result
 	if t.isVectorClusteringKey {
 		if err := t.getVectorAnalyzeResult(ctx); err != nil {
 			return nil, err
@@ -307,15 +289,15 @@ func (t *clusteringCompactionTask) getScalarAnalyzeResult(ctx context.Context) e
 
 func (t *clusteringCompactionTask) getVectorAnalyzeResult(ctx context.Context) error {
 	analyzeResultPath := t.plan.AnalyzeResultPath
-	centroidFilePath := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
+	centroidFilePath := t.binlogIO.JoinFullPath(analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID), common.Centroids)
 	offsetMappingFiles := make(map[int64]string, 0)
 	for _, segmentID := range t.plan.AnalyzeSegmentIds {
-		path := t.io.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), common.OffsetMapping)
+		path := t.binlogIO.JoinFullPath(common.AnalyzeStatsPath, analyzeResultPath, metautil.JoinIDPath(t.collectionID, t.partitionID, t.clusteringKeyField.FieldID, segmentID), common.OffsetMapping)
 		offsetMappingFiles[segmentID] = path
 		log.Debug("read segment offset mapping file", zap.Int64("segmentID", segmentID), zap.String("path", path))
 	}
 	t.segmentIDOffsetMapping = offsetMappingFiles
-	centroidBytes, err := t.io.Download(ctx, []string{centroidFilePath})
+	centroidBytes, err := t.binlogIO.Download(ctx, []string{centroidFilePath})
 	if err != nil {
 		return err
 	}
@@ -460,7 +442,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	mappingStats := &clusteringpb.ClusteringCentroidIdMappingStats{}
 	if t.isVectorClusteringKey {
 		offSetPath := t.segmentIDOffsetMapping[segment.SegmentID]
-		offsetBytes, err := t.io.Download(ctx, []string{offSetPath})
+		offsetBytes, err := t.binlogIO.Download(ctx, []string{offSetPath})
 		if err != nil {
 			return err
 		}
@@ -492,7 +474,7 @@ func (t *clusteringCompactionTask) mappingSegment(
 	}
 
 	for _, path := range fieldBinlogPaths {
-		bytesArr, err := t.io.Download(ctx, path)
+		bytesArr, err := t.binlogIO.Download(ctx, path)
 		blobs := make([]*storage.Blob, len(bytesArr))
 		var segmentSize int64
 		for i := range bytesArr {
@@ -720,7 +702,7 @@ func (t *clusteringCompactionTask) packBufferToSegment(ctx context.Context, buff
 	for _, fieldBinlog := range buffer.flushedBinlogs {
 		insertLogs = append(insertLogs, fieldBinlog)
 	}
-	statPaths, err := statSerializeWrite(ctx, t.io, t.allocator, buffer.writer, buffer.flushedRowNum)
+	statPaths, err := statSerializeWrite(ctx, t.binlogIO, t.allocator, buffer.writer, buffer.flushedRowNum)
 	if err != nil {
 		return err
 	}
@@ -766,7 +748,7 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 		return err
 	}
 
-	if err := t.io.Upload(ctx, kvs); err != nil {
+	if err := t.binlogIO.Upload(ctx, kvs); err != nil {
 		log.Warn("compact wrong, failed to upload kvs", zap.Error(err))
 	}
 
@@ -794,22 +776,6 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 	return nil
 }
 
-func (t *clusteringCompactionTask) getSegmentMeta(segID typeutil.UniqueID) (typeutil.UniqueID, typeutil.UniqueID, *etcdpb.CollectionMeta, error) {
-	collID := t.metaCache.Collection()
-	seg, ok := t.metaCache.GetSegmentByID(segID)
-	if !ok {
-		return -1, -1, nil, merr.WrapErrSegmentNotFound(segID)
-	}
-	partID := seg.PartitionID()
-	sch := t.metaCache.Schema()
-
-	meta := &etcdpb.CollectionMeta{
-		ID:     collID,
-		Schema: sch,
-	}
-	return collID, partID, meta, nil
-}
-
 func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, collectionID, partitionID typeutil.UniqueID, partitionStats *storage.PartitionStatsSnapshot) error {
 	// use planID as partitionStats version
 	version := t.plan.PlanID
@@ -818,12 +784,12 @@ func (t *clusteringCompactionTask) uploadPartitionStats(ctx context.Context, col
 	if err != nil {
 		return err
 	}
-	newStatsPath := t.io.JoinFullPath(common.PartitionStatsPath,
+	newStatsPath := t.binlogIO.JoinFullPath(common.PartitionStatsPath,
 		path.Join(strconv.FormatInt(collectionID, 10), strconv.FormatInt(partitionID, 10), t.plan.GetChannel(), strconv.FormatInt(version, 10)))
 	kv := map[string][]byte{
 		newStatsPath: partitionStatsBytes,
 	}
-	err = t.io.Upload(ctx, kv)
+	err = t.binlogIO.Upload(ctx, kv)
 	if err != nil {
 		return err
 	}
@@ -843,7 +809,7 @@ func (t *clusteringCompactionTask) cleanUp(ctx context.Context) {
 func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[interface{}]int64, error) {
 	inputSegments := t.plan.GetSegmentBinlogs()
 	futures := make([]*conc.Future[any], 0, len(inputSegments))
-	mapStart := time.Now()
+	analyzeStart := time.Now()
 	var mutex sync.Mutex
 	analyzeDict := make(map[interface{}]int64, 0)
 	for _, segment := range inputSegments {
@@ -879,7 +845,7 @@ func (t *clusteringCompactionTask) scalarAnalyze(ctx context.Context) (map[inter
 		zap.Int64("collectionID", t.GetCollection()),
 		zap.Int64("partitionID", t.partitionID),
 		zap.Int("segments", len(inputSegments)),
-		zap.Duration("elapse", time.Since(mapStart)))
+		zap.Duration("elapse", time.Since(analyzeStart)))
 	return analyzeDict, nil
 }
 
@@ -928,7 +894,7 @@ func (t *clusteringCompactionTask) scalarAnalyzeSegment(
 	}
 
 	for _, path := range fieldBinlogPaths {
-		bytesArr, err := t.io.Download(ctx, path)
+		bytesArr, err := t.binlogIO.Download(ctx, path)
 		blobs := make([]*storage.Blob, len(bytesArr))
 		for i := range bytesArr {
 			blobs[i] = &storage.Blob{Value: bytesArr[i]}
