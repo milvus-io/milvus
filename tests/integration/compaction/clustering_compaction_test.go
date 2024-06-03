@@ -14,12 +14,12 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package clustering
+package compaction
 
 import (
 	"context"
-	"fmt"
 	"testing"
+	"time"
 
 	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
@@ -31,7 +31,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
-	"github.com/milvus-io/milvus/pkg/util/metric"
 	"github.com/milvus-io/milvus/tests/integration"
 )
 
@@ -52,7 +51,7 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 
 	collectionName := "TestClusteringCompaction" + funcutil.GenRandomStr()
 
-	schema := integration.ConstructSchema(collectionName, dim, true)
+	schema := ConstructScalarClusteringSchema(collectionName, dim, true)
 	marshaledSchema, err := proto.Marshal(schema)
 	s.NoError(err)
 
@@ -107,63 +106,117 @@ func (s *ClusteringCompactionSuite) TestClusteringCompaction() {
 	}
 	s.WaitForFlush(ctx, ids, flushTs, dbName, collectionName)
 
-	// create index
-	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{
-		CollectionName: collectionName,
-		FieldName:      integration.FloatVecField,
-		IndexName:      "_default",
-		ExtraParams:    integration.ConstructIndexParam(dim, integration.IndexFaissIvfFlat, metric.L2),
-	})
-	if createIndexStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("createIndexStatus fail reason", zap.String("reason", createIndexStatus.GetReason()))
-	}
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, createIndexStatus.GetErrorCode())
-
-	s.WaitForIndexBuilt(ctx, collectionName, integration.FloatVecField)
-
-	// load
-	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
-		DbName:         dbName,
-		CollectionName: collectionName,
-	})
-	s.NoError(err)
-	if loadStatus.GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("loadStatus fail reason", zap.String("reason", loadStatus.GetReason()))
-	}
-	s.Equal(commonpb.ErrorCode_Success, loadStatus.GetErrorCode())
-	s.WaitForLoad(ctx, collectionName)
-
-	// search
-	expr := fmt.Sprintf("%s > 0", integration.Int64Field)
-	nq := 10
-	topk := 10
-	roundDecimal := -1
-
-	params := integration.GetSearchParams(integration.IndexFaissIvfFlat, metric.L2)
-	searchReq := integration.ConstructSearchRequest("", collectionName, expr,
-		integration.FloatVecField, schemapb.DataType_FloatVector, nil, metric.L2, params, nq, dim, topk, roundDecimal)
-
-	searchResult, err := c.Proxy.Search(ctx, searchReq)
-
-	if searchResult.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-		log.Warn("searchResult fail reason", zap.String("reason", searchResult.GetStatus().GetReason()))
-	}
-	s.NoError(err)
-	s.Equal(commonpb.ErrorCode_Success, searchResult.GetStatus().GetErrorCode())
-
 	compactReq := &milvuspb.ManualCompactionRequest{
 		CollectionID:    showCollectionsResp.CollectionIds[0],
 		MajorCompaction: true,
 	}
 	compactResp, err := c.Proxy.ManualCompaction(ctx, compactReq)
 	s.NoError(err)
-	log.Info("comapct", zap.Any("compactResp", compactResp))
+	log.Info("compact", zap.Any("compactResp", compactResp))
+
+	compacted := func() bool {
+		resp, err := c.Proxy.GetCompactionState(ctx, &milvuspb.GetCompactionStateRequest{
+			CompactionID: compactResp.GetCompactionID(),
+		})
+		if err != nil {
+			return false
+		}
+		return resp.GetState() == commonpb.CompactionState_Completed
+	}
+	for !compacted() {
+		time.Sleep(1 * time.Second)
+	}
+	log.Info("compact done")
 
 	log.Info("TestClusteringCompaction succeed")
 }
 
+func ConstructScalarClusteringSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
+	// if fields are specified, construct it
+	if len(fields) > 0 {
+		return &schemapb.CollectionSchema{
+			Name:   collection,
+			AutoID: autoID,
+			Fields: fields,
+		}
+	}
+
+	// if no field is specified, use default
+	pk := &schemapb.FieldSchema{
+		FieldID:         100,
+		Name:            integration.Int64Field,
+		IsPrimaryKey:    true,
+		Description:     "",
+		DataType:        schemapb.DataType_Int64,
+		TypeParams:      nil,
+		IndexParams:     nil,
+		AutoID:          autoID,
+		IsClusteringKey: true,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         integration.FloatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: fmt.Sprintf("%d", dim),
+			},
+		},
+		IndexParams: nil,
+	}
+	return &schemapb.CollectionSchema{
+		Name:   collection,
+		AutoID: autoID,
+		Fields: []*schemapb.FieldSchema{pk, fVec},
+	}
+}
+
+func ConstructVectorClusteringSchema(collection string, dim int, autoID bool, fields ...*schemapb.FieldSchema) *schemapb.CollectionSchema {
+	// if fields are specified, construct it
+	if len(fields) > 0 {
+		return &schemapb.CollectionSchema{
+			Name:   collection,
+			AutoID: autoID,
+			Fields: fields,
+		}
+	}
+
+	// if no field is specified, use default
+	pk := &schemapb.FieldSchema{
+		FieldID:      100,
+		Name:         integration.Int64Field,
+		IsPrimaryKey: true,
+		Description:  "",
+		DataType:     schemapb.DataType_Int64,
+		TypeParams:   nil,
+		IndexParams:  nil,
+		AutoID:       autoID,
+	}
+	fVec := &schemapb.FieldSchema{
+		FieldID:      101,
+		Name:         integration.FloatVecField,
+		IsPrimaryKey: false,
+		Description:  "",
+		DataType:     schemapb.DataType_FloatVector,
+		TypeParams: []*commonpb.KeyValuePair{
+			{
+				Key:   common.DimKey,
+				Value: fmt.Sprintf("%d", dim),
+			},
+		},
+		IndexParams:     nil,
+		IsClusteringKey: true,
+	}
+	return &schemapb.CollectionSchema{
+		Name:   collection,
+		AutoID: autoID,
+		Fields: []*schemapb.FieldSchema{pk, fVec},
+	}
+}
+
 func TestClusteringCompaction(t *testing.T) {
-	t.Skip("Skip integration test")
 	suite.Run(t, new(ClusteringCompactionSuite))
 }
