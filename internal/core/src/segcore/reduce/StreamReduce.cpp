@@ -10,9 +10,9 @@
 // or implied. See the License for the specific language governing permissions and limitations under the License
 
 #include "StreamReduce.h"
-#include "SegmentInterface.h"
+#include "segcore/SegmentInterface.h"
 #include "segcore/Utils.h"
-#include "Reduce.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/pkVisitor.h"
 #include "segcore/ReduceUtils.h"
 
