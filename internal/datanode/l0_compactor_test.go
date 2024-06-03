@@ -18,7 +18,6 @@ package datanode
 
 import (
 	"context"
-	"path"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -29,14 +28,10 @@ import (
 
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/io"
-	iter "github.com/milvus-io/milvus/internal/datanode/iterators"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/timerecord"
 )
 
@@ -80,7 +75,7 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 	s.dBlob = blob.GetValue()
 }
 
-func (s *LevelZeroCompactionTaskSuite) TestLinearBatchLoadDeltaFail() {
+func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
 	plan := &datapb.CompactionPlan{
 		PlanID: 19530,
 		Type:   datapb.CompactionType_Level0DeleteCompaction,
@@ -103,21 +98,17 @@ func (s *LevelZeroCompactionTaskSuite) TestLinearBatchLoadDeltaFail() {
 
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock download fail")).Twice()
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock download fail")).Once()
 
 	targetSegments := []int64{200}
 	deltaLogs := map[int64][]string{100: {"a/b/c1"}}
 
-	segments, err := s.task.linearProcess(context.Background(), targetSegments, deltaLogs)
-	s.Error(err)
-	s.Empty(segments)
-
-	segments, err = s.task.batchProcess(context.Background(), targetSegments, lo.Values(deltaLogs)...)
+	segments, err := s.task.process(context.Background(), 1, targetSegments, lo.Values(deltaLogs)...)
 	s.Error(err)
 	s.Empty(segments)
 }
 
-func (s *LevelZeroCompactionTaskSuite) TestLinearBatchUploadByCheckFail() {
+func (s *LevelZeroCompactionTaskSuite) TestProcessUploadFail() {
 	plan := &datapb.CompactionPlan{
 		PlanID: 19530,
 		Type:   datapb.CompactionType_Level0DeleteCompaction,
@@ -140,25 +131,22 @@ func (s *LevelZeroCompactionTaskSuite) TestLinearBatchUploadByCheckFail() {
 
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(2)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload fail")).Once()
+	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Once()
 	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Twice()
 	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).RunAndReturn(
 		func(filters ...metacache.SegmentFilter) []*metacache.SegmentInfo {
 			bfs1 := metacache.NewBloomFilterSetWithBatchSize(100)
 			bfs1.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2}})
 			segment1 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 200}, bfs1)
 			return []*metacache.SegmentInfo{segment1}
-		}).Twice()
+		}).Once()
 
 	targetSegments := []int64{200}
 	deltaLogs := map[int64][]string{100: {"a/b/c1"}}
 
-	segments, err := s.task.linearProcess(context.Background(), targetSegments, deltaLogs)
-	s.Error(err)
-	s.Empty(segments)
-
-	segments, err = s.task.batchProcess(context.Background(), targetSegments, lo.Values(deltaLogs)...)
+	segments, err := s.task.process(context.Background(), 2, targetSegments, lo.Values(deltaLogs)...)
 	s.Error(err)
 	s.Empty(segments)
 }
@@ -207,20 +195,27 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 	bfs2.UpdatePKRange(&storage.Int64FieldData{Data: []int64{1, 2}})
 	segment2 := metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 201}, bfs2)
 
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(2)
-	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{segment1, segment2})
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentByID(mock.Anything, mock.Anything).
-		RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-			return metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: id, PartitionID: 10}, nil), true
-		})
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(1)
+	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Twice()
 
+	times := 1
+	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).RunAndReturn(
+		func(filters ...metacache.SegmentFilter) []*metacache.SegmentInfo {
+			if times == 1 {
+				times += 1
+				return []*metacache.SegmentInfo{segment1}
+			}
+
+			if times == 2 {
+				times += 1
+				return []*metacache.SegmentInfo{segment2}
+			}
+
+			return []*metacache.SegmentInfo{segment1, segment2}
+		}).Twice()
+
+	s.mockMeta.EXPECT().Collection().Return(1)
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
-	s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).
-		RunAndReturn(func(paths ...string) string {
-			return path.Join(paths...)
-		}).Times(2)
-	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
 	s.Require().Equal(plan.GetPlanID(), s.task.getPlanID())
 	s.Require().Equal(plan.GetChannel(), s.task.getChannelName())
@@ -249,7 +244,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactLinear() {
 			totalDeltalogs[s.GetSegmentID()] = paths
 		}
 	}
-	segments, err := s.task.linearProcess(context.Background(), targetSegIDs, totalDeltalogs)
+	segments, err := s.task.process(context.Background(), 1, targetSegIDs, lo.Values(totalDeltalogs)...)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -312,16 +307,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 
 	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
 	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().GetSegmentByID(mock.Anything, mock.Anything).
-		RunAndReturn(func(id int64, filters ...metacache.SegmentFilter) (*metacache.SegmentInfo, bool) {
-			return metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: id, PartitionID: 10}, nil), true
-		})
-
 	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil).Times(2)
-	s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).
-		RunAndReturn(func(paths ...string) string {
-			return path.Join(paths...)
-		}).Times(2)
 	s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil).Once()
 
 	l0Segments := lo.Filter(s.task.plan.GetSegmentBinlogs(), func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
@@ -334,8 +320,8 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 		}
 		return 0, false
 	})
-	totalDeltalogs := make(map[UniqueID][]string)
 
+	totalDeltalogs := make(map[UniqueID][]string)
 	for _, s := range l0Segments {
 		paths := []string{}
 		for _, d := range s.GetDeltalogs() {
@@ -347,7 +333,7 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 			totalDeltalogs[s.GetSegmentID()] = paths
 		}
 	}
-	segments, err := s.task.batchProcess(context.TODO(), targetSegIDs, lo.Values(totalDeltalogs)...)
+	segments, err := s.task.process(context.TODO(), 2, targetSegIDs, lo.Values(totalDeltalogs)...)
 	s.NoError(err)
 	s.NotEmpty(segments)
 	s.Equal(2, len(segments))
@@ -359,148 +345,49 @@ func (s *LevelZeroCompactionTaskSuite) TestCompactBatch() {
 	log.Info("test segment results", zap.Any("result", segments))
 }
 
-func (s *LevelZeroCompactionTaskSuite) TestUploadByCheck() {
+func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 	ctx := context.Background()
-	s.Run("uploadByCheck directly composeDeltalog failed", func() {
+	s.Run("serializeUpload allocator Alloc failed", func() {
 		s.SetupTest()
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(mock.Anything).Return(nil, false).Once()
+		s.mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc wrong"))
+		writer := NewSegmentDeltaWriter(100, 10, 1)
+		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
+		writers := map[int64]*SegmentDeltaWriter{100: writer}
 
-		segments := map[int64]*storage.DeleteData{100: s.dData}
-		results := make(map[int64]*datapb.CompactionSegment)
-		err := s.task.uploadByCheck(ctx, false, segments, results)
+		result, err := s.task.serializeUpload(ctx, writers)
 		s.Error(err)
-		s.Equal(0, len(results))
+		s.Equal(0, len(result))
 	})
 
-	s.Run("uploadByCheck directly Upload failed", func() {
+	s.Run("serializeUpload Upload failed", func() {
 		s.SetupTest()
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
-
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
-		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
-		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
-		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
 
-		segments := map[int64]*storage.DeleteData{100: s.dData}
-		results := make(map[int64]*datapb.CompactionSegment)
-		err := s.task.uploadByCheck(ctx, false, segments, results)
+		writer := NewSegmentDeltaWriter(100, 10, 1)
+		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
+		writers := map[int64]*SegmentDeltaWriter{100: writer}
+		results, err := s.task.serializeUpload(ctx, writers)
 		s.Error(err)
 		s.Equal(0, len(results))
 	})
 
-	s.Run("upload directly", func() {
+	s.Run("upload success", func() {
 		s.SetupTest()
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
-
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
-		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
-		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
-		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
-		segments := map[int64]*storage.DeleteData{100: s.dData}
-		results := make(map[int64]*datapb.CompactionSegment)
-		err := s.task.uploadByCheck(ctx, false, segments, results)
+		writer := NewSegmentDeltaWriter(100, 10, 1)
+		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
+		writers := map[int64]*SegmentDeltaWriter{100: writer}
+		results, err := s.task.serializeUpload(ctx, writers)
 		s.NoError(err)
 		s.Equal(1, len(results))
 
-		seg1, ok := results[100]
-		s.True(ok)
+		seg1 := results[0]
 		s.EqualValues(100, seg1.GetSegmentID())
 		s.Equal(1, len(seg1.GetDeltalogs()))
 		s.Equal(1, len(seg1.GetDeltalogs()[0].GetBinlogs()))
 	})
-
-	s.Run("check without upload", func() {
-		s.SetupTest()
-		segments := map[int64]*storage.DeleteData{100: s.dData}
-		results := make(map[int64]*datapb.CompactionSegment)
-		s.Require().Empty(results)
-
-		err := s.task.uploadByCheck(ctx, true, segments, results)
-		s.NoError(err)
-		s.Empty(results)
-	})
-
-	s.Run("check with upload", func() {
-		blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
-		blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
-
-		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(nil)
-		s.mockMeta.EXPECT().Collection().Return(1)
-		s.mockMeta.EXPECT().GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-			Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
-
-		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
-		s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
-
-		segments := map[int64]*storage.DeleteData{100: s.dData}
-		results := map[int64]*datapb.CompactionSegment{
-			100: {SegmentID: 100, Deltalogs: []*datapb.FieldBinlog{{Binlogs: []*datapb.Binlog{{LogID: 1}}}}},
-		}
-		s.Require().Equal(1, len(results))
-
-		paramtable.Get().Save(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key, "1")
-		defer paramtable.Get().Reset(paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.Key)
-		err := s.task.uploadByCheck(ctx, true, segments, results)
-		s.NoError(err)
-		s.NotEmpty(results)
-		s.Equal(1, len(results))
-
-		seg1, ok := results[100]
-		s.True(ok)
-		s.EqualValues(100, seg1.GetSegmentID())
-		s.Equal(1, len(seg1.GetDeltalogs()))
-		s.Equal(2, len(seg1.GetDeltalogs()[0].GetBinlogs()))
-	})
-}
-
-func (s *LevelZeroCompactionTaskSuite) TestComposeDeltalog() {
-	s.mockMeta.EXPECT().Collection().Return(1)
-	s.mockMeta.EXPECT().
-		GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 100
-			}), mock.Anything).
-		Return(metacache.NewSegmentInfo(&datapb.SegmentInfo{ID: 100, PartitionID: 10}, nil), true)
-
-	s.mockMeta.EXPECT().
-		GetSegmentByID(
-			mock.MatchedBy(func(ID int64) bool {
-				return ID == 101
-			}), mock.Anything).
-		Return(nil, false)
-
-	s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
-
-	blobKey := metautil.JoinIDPath(1, 10, 100, 19530)
-	blobPath := path.Join(common.SegmentDeltaLogPath, blobKey)
-	s.mockBinlogIO.EXPECT().JoinFullPath(mock.Anything, mock.Anything).Return(blobPath)
-
-	kvs, binlog, err := s.task.composeDeltalog(100, s.dData)
-	s.NoError(err)
-	s.Equal(1, len(kvs))
-	v, ok := kvs[blobPath]
-	s.True(ok)
-	s.NotNil(v)
-	s.Equal(blobPath, binlog.LogPath)
-
-	_, _, err = s.task.composeDeltalog(101, s.dData)
-	s.Error(err)
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
@@ -516,23 +403,20 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 
 	predicted := []int64{100, 101, 102}
 	s.mockMeta.EXPECT().GetSegmentsBy(mock.Anything).Return([]*metacache.SegmentInfo{segment1, segment2, segment3})
+	s.mockMeta.EXPECT().Collection().Return(1)
 
-	diter := iter.NewDeltalogIterator([][]byte{s.dBlob}, nil)
-	s.Require().NotNil(diter)
-
-	targetSegBuffer := make(map[int64]*storage.DeleteData)
 	targetSegIDs := predicted
-	s.task.splitDelta(context.TODO(), []*iter.DeltalogIterator{diter}, targetSegBuffer, targetSegIDs)
+	deltaWriters := s.task.splitDelta(context.TODO(), []*storage.DeleteData{s.dData}, targetSegIDs)
 
-	s.NotEmpty(targetSegBuffer)
-	s.ElementsMatch(predicted, lo.Keys(targetSegBuffer))
-	s.EqualValues(2, targetSegBuffer[100].RowCount)
-	s.EqualValues(1, targetSegBuffer[101].RowCount)
-	s.EqualValues(1, targetSegBuffer[102].RowCount)
+	s.NotEmpty(deltaWriters)
+	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
+	s.EqualValues(2, deltaWriters[100].GetRowNum())
+	s.EqualValues(1, deltaWriters[101].GetRowNum())
+	s.EqualValues(1, deltaWriters[102].GetRowNum())
 
-	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(3)}, targetSegBuffer[100].Pks)
-	s.Equal(storage.NewInt64PrimaryKey(3), targetSegBuffer[101].Pks[0])
-	s.Equal(storage.NewInt64PrimaryKey(3), targetSegBuffer[102].Pks[0])
+	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(3)}, deltaWriters[100].deleteData.Pks)
+	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[101].deleteData.Pks[0])
+	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[102].deleteData.Pks[0])
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
@@ -557,47 +441,24 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
 		description string
 		paths       []string
 
-		expectNilIter bool
-		expectError   bool
+		expectError bool
 	}{
-		{"no error", []string{"correct"}, false, false},
-		{"download error", []string{"error"}, true, true},
-		{"new iter error", []string{"invalid-blobs"}, true, false},
+		{"no error", []string{"correct"}, false},
+		{"download error", []string{"error"}, true},
+		{"deserialize error", []string{"invalid-blobs"}, true},
 	}
 
 	for _, test := range tests {
-		iters, err := s.task.loadDelta(ctx, test.paths)
-		if test.expectNilIter {
-			if len(iters) > 0 {
-				for _, iter := range iters {
-					s.False(iter.HasNext())
-				}
-			} else {
-				s.Nil(iters)
-			}
-		} else {
-			s.NotNil(iters)
-			s.Equal(1, len(iters))
-			s.True(iters[0].HasNext())
-
-			iter := iters[0]
-			var pks []storage.PrimaryKey
-			var tss []storage.Timestamp
-			for iter.HasNext() {
-				labeled, err := iter.Next()
-				s.NoError(err)
-				pks = append(pks, labeled.GetPk())
-				tss = append(tss, labeled.GetTimestamp())
-			}
-
-			s.ElementsMatch(pks, s.dData.Pks)
-			s.ElementsMatch(tss, s.dData.Tss)
-		}
+		dDatas, err := s.task.loadDelta(ctx, test.paths)
 
 		if test.expectError {
 			s.Error(err)
 		} else {
 			s.NoError(err)
+			s.NotEmpty(dDatas)
+			s.EqualValues(1, len(dDatas))
+			s.ElementsMatch(s.dData.Pks, dDatas[0].Pks)
+			s.Equal(s.dData.RowCount, dDatas[0].RowCount)
 		}
 	}
 }
