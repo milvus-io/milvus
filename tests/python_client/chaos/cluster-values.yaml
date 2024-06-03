@@ -140,4 +140,4 @@ extraConfigFiles:
   user.yaml: |+
     common:
       materializedView:
-        enable: true
+        enabled: true
