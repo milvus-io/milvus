@@ -17,6 +17,7 @@
 package vralloc
 
 import (
+	"maps"
 	"sync"
 
 	"github.com/shirou/gopsutil/v3/disk"
@@ -118,7 +119,7 @@ func (a *FixedSizeAllocator) Used() Resource {
 func (a *FixedSizeAllocator) Inspect() map[string]*Resource {
 	a.lock.RLock()
 	defer a.lock.RUnlock()
-	return a.allocs
+	return maps.Clone(a.allocs)
 }
 
 func NewFixedSizeAllocator(limit *Resource) *FixedSizeAllocator {

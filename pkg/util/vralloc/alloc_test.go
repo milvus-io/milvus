@@ -17,6 +17,8 @@
 package vralloc
 
 import (
+	"fmt"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -41,6 +43,22 @@ func TestFixedSizeAllocator(t *testing.T) {
 	assert.Equal(t, 2, len(m))
 	allocated, _ = a.Allocate("a1", &Resource{10, 0, 0})
 	assert.Equal(t, false, allocated)
+}
+
+func TestFixedSizeAllocatorRace(t *testing.T) {
+	a := NewFixedSizeAllocator(&Resource{100, 100, 100})
+	wg := new(sync.WaitGroup)
+	for i := 0; i < 100; i++ {
+		wg.Add(1)
+		go func(index int) {
+			defer wg.Done()
+			allocated, _ := a.Allocate(fmt.Sprintf("a%d", index), &Resource{1, 1, 1})
+			assert.Equal(t, true, allocated)
+		}(i)
+	}
+	wg.Wait()
+	m := a.Inspect()
+	assert.Equal(t, 100, len(m))
 }
 
 func TestPhysicalAwareFixedSizeAllocator(t *testing.T) {
