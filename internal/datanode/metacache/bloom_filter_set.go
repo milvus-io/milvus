@@ -19,10 +19,10 @@ package metacache
 import (
 	"sync"
 
-	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -76,8 +76,9 @@ func (bfs *BloomFilterSet) UpdatePKRange(ids storage.FieldData) error {
 
 	if bfs.current == nil {
 		bfs.current = &storage.PkStatistics{
-			PkFilter: bloom.NewWithEstimates(bfs.batchSize,
-				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat()),
+			PkFilter: bloomfilter.NewBloomFilterWithType(bfs.batchSize,
+				paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
+				paramtable.Get().CommonCfg.BloomFilterType.GetValue()),
 		}
 	}
 

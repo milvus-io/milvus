@@ -65,9 +65,11 @@ require (
 require github.com/milvus-io/milvus-storage/go v0.0.0-20231227072638-ebd0b8e56d70
 
 require (
+	github.com/greatroar/blobloom v0.0.0-00010101000000-000000000000
 	github.com/jolestar/go-commons-pool/v2 v2.1.2
 	github.com/milvus-io/milvus/pkg v0.0.0-00010101000000-000000000000
 	github.com/pkg/errors v0.9.1
+	github.com/zeebo/xxh3 v1.0.2
 	gopkg.in/yaml.v3 v3.0.1
 )
 
@@ -209,7 +211,6 @@ require (
 	github.com/x448/float16 v0.8.4 // indirect
 	github.com/xiang90/probing v0.0.0-20190116061207-43a291ad63a2 // indirect
 	github.com/yusufpapurcu/wmi v1.2.2 // indirect
-	github.com/zeebo/xxh3 v1.0.2 // indirect
 	go.etcd.io/bbolt v1.3.6 // indirect
 	go.etcd.io/etcd/client/pkg/v3 v3.5.5 // indirect
 	go.etcd.io/etcd/client/v2 v2.305.5 // indirect
@@ -250,6 +251,7 @@ replace (
 	github.com/bketelsen/crypt => github.com/bketelsen/crypt v0.0.4 // Fix security alert for core-os/etcd
 	github.com/expr-lang/expr => github.com/SimFG/expr v0.0.0-20231218130003-94d085776dc5
 	github.com/go-kit/kit => github.com/go-kit/kit v0.1.0
+	github.com/greatroar/blobloom => github.com/weiliu1031/blobloom v0.0.0-20240530105622-1e0e104a7160
 	// github.com/milvus-io/milvus-storage/go => ../milvus-storage/go
 	github.com/milvus-io/milvus/pkg => ./pkg
 	github.com/streamnative/pulsarctl => github.com/xiaofan-luan/pulsarctl v0.5.1

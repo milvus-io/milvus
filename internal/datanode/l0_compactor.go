@@ -201,7 +201,7 @@ func (t *levelZeroCompactionTask) linearProcess(ctx context.Context, targetSegme
 		alteredSegments = make(map[int64]*storage.DeleteData)
 	)
 
-	segmentBFs, err := t.loadBF(targetSegments)
+	segmentBFs, err := t.loadBF(ctx, targetSegments)
 	if err != nil {
 		return nil, err
 	}
@@ -254,7 +254,7 @@ func (t *levelZeroCompactionTask) batchProcess(ctx context.Context, targetSegmen
 		return nil, err
 	}
 
-	segmentBFs, err := t.loadBF(targetSegments)
+	segmentBFs, err := t.loadBF(ctx, targetSegments)
 	if err != nil {
 		return nil, err
 	}
@@ -420,11 +420,9 @@ func (t *levelZeroCompactionTask) uploadByCheck(ctx context.Context, requireChec
 	return nil
 }
 
-func (t *levelZeroCompactionTask) loadBF(targetSegments []*datapb.CompactionSegmentBinlogs) (map[int64]*metacache.BloomFilterSet, error) {
-	log := log.Ctx(t.ctx).With(
-		zap.Int64("planID", t.plan.GetPlanID()),
-		zap.String("type", t.plan.GetType().String()),
-	)
+func (t *levelZeroCompactionTask) loadBF(ctx context.Context, targetSegments []*datapb.CompactionSegmentBinlogs) (map[int64]*metacache.BloomFilterSet, error) {
+	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact loadBF")
+	defer span.End()
 
 	var (
 		futures = make([]*conc.Future[any], 0, len(targetSegments))
@@ -436,13 +434,16 @@ func (t *levelZeroCompactionTask) loadBF(targetSegments []*datapb.CompactionSegm
 
 	for _, segment := range targetSegments {
 		segment := segment
+		innerCtx := ctx
 		future := pool.Submit(func() (any, error) {
 			_ = binlog.DecompressBinLog(storage.StatsBinlog, segment.GetCollectionID(),
 				segment.GetPartitionID(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
-			pks, err := loadStats(t.ctx, t.cm,
-				t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
+			pks, err := loadStats(innerCtx, t.cm, t.plan.GetSchema(), segment.GetSegmentID(), segment.GetField2StatslogPaths())
 			if err != nil {
-				log.Warn("failed to load segment stats log", zap.Error(err))
+				log.Warn("failed to load segment stats log",
+					zap.Int64("planID", t.plan.GetPlanID()),
+					zap.String("type", t.plan.GetType().String()),
+					zap.Error(err))
 				return err, err
 			}
 			bf := metacache.NewBloomFilterSet(pks...)

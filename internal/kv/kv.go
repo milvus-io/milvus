@@ -91,5 +91,6 @@ type SnapShotKV interface {
 	Load(key string, ts typeutil.Timestamp) (string, error)
 	MultiSave(kvs map[string]string, ts typeutil.Timestamp) error
 	LoadWithPrefix(key string, ts typeutil.Timestamp) ([]string, []string, error)
+	MultiSaveAndRemove(saves map[string]string, removals []string, ts typeutil.Timestamp) error
 	MultiSaveAndRemoveWithPrefix(saves map[string]string, removals []string, ts typeutil.Timestamp) error
 }

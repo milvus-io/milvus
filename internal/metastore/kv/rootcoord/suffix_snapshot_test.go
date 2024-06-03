@@ -673,6 +673,82 @@ func Test_SuffixSnapshotMultiSaveAndRemoveWithPrefix(t *testing.T) {
 	ss.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{""}, 0)
 }
 
+func Test_SuffixSnapshotMultiSaveAndRemove(t *testing.T) {
+	rand.Seed(time.Now().UnixNano())
+	randVal := rand.Int()
+
+	rootPath := fmt.Sprintf("/test/meta/%d", randVal)
+	sep := "_ts"
+
+	etcdCli, err := etcd.GetEtcdClient(
+		Params.EtcdCfg.UseEmbedEtcd.GetAsBool(),
+		Params.EtcdCfg.EtcdUseSSL.GetAsBool(),
+		Params.EtcdCfg.Endpoints.GetAsStrings(),
+		Params.EtcdCfg.EtcdTLSCert.GetValue(),
+		Params.EtcdCfg.EtcdTLSKey.GetValue(),
+		Params.EtcdCfg.EtcdTLSCACert.GetValue(),
+		Params.EtcdCfg.EtcdTLSMinVersion.GetValue())
+	require.Nil(t, err)
+	defer etcdCli.Close()
+	etcdkv := etcdkv.NewEtcdKV(etcdCli, rootPath)
+	require.Nil(t, err)
+	defer etcdkv.Close()
+
+	var vtso typeutil.Timestamp
+	ftso := func() typeutil.Timestamp {
+		return vtso
+	}
+
+	ss, err := NewSuffixSnapshot(etcdkv, sep, rootPath, snapshotPrefix)
+	assert.NoError(t, err)
+	assert.NotNil(t, ss)
+	defer ss.Close()
+
+	for i := 0; i < 20; i++ {
+		vtso = typeutil.Timestamp(100 + i*5)
+		ts := ftso()
+		err = ss.Save(fmt.Sprintf("kd-%04d", i), fmt.Sprintf("value-%d", i), ts)
+		assert.NoError(t, err)
+		assert.Equal(t, vtso, ts)
+	}
+	for i := 20; i < 40; i++ {
+		sm := map[string]string{"ks": fmt.Sprintf("value-%d", i)}
+		dm := []string{fmt.Sprintf("kd-%04d", i-20)}
+		vtso = typeutil.Timestamp(100 + i*5)
+		ts := ftso()
+		err = ss.MultiSaveAndRemove(sm, dm, ts)
+		assert.NoError(t, err)
+		assert.Equal(t, vtso, ts)
+	}
+	for i := 0; i < 20; i++ {
+		val, err := ss.Load(fmt.Sprintf("kd-%04d", i), typeutil.Timestamp(100+i*5+2))
+		assert.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
+		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		assert.NoError(t, err)
+		assert.Equal(t, i+1, len(vals))
+	}
+	for i := 20; i < 40; i++ {
+		val, err := ss.Load("ks", typeutil.Timestamp(100+i*5+2))
+		assert.NoError(t, err)
+		assert.Equal(t, fmt.Sprintf("value-%d", i), val)
+		_, vals, err := ss.LoadWithPrefix("kd-", typeutil.Timestamp(100+i*5+2))
+		assert.NoError(t, err)
+		assert.Equal(t, 39-i, len(vals))
+	}
+
+	// try to load
+	_, err = ss.Load("kd-0000", 500)
+	assert.Error(t, err)
+	_, err = ss.Load("kd-0000", 0)
+	assert.Error(t, err)
+	_, err = ss.Load("kd-0000", 1)
+	assert.Error(t, err)
+
+	// cleanup
+	ss.MultiSaveAndRemoveWithPrefix(map[string]string{}, []string{""}, 0)
+}
+
 func TestSuffixSnapshot_LoadWithPrefix(t *testing.T) {
 	rand.Seed(time.Now().UnixNano())
 	randVal := rand.Int()
