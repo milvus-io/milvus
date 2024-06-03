@@ -61,6 +61,7 @@ message QueryInfo {
   int64 round_decimal = 5;
   int64 group_by_field_id = 6;
   bool materialized_view_involved = 7;
+  int64 group_size = 8;
 }
 
 message ColumnInfo {

@@ -21,9 +21,9 @@
 #include "common/type_c.h"
 #include "common/QueryResult.h"
 #include "query/PlanImpl.h"
-#include "ReduceStructure.h"
+#include "segcore/ReduceStructure.h"
 #include "common/Tracer.h"
-#include "segment_c.h"
+#include "segcore/segment_c.h"
 
 namespace milvus::segcore {
 
@@ -60,11 +60,16 @@ class ReduceHelper {
     }
 
  protected:
-    void
+    virtual void
     FilterInvalidSearchResult(SearchResult* search_result);
 
     void
-    RefreshSearchResult();
+    RefreshSearchResults();
+
+    virtual void
+    RefreshSingleSearchResult(SearchResult* search_result,
+                              int seg_res_idx,
+                              std::vector<int64_t>& real_topks);
 
     void
     FillPrimaryKey();
@@ -72,17 +77,24 @@ class ReduceHelper {
     void
     ReduceResultData();
 
+    virtual int64_t
+    ReduceSearchResultForOneNQ(int64_t qi,
+                               int64_t topk,
+                               int64_t& result_offset);
+
+    virtual void
+    FillOtherData(int result_count,
+                  int64_t nq_begin,
+                  int64_t nq_end,
+                  std::unique_ptr<milvus::proto::schema::SearchResultData>&
+                      search_res_data);
+
  private:
     void
     Initialize();
 
     void
     FillEntryData();
-
-    int64_t
-    ReduceSearchResultForOneNQ(int64_t qi,
-                               int64_t topk,
-                               int64_t& result_offset);
 
     std::vector<char>
     GetSearchResultDataSlice(int slice_index_);
@@ -94,25 +106,16 @@ class ReduceHelper {
     std::vector<int64_t> slice_nqs_prefix_sum_;
     int64_t num_segments_;
     std::vector<int64_t> slice_topKs_;
-    std::priority_queue<SearchResultPair*,
-                        std::vector<SearchResultPair*>,
-                        SearchResultPairComparator>
-        heap_;
     // Used for merge results,
     // define these here to avoid allocating them for each query
     std::vector<SearchResultPair> pairs_;
     std::unordered_set<milvus::PkType> pk_set_;
-    std::unordered_set<milvus::GroupByValueType> group_by_val_set_;
     // dim0: num_segments_; dim1: total_nq_; dim2: offset
     std::vector<std::vector<std::vector<int64_t>>> final_search_records_;
-
- private:
     std::vector<int64_t> slice_nqs_;
     int64_t total_nq_;
-
     // output
     std::unique_ptr<SearchResultDataBlobs> search_result_data_blobs_;
-
     tracer::TraceContext* trace_ctx_;
 };
 

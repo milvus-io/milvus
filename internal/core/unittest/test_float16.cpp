@@ -16,7 +16,7 @@
 #include "index/IndexFactory.h"
 #include "knowhere/comp/index_param.h"
 #include "query/ExprImpl.h"
-#include "segcore/Reduce.h"
+#include "segcore/reduce/Reduce.h"
 #include "segcore/reduce_c.h"
 #include "test_utils/DataGen.h"
 #include "test_utils/PbHelper.h"
