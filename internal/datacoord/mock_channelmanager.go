@@ -244,13 +244,13 @@ func (_c *MockChannelManager_GetChannel_Call) RunAndReturn(run func(int64, strin
 	return _c
 }
 
-// GetChannelNamesByCollectionID provides a mock function with given fields: collectionID
-func (_m *MockChannelManager) GetChannelNamesByCollectionID(collectionID int64) []string {
-	ret := _m.Called(collectionID)
+// GetChannelNamesByCollectionID provides a mock function with given fields: collectionID, allowBufferNode
+func (_m *MockChannelManager) GetChannelNamesByCollectionID(collectionID int64, allowBufferNode bool) []string {
+	ret := _m.Called(collectionID, allowBufferNode)
 
 	var r0 []string
-	if rf, ok := ret.Get(0).(func(int64) []string); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(int64, bool) []string); ok {
+		r0 = rf(collectionID, allowBufferNode)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]string)
@@ -267,13 +267,14 @@ type MockChannelManager_GetChannelNamesByCollectionID_Call struct {
 
 // GetChannelNamesByCollectionID is a helper method to define mock.On call
 //   - collectionID int64
-func (_e *MockChannelManager_Expecter) GetChannelNamesByCollectionID(collectionID interface{}) *MockChannelManager_GetChannelNamesByCollectionID_Call {
-	return &MockChannelManager_GetChannelNamesByCollectionID_Call{Call: _e.mock.On("GetChannelNamesByCollectionID", collectionID)}
+//   - allowBufferNode bool
+func (_e *MockChannelManager_Expecter) GetChannelNamesByCollectionID(collectionID interface{}, allowBufferNode interface{}) *MockChannelManager_GetChannelNamesByCollectionID_Call {
+	return &MockChannelManager_GetChannelNamesByCollectionID_Call{Call: _e.mock.On("GetChannelNamesByCollectionID", collectionID, allowBufferNode)}
 }
 
-func (_c *MockChannelManager_GetChannelNamesByCollectionID_Call) Run(run func(collectionID int64)) *MockChannelManager_GetChannelNamesByCollectionID_Call {
+func (_c *MockChannelManager_GetChannelNamesByCollectionID_Call) Run(run func(collectionID int64, allowBufferNode bool)) *MockChannelManager_GetChannelNamesByCollectionID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(bool))
 	})
 	return _c
 }
@@ -283,18 +284,18 @@ func (_c *MockChannelManager_GetChannelNamesByCollectionID_Call) Return(_a0 []st
 	return _c
 }
 
-func (_c *MockChannelManager_GetChannelNamesByCollectionID_Call) RunAndReturn(run func(int64) []string) *MockChannelManager_GetChannelNamesByCollectionID_Call {
+func (_c *MockChannelManager_GetChannelNamesByCollectionID_Call) RunAndReturn(run func(int64, bool) []string) *MockChannelManager_GetChannelNamesByCollectionID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetChannelsByCollectionID provides a mock function with given fields: collectionID
-func (_m *MockChannelManager) GetChannelsByCollectionID(collectionID int64) []RWChannel {
-	ret := _m.Called(collectionID)
+// GetChannelsByCollectionID provides a mock function with given fields: collectionID, allowBufferNode
+func (_m *MockChannelManager) GetChannelsByCollectionID(collectionID int64, allowBufferNode bool) []RWChannel {
+	ret := _m.Called(collectionID, allowBufferNode)
 
 	var r0 []RWChannel
-	if rf, ok := ret.Get(0).(func(int64) []RWChannel); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(int64, bool) []RWChannel); ok {
+		r0 = rf(collectionID, allowBufferNode)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).([]RWChannel)
@@ -311,13 +312,14 @@ type MockChannelManager_GetChannelsByCollectionID_Call struct {
 
 // GetChannelsByCollectionID is a helper method to define mock.On call
 //   - collectionID int64
-func (_e *MockChannelManager_Expecter) GetChannelsByCollectionID(collectionID interface{}) *MockChannelManager_GetChannelsByCollectionID_Call {
-	return &MockChannelManager_GetChannelsByCollectionID_Call{Call: _e.mock.On("GetChannelsByCollectionID", collectionID)}
+//   - allowBufferNode bool
+func (_e *MockChannelManager_Expecter) GetChannelsByCollectionID(collectionID interface{}, allowBufferNode interface{}) *MockChannelManager_GetChannelsByCollectionID_Call {
+	return &MockChannelManager_GetChannelsByCollectionID_Call{Call: _e.mock.On("GetChannelsByCollectionID", collectionID, allowBufferNode)}
 }
 
-func (_c *MockChannelManager_GetChannelsByCollectionID_Call) Run(run func(collectionID int64)) *MockChannelManager_GetChannelsByCollectionID_Call {
+func (_c *MockChannelManager_GetChannelsByCollectionID_Call) Run(run func(collectionID int64, allowBufferNode bool)) *MockChannelManager_GetChannelsByCollectionID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(bool))
 	})
 	return _c
 }
@@ -327,18 +329,18 @@ func (_c *MockChannelManager_GetChannelsByCollectionID_Call) Return(_a0 []RWChan
 	return _c
 }
 
-func (_c *MockChannelManager_GetChannelsByCollectionID_Call) RunAndReturn(run func(int64) []RWChannel) *MockChannelManager_GetChannelsByCollectionID_Call {
+func (_c *MockChannelManager_GetChannelsByCollectionID_Call) RunAndReturn(run func(int64, bool) []RWChannel) *MockChannelManager_GetChannelsByCollectionID_Call {
 	_c.Call.Return(run)
 	return _c
 }
 
-// GetNodeChannelsByCollectionID provides a mock function with given fields: collectionID
-func (_m *MockChannelManager) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
-	ret := _m.Called(collectionID)
+// GetNodeChannelsByCollectionID provides a mock function with given fields: collectionID, allowBufferNode
+func (_m *MockChannelManager) GetNodeChannelsByCollectionID(collectionID int64, allowBufferNode bool) map[int64][]string {
+	ret := _m.Called(collectionID, allowBufferNode)
 
 	var r0 map[int64][]string
-	if rf, ok := ret.Get(0).(func(int64) map[int64][]string); ok {
-		r0 = rf(collectionID)
+	if rf, ok := ret.Get(0).(func(int64, bool) map[int64][]string); ok {
+		r0 = rf(collectionID, allowBufferNode)
 	} else {
 		if ret.Get(0) != nil {
 			r0 = ret.Get(0).(map[int64][]string)
@@ -355,13 +357,14 @@ type MockChannelManager_GetNodeChannelsByCollectionID_Call struct {
 
 // GetNodeChannelsByCollectionID is a helper method to define mock.On call
 //   - collectionID int64
-func (_e *MockChannelManager_Expecter) GetNodeChannelsByCollectionID(collectionID interface{}) *MockChannelManager_GetNodeChannelsByCollectionID_Call {
-	return &MockChannelManager_GetNodeChannelsByCollectionID_Call{Call: _e.mock.On("GetNodeChannelsByCollectionID", collectionID)}
+//   - allowBufferNode bool
+func (_e *MockChannelManager_Expecter) GetNodeChannelsByCollectionID(collectionID interface{}, allowBufferNode interface{}) *MockChannelManager_GetNodeChannelsByCollectionID_Call {
+	return &MockChannelManager_GetNodeChannelsByCollectionID_Call{Call: _e.mock.On("GetNodeChannelsByCollectionID", collectionID, allowBufferNode)}
 }
 
-func (_c *MockChannelManager_GetNodeChannelsByCollectionID_Call) Run(run func(collectionID int64)) *MockChannelManager_GetNodeChannelsByCollectionID_Call {
+func (_c *MockChannelManager_GetNodeChannelsByCollectionID_Call) Run(run func(collectionID int64, allowBufferNode bool)) *MockChannelManager_GetNodeChannelsByCollectionID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(bool))
 	})
 	return _c
 }
@@ -371,7 +374,7 @@ func (_c *MockChannelManager_GetNodeChannelsByCollectionID_Call) Return(_a0 map[
 	return _c
 }
 
-func (_c *MockChannelManager_GetNodeChannelsByCollectionID_Call) RunAndReturn(run func(int64) map[int64][]string) *MockChannelManager_GetNodeChannelsByCollectionID_Call {
+func (_c *MockChannelManager_GetNodeChannelsByCollectionID_Call) RunAndReturn(run func(int64, bool) map[int64][]string) *MockChannelManager_GetNodeChannelsByCollectionID_Call {
 	_c.Call.Return(run)
 	return _c
 }

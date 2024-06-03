@@ -179,16 +179,16 @@ func (_c *MockRWChannelStore_GetNodeChannelCount_Call) RunAndReturn(run func(int
 	return _c
 }
 
-// GetNodeChannelsByCollectionID provides a mock function with given fields: collectionID
-func (_m *MockRWChannelStore) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
-	ret := _m.Called(collectionID)
+// GetNodeChannelsByCollectionID provides a mock function with given fields: collectionID, allowBufferNode
+func (_m *MockRWChannelStore) GetNodeChannelsByCollectionID(collectionID int64, allowBufferNode bool) map[int64][]RWChannel {
+	ret := _m.Called(collectionID, allowBufferNode)
 
-	var r0 map[int64][]string
-	if rf, ok := ret.Get(0).(func(int64) map[int64][]string); ok {
-		r0 = rf(collectionID)
+	var r0 map[int64][]RWChannel
+	if rf, ok := ret.Get(0).(func(int64, bool) map[int64][]RWChannel); ok {
+		r0 = rf(collectionID, allowBufferNode)
 	} else {
 		if ret.Get(0) != nil {
-			r0 = ret.Get(0).(map[int64][]string)
+			r0 = ret.Get(0).(map[int64][]RWChannel)
 		}
 	}
 
@@ -202,23 +202,24 @@ type MockRWChannelStore_GetNodeChannelsByCollectionID_Call struct {
 
 // GetNodeChannelsByCollectionID is a helper method to define mock.On call
 //   - collectionID int64
-func (_e *MockRWChannelStore_Expecter) GetNodeChannelsByCollectionID(collectionID interface{}) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
-	return &MockRWChannelStore_GetNodeChannelsByCollectionID_Call{Call: _e.mock.On("GetNodeChannelsByCollectionID", collectionID)}
+//   - allowBufferNode bool
+func (_e *MockRWChannelStore_Expecter) GetNodeChannelsByCollectionID(collectionID interface{}, allowBufferNode interface{}) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
+	return &MockRWChannelStore_GetNodeChannelsByCollectionID_Call{Call: _e.mock.On("GetNodeChannelsByCollectionID", collectionID, allowBufferNode)}
 }
 
-func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) Run(run func(collectionID int64)) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
+func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) Run(run func(collectionID int64, allowBufferNode bool)) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
 	_c.Call.Run(func(args mock.Arguments) {
-		run(args[0].(int64))
+		run(args[0].(int64), args[1].(bool))
 	})
 	return _c
 }
 
-func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) Return(_a0 map[int64][]string) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
+func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) Return(_a0 map[int64][]RWChannel) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
 	_c.Call.Return(_a0)
 	return _c
 }
 
-func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) RunAndReturn(run func(int64) map[int64][]string) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
+func (_c *MockRWChannelStore_GetNodeChannelsByCollectionID_Call) RunAndReturn(run func(int64, bool) map[int64][]RWChannel) *MockRWChannelStore_GetNodeChannelsByCollectionID_Call {
 	_c.Call.Return(run)
 	return _c
 }

@@ -136,7 +136,7 @@ func (s *Server) Flush(ctx context.Context, req *datapb.FlushRequest) (*datapb.F
 
 	var isUnimplemented bool
 	err = retry.Do(ctx, func() error {
-		nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(req.GetCollectionID())
+		nodeChannels := s.channelManager.GetNodeChannelsByCollectionID(req.GetCollectionID(), false)
 
 		for nodeID, channelNames := range nodeChannels {
 			err = s.cluster.FlushChannels(ctx, nodeID, ts, channelNames)
@@ -825,7 +825,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			Status: merr.Status(err),
 		}, nil
 	}
-	channels := s.channelManager.GetChannelsByCollectionID(collectionID)
+	channels := s.channelManager.GetChannelsByCollectionID(collectionID, true)
 	channelInfos := make([]*datapb.VchannelInfo, 0, len(channels))
 	flushedIDs := make(typeutil.UniqueSet)
 	for _, ch := range channels {
@@ -1293,7 +1293,7 @@ func (s *Server) GetFlushState(ctx context.Context, req *datapb.GetFlushStateReq
 		}
 	}
 
-	channels := s.channelManager.GetChannelsByCollectionID(req.GetCollectionID())
+	channels := s.channelManager.GetChannelsByCollectionID(req.GetCollectionID(), true)
 	if len(channels) == 0 { // For compatibility with old client
 		resp.Flushed = true
 

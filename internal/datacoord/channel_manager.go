@@ -493,30 +493,40 @@ func (c *ChannelManagerImpl) GetBufferChannels() *NodeChannelInfo {
 }
 
 // GetNodeChannelsByCollectionID gets all node channels map of the collection
-func (c *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
+func (c *ChannelManagerImpl) GetNodeChannelsByCollectionID(collectionID UniqueID, allowBufferNode bool) map[UniqueID][]string {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
-	return c.store.GetNodeChannelsByCollectionID(collectionID)
+	nodeChannels := c.store.GetNodeChannelsByCollectionID(collectionID, allowBufferNode)
+	result := make(map[UniqueID][]string)
+	for id, chs := range nodeChannels {
+		var channels []string
+		for _, ch := range chs {
+			channels = append(channels, ch.GetName())
+		}
+		if len(channels) > 0 {
+			result[id] = channels
+		}
+	}
+	return result
 }
 
 // Get all channels belong to the collection
-func (c *ChannelManagerImpl) GetChannelsByCollectionID(collectionID UniqueID) []RWChannel {
-	channels := make([]RWChannel, 0)
-	for _, nodeChannels := range c.GetAssignedChannels() {
-		for _, ch := range nodeChannels.Channels {
-			if ch.GetCollectionID() == collectionID {
-				channels = append(channels, ch)
-			}
-		}
+func (c *ChannelManagerImpl) GetChannelsByCollectionID(collectionID UniqueID, allowBufferNode bool) []RWChannel {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	nodeChannels := c.store.GetNodeChannelsByCollectionID(collectionID, allowBufferNode)
+	var result []RWChannel
+	for _, chs := range nodeChannels {
+		result = append(result, chs...)
 	}
-	return channels
+	return result
 }
 
 // Get all channel names belong to the collection
-func (c *ChannelManagerImpl) GetChannelNamesByCollectionID(collectionID UniqueID) []string {
-	channels := c.GetChannelsByCollectionID(collectionID)
-	return lo.Map(channels, func(channel RWChannel, _ int) string {
-		return channel.GetName()
+func (c *ChannelManagerImpl) GetChannelNamesByCollectionID(collectionID UniqueID, allowBufferNode bool) []string {
+	channels := c.GetChannelsByCollectionID(collectionID, allowBufferNode)
+	return lo.Map(channels, func(ch RWChannel, _ int) string {
+		return ch.GetName()
 	})
 }
 
