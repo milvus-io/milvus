@@ -144,6 +144,17 @@ func (s *SegmentsInfo) GetSegmentsBySelector(filters ...SegmentFilter) []*Segmen
 	return result
 }
 
+func (s *SegmentsInfo) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
+	channelSegments := s.secondaryIndexes.channel2Segments[channel]
+	var result []*SegmentInfo
+	for _, segment := range channelSegments {
+		if !segment.GetIsFake() {
+			result = append(result, segment)
+		}
+	}
+	return result
+}
+
 // GetCompactionTo returns the segment that the provided segment is compacted to.
 // Return (nil, false) if given segmentID can not found in the meta.
 // Return (nil, true) if given segmentID can be found not no compaction to.
