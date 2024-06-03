@@ -203,7 +203,7 @@ func (s *SyncTaskSuiteV2) TestRunNormal() {
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	})
+	}, 16)
 	s.Require().NoError(err)
 
 	ids := []int64{1, 2, 3, 4, 5, 6, 7}
