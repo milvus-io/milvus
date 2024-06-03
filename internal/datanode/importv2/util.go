@@ -190,7 +190,7 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
 		}
 	}
-	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, no need to append rowID and ts
+	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts
 		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	}
 	if _, ok := data.Data[common.TimeStampField]; !ok {
