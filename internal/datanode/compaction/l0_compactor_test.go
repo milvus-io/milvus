@@ -109,7 +109,7 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
 
 	s.task.plan = plan
 	s.task.tr = timerecord.NewTimeRecorder("test")
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock download fail")).Twice()
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return(nil, errors.New("mock download fail")).Once()
 
 	targetSegments := lo.Filter(plan.SegmentBinlogs, func(s *datapb.CompactionSegmentBinlogs, _ int) bool {
 		return s.Level == datapb.SegmentLevel_L1
@@ -168,7 +168,7 @@ func (s *LevelZeroCompactionTaskSuite) TestProcessUploadByCheckFail() {
 	cm.EXPECT().MultiRead(mock.Anything, mock.Anything).Return([][]byte{sw.GetBuffer()}, nil)
 	s.task.cm = cm
 
-	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Times(2)
+	s.mockBinlogIO.EXPECT().Download(mock.Anything, mock.Anything).Return([][]byte{s.dBlob}, nil).Once()
 	mockAlloc := allocator.NewMockAllocator(s.T())
 	mockAlloc.EXPECT().AllocOne().Return(0, errors.New("mock alloc err"))
 	s.task.allocator = mockAlloc
