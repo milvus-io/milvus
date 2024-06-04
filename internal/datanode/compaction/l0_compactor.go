@@ -150,8 +150,8 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 		}
 	}
 
-	maxConcurrency := getMaxConcurrentSegmentCount(totalSize)
-	resultSegments, err := t.process(ctx, maxConcurrency, targetSegments, lo.Values(totalDeltalogs)...)
+	batchSize := getMaxBatchSize(totalSize)
+	resultSegments, err := t.process(ctx, batchSize, targetSegments, lo.Values(totalDeltalogs)...)
 	if err != nil {
 		return nil, err
 	}
@@ -171,9 +171,8 @@ func (t *LevelZeroCompactionTask) Compact() (*datapb.CompactionPlanResult, error
 	return result, nil
 }
 
-// control the written deltalogs count within a batch, make sure that
-// totalSize * COUNT < memLimit
-func getMaxConcurrentSegmentCount(totalSize int64) int {
+// batch size means segment count
+func getMaxBatchSize(totalSize int64) int {
 	max := 1
 	memLimit := float64(hardware.GetFreeMemoryCount()) * paramtable.Get().DataNodeCfg.L0BatchMemoryRatio.GetAsFloat()
 	if memLimit > float64(totalSize) {
@@ -250,6 +249,10 @@ func (t *LevelZeroCompactionTask) splitDelta(
 		return predicts
 	}
 
+	allSeg := lo.Associate(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) (int64, *datapb.CompactionSegmentBinlogs) {
+		return segment.GetSegmentID(), segment
+	})
+
 	// spilt all delete data to segments
 	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
 	for _, delta := range allDelta {
@@ -259,10 +262,7 @@ func (t *LevelZeroCompactionTask) splitDelta(
 			for _, gotSeg := range predicted {
 				writer, ok := targetSegBuffer[gotSeg]
 				if !ok {
-					segment, _ := lo.Find(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) bool {
-						return segment.GetSegmentID() == gotSeg
-					})
-
+					segment, _ := allSeg(gotSeg)
 					writer = NewSegmentDeltaWriter(gotSeg, segment.GetPartitionID(), segment.GetCollectionID())
 					targetSegBuffer[gotSeg] = writer
 				}
@@ -274,17 +274,17 @@ func (t *LevelZeroCompactionTask) splitDelta(
 	return targetSegBuffer
 }
 
-func (t *LevelZeroCompactionTask) process(ctx context.Context, maxConcurrency int, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
+func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact process")
 	defer span.End()
 
 	results := make([]*datapb.CompactionSegment, 0)
-	iterCount := int(math.Ceil(float64(len(targetSegments)) / float64(maxConcurrency)))
+	batch := int(math.Ceil(float64(len(targetSegments)) / float64(batchSize)))
 	log := log.Ctx(t.ctx).With(
 		zap.Int64("planID", t.plan.GetPlanID()),
-		zap.Int("max conc segment counts", maxConcurrency),
+		zap.Int("max conc segment counts", batchSize),
 		zap.Int("total segment counts", len(targetSegments)),
-		zap.Int("total batch", iterCount),
+		zap.Int("total batch", batch),
 	)
 
 	log.Info("L0 compaction process start")
@@ -294,12 +294,12 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, maxConcurrency in
 		return nil, err
 	}
 
-	for i := 0; i < iterCount; i++ {
-		safeRight := (i + 1) * maxConcurrency
-		if (i+1)*maxConcurrency > len(targetSegments) {
-			safeRight = len(targetSegments)
+	for i := 0; i < batch; i++ {
+		left, right := i*batchSize, (i+1)*batchSize
+		if right >= len(targetSegments) {
+			right = len(targetSegments)
 		}
-		batchSegments := targetSegments[i*maxConcurrency : safeRight]
+		batchSegments := targetSegments[left, right]
 		segmentBFs, err := t.loadBF(ctx, batchSegments)
 		if err != nil {
 			log.Warn("L0 compaction loadBF fail", zap.Error(err))
