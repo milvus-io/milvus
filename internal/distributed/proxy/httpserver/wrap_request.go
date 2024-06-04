@@ -163,7 +163,6 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
-
 	case schemapb.DataType_Double:
 		data := []float64{}
 		err := json.Unmarshal(raw, &data)
@@ -179,7 +178,6 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
-
 	case schemapb.DataType_FloatVector:
 		wrappedData := [][]float32{}
 		err := json.Unmarshal(raw, &wrappedData)
@@ -213,6 +211,105 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				},
 			},
 		}
+	case schemapb.DataType_BinaryVector:
+		wrappedData := [][]byte{}
+		err := json.Unmarshal(raw, &wrappedData)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		if len(wrappedData) < 1 {
+			return nil, errors.New("at least one row for insert")
+		}
+		array0 := wrappedData[0]
+		rowBytes := len(array0)
+		if rowBytes < 1 {
+			return nil, errors.New("empty row")
+		}
+		data := make([]byte, len(wrappedData)*rowBytes)
+
+		var i int
+		for _, dataArray := range wrappedData {
+			for _, v := range dataArray {
+				data[i] = v
+				i++
+			}
+		}
+		ret.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(rowBytes * 8),
+				Data: &schemapb.VectorField_BinaryVector{
+					BinaryVector: data,
+				},
+			},
+		}
+	case schemapb.DataType_Float16Vector:
+		wrappedData := [][]byte{}
+		err := json.Unmarshal(raw, &wrappedData)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		if len(wrappedData) < 1 {
+			return nil, errors.New("at least one row for insert")
+		}
+		array0 := wrappedData[0]
+		rowBytes := len(array0)
+		if rowBytes < 1 {
+			return nil, errors.New("empty row")
+		}
+		if rowBytes%2 != 0 {
+			return nil, errors.New("illegal Float16Vector")
+		}
+		data := make([]byte, len(wrappedData)*rowBytes)
+
+		var i int
+		for _, dataArray := range wrappedData {
+			for _, v := range dataArray {
+				data[i] = v
+				i++
+			}
+		}
+		ret.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(rowBytes / 2),
+				Data: &schemapb.VectorField_Float16Vector{
+					Float16Vector: data,
+				},
+			},
+		}
+	case schemapb.DataType_BFloat16Vector:
+		wrappedData := [][]byte{}
+		err := json.Unmarshal(raw, &wrappedData)
+		if err != nil {
+			return nil, newFieldDataError(f.FieldName, err)
+		}
+		if len(wrappedData) < 1 {
+			return nil, errors.New("at least one row for insert")
+		}
+		array0 := wrappedData[0]
+		rowBytes := len(array0)
+		if rowBytes < 1 {
+			return nil, errors.New("empty row")
+		}
+		if rowBytes%2 != 0 {
+			return nil, errors.New("illegal Bfloat16Vector")
+		}
+		data := make([]byte, len(wrappedData)*rowBytes)
+
+		var i int
+		for _, dataArray := range wrappedData {
+			for _, v := range dataArray {
+				data[i] = v
+				i++
+			}
+		}
+		ret.Field = &schemapb.FieldData_Vectors{
+			Vectors: &schemapb.VectorField{
+				Dim: int64(rowBytes / 2),
+				Data: &schemapb.VectorField_Bfloat16Vector{
+					Bfloat16Vector: data,
+				},
+			},
+		}
 	case schemapb.DataType_SparseFloatVector:
 		var wrappedData []map[string]interface{}
 		err := json.Unmarshal(raw, &wrappedData)
@@ -235,7 +332,6 @@ func (f *FieldData) AsSchemapb() (*schemapb.FieldData, error) {
 				dim = rowDim
 			}
 		}
-
 		ret.Field = &schemapb.FieldData_Vectors{
 			Vectors: &schemapb.VectorField{
 				Dim: dim,

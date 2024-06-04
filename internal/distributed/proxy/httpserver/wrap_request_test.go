@@ -163,8 +163,7 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		assert.Error(t, err)
 	})
 
-	// vectors
-
+	// float vector
 	t.Run("floatvector_ok", func(t *testing.T) {
 		fieldData := FieldData{
 			Type: schemapb.DataType_FloatVector,
@@ -220,6 +219,203 @@ func TestFieldData_AsSchemapb(t *testing.T) {
 		assert.Error(t, err)
 	})
 
+	// binary vector
+	t.Run("binaryvector_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type: schemapb.DataType_BinaryVector,
+			Field: []byte(`[
+				[1, 2, 3],
+				[4, 5, 6],
+				[7, 8, 9]
+			]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+	})
+	t.Run("binaryvector_empty_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BinaryVector,
+			Field: []byte(""),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("binaryvector_dim=0_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BinaryVector,
+			Field: []byte(`[]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("binaryvector_vectorTypeError_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BinaryVector,
+			Field: []byte(`["1"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("binaryvector_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BinaryVector,
+			Field: []byte(`["a", "b", "c"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+
+	// float16 vector
+	t.Run("float16vector_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type: schemapb.DataType_Float16Vector,
+			Field: []byte(`[
+				[1, 2, 3, 4],
+				[5, 6, 7, 8],
+				[9, 10, 11, 12]
+			]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+	})
+	t.Run("float16vector_empty_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Float16Vector,
+			Field: []byte(""),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("float16vector_dim=0_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Float16Vector,
+			Field: []byte(`[]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("float16vector_vectorTypeError_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Float16Vector,
+			Field: []byte(`["1"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("float16vector_rowLen_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type: schemapb.DataType_Float16Vector,
+			Field: []byte(`[
+				[1, 2, 3],
+				[5, 6, 7],
+				[9, 10, 11]
+			]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("float16vector_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_Float16Vector,
+			Field: []byte(`["a", "b", "c"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+
+	// bfloat16 vector
+	t.Run("bfloat16vector_ok", func(t *testing.T) {
+		fieldData := FieldData{
+			Type: schemapb.DataType_BFloat16Vector,
+			Field: []byte(`[
+				[1, 2, 3, 4],
+				[5, 6, 7, 8],
+				[9, 10, 11, 12]
+			]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.NoError(t, err)
+	})
+	t.Run("bfloat16vector_empty_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BFloat16Vector,
+			Field: []byte(""),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("bfloat16vector_dim=0_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BFloat16Vector,
+			Field: []byte(`[]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("bfloat16vector_vectorTypeError_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BFloat16Vector,
+			Field: []byte(`["1"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("bfloat16vector_rowLen_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type: schemapb.DataType_BFloat16Vector,
+			Field: []byte(`[
+				[1, 2, 3],
+				[5, 6, 7],
+				[9, 10, 11]
+			]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+	t.Run("bfloat16vector_error", func(t *testing.T) {
+		fieldData := FieldData{
+			Type:  schemapb.DataType_BFloat16Vector,
+			Field: []byte(`["a", "b", "c"]`),
+		}
+		raw, _ := json.Marshal(fieldData)
+		json.Unmarshal(raw, &fieldData)
+		_, err := fieldData.AsSchemapb()
+		assert.Error(t, err)
+	})
+
+	// sparse float vector
 	t.Run("sparsefloatvector_ok_1", func(t *testing.T) {
 		fieldData := FieldData{
 			Type: schemapb.DataType_SparseFloatVector,
