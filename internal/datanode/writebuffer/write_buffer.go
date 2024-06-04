@@ -495,11 +495,11 @@ func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*
 				return nil, merr.WrapErrServiceInternal("timestamp column row num not match")
 			}
 
-			timestamps := tsFieldData.GetRows().([]int64)
+			timestamps := tsFieldData.GetDataRows().([]int64)
 
 			switch wb.pkField.GetDataType() {
 			case schemapb.DataType_Int64:
-				pks := pkFieldData.GetRows().([]int64)
+				pks := pkFieldData.GetDataRows().([]int64)
 				for idx, pk := range pks {
 					ts, ok := inData.intPKTs[pk]
 					if !ok || timestamps[idx] < ts {
@@ -507,7 +507,7 @@ func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*
 					}
 				}
 			case schemapb.DataType_VarChar:
-				pks := pkFieldData.GetRows().([]string)
+				pks := pkFieldData.GetDataRows().([]string)
 				for idx, pk := range pks {
 					ts, ok := inData.strPKTs[pk]
 					if !ok || timestamps[idx] < ts {

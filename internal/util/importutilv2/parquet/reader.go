@@ -99,14 +99,14 @@ func (r *reader) Read() (*storage.InsertData, error) {
 OUTER:
 	for {
 		for fieldID, cr := range r.frs {
-			data, err := cr.Next(r.count)
+			data, validData, err := cr.Next(r.count)
 			if err != nil {
 				return nil, err
 			}
 			if data == nil {
 				break OUTER
 			}
-			err = insertData.Data[fieldID].AppendRows(data)
+			err = insertData.Data[fieldID].AppendRows(data, validData)
 			if err != nil {
 				return nil, err
 			}

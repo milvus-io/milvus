@@ -89,7 +89,7 @@ func (r *reader) Read() (*storage.InsertData, error) {
 		if data == nil {
 			return nil, io.EOF
 		}
-		err = insertData.Data[fieldID].AppendRows(data)
+		err = insertData.Data[fieldID].AppendRows(data, nil)
 		if err != nil {
 			return nil, err
 		}

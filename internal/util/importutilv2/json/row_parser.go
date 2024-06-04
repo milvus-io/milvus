@@ -197,6 +197,9 @@ func (r *rowParser) combineDynamicRow(dynamicValues map[string]any, row Row) err
 }
 
 func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
+	if r.id2Field[fieldID].GetNullable() {
+		return r.parseNullableEntity(fieldID, obj)
+	}
 	switch r.id2Field[fieldID].GetDataType() {
 	case schemapb.DataType_Bool:
 		b, ok := obj.(bool)
@@ -386,6 +389,147 @@ func (r *rowParser) parseEntity(fieldID int64, obj any) (any, error) {
 			return nil, r.wrapTypeError(obj, fieldID)
 		}
 	case schemapb.DataType_Array:
+		arr, ok := obj.([]interface{})
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		scalarFieldData, err := r.arrayToFieldData(arr, r.id2Field[fieldID].GetElementType())
+		if err != nil {
+			return nil, err
+		}
+		return scalarFieldData, nil
+	default:
+		return nil, merr.WrapErrImportFailed(fmt.Sprintf("parse json failed, unsupport data type: %s",
+			r.id2Field[fieldID].GetDataType().String()))
+	}
+}
+
+func (r *rowParser) parseNullableEntity(fieldID int64, obj any) (any, error) {
+	switch r.id2Field[fieldID].GetDataType() {
+	case schemapb.DataType_Bool:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(bool)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		return value, nil
+	case schemapb.DataType_Int8:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(json.Number)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		num, err := strconv.ParseInt(value.String(), 0, 8)
+		if err != nil {
+			return nil, err
+		}
+		return int8(num), nil
+	case schemapb.DataType_Int16:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(json.Number)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		num, err := strconv.ParseInt(value.String(), 0, 16)
+		if err != nil {
+			return nil, err
+		}
+		return int16(num), nil
+	case schemapb.DataType_Int32:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(json.Number)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		num, err := strconv.ParseInt(value.String(), 0, 32)
+		if err != nil {
+			return nil, err
+		}
+		return int32(num), nil
+	case schemapb.DataType_Int64:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(json.Number)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		num, err := strconv.ParseInt(value.String(), 0, 64)
+		if err != nil {
+			return nil, err
+		}
+		return num, nil
+	case schemapb.DataType_Float:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(json.Number)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		num, err := strconv.ParseFloat(value.String(), 32)
+		if err != nil {
+			return nil, err
+		}
+		return float32(num), nil
+	case schemapb.DataType_Double:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(json.Number)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		num, err := strconv.ParseFloat(value.String(), 64)
+		if err != nil {
+			return nil, err
+		}
+		return num, nil
+	case schemapb.DataType_BinaryVector, schemapb.DataType_FloatVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector, schemapb.DataType_SparseFloatVector:
+		return nil, merr.WrapErrParameterInvalidMsg("not support nullable in vector")
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		if obj == nil {
+			return nil, nil
+		}
+		value, ok := obj.(string)
+		if !ok {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+		return value, nil
+	case schemapb.DataType_JSON:
+		if obj == nil {
+			return nil, nil
+		}
+		// for JSON data, we accept two kinds input: string and map[string]interface
+		// user can write JSON content as {"FieldJSON": "{\"x\": 8}"} or {"FieldJSON": {"x": 8}}
+		if value, ok := obj.(string); ok {
+			var dummy interface{}
+			err := json.Unmarshal([]byte(value), &dummy)
+			if err != nil {
+				return nil, err
+			}
+			return []byte(value), nil
+		} else if mp, ok := obj.(map[string]interface{}); ok {
+			bs, err := json.Marshal(mp)
+			if err != nil {
+				return nil, err
+			}
+			return bs, nil
+		} else {
+			return nil, r.wrapTypeError(obj, fieldID)
+		}
+	case schemapb.DataType_Array:
+		if obj == nil {
+			return nil, nil
+		}
 		arr, ok := obj.([]interface{})
 		if !ok {
 			return nil, r.wrapTypeError(obj, fieldID)

@@ -125,7 +125,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 		dType := field.GetDataType()
 		switch dType {
 		case schemapb.DataType_BinaryVector:
-			rows := fieldData.GetRows().([]byte)
+			rows := fieldData.GetDataRows().([]byte)
 			if dim != fieldData.(*storage.BinaryVectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.BinaryVectorFieldData).Dim))
 			}
@@ -137,7 +137,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			}
 			data = chunkedRows
 		case schemapb.DataType_FloatVector:
-			rows := fieldData.GetRows().([]float32)
+			rows := fieldData.GetDataRows().([]float32)
 			if dim != fieldData.(*storage.FloatVectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.FloatVectorFieldData).Dim))
 			}
@@ -148,7 +148,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			}
 			data = chunkedRows
 		case schemapb.DataType_Float16Vector:
-			rows := insertData.Data[fieldID].GetRows().([]byte)
+			rows := insertData.Data[fieldID].GetDataRows().([]byte)
 			if dim != fieldData.(*storage.Float16VectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.Float16VectorFieldData).Dim))
 			}
@@ -160,7 +160,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 			}
 			data = chunkedRows
 		case schemapb.DataType_BFloat16Vector:
-			rows := insertData.Data[fieldID].GetRows().([]byte)
+			rows := insertData.Data[fieldID].GetDataRows().([]byte)
 			if dim != fieldData.(*storage.BFloat16VectorFieldData).Dim {
 				panic(fmt.Sprintf("dim mis-match: %d, %d", dim, fieldData.(*storage.BFloat16VectorFieldData).Dim))
 			}
@@ -174,7 +174,7 @@ func GenerateNumpyFiles(cm storage.ChunkManager, schema *schemapb.CollectionSche
 		case schemapb.DataType_SparseFloatVector:
 			data = insertData.Data[fieldID].(*storage.SparseFloatVectorFieldData).GetContents()
 		default:
-			data = insertData.Data[fieldID].GetRows()
+			data = insertData.Data[fieldID].GetDataRows()
 		}
 
 		err := writeFn(path, data)
