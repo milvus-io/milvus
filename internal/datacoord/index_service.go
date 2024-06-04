@@ -49,8 +49,6 @@ func (s *Server) serverID() int64 {
 
 func (s *Server) startIndexService(ctx context.Context) {
 	s.indexBuilder.Start()
-
-	s.serverLoopWg.Add(1)
 	go s.createIndexForSegmentLoop(ctx)
 }
 

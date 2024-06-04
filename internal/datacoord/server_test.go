@@ -3087,7 +3087,7 @@ func newTestServer(t *testing.T, opts ...Option) *Server {
 	<-signal
 	err = svr.Start()
 	assert.NoError(t, err)
-	assert.Equal(t, commonpb.StateCode_Healthy, svr.stateCode.Load().(commonpb.StateCode))
+	require.Equal(t, commonpb.StateCode_Healthy, svr.stateCode.Load().(commonpb.StateCode))
 
 	return svr
 }
