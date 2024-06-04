@@ -17,13 +17,11 @@
 package client
 
 import (
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
 	"github.com/milvus-io/milvus/client/v2/index"
+	proto "github.com/milvus-io/milvus/client/v2/internal/protobr"
 )
 
 // CreateCollectionOption is the interface builds CreateCollectionRequest.
@@ -103,7 +101,7 @@ func (opt *createCollectionOption) Request() *milvuspb.CreateCollectionRequest {
 	}
 
 	schemaProto := opt.schema.ProtoMessage()
-	schemaBytes, _ := proto.Marshal(protoadapt.MessageV2Of(schemaProto))
+	schemaBytes, _ := proto.Marshal(schemaProto)
 
 	return &milvuspb.CreateCollectionRequest{
 		DbName:           "", // reserved fields, not used for now

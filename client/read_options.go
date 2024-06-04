@@ -20,12 +20,10 @@ import (
 	"encoding/json"
 	"strconv"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/client/v2/entity"
+	proto "github.com/milvus-io/milvus/client/v2/internal/protobr"
 )
 
 const (
@@ -160,7 +158,7 @@ func vector2PlaceholderGroupBytes(vectors []entity.Vector) []byte {
 		},
 	}
 
-	bs, _ := proto.Marshal(protoadapt.MessageV2Of(phg))
+	bs, _ := proto.Marshal(phg)
 	return bs
 }
 
