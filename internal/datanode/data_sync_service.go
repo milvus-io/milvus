@@ -26,7 +26,6 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
@@ -63,15 +62,9 @@ type dataSyncService struct {
 	broker  broker.Broker
 	syncMgr syncmgr.SyncManager
 
-	flushCh          chan flushMsg
-	resendTTCh       chan resendTTMsg    // chan to ask for resending DataNode time tick message.
-	timetickSender   *timeTickSender     // reference to timeTickSender
-	compactor        *compactionExecutor // reference to compaction executor
-	flushingSegCache *Cache              // a guarding cache stores currently flushing segment ids
+	timetickSender *timeTickSender     // reference to timeTickSender
+	compactor      *compactionExecutor // reference to compaction executor
 
-	clearSignal  chan<- string       // signal channel to notify flowgraph close for collection/partition drop msg consumed
-	idAllocator  allocator.Allocator // id/timestamp allocator
-	msFactory    msgstream.Factory
 	dispClient   msgdispatcher.Client
 	chunkManager storage.ChunkManager
 
@@ -83,7 +76,6 @@ type nodeConfig struct {
 	collectionID UniqueID
 	vChannelName string
 	metacache    metacache.MetaCache
-	allocator    allocator.Allocator
 	serverID     UniqueID
 }
 
@@ -338,19 +330,12 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 	)
 
 	config := &nodeConfig{
-		msFactory: node.factory,
-		allocator: node.allocator,
-
+		msFactory:    node.factory,
 		collectionID: collectionID,
 		vChannelName: channelName,
 		metacache:    metacache,
 		serverID:     node.session.ServerID,
 	}
-
-	var (
-		flushCh    = make(chan flushMsg, 100)
-		resendTTCh = make(chan resendTTMsg, 100)
-	)
 
 	err := node.writeBufferManager.Register(channelName, metacache, storageV2Cache, writebuffer.WithMetaWriter(syncmgr.BrokerMetaWriter(node.broker, config.serverID)), writebuffer.WithIDAllocator(node.allocator))
 	if err != nil {
@@ -365,28 +350,22 @@ func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb
 
 	ctx, cancel := context.WithCancel(node.ctx)
 	ds := &dataSyncService{
-		ctx:        ctx,
-		cancelFn:   cancel,
-		flushCh:    flushCh,
-		resendTTCh: resendTTCh,
-		opID:       info.GetOpID(),
+		ctx:      ctx,
+		cancelFn: cancel,
+		opID:     info.GetOpID(),
 
 		dispClient: node.dispClient,
-		msFactory:  node.factory,
 		broker:     node.broker,
 
-		idAllocator:  config.allocator,
 		metacache:    config.metacache,
 		collectionID: config.collectionID,
 		vchannelName: config.vChannelName,
 		serverID:     config.serverID,
 
-		flushingSegCache: node.segmentCache,
-		clearSignal:      node.clearSignal,
-		chunkManager:     node.chunkManager,
-		compactor:        node.compactionExecutor,
-		timetickSender:   node.timeTickSender,
-		syncMgr:          node.syncMgr,
+		chunkManager:   node.chunkManager,
+		compactor:      node.compactionExecutor,
+		timetickSender: node.timeTickSender,
+		syncMgr:        node.syncMgr,
 
 		fg: nil,
 	}

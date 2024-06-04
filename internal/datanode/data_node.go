@@ -97,8 +97,6 @@ type DataNode struct {
 	importTaskMgr      importv2.TaskManager
 	importScheduler    importv2.Scheduler
 
-	clearSignal              chan string // vchannel name
-	segmentCache             *Cache
 	compactionExecutor       *compactionExecutor
 	timeTickSender           *timeTickSender
 	channelCheckpointUpdater *channelCheckpointUpdater
@@ -138,14 +136,10 @@ func NewDataNode(ctx context.Context, factory dependency.Factory) *DataNode {
 		cancel: cancel2,
 		Role:   typeutil.DataNodeRole,
 
-		rootCoord:          nil,
-		dataCoord:          nil,
-		factory:            factory,
-		segmentCache:       newCache(),
-		compactionExecutor: newCompactionExecutor(),
-
-		clearSignal: make(chan string, 100),
-
+		rootCoord:              nil,
+		dataCoord:              nil,
+		factory:                factory,
+		compactionExecutor:     newCompactionExecutor(),
 		reportImportRetryTimes: 10,
 	}
 	node.UpdateStateCode(commonpb.StateCode_Abnormal)
@@ -339,22 +333,6 @@ func (node *DataNode) tryToReleaseFlowgraph(channel string) {
 	}
 }
 
-// BackGroundGC runs in background to release datanode resources
-// GOOSE TODO: remove background GC, using ToRelease for drop-collection after #15846
-func (node *DataNode) BackGroundGC(vChannelCh <-chan string) {
-	defer node.stopWaiter.Done()
-	log.Info("DataNode Background GC Start")
-	for {
-		select {
-		case vchanName := <-vChannelCh:
-			node.tryToReleaseFlowgraph(vchanName)
-		case <-node.ctx.Done():
-			log.Warn("DataNode context done, exiting background GC")
-			return
-		}
-	}
-}
-
 // Start will update DataNode state to HEALTHY
 func (node *DataNode) Start() error {
 	var startErr error
@@ -396,7 +374,6 @@ func (node *DataNode) Start() error {
 		node.writeBufferManager.Start()
 
 		node.stopWaiter.Add(1)
-		go node.BackGroundGC(node.clearSignal)
 
 		go node.compactionExecutor.start(node.ctx)
 
