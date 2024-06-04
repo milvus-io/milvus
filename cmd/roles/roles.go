@@ -30,6 +30,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"go.uber.org/zap"
+	"go.uber.org/zap/zapcore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/cmd/components"
@@ -249,6 +250,16 @@ func (mr *MilvusRoles) setupLogger() {
 	}
 
 	logutil.SetupLogger(&logConfig)
+
+	params.Watch(params.LogCfg.Level.Key, config.NewHandler("log level handler", func(e *config.Event) {
+		level := zapcore.DebugLevel
+		if err := level.UnmarshalText([]byte(e.Value)); err != nil {
+			log.Warn("update log level failed", zap.String("level", e.Value), zap.Error(err))
+			return
+		}
+		log.SetLevel(level)
+		log.Info("update log level", zap.String("level", e.Value))
+	}))
 }
 
 // Register serves prometheus http service
