@@ -226,7 +226,8 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	// Won't load bloom filter with sealed segments
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
-			exist := segment.MayPkExist(storage.NewInt64PrimaryKey(int64(pk)))
+			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
+			exist := segment.MayPkExist(lc)
 			suite.Require().False(exist)
 		}
 	}
@@ -260,7 +261,8 @@ func (suite *SegmentLoaderSuite) TestLoadMultipleSegments() {
 	// Should load bloom filter with growing segments
 	for _, segment := range segments {
 		for pk := 0; pk < 100; pk++ {
-			exist := segment.MayPkExist(storage.NewInt64PrimaryKey(int64(pk)))
+			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
+			exist := segment.MayPkExist(lc)
 			suite.True(exist)
 		}
 	}
@@ -351,7 +353,8 @@ func (suite *SegmentLoaderSuite) TestLoadBloomFilter() {
 
 	for _, bf := range bfs {
 		for pk := 0; pk < 100; pk++ {
-			exist := bf.MayPkExist(storage.NewInt64PrimaryKey(int64(pk)))
+			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
+			exist := bf.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
 	}
@@ -404,7 +407,8 @@ func (suite *SegmentLoaderSuite) TestLoadDeltaLogs() {
 			if pk == 1 || pk == 2 {
 				continue
 			}
-			exist := segment.MayPkExist(storage.NewInt64PrimaryKey(int64(pk)))
+			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
+			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
 	}
@@ -457,7 +461,8 @@ func (suite *SegmentLoaderSuite) TestLoadDupDeltaLogs() {
 			if pk == 1 || pk == 2 {
 				continue
 			}
-			exist := segment.MayPkExist(storage.NewInt64PrimaryKey(int64(pk)))
+			lc := storage.NewLocationsCache(storage.NewInt64PrimaryKey(int64(pk)))
+			exist := segment.MayPkExist(lc)
 			suite.Require().True(exist)
 		}
 

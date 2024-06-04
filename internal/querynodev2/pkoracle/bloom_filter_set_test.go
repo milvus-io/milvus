@@ -41,10 +41,9 @@ func TestInt64Pk(t *testing.T) {
 	bfs.UpdateBloomFilter(pks)
 
 	for i := 0; i < batchSize; i++ {
-		locations := storage.Locations(pks[i], bfs.GetHashFuncNum())
-		ret1 := bfs.TestLocations(pks[i], locations)
-		ret2 := bfs.MayPkExist(pks[i])
-		assert.Equal(t, ret1, ret2)
+		lc := storage.NewLocationsCache(pks[i])
+		ret1 := bfs.currentStat.TestLocationCache(lc)
+		assert.True(t, ret1, true)
 	}
 
 	assert.Equal(t, int64(1), bfs.ID())
@@ -66,10 +65,9 @@ func TestVarCharPk(t *testing.T) {
 	bfs.UpdateBloomFilter(pks)
 
 	for i := 0; i < batchSize; i++ {
-		locations := storage.Locations(pks[i], bfs.GetHashFuncNum())
-		ret1 := bfs.TestLocations(pks[i], locations)
-		ret2 := bfs.MayPkExist(pks[i])
-		assert.Equal(t, ret1, ret2)
+		lc := storage.NewLocationsCache(pks[i])
+		ret1 := bfs.currentStat.TestLocationCache(lc)
+		assert.True(t, ret1, true)
 	}
 }
 
@@ -91,29 +89,14 @@ func TestHistoricalStat(t *testing.T) {
 	bfs.currentStat = nil
 
 	for i := 0; i < batchSize; i++ {
-		locations := storage.Locations(pks[i], bfs.GetHashFuncNum())
-		ret1 := bfs.TestLocations(pks[i], locations)
-		ret2 := bfs.MayPkExist(pks[i])
-		assert.Equal(t, ret1, ret2)
-	}
-}
-
-func TestHashFuncNum(t *testing.T) {
-	paramtable.Init()
-	batchSize := 100
-	pks := make([]storage.PrimaryKey, 0)
-	for i := 0; i < batchSize; i++ {
-		pk := storage.NewVarCharPrimaryKey(strconv.FormatInt(int64(i), 10))
-		pks = append(pks, pk)
+		lc := storage.NewLocationsCache(pks[i])
+		ret := bfs.MayPkExist(lc)
+		assert.True(t, ret)
 	}
 
-	bfs := NewBloomFilterSet(1, 1, commonpb.SegmentState_Sealed)
-	bfs.UpdateBloomFilter(pks)
-
-	for i := 0; i < batchSize; i++ {
-		// pass locations more then hash func num in bf
-		locations := storage.Locations(pks[i], bfs.GetHashFuncNum()+3)
-		ret1 := bfs.TestLocations(pks[i], locations)
-		assert.True(t, ret1)
+	lc := storage.NewBatchLocationsCache(pks)
+	ret := bfs.BatchPkExist(lc)
+	for i := range ret {
+		assert.True(t, ret[i])
 	}
 }

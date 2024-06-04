@@ -188,14 +188,6 @@ func (suite *SegmentSuite) TestHasRawData() {
 	suite.True(has)
 }
 
-func (suite *SegmentSuite) TestLocation() {
-	pk := storage.NewInt64PrimaryKey(100)
-	locations := storage.Locations(pk, suite.sealed.GetHashFuncNum())
-	ret1 := suite.sealed.TestLocations(pk, locations)
-	ret2 := suite.sealed.MayPkExist(pk)
-	suite.Equal(ret1, ret2)
-}
-
 func (suite *SegmentSuite) TestCASVersion() {
 	segment := suite.sealed
 
