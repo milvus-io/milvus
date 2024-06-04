@@ -351,9 +351,11 @@ func (s *importScheduler) processFailed(task ImportTask) {
 				return
 			}
 		}
-		err := s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs(nil))
-		if err != nil {
-			log.Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
+		if len(segments) > 0 {
+			err := s.imeta.UpdateTask(task.GetTaskID(), UpdateSegmentIDs(nil))
+			if err != nil {
+				log.Warn("update import task segments failed", WrapTaskLog(task, zap.Error(err))...)
+			}
 		}
 	}
 	err := DropImportTask(task, s.cluster, s.imeta)

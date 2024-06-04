@@ -424,16 +424,6 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 		return err
 	}
 
-	// load bloom filter only when candidate not exists
-	infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
-		return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
-	})
-	candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
-	if err != nil {
-		log.Warn("failed to load bloom filter set for segment", zap.Error(err))
-		return err
-	}
-
 	req.Base.TargetID = req.GetDstNodeID()
 	log.Debug("worker loads segments...")
 
@@ -490,6 +480,16 @@ func (sd *shardDelegator) LoadSegments(ctx context.Context, req *querypb.LoadSeg
 	if req.GetInfos()[0].GetLevel() == datapb.SegmentLevel_L0 {
 		sd.RefreshLevel0DeletionStats()
 	} else {
+		// load bloom filter only when candidate not exists
+		infos := lo.Filter(req.GetInfos(), func(info *querypb.SegmentLoadInfo, _ int) bool {
+			return !sd.pkOracle.Exists(pkoracle.NewCandidateKey(info.GetSegmentID(), info.GetPartitionID(), commonpb.SegmentState_Sealed), targetNodeID)
+		})
+		candidates, err := sd.loader.LoadBloomFilterSet(ctx, req.GetCollectionID(), req.GetVersion(), infos...)
+		if err != nil {
+			log.Warn("failed to load bloom filter set for segment", zap.Error(err))
+			return err
+		}
+
 		log.Debug("load delete...")
 		err = sd.loadStreamDelete(ctx, candidates, infos, req.GetDeltaPositions(), targetNodeID, worker, entries)
 		if err != nil {

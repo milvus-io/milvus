@@ -1118,6 +1118,12 @@ func (m *meta) SelectSegments(filters ...SegmentFilter) []*SegmentInfo {
 	return m.segments.GetSegmentsBySelector(filters...)
 }
 
+func (m *meta) GetRealSegmentsForChannel(channel string) []*SegmentInfo {
+	m.RLock()
+	defer m.RUnlock()
+	return m.segments.GetRealSegmentsForChannel(channel)
+}
+
 // AddAllocation add allocation in segment
 func (m *meta) AddAllocation(segmentID UniqueID, allocation *Allocation) error {
 	log.Debug("meta update: add allocation",
