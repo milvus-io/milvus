@@ -262,7 +262,7 @@ func (t *LevelZeroCompactionTask) splitDelta(
 			for _, gotSeg := range predicted {
 				writer, ok := targetSegBuffer[gotSeg]
 				if !ok {
-					segment, _ := allSeg(gotSeg)
+					segment := allSeg[gotSeg]
 					writer = NewSegmentDeltaWriter(gotSeg, segment.GetPartitionID(), segment.GetCollectionID())
 					targetSegBuffer[gotSeg] = writer
 				}
@@ -299,7 +299,7 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 		if right >= len(targetSegments) {
 			right = len(targetSegments)
 		}
-		batchSegments := targetSegments[left, right]
+		batchSegments := targetSegments[left:right]
 		segmentBFs, err := t.loadBF(ctx, batchSegments)
 		if err != nil {
 			log.Warn("L0 compaction loadBF fail", zap.Error(err))
