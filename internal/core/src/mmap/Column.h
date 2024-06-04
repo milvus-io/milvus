@@ -459,9 +459,7 @@ class VariableColumn : public ColumnBase {
 
     std::string_view
     RawAt(const int i) const {
-        size_t len = (i == indices_.size() - 1) ? size_ - indices_.back()
-                                                : indices_[i + 1] - indices_[i];
-        return std::string_view(data_ + indices_[i], len);
+        return std::string_view(views_[i]);
     }
 
     void
@@ -502,6 +500,9 @@ class VariableColumn : public ColumnBase {
         }
 
         ConstructViews();
+
+        // Not need indices_ after
+        indices_.clear();
     }
 
  protected:

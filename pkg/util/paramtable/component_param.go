@@ -787,11 +787,12 @@ func (t *gpuConfig) init(base *BaseTable) {
 }
 
 type traceConfig struct {
-	Exporter       ParamItem `refreshable:"false"`
-	SampleFraction ParamItem `refreshable:"false"`
-	JaegerURL      ParamItem `refreshable:"false"`
-	OtlpEndpoint   ParamItem `refreshable:"false"`
-	OtlpSecure     ParamItem `refreshable:"false"`
+	Exporter           ParamItem `refreshable:"false"`
+	SampleFraction     ParamItem `refreshable:"false"`
+	JaegerURL          ParamItem `refreshable:"false"`
+	OtlpEndpoint       ParamItem `refreshable:"false"`
+	OtlpSecure         ParamItem `refreshable:"false"`
+	InitTimeoutSeconds ParamItem `refreshable:"false"`
 }
 
 func (t *traceConfig) init(base *BaseTable) {
@@ -839,6 +840,15 @@ Fractions >= 1 will always sample. Fractions < 0 are treated as zero.`,
 		Export:       true,
 	}
 	t.OtlpSecure.Init(base.mgr)
+
+	t.InitTimeoutSeconds = ParamItem{
+		Key:          "trace.initTimeoutSeconds",
+		Version:      "2.4.4",
+		DefaultValue: "10",
+		Export:       true,
+		Doc:          "segcore initialization timeout in seconds, preventing otlp grpc hangs forever",
+	}
+	t.InitTimeoutSeconds.Init(base.mgr)
 }
 
 type logConfig struct {
