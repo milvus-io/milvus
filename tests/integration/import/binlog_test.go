@@ -20,7 +20,6 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
@@ -28,6 +27,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"

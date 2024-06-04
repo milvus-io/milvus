@@ -29,10 +29,9 @@ import (
 	"github.com/apache/arrow/go/v12/parquet/compress"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -348,7 +347,7 @@ func (w *NativePayloadWriter) AddOneArrayToPayload(data *schemapb.ScalarField) e
 		return errors.New("can't append data to finished array payload")
 	}
 
-	bytes, err := proto.Marshal(protoadapt.MessageV2Of(data))
+	bytes, err := proto.Marshal(data)
 	if err != nil {
 		return errors.New("Marshal ListValue failed")
 	}

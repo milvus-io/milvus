@@ -14,8 +14,6 @@ import (
 	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -24,6 +22,7 @@ import (
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/storage"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/logutil"
@@ -522,7 +521,7 @@ func (c *mck) extractVecFieldIndexInfo(taskID int64, infos []*querypb.FieldIndex
 // return partitionIDs,segmentIDs,error
 func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, error) {
 	header := commonpb.MsgHeader{}
-	err := proto.Unmarshal([]byte(t), protoadapt.MessageV2Of(&header))
+	err := proto.Unmarshal([]byte(t), &header)
 	if err != nil {
 		return errReturn(taskID, "MsgHeader", err)
 	}

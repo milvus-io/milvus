@@ -6,8 +6,6 @@ import (
 	"strconv"
 
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -16,6 +14,7 @@ import (
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/clustering"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/internal/util/typeutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -48,7 +47,7 @@ func PruneSegments(ctx context.Context,
 	if searchReq != nil {
 		// parse searched vectors
 		var vectorsHolder commonpb.PlaceholderGroup
-		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), protoadapt.MessageV2Of(&vectorsHolder))
+		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
 		if err != nil || len(vectorsHolder.GetPlaceholders()) == 0 {
 			return
 		}

@@ -7,12 +7,11 @@ import (
 	"math"
 
 	"github.com/cockroachdb/errors"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -299,7 +298,7 @@ func binaryVector2Bytes(vectors [][]byte) []byte {
 			ph,
 		},
 	}
-	ret, _ := proto.Marshal(protoadapt.MessageV2Of(phg))
+	ret, _ := proto.Marshal(phg)
 	return ret
 }
 
@@ -317,7 +316,7 @@ func vector2Bytes(vectors [][]float32) []byte {
 			ph,
 		},
 	}
-	ret, _ := proto.Marshal(protoadapt.MessageV2Of(phg))
+	ret, _ := proto.Marshal(phg)
 	return ret
 }
 

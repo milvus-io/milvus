@@ -31,10 +31,9 @@ import (
 	"github.com/apache/arrow/go/v12/parquet"
 	"github.com/apache/arrow/go/v12/parquet/pqarrow"
 	"github.com/cockroachdb/errors"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -470,7 +469,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			if arr, ok := a.(*array.Binary); ok && i < arr.Len() {
 				v := &schemapb.ScalarField{}
-				if err := proto.Unmarshal(arr.Value(i), protoadapt.MessageV2Of(v)); err == nil {
+				if err := proto.Unmarshal(arr.Value(i), v); err == nil {
 					return v, true
 				}
 			}
@@ -483,7 +482,7 @@ var serdeMap = func() map[schemapb.DataType]serdeEntry {
 			}
 			if builder, ok := b.(*array.BinaryBuilder); ok {
 				if vv, ok := v.(*schemapb.ScalarField); ok {
-					if bytes, err := proto.Marshal(protoadapt.MessageV2Of(vv)); err == nil {
+					if bytes, err := proto.Marshal(vv); err == nil {
 						builder.Append(bytes)
 						return true
 					}

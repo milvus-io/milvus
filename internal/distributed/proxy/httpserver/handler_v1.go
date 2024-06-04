@@ -12,14 +12,13 @@ import (
 	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proxy"
 	"github.com/milvus-io/milvus/internal/types"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -253,7 +252,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 
-	schema, err := proto.Marshal(protoadapt.MessageV2Of(&schemapb.CollectionSchema{
+	schema, err := proto.Marshal(&schemapb.CollectionSchema{
 		Name:        httpReq.CollectionName,
 		Description: httpReq.Description,
 		AutoID:      EnableAutoID,
@@ -279,7 +278,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 			},
 		},
 		EnableDynamicField: httpReq.EnableDynamicField,
-	}))
+	})
 	if err != nil {
 		log.Warn("high level restful api, marshal collection schema fail", zap.Any("request", httpReq), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

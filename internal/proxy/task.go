@@ -23,8 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -34,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -280,7 +279,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 	t.Base.SourceID = paramtable.GetNodeID()
 
 	t.schema = &schemapb.CollectionSchema{}
-	err := proto.Unmarshal(t.Schema, protoadapt.MessageV2Of(t.schema))
+	err := proto.Unmarshal(t.Schema, t.schema)
 	if err != nil {
 		return err
 	}
@@ -377,7 +376,7 @@ func (t *createCollectionTask) PreExecute(ctx context.Context) error {
 		return err
 	}
 
-	t.CreateCollectionRequest.Schema, err = proto.Marshal(protoadapt.MessageV2Of(t.schema))
+	t.CreateCollectionRequest.Schema, err = proto.Marshal(t.schema)
 	if err != nil {
 		return err
 	}

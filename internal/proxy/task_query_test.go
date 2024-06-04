@@ -22,12 +22,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -97,7 +96,7 @@ func TestQueryTask_all(t *testing.T) {
 	}
 
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
-	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
+	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
 	createColT := &createCollectionTask{

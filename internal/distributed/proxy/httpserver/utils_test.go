@@ -10,12 +10,11 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/assert"
 	"github.com/tidwall/gjson"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -594,11 +593,11 @@ func TestSerialize(t *testing.T) {
 		Type:   commonpb.PlaceholderType_FloatVector,
 		Values: values,
 	}
-	bytes, err := proto.Marshal(protoadapt.MessageV2Of(&commonpb.PlaceholderGroup{
+	bytes, err := proto.Marshal(&commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{
 			placeholderValue,
 		},
-	}))
+	})
 	assert.Nil(t, err)
 	assert.Equal(t, "\n\x10\n\x02$0\x10e\x1a\b\xa4\x8d\xe3=\xa4\x8dc>", string(bytes)) // todo
 	for _, dataType := range []schemapb.DataType{schemapb.DataType_BinaryVector, schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector} {
@@ -614,11 +613,11 @@ func TestSerialize(t *testing.T) {
 			Tag:    "$0",
 			Values: values,
 		}
-		_, err = proto.Marshal(protoadapt.MessageV2Of(&commonpb.PlaceholderGroup{
+		_, err = proto.Marshal(&commonpb.PlaceholderGroup{
 			Placeholders: []*commonpb.PlaceholderValue{
 				placeholderValue,
 			},
-		}))
+		})
 		assert.Nil(t, err)
 	}
 }

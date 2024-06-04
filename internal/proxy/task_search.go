@@ -10,8 +10,6 @@ import (
 	"github.com/samber/lo"
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -22,6 +20,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/exprutil"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/commonpbutil"
@@ -883,7 +882,7 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		}
 
 		var partialResultData schemapb.SearchResultData
-		err := proto.Unmarshal(partialSearchResult.SlicedBlob, protoadapt.MessageV2Of(&partialResultData))
+		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
 		if err != nil {
 			return nil, err
 		}

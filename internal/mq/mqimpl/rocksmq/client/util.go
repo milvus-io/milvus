@@ -14,14 +14,12 @@ package client
 import (
 	"fmt"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 )
 
 func MarshalHeader(header *commonpb.MsgHeader) ([]byte, error) {
-	hb, err := proto.Marshal(protoadapt.MessageV2Of(header))
+	hb, err := proto.Marshal(header)
 	if err != nil {
 		return nil, err
 	}
@@ -33,7 +31,7 @@ func UnmarshalHeader(headerbyte []byte) (*commonpb.MsgHeader, error) {
 	if headerbyte == nil {
 		return &header, fmt.Errorf("failed to unmarshal message header, payload is empty")
 	}
-	err := proto.Unmarshal(headerbyte, protoadapt.MessageV2Of(&header))
+	err := proto.Unmarshal(headerbyte, &header)
 	if err != nil {
 		return &header, err
 	}

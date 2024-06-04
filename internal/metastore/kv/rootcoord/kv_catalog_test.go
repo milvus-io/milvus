@@ -15,8 +15,6 @@ import (
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -27,6 +25,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -197,7 +196,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			Return([]string{"key"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
-		fm, err := proto.Marshal(protoadapt.MessageV2Of(fieldMeta))
+		fm, err := proto.Marshal(fieldMeta)
 		assert.NoError(t, err)
 
 		kv.On("LoadWithPrefix", mock.MatchedBy(
@@ -238,7 +237,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			Return([]string{"key"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
-		fm, err := proto.Marshal(protoadapt.MessageV2Of(fieldMeta))
+		fm, err := proto.Marshal(fieldMeta)
 		assert.NoError(t, err)
 
 		kv.On("LoadWithPrefix", mock.MatchedBy(
@@ -603,7 +602,7 @@ func TestCatalog_listFieldsAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		field := &schemapb.FieldSchema{FieldID: 101}
-		value, err := proto.Marshal(protoadapt.MessageV2Of(field))
+		value, err := proto.Marshal(field)
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()

@@ -27,8 +27,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -37,6 +35,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/internal/util/segmentutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -248,7 +247,7 @@ func (m *meta) GetClonedCollectionInfo(collectionID UniqueID) *collectionInfo {
 	maps.Copy(clonedProperties, coll.Properties)
 	cloneColl := &collectionInfo{
 		ID:             coll.ID,
-		Schema:         protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(coll.Schema))).(*schemapb.CollectionSchema),
+		Schema:         proto.Clone(coll.Schema).(*schemapb.CollectionSchema),
 		Partitions:     coll.Partitions,
 		StartPositions: common.CloneKeyDataPairs(coll.StartPositions),
 		Properties:     clonedProperties,
@@ -1472,7 +1471,7 @@ func (m *meta) GetChannelCheckpoint(vChannel string) *msgpb.MsgPosition {
 	if !ok {
 		return nil
 	}
-	return protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(cp))).(*msgpb.MsgPosition)
+	return proto.Clone(cp).(*msgpb.MsgPosition)
 }
 
 func (m *meta) DropChannelCheckpoint(vChannel string) error {

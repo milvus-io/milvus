@@ -23,11 +23,10 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"golang.org/x/exp/mmap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -412,25 +411,25 @@ func printDDLPayloadValues(eventType EventTypeCode, colType schemapb.DataType, r
 			switch eventType {
 			case CreateCollectionEventType:
 				var req msgpb.CreateCollectionRequest
-				if err := proto.Unmarshal(valBytes, protoadapt.MessageV2Of(&req)); err != nil {
+				if err := proto.Unmarshal(valBytes, &req); err != nil {
 					return err
 				}
 				fmt.Printf("\t\t%d : create collection: %v\n", i, req)
 			case DropCollectionEventType:
 				var req msgpb.DropCollectionRequest
-				if err := proto.Unmarshal(valBytes, protoadapt.MessageV2Of(&req)); err != nil {
+				if err := proto.Unmarshal(valBytes, &req); err != nil {
 					return err
 				}
 				fmt.Printf("\t\t%d : drop collection: %v\n", i, req)
 			case CreatePartitionEventType:
 				var req msgpb.CreatePartitionRequest
-				if err := proto.Unmarshal(valBytes, protoadapt.MessageV2Of(&req)); err != nil {
+				if err := proto.Unmarshal(valBytes, &req); err != nil {
 					return err
 				}
 				fmt.Printf("\t\t%d : create partition: %v\n", i, req)
 			case DropPartitionEventType:
 				var req msgpb.DropPartitionRequest
-				if err := proto.Unmarshal(valBytes, protoadapt.MessageV2Of(&req)); err != nil {
+				if err := proto.Unmarshal(valBytes, &req); err != nil {
 					return err
 				}
 				fmt.Printf("\t\t%d : drop partition: %v\n", i, req)

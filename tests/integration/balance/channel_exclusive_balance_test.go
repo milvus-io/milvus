@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
@@ -35,6 +34,7 @@ import (
 	grpcquerynode "github.com/milvus-io/milvus/internal/distributed/querynode"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/meta"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"

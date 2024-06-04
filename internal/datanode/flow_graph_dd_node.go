@@ -24,13 +24,12 @@ import (
 
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/util/flowgraph"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -180,11 +179,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 				continue
 			}
 
-			rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(protoadapt.MessageV2Of(&imsg.InsertRequest))))
+			rateCol.Add(metricsinfo.InsertConsumeThroughput, float64(proto.Size(&imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel).
-				Add(float64(proto.Size(protoadapt.MessageV2Of(&imsg.InsertRequest))))
+				Add(float64(proto.Size(&imsg.InsertRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.InsertLabel, fmt.Sprint(ddn.collectionID)).
@@ -212,11 +211,11 @@ func (ddn *ddNode) Operate(in []Msg) []Msg {
 			}
 
 			log.Debug("DDNode receive delete messages", zap.String("channel", ddn.vChannelName), zap.Int64("numRows", dmsg.NumRows))
-			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(protoadapt.MessageV2Of(&dmsg.DeleteRequest))))
+			rateCol.Add(metricsinfo.DeleteConsumeThroughput, float64(proto.Size(&dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeBytesCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
-				Add(float64(proto.Size(protoadapt.MessageV2Of(&dmsg.DeleteRequest))))
+				Add(float64(proto.Size(&dmsg.DeleteRequest)))
 
 			metrics.DataNodeConsumeMsgCount.
 				WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel, fmt.Sprint(ddn.collectionID)).

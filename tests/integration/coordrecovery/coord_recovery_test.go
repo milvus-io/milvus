@@ -24,7 +24,6 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
@@ -33,6 +32,7 @@ import (
 	grpcdatacoord "github.com/milvus-io/milvus/internal/distributed/datacoord"
 	grpcquerycoord "github.com/milvus-io/milvus/internal/distributed/querycoord"
 	grpcrootcoord "github.com/milvus-io/milvus/internal/distributed/rootcoord"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"

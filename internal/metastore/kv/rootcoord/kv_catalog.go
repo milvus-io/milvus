@@ -7,8 +7,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -17,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -183,7 +182,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 	for _, field := range coll.Fields {
 		k := BuildFieldKey(coll.CollectionID, field.FieldID)
 		fieldInfo := model.MarshalFieldModel(field)
-		v, err := proto.Marshal(protoadapt.MessageV2Of(fieldInfo))
+		v, err := proto.Marshal(fieldInfo)
 		if err != nil {
 			return err
 		}
@@ -349,7 +348,7 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 	fields := make([]*model.Field, 0, len(values))
 	for _, v := range values {
 		partitionMeta := &schemapb.FieldSchema{}
-		err := proto.Unmarshal([]byte(v), protoadapt.MessageV2Of(partitionMeta))
+		err := proto.Unmarshal([]byte(v), partitionMeta)
 		if err != nil {
 			return nil, err
 		}

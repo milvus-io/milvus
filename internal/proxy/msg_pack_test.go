@@ -20,10 +20,9 @@ import (
 	"context"
 	"testing"
 
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -176,7 +175,7 @@ func TestRepackInsertDataWithPartitionKey(t *testing.T) {
 
 	t.Run("create collection with partition key", func(t *testing.T) {
 		schema := ConstructCollectionSchemaWithPartitionKey(collectionName, fieldName2Types, testInt64Field, testVarCharField, false)
-		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
+		marshaledSchema, err := proto.Marshal(schema)
 		assert.NoError(t, err)
 
 		resp, err := rc.CreateCollection(ctx, &milvuspb.CreateCollectionRequest{

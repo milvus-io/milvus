@@ -6,11 +6,10 @@ import (
 	"path"
 
 	"github.com/apache/arrow/go/v12/arrow/array"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/storage"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -70,7 +69,7 @@ func BuildRecord(b *array.RecordBuilder, data *storage.InsertData, fields []*sch
 			fBuilder.(*array.StringBuilder).AppendValues(data.Data[field.FieldID].(*storage.StringFieldData).Data, nil)
 		case schemapb.DataType_Array:
 			for _, data := range data.Data[field.FieldID].(*storage.ArrayFieldData).Data {
-				marsheled, err := proto.Marshal(protoadapt.MessageV2Of(data))
+				marsheled, err := proto.Marshal(data)
 				if err != nil {
 					return err
 				}

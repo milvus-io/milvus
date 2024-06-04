@@ -21,10 +21,9 @@ import (
 	"fmt"
 	"strconv"
 
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -132,16 +131,16 @@ func getRequestInfo(ctx context.Context, req interface{}) (int64, map[int64][]in
 	switch r := req.(type) {
 	case *milvuspb.InsertRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(protoadapt.MessageV2Of(r)), err
+		return dbID, collToPartIDs, internalpb.RateType_DMLInsert, proto.Size(r), err
 	case *milvuspb.UpsertRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLUpsert, proto.Size(protoadapt.MessageV2Of(r)), err
+		return dbID, collToPartIDs, internalpb.RateType_DMLUpsert, proto.Size(r), err
 	case *milvuspb.DeleteRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(protoadapt.MessageV2Of(r)), err
+		return dbID, collToPartIDs, internalpb.RateType_DMLDelete, proto.Size(r), err
 	case *milvuspb.ImportRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionID(ctx, req.(reqPartName))
-		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(protoadapt.MessageV2Of(r)), err
+		return dbID, collToPartIDs, internalpb.RateType_DMLBulkLoad, proto.Size(r), err
 	case *milvuspb.SearchRequest:
 		dbID, collToPartIDs, err := getCollectionAndPartitionIDs(ctx, req.(reqPartNames))
 		return dbID, collToPartIDs, internalpb.RateType_DQLSearch, int(r.GetNq()), err

@@ -24,10 +24,9 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 )
 
@@ -56,7 +55,7 @@ func (s *SearchTaskSuite) composePlaceholderGroup(nq int, dim int) []byte {
 		},
 	}
 
-	bs, err := proto.Marshal(protoadapt.MessageV2Of(placeHolderGroup))
+	bs, err := proto.Marshal(placeHolderGroup)
 	s.Require().NoError(err)
 	return bs
 }
@@ -64,7 +63,7 @@ func (s *SearchTaskSuite) composePlaceholderGroup(nq int, dim int) []byte {
 func (s *SearchTaskSuite) composeEmptyPlaceholderGroup() []byte {
 	placeHolderGroup := &commonpb.PlaceholderGroup{}
 
-	bs, err := proto.Marshal(protoadapt.MessageV2Of(placeHolderGroup))
+	bs, err := proto.Marshal(placeHolderGroup)
 	s.Require().NoError(err)
 	return bs
 }

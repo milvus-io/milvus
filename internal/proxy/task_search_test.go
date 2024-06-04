@@ -28,8 +28,6 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -40,6 +38,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/internal/util/dependency"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/merr"
@@ -99,7 +98,7 @@ func TestSearchTask_PostExecute(t *testing.T) {
 
 func createColl(t *testing.T, name string, rc types.RootCoordClient) {
 	schema := constructCollectionSchema(testInt64Field, testFloatVecField, testVecDim, name)
-	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
+	marshaledSchema, err := proto.Marshal(schema)
 	require.NoError(t, err)
 	ctx := context.TODO()
 
@@ -1811,7 +1810,7 @@ func TestSearchTask_ErrExecute(t *testing.T) {
 	}
 
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
-	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
+	marshaledSchema, err := proto.Marshal(schema)
 	assert.NoError(t, err)
 
 	createColT := &createCollectionTask{
@@ -2368,7 +2367,7 @@ func TestSearchTask_Requery(t *testing.T) {
 			Ids:    resultIDs,
 			Scores: scores,
 		}
-		bytes, err := proto.Marshal(protoadapt.MessageV2Of(partialResultData))
+		bytes, err := proto.Marshal(partialResultData)
 		assert.NoError(t, err)
 		qt.resultBuf.Insert(&internalpb.SearchResults{
 			SlicedBlob: bytes,

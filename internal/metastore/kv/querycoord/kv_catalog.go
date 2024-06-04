@@ -10,12 +10,11 @@ import (
 	"github.com/pingcap/log"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/compressor"
 )
 
@@ -170,7 +169,7 @@ func (s Catalog) getReplicasFromV1() ([]*querypb.Replica, error) {
 	ret := make([]*querypb.Replica, 0, len(replicaValues))
 	for _, value := range replicaValues {
 		replicaInfo := milvuspb.ReplicaInfo{}
-		err = proto.Unmarshal([]byte(value), protoadapt.MessageV2Of(&replicaInfo))
+		err = proto.Unmarshal([]byte(value), &replicaInfo)
 		if err != nil {
 			return nil, err
 		}

@@ -4,11 +4,10 @@ import (
 	"fmt"
 
 	"github.com/gin-gonic/gin"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/types"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 )
 
 // Handlers handles http requests
@@ -103,7 +102,7 @@ func (h *Handlers) handleCreateCollection(c *gin.Context) (interface{}, error) {
 	if err != nil {
 		return nil, fmt.Errorf("%w: parse body failed: %v", errBadRequest, err)
 	}
-	schemaProto, err := proto.Marshal(protoadapt.MessageV2Of(&wrappedReq.Schema))
+	schemaProto, err := proto.Marshal(&wrappedReq.Schema)
 	if err != nil {
 		return nil, fmt.Errorf("%w: marshal schema failed: %v", errBadRequest, err)
 	}

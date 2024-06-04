@@ -23,8 +23,6 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -32,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	pb "github.com/milvus-io/milvus/internal/proto/etcdpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/internal/util/proxyutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -254,7 +253,7 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 
 func (t *createCollectionTask) prepareSchema() error {
 	var schema schemapb.CollectionSchema
-	if err := proto.Unmarshal(t.Req.GetSchema(), protoadapt.MessageV2Of(&schema)); err != nil {
+	if err := proto.Unmarshal(t.Req.GetSchema(), &schema); err != nil {
 		return err
 	}
 	if err := t.validateSchema(&schema); err != nil {
@@ -372,7 +371,7 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts ui
 	collectionID := t.collID
 	partitionIDs := t.partIDs
 	// error won't happen here.
-	marshaledSchema, _ := proto.Marshal(protoadapt.MessageV2Of(t.schema))
+	marshaledSchema, _ := proto.Marshal(t.schema)
 	pChannels := t.channels.physicalChannels
 	vChannels := t.channels.virtualChannels
 

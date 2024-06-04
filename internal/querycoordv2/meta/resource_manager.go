@@ -23,13 +23,12 @@ import (
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/metastore"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/session"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -131,7 +130,7 @@ func (rm *ResourceManager) AddResourceGroup(rgName string, cfg *rgpb.ResourceGro
 	if rm.groups[rgName] != nil {
 		// Idempotent promise.
 		// If resource group already exist, check if configuration is the same,
-		if proto.Equal(protoadapt.MessageV2Of(rm.groups[rgName].GetConfig()), protoadapt.MessageV2Of(cfg)) {
+		if proto.Equal(rm.groups[rgName].GetConfig(), cfg) {
 			return nil
 		}
 		return merr.WrapErrResourceGroupAlreadyExist(rgName)

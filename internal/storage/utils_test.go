@@ -27,12 +27,11 @@ import (
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/testutils"
@@ -521,7 +520,7 @@ func genRowWithAllFields(fVecDim, bVecDim, f16VecDim, bf16VecDim int) (blob *com
 					},
 				},
 			}
-			bytes, _ := proto.Marshal(protoadapt.MessageV2Of(data))
+			bytes, _ := proto.Marshal(data)
 			binary.Write(&buffer, common.Endian, bytes)
 			ret.Value = append(ret.Value, buffer.Bytes()...)
 			row = append(row, data)
@@ -1532,7 +1531,7 @@ func Test_boolFieldDataToBytes(t *testing.T) {
 	bs, err := boolFieldDataToPbBytes(field)
 	assert.NoError(t, err)
 	var arr schemapb.BoolArray
-	err = proto.Unmarshal(bs, protoadapt.MessageV2Of(&arr))
+	err = proto.Unmarshal(bs, &arr)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, field.Data, arr.Data)
 }
@@ -1542,7 +1541,7 @@ func Test_stringFieldDataToBytes(t *testing.T) {
 	bs, err := stringFieldDataToPbBytes(field)
 	assert.NoError(t, err)
 	var arr schemapb.StringArray
-	err = proto.Unmarshal(bs, protoadapt.MessageV2Of(&arr))
+	err = proto.Unmarshal(bs, &arr)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, field.Data, arr.Data)
 }
@@ -1564,7 +1563,7 @@ func TestFieldDataToBytes(t *testing.T) {
 	bs, err = FieldDataToBytes(endian, f1)
 	assert.NoError(t, err)
 	var barr schemapb.BoolArray
-	err = proto.Unmarshal(bs, protoadapt.MessageV2Of(&barr))
+	err = proto.Unmarshal(bs, &barr)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, f1.Data, barr.Data)
 
@@ -1572,7 +1571,7 @@ func TestFieldDataToBytes(t *testing.T) {
 	bs, err = FieldDataToBytes(endian, f2)
 	assert.NoError(t, err)
 	var sarr schemapb.StringArray
-	err = proto.Unmarshal(bs, protoadapt.MessageV2Of(&sarr))
+	err = proto.Unmarshal(bs, &sarr)
 	assert.NoError(t, err)
 	assert.ElementsMatch(t, f2.Data, sarr.Data)
 

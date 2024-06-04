@@ -30,8 +30,6 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/exp/maps"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -42,6 +40,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -544,7 +543,7 @@ func TestChannelCP(t *testing.T) {
 		Timestamp:   1000,
 	}
 	k := buildChannelCPKey(mockVChannel)
-	v, err := proto.Marshal(protoadapt.MessageV2Of(pos))
+	v, err := proto.Marshal(pos)
 	assert.NoError(t, err)
 
 	t.Run("ListChannelCheckpoint", func(t *testing.T) {

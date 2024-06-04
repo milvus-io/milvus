@@ -21,11 +21,10 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -76,11 +75,11 @@ func TestRateLimitInterceptor(t *testing.T) {
 			DbName:         "db1",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, proto.Size(protoadapt.MessageV2Of(&milvuspb.InsertRequest{
+		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
-		})), size)
+		}), size)
 		assert.Equal(t, internalpb.RateType_DMLInsert, rt)
 		assert.Equal(t, database, int64(100))
 		assert.True(t, len(col2part) == 1)
@@ -92,11 +91,11 @@ func TestRateLimitInterceptor(t *testing.T) {
 			DbName:         "db1",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, proto.Size(protoadapt.MessageV2Of(&milvuspb.InsertRequest{
+		assert.Equal(t, proto.Size(&milvuspb.InsertRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
-		})), size)
+		}), size)
 		assert.Equal(t, internalpb.RateType_DMLUpsert, rt)
 		assert.Equal(t, database, int64(100))
 		assert.True(t, len(col2part) == 1)
@@ -108,11 +107,11 @@ func TestRateLimitInterceptor(t *testing.T) {
 			DbName:         "db1",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, proto.Size(protoadapt.MessageV2Of(&milvuspb.DeleteRequest{
+		assert.Equal(t, proto.Size(&milvuspb.DeleteRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
-		})), size)
+		}), size)
 		assert.Equal(t, internalpb.RateType_DMLDelete, rt)
 		assert.Equal(t, database, int64(100))
 		assert.True(t, len(col2part) == 1)
@@ -124,11 +123,11 @@ func TestRateLimitInterceptor(t *testing.T) {
 			DbName:         "db1",
 		})
 		assert.NoError(t, err)
-		assert.Equal(t, proto.Size(protoadapt.MessageV2Of(&milvuspb.ImportRequest{
+		assert.Equal(t, proto.Size(&milvuspb.ImportRequest{
 			CollectionName: "foo",
 			PartitionName:  "p1",
 			DbName:         "db1",
-		})), size)
+		}), size)
 		assert.Equal(t, internalpb.RateType_DMLBulkLoad, rt)
 		assert.Equal(t, database, int64(100))
 		assert.True(t, len(col2part) == 1)

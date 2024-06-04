@@ -21,8 +21,6 @@ import (
 
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -31,6 +29,7 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/kv/querycoord"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	. "github.com/milvus-io/milvus/internal/querycoordv2/params"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
@@ -201,7 +200,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 		CollectionID: 1000,
 		NodeIds:      []int64{1, 2, 3},
 	}
-	value, err := proto.Marshal(protoadapt.MessageV2Of(&replicaInfo))
+	value, err := proto.Marshal(&replicaInfo)
 	suite.NoError(err)
 	suite.kv.Save(querycoord.ReplicaMetaPrefixV1+"/2100", string(value))
 

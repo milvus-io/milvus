@@ -21,12 +21,10 @@ import (
 	"math/rand"
 	"strconv"
 
-	"google.golang.org/protobuf/proto"
-	"google.golang.org/protobuf/protoadapt"
-
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/planpb"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -111,7 +109,7 @@ func genPlaceHolderGroup(nq int64) ([]byte, error) {
 	placeholderGroup := commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{placeholderValue},
 	}
-	placeGroupByte, err := proto.Marshal(protoadapt.MessageV2Of(&placeholderGroup))
+	placeGroupByte, err := proto.Marshal(&placeholderGroup)
 	if err != nil {
 		return nil, err
 	}

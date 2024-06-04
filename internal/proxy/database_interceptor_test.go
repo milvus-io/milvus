@@ -4,10 +4,10 @@ import (
 	"context"
 	"testing"
 
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/stretchr/testify/assert"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
-	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -99,13 +99,13 @@ func TestDatabaseInterceptor(t *testing.T) {
 		md := metadata.Pairs(util.HeaderDBName, "db")
 		ctx = metadata.NewIncomingContext(ctx, md)
 		for _, req := range availableReqs {
-			before, err := proto.Marshal(protoadapt.MessageV2Of(req))
+			before, err := proto.Marshal(req)
 			assert.NoError(t, err)
 
 			_, err = interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
 			assert.NoError(t, err)
 
-			after, err := proto.Marshal(protoadapt.MessageV2Of(req))
+			after, err := proto.Marshal(req)
 			assert.NoError(t, err)
 
 			assert.True(t, len(after) > len(before))
@@ -124,13 +124,13 @@ func TestDatabaseInterceptor(t *testing.T) {
 		}
 
 		for _, req := range unavailableReqs {
-			before, err := proto.Marshal(protoadapt.MessageV2Of(req))
+			before, err := proto.Marshal(req)
 			assert.NoError(t, err)
 
 			_, err = interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
 			assert.NoError(t, err)
 
-			after, err := proto.Marshal(protoadapt.MessageV2Of(req))
+			after, err := proto.Marshal(req)
 			assert.NoError(t, err)
 
 			if len(after) != len(before) {
