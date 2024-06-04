@@ -114,7 +114,7 @@ func (c *mck) run() {
 	}
 	for _, value := range values {
 		info := &datapb.SegmentInfo{}
-		err = proto.Unmarshal([]byte(value), protoadapt.MessageV2Of(info))
+		err = proto.Unmarshal([]byte(value), info)
 		if err != nil {
 			log.Warn("fail to unmarshal the segment info", zap.Error(err))
 			continue
@@ -128,7 +128,7 @@ func (c *mck) run() {
 	}
 	for _, value := range values {
 		collInfo := pb.CollectionInfo{}
-		err = proto.Unmarshal([]byte(value), protoadapt.MessageV2Of(&collInfo))
+		err = proto.Unmarshal([]byte(value), &collInfo)
 		if err != nil {
 			log.Warn("fail to unmarshal the collection info", zap.Error(err))
 			continue

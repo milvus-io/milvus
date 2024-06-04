@@ -17,11 +17,8 @@ Install compile dependencies
 $ sudo apt install -y g++ gcc make libssl-dev zlib1g-dev libboost-regex-dev \
     libboost-program-options-dev libboost-system-dev libboost-filesystem-dev \
     libboost-serialization-dev python3-dev libboost-python-dev libcurl4-openssl-dev gfortran libtbb-dev
-$ export GO111MODULE=on
-$ go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
 ```
 
-# google.golang.org/protobuf/cmd/protoc-gen-go
 Install OpenBlas library
 
 install using apt
