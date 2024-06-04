@@ -77,6 +77,7 @@ type BloomFilterInterface interface {
 	Test(data []byte) bool
 	TestString(data string) bool
 	TestLocations(locs []uint64) bool
+	BatchTestLocations(locs [][]uint64, hit []bool) []bool
 	MarshalJSON() ([]byte, error)
 	UnmarshalJSON(data []byte) error
 }
@@ -124,6 +125,20 @@ func (b *basicBloomFilter) TestString(data string) bool {
 
 func (b *basicBloomFilter) TestLocations(locs []uint64) bool {
 	return b.inner.TestLocations(locs[:b.k])
+}
+
+func (b *basicBloomFilter) BatchTestLocations(locs [][]uint64, hits []bool) []bool {
+	ret := make([]bool, len(locs))
+	for i := range hits {
+		if !hits[i] {
+			if uint(len(locs[i])) < b.k {
+				ret[i] = true
+				continue
+			}
+			ret[i] = b.inner.TestLocations(locs[i][:b.k])
+		}
+	}
+	return ret
 }
 
 func (b basicBloomFilter) MarshalJSON() ([]byte, error) {
@@ -188,7 +203,25 @@ func (b *blockedBloomFilter) TestString(data string) bool {
 }
 
 func (b *blockedBloomFilter) TestLocations(locs []uint64) bool {
-	return b.inner.TestLocations(locs)
+	// for block bf, just cache it's hash result as locations
+	if len(locs) != 1 {
+		return true
+	}
+	return b.inner.Has(locs[0])
+}
+
+func (b *blockedBloomFilter) BatchTestLocations(locs [][]uint64, hits []bool) []bool {
+	ret := make([]bool, len(locs))
+	for i := range hits {
+		if !hits[i] {
+			if len(locs[i]) != 1 {
+				ret[i] = true
+				continue
+			}
+			ret[i] = b.inner.Has(locs[i][0])
+		}
+	}
+	return ret
 }
 
 func (b blockedBloomFilter) MarshalJSON() ([]byte, error) {
@@ -236,6 +269,15 @@ func (b *alwaysTrueBloomFilter) TestString(data string) bool {
 
 func (b *alwaysTrueBloomFilter) TestLocations(locs []uint64) bool {
 	return true
+}
+
+func (b *alwaysTrueBloomFilter) BatchTestLocations(locs [][]uint64, hits []bool) []bool {
+	ret := make([]bool, len(locs))
+	for i := 0; i < len(hits); i++ {
+		ret[i] = true
+	}
+
+	return ret
 }
 
 func (b *alwaysTrueBloomFilter) MarshalJSON() ([]byte, error) {
@@ -287,7 +329,7 @@ func Locations(data []byte, k uint, bfType BFType) []uint64 {
 	case BasicBF:
 		return bloom.Locations(data, k)
 	case BlockedBF:
-		return blobloom.Locations(xxh3.Hash(data), k)
+		return []uint64{xxh3.Hash(data)}
 	case AlwaysTrueBF:
 		return nil
 	default:

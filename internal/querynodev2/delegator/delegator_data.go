@@ -202,18 +202,23 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 	// segment => delete data
 	delRecords := make(map[int64]DeleteData)
 	for _, data := range deleteData {
-		for i, pk := range data.PrimaryKeys {
-			segmentIDs, err := sd.pkOracle.Get(pk, pkoracle.WithPartitionID(data.PartitionID))
-			if err != nil {
-				log.Warn("failed to get delete candidates for pk", zap.Any("pk", pk.GetValue()))
-				continue
+		pks := data.PrimaryKeys
+		batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+		for idx := 0; idx < len(pks); idx += batchSize {
+			endIdx := idx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
 			}
-			for _, segmentID := range segmentIDs {
-				delRecord := delRecords[segmentID]
-				delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pk)
-				delRecord.Timestamps = append(delRecord.Timestamps, data.Timestamps[i])
-				delRecord.RowCount++
-				delRecords[segmentID] = delRecord
+
+			pk2SegmentIDs := sd.pkOracle.BatchGet(pks[idx:endIdx], pkoracle.WithPartitionID(data.PartitionID))
+			for i, segmentIDs := range pk2SegmentIDs {
+				for _, segmentID := range segmentIDs {
+					delRecord := delRecords[segmentID]
+					delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pks[idx+i])
+					delRecord.Timestamps = append(delRecord.Timestamps, data.Timestamps[idx+i])
+					delRecord.RowCount++
+					delRecords[segmentID] = delRecord
+				}
 			}
 		}
 	}
@@ -522,11 +527,20 @@ func (sd *shardDelegator) GetLevel0Deletions(partitionID int64, candidate pkorac
 		segment := segment.(*segments.L0Segment)
 		if segment.Partition() == partitionID || segment.Partition() == common.AllPartitionsID {
 			segmentPks, segmentTss := segment.DeleteRecords()
-			for i, pk := range segmentPks {
-				lc := storage.NewLocationsCache(pk)
-				if candidate.MayPkExist(lc) {
-					pks = append(pks, pk)
-					tss = append(tss, segmentTss[i])
+			batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+			for idx := 0; idx < len(segmentPks); idx += batchSize {
+				endIdx := idx + batchSize
+				if endIdx > len(segmentPks) {
+					endIdx = len(segmentPks)
+				}
+
+				lc := storage.NewBatchLocationsCache(segmentPks[idx:endIdx])
+				hits := candidate.BatchPkExist(lc)
+				for i, hit := range hits {
+					if hit {
+						pks = append(pks, segmentPks[idx+i])
+						tss = append(tss, segmentTss[idx+i])
+					}
 				}
 			}
 		}
@@ -634,10 +648,20 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 				if record.PartitionID != common.AllPartitionsID && candidate.Partition() != record.PartitionID {
 					continue
 				}
-				for i, pk := range record.DeleteData.Pks {
-					lc := storage.NewLocationsCache(pk)
-					if candidate.MayPkExist(lc) {
-						deleteData.Append(pk, record.DeleteData.Tss[i])
+				pks := record.DeleteData.Pks
+				batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+				for idx := 0; idx < len(pks); idx += batchSize {
+					endIdx := idx + batchSize
+					if endIdx > len(pks) {
+						endIdx = len(pks)
+					}
+
+					lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
+					hits := candidate.BatchPkExist(lc)
+					for i, hit := range hits {
+						if hit {
+							deleteData.Append(pks[idx+i], record.DeleteData.Tss[idx+i])
+						}
 					}
 				}
 			}
@@ -731,11 +755,21 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 						continue
 					}
 
-					for idx, pk := range storage.ParseIDs2PrimaryKeys(dmsg.GetPrimaryKeys()) {
-						lc := storage.NewLocationsCache(pk)
-						if candidate.MayPkExist(lc) {
-							result.Pks = append(result.Pks, pk)
-							result.Tss = append(result.Tss, dmsg.Timestamps[idx])
+					pks := storage.ParseIDs2PrimaryKeys(dmsg.GetPrimaryKeys())
+					batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+					for idx := 0; idx < len(pks); idx += batchSize {
+						endIdx := idx + batchSize
+						if endIdx > len(pks) {
+							endIdx = len(pks)
+						}
+
+						lc := storage.NewBatchLocationsCache(pks[idx:endIdx])
+						hits := candidate.BatchPkExist(lc)
+						for i, hit := range hits {
+							if hit {
+								result.Pks = append(result.Pks, pks[idx+i])
+								result.Tss = append(result.Tss, dmsg.Timestamps[idx+i])
+							}
 						}
 					}
 				}

@@ -20,6 +20,7 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/util/bloomfilter"
@@ -125,21 +126,6 @@ func Locations(pk PrimaryKey, k uint, bfType bloomfilter.BFType) []uint64 {
 	return nil
 }
 
-func (st *PkStatistics) TestLocations(pk PrimaryKey, locs []uint64) bool {
-	// empty pkStatics
-	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
-		return false
-	}
-
-	// check bf first, TestLocation just do some bitset compute, cost is cheaper
-	if !st.PkFilter.TestLocations(locs) {
-		return false
-	}
-
-	// check pk range first, ugly but key it for now
-	return st.MinPK.LE(pk) && st.MaxPK.GE(pk)
-}
-
 func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
 	// empty pkStatics
 	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
@@ -153,6 +139,28 @@ func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
 
 	// check pk range after
 	return st.MinPK.LE(lc.pk) && st.MaxPK.GE(lc.pk)
+}
+
+func (st *PkStatistics) BatchPkExist(lc *BatchLocationsCache, hits []bool) []bool {
+	// empty pkStatics
+	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
+		return hits
+	}
+
+	// check bf first, TestLocation just do some bitset compute, cost is cheaper
+	locations := lc.Locations(st.PkFilter.K(), st.PkFilter.Type())
+	ret := st.PkFilter.BatchTestLocations(locations, hits)
+
+	// todo: a bit ugly, hits[i]'s value will depends on multi bf in single segment,
+	// hits array will be removed after we merge bf in segment
+	pks := lc.PKs()
+	for i := range ret {
+		if !hits[i] {
+			hits[i] = ret[i] && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
+		}
+	}
+
+	return hits
 }
 
 // LocationsCache is a helper struct caching pk bloom filter locations.
@@ -175,10 +183,11 @@ func (lc *LocationsCache) Locations(k uint, bfType bloomfilter.BFType) []uint64 
 		}
 		return lc.basicBFLocations[:k]
 	case bloomfilter.BlockedBF:
-		if int(k) > len(lc.blockBFLocations) {
-			lc.blockBFLocations = Locations(lc.pk, k, bfType)
+		// for block bf, we only need cache the hash result, which is a uint and only compute once for any k value
+		if len(lc.blockBFLocations) != 1 {
+			lc.blockBFLocations = Locations(lc.pk, 1, bfType)
 		}
-		return lc.blockBFLocations[:k]
+		return lc.blockBFLocations
 	default:
 		return nil
 	}
@@ -187,5 +196,55 @@ func (lc *LocationsCache) Locations(k uint, bfType bloomfilter.BFType) []uint64 
 func NewLocationsCache(pk PrimaryKey) *LocationsCache {
 	return &LocationsCache{
 		pk: pk,
+	}
+}
+
+type BatchLocationsCache struct {
+	pks []PrimaryKey
+	k   uint
+
+	// for block bf
+	blockLocations [][]uint64
+
+	// for basic bf
+	basicLocations [][]uint64
+}
+
+func (lc *BatchLocationsCache) PKs() []PrimaryKey {
+	return lc.pks
+}
+
+func (lc *BatchLocationsCache) Size() int {
+	return len(lc.pks)
+}
+
+func (lc *BatchLocationsCache) Locations(k uint, bfType bloomfilter.BFType) [][]uint64 {
+	switch bfType {
+	case bloomfilter.BasicBF:
+		if k > lc.k {
+			lc.k = k
+			lc.basicLocations = lo.Map(lc.pks, func(pk PrimaryKey, _ int) []uint64 {
+				return Locations(pk, lc.k, bfType)
+			})
+		}
+
+		return lc.basicLocations
+	case bloomfilter.BlockedBF:
+		// for block bf, we only need cache the hash result, which is a uint and only compute once for any k value
+		if len(lc.blockLocations) != len(lc.pks) {
+			lc.blockLocations = lo.Map(lc.pks, func(pk PrimaryKey, _ int) []uint64 {
+				return Locations(pk, lc.k, bfType)
+			})
+		}
+
+		return lc.blockLocations
+	default:
+		return nil
+	}
+}
+
+func NewBatchLocationsCache(pks []PrimaryKey) *BatchLocationsCache {
+	return &BatchLocationsCache{
+		pks: pks,
 	}
 }

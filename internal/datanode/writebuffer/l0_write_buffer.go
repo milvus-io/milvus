@@ -3,7 +3,6 @@ package writebuffer
 import (
 	"context"
 
-	"github.com/samber/lo"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -16,6 +15,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/retry"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -48,27 +48,42 @@ func NewL0WriteBuffer(channel string, metacache metacache.MetaCache, storageV2Ca
 }
 
 func (wb *l0WriteBuffer) dispatchDeleteMsgs(groups []*inData, deleteMsgs []*msgstream.DeleteMsg, startPos, endPos *msgpb.MsgPosition) {
-	for _, delMsg := range deleteMsgs {
-		l0SegmentID := wb.getL0SegmentID(delMsg.GetPartitionID(), startPos)
-		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
-		lcs := lo.Map(pks, func(pk storage.PrimaryKey, _ int) *storage.LocationsCache { return storage.NewLocationsCache(pk) })
-		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
-			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+	split := func(pks []storage.PrimaryKey, pkTss []uint64, segments []*metacache.SegmentInfo, l0SegmentID int64) {
+		lc := storage.NewBatchLocationsCache(pks)
 		for _, segment := range segments {
 			if segment.CompactTo() != 0 {
 				continue
 			}
+
+			hits := segment.GetBloomFilterSet().BatchPkExist(lc)
 			var deletePks []storage.PrimaryKey
 			var deleteTss []typeutil.Timestamp
-			for idx, lc := range lcs {
-				if segment.GetBloomFilterSet().PkExists(lc) {
-					deletePks = append(deletePks, pks[idx])
-					deleteTss = append(deleteTss, delMsg.GetTimestamps()[idx])
+			for i, hit := range hits {
+				if hit {
+					deletePks = append(deletePks, pks[i])
+					deleteTss = append(deleteTss, pkTss[i])
 				}
 			}
 			if len(deletePks) > 0 {
 				wb.bufferDelete(l0SegmentID, deletePks, deleteTss, startPos, endPos)
 			}
+		}
+	}
+
+	for _, delMsg := range deleteMsgs {
+		l0SegmentID := wb.getL0SegmentID(delMsg.GetPartitionID(), startPos)
+		pks := storage.ParseIDs2PrimaryKeys(delMsg.GetPrimaryKeys())
+		pkTss := delMsg.GetTimestamps()
+		segments := wb.metaCache.GetSegmentsBy(metacache.WithPartitionID(delMsg.PartitionID),
+			metacache.WithSegmentState(commonpb.SegmentState_Growing, commonpb.SegmentState_Flushing, commonpb.SegmentState_Flushed))
+
+		for idx := 0; idx < len(pks); idx += batchSize {
+			endIdx := idx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
+			}
+			split(pks[idx:endIdx], pkTss[idx:endIdx], segments, l0SegmentID)
 		}
 
 		for _, inData := range groups {
