@@ -27,7 +27,7 @@ import (
 )
 
 func TestFixedSizeAllocator(t *testing.T) {
-	a := NewFixedSizeAllocator(&Resource{100, 100, 100})
+	a := NewFixedSizeAllocator[string](&Resource{100, 100, 100})
 
 	allocated, _ := a.Allocate("a1", &Resource{10, 10, 10})
 	assert.Equal(t, true, allocated)
@@ -46,7 +46,7 @@ func TestFixedSizeAllocator(t *testing.T) {
 }
 
 func TestFixedSizeAllocatorRace(t *testing.T) {
-	a := NewFixedSizeAllocator(&Resource{100, 100, 100})
+	a := NewFixedSizeAllocator[string](&Resource{100, 100, 100})
 	wg := new(sync.WaitGroup)
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
@@ -64,7 +64,7 @@ func TestFixedSizeAllocatorRace(t *testing.T) {
 func TestPhysicalAwareFixedSizeAllocator(t *testing.T) {
 	hwMemoryLimit := int64(float32(hardware.GetMemoryCount()) * 0.9)
 	hwDiskLimit := int64(1<<63 - 1)
-	a := NewPhysicalAwareFixedSizeAllocator(&Resource{100, 100, 100}, hwMemoryLimit, hwDiskLimit, "/tmp")
+	a := NewPhysicalAwareFixedSizeAllocator[string](&Resource{100, 100, 100}, hwMemoryLimit, hwDiskLimit, "/tmp")
 
 	allocated, _ := a.Allocate("a1", &Resource{10, 10, 10})
 	assert.Equal(t, true, allocated)
