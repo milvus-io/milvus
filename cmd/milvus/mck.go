@@ -619,8 +619,8 @@ func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, e
 		log.Warn("legacy WatchQueryChannels type found, ignore")
 		return "WatchQueryChannels", emptyInt64(), emptyInt64(), nil
 	case commonpb.MsgType_LoadBalanceSegments:
-		loadReq := querypb.LoadBalanceRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.LoadBalanceRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "LoadBalanceRequest", err)
 		}

@@ -24,7 +24,7 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/suite"
-	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/encoding/prototext"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -33,6 +33,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/initcore"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/funcutil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -167,7 +168,8 @@ func (suite *ReduceSuite) TestReduceAllFunc() {
                  placeholder_tag: "$0"
                >`
 	var planpb planpb.PlanNode
-	proto.UnmarshalText(planStr, &planpb)
+	err = prototext.Unmarshal([]byte(planStr), &planpb)
+	suite.NoError(err)
 	serializedPlan, err := proto.Marshal(&planpb)
 	suite.NoError(err)
 	plan, err := createSearchPlanByExpr(context.Background(), suite.collection, serializedPlan)
