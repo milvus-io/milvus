@@ -18,6 +18,8 @@ package binlog
 
 import (
 	"context"
+	"fmt"
+	"io"
 	"testing"
 
 	"github.com/cockroachdb/errors"
@@ -26,6 +28,7 @@ import (
 
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/internal/storage"
 )
 
 func TestL0Reader_NewL0Reader(t *testing.T) {
@@ -52,4 +55,41 @@ func TestL0Reader_NewL0Reader(t *testing.T) {
 		assert.Error(t, err)
 		assert.Nil(t, r)
 	})
+}
+
+func TestL0Reader_Read(t *testing.T) {
+	ctx := context.Background()
+	const (
+		delCnt = 100
+	)
+
+	deleteData := storage.NewDeleteData(nil, nil)
+	for i := 0; i < delCnt; i++ {
+		deleteData.Append(storage.NewVarCharPrimaryKey(fmt.Sprintf("No.%d", i)), uint64(i+1))
+	}
+	deleteCodec := storage.NewDeleteCodec()
+	blob, err := deleteCodec.Serialize(1, 2, 3, deleteData)
+	assert.NoError(t, err)
+
+	cm := mocks.NewChunkManager(t)
+	cm.EXPECT().WalkWithPrefix(mock.Anything, mock.Anything, mock.Anything, mock.Anything).RunAndReturn(
+		func(ctx context.Context, s string, b bool, walkFunc storage.ChunkObjectWalkFunc) error {
+			for _, file := range []string{"a/b/c/"} {
+				walkFunc(&storage.ChunkObjectInfo{FilePath: file})
+			}
+			return nil
+		})
+	cm.EXPECT().Read(mock.Anything, mock.Anything).Return(blob.Value, nil)
+
+	r, err := NewL0Reader(ctx, cm, nil, &internalpb.ImportFile{Paths: []string{"mock-prefix"}}, 100)
+	assert.NoError(t, err)
+
+	res, err := r.Read()
+	assert.NoError(t, err)
+	assert.Equal(t, int64(delCnt), res.RowCount)
+	assert.Equal(t, deleteData.Size(), res.Size())
+
+	_, err = r.Read()
+	assert.Error(t, err)
+	assert.ErrorIs(t, err, io.EOF)
 }
