@@ -871,7 +871,10 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 		return nil, err2
 	}
 	var planpb planpb.PlanNode
-	_ = prototext.Unmarshal([]byte(planStr), protoadapt.MessageV2Of(&planpb))
+	err = prototext.Unmarshal([]byte(planStr), protoadapt.MessageV2Of(&planpb))
+	if err != nil {
+		return nil, err
+	}
 	serializedPlan, err3 := proto.Marshal(&planpb)
 	if err3 != nil {
 		return nil, err3
