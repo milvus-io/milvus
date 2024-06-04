@@ -156,7 +156,7 @@ func (s *BulkInsertSuite) TestImportWithPartitionKey() {
 
 	// query partition key, TermExpr
 	queryNum := 10
-	partitionKeyData := insertData.Data[int64(102)].GetRows().([]string)
+	partitionKeyData := insertData.Data[int64(102)].GetDataRows().([]string)
 	queryData := partitionKeyData[:queryNum]
 	strs := lo.Map(queryData, func(str string, _ int) string {
 		return fmt.Sprintf("\"%s\"", str)
