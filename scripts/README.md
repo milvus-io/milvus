@@ -21,6 +21,7 @@ $ export GO111MODULE=on
 $ go get github.com/golang/protobuf/protoc-gen-go@v1.3.2
 ```
 
+# google.golang.org/protobuf/cmd/protoc-gen-go
 Install OpenBlas library
 
 install using apt

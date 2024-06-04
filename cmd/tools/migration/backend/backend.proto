@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package milvus.proto.backend;
+
+option go_package = "github.com/milvus-io/milvus/cmd/tools/migration/backend";
+
+// BackupHeader stores etcd backup header information
+message BackupHeader {
+	// version number for backup format
+	int32 version = 1;
+	// instance name, as rootPath for key prefix
+	string instance = 2;
+	// meta_path used in keys
+	string meta_path = 3;
+	// entries record number of key-value in backup
+	int64 entries = 4;
+	// component is the backup target
+	string component = 5;
+	// extra property reserved
+	bytes extra = 6;
+}

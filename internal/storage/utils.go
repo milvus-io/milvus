@@ -28,9 +28,10 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -955,22 +956,22 @@ func GetTimestampFromInsertData(data *InsertData) (*Int64FieldData, error) {
 
 func boolFieldDataToPbBytes(field *BoolFieldData) ([]byte, error) {
 	arr := &schemapb.BoolArray{Data: field.Data}
-	return proto.Marshal(arr)
+	return proto.Marshal(protoadapt.MessageV2Of(arr))
 }
 
 func stringFieldDataToPbBytes(field *StringFieldData) ([]byte, error) {
 	arr := &schemapb.StringArray{Data: field.Data}
-	return proto.Marshal(arr)
+	return proto.Marshal(protoadapt.MessageV2Of(arr))
 }
 
 func arrayFieldDataToPbBytes(field *ArrayFieldData) ([]byte, error) {
 	arr := &schemapb.ArrayArray{Data: field.Data}
-	return proto.Marshal(arr)
+	return proto.Marshal(protoadapt.MessageV2Of(arr))
 }
 
 func jsonFieldDataToPbBytes(field *JSONFieldData) ([]byte, error) {
 	arr := &schemapb.JSONArray{Data: field.Data}
-	return proto.Marshal(arr)
+	return proto.Marshal(protoadapt.MessageV2Of(arr))
 }
 
 func binaryWrite(endian binary.ByteOrder, data interface{}) ([]byte, error) {

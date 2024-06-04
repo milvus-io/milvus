@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
 	clientv3 "go.etcd.io/etcd/client/v3"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus/cmd/tools/migration/configs"
 	"github.com/milvus-io/milvus/cmd/tools/migration/console"

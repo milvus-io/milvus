@@ -49,7 +49,7 @@ import (
 
 // 	"github.com/milvus-io/milvus/internal/kv"
 
-// 	"github.com/golang/protobuf/proto"
+// 	"google.golang.org/protobuf/proto"
 // 	etcdkv "github.com/milvus-io/milvus/internal/kv/etcd"
 // 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 // 	"github.com/milvus-io/milvus/internal/proto/indexpb"

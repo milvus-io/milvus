@@ -2,7 +2,8 @@ package meta
 
 import (
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/rgpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -88,7 +89,7 @@ func (rg *ResourceGroup) GetConfig() *rgpb.ResourceGroupConfig {
 
 // GetConfigCloned return a cloned resource group config.
 func (rg *ResourceGroup) GetConfigCloned() *rgpb.ResourceGroupConfig {
-	return proto.Clone(rg.cfg).(*rgpb.ResourceGroupConfig)
+	return protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(rg.cfg))).(*rgpb.ResourceGroupConfig)
 }
 
 // GetNodes return nodes of resource group.

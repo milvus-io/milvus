@@ -46,14 +46,17 @@ pushd ${PROTO_DIR}
 
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
 
-protoc --proto_path=. \
---proto_path=${API_PROTO_DIR} \
---plugin=protoc-gen-go=$GOBIN/protoc-gen-go \
---go_out=. \
---go_opt=module=github.com/milvus-io/milvus/internal/proto \
---plugin=protoc-gen-go-grpc=$GOBIN/protoc-gen-go-grpc \
---go-grpc_out=. \
---go-grpc_opt=module=github.com/milvus-io/milvus/internal/proto \
+protoc_opt="${PROTOC_BIN}
+  --proto_path=${API_PROTO_DIR}
+  --proto_path=.
+  --plugin=protoc-gen-go=$GOBIN/protoc-gen-go
+  --plugin=protoc-gen-go-grpc=$GOBIN/protoc-gen-go-grpc"
+
+${protoc_opt} \
+--go_out=$ROOT_DIR \
+--go_opt=module=github.com/milvus-io/milvus \
+--go-grpc_out=$ROOT_DIR \
+--go-grpc_opt=module=github.com/milvus-io/milvus,require_unimplemented_servers=false \
 etcd_meta.proto \
 index_cgo_msg.proto \
 cgo_msg.proto \
@@ -67,10 +70,11 @@ plan.proto \
 segcore.proto \
 || { echo 'generate go proto failed'; exit 1; }
 
-protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
+${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
+  --go_out=paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }
 
-# ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
-#   --go_out=plugins=grpc,paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }
+${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/backend/ \
+  --go_out=$ROOT_DIR --go_opt=module=github.com/milvus-io/milvus backend.proto || { echo 'generate backend.proto failed'; exit 1; }
 
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb schema.proto|| { echo 'generate schema.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb common.proto|| { echo 'generate common.proto failed'; exit 1; }

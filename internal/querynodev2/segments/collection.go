@@ -28,10 +28,11 @@ import (
 	"sync"
 	"unsafe"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -227,7 +228,7 @@ func NewCollection(collectionID int64, schema *schemapb.CollectionSchema, indexM
 		CCollection
 		NewCollection(const char* schema_proto_blob);
 	*/
-	schemaBlob, err := proto.Marshal(schema)
+	schemaBlob, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	if err != nil {
 		log.Warn("marshal schema failed", zap.Error(err))
 		return nil

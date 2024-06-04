@@ -19,9 +19,10 @@ package meta
 import (
 	"testing"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -200,7 +201,7 @@ func (suite *ReplicaManagerSuite) TestRecover() {
 		CollectionID: 1000,
 		NodeIds:      []int64{1, 2, 3},
 	}
-	value, err := proto.Marshal(&replicaInfo)
+	value, err := proto.Marshal(protoadapt.MessageV2Of(&replicaInfo))
 	suite.NoError(err)
 	suite.kv.Save(querycoord.ReplicaMetaPrefixV1+"/2100", string(value))
 

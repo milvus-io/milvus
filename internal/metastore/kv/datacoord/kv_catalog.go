@@ -23,10 +23,11 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
 	"golang.org/x/sync/errgroup"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -485,7 +486,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb
 	for i, key := range keys {
 		value := values[i]
 		channelCP := &msgpb.MsgPosition{}
-		err = proto.Unmarshal([]byte(value), channelCP)
+		err = proto.Unmarshal([]byte(value), protoadapt.MessageV2Of(channelCP))
 		if err != nil {
 			log.Error("unmarshal channelCP failed when ListChannelCheckpoint", zap.Error(err))
 			return nil, err
@@ -500,7 +501,7 @@ func (kc *Catalog) ListChannelCheckpoint(ctx context.Context) (map[string]*msgpb
 
 func (kc *Catalog) SaveChannelCheckpoint(ctx context.Context, vChannel string, pos *msgpb.MsgPosition) error {
 	k := buildChannelCPKey(vChannel)
-	v, err := proto.Marshal(pos)
+	v, err := proto.Marshal(protoadapt.MessageV2Of(pos))
 	if err != nil {
 		return err
 	}
@@ -511,7 +512,7 @@ func (kc *Catalog) SaveChannelCheckpoints(ctx context.Context, positions []*msgp
 	kvs := make(map[string]string)
 	for _, position := range positions {
 		k := buildChannelCPKey(position.GetChannelName())
-		v, err := proto.Marshal(position)
+		v, err := proto.Marshal(protoadapt.MessageV2Of(position))
 		if err != nil {
 			return err
 		}

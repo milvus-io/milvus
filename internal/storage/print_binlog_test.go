@@ -22,8 +22,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -377,7 +378,7 @@ func TestPrintDDFiles(t *testing.T) {
 		DbName:         "DbName",
 		DbID:           UniqueID(0),
 	}
-	createCollString, err := proto.Marshal(&createCollReq)
+	createCollString, err := proto.Marshal(protoadapt.MessageV2Of(&createCollReq))
 	assert.NoError(t, err)
 
 	dropCollReq := msgpb.DropCollectionRequest{
@@ -392,7 +393,7 @@ func TestPrintDDFiles(t *testing.T) {
 		DbName:         "DbName",
 		DbID:           UniqueID(0),
 	}
-	dropCollString, err := proto.Marshal(&dropCollReq)
+	dropCollString, err := proto.Marshal(protoadapt.MessageV2Of(&dropCollReq))
 	assert.NoError(t, err)
 
 	createPartitionReq := msgpb.CreatePartitionRequest{
@@ -409,7 +410,7 @@ func TestPrintDDFiles(t *testing.T) {
 		DbName:         "DbName",
 		DbID:           UniqueID(0),
 	}
-	createPartitionString, err := proto.Marshal(&createPartitionReq)
+	createPartitionString, err := proto.Marshal(protoadapt.MessageV2Of(&createPartitionReq))
 	assert.NoError(t, err)
 
 	dropPartitionReq := msgpb.DropPartitionRequest{
@@ -426,7 +427,7 @@ func TestPrintDDFiles(t *testing.T) {
 		DbName:         "DbName",
 		DbID:           UniqueID(0),
 	}
-	dropPartitionString, err := proto.Marshal(&dropPartitionReq)
+	dropPartitionString, err := proto.Marshal(protoadapt.MessageV2Of(&dropPartitionReq))
 	assert.NoError(t, err)
 	ddRequests := []string{
 		string(createCollString[:]),

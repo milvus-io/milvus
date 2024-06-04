@@ -9,13 +9,14 @@ import (
 	"testing"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/atomic"
 	"go.uber.org/zap"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -196,7 +197,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			Return([]string{"key"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
-		fm, err := proto.Marshal(fieldMeta)
+		fm, err := proto.Marshal(protoadapt.MessageV2Of(fieldMeta))
 		assert.NoError(t, err)
 
 		kv.On("LoadWithPrefix", mock.MatchedBy(
@@ -237,7 +238,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 			Return([]string{"key"}, []string{string(pm)}, nil)
 
 		fieldMeta := &schemapb.FieldSchema{}
-		fm, err := proto.Marshal(fieldMeta)
+		fm, err := proto.Marshal(protoadapt.MessageV2Of(fieldMeta))
 		assert.NoError(t, err)
 
 		kv.On("LoadWithPrefix", mock.MatchedBy(
@@ -602,7 +603,7 @@ func TestCatalog_listFieldsAfter210(t *testing.T) {
 		ctx := context.Background()
 
 		field := &schemapb.FieldSchema{FieldID: 101}
-		value, err := proto.Marshal(field)
+		value, err := proto.Marshal(protoadapt.MessageV2Of(field))
 		assert.NoError(t, err)
 
 		snapshot := kv.NewMockSnapshotKV()
@@ -1274,7 +1275,7 @@ func TestCatalog_DropCollection(t *testing.T) {
 }
 
 func getUserInfoMetaString(username string) string {
-	validInfo := internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
+	validInfo := &internalpb.CredentialInfo{Username: username, EncryptedPassword: "pwd" + username}
 	validBytes, _ := json.Marshal(validInfo)
 	return string(validBytes)
 }

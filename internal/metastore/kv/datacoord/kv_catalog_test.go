@@ -27,10 +27,11 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"golang.org/x/exp/maps"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -543,7 +544,7 @@ func TestChannelCP(t *testing.T) {
 		Timestamp:   1000,
 	}
 	k := buildChannelCPKey(mockVChannel)
-	v, err := proto.Marshal(pos)
+	v, err := proto.Marshal(protoadapt.MessageV2Of(pos))
 	assert.NoError(t, err)
 
 	t.Run("ListChannelCheckpoint", func(t *testing.T) {

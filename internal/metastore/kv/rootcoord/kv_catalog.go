@@ -6,8 +6,9 @@ import (
 	"fmt"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -182,7 +183,7 @@ func (kc *Catalog) CreateCollection(ctx context.Context, coll *model.Collection,
 	for _, field := range coll.Fields {
 		k := BuildFieldKey(coll.CollectionID, field.FieldID)
 		fieldInfo := model.MarshalFieldModel(field)
-		v, err := proto.Marshal(fieldInfo)
+		v, err := proto.Marshal(protoadapt.MessageV2Of(fieldInfo))
 		if err != nil {
 			return err
 		}
@@ -348,7 +349,7 @@ func (kc *Catalog) listFieldsAfter210(ctx context.Context, collectionID typeutil
 	fields := make([]*model.Field, 0, len(values))
 	for _, v := range values {
 		partitionMeta := &schemapb.FieldSchema{}
-		err := proto.Unmarshal([]byte(v), partitionMeta)
+		err := proto.Unmarshal([]byte(v), protoadapt.MessageV2Of(partitionMeta))
 		if err != nil {
 			return nil, err
 		}

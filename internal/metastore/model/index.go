@@ -1,7 +1,8 @@
 package model
 
 import (
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
@@ -126,13 +127,13 @@ func CloneIndex(index *Index) *Index {
 		UserIndexParams: make([]*commonpb.KeyValuePair, len(index.UserIndexParams)),
 	}
 	for i, param := range index.TypeParams {
-		clonedIndex.TypeParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
+		clonedIndex.TypeParams[i] = protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(param))).(*commonpb.KeyValuePair)
 	}
 	for i, param := range index.IndexParams {
-		clonedIndex.IndexParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
+		clonedIndex.IndexParams[i] = protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(param))).(*commonpb.KeyValuePair)
 	}
 	for i, param := range index.UserIndexParams {
-		clonedIndex.UserIndexParams[i] = proto.Clone(param).(*commonpb.KeyValuePair)
+		clonedIndex.UserIndexParams[i] = protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(param))).(*commonpb.KeyValuePair)
 	}
 	return clonedIndex
 }

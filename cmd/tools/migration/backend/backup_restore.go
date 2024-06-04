@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"io"
 
-	"github.com/golang/protobuf/proto"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 )
@@ -55,7 +56,7 @@ func (f *BackupFile) WriteEntry(k, v string) error {
 		Key:  k,
 		Data: []byte(v),
 	}
-	marshaledEntry, err := proto.Marshal(entry)
+	marshaledEntry, err := proto.Marshal(protoadapt.MessageV2Of(entry))
 	if err != nil {
 		return err
 	}
@@ -92,7 +93,7 @@ func (f *BackupFile) ReadEntryFromPos(pos uint64) (entryLength uint64, entry *co
 		return 0, nil, fmt.Errorf("invalid backup file, cannot read entry")
 	}
 	entry = &commonpb.KeyDataPair{}
-	if err := proto.Unmarshal((*f)[pos+8:pos+8+entryLength], entry); err != nil {
+	if err := proto.Unmarshal((*f)[pos+8:pos+8+entryLength], protoadapt.MessageV2Of(entry)); err != nil {
 		return 0, nil, fmt.Errorf("invalid backup file, cannot read entry: %s", err.Error())
 	}
 	return entryLength, entry, nil

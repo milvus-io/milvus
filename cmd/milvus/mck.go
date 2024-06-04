@@ -12,9 +12,10 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/kv"
@@ -113,7 +114,7 @@ func (c *mck) run() {
 	}
 	for _, value := range values {
 		info := &datapb.SegmentInfo{}
-		err = proto.Unmarshal([]byte(value), info)
+		err = proto.Unmarshal([]byte(value), protoadapt.MessageV2Of(info))
 		if err != nil {
 			log.Warn("fail to unmarshal the segment info", zap.Error(err))
 			continue
@@ -127,7 +128,7 @@ func (c *mck) run() {
 	}
 	for _, value := range values {
 		collInfo := pb.CollectionInfo{}
-		err = proto.Unmarshal([]byte(value), &collInfo)
+		err = proto.Unmarshal([]byte(value), protoadapt.MessageV2Of(&collInfo))
 		if err != nil {
 			log.Warn("fail to unmarshal the collection info", zap.Error(err))
 			continue
@@ -521,47 +522,47 @@ func (c *mck) extractVecFieldIndexInfo(taskID int64, infos []*querypb.FieldIndex
 // return partitionIDs,segmentIDs,error
 func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, error) {
 	header := commonpb.MsgHeader{}
-	err := proto.Unmarshal([]byte(t), &header)
+	err := proto.Unmarshal([]byte(t), protoadapt.MessageV2Of(&header))
 	if err != nil {
 		return errReturn(taskID, "MsgHeader", err)
 	}
 
 	switch header.Base.MsgType {
 	case commonpb.MsgType_LoadCollection:
-		loadReq := querypb.LoadCollectionRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.LoadCollectionRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "LoadCollectionRequest", err)
 		}
 		log.Info("LoadCollection", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "LoadCollection", emptyInt64(), emptyInt64(), nil
 	case commonpb.MsgType_LoadPartitions:
-		loadReq := querypb.LoadPartitionsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.LoadPartitionsRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "LoadPartitionsRequest", err)
 		}
 		log.Info("LoadPartitions", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "LoadPartitions", loadReq.PartitionIDs, emptyInt64(), nil
 	case commonpb.MsgType_ReleaseCollection:
-		loadReq := querypb.ReleaseCollectionRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.ReleaseCollectionRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "ReleaseCollectionRequest", err)
 		}
 		log.Info("ReleaseCollection", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "ReleaseCollection", emptyInt64(), emptyInt64(), nil
 	case commonpb.MsgType_ReleasePartitions:
-		loadReq := querypb.ReleasePartitionsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.ReleasePartitionsRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "ReleasePartitionsRequest", err)
 		}
 		log.Info("ReleasePartitions", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "ReleasePartitions", loadReq.PartitionIDs, emptyInt64(), nil
 	case commonpb.MsgType_LoadSegments:
-		loadReq := querypb.LoadSegmentsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.LoadSegmentsRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "LoadSegmentsRequest", err)
 		}
@@ -584,16 +585,16 @@ func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, e
 		log.Info("LoadSegments", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "LoadSegments", removeRepeatElement(partitionIDs), removeRepeatElement(segmentIDs), nil
 	case commonpb.MsgType_ReleaseSegments:
-		loadReq := querypb.ReleaseSegmentsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.ReleaseSegmentsRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "ReleaseSegmentsRequest", err)
 		}
 		log.Info("ReleaseSegments", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "ReleaseSegments", loadReq.PartitionIDs, loadReq.SegmentIDs, nil
 	case commonpb.MsgType_WatchDmChannels:
-		loadReq := querypb.WatchDmChannelsRequest{}
-		err = proto.Unmarshal([]byte(t), &loadReq)
+		loadReq := &querypb.WatchDmChannelsRequest{}
+		err = proto.Unmarshal([]byte(t), loadReq)
 		if err != nil {
 			return errReturn(taskID, "WatchDmChannelsRequest", err)
 		}
@@ -627,8 +628,8 @@ func (c *mck) unmarshalTask(taskID int64, t string) (string, []int64, []int64, e
 		log.Info("LoadBalanceSegments", zap.String("detail", fmt.Sprintf("+%v", loadReq)))
 		return "LoadBalanceSegments", emptyInt64(), loadReq.SealedSegmentIDs, nil
 	case commonpb.MsgType_HandoffSegments:
-		handoffReq := querypb.HandoffSegmentsRequest{}
-		err = proto.Unmarshal([]byte(t), &handoffReq)
+		handoffReq := &querypb.HandoffSegmentsRequest{}
+		err = proto.Unmarshal([]byte(t), handoffReq)
 		if err != nil {
 			return errReturn(taskID, "HandoffSegmentsRequest", err)
 		}
