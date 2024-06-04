@@ -116,6 +116,16 @@ func (m *Manager) EvictCachedValue(key string) {
 	m.configCache.Remove(key)
 }
 
+func (m *Manager) EvictCacheValueByFormat(keys ...string) {
+	set := typeutil.NewSet(keys...)
+	m.configCache.Range(func(key string, value interface{}) bool {
+		if set.Contain(formatKey(key)) {
+			m.configCache.Remove(key)
+		}
+		return true
+	})
+}
+
 func (m *Manager) GetConfig(key string) (string, error) {
 	realKey := formatKey(key)
 	v, ok := m.overlays.Get(realKey)
@@ -210,6 +220,7 @@ func (m *Manager) AddSource(source Source) error {
 		return err
 	}
 
+	source.SetManager(m)
 	m.sources.Insert(sourceName, source)
 
 	err := m.pullSourceConfigs(sourceName)
