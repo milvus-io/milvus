@@ -264,7 +264,7 @@ func (t *levelZeroCompactionTask) splitDelta(
 			for _, gotSeg := range predicted {
 				writer, ok := targetSegBuffer[gotSeg]
 				if !ok {
-					segment, _ := targetSeg[gotSeg]
+					segment := targetSeg[gotSeg]
 					writer = NewSegmentDeltaWriter(gotSeg, segment.PartitionID(), t.getCollection())
 					targetSegBuffer[gotSeg] = writer
 				}
