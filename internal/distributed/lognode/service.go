@@ -62,7 +62,7 @@ type Server struct {
 	session *sessionutil.Session
 
 	// server
-	lognode *lognodeserver.Server
+	lognode *lognodeserver.LogNode
 
 	// rpc
 	grpcServer *grpc.Server
@@ -71,6 +71,8 @@ type Server struct {
 	// component client
 	etcdCli   *clientv3.Client
 	rootCoord types.RootCoordClient
+
+	factory dependency.Factory
 }
 
 // NewServer create a new QueryCoord grpc server.
@@ -80,6 +82,7 @@ func NewServer(factory dependency.Factory) (*Server, error) {
 		stopOnce:       sync.Once{},
 		grpcServerChan: make(chan struct{}),
 		etcdCli:        kvfactory.GetEtcd(),
+		factory:        factory,
 	}, nil
 }
 
@@ -211,6 +214,7 @@ func (s *Server) initSession() error {
 	}
 	s.session.Init(typeutil.LogNodeRole, addr, false, true)
 	paramtable.SetNodeID(s.session.ServerID)
+	sessionutil.SaveServerInfo(typeutil.DataNodeRole, s.session.ServerID)
 	log.Info("LogNode init session", zap.Int64("nodeID", paramtable.GetNodeID()), zap.String("node address", addr))
 	return nil
 }
@@ -321,7 +325,7 @@ func (s *Server) registerSessionToETCD() {
 	s.session.Register()
 	// start liveness check
 	s.session.LivenessCheck(context.Background(), func() {
-		log.Error("LogNode disconnected from etcd, process will exit", zap.Int64("Server Id", paramtable.GetNodeID()))
+		log.Error("LogNode disconnected from etcd, process will exit", zap.Int64("LogNode Id", paramtable.GetNodeID()))
 		if err := s.Stop(); err != nil {
 			log.Warn("failed to stop server", zap.Error(err))
 		}
