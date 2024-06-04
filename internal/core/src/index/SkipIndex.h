@@ -92,6 +92,7 @@ class SkipIndex {
             std::is_same<T, std::string_view>::value;
         static constexpr bool isDisabledType =
             std::is_same<T, milvus::Json>::value ||
+            std::is_same<T, milvus::JsonView>::value ||
             std::is_same<T, bool>::value;
         static constexpr bool value = isAllowedType && !isDisabledType;
     };

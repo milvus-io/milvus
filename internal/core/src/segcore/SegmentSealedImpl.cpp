@@ -1499,6 +1499,9 @@ SegmentSealedImpl::mask_with_timestamps(BitsetType& bitset_chunk,
                                         Timestamp ts) const {
     auto row_count = this->get_row_count();
     auto& ts_vec = this->insert_record_.timestamps_;
+    if (ts >= ts_vec[row_count - 1]) {
+        return;
+    }
     auto iter = std::upper_bound(
         boost::make_counting_iterator(static_cast<int64_t>(0)),
         boost::make_counting_iterator(row_count),

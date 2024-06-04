@@ -49,10 +49,11 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
  private:
+    template <typename T>
     VectorPtr
     EvalJsonContainsForDataSegment();
 
-    template <typename ExprValueType>
+    template <typename ExprValueType, typename T>
     VectorPtr
     ExecJsonContains();
 
@@ -60,7 +61,7 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayContains();
 
-    template <typename ExprValueType>
+    template <typename ExprValueType, typename T>
     VectorPtr
     ExecJsonContainsAll();
 
@@ -68,15 +69,19 @@ class PhyJsonContainsFilterExpr : public SegmentExpr {
     VectorPtr
     ExecArrayContainsAll();
 
+    template <typename T>
     VectorPtr
     ExecJsonContainsArray();
 
+    template <typename T>
     VectorPtr
     ExecJsonContainsAllArray();
 
+    template <typename T>
     VectorPtr
     ExecJsonContainsAllWithDiffType();
 
+    template <typename T>
     VectorPtr
     ExecJsonContainsWithDiffType();
 

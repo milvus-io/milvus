@@ -461,7 +461,7 @@ class PhyBinaryArithOpEvalRangeExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForData();
 
-    template <typename ValueType>
+    template <typename ValueType, typename T>
     VectorPtr
     ExecRangeVisitorImplForJson();
 

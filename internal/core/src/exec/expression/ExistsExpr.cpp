@@ -28,7 +28,11 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                 PanicInfo(ExprInvalid,
                           "exists expr for json index mode not supportted");
             }
-            result = EvalJsonExistsForDataSegment();
+            if (segment_->type() == SegmentType::Growing) {
+                result = EvalJsonExistsForDataSegment<milvus::Json>();
+            } else {
+                result = EvalJsonExistsForDataSegment<milvus::JsonView>();
+            }
             break;
         }
         default:
@@ -38,6 +42,7 @@ PhyExistsFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 }
 
+template <typename T>
 VectorPtr
 PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
     auto real_batch_size = GetNextBatchSize();
@@ -49,7 +54,7 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
     TargetBitmapView res(res_vec->GetRawData(), real_batch_size);
 
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
-    auto execute_sub_batch = [](const milvus::Json* data,
+    auto execute_sub_batch = [](const T* data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string& pointer) {
@@ -58,8 +63,8 @@ PhyExistsFilterExpr::EvalJsonExistsForDataSegment() {
         }
     };
 
-    int64_t processed_size = ProcessDataChunks<Json>(
-        execute_sub_batch, std::nullptr_t{}, res, pointer);
+    int64_t processed_size =
+        ProcessDataChunks<T>(execute_sub_batch, std::nullptr_t{}, res, pointer);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

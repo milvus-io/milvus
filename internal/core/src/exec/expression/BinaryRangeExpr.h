@@ -71,7 +71,10 @@ struct BinaryRangeElementFunc {
         res[i] = (cmp);                                       \
     } while (false)
 
-template <typename ValueType, bool lower_inclusive, bool upper_inclusive>
+template <typename ValueType,
+          typename T,
+          bool lower_inclusive,
+          bool upper_inclusive>
 struct BinaryRangeElementFuncForJson {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
                                        std::string_view,
@@ -80,7 +83,7 @@ struct BinaryRangeElementFuncForJson {
     operator()(ValueType val1,
                ValueType val2,
                const std::string& pointer,
-               const milvus::Json* src,
+               const T* src,
                size_t n,
                TargetBitmapView res) {
         for (size_t i = 0; i < n; ++i) {
@@ -213,7 +216,7 @@ class PhyBinaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForData();
 
-    template <typename ValueType>
+    template <typename ValueType, typename T>
     VectorPtr
     ExecRangeVisitorImplForJson();
 
