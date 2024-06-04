@@ -6,6 +6,7 @@ import (
 
 	"github.com/stretchr/testify/suite"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -390,7 +391,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 			vector2Placeholder(vectors),
 		},
 	}
-	bs, _ := proto.Marshal(phg)
+	bs, _ := proto.Marshal(protoadapt.MessageV2Of(phg))
 	// test for L2 metrics
 	req := &internalpb.SearchRequest{
 		MetricType:       "L2",

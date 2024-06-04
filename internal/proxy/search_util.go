@@ -9,6 +9,7 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -145,7 +146,7 @@ func getNqFromSubSearch(req *milvuspb.SubSearchRequest) (int64, error) {
 	if req.GetNq() == 0 {
 		// keep compatible with older client version.
 		x := &commonpb.PlaceholderGroup{}
-		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
+		err := proto.Unmarshal(req.GetPlaceholderGroup(), protoadapt.MessageV2Of(x))
 		if err != nil {
 			return 0, err
 		}
@@ -162,7 +163,7 @@ func getNq(req *milvuspb.SearchRequest) (int64, error) {
 	if req.GetNq() == 0 {
 		// keep compatible with older client version.
 		x := &commonpb.PlaceholderGroup{}
-		err := proto.Unmarshal(req.GetPlaceholderGroup(), x)
+		err := proto.Unmarshal(req.GetPlaceholderGroup(), protoadapt.MessageV2Of(x))
 		if err != nil {
 			return 0, err
 		}

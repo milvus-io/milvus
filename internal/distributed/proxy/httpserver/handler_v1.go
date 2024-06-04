@@ -13,6 +13,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -252,7 +253,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 	}
 	c.Set(ContextRequest, req)
 
-	schema, err := proto.Marshal(&schemapb.CollectionSchema{
+	schema, err := proto.Marshal(protoadapt.MessageV2Of(&schemapb.CollectionSchema{
 		Name:        httpReq.CollectionName,
 		Description: httpReq.Description,
 		AutoID:      EnableAutoID,
@@ -278,7 +279,7 @@ func (h *HandlersV1) createCollection(c *gin.Context) {
 			},
 		},
 		EnableDynamicField: httpReq.EnableDynamicField,
-	})
+	}))
 	if err != nil {
 		log.Warn("high level restful api, marshal collection schema fail", zap.Any("request", httpReq), zap.Error(err))
 		HTTPAbortReturn(c, http.StatusOK, gin.H{

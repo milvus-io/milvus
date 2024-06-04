@@ -7,6 +7,7 @@ import (
 	"go.opentelemetry.io/otel/trace"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -37,14 +38,14 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 	// replace pchannel with vchannel
 	startPositions := make([]*msgpb.MsgPosition, 0, len(fgMsg.startPositions))
 	for idx := range fgMsg.startPositions {
-		pos := proto.Clone(fgMsg.startPositions[idx]).(*msgpb.MsgPosition)
+		pos := protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(fgMsg.startPositions[idx]))).(*msgpb.MsgPosition)
 		pos.ChannelName = wNode.channelName
 		startPositions = append(startPositions, pos)
 	}
 	fgMsg.startPositions = startPositions
 	endPositions := make([]*msgpb.MsgPosition, 0, len(fgMsg.endPositions))
 	for idx := range fgMsg.endPositions {
-		pos := proto.Clone(fgMsg.endPositions[idx]).(*msgpb.MsgPosition)
+		pos := protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(fgMsg.endPositions[idx]))).(*msgpb.MsgPosition)
 		pos.ChannelName = wNode.channelName
 		endPositions = append(endPositions, pos)
 	}

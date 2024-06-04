@@ -28,7 +28,9 @@ import (
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/prototext"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -869,7 +871,7 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 		return nil, err2
 	}
 	var planpb planpb.PlanNode
-	proto.UnmarshalText(planStr, &planpb)
+	prototext.Unmarshal([]byte(planStr), protoadapt.MessageV2Of(&planpb))
 	serializedPlan, err3 := proto.Marshal(&planpb)
 	if err3 != nil {
 		return nil, err3
@@ -917,7 +919,7 @@ func genPlaceHolderGroup(nq int64) ([]byte, error) {
 	placeholderGroup := commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{placeholderValue},
 	}
-	placeGroupByte, err := proto.Marshal(&placeholderGroup)
+	placeGroupByte, err := proto.Marshal(protoadapt.MessageV2Of(&placeholderGroup))
 	if err != nil {
 		return nil, err
 	}
@@ -1025,7 +1027,7 @@ func checkSearchResult(ctx context.Context, nq int64, plan *SearchPlan, searchRe
 		}
 
 		result := &schemapb.SearchResultData{}
-		err = proto.Unmarshal(blob, result)
+		err = proto.Unmarshal(blob, protoadapt.MessageV2Of(result))
 		if err != nil {
 			return err
 		}

@@ -11,6 +11,7 @@ import (
 	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -882,7 +883,7 @@ func decodeSearchResults(ctx context.Context, searchResults []*internalpb.Search
 		}
 
 		var partialResultData schemapb.SearchResultData
-		err := proto.Unmarshal(partialSearchResult.SlicedBlob, &partialResultData)
+		err := proto.Unmarshal(partialSearchResult.SlicedBlob, protoadapt.MessageV2Of(&partialResultData))
 		if err != nil {
 			return nil, err
 		}

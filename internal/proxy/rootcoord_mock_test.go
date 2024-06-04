@@ -26,6 +26,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -337,7 +338,7 @@ func (coord *RootCoordMock) CreateCollection(ctx context.Context, req *milvuspb.
 	defer coord.collMtx.Unlock()
 
 	var schema schemapb.CollectionSchema
-	err := proto.Unmarshal(req.Schema, &schema)
+	err := proto.Unmarshal(req.Schema, protoadapt.MessageV2Of(&schema))
 	if err != nil {
 		return &commonpb.Status{
 			ErrorCode: commonpb.ErrorCode_UnexpectedError,

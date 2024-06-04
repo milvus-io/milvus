@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -417,7 +418,7 @@ func constructSearchRequest(
 		panic(err)
 	}
 	plg := constructPlaceholderGroup(nq, dim)
-	plgBs, err := proto.Marshal(plg)
+	plgBs, err := proto.Marshal(protoadapt.MessageV2Of(plg))
 	if err != nil {
 		panic(err)
 	}
@@ -626,7 +627,7 @@ func TestCreateCollectionTask(t *testing.T) {
 	fieldName2Type[floatVecField] = schemapb.DataType_FloatVector
 	schema := constructCollectionSchemaByDataType(collectionName, fieldName2Type, int64Field, false)
 	var marshaledSchema []byte
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	task := &createCollectionTask{
@@ -713,8 +714,8 @@ func TestCreateCollectionTask(t *testing.T) {
 		assert.Error(t, err)
 		task.ShardsNum = shardsNum
 
-		reqBackup := proto.Clone(task.CreateCollectionRequest).(*milvuspb.CreateCollectionRequest)
-		schemaBackup := proto.Clone(schema).(*schemapb.CollectionSchema)
+		reqBackup := protoClone(task.CreateCollectionRequest)
+		schemaBackup := protoClone(schema)
 
 		schemaWithTooManyFields := &schemapb.CollectionSchema{
 			Name:        collectionName,
@@ -722,14 +723,14 @@ func TestCreateCollectionTask(t *testing.T) {
 			AutoID:      false,
 			Fields:      make([]*schemapb.FieldSchema, Params.ProxyCfg.MaxFieldNum.GetAsInt32()+1),
 		}
-		marshaledSchemaWithTooManyFields, err := proto.Marshal(schemaWithTooManyFields)
+		marshaledSchemaWithTooManyFields, err := proto.Marshal(protoadapt.MessageV2Of(schemaWithTooManyFields))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = marshaledSchemaWithTooManyFields
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		// too many vector fields
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		schema.Fields = append(schema.Fields, schema.Fields[0])
 		for i := 0; i < Params.ProxyCfg.MaxVectorFieldNum.GetAsInt(); i++ {
 			schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
@@ -748,7 +749,7 @@ func TestCreateCollectionTask(t *testing.T) {
 				AutoID:      false,
 			})
 		}
-		tooManyVectorFieldsSchema, err := proto.Marshal(schema)
+		tooManyVectorFieldsSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = tooManyVectorFieldsSchema
 		err = task.PreExecute(ctx)
@@ -767,7 +768,7 @@ func TestCreateCollectionTask(t *testing.T) {
 				},
 			},
 		}
-		noVectorSchema, err := proto.Marshal(schema)
+		noVectorSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = noVectorSchema
 		err = task.PreExecute(ctx)
@@ -776,9 +777,9 @@ func TestCreateCollectionTask(t *testing.T) {
 		task.CreateCollectionRequest = reqBackup
 
 		// validateCollectionName
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		schema.Name = " " // empty
-		emptyNameSchema, err := proto.Marshal(schema)
+		emptyNameSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = emptyNameSchema
 		err = task.PreExecute(ctx)
@@ -788,78 +789,78 @@ func TestCreateCollectionTask(t *testing.T) {
 		for i := 0; i < Params.ProxyCfg.MaxNameLength.GetAsInt(); i++ {
 			schema.Name += strconv.Itoa(i % 10)
 		}
-		tooLongNameSchema, err := proto.Marshal(schema)
+		tooLongNameSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = tooLongNameSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		schema.Name = "$" // invalid first char
-		invalidFirstCharSchema, err := proto.Marshal(schema)
+		invalidFirstCharSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = invalidFirstCharSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		// validateDuplicatedFieldName
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		schema.Fields = append(schema.Fields, schema.Fields[0])
-		duplicatedFieldsSchema, err := proto.Marshal(schema)
+		duplicatedFieldsSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = duplicatedFieldsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		// validatePrimaryKey
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		for idx := range schema.Fields {
 			schema.Fields[idx].IsPrimaryKey = false
 		}
-		noPrimaryFieldsSchema, err := proto.Marshal(schema)
+		noPrimaryFieldsSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = noPrimaryFieldsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		// validateFieldName
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		for idx := range schema.Fields {
 			schema.Fields[idx].Name = "$"
 		}
-		invalidFieldNameSchema, err := proto.Marshal(schema)
+		invalidFieldNameSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = invalidFieldNameSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		// validateMaxLengthPerRow
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		for idx := range schema.Fields {
 			if schema.Fields[idx].DataType == schemapb.DataType_VarChar {
 				schema.Fields[idx].TypeParams = nil
 			}
 		}
-		noTypeParamsSchema, err := proto.Marshal(schema)
+		noTypeParamsSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = noTypeParamsSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
 		// ValidateVectorField
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		for idx := range schema.Fields {
 			if schema.Fields[idx].DataType == schemapb.DataType_FloatVector ||
 				schema.Fields[idx].DataType == schemapb.DataType_BinaryVector {
 				schema.Fields[idx].TypeParams = nil
 			}
 		}
-		noDimSchema, err := proto.Marshal(schema)
+		noDimSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = noDimSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		for idx := range schema.Fields {
 			if schema.Fields[idx].DataType == schemapb.DataType_FloatVector ||
 				schema.Fields[idx].DataType == schemapb.DataType_BinaryVector {
@@ -871,13 +872,13 @@ func TestCreateCollectionTask(t *testing.T) {
 				}
 			}
 		}
-		dimNotIntSchema, err := proto.Marshal(schema)
+		dimNotIntSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = dimNotIntSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		for idx := range schema.Fields {
 			if schema.Fields[idx].DataType == schemapb.DataType_FloatVector ||
 				schema.Fields[idx].DataType == schemapb.DataType_BinaryVector {
@@ -889,13 +890,13 @@ func TestCreateCollectionTask(t *testing.T) {
 				}
 			}
 		}
-		tooLargeDimSchema, err := proto.Marshal(schema)
+		tooLargeDimSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = tooLargeDimSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		schema.Fields[1].DataType = schemapb.DataType_BinaryVector
 		schema.Fields[1].TypeParams = []*commonpb.KeyValuePair{
 			{
@@ -903,13 +904,13 @@ func TestCreateCollectionTask(t *testing.T) {
 				Value: strconv.Itoa(Params.ProxyCfg.MaxDimension.GetAsInt() + 1),
 			},
 		}
-		binaryTooLargeDimSchema, err := proto.Marshal(schema)
+		binaryTooLargeDimSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = binaryTooLargeDimSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 
-		schema = proto.Clone(schemaBackup).(*schemapb.CollectionSchema)
+		schema = protoClone(schemaBackup)
 		schema.Fields = append(schema.Fields, &schemapb.FieldSchema{
 			FieldID:      0,
 			Name:         "second_vector",
@@ -925,7 +926,7 @@ func TestCreateCollectionTask(t *testing.T) {
 			IndexParams: nil,
 			AutoID:      false,
 		})
-		twoVecFieldsSchema, err := proto.Marshal(schema)
+		twoVecFieldsSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.CreateCollectionRequest.Schema = twoVecFieldsSchema
 		err = task.PreExecute(ctx)
@@ -946,7 +947,7 @@ func TestCreateCollectionTask(t *testing.T) {
 			Name:   collectionName,
 			Fields: append(schema.Fields, dynamicField),
 		}
-		marshaledSchema, err := proto.Marshal(schema2)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema2))
 		assert.NoError(t, err)
 
 		task2 := &createCollectionTask{
@@ -991,7 +992,7 @@ func TestHasCollectionTask(t *testing.T) {
 	dim := 128
 
 	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	createColReq := &milvuspb.CreateCollectionRequest{
@@ -1135,7 +1136,7 @@ func TestDescribeCollectionTask_ShardsNum1(t *testing.T) {
 	dim := 128
 
 	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	createColReq := &milvuspb.CreateCollectionRequest{
@@ -1196,7 +1197,7 @@ func TestDescribeCollectionTask_EnableDynamicSchema(t *testing.T) {
 	dim := 128
 
 	schema := constructCollectionSchemaEnableDynamicSchema(int64Field, floatVecField, dim, collectionName)
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	createColReq := &milvuspb.CreateCollectionRequest{
@@ -1259,7 +1260,7 @@ func TestDescribeCollectionTask_ShardsNum2(t *testing.T) {
 	dim := 128
 
 	schema := constructCollectionSchema(int64Field, floatVecField, dim, collectionName)
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	createColReq := &milvuspb.CreateCollectionRequest{
@@ -1633,7 +1634,7 @@ func TestTask_Int64PrimaryKey(t *testing.T) {
 
 	t.Run("create collection", func(t *testing.T) {
 		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testInt64Field, false)
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		createColT := &createCollectionTask{
@@ -1826,7 +1827,7 @@ func TestTask_VarCharPrimaryKey(t *testing.T) {
 
 	t.Run("create collection", func(t *testing.T) {
 		schema := constructCollectionSchemaByDataType(collectionName, fieldName2Types, testVarCharField, false)
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		createColT := &createCollectionTask{
@@ -3028,7 +3029,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		Fields: []*schemapb.FieldSchema{int64Field, varCharField, partitionKeyField, floatVecField},
 	}
 
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	task := &createCollectionTask{
@@ -3068,7 +3069,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		// test specify num partition without partition key field
 		partitionKeyField.IsPartitionKey = false
 		task.NumPartitions = common.DefaultPartitionsWithPartitionKey * 2
-		marshaledSchema, err = proto.Marshal(schema)
+		marshaledSchema, err = proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
@@ -3077,7 +3078,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 
 		// test multi partition key field
 		varCharField.IsPartitionKey = true
-		marshaledSchema, err = proto.Marshal(schema)
+		marshaledSchema, err = proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
@@ -3086,7 +3087,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 
 		// test partitions < 0
 		task.NumPartitions = -2
-		marshaledSchema, err = proto.Marshal(schema)
+		marshaledSchema, err = proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
@@ -3095,7 +3096,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 
 		// test partition key type not in [int64, varChar]
 		partitionKeyField.DataType = schemapb.DataType_FloatVector
-		marshaledSchema, err = proto.Marshal(schema)
+		marshaledSchema, err = proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
@@ -3105,7 +3106,7 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 		// test partition key field not primary key field
 		primaryField, _ := typeutil.GetPrimaryFieldSchema(schema)
 		primaryField.IsPartitionKey = true
-		marshaledSchema, err = proto.Marshal(schema)
+		marshaledSchema, err = proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
@@ -3114,14 +3115,14 @@ func TestCreateCollectionTaskWithPartitionKey(t *testing.T) {
 
 		// test partition num too large
 		Params.Save(Params.RootCoordCfg.MaxPartitionNum.Key, "16")
-		marshaledSchema, err = proto.Marshal(schema)
+		marshaledSchema, err = proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
 		assert.Error(t, err)
 		Params.Reset(Params.RootCoordCfg.MaxPartitionNum.Key)
 
-		marshaledSchema, err = proto.Marshal(schema)
+		marshaledSchema, err = proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task.Schema = marshaledSchema
 		err = task.PreExecute(ctx)
@@ -3235,7 +3236,7 @@ func TestPartitionKey(t *testing.T) {
 	}
 	fieldName2Type["partition_key_field"] = schemapb.DataType_Int64
 	schema.Fields = append(schema.Fields, partitionKeyField)
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	t.Run("create collection", func(t *testing.T) {
@@ -3501,7 +3502,7 @@ func TestClusteringKey(t *testing.T) {
 			},
 		}
 		schema.Fields = append(schema.Fields, vecField)
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		createCollectionTask := &createCollectionTask{
@@ -3541,7 +3542,7 @@ func TestClusteringKey(t *testing.T) {
 			IsPartitionKey:  true,
 		}
 		schema.Fields = append(schema.Fields, clusterKeyField)
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		createCollectionTask := &createCollectionTask{
@@ -3578,7 +3579,7 @@ func TestClusteringKey(t *testing.T) {
 			IsPrimaryKey:    true,
 		}
 		schema.Fields = append(schema.Fields, clusterKeyField)
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		createCollectionTask := &createCollectionTask{
@@ -3620,7 +3621,7 @@ func TestClusteringKey(t *testing.T) {
 			IsClusteringKey: true,
 		}
 		schema.Fields = append(schema.Fields, clusterKeyField2)
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		createCollectionTask := &createCollectionTask{
@@ -3681,4 +3682,8 @@ func TestAlterCollectionCheckLoaded(t *testing.T) {
 	}
 	err = task.PreExecute(context.Background())
 	assert.Equal(t, merr.Code(merr.ErrCollectionLoaded), merr.Code(err))
+}
+
+func protoClone[T protoadapt.MessageV1](v T) T {
+	return proto.Clone(protoadapt.MessageV2Of(v)).(T)
 }

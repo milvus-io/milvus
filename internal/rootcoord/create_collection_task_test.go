@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -501,7 +502,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				{Name: TimeStampFieldName},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
@@ -528,7 +529,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
@@ -555,7 +556,7 @@ func Test_createCollectionTask_prepareSchema(t *testing.T) {
 				},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		task := createCollectionTask{
 			Req: &milvuspb.CreateCollectionRequest{
@@ -630,7 +631,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				{Name: field1},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		meta.On("GetDatabaseByID", mock.Anything,
 			mock.Anything, mock.Anything).Return(nil, errors.New("mock"))
@@ -672,7 +673,7 @@ func Test_createCollectionTask_Prepare(t *testing.T) {
 				},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
@@ -848,7 +849,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 				{Name: field1},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
@@ -943,7 +944,7 @@ func Test_createCollectionTask_Execute(t *testing.T) {
 				{Name: field1},
 			},
 		}
-		marshaledSchema, err := proto.Marshal(schema)
+		marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 
 		task := createCollectionTask{
@@ -1019,7 +1020,7 @@ func Test_createCollectionTask_PartitionKey(t *testing.T) {
 		AutoID:      false,
 		Fields:      []*schemapb.FieldSchema{partitionKeyField},
 	}
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	assert.NoError(t, err)
 
 	task := createCollectionTask{

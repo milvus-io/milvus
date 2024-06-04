@@ -8,6 +8,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/metadata"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util"
@@ -45,7 +46,7 @@ func TestDatabaseInterceptor(t *testing.T) {
 	})
 
 	t.Run("test ok for all request", func(t *testing.T) {
-		availableReqs := []proto.Message{
+		availableReqs := []protoadapt.MessageV1{
 			&milvuspb.CreateCollectionRequest{},
 			&milvuspb.DropCollectionRequest{},
 			&milvuspb.HasCollectionRequest{},
@@ -98,19 +99,19 @@ func TestDatabaseInterceptor(t *testing.T) {
 		md := metadata.Pairs(util.HeaderDBName, "db")
 		ctx = metadata.NewIncomingContext(ctx, md)
 		for _, req := range availableReqs {
-			before, err := proto.Marshal(req)
+			before, err := proto.Marshal(protoadapt.MessageV2Of(req))
 			assert.NoError(t, err)
 
 			_, err = interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
 			assert.NoError(t, err)
 
-			after, err := proto.Marshal(req)
+			after, err := proto.Marshal(protoadapt.MessageV2Of(req))
 			assert.NoError(t, err)
 
 			assert.True(t, len(after) > len(before))
 		}
 
-		unavailableReqs := []proto.Message{
+		unavailableReqs := []protoadapt.MessageV1{
 			&milvuspb.GetMetricsRequest{},
 			&milvuspb.DummyRequest{},
 			&milvuspb.CalcDistanceRequest{},
@@ -123,13 +124,13 @@ func TestDatabaseInterceptor(t *testing.T) {
 		}
 
 		for _, req := range unavailableReqs {
-			before, err := proto.Marshal(req)
+			before, err := proto.Marshal(protoadapt.MessageV2Of(req))
 			assert.NoError(t, err)
 
 			_, err = interceptor(ctx, req, &grpc.UnaryServerInfo{}, handler)
 			assert.NoError(t, err)
 
-			after, err := proto.Marshal(req)
+			after, err := proto.Marshal(protoadapt.MessageV2Of(req))
 			assert.NoError(t, err)
 
 			if len(after) != len(before) {

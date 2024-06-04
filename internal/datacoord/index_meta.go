@@ -27,6 +27,7 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/metastore"
@@ -598,7 +599,7 @@ func (m *indexMeta) GetIndexParams(collID, indexID UniqueID) []*commonpb.KeyValu
 	indexParams := make([]*commonpb.KeyValuePair, 0, len(index.IndexParams))
 
 	for _, param := range index.IndexParams {
-		indexParams = append(indexParams, proto.Clone(param).(*commonpb.KeyValuePair))
+		indexParams = append(indexParams, protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(param))).(*commonpb.KeyValuePair))
 	}
 
 	return indexParams
@@ -619,7 +620,7 @@ func (m *indexMeta) GetTypeParams(collID, indexID UniqueID) []*commonpb.KeyValue
 	typeParams := make([]*commonpb.KeyValuePair, 0, len(index.TypeParams))
 
 	for _, param := range index.TypeParams {
-		typeParams = append(typeParams, proto.Clone(param).(*commonpb.KeyValuePair))
+		typeParams = append(typeParams, protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(param))).(*commonpb.KeyValuePair))
 	}
 
 	return typeParams

@@ -40,6 +40,7 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/keepalive"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -585,7 +586,7 @@ func TestProxy(t *testing.T) {
 	schema := constructCollectionSchema()
 
 	constructCreateCollectionRequest := func() *milvuspb.CreateCollectionRequest {
-		bs, err := proto.Marshal(schema)
+		bs, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		return &milvuspb.CreateCollectionRequest{
 			Base:           nil,
@@ -714,7 +715,7 @@ func TestProxy(t *testing.T) {
 			Name:     "StringField",
 			DataType: schemapb.DataType_String,
 		})
-		bs, err := proto.Marshal(schema)
+		bs, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		reqInvalidField.CollectionName = "invalid_field_coll"
 		reqInvalidField.Schema = bs
@@ -1527,7 +1528,7 @@ func TestProxy(t *testing.T) {
 
 	constructSearchRequest := func(nq int) *milvuspb.SearchRequest {
 		plg := constructVectorsPlaceholderGroup(nq)
-		plgBs, err := proto.Marshal(plg)
+		plgBs, err := proto.Marshal(protoadapt.MessageV2Of(plg))
 		assert.NoError(t, err)
 
 		params := make(map[string]string)
@@ -1560,7 +1561,7 @@ func TestProxy(t *testing.T) {
 
 	constructSubSearchRequest := func(nq int) *milvuspb.SubSearchRequest {
 		plg := constructVectorsPlaceholderGroup(nq)
-		plgBs, err := proto.Marshal(plg)
+		plgBs, err := proto.Marshal(protoadapt.MessageV2Of(plg))
 		assert.NoError(t, err)
 
 		params := make(map[string]string)
@@ -1657,7 +1658,7 @@ func TestProxy(t *testing.T) {
 
 	constructSearchByPksRequest := func() *milvuspb.SearchRequest {
 		plg := constructPrimaryKeysPlaceholderGroup()
-		plgBs, err := proto.Marshal(plg)
+		plgBs, err := proto.Marshal(protoadapt.MessageV2Of(plg))
 		assert.NoError(t, err)
 
 		params := make(map[string]string)
@@ -3708,7 +3709,7 @@ func TestProxy(t *testing.T) {
 	schema = constructCollectionSchema()
 
 	constructCreateCollectionRequest = func() *milvuspb.CreateCollectionRequest {
-		bs, err := proto.Marshal(schema)
+		bs, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		return &milvuspb.CreateCollectionRequest{
 			Base:           nil,
@@ -3782,7 +3783,7 @@ func TestProxy(t *testing.T) {
 			Name:     "StringField",
 			DataType: schemapb.DataType_String,
 		})
-		bs, err := proto.Marshal(schema)
+		bs, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 		assert.NoError(t, err)
 		reqInvalidField.CollectionName = "invalid_field_coll_upsert_valid"
 		reqInvalidField.Schema = bs

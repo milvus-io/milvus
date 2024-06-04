@@ -19,6 +19,7 @@ import (
 	"go.uber.org/zap"
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -873,11 +874,11 @@ func generatePlaceholderGroup(ctx context.Context, body string, collSchema *sche
 	if err != nil {
 		return nil, err
 	}
-	return proto.Marshal(&commonpb.PlaceholderGroup{
+	return proto.Marshal(protoadapt.MessageV2Of(&commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{
 			phv,
 		},
-	})
+	}))
 }
 
 func generateSearchParams(ctx context.Context, c *gin.Context, reqParams map[string]float64) ([]*commonpb.KeyValuePair, error) {
@@ -1110,7 +1111,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				enableDynamic = en
 			}
 		}
-		schema, err = proto.Marshal(&schemapb.CollectionSchema{
+		schema, err = proto.Marshal(protoadapt.MessageV2Of(&schemapb.CollectionSchema{
 			Name: httpReq.CollectionName,
 			Fields: []*schemapb.FieldSchema{
 				{
@@ -1136,7 +1137,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 				},
 			},
 			EnableDynamicField: enableDynamic,
-		})
+		}))
 	} else {
 		collSchema := schemapb.CollectionSchema{
 			Name:               httpReq.CollectionName,
@@ -1190,7 +1191,7 @@ func (h *HandlersV2) createCollection(ctx context.Context, c *gin.Context, anyRe
 			collSchema.Fields = append(collSchema.Fields, &fieldSchema)
 			fieldNames[field.FieldName] = true
 		}
-		schema, err = proto.Marshal(&collSchema)
+		schema, err = proto.Marshal(protoadapt.MessageV2Of(&collSchema))
 	}
 	if err != nil {
 		log.Ctx(ctx).Warn("high level restful api, marshal collection schema fail", zap.Error(err), zap.Any("request", anyReq))

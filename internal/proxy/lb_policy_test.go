@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/atomic"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -123,7 +124,7 @@ func (s *LBPolicySuite) loadCollection() {
 	}
 
 	schema := constructCollectionSchemaByDataType(s.collectionName, fieldName2Types, testInt64Field, false)
-	marshaledSchema, err := proto.Marshal(schema)
+	marshaledSchema, err := proto.Marshal(protoadapt.MessageV2Of(schema))
 	s.NoError(err)
 
 	ctx := context.Background()

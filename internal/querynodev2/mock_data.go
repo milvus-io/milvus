@@ -22,6 +22,7 @@ import (
 	"strconv"
 
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -110,7 +111,7 @@ func genPlaceHolderGroup(nq int64) ([]byte, error) {
 	placeholderGroup := commonpb.PlaceholderGroup{
 		Placeholders: []*commonpb.PlaceholderValue{placeholderValue},
 	}
-	placeGroupByte, err := proto.Marshal(&placeholderGroup)
+	placeGroupByte, err := proto.Marshal(protoadapt.MessageV2Of(&placeholderGroup))
 	if err != nil {
 		return nil, err
 	}

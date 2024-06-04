@@ -7,6 +7,7 @@ import (
 
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -47,7 +48,7 @@ func PruneSegments(ctx context.Context,
 	if searchReq != nil {
 		// parse searched vectors
 		var vectorsHolder commonpb.PlaceholderGroup
-		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), &vectorsHolder)
+		err := proto.Unmarshal(searchReq.GetPlaceholderGroup(), protoadapt.MessageV2Of(&vectorsHolder))
 		if err != nil || len(vectorsHolder.GetPlaceholders()) == 0 {
 			return
 		}

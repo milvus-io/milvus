@@ -31,6 +31,7 @@ import (
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/federpb"
@@ -2502,7 +2503,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 	tr := timerecord.NewTimeRecorder(method)
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.InsertLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
+		metrics.InsertLabel, request.GetCollectionName()).Add(float64(proto.Size(protoadapt.MessageV2Of(request))))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
 	it := &insertTask{
@@ -2593,7 +2594,7 @@ func (node *Proxy) Insert(ctx context.Context, request *milvuspb.InsertRequest) 
 		hookutil.OpTypeKey:          hookutil.OpTypeInsert,
 		hookutil.DatabaseKey:        dbName,
 		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(request),
+		hookutil.RequestDataSizeKey: proto.Size(protoadapt.MessageV2Of(request)),
 		hookutil.SuccessCntKey:      successCnt,
 		hookutil.FailCntKey:         len(it.result.ErrIndex),
 	})
@@ -2629,7 +2630,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.DeleteLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
+		metrics.DeleteLabel, request.GetCollectionName()).Add(float64(proto.Size(protoadapt.MessageV2Of(request))))
 
 	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
 		return &milvuspb.MutationResult{
@@ -2682,7 +2683,7 @@ func (node *Proxy) Delete(ctx context.Context, request *milvuspb.DeleteRequest) 
 		}, nil
 	}
 
-	receiveSize := proto.Size(dr.req)
+	receiveSize := proto.Size(protoadapt.MessageV2Of(dr.req))
 	rateCol.Add(internalpb.RateType_DMLDelete.String(), float64(receiveSize))
 
 	successCnt := dr.result.GetDeleteCnt()
@@ -2738,7 +2739,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
-		metrics.UpsertLabel, request.GetCollectionName()).Add(float64(proto.Size(request)))
+		metrics.UpsertLabel, request.GetCollectionName()).Add(float64(proto.Size(protoadapt.MessageV2Of(request))))
 	metrics.ProxyFunctionCall.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10), method, metrics.TotalLabel, request.GetDbName(), request.GetCollectionName()).Inc()
 
 	request.Base = commonpbutil.NewMsgBase(
@@ -2830,7 +2831,7 @@ func (node *Proxy) Upsert(ctx context.Context, request *milvuspb.UpsertRequest) 
 		hookutil.OpTypeKey:          hookutil.OpTypeUpsert,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
-		hookutil.RequestDataSizeKey: proto.Size(it.req),
+		hookutil.RequestDataSizeKey: proto.Size(protoadapt.MessageV2Of(it.req)),
 		hookutil.SuccessCntKey:      it.result.UpsertCnt,
 		hookutil.FailCntKey:         len(it.result.ErrIndex),
 	})
@@ -2891,7 +2892,7 @@ func (node *Proxy) Search(ctx context.Context, request *milvuspb.SearchRequest) 
 }
 
 func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) (*milvuspb.SearchResults, error) {
-	receiveSize := proto.Size(request)
+	receiveSize := proto.Size(protoadapt.MessageV2Of(request))
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.SearchLabel,
@@ -3068,7 +3069,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 
 	if qt.result != nil {
 		username := GetCurUserFromContextOrDefault(ctx)
-		sentSize := proto.Size(qt.result)
+		sentSize := proto.Size(protoadapt.MessageV2Of(qt.result))
 		v := Extension.Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeSearch,
 			hookutil.DatabaseKey:        dbName,
@@ -3107,7 +3108,7 @@ func (node *Proxy) HybridSearch(ctx context.Context, request *milvuspb.HybridSea
 }
 
 func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSearchRequest) (*milvuspb.SearchResults, error) {
-	receiveSize := proto.Size(request)
+	receiveSize := proto.Size(protoadapt.MessageV2Of(request))
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.HybridSearchLabel,
@@ -3265,7 +3266,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 	).Observe(float64(searchDur))
 
 	if qt.result != nil {
-		sentSize := proto.Size(qt.result)
+		sentSize := proto.Size(protoadapt.MessageV2Of(qt.result))
 		username := GetCurUserFromContextOrDefault(ctx)
 		v := Extension.Report(map[string]any{
 			hookutil.OpTypeKey:          hookutil.OpTypeHybridSearch,
@@ -3288,7 +3289,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 
 func (node *Proxy) getVectorPlaceholderGroupForSearchByPks(ctx context.Context, request *milvuspb.SearchRequest) ([]byte, error) {
 	placeholderGroup := &commonpb.PlaceholderGroup{}
-	err := proto.Unmarshal(request.PlaceholderGroup, placeholderGroup)
+	err := proto.Unmarshal(request.PlaceholderGroup, protoadapt.MessageV2Of(placeholderGroup))
 	if err != nil {
 		return nil, err
 	}
@@ -3540,7 +3541,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 	}
 
 	subLabel := GetCollectionRateSubLabel(request)
-	receiveSize := proto.Size(request)
+	receiveSize := proto.Size(protoadapt.MessageV2Of(request))
 	metrics.ProxyReceiveBytes.WithLabelValues(
 		strconv.FormatInt(paramtable.GetNodeID(), 10),
 		metrics.QueryLabel,
@@ -3588,7 +3589,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		request.GetCollectionName(),
 	).Inc()
 
-	sentSize := proto.Size(qt.result)
+	sentSize := proto.Size(protoadapt.MessageV2Of(qt.result))
 	rateCol.Add(metricsinfo.ReadResultThroughput, float64(sentSize), subLabel)
 	metrics.ProxyReadReqSendBytes.WithLabelValues(strconv.FormatInt(paramtable.GetNodeID(), 10)).Add(float64(sentSize))
 
@@ -3598,7 +3599,7 @@ func (node *Proxy) Query(ctx context.Context, request *milvuspb.QueryRequest) (*
 		hookutil.OpTypeKey:          hookutil.OpTypeQuery,
 		hookutil.DatabaseKey:        request.DbName,
 		hookutil.UsernameKey:        username,
-		hookutil.ResultDataSizeKey:  proto.Size(res),
+		hookutil.ResultDataSizeKey:  proto.Size(protoadapt.MessageV2Of(res)),
 		hookutil.RelatedDataSizeKey: qt.totalRelatedDataSize,
 		hookutil.RelatedCntKey:      qt.allQueryCnt,
 	})
@@ -5189,7 +5190,7 @@ func (node *Proxy) OperatePrivilege(ctx context.Context, req *milvuspb.OperatePr
 	relatedPrivileges := util.RelatedPrivileges[util.PrivilegeNameForMetastore(req.Entity.Grantor.Privilege.Name)]
 	if len(relatedPrivileges) != 0 {
 		for _, relatedPrivilege := range relatedPrivileges {
-			relatedReq := proto.Clone(req).(*milvuspb.OperatePrivilegeRequest)
+			relatedReq := protoadapt.MessageV1Of(proto.Clone(protoadapt.MessageV2Of(req))).(*milvuspb.OperatePrivilegeRequest)
 			relatedReq.Entity.Grantor.Privilege.Name = util.PrivilegeNameForAPI(relatedPrivilege)
 			result, err = node.rootCoord.OperatePrivilege(ctx, relatedReq)
 			if err != nil {
@@ -5956,7 +5957,7 @@ func (node *Proxy) ReplicateMessage(ctx context.Context, req *milvuspb.Replicate
 	// getTsMsgFromConsumerMsg
 	for i, msgBytes := range req.Msgs {
 		header := commonpb.MsgHeader{}
-		err = proto.Unmarshal(msgBytes, &header)
+		err = proto.Unmarshal(msgBytes, protoadapt.MessageV2Of(&header))
 		if err != nil {
 			ctxLog.Warn("failed to unmarshal msg header", zap.Int("index", i), zap.Error(err))
 			return &milvuspb.ReplicateMessageResponse{Status: merr.Status(err)}, nil

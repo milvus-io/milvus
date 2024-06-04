@@ -24,6 +24,7 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
@@ -253,7 +254,7 @@ func (t *createCollectionTask) appendSysFields(schema *schemapb.CollectionSchema
 
 func (t *createCollectionTask) prepareSchema() error {
 	var schema schemapb.CollectionSchema
-	if err := proto.Unmarshal(t.Req.GetSchema(), &schema); err != nil {
+	if err := proto.Unmarshal(t.Req.GetSchema(), protoadapt.MessageV2Of(&schema)); err != nil {
 		return err
 	}
 	if err := t.validateSchema(&schema); err != nil {
@@ -371,7 +372,7 @@ func (t *createCollectionTask) genCreateCollectionMsg(ctx context.Context, ts ui
 	collectionID := t.collID
 	partitionIDs := t.partIDs
 	// error won't happen here.
-	marshaledSchema, _ := proto.Marshal(t.schema)
+	marshaledSchema, _ := proto.Marshal(protoadapt.MessageV2Of(t.schema))
 	pChannels := t.channels.physicalChannels
 	vChannels := t.channels.virtualChannels
 

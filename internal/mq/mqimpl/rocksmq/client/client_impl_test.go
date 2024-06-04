@@ -20,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -316,7 +317,7 @@ func TestRocksmq_Properties(t *testing.T) {
 			SourceID:  0,
 		},
 	}
-	msgb, errMarshal := proto.Marshal(timeTickMsg)
+	msgb, errMarshal := proto.Marshal(protoadapt.MessageV2Of(timeTickMsg))
 	assert.NoError(t, errMarshal)
 	assert.True(t, len(msgb) > 0)
 	header, err := UnmarshalHeader(msgb)
@@ -354,7 +355,7 @@ func TestRocksmq_Properties(t *testing.T) {
 	assert.NoError(t, err)
 
 	timeTickMsg2 := &msgpb.TimeTickMsg{}
-	proto.Unmarshal(msgConsume.Payload(), timeTickMsg2)
+	proto.Unmarshal(msgConsume.Payload(), protoadapt.MessageV2Of(timeTickMsg2))
 
 	assert.Equal(t, timeTickMsg2.Base.MsgType, commonpb.MsgType_TimeTick)
 	assert.Equal(t, timeTickMsg2.Base.Timestamp, uint64(100))
