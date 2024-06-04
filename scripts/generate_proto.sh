@@ -30,51 +30,47 @@ CPP_SRC_DIR=$ROOT_DIR/internal/core
 PROTOC_BIN=$ROOT_DIR/cmake_build/bin/protoc
 
 PROGRAM=$(basename "$0")
-GOPATH=$(go env GOPATH)
 
-if [ -z $GOPATH ]; then
-    printf "Error: the environment variable GOPATH is not set, please set it before running %s\n" $PROGRAM > /dev/stderr
-    exit 1
+export GOBIN=$ROOT_DIR/bin
+
+if [ ! -f $GOBIN/protoc-gen-go ]; then 
+  go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.33.0
 fi
 
-export PATH=${GOPATH}/bin:$PATH
+if [ ! -f $GOBIN/protoc-gen-go-grpc ]; then
+  go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.3.0
+fi
 
 # official go code ship with the crate, so we need to generate it manually.
 pushd ${PROTO_DIR}
 
-mkdir -p etcdpb
-mkdir -p indexcgopb
-mkdir -p cgopb
-
-mkdir -p internalpb
-mkdir -p rootcoordpb
-
-mkdir -p segcorepb
-mkdir -p proxypb
-
-mkdir -p indexpb
-mkdir -p datapb
-mkdir -p querypb
-mkdir -p planpb
-
 mkdir -p $ROOT_DIR/cmd/tools/migration/legacy/legacypb
+
+protoc --proto_path=. \
+--proto_path=${API_PROTO_DIR} \
+--plugin=protoc-gen-go=$GOBIN/protoc-gen-go \
+--go_out=. \
+--go_opt=module=github.com/milvus-io/milvus/internal/proto \
+--plugin=protoc-gen-go-grpc=$GOBIN/protoc-gen-go-grpc \
+--go-grpc_out=. \
+--go-grpc_opt=module=github.com/milvus-io/milvus/internal/proto \
+etcd_meta.proto \
+index_cgo_msg.proto \
+cgo_msg.proto \
+root_coord.proto \
+internal.proto \
+proxy.proto \
+index_coord.proto \
+data_coord.proto \
+query_coord.proto \
+plan.proto \
+segcore.proto \
+|| { echo 'generate go proto failed'; exit 1; }
 
 protoc_opt="${PROTOC_BIN} --proto_path=${API_PROTO_DIR} --proto_path=."
 
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./etcdpb etcd_meta.proto || { echo 'generate etcd_meta.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexcgopb index_cgo_msg.proto || { echo 'generate index_cgo_msg failed '; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./cgopb cgo_msg.proto || { echo 'generate cgo_msg failed '; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./rootcoordpb root_coord.proto || { echo 'generate root_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./internalpb internal.proto || { echo 'generate internal.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./proxypb proxy.proto|| { echo 'generate proxy.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./indexpb index_coord.proto|| { echo 'generate index_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./datapb data_coord.proto|| { echo 'generate data_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./querypb query_coord.proto|| { echo 'generate query_coord.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./planpb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
-${protoc_opt} --go_out=plugins=grpc,paths=source_relative:./segcorepb segcore.proto|| { echo 'generate segcore.proto failed'; exit 1; }
-
-${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
-  --go_out=plugins=grpc,paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }
+# ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \
+#   --go_out=plugins=grpc,paths=source_relative:../../cmd/tools/migration/legacy/legacypb legacy.proto || { echo 'generate legacy.proto failed'; exit 1; }
 
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb schema.proto|| { echo 'generate schema.proto failed'; exit 1; }
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb common.proto|| { echo 'generate common.proto failed'; exit 1; }
@@ -84,5 +80,3 @@ ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb cgo_msg.proto|| { echo 'generate cgo
 ${protoc_opt} --cpp_out=$CPP_SRC_DIR/src/pb plan.proto|| { echo 'generate plan.proto failed'; exit 1; }
 
 popd
-
-
