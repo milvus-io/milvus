@@ -27,7 +27,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -47,7 +46,6 @@ type L0PreImportTask struct {
 	partitionIDs []int64
 	vchannels    []string
 	schema       *schemapb.CollectionSchema
-	options      []*commonpb.KeyValuePair
 
 	manager TaskManager
 	cm      storage.ChunkManager
@@ -76,7 +74,6 @@ func NewL0PreImportTask(req *datapb.PreImportRequest,
 		partitionIDs: req.GetPartitionIDs(),
 		vchannels:    req.GetVchannels(),
 		schema:       req.GetSchema(),
-		options:      req.GetOptions(),
 		manager:      manager,
 		cm:           cm,
 	}
@@ -104,14 +101,13 @@ func (t *L0PreImportTask) Cancel() {
 
 func (t *L0PreImportTask) Clone() Task {
 	ctx, cancel := context.WithCancel(t.ctx)
-	return &PreImportTask{
+	return &L0PreImportTask{
 		PreImportTask: proto.Clone(t.PreImportTask).(*datapb.PreImportTask),
 		ctx:           ctx,
 		cancel:        cancel,
 		partitionIDs:  t.GetPartitionIDs(),
 		vchannels:     t.GetVchannels(),
 		schema:        t.GetSchema(),
-		options:       t.options,
 	}
 }
 

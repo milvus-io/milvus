@@ -452,7 +452,7 @@ func (node *DataNode) ImportV2(ctx context.Context, req *datapb.ImportRequest) (
 	}
 	var task importv2.Task
 	if importutilv2.IsL0Import(req.GetOptions()) {
-		task = importv2.NewTaskL0Import(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
+		task = importv2.NewL0ImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
 	} else {
 		task = importv2.NewImportTask(req, node.importTaskMgr, node.syncMgr, node.chunkManager)
 	}

@@ -53,7 +53,7 @@ type L0ImportTask struct {
 	metaCaches map[string]metacache.MetaCache
 }
 
-func NewTaskL0Import(req *datapb.ImportRequest,
+func NewL0ImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,

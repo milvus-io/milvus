@@ -18,11 +18,8 @@ package importv2
 
 import (
 	"context"
-	rand2 "crypto/rand"
 	"encoding/json"
-	"fmt"
 	"io"
-	"math/rand"
 	"strconv"
 	"strings"
 	"sync"
@@ -30,7 +27,6 @@ import (
 	"time"
 
 	"github.com/cockroachdb/errors"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/suite"
 
@@ -42,10 +38,10 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/testutil"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
 type sampleRow struct {
@@ -117,113 +113,6 @@ func (s *SchedulerSuite) SetupTest() {
 	s.manager = NewTaskManager()
 	s.syncMgr = syncmgr.NewMockSyncManager(s.T())
 	s.scheduler = NewScheduler(s.manager).(*scheduler)
-}
-
-func createInsertData(t *testing.T, schema *schemapb.CollectionSchema, rowCount int) *storage.InsertData {
-	insertData, err := storage.NewInsertData(schema)
-	assert.NoError(t, err)
-	for _, field := range schema.GetFields() {
-		if field.GetAutoID() && field.GetIsPrimaryKey() {
-			continue
-		}
-		switch field.GetDataType() {
-		case schemapb.DataType_Bool:
-			boolData := make([]bool, 0)
-			for i := 0; i < rowCount; i++ {
-				boolData = append(boolData, i%3 != 0)
-			}
-			insertData.Data[field.GetFieldID()] = &storage.BoolFieldData{Data: boolData}
-		case schemapb.DataType_Float:
-			floatData := make([]float32, 0)
-			for i := 0; i < rowCount; i++ {
-				floatData = append(floatData, float32(i/2))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.FloatFieldData{Data: floatData}
-		case schemapb.DataType_Double:
-			doubleData := make([]float64, 0)
-			for i := 0; i < rowCount; i++ {
-				doubleData = append(doubleData, float64(i/5))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.DoubleFieldData{Data: doubleData}
-		case schemapb.DataType_Int8:
-			int8Data := make([]int8, 0)
-			for i := 0; i < rowCount; i++ {
-				int8Data = append(int8Data, int8(i%256))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.Int8FieldData{Data: int8Data}
-		case schemapb.DataType_Int16:
-			int16Data := make([]int16, 0)
-			for i := 0; i < rowCount; i++ {
-				int16Data = append(int16Data, int16(i%65536))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.Int16FieldData{Data: int16Data}
-		case schemapb.DataType_Int32:
-			int32Data := make([]int32, 0)
-			for i := 0; i < rowCount; i++ {
-				int32Data = append(int32Data, int32(i%1000))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.Int32FieldData{Data: int32Data}
-		case schemapb.DataType_Int64:
-			int64Data := make([]int64, 0)
-			for i := 0; i < rowCount; i++ {
-				int64Data = append(int64Data, int64(i))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.Int64FieldData{Data: int64Data}
-		case schemapb.DataType_BinaryVector:
-			dim, err := typeutil.GetDim(field)
-			assert.NoError(t, err)
-			binVecData := make([]byte, 0)
-			total := rowCount * int(dim) / 8
-			for i := 0; i < total; i++ {
-				binVecData = append(binVecData, byte(i%256))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.BinaryVectorFieldData{Data: binVecData, Dim: int(dim)}
-		case schemapb.DataType_FloatVector:
-			dim, err := typeutil.GetDim(field)
-			assert.NoError(t, err)
-			floatVecData := make([]float32, 0)
-			total := rowCount * int(dim)
-			for i := 0; i < total; i++ {
-				floatVecData = append(floatVecData, rand.Float32())
-			}
-			insertData.Data[field.GetFieldID()] = &storage.FloatVectorFieldData{Data: floatVecData, Dim: int(dim)}
-		case schemapb.DataType_Float16Vector:
-			dim, err := typeutil.GetDim(field)
-			assert.NoError(t, err)
-			total := int64(rowCount) * dim * 2
-			float16VecData := make([]byte, total)
-			_, err = rand2.Read(float16VecData)
-			assert.NoError(t, err)
-			insertData.Data[field.GetFieldID()] = &storage.Float16VectorFieldData{Data: float16VecData, Dim: int(dim)}
-		case schemapb.DataType_String, schemapb.DataType_VarChar:
-			varcharData := make([]string, 0)
-			for i := 0; i < rowCount; i++ {
-				varcharData = append(varcharData, strconv.Itoa(i))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.StringFieldData{Data: varcharData}
-		case schemapb.DataType_JSON:
-			jsonData := make([][]byte, 0)
-			for i := 0; i < rowCount; i++ {
-				jsonData = append(jsonData, []byte(fmt.Sprintf("{\"y\": %d}", i)))
-			}
-			insertData.Data[field.GetFieldID()] = &storage.JSONFieldData{Data: jsonData}
-		case schemapb.DataType_Array:
-			arrayData := make([]*schemapb.ScalarField, 0)
-			for i := 0; i < rowCount; i++ {
-				arrayData = append(arrayData, &schemapb.ScalarField{
-					Data: &schemapb.ScalarField_IntData{
-						IntData: &schemapb.IntArray{
-							Data: []int32{int32(i), int32(i + 1), int32(i + 2)},
-						},
-					},
-				})
-			}
-			insertData.Data[field.GetFieldID()] = &storage.ArrayFieldData{Data: arrayData}
-		default:
-			panic(fmt.Sprintf("unexpected data type: %s", field.GetDataType().String()))
-		}
-	}
-	return insertData
 }
 
 func (s *SchedulerSuite) TestScheduler_Slots() {
@@ -465,7 +354,8 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 	}
 
 	var once sync.Once
-	data := createInsertData(s.T(), s.schema, s.numRows)
+	data, err := testutil.CreateInsertData(s.schema, s.numRows)
+	s.NoError(err)
 	s.reader = importutilv2.NewMockReader(s.T())
 	s.reader.EXPECT().Size().Return(1024, nil)
 	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
@@ -489,7 +379,7 @@ func (s *SchedulerSuite) TestScheduler_ReadFileStat() {
 	}
 	preimportTask := NewPreImportTask(preimportReq, s.manager, s.cm)
 	s.manager.Add(preimportTask)
-	err := preimportTask.(*PreImportTask).readFileStat(s.reader, preimportTask, 0)
+	err = preimportTask.(*PreImportTask).readFileStat(s.reader, preimportTask, 0)
 	s.NoError(err)
 }
 
@@ -501,7 +391,8 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 		return future
 	})
 	var once sync.Once
-	data := createInsertData(s.T(), s.schema, s.numRows)
+	data, err := testutil.CreateInsertData(s.schema, s.numRows)
+	s.NoError(err)
 	s.reader = importutilv2.NewMockReader(s.T())
 	s.reader.EXPECT().Read().RunAndReturn(func() (*storage.InsertData, error) {
 		var res *storage.InsertData
@@ -540,7 +431,7 @@ func (s *SchedulerSuite) TestScheduler_ImportFile() {
 	}
 	importTask := NewImportTask(importReq, s.manager, s.syncMgr, s.cm)
 	s.manager.Add(importTask)
-	err := importTask.(*ImportTask).importFile(s.reader, importTask)
+	err = importTask.(*ImportTask).importFile(s.reader, importTask)
 	s.NoError(err)
 }
 

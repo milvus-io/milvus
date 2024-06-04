@@ -195,7 +195,7 @@ func GetDeleteStats(task Task, delData *storage.DeleteData) (map[string]*datapb.
 		pk := delData.Pks[i]
 		p := f1(pk.GetValue())
 		hashRowsCount[p][0]++
-		hashDataSize[p][0] += int(pk.Size())
+		hashDataSize[p][0] += int(pk.Size()) + 8 // pk + ts
 	}
 
 	res := make(map[string]*datapb.PartitionImportStats)
