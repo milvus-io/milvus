@@ -1487,6 +1487,7 @@ func (q *QuotaCenter) sendRatesToProxy() error {
 
 // recordMetrics records metrics of quota states.
 func (q *QuotaCenter) recordMetrics() {
+	metrics.RootCoordQuotaStates.Reset()
 	dbIDs := make(map[int64]string, q.dbs.Len())
 	collectionIDs := make(map[int64]string, q.collections.Len())
 	q.dbs.Range(func(name string, id int64) bool {
