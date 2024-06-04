@@ -411,7 +411,7 @@ func (mr *MilvusRoles) Run() {
 		}
 
 		tracer.SetTracerProvider(exp, params.TraceCfg.SampleFraction.GetAsFloat())
-		log.Info("Reset tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()))
+		log.Info("Reset tracer finished", zap.String("Exporter", params.TraceCfg.Exporter.GetValue()), zap.Float64("SampleFraction", params.TraceCfg.SampleFraction.GetAsFloat()))
 
 		if paramtable.GetRole() == typeutil.QueryNodeRole || paramtable.GetRole() == typeutil.StandaloneRole {
 			initcore.InitTraceConfig(params)

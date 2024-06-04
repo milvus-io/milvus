@@ -24,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/samber/lo"
 	clientv3 "go.etcd.io/etcd/client/v3"
 	"go.uber.org/zap"
 
@@ -44,6 +45,7 @@ type EtcdSource struct {
 
 	updateMu        sync.Mutex
 	configRefresher *refresher
+	manager         ConfigManager
 }
 
 func NewEtcdSource(etcdInfo *EtcdInfo) (*EtcdSource, error) {
@@ -115,6 +117,12 @@ func (es *EtcdSource) Close() {
 	es.configRefresher.stop()
 }
 
+func (es *EtcdSource) SetManager(m ConfigManager) {
+	es.Lock()
+	defer es.Unlock()
+	es.manager = m
+}
+
 func (es *EtcdSource) SetEventHandler(eh EventHandler) {
 	es.configRefresher.SetEventHandler(eh)
 }
@@ -172,6 +180,9 @@ func (es *EtcdSource) update(configs map[string]string) error {
 		return err
 	}
 	es.currentConfigs = configs
+	if es.manager != nil {
+		es.manager.EvictCacheValueByFormat(lo.Map(events, func(event *Event, _ int) string { return event.Key })...)
+	}
 	es.Unlock()
 
 	es.configRefresher.fireEvents(events...)
