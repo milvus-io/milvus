@@ -201,6 +201,10 @@ IndexFactory::CreateVectorIndex(
                 return std::make_unique<VectorDiskAnnIndex<bin1>>(
                     index_type, metric_type, version, file_manager_context);
             }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(
+                    index_type, metric_type, version, file_manager_context);
+            }
             default:
                 throw SegcoreError(
                     DataTypeInvalid,
@@ -317,6 +321,14 @@ IndexFactory::CreateVectorIndex(
             }
             case DataType::VECTOR_BINARY: {
                 return std::make_unique<VectorDiskAnnIndex<bin1>>(
+                    index_type,
+                    metric_type,
+                    version,
+                    space,
+                    file_manager_context);
+            }
+            case DataType::VECTOR_SPARSE_FLOAT: {
+                return std::make_unique<VectorDiskAnnIndex<float>>(
                     index_type,
                     metric_type,
                     version,
