@@ -167,7 +167,7 @@ func (s *ReaderSuite) run(dataType schemapb.DataType, elemType schemapb.DataType
 			for i := 0; i < expectRows; i++ {
 				expect := expectInsertData.Data[fieldID].GetRow(i + offsetBegin)
 				actual := data.GetRow(i)
-				if fieldDataType == schemapb.DataType_Array {
+				if fieldDataType == schemapb.DataType_Array && expect != nil {
 					switch elementType {
 					case schemapb.DataType_Bool:
 						actualArray := actual.(*schemapb.ScalarField).GetBoolData().GetData()

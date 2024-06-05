@@ -817,8 +817,10 @@ func ReadNullableIntegerOrFloatArrayData[T constraints.Integer | constraints.Flo
 		}
 		offsets := listReader.Offsets()
 		dataType := pcr.field.GetDataType()
-		if typeutil.IsVectorType(dataType) && !isVectorAligned(offsets, pcr.dim, dataType) {
-			return nil, nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
+		if typeutil.IsVectorType(dataType) {
+			if err = checkVectorAligned(offsets, pcr.dim, dataType); err != nil {
+				return nil, nil, merr.WrapErrImportFailed(fmt.Sprintf("length of vector is not aligned: %s, data type: %s", err.Error(), dataType.String()))
+			}
 		}
 		valueReader := listReader.ListValues()
 		switch valueReader.DataType().ID() {

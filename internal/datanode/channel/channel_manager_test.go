@@ -181,9 +181,7 @@ func (s *ChannelManagerSuite) TearDownTest() {
 }
 
 func (s *ChannelManagerSuite) TestReleaseStuck() {
-	var (
-		channel = "by-dev-rootcoord-dml-2"
-	)
+	channel := "by-dev-rootcoord-dml-2"
 	s.manager.releaseFunc = func(channel string) {
 		time.Sleep(1 * time.Second)
 	}
