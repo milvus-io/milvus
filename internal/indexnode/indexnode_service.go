@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"strconv"
 
-	"github.com/golang/protobuf/proto"
 	"go.opentelemetry.io/otel"
 	"go.opentelemetry.io/otel/attribute"
 	"go.opentelemetry.io/otel/trace"
@@ -36,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/metricsinfo"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
-	"github.com/milvus-io/milvus/pkg/util/timerecord"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -100,35 +98,9 @@ func (i *IndexNode) CreateJob(ctx context.Context, req *indexpb.CreateJobRequest
 	}
 	var task task
 	if Params.CommonCfg.EnableStorageV2.GetAsBool() {
-		task = &indexBuildTaskV2{
-			indexBuildTask: &indexBuildTask{
-				ident:          fmt.Sprintf("%s/%d", req.ClusterID, req.BuildID),
-				ctx:            taskCtx,
-				cancel:         taskCancel,
-				BuildID:        req.GetBuildID(),
-				ClusterID:      req.GetClusterID(),
-				node:           i,
-				req:            req,
-				cm:             cm,
-				nodeID:         i.GetNodeID(),
-				tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
-				serializedSize: 0,
-			},
-		}
+		task = newIndexBuildTaskV2(taskCtx, taskCancel, req, i)
 	} else {
-		task = &indexBuildTask{
-			ident:          fmt.Sprintf("%s/%d", req.ClusterID, req.BuildID),
-			ctx:            taskCtx,
-			cancel:         taskCancel,
-			BuildID:        req.GetBuildID(),
-			ClusterID:      req.GetClusterID(),
-			node:           i,
-			req:            req,
-			cm:             cm,
-			nodeID:         i.GetNodeID(),
-			tr:             timerecord.NewTimeRecorder(fmt.Sprintf("IndexBuildID: %d, ClusterID: %s", req.BuildID, req.ClusterID)),
-			serializedSize: 0,
-		}
+		task = newIndexBuildTask(taskCtx, taskCancel, req, cm, i)
 	}
 	ret := merr.Success()
 	if err := i.sched.IndexBuildQueue.Enqueue(task); err != nil {
@@ -222,6 +194,7 @@ func (i *IndexNode) DropJobs(ctx context.Context, req *indexpb.DropJobsRequest) 
 	return merr.Success(), nil
 }
 
+// GetJobStats should be GetSlots
 func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
 	if err := i.lifetime.Add(merr.IsHealthyOrStopping); err != nil {
 		log.Ctx(ctx).Warn("index node not ready", zap.Error(err))
@@ -231,12 +204,6 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 	}
 	defer i.lifetime.Done()
 	unissued, active := i.sched.IndexBuildQueue.GetTaskNum()
-	jobInfos := make([]*indexpb.JobInfo, 0)
-	i.foreachTaskInfo(func(ClusterID string, buildID UniqueID, info *taskInfo) {
-		if info.statistic != nil {
-			jobInfos = append(jobInfos, proto.Clone(info.statistic).(*indexpb.JobInfo))
-		}
-	})
 	slots := 0
 	if i.sched.buildParallel > unissued+active {
 		slots = i.sched.buildParallel - unissued - active
@@ -252,7 +219,6 @@ func (i *IndexNode) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsReq
 		InProgressJobNum: int64(active),
 		EnqueueJobNum:    int64(unissued),
 		TaskSlots:        int64(slots),
-		JobInfos:         jobInfos,
 		EnableDisk:       Params.IndexNodeCfg.EnableDisk.GetAsBool(),
 	}, nil
 }

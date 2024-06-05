@@ -19,7 +19,6 @@ package info
 import (
 	"fmt"
 	"net/http"
-	"sync"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -35,10 +34,9 @@ const (
 )
 
 type RestfulInfo struct {
-	params      *gin.LogFormatterParams
-	start       time.Time
-	req         interface{}
-	reqInitOnce sync.Once
+	params *gin.LogFormatterParams
+	start  time.Time
+	req    interface{}
 }
 
 func NewRestfulInfo() *RestfulInfo {
@@ -184,6 +182,14 @@ func (i *RestfulInfo) OutputFields() string {
 	fields, ok := requestutil.GetOutputFieldsFromRequest(i.req)
 	if ok {
 		return fmt.Sprint(fields.([]string))
+	}
+	return Unknown
+}
+
+func (i *RestfulInfo) ConsistencyLevel() string {
+	level, ok := requestutil.GetConsistencyLevelFromRequst(i.req)
+	if ok {
+		return level.String()
 	}
 	return Unknown
 }

@@ -358,6 +358,8 @@ SegmentSealedImpl::LoadFieldData(FieldId field_id, FieldDataInfo& data) {
         } else {
             AssertInfo(system_field_type == SystemFieldType::RowId,
                        "System field type of id column is not RowId");
+            // Consume rowid field data but not really load it
+            storage::CollectFieldDataChannel(data.channel);
         }
         ++system_ready_count_;
     } else {
