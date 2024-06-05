@@ -849,13 +849,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
             cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
-            # cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
-            # cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
             cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim),
             cf.gen_bfloat16_vec_field(name=df.bf16_vec_field, dim=dim),
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim)
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+
         files = prepare_bulk_insert_new_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -864,10 +866,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             data_fields=data_fields,
             enable_dynamic_field=enable_dynamic_field,
             force=True,
+            schema=schema
         )
-        self._connect()
-        c_name = cf.gen_unique_str("bulk_insert")
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
@@ -988,6 +988,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim)
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+
         files = prepare_bulk_insert_numpy_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -997,11 +1001,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             enable_dynamic_field=enable_dynamic_field,
             force=True,
             include_meta=include_meta,
-
+            schema=schema
         )
-        self._connect()
-        c_name = cf.gen_unique_str("bulk_insert")
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
@@ -1089,8 +1090,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         if enable_partition_key:
             assert len(self.collection_wrap.partitions) > 1
 
-
-
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
@@ -1125,6 +1124,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float16_vec_field(name=df.fp16_vec_field, dim=dim)
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         files = prepare_bulk_insert_parquet_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -1134,12 +1136,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             enable_dynamic_field=enable_dynamic_field,
             force=True,
             include_meta=include_meta,
+            schema=schema,
         )
-        self._connect()
-        c_name = cf.gen_unique_str("bulk_insert")
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
-
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
@@ -1257,6 +1256,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_sparse_vec_field(name=df.sparse_vec_field),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         files = prepare_bulk_insert_parquet_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -1266,11 +1268,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             enable_dynamic_field=enable_dynamic_field,
             force=True,
             include_meta=include_meta,
-            sparse_format=sparse_format
+            sparse_format=sparse_format,
+            schema=schema
         )
-        self._connect()
-        c_name = cf.gen_unique_str("bulk_insert")
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
+
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
@@ -1378,6 +1379,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_sparse_vec_field(name=df.sparse_vec_field),
         ]
         data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         files = prepare_bulk_insert_new_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -1387,11 +1391,9 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             enable_dynamic_field=enable_dynamic_field,
             force=True,
             include_meta=include_meta,
-            sparse_format=sparse_format
+            sparse_format=sparse_format,
+            schema=schema
         )
-        self._connect()
-        c_name = cf.gen_unique_str("bulk_insert")
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id, enable_dynamic_field=enable_dynamic_field)
         self.collection_wrap.init_collection(c_name, schema=schema)
 
         # import data
