@@ -155,19 +155,19 @@ func TestChannelStateTimer_parses(t *testing.T) {
 	)
 
 	t.Run("test parseWatchInfo", func(t *testing.T) {
-		validWatchInfo := datapb.ChannelWatchInfo{
+		validWatchInfo := &datapb.ChannelWatchInfo{
 			Vchan:   &datapb.VchannelInfo{},
 			StartTs: time.Now().Unix(),
 			State:   datapb.ChannelWatchState_ToWatch,
 		}
-		validData, err := proto.Marshal(&validWatchInfo)
+		validData, err := proto.Marshal(validWatchInfo)
 		require.NoError(t, err)
 
 		invalidDataUnableToMarshal := []byte("invalidData")
 
-		invalidWatchInfoNilVchan := validWatchInfo
+		invalidWatchInfoNilVchan := proto.Clone(validWatchInfo).(*datapb.ChannelWatchInfo)
 		invalidWatchInfoNilVchan.Vchan = nil
-		invalidDataNilVchan, err := proto.Marshal(&invalidWatchInfoNilVchan)
+		invalidDataNilVchan, err := proto.Marshal(invalidWatchInfoNilVchan)
 		require.NoError(t, err)
 
 		tests := []struct {

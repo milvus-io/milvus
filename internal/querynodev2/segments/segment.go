@@ -420,16 +420,22 @@ func (s *LocalSegment) initializeSegment() error {
 		})
 		if !typeutil.IsVectorType(field.GetDataType()) && !s.HasRawData(fieldID) {
 			s.fields.Insert(fieldID, &FieldInfo{
-				FieldBinlog: *info.FieldBinlog,
-				RowCount:    loadInfo.GetNumOfRows(),
+				FieldBinlog: datapb.FieldBinlog{
+					FieldID: info.FieldBinlog.FieldID,
+					Binlogs: info.FieldBinlog.Binlogs,
+				},
+				RowCount: loadInfo.GetNumOfRows(),
 			})
 		}
 	}
 
 	for _, binlogs := range fieldBinlogs {
 		s.fields.Insert(binlogs.FieldID, &FieldInfo{
-			FieldBinlog: *binlogs,
-			RowCount:    loadInfo.GetNumOfRows(),
+			FieldBinlog: datapb.FieldBinlog{
+				FieldID: binlogs.FieldID,
+				Binlogs: binlogs.Binlogs,
+			},
+			RowCount: loadInfo.GetNumOfRows(),
 		})
 	}
 
