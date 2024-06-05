@@ -150,7 +150,7 @@ func (s *SegmentsInfo) DropSegment(segmentID UniqueID) {
 }
 
 // SetSegment sets SegmentInfo with segmentID, perform overwrite if already exists
-// set the logPath of segement in meta empty, to save space
+// set the logPath of segment in meta empty, to save space
 // if segment has logPath, make it empty
 func (s *SegmentsInfo) SetSegment(segmentID UniqueID, segment *SegmentInfo) {
 	if segment, ok := s.segments[segmentID]; ok {
