@@ -2762,6 +2762,7 @@ type dataCoordConfig struct {
 	SegmentCompactableProportion      ParamItem `refreshable:"true"`
 	SegmentExpansionRate              ParamItem `refreshable:"true"`
 	CompactionTimeoutInSeconds        ParamItem `refreshable:"true"`
+	CompactionDropToleranceInSeconds  ParamItem `refreshable:"true"`
 	CompactionCheckIntervalInSeconds  ParamItem `refreshable:"false"`
 	SingleCompactionRatioThreshold    ParamItem `refreshable:"true"`
 	SingleCompactionDeltaLogMaxSize   ParamItem `refreshable:"true"`
@@ -3059,6 +3060,14 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		DefaultValue: "900",
 	}
 	p.CompactionTimeoutInSeconds.Init(base.mgr)
+
+	p.CompactionDropToleranceInSeconds = ParamItem{
+		Key:          "dataCoord.compaction.dropTolerance",
+		Version:      "2.4.2",
+		Doc:          "If compaction job is finished for a long time, gc it",
+		DefaultValue: "86400",
+	}
+	p.CompactionDropToleranceInSeconds.Init(base.mgr)
 
 	p.CompactionCheckIntervalInSeconds = ParamItem{
 		Key:          "dataCoord.compaction.check.interval",

@@ -2968,6 +2968,7 @@ func (node *Proxy) search(ctx context.Context, request *milvuspb.SearchRequest) 
 		zap.Any("OutputFields", request.OutputFields),
 		zap.Any("search_params", request.SearchParams),
 		zap.Uint64("guarantee_timestamp", guaranteeTs),
+		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
 	defer func() {
@@ -3167,6 +3168,7 @@ func (node *Proxy) hybridSearch(ctx context.Context, request *milvuspb.HybridSea
 		zap.Any("partitions", request.PartitionNames),
 		zap.Any("OutputFields", request.OutputFields),
 		zap.Uint64("guarantee_timestamp", guaranteeTs),
+		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
 	defer func() {
@@ -3429,6 +3431,7 @@ func (node *Proxy) query(ctx context.Context, qt *queryTask) (*milvuspb.QueryRes
 		zap.String("db", request.DbName),
 		zap.String("collection", request.CollectionName),
 		zap.Strings("partitions", request.PartitionNames),
+		zap.Bool("useDefaultConsistency", request.GetUseDefaultConsistency()),
 	)
 
 	log.Debug(

@@ -46,9 +46,7 @@ type SyncMeta struct {
 //go:generate mockery --name=SyncManager --structname=MockSyncManager --output=./  --filename=mock_sync_manager.go --with-expecter --inpackage
 type SyncManager interface {
 	// SyncData is the method to submit sync task.
-	SyncData(ctx context.Context, task Task) *conc.Future[struct{}]
-	// GetEarliestPosition returns the earliest position (normally start position) of the processing sync task of provided channel.
-	GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition)
+	SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}]
 }
 
 type syncManager struct {
@@ -100,7 +98,7 @@ func (mgr *syncManager) resizeHandler(evt *config.Event) {
 	}
 }
 
-func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[struct{}] {
+func (mgr *syncManager) SyncData(ctx context.Context, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	switch t := task.(type) {
 	case *SyncTask:
 		t.WithAllocator(mgr.allocator).WithChunkManager(mgr.chunkManager)
@@ -108,13 +106,13 @@ func (mgr *syncManager) SyncData(ctx context.Context, task Task) *conc.Future[st
 		t.WithAllocator(mgr.allocator)
 	}
 
-	return mgr.safeSubmitTask(task)
+	return mgr.safeSubmitTask(task, callbacks...)
 }
 
 // safeSubmitTask handles submitting task logic with optimistic target check logic
 // when task returns errTargetSegmentNotMatch error
 // perform refetch then retry logic
-func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
+func (mgr *syncManager) safeSubmitTask(task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
 	mgr.tasks.Insert(taskKey, task)
 
@@ -124,11 +122,10 @@ func (mgr *syncManager) safeSubmitTask(task Task) *conc.Future[struct{}] {
 		return conc.Go(func() (struct{}, error) { return struct{}{}, err })
 	}
 
-	return mgr.submit(key, task)
+	return mgr.submit(key, task, callbacks...)
 }
 
-func (mgr *syncManager) submit(key int64, task Task) *conc.Future[struct{}] {
-	taskKey := fmt.Sprintf("%d-%d", task.SegmentID(), task.Checkpoint().GetTimestamp())
+func (mgr *syncManager) submit(key int64, task Task, callbacks ...func(error) error) *conc.Future[struct{}] {
 	handler := func(err error) error {
 		if err == nil {
 			return nil
@@ -156,11 +153,9 @@ func (mgr *syncManager) submit(key int64, task Task) *conc.Future[struct{}] {
 		)
 		return mgr.submit(targetID, task).Err()
 	}
+	callbacks = append([]func(error) error{handler}, callbacks...)
 	log.Info("sync mgr sumbit task with key", zap.Int64("key", key))
-	return mgr.Submit(key, task, handler, func(err error) error {
-		mgr.tasks.Remove(taskKey)
-		return err
-	})
+	return mgr.Submit(key, task, callbacks...)
 }
 
 func (mgr *syncManager) GetEarliestPosition(channel string) (int64, *msgpb.MsgPosition) {
