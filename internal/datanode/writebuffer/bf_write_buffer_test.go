@@ -329,7 +329,7 @@ func (s *BFWriteBufferSuite) TestAutoSync() {
 		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
-		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil)
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
@@ -414,7 +414,7 @@ func (s *BFWriteBufferSuite) TestAutoSyncWithStorageV2() {
 		s.metacacheInt64.EXPECT().AddSegment(mock.Anything, mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		s.metacacheInt64.EXPECT().UpdateSegments(mock.Anything, mock.Anything, mock.Anything).Return()
-		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(nil)
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 		pks, msg := s.composeInsertMsg(1000, 10, 128, schemapb.DataType_Int64)
 		delMsg := s.composeDeleteMsg(lo.Map(pks, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
