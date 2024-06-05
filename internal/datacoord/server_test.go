@@ -2254,13 +2254,14 @@ func TestGetRecoveryInfo(t *testing.T) {
 func TestGetCompactionState(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
-	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
+	t.Run("test get compaction state with new compaction Handler", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{{state: completed}})
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything).Return(&compactionInfo{
+			state: commonpb.CompactionState_Completed,
+		})
 		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
@@ -2271,21 +2272,22 @@ func TestGetCompactionState(t *testing.T) {
 	t.Run("test get compaction state in running", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-
-		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{
-				{state: executing},
-				{state: executing},
-				{state: executing},
-				{state: completed},
-				{state: completed},
-				{state: failed, plan: &datapb.CompactionPlan{PlanID: 1}},
-				{state: timeout, plan: &datapb.CompactionPlan{PlanID: 2}},
-				{state: timeout},
-				{state: timeout},
-				{state: timeout},
-			})
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything).RunAndReturn(func(i int64) []*datapb.CompactionTask {
+			return []*datapb.CompactionTask{
+				{State: datapb.CompactionTaskState_executing},
+				{State: datapb.CompactionTaskState_executing},
+				{State: datapb.CompactionTaskState_executing},
+				{State: datapb.CompactionTaskState_completed},
+				{State: datapb.CompactionTaskState_completed},
+				{PlanID: 1, State: datapb.CompactionTaskState_failed},
+				{PlanID: 2, State: datapb.CompactionTaskState_timeout},
+				{State: datapb.CompactionTaskState_timeout},
+				{State: datapb.CompactionTaskState_timeout},
+				{State: datapb.CompactionTaskState_timeout},
+			}
+		})
+		mockHandler := newCompactionPlanHandler(nil, nil, nil, mockMeta, nil)
 		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
@@ -2316,20 +2318,14 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},
 		}
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{
-				{
-					triggerInfo: &compactionSignal{id: 1},
-					state:       executing,
-				},
-			})
+		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
 		svr.compactionHandler = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -2344,12 +2340,14 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 0, errors.New("mock error")
 				},
 			},
 		}
-
+		// mockMeta =:
+		// mockHandler := newCompactionPlanHandler(nil, nil, nil, mockMeta, nil)
+		// svr.compactionHandler = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
@@ -2363,7 +2361,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},
@@ -2384,13 +2382,10 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{
-				{
-					triggerInfo: &compactionSignal{id: 1},
-					state:       executing,
-				},
-			})
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything).Return(&compactionInfo{
+			state:        commonpb.CompactionState_Executing,
+			executingCnt: 1,
+		})
 		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{
