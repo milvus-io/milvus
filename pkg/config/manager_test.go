@@ -270,6 +270,9 @@ func (ErrSource) GetPriority() int {
 	return 2
 }
 
+func (ErrSource) SetManager(m ConfigManager) {
+}
+
 // GetSourceName implements Source
 func (ErrSource) GetSourceName() string {
 	return "ErrSource"
