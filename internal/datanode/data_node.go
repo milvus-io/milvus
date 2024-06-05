@@ -288,7 +288,7 @@ func (node *DataNode) Init() error {
 		node.writeBufferManager = writebuffer.NewManager(syncMgr)
 
 		node.importTaskMgr = importv2.NewTaskManager()
-		node.importScheduler = importv2.NewScheduler(node.importTaskMgr, node.syncMgr, node.chunkManager)
+		node.importScheduler = importv2.NewScheduler(node.importTaskMgr)
 		node.channelCheckpointUpdater = newChannelCheckpointUpdater(node)
 		node.flowgraphManager = newFlowgraphManager()
 
