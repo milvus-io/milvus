@@ -401,6 +401,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 
 	validRetrieveResults := []*internalpb.RetrieveResults{}
 	relatedDataSize := int64(0)
+	hasMoreResult := false
 	for _, r := range retrieveResults {
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
 		relatedDataSize += r.GetCostAggregation().GetTotalRelatedDataSize()
@@ -410,7 +411,9 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 		}
 		validRetrieveResults = append(validRetrieveResults, r)
 		loopEnd += size
+		hasMoreResult = hasMoreResult || r.GetHasMoreResult()
 	}
+	ret.HasMoreResult = hasMoreResult
 
 	if len(validRetrieveResults) == 0 {
 		return ret, nil
@@ -427,7 +430,7 @@ func MergeInternalRetrieveResult(ctx context.Context, retrieveResults []*interna
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd; {
-		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}
@@ -515,6 +518,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	validSegments := make([]Segment, 0, len(segments))
 	selectedOffsets := make([][]int64, 0, len(retrieveResults))
 	selectedIndexes := make([][]int64, 0, len(retrieveResults))
+	hasMoreResult := false
 	for i, r := range retrieveResults {
 		size := typeutil.GetSizeOfIDs(r.GetIds())
 		ret.AllRetrieveCount += r.GetAllRetrieveCount()
@@ -529,7 +533,9 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 		selectedOffsets = append(selectedOffsets, make([]int64, 0, len(r.GetOffset())))
 		selectedIndexes = append(selectedIndexes, make([]int64, 0, len(r.GetOffset())))
 		loopEnd += size
+		hasMoreResult = r.GetHasMoreResult() || hasMoreResult
 	}
+	ret.HasMoreResult = hasMoreResult
 
 	if len(validRetrieveResults) == 0 {
 		return ret, nil
@@ -549,7 +555,7 @@ func MergeSegcoreRetrieveResults(ctx context.Context, retrieveResults []*segcore
 	var retSize int64
 	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
 	for j := 0; j < loopEnd && (limit == -1 || availableCount < limit); j++ {
-		sel, drainOneResult := typeutil.SelectMinPK(param.limit, validRetrieveResults, cursors)
+		sel, drainOneResult := typeutil.SelectMinPK(validRetrieveResults, cursors)
 		if sel == -1 || (param.mergeStopForBest && drainOneResult) {
 			break
 		}

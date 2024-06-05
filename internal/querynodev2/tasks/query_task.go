@@ -160,6 +160,7 @@ func (t *QueryTask) Execute() error {
 			TotalRelatedDataSize: relatedDataSize,
 		},
 		AllRetrieveCount: reducedResult.GetAllRetrieveCount(),
+		HasMoreResult:    reducedResult.HasMoreResult,
 	}
 	return nil
 }
