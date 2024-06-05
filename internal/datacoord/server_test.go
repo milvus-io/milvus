@@ -321,14 +321,17 @@ func TestGetSegmentInfo(t *testing.T) {
 						{
 							EntriesNum: 20,
 							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 801),
+							LogID:      801,
 						},
 						{
 							EntriesNum: 20,
 							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 802),
+							LogID:      802,
 						},
 						{
 							EntriesNum: 20,
 							LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 803),
+							LogID:      803,
 						},
 					},
 				},
@@ -829,15 +832,15 @@ type spySegmentManager struct {
 
 // AllocSegment allocates rows and record the allocation.
 func (s *spySegmentManager) AllocSegment(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error) {
-	panic("not implemented") // TODO: Implement
+	return nil, nil
 }
 
 func (s *spySegmentManager) allocSegmentForImport(ctx context.Context, collectionID UniqueID, partitionID UniqueID, channelName string, requestRows int64, taskID int64) (*Allocation, error) {
-	panic("not implemented") // TODO: Implement
+	return nil, nil
 }
 
 func (s *spySegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string, level datapb.SegmentLevel) (*SegmentInfo, error) {
-	panic("not implemented")
+	return nil, nil
 }
 
 // DropSegment drops the segment from manager.
@@ -846,22 +849,22 @@ func (s *spySegmentManager) DropSegment(ctx context.Context, segmentID UniqueID)
 
 // FlushImportSegments set importing segment state to Flushed.
 func (s *spySegmentManager) FlushImportSegments(ctx context.Context, collectionID UniqueID, segmentIDs []UniqueID) error {
-	panic("not implemented")
+	return nil
 }
 
 // SealAllSegments seals all segments of collection with collectionID and return sealed segments
 func (s *spySegmentManager) SealAllSegments(ctx context.Context, collectionID UniqueID, segIDs []UniqueID) ([]UniqueID, error) {
-	panic("not implemented") // TODO: Implement
+	return nil, nil
 }
 
 // GetFlushableSegments returns flushable segment ids
 func (s *spySegmentManager) GetFlushableSegments(ctx context.Context, channel string, ts Timestamp) ([]UniqueID, error) {
-	panic("not implemented") // TODO: Implement
+	return nil, nil
 }
 
 // ExpireAllocations notifies segment status to expire old allocations
 func (s *spySegmentManager) ExpireAllocations(channel string, ts Timestamp) error {
-	panic("not implemented") // TODO: Implement
+	return nil
 }
 
 // DropSegmentsOfChannel drops all segments in a channel
@@ -1822,14 +1825,17 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 901),
+						LogID:      901,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 902),
+						LogID:      902,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 0, 1, 903),
+						LogID:      903,
 					},
 				},
 			},
@@ -1842,10 +1848,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 30,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 801),
+						LogID:      801,
 					},
 					{
 						EntriesNum: 70,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 1, 1, 802),
+						LogID:      802,
 					},
 				},
 			},
@@ -1919,14 +1927,17 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 901),
+						LogID:      901,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 902),
+						LogID:      902,
 					},
 					{
 						EntriesNum: 20,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 3, 1, 903),
+						LogID:      903,
 					},
 				},
 			},
@@ -1939,10 +1950,12 @@ func TestGetRecoveryInfo(t *testing.T) {
 					{
 						EntriesNum: 30,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 801),
+						LogID:      801,
 					},
 					{
 						EntriesNum: 70,
 						LogPath:    metautil.BuildInsertLogPath("a", 0, 0, 4, 1, 802),
+						LogID:      802,
 					},
 				},
 			},
@@ -2242,15 +2255,15 @@ func TestGetRecoveryInfo(t *testing.T) {
 func TestGetCompactionState(t *testing.T) {
 	paramtable.Get().Save(Params.DataCoordCfg.EnableCompaction.Key, "true")
 	defer paramtable.Get().Reset(Params.DataCoordCfg.EnableCompaction.Key)
-	t.Run("test get compaction state with new compactionhandler", func(t *testing.T) {
+	t.Run("test get compaction state with new compaction Handler", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{{state: completed}})
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything).Return(&compactionInfo{
+			state: commonpb.CompactionState_Completed,
+		})
 		svr.compactionHandler = mockHandler
-
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -2259,23 +2272,23 @@ func TestGetCompactionState(t *testing.T) {
 	t.Run("test get compaction state in running", func(t *testing.T) {
 		svr := &Server{}
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
-
-		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{
-				{state: executing},
-				{state: executing},
-				{state: executing},
-				{state: completed},
-				{state: completed},
-				{state: failed, plan: &datapb.CompactionPlan{PlanID: 1}},
-				{state: timeout, plan: &datapb.CompactionPlan{PlanID: 2}},
-				{state: timeout},
-				{state: timeout},
-				{state: timeout},
-			})
+		mockMeta := NewMockCompactionMeta(t)
+		mockMeta.EXPECT().GetCompactionTasksByTriggerID(mock.Anything).RunAndReturn(func(i int64) []*datapb.CompactionTask {
+			return []*datapb.CompactionTask{
+				{State: datapb.CompactionTaskState_executing},
+				{State: datapb.CompactionTaskState_executing},
+				{State: datapb.CompactionTaskState_executing},
+				{State: datapb.CompactionTaskState_completed},
+				{State: datapb.CompactionTaskState_completed},
+				{PlanID: 1, State: datapb.CompactionTaskState_failed},
+				{PlanID: 2, State: datapb.CompactionTaskState_timeout},
+				{State: datapb.CompactionTaskState_timeout},
+				{State: datapb.CompactionTaskState_timeout},
+				{State: datapb.CompactionTaskState_timeout},
+			}
+		})
+		mockHandler := newCompactionPlanHandler(nil, nil, nil, mockMeta, nil)
 		svr.compactionHandler = mockHandler
-
 		resp, err := svr.GetCompactionState(context.Background(), &milvuspb.GetCompactionStateRequest{CompactionID: 1})
 		assert.NoError(t, err)
 		assert.Equal(t, commonpb.ErrorCode_Success, resp.GetStatus().GetErrorCode())
@@ -2304,20 +2317,14 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},
 		}
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{
-				{
-					triggerInfo: &compactionSignal{id: 1},
-					state:       executing,
-				},
-			})
+		mockHandler.EXPECT().getCompactionTasksNumBySignalID(mock.Anything).Return(1)
 		svr.compactionHandler = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
@@ -2332,12 +2339,14 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 0, errors.New("mock error")
 				},
 			},
 		}
-
+		// mockMeta =:
+		// mockHandler := newCompactionPlanHandler(nil, nil, nil, mockMeta, nil)
+		// svr.compactionHandler = mockHandler
 		resp, err := svr.ManualCompaction(context.TODO(), &milvuspb.ManualCompactionRequest{
 			CollectionID: 1,
 			Timetravel:   1,
@@ -2351,7 +2360,7 @@ func TestManualCompaction(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Abnormal)
 		svr.compactionTrigger = &mockCompactionTrigger{
 			methods: map[string]interface{}{
-				"forceTriggerCompaction": func(collectionID int64) (UniqueID, error) {
+				"triggerManualCompaction": func(collectionID int64) (UniqueID, error) {
 					return 1, nil
 				},
 			},
@@ -2372,13 +2381,10 @@ func TestGetCompactionStateWithPlans(t *testing.T) {
 		svr.stateCode.Store(commonpb.StateCode_Healthy)
 
 		mockHandler := NewMockCompactionPlanContext(t)
-		mockHandler.EXPECT().getCompactionTasksBySignalID(mock.Anything).Return(
-			[]*compactionTask{
-				{
-					triggerInfo: &compactionSignal{id: 1},
-					state:       executing,
-				},
-			})
+		mockHandler.EXPECT().getCompactionInfo(mock.Anything).Return(&compactionInfo{
+			state:        commonpb.CompactionState_Executing,
+			executingCnt: 1,
+		})
 		svr.compactionHandler = mockHandler
 
 		resp, err := svr.GetCompactionStateWithPlans(context.TODO(), &milvuspb.GetCompactionPlansRequest{

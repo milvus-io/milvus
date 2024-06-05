@@ -64,8 +64,8 @@ func CompressCompactionBinlogs(binlogs []*datapb.CompactionSegment) error {
 }
 
 func CompressBinLogs(binlogs ...[]*datapb.FieldBinlog) error {
-	for _, logs := range binlogs {
-		err := CompressFieldBinlogs(logs)
+	for _, l := range binlogs {
+		err := CompressFieldBinlogs(l)
 		if err != nil {
 			return err
 		}
