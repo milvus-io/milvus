@@ -308,6 +308,7 @@ func NewFieldData(dataType schemapb.DataType, fieldSchema *schemapb.FieldSchema,
 		data := &StringFieldData{
 			Data:     make([]string, 0, cap),
 			DataType: dataType,
+			Nullable: fieldSchema.GetNullable(),
 		}
 		if fieldSchema.GetNullable() {
 			data.ValidData = make([]bool, 0, cap)
@@ -1265,7 +1266,7 @@ func (data *StringFieldData) GetMemorySize() int {
 	for _, val := range data.Data {
 		size += len(val) + 16
 	}
-	return size
+	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
 
 func (data *ArrayFieldData) GetMemorySize() int {
@@ -1290,7 +1291,7 @@ func (data *ArrayFieldData) GetMemorySize() int {
 			size += (&StringFieldData{Data: val.GetStringData().GetData()}).GetMemorySize()
 		}
 	}
-	return size
+	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
 
 func (data *JSONFieldData) GetMemorySize() int {
@@ -1298,7 +1299,7 @@ func (data *JSONFieldData) GetMemorySize() int {
 	for _, val := range data.Data {
 		size += len(val) + 16
 	}
-	return size
+	return size + binary.Size(data.ValidData) + binary.Size(data.Nullable)
 }
 
 func (data *BoolFieldData) GetRowSize(i int) int           { return 1 }
