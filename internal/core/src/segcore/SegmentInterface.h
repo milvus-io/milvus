@@ -235,6 +235,7 @@ class SegmentInternalInterface : public SegmentInterface {
     virtual int64_t
     num_chunk_data(FieldId field_id) const = 0;
 
+    // bitset 1 means not hit. 0 means hit.
     virtual void
     mask_with_timestamps(BitsetType& bitset_chunk,
                          Timestamp timestamp) const = 0;
