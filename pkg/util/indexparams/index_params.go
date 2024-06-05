@@ -362,6 +362,10 @@ func AppendPrepareLoadParams(params *paramtable.ComponentParam, indexParams map[
 		for k, v := range params.AutoIndexConfig.PrepareParams.GetAsJSONMap() {
 			indexParams[k] = v
 		}
+
+		for k, v := range params.AutoIndexConfig.LoadAdaptParams.GetAsJSONMap() {
+			indexParams[k] = v
+		}
 	}
 	return nil
 }
