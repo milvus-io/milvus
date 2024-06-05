@@ -25,6 +25,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/suite"
 
+	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -176,6 +177,18 @@ func (s *RestfulAccessInfoSuite) TestOutputFields() {
 	s.info.InitReq()
 	result = Get(s.info, "$output_fields")
 	s.Equal(fmt.Sprint(fields), result[0])
+}
+
+func (s *RestfulAccessInfoSuite) TestConsistencyLevel() {
+	result := Get(s.info, "$consistency_level")
+	s.Equal(Unknown, result[0])
+
+	s.info.params.Keys[ContextRequest] = &milvuspb.QueryRequest{
+		ConsistencyLevel: commonpb.ConsistencyLevel_Bounded,
+	}
+	s.info.InitReq()
+	result = Get(s.info, "$consistency_level")
+	s.Equal(commonpb.ConsistencyLevel_Bounded.String(), result[0])
 }
 
 func (s *RestfulAccessInfoSuite) TestClusterPrefix() {
