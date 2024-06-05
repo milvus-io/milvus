@@ -258,6 +258,7 @@ class OffsetOrderedArray : public OffsetMap {
         if (!false_filtered_out) {
             cnt = size - bitset.count();
         }
+        auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
@@ -274,7 +275,7 @@ class OffsetOrderedArray : public OffsetMap {
                 hit_num++;
             }
         }
-        return {seg_offsets, it != array_.end()};
+        return {seg_offsets, more_hit_than_limit && it != array_.end()};
     }
 
     void
