@@ -36,6 +36,12 @@ if ( MILVUS_GPU_VERSION STREQUAL "ON" )
     set(WITH_RAFT ON CACHE BOOL "" FORCE )
 endif ()
 
+if ( BUILD_WITH_DNNL STREQUAL "ON" )
+    set(WITH_DNNL ON CACHE BOOL "" FORCE )
+else ()
+    set(WITH_DNNL OFF CACHE BOOL "" FORCE )
+endif ()
+
 set( CMAKE_PREFIX_PATH ${CONAN_BOOST_ROOT} )
 FetchContent_Declare(
         knowhere
