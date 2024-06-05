@@ -1369,9 +1369,6 @@ TEST(Sealed, GetVector) {
 }
 
 TEST(Sealed, GetVectorFromChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1384,8 +1381,6 @@ TEST(Sealed, GetVectorFromChunkCache) {
 
     auto sc = milvus::storage::StorageConfig{};
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
-    auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
-    // mcm->CreateBucket(sc.bucket_name);
     milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
                                                              "willneed");
 
@@ -1480,9 +1475,6 @@ TEST(Sealed, GetVectorFromChunkCache) {
 }
 
 TEST(Sealed, WarmupChunkCache) {
-    // skip test due to mem leak from AWS::InitSDK
-    return;
-
     auto dim = 16;
     auto topK = 5;
     auto N = ROW_COUNT;
@@ -1495,8 +1487,6 @@ TEST(Sealed, WarmupChunkCache) {
 
     auto sc = milvus::storage::StorageConfig{};
     milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
-    auto mcm = std::make_unique<milvus::storage::MinioChunkManager>(sc);
-    // mcm->CreateBucket(sc.bucket_name);
     milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
                                                              "willneed");
 
