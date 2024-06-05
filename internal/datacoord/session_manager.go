@@ -18,10 +18,10 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"time"
 
+	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"golang.org/x/sync/errgroup"
 
