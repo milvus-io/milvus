@@ -15,14 +15,13 @@ import (
 	"runtime"
 	"unsafe"
 
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/encoding/prototext"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/indexcgopb"
 	"github.com/milvus-io/milvus/internal/storage"
-	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/log"
 )
 
@@ -60,7 +59,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	for key, value := range typeParams {
 		protoTypeParams.Params = append(protoTypeParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	typeParamsStr := prototext.Format(protoTypeParams)
+	typeParamsStr := proto.MarshalTextString(protoTypeParams)
 
 	protoIndexParams := &indexcgopb.IndexParams{
 		Params: make([]*commonpb.KeyValuePair, 0),
@@ -68,7 +67,7 @@ func NewCgoIndex(dtype schemapb.DataType, typeParams, indexParams map[string]str
 	for key, value := range indexParams {
 		protoIndexParams.Params = append(protoIndexParams.Params, &commonpb.KeyValuePair{Key: key, Value: value})
 	}
-	indexParamsStr := prototext.Format(protoIndexParams)
+	indexParamsStr := proto.MarshalTextString(protoIndexParams)
 
 	typeParamsPointer := C.CString(typeParamsStr)
 	indexParamsPointer := C.CString(indexParamsStr)

@@ -27,9 +27,8 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
+	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
-	"google.golang.org/protobuf/encoding/prototext"
-	"google.golang.org/protobuf/protoadapt"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -43,7 +42,6 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
-	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -871,7 +869,7 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 		return nil, err2
 	}
 	var planpb planpb.PlanNode
-	err = prototext.Unmarshal([]byte(planStr), protoadapt.MessageV2Of(&planpb))
+	err = proto.UnmarshalText(planStr, &planpb)
 	if err != nil {
 		return nil, err
 	}
