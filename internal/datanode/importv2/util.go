@@ -108,8 +108,8 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 	}, nil
 }
 
-func PickSegment(task *ImportTask, vchannel string, partitionID int64) int64 {
-	candidates := lo.Filter(task.req.GetRequestSegments(), func(info *datapb.ImportRequestSegment, _ int) bool {
+func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) int64 {
+	candidates := lo.Filter(segments, func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 

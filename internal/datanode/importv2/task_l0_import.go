@@ -202,22 +202,18 @@ func (t *L0ImportTask) syncDelete(task *L0ImportTask, delData []*storage.DeleteD
 	log.Info("start to sync l0 delete data", WrapLogFields(task)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
-	segmentImportedSizes := make(map[int64]int)
 	for channelIdx, data := range delData {
 		channel := task.GetVchannels()[channelIdx]
 		if data.RowCount == 0 {
 			continue
 		}
 		partitionID := task.GetPartitionIDs()[0]
-		size := int(data.Size())
-		segmentID := PickSegment(task.req.GetRequestSegments(), task.GetSegmentsInfo(),
-			segmentImportedSizes, channel, partitionID, size)
+		segmentID := PickSegment(task.req.GetRequestSegments(), channel, partitionID)
 		syncTask, err := NewSyncTask(task.ctx, task.metaCaches, task.req.GetTs(),
 			segmentID, partitionID, task.GetCollectionID(), channel, nil, data)
 		if err != nil {
 			return nil, nil, err
 		}
-		segmentImportedSizes[segmentID] += size
 		future := t.syncMgr.SyncData(task.ctx, syncTask)
 		futures = append(futures, future)
 		syncTasks = append(syncTasks, syncTask)

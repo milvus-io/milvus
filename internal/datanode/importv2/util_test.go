@@ -155,7 +155,7 @@ func Test_PickSegment(t *testing.T) {
 	batchSize := 16 * 1024 * 1024
 
 	for totalSize > 0 {
-		picked := PickSegment(task, vchannel, partitionID)
+		picked := PickSegment(task.req.GetRequestSegments(), vchannel, partitionID)
 		importedSize[picked] += batchSize
 		totalSize -= batchSize
 	}
