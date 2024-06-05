@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -557,6 +558,10 @@ func (c *SessionManagerImpl) DropCompactionPlan(nodeID int64, req *datapb.DropCo
 	defer cancel()
 	cli, err := c.getClient(ctx, nodeID)
 	if err != nil {
+		if errors.Is(err, merr.ErrNodeNotFound) {
+			log.Info("node not found, skip dropping compaction plan")
+			return nil
+		}
 		log.Warn("failed to get client", zap.Error(err))
 		return err
 	}

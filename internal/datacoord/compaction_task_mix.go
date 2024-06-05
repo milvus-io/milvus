@@ -81,10 +81,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 			if err != nil {
 				return false
 			}
-			err = t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
-				PlanID: t.GetPlanID(),
-			})
-			return err == nil
+			return t.processFailed()
 		}
 		saveSuccess := t.saveSegmentMeta()
 		if !saveSuccess {
