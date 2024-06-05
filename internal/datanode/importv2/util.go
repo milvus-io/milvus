@@ -19,7 +19,9 @@ package importv2
 import (
 	"context"
 	"fmt"
+	"math/rand"
 	"strconv"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -34,7 +36,6 @@ import (
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
-	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -107,34 +108,13 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 	}, nil
 }
 
-func PickSegment(
-	requestSegments []*datapb.ImportRequestSegment,
-	segmentsInfo []*datapb.ImportSegmentInfo,
-	segmentImportedSizes map[int64]int,
-	vchannel string, partitionID int64,
-	sizeToImport int,
-) int64 {
-	candidates := lo.Filter(requestSegments, func(info *datapb.ImportRequestSegment, _ int) bool {
+func PickSegment(task *ImportTask, vchannel string, partitionID int64) int64 {
+	candidates := lo.Filter(task.req.GetRequestSegments(), func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
-	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
-
-	for _, candidate := range candidates {
-		sizeImported := segmentImportedSizes[candidate.GetSegmentID()]
-		if sizeImported+sizeToImport <= segmentMaxSize {
-			return candidate.GetSegmentID()
-		}
-	}
-	segmentID := lo.MinBy(segmentsInfo, func(s1, s2 *datapb.ImportSegmentInfo) bool {
-		return segmentImportedSizes[s1.GetSegmentID()] < segmentImportedSizes[s2.GetSegmentID()]
-	}).GetSegmentID()
-	log.Warn("failed to pick an appropriate segment, opt for the smallest one instead",
-		zap.Int64("segmentID", segmentID),
-		zap.Int("sizeToImport", sizeToImport),
-		zap.Int("sizeImported", segmentImportedSizes[segmentID]),
-		zap.Int("segmentMaxSize", segmentMaxSize))
-	return segmentID
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return candidates[r.Intn(len(candidates))].GetSegmentID()
 }
 
 func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData) error {

@@ -196,14 +196,14 @@ TEST(Float16, GetVector) {
 
         auto vector = result.get()->mutable_vectors()->float16_vector();
         EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(float16));
-        // EXPECT_TRUE(vector.size() == num_inserted * dim);
-        // for (size_t i = 0; i < num_inserted; ++i) {
-        //     auto id = ids_ds->GetIds()[i];
-        //     for (size_t j = 0; j < 128; ++j) {
-        //         EXPECT_TRUE(vector[i * dim + j] ==
-        //                     fakevec[(id % per_batch) * dim + j]);
-        //     }
-        // }
+        for (size_t i = 0; i < num_inserted; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            for (size_t j = 0; j < 128; ++j) {
+                EXPECT_TRUE(
+                    reinterpret_cast<float16*>(vector.data())[i * dim + j] ==
+                    fakevec[(id % per_batch) * dim + j]);
+            }
+        }
     }
 }
 
@@ -453,14 +453,14 @@ TEST(BFloat16, GetVector) {
 
         auto vector = result.get()->mutable_vectors()->bfloat16_vector();
         EXPECT_TRUE(vector.size() == num_inserted * dim * sizeof(bfloat16));
-        // EXPECT_TRUE(vector.size() == num_inserted * dim);
-        // for (size_t i = 0; i < num_inserted; ++i) {
-        //     auto id = ids_ds->GetIds()[i];
-        //     for (size_t j = 0; j < 128; ++j) {
-        //         EXPECT_TRUE(vector[i * dim + j] ==
-        //                     fakevec[(id % per_batch) * dim + j]);
-        //     }
-        // }
+        for (size_t i = 0; i < num_inserted; ++i) {
+            auto id = ids_ds->GetIds()[i];
+            for (size_t j = 0; j < 128; ++j) {
+                EXPECT_TRUE(
+                    reinterpret_cast<bfloat16*>(vector.data())[i * dim + j] ==
+                    fakevec[(id % per_batch) * dim + j]);
+            }
+        }
     }
 }
 
