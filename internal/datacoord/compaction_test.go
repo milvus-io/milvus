@@ -569,6 +569,8 @@ func (s *CompactionPlanHandlerSuite) TestCheckCompaction() {
 			Segments: []*datapb.CompactionSegment{{PlanID: 6}},
 		}, nil).Once()
 
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
+
 	inTasks := map[int64]CompactionTask{
 		1: &mixCompactionTask{
 			CompactionTask: &datapb.CompactionTask{
@@ -774,6 +776,7 @@ func (s *CompactionPlanHandlerSuite) TestProcessCompleteCompaction() {
 	}
 
 	s.mockSessMgr.EXPECT().GetCompactionPlanResult(UniqueID(111), int64(1)).Return(&compactionResult, nil).Once()
+	s.mockSessMgr.EXPECT().DropCompactionPlan(mock.Anything, mock.Anything).Return(nil)
 
 	s.handler.submitTask(task)
 	s.handler.doSchedule()
