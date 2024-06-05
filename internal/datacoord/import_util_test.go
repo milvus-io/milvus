@@ -152,6 +152,7 @@ func TestImportUtil_AssembleRequest(t *testing.T) {
 	catalog.EXPECT().ListIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListSegmentIndexes(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 
 	alloc := NewNMockAllocator(t)
 	alloc.EXPECT().allocN(mock.Anything).RunAndReturn(func(n int64) (int64, int64, error) {
@@ -231,6 +232,7 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 	catalog.EXPECT().ListSegments(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().ListChannelCheckpoint(mock.Anything).Return(nil, nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)
@@ -405,6 +407,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	catalog.EXPECT().SaveImportTask(mock.Anything).Return(nil)
 	catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(nil)
 	catalog.EXPECT().AlterSegments(mock.Anything, mock.Anything).Return(nil)
+	catalog.EXPECT().ListCompactionTask(mock.Anything).Return(nil, nil)
 
 	imeta, err := NewImportMeta(catalog)
 	assert.NoError(t, err)

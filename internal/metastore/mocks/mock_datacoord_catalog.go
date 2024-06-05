@@ -5,8 +5,9 @@ package mocks
 import (
 	context "context"
 
-	metastore "github.com/milvus-io/milvus/internal/metastore"
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+
+	metastore "github.com/milvus-io/milvus/internal/metastore"
 
 	mock "github.com/stretchr/testify/mock"
 
@@ -430,6 +431,49 @@ func (_c *DataCoordCatalog_DropChannelCheckpoint_Call) RunAndReturn(run func(con
 	return _c
 }
 
+// DropCompactionTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	ret := _m.Called(ctx, task)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask) error); ok {
+		r0 = rf(ctx, task)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropCompactionTask'
+type DataCoordCatalog_DropCompactionTask_Call struct {
+	*mock.Call
+}
+
+// DropCompactionTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - task *datapb.CompactionTask
+func (_e *DataCoordCatalog_Expecter) DropCompactionTask(ctx interface{}, task interface{}) *DataCoordCatalog_DropCompactionTask_Call {
+	return &DataCoordCatalog_DropCompactionTask_Call{Call: _e.mock.On("DropCompactionTask", ctx, task)}
+}
+
+func (_c *DataCoordCatalog_DropCompactionTask_Call) Run(run func(ctx context.Context, task *datapb.CompactionTask)) *DataCoordCatalog_DropCompactionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropCompactionTask_Call) Return(_a0 error) *DataCoordCatalog_DropCompactionTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropCompactionTask_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask) error) *DataCoordCatalog_DropCompactionTask_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // DropImportJob provides a mock function with given fields: jobID
 func (_m *DataCoordCatalog) DropImportJob(jobID int64) error {
 	ret := _m.Called(jobID)
@@ -783,6 +827,60 @@ func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) Return(_a0 map[string]*ms
 }
 
 func (_c *DataCoordCatalog_ListChannelCheckpoint_Call) RunAndReturn(run func(context.Context) (map[string]*msgpb.MsgPosition, error)) *DataCoordCatalog_ListChannelCheckpoint_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListCompactionTask provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error) {
+	ret := _m.Called(ctx)
+
+	var r0 []*datapb.CompactionTask
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*datapb.CompactionTask, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*datapb.CompactionTask); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*datapb.CompactionTask)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListCompactionTask'
+type DataCoordCatalog_ListCompactionTask_Call struct {
+	*mock.Call
+}
+
+// ListCompactionTask is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListCompactionTask(ctx interface{}) *DataCoordCatalog_ListCompactionTask_Call {
+	return &DataCoordCatalog_ListCompactionTask_Call{Call: _e.mock.On("ListCompactionTask", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListCompactionTask_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListCompactionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListCompactionTask_Call) Return(_a0 []*datapb.CompactionTask, _a1 error) *DataCoordCatalog_ListCompactionTask_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListCompactionTask_Call) RunAndReturn(run func(context.Context) ([]*datapb.CompactionTask, error)) *DataCoordCatalog_ListCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1277,6 +1375,49 @@ func (_c *DataCoordCatalog_SaveChannelCheckpoints_Call) Return(_a0 error) *DataC
 }
 
 func (_c *DataCoordCatalog_SaveChannelCheckpoints_Call) RunAndReturn(run func(context.Context, []*msgpb.MsgPosition) error) *DataCoordCatalog_SaveChannelCheckpoints_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveCompactionTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error {
+	ret := _m.Called(ctx, task)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *datapb.CompactionTask) error); ok {
+		r0 = rf(ctx, task)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveCompactionTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveCompactionTask'
+type DataCoordCatalog_SaveCompactionTask_Call struct {
+	*mock.Call
+}
+
+// SaveCompactionTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - task *datapb.CompactionTask
+func (_e *DataCoordCatalog_Expecter) SaveCompactionTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveCompactionTask_Call {
+	return &DataCoordCatalog_SaveCompactionTask_Call{Call: _e.mock.On("SaveCompactionTask", ctx, task)}
+}
+
+func (_c *DataCoordCatalog_SaveCompactionTask_Call) Run(run func(ctx context.Context, task *datapb.CompactionTask)) *DataCoordCatalog_SaveCompactionTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*datapb.CompactionTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveCompactionTask_Call) Return(_a0 error) *DataCoordCatalog_SaveCompactionTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveCompactionTask_Call) RunAndReturn(run func(context.Context, *datapb.CompactionTask) error) *DataCoordCatalog_SaveCompactionTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
