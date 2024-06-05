@@ -1379,8 +1379,6 @@ TEST(Sealed, GetVectorFromChunkCache) {
     auto file_name = std::string(
         "sealed_test_get_vector_from_chunk_cache/insert_log/1/101/1000000");
 
-    auto sc = milvus::storage::StorageConfig{};
-    milvus::storage::RemoteChunkManagerSingleton::GetInstance().Init(sc);
     milvus::storage::ChunkCacheSingleton::GetInstance().Init(mmap_dir,
                                                              "willneed");
 
