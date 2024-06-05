@@ -370,7 +370,6 @@ var (
 			collectionIDLabelName,
 			partitionIDLabelName,
 			segmentStateLabelName,
-			indexCountLabelName,
 		})
 
 	QueryNodeEntitiesSize = prometheus.NewGaugeVec(
