@@ -402,19 +402,21 @@ func (c *StateChannelStore) GetNodesChannels() []*NodeChannelInfo {
 	return ret
 }
 
-func (c *StateChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
-	nodeChs := make(map[UniqueID][]string)
+func (c *StateChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID, allowBufferNode bool) map[UniqueID][]RWChannel {
+	nodeChs := make(map[UniqueID][]RWChannel)
 	for id, info := range c.channelsInfo {
-		if id == bufferID {
+		if (!allowBufferNode) && id == bufferID {
 			continue
 		}
-		var channelNames []string
-		for name, ch := range info.Channels {
+		var channels []RWChannel
+		for _, ch := range info.Channels {
 			if ch.GetCollectionID() == collectionID {
-				channelNames = append(channelNames, name)
+				channels = append(channels, ch)
 			}
 		}
-		nodeChs[id] = channelNames
+		if len(channels) > 0 {
+			nodeChs[id] = channels
+		}
 	}
 	return nodeChs
 }

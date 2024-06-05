@@ -49,9 +49,9 @@ type ChannelManager interface {
 	FindWatcher(channel string) (UniqueID, error)
 
 	GetChannel(nodeID int64, channel string) (RWChannel, bool)
-	GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string
-	GetChannelsByCollectionID(collectionID int64) []RWChannel
-	GetChannelNamesByCollectionID(collectionID int64) []string
+	GetNodeChannelsByCollectionID(collectionID int64, allowBufferNode bool) map[UniqueID][]string
+	GetChannelsByCollectionID(collectionID int64, allowBufferNode bool) []RWChannel
+	GetChannelNamesByCollectionID(collectionID int64, allowBufferNode bool) []string
 }
 
 // An interface sessionManager implments
@@ -351,28 +351,36 @@ func (m *ChannelManagerImplV2) GetChannel(nodeID int64, channelName string) (RWC
 	return nil, false
 }
 
-func (m *ChannelManagerImplV2) GetNodeChannelsByCollectionID(collectionID int64) map[int64][]string {
+func (m *ChannelManagerImplV2) GetNodeChannelsByCollectionID(collectionID int64, allowBufferNode bool) map[int64][]string {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.store.GetNodeChannelsByCollectionID(collectionID)
+	result := make(map[UniqueID][]string)
+	nodeChannels := m.store.GetNodeChannelsByCollectionID(collectionID, allowBufferNode)
+	for id, chs := range nodeChannels {
+		var channels []string
+		for _, ch := range chs {
+			channels = append(channels, ch.GetName())
+		}
+		if len(channels) > 0 {
+			result[id] = channels
+		}
+	}
+	return result
 }
 
-func (m *ChannelManagerImplV2) GetChannelsByCollectionID(collectionID int64) []RWChannel {
+func (m *ChannelManagerImplV2) GetChannelsByCollectionID(collectionID int64, allowBufferNode bool) []RWChannel {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	channels := []RWChannel{}
-
-	nodeChannels := m.store.GetNodeChannelsBy(
-		WithAllNodes(),
-		WithCollectionIDV2(collectionID))
-	lo.ForEach(nodeChannels, func(info *NodeChannelInfo, _ int) {
-		channels = append(channels, lo.Values(info.Channels)...)
-	})
-	return channels
+	nodeChannels := m.store.GetNodeChannelsByCollectionID(collectionID, allowBufferNode)
+	var result []RWChannel
+	for _, chs := range nodeChannels {
+		result = append(result, chs...)
+	}
+	return result
 }
 
-func (m *ChannelManagerImplV2) GetChannelNamesByCollectionID(collectionID int64) []string {
-	channels := m.GetChannelsByCollectionID(collectionID)
+func (m *ChannelManagerImplV2) GetChannelNamesByCollectionID(collectionID int64, allowBufferNode bool) []string {
+	channels := m.GetChannelsByCollectionID(collectionID, allowBufferNode)
 	return lo.Map(channels, func(ch RWChannel, _ int) string {
 		return ch.GetName()
 	})

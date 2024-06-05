@@ -56,7 +56,7 @@ type ROChannelStore interface {
 	// GetNodeChannelCount
 	GetNodeChannelCount(nodeID int64) int
 	// GetNodeChannels for given collection
-	GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string
+	GetNodeChannelsByCollectionID(collectionID UniqueID, allowBufferNode bool) map[UniqueID][]RWChannel
 
 	// GetNodeChannelsBy used by channel_store_v2 and channel_manager_v2 only
 	GetNodeChannelsBy(nodeSelector NodeSelector, channelSelectors ...ChannelSelector) []*NodeChannelInfo
@@ -469,19 +469,21 @@ func (c *ChannelStore) GetNodesChannels() []*NodeChannelInfo {
 	return ret
 }
 
-func (c *ChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID) map[UniqueID][]string {
-	nodeChs := make(map[UniqueID][]string)
+func (c *ChannelStore) GetNodeChannelsByCollectionID(collectionID UniqueID, allowBufferNode bool) map[UniqueID][]RWChannel {
+	nodeChs := make(map[UniqueID][]RWChannel)
 	for id, info := range c.channelsInfo {
-		if id == bufferID {
+		if (!allowBufferNode) && id == bufferID {
 			continue
 		}
-		var channelNames []string
-		for name, ch := range info.Channels {
+		var channels []RWChannel
+		for _, ch := range info.Channels {
 			if ch.GetCollectionID() == collectionID {
-				channelNames = append(channelNames, name)
+				channels = append(channels, ch)
 			}
 		}
-		nodeChs[id] = channelNames
+		if len(channels) > 0 {
+			nodeChs[id] = channels
+		}
 	}
 	return nodeChs
 }

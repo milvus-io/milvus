@@ -264,7 +264,7 @@ func (s *ServerSuite) TestDataNodeTtChannel_FlushWithDiffChan() {
 	s.testServer.cluster = mockCluster
 
 	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Once()
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(collID).Return(map[int64][]string{
+	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(collID, false).Return(map[int64][]string{
 		sourceID: {chanName},
 	})
 
@@ -344,7 +344,7 @@ func (s *ServerSuite) TestDataNodeTtChannel_SegmentFlushAfterTt() {
 	s.testServer.cluster = mockCluster
 
 	s.mockChMgr.EXPECT().Match(sourceID, chanName).Return(true).Once()
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(collID).Return(map[int64][]string{
+	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(collID, false).Return(map[int64][]string{
 		sourceID: {chanName},
 	})
 
@@ -394,10 +394,10 @@ func (s *ServerSuite) TestDataNodeTtChannel_SegmentFlushAfterTt() {
 }
 
 func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(0)).
+	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(0), true).
 		Return([]RWChannel{&channelMeta{Name: "ch1", CollectionID: 0}}).Times(3)
 
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(1)).Return(nil).Times(1)
+	s.mockChMgr.EXPECT().GetChannelsByCollectionID(int64(1), true).Return(nil).Times(1)
 	tests := []struct {
 		description string
 		inTs        Timestamp
@@ -434,7 +434,7 @@ func (s *ServerSuite) TestGetFlushState_ByFlushTs() {
 }
 
 func (s *ServerSuite) TestGetFlushState_BySegment() {
-	s.mockChMgr.EXPECT().GetChannelsByCollectionID(mock.Anything).
+	s.mockChMgr.EXPECT().GetChannelsByCollectionID(mock.Anything, true).
 		Return([]RWChannel{&channelMeta{Name: "ch1", CollectionID: 0}}).Times(3)
 
 	tests := []struct {
@@ -762,7 +762,7 @@ func (s *ServerSuite) TestFlush_NormalCase() {
 		CollectionID: 0,
 	}
 
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
+	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything, false).Return(map[int64][]string{
 		1: {"channel-1"},
 	})
 
@@ -851,7 +851,7 @@ func (s *ServerSuite) TestFlush_RollingUpgrade() {
 	mockCluster.EXPECT().Close().Maybe()
 	s.testServer.cluster = mockCluster
 	s.testServer.meta.AddCollection(&collectionInfo{ID: 0})
-	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything).Return(map[int64][]string{
+	s.mockChMgr.EXPECT().GetNodeChannelsByCollectionID(mock.Anything, false).Return(map[int64][]string{
 		1: {"channel-1"},
 	}).Once()
 
