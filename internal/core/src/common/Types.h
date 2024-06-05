@@ -57,6 +57,7 @@ using distance_t = float;
 
 using float16 = knowhere::fp16;
 using bfloat16 = knowhere::bf16;
+using bin1 = knowhere::bin1;
 
 enum class DataType {
     NONE = 0,
