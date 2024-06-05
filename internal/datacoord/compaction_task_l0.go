@@ -266,17 +266,21 @@ func (t *l0CompactionTask) BuildCompactionRequest() (*datapb.CompactionPlan, err
 func (t *l0CompactionTask) processMetaSaved() bool {
 	err := t.updateAndSaveTaskMeta(setState(datapb.CompactionTaskState_completed))
 	if err == nil {
-		t.resetSegmentCompacting()
-		UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
-		log.Info("handleCompactionResult: success to handle l0 compaction result")
+		return t.processCompleted()
 	}
-	return err == nil
+	return false
 }
 
 func (t *l0CompactionTask) processCompleted() bool {
-	for _, segmentBinlogs := range t.GetPlan().GetSegmentBinlogs() {
-		t.meta.SetSegmentCompacting(segmentBinlogs.GetSegmentID(), false)
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetPlanID(),
+	}); err != nil {
+		return false
 	}
+
+	t.resetSegmentCompacting()
+	UpdateCompactionSegmentSizeMetrics(t.result.GetSegments())
+	log.Info("handleCompactionResult: success to handle l0 compaction result")
 	return true
 }
 
@@ -292,6 +296,12 @@ func (t *l0CompactionTask) processTimeout() bool {
 }
 
 func (t *l0CompactionTask) processFailed() bool {
+	if err := t.sessions.DropCompactionPlan(t.GetNodeID(), &datapb.DropCompactionPlanRequest{
+		PlanID: t.GetPlanID(),
+	}); err != nil {
+		return false
+	}
+
 	t.resetSegmentCompacting()
 	return true
 }

@@ -553,3 +553,13 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		NumSlots: node.compactionExecutor.Slots(),
 	}, nil
 }
+
+func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	node.compactionExecutor.removeTask(req.GetPlanID())
+	log.Ctx(ctx).Info("DropCompactionPlans success", zap.Int64("planID", req.GetPlanID()))
+	return merr.Success(), nil
+}
