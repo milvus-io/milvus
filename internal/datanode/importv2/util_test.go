@@ -113,3 +113,57 @@ func Test_UnsetAutoID(t *testing.T) {
 		}
 	}
 }
+
+func Test_PickSegment(t *testing.T) {
+	const (
+		vchannel    = "ch-0"
+		partitionID = 10
+	)
+	task := &ImportTask{
+		req: &datapb.ImportRequest{
+			RequestSegments: []*datapb.ImportRequestSegment{
+				{
+					SegmentID:   100,
+					PartitionID: partitionID,
+					Vchannel:    vchannel,
+				},
+				{
+					SegmentID:   101,
+					PartitionID: partitionID,
+					Vchannel:    vchannel,
+				},
+				{
+					SegmentID:   102,
+					PartitionID: partitionID,
+					Vchannel:    vchannel,
+				},
+				{
+					SegmentID:   103,
+					PartitionID: partitionID,
+					Vchannel:    vchannel,
+				},
+			},
+		},
+	}
+
+	importedSize := map[int64]int{}
+
+	totalSize := 8 * 1024 * 1024 * 1024
+	batchSize := 16 * 1024 * 1024
+
+	for totalSize > 0 {
+		picked := PickSegment(task, vchannel, partitionID)
+		importedSize[picked] += batchSize
+		totalSize -= batchSize
+	}
+	expectSize := 2 * 1024 * 1024 * 1024
+	fn := func(actual int) {
+		t.Logf("actual=%d, expect*0.8=%f, expect*1.2=%f", actual, float64(expectSize)*0.9, float64(expectSize)*1.1)
+		assert.True(t, float64(actual) > float64(expectSize)*0.8)
+		assert.True(t, float64(actual) < float64(expectSize)*1.2)
+	}
+	fn(importedSize[int64(100)])
+	fn(importedSize[int64(101)])
+	fn(importedSize[int64(102)])
+	fn(importedSize[int64(103)])
+}
