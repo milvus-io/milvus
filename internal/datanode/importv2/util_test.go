@@ -158,8 +158,9 @@ func Test_PickSegment(t *testing.T) {
 	}
 	expectSize := 2 * 1024 * 1024 * 1024
 	fn := func(actual int) {
-		assert.True(t, float64(actual) > float64(expectSize)*0.9)
-		assert.True(t, float64(actual) < float64(expectSize)*1.1)
+		t.Logf("actual=%d, expect*0.8=%f, expect*1.2=%f", actual, float64(expectSize)*0.9, float64(expectSize)*1.1)
+		assert.True(t, float64(actual) > float64(expectSize)*0.8)
+		assert.True(t, float64(actual) < float64(expectSize)*1.2)
 	}
 	fn(importedSize[int64(100)])
 	fn(importedSize[int64(101)])

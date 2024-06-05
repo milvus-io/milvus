@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"strconv"
+	"time"
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
@@ -104,7 +105,8 @@ func PickSegment(task *ImportTask, vchannel string, partitionID int64) int64 {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
-	return candidates[rand.Intn(len(candidates))].GetSegmentID()
+	r := rand.New(rand.NewSource(time.Now().UnixNano()))
+	return candidates[r.Intn(len(candidates))].GetSegmentID()
 }
 
 func CheckRowsEqual(schema *schemapb.CollectionSchema, data *storage.InsertData) error {
