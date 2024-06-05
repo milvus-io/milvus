@@ -56,7 +56,7 @@ class ScalarIndex : public IndexBase {
          const std::function<bool(size_t /* offset */)>& filter) {
         auto res = In(n, values);
         for (size_t offset = 0; offset < res.size(); offset++) {
-            res[offset] &= filter(offset);
+            res[offset] = res[offset] && filter(offset);
         }
         return res;
     }
