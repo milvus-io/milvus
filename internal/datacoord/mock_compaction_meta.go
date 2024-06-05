@@ -178,6 +178,92 @@ func (_c *MockCompactionMeta_DropCompactionTask_Call) RunAndReturn(run func(*dat
 	return _c
 }
 
+// GetAnalyzeMeta provides a mock function with given fields:
+func (_m *MockCompactionMeta) GetAnalyzeMeta() *analyzeMeta {
+	ret := _m.Called()
+
+	var r0 *analyzeMeta
+	if rf, ok := ret.Get(0).(func() *analyzeMeta); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*analyzeMeta)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetAnalyzeMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetAnalyzeMeta'
+type MockCompactionMeta_GetAnalyzeMeta_Call struct {
+	*mock.Call
+}
+
+// GetAnalyzeMeta is a helper method to define mock.On call
+func (_e *MockCompactionMeta_Expecter) GetAnalyzeMeta() *MockCompactionMeta_GetAnalyzeMeta_Call {
+	return &MockCompactionMeta_GetAnalyzeMeta_Call{Call: _e.mock.On("GetAnalyzeMeta")}
+}
+
+func (_c *MockCompactionMeta_GetAnalyzeMeta_Call) Run(run func()) *MockCompactionMeta_GetAnalyzeMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetAnalyzeMeta_Call) Return(_a0 *analyzeMeta) *MockCompactionMeta_GetAnalyzeMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetAnalyzeMeta_Call) RunAndReturn(run func() *analyzeMeta) *MockCompactionMeta_GetAnalyzeMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetCompactionTaskMeta provides a mock function with given fields:
+func (_m *MockCompactionMeta) GetCompactionTaskMeta() *compactionTaskMeta {
+	ret := _m.Called()
+
+	var r0 *compactionTaskMeta
+	if rf, ok := ret.Get(0).(func() *compactionTaskMeta); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*compactionTaskMeta)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetCompactionTaskMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetCompactionTaskMeta'
+type MockCompactionMeta_GetCompactionTaskMeta_Call struct {
+	*mock.Call
+}
+
+// GetCompactionTaskMeta is a helper method to define mock.On call
+func (_e *MockCompactionMeta_Expecter) GetCompactionTaskMeta() *MockCompactionMeta_GetCompactionTaskMeta_Call {
+	return &MockCompactionMeta_GetCompactionTaskMeta_Call{Call: _e.mock.On("GetCompactionTaskMeta")}
+}
+
+func (_c *MockCompactionMeta_GetCompactionTaskMeta_Call) Run(run func()) *MockCompactionMeta_GetCompactionTaskMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetCompactionTaskMeta_Call) Return(_a0 *compactionTaskMeta) *MockCompactionMeta_GetCompactionTaskMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetCompactionTaskMeta_Call) RunAndReturn(run func() *compactionTaskMeta) *MockCompactionMeta_GetCompactionTaskMeta_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // GetCompactionTasks provides a mock function with given fields:
 func (_m *MockCompactionMeta) GetCompactionTasks() map[int64][]*datapb.CompactionTask {
 	ret := _m.Called()
@@ -305,6 +391,49 @@ func (_c *MockCompactionMeta_GetHealthySegment_Call) Return(_a0 *SegmentInfo) *M
 }
 
 func (_c *MockCompactionMeta_GetHealthySegment_Call) RunAndReturn(run func(int64) *SegmentInfo) *MockCompactionMeta_GetHealthySegment_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// GetIndexMeta provides a mock function with given fields:
+func (_m *MockCompactionMeta) GetIndexMeta() *indexMeta {
+	ret := _m.Called()
+
+	var r0 *indexMeta
+	if rf, ok := ret.Get(0).(func() *indexMeta); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(*indexMeta)
+		}
+	}
+
+	return r0
+}
+
+// MockCompactionMeta_GetIndexMeta_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'GetIndexMeta'
+type MockCompactionMeta_GetIndexMeta_Call struct {
+	*mock.Call
+}
+
+// GetIndexMeta is a helper method to define mock.On call
+func (_e *MockCompactionMeta_Expecter) GetIndexMeta() *MockCompactionMeta_GetIndexMeta_Call {
+	return &MockCompactionMeta_GetIndexMeta_Call{Call: _e.mock.On("GetIndexMeta")}
+}
+
+func (_c *MockCompactionMeta_GetIndexMeta_Call) Run(run func()) *MockCompactionMeta_GetIndexMeta_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetIndexMeta_Call) Return(_a0 *indexMeta) *MockCompactionMeta_GetIndexMeta_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockCompactionMeta_GetIndexMeta_Call) RunAndReturn(run func() *indexMeta) *MockCompactionMeta_GetIndexMeta_Call {
 	_c.Call.Return(run)
 	return _c
 }

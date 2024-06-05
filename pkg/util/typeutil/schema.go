@@ -378,6 +378,20 @@ func IsDenseFloatVectorType(dataType schemapb.DataType) bool {
 	}
 }
 
+// return VectorTypeSize for each dim (byte)
+func VectorTypeSize(dataType schemapb.DataType) float64 {
+	switch dataType {
+	case schemapb.DataType_FloatVector, schemapb.DataType_SparseFloatVector:
+		return 4.0
+	case schemapb.DataType_BinaryVector:
+		return 0.125
+	case schemapb.DataType_Float16Vector, schemapb.DataType_BFloat16Vector:
+		return 2.0
+	default:
+		return 0.0
+	}
+}
+
 func IsSparseFloatVectorType(dataType schemapb.DataType) bool {
 	return dataType == schemapb.DataType_SparseFloatVector
 }
@@ -1083,6 +1097,16 @@ func HasPartitionKey(schema *schemapb.CollectionSchema) bool {
 
 func IsFieldDataTypeSupportMaterializedView(fieldSchema *schemapb.FieldSchema) bool {
 	return fieldSchema.DataType == schemapb.DataType_VarChar || fieldSchema.DataType == schemapb.DataType_String
+}
+
+// HasClusterKey check if a collection schema has ClusterKey field
+func HasClusterKey(schema *schemapb.CollectionSchema) bool {
+	for _, fieldSchema := range schema.Fields {
+		if fieldSchema.IsClusteringKey {
+			return true
+		}
+	}
+	return false
 }
 
 // GetPrimaryFieldData get primary field data from all field data inserted from sdk
