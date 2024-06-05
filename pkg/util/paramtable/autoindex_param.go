@@ -32,7 +32,10 @@ type autoIndexConfig struct {
 	EnableOptimize ParamItem `refreshable:"true"`
 
 	IndexParams           ParamItem  `refreshable:"true"`
+	SparseIndexParams     ParamItem  `refreshable:"true"`
+	BinaryIndexParams     ParamItem  `refreshable:"true"`
 	PrepareParams         ParamItem  `refreshable:"true"`
+	LoadAdaptParams       ParamItem  `refreshable:"true"`
 	ExtraParams           ParamItem  `refreshable:"true"`
 	IndexType             ParamItem  `refreshable:"true"`
 	AutoIndexTypeName     ParamItem  `refreshable:"true"`
@@ -71,11 +74,33 @@ func (p *autoIndexConfig) init(base *BaseTable) {
 	}
 	p.IndexParams.Init(base.mgr)
 
+	p.SparseIndexParams = ParamItem{
+		Key:          "autoIndex.params.sparse.build",
+		Version:      "2.4.5",
+		DefaultValue: `{"index_type": "SPARSE_INVERTED_INDEX", "metric_type": "IP"}`,
+		Export:       true,
+	}
+	p.SparseIndexParams.Init(base.mgr)
+
+	p.BinaryIndexParams = ParamItem{
+		Key:          "autoIndex.params.binary.build",
+		Version:      "2.4.5",
+		DefaultValue: `{"nlist": 1024, "index_type": "BIN_IVF_FLAT", "metric_type": "JACCARD"}`,
+		Export:       true,
+	}
+	p.BinaryIndexParams.Init(base.mgr)
+
 	p.PrepareParams = ParamItem{
 		Key:     "autoIndex.params.prepare",
 		Version: "2.3.2",
 	}
 	p.PrepareParams.Init(base.mgr)
+
+	p.LoadAdaptParams = ParamItem{
+		Key:     "autoIndex.params.load",
+		Version: "2.4.5",
+	}
+	p.LoadAdaptParams.Init(base.mgr)
 
 	p.ExtraParams = ParamItem{
 		Key:     "autoIndex.params.extra",
