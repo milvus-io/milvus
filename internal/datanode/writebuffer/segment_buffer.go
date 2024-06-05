@@ -85,6 +85,21 @@ func (tr *TimeRange) Merge(other *TimeRange) {
 	}
 }
 
+func (tr *TimeRange) GetMinTimestamp() typeutil.Timestamp {
+	return tr.timestampMin
+}
+
+func (tr *TimeRange) GetMaxTimestamp() typeutil.Timestamp {
+	return tr.timestampMax
+}
+
+func NewTimeRange(tsFrom, tsTo typeutil.Timestamp) *TimeRange {
+	return &TimeRange{
+		timestampMin: tsFrom,
+		timestampMax: tsTo,
+	}
+}
+
 func getEarliestCheckpoint(cps ...*msgpb.MsgPosition) *msgpb.MsgPosition {
 	var result *msgpb.MsgPosition
 	for _, cp := range cps {
