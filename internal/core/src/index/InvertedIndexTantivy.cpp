@@ -204,6 +204,25 @@ apply_hits(TargetBitmap& bitset, const RustArrayWrapper& w, bool v) {
     }
 }
 
+inline void
+apply_hits_with_filter(TargetBitmap& bitset,
+                       const RustArrayWrapper& w,
+                       const std::function<bool(size_t /* offset */)>& filter) {
+    for (size_t j = 0; j < w.array_.len; j++) {
+        auto the_offset = w.array_.array[j];
+        bitset[the_offset] = filter(the_offset);
+    }
+}
+
+inline void
+apply_hits_with_callback(
+    const RustArrayWrapper& w,
+    const std::function<void(size_t /* offset */)>& callback) {
+    for (size_t j = 0; j < w.array_.len; j++) {
+        callback(w.array_.array[j]);
+    }
+}
+
 template <typename T>
 const TargetBitmap
 InvertedIndexTantivy<T>::In(size_t n, const T* values) {
@@ -213,6 +232,30 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
         apply_hits(bitset, array, true);
     }
     return bitset;
+}
+
+template <typename T>
+const TargetBitmap
+InvertedIndexTantivy<T>::InV2(size_t n,
+                              const T* values,
+                              const std::function<bool(size_t)>& filter) {
+    TargetBitmap bitset(Count());
+    for (size_t i = 0; i < n; ++i) {
+        auto array = wrapper_->term_query(values[i]);
+        apply_hits_with_filter(bitset, array, filter);
+    }
+    return bitset;
+}
+
+template <typename T>
+void
+InvertedIndexTantivy<T>::InV3(size_t n,
+                              const T* values,
+                              const std::function<void(size_t)>& callback) {
+    for (size_t i = 0; i < n; ++i) {
+        auto array = wrapper_->term_query(values[i]);
+        apply_hits_with_callback(array, callback);
+    }
 }
 
 template <typename T>
