@@ -4,11 +4,9 @@ import (
 	"context"
 	"time"
 
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
-	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 )
@@ -61,7 +59,6 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 	buildID UniqueID,
 	fileKeys []string,
 	serializedSize uint64,
-	statistic *indexpb.JobInfo,
 	currentIndexVersion int32,
 ) {
 	key := taskKey{ClusterID: ClusterID, BuildID: buildID}
@@ -70,7 +67,6 @@ func (i *IndexNode) storeIndexFilesAndStatistic(
 	if info, ok := i.tasks[key]; ok {
 		info.fileKeys = common.CloneStringList(fileKeys)
 		info.serializedSize = serializedSize
-		info.statistic = proto.Clone(statistic).(*indexpb.JobInfo)
 		info.currentIndexVersion = currentIndexVersion
 		return
 	}
@@ -81,7 +77,6 @@ func (i *IndexNode) storeIndexFilesAndStatisticV2(
 	buildID UniqueID,
 	fileKeys []string,
 	serializedSize uint64,
-	statistic *indexpb.JobInfo,
 	currentIndexVersion int32,
 	indexStoreVersion int64,
 ) {
@@ -91,7 +86,6 @@ func (i *IndexNode) storeIndexFilesAndStatisticV2(
 	if info, ok := i.tasks[key]; ok {
 		info.fileKeys = common.CloneStringList(fileKeys)
 		info.serializedSize = serializedSize
-		info.statistic = proto.Clone(statistic).(*indexpb.JobInfo)
 		info.currentIndexVersion = currentIndexVersion
 		info.indexStoreVersion = indexStoreVersion
 		return
