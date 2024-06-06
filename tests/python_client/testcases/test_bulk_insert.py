@@ -80,6 +80,14 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         5. verify search successfully
         6. verify query successfully
         """
+
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        fields = [
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+        ]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_new_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -87,16 +95,10 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             rows=entities,
             dim=dim,
             auto_id=auto_id,
-            data_fields=default_vec_only_fields,
+            data_fields=data_fields,
             force=True,
         )
-        self._connect()
-        c_name = cf.gen_unique_str("bulk_insert")
-        fields = [
-            cf.gen_int64_field(name=df.pk_field, is_primary=True),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
-        ]
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        schema = cf.gen_collection_schema(fields=fields)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
@@ -120,7 +122,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify imported data is available for search
         index_params = ct.default_index
         self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
+            field_name=df.float_vec_field, index_params=index_params
         )
         time.sleep(2)
         self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
@@ -139,7 +141,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         search_params = ct.default_search_params
         res, _ = self.collection_wrap.search(
             search_data,
-            df.vec_field,
+            df.float_vec_field,
             param=search_params,
             limit=topk,
             check_task=CheckTasks.check_search_results,
@@ -167,6 +169,15 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         auto_id = False  # no auto id for string_pk schema
         string_pk = True
+
+        self._connect()
+        c_name = cf.gen_unique_str("bulk_insert")
+        fields = [
+            cf.gen_string_field(name=df.string_field, is_primary=True, auto_id=auto_id),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
+        ]
+        schema = cf.gen_collection_schema(fields=fields)
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         files = prepare_bulk_insert_new_json_files(
             minio_endpoint=self.minio_endpoint,
             bucket_name=self.bucket_name,
@@ -175,15 +186,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             dim=dim,
             auto_id=auto_id,
             str_pk=string_pk,
-            data_fields=default_vec_only_fields,
+            data_fields=data_fields,
         )
-        self._connect()
-        c_name = cf.gen_unique_str("bulk_insert")
-        fields = [
-            cf.gen_string_field(name=df.pk_field, is_primary=True),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
-        ]
-        schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         self.collection_wrap.init_collection(c_name, schema=schema)
         # import data
         t0 = time.time()
@@ -205,7 +209,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify imported data is available for search
         index_params = ct.default_index
         self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
+            field_name=df.float_vec_field, index_params=index_params
         )
         self.utility_wrap.wait_for_index_building_complete(c_name, timeout=300)
         res, _ = self.utility_wrap.index_building_progress(c_name)
@@ -224,7 +228,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         time.sleep(2)
         res, _ = self.collection_wrap.search(
             search_data,
-            df.vec_field,
+            df.float_vec_field,
             param=search_params,
             limit=topk,
             check_task=CheckTasks.check_search_results,
@@ -232,7 +236,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         )
         for hits in res:
             ids = hits.ids
-            expr = f"{df.pk_field} in {ids}"
+            expr = f"{df.string_field} in {ids}"
             expr = expr.replace("'", '"')
             results, _ = self.collection_wrap.query(expr=expr)
             assert len(results) == len(ids)
@@ -433,21 +437,12 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         bulk_insert_row = 500
         direct_insert_row = 3000
         dim = 128
-        files = prepare_bulk_insert_json_files(
-            minio_endpoint=self.minio_endpoint,
-            bucket_name=self.bucket_name,
-            is_row_based=True,
-            rows=bulk_insert_row,
-            dim=dim,
-            data_fields=[df.pk_field, df.float_field, df.vec_field],
-            force=True,
-        )
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True),
             cf.gen_float_field(name=df.float_field),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
         ]
         data = [
             [i for i in range(direct_insert_row)],
@@ -460,7 +455,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # build index
         index_params = ct.default_index
         self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
+            field_name=df.float_vec_field, index_params=index_params
         )
         # load collection
         self.collection_wrap.load()
@@ -468,6 +463,16 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             # insert data
             self.collection_wrap.insert(data)
             self.collection_wrap.num_entities
+
+        files = prepare_bulk_insert_new_json_files(
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            is_row_based=True,
+            rows=bulk_insert_row,
+            dim=dim,
+            data_fields=[df.pk_field, df.float_field, df.float_vec_field],
+            force=True,
+        )
         # import data
         t0 = time.time()
         task_id, _ = self.utility_wrap.do_bulk_insert(
@@ -503,7 +508,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         search_params = ct.default_search_params
         res, _ = self.collection_wrap.search(
             search_data,
-            df.vec_field,
+            df.float_vec_field,
             param=search_params,
             limit=topk,
             check_task=CheckTasks.check_search_results,
