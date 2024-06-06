@@ -23,7 +23,6 @@ import (
 	"github.com/samber/lo"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -165,14 +164,17 @@ func (c *compactionExecutor) getCompactionResult(planID int64) *datapb.Compactio
 	_, ok := c.executing.Get(planID)
 	if ok {
 		result := &datapb.CompactionPlanResult{
-			State:  commonpb.CompactionState_Executing,
+			State:  datapb.CompactionTaskState_executing,
 			PlanID: planID,
 		}
 		return result
 	}
 	result, ok2 := c.completed.Get(planID)
 	if !ok2 {
-		return &datapb.CompactionPlanResult{}
+		return &datapb.CompactionPlanResult{
+			PlanID: planID,
+			State:  datapb.CompactionTaskState_failed,
+		}
 	}
 	return result
 }
@@ -190,7 +192,7 @@ func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanR
 	c.executing.Range(func(planID int64, task compaction.Compactor) bool {
 		executing = append(executing, planID)
 		results = append(results, &datapb.CompactionPlanResult{
-			State:  commonpb.CompactionState_Executing,
+			State:  datapb.CompactionTaskState_executing,
 			PlanID: planID,
 		})
 		return true

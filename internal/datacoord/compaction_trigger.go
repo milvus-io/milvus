@@ -50,8 +50,6 @@ type compactTime struct {
 type trigger interface {
 	start()
 	stop()
-	// triggerCompaction triggers a compaction if any compaction condition satisfy.
-	triggerCompaction() error
 	// triggerSingleCompaction triggers a compaction bundled with collection-partition-channel-segment
 	triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error
 	// triggerManualCompaction force to start a compaction
@@ -347,7 +345,8 @@ func (t *compactionTrigger) handleGlobalSignal(signal *compactionSignal) error {
 			isFlush(segment) &&
 			!segment.isCompacting && // not compacting now
 			!segment.GetIsImporting() && // not importing now
-			segment.GetLevel() != datapb.SegmentLevel_L0 // ignore level zero segments
+			segment.GetLevel() != datapb.SegmentLevel_L0 && // ignore level zero segments
+			segment.GetLevel() != datapb.SegmentLevel_L2 // ignore l2 segment
 	}) // partSegments is list of chanPartSegments, which is channel-partition organized segments
 
 	if len(partSegments) == 0 {
@@ -755,7 +754,8 @@ func (t *compactionTrigger) getCandidateSegments(channel string, partitionID Uni
 			s.GetPartitionID() != partitionID ||
 			s.isCompacting ||
 			s.GetIsImporting() ||
-			s.GetLevel() == datapb.SegmentLevel_L0 {
+			s.GetLevel() == datapb.SegmentLevel_L0 ||
+			s.GetLevel() == datapb.SegmentLevel_L2 {
 			continue
 		}
 		res = append(res, s)

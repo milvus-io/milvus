@@ -74,6 +74,8 @@ const (
 	Done      = "done"
 
 	compactionTypeLabelName  = "compaction_type"
+	isVectorFieldLabelName   = "is_vector_field"
+	stageLabelName           = "compaction_stage"
 	nodeIDLabelName          = "node_id"
 	statusLabelName          = "status"
 	indexTaskStatusLabelName = "index_task_status"

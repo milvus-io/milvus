@@ -44,10 +44,10 @@ type MockMsgStream_AsConsumer_Call struct {
 }
 
 // AsConsumer is a helper method to define mock.On call
-//  - ctx context.Context
-//  - channels []string
-//  - subName string
-//  - position mqwrapper.SubscriptionInitialPosition
+//   - ctx context.Context
+//   - channels []string
+//   - subName string
+//   - position mqwrapper.SubscriptionInitialPosition
 func (_e *MockMsgStream_Expecter) AsConsumer(ctx interface{}, channels interface{}, subName interface{}, position interface{}) *MockMsgStream_AsConsumer_Call {
 	return &MockMsgStream_AsConsumer_Call{Call: _e.mock.On("AsConsumer", ctx, channels, subName, position)}
 }
@@ -80,7 +80,7 @@ type MockMsgStream_AsProducer_Call struct {
 }
 
 // AsProducer is a helper method to define mock.On call
-//  - channels []string
+//   - channels []string
 func (_e *MockMsgStream_Expecter) AsProducer(channels interface{}) *MockMsgStream_AsProducer_Call {
 	return &MockMsgStream_AsProducer_Call{Call: _e.mock.On("AsProducer", channels)}
 }
@@ -134,7 +134,7 @@ type MockMsgStream_Broadcast_Call struct {
 }
 
 // Broadcast is a helper method to define mock.On call
-//  - _a0 *MsgPack
+//   - _a0 *MsgPack
 func (_e *MockMsgStream_Expecter) Broadcast(_a0 interface{}) *MockMsgStream_Broadcast_Call {
 	return &MockMsgStream_Broadcast_Call{Call: _e.mock.On("Broadcast", _a0)}
 }
@@ -219,7 +219,7 @@ type MockMsgStream_CheckTopicValid_Call struct {
 }
 
 // CheckTopicValid is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockMsgStream_Expecter) CheckTopicValid(channel interface{}) *MockMsgStream_CheckTopicValid_Call {
 	return &MockMsgStream_CheckTopicValid_Call{Call: _e.mock.On("CheckTopicValid", channel)}
 }
@@ -284,7 +284,7 @@ type MockMsgStream_EnableProduce_Call struct {
 }
 
 // EnableProduce is a helper method to define mock.On call
-//  - can bool
+//   - can bool
 func (_e *MockMsgStream_Expecter) EnableProduce(can interface{}) *MockMsgStream_EnableProduce_Call {
 	return &MockMsgStream_EnableProduce_Call{Call: _e.mock.On("EnableProduce", can)}
 }
@@ -338,7 +338,7 @@ type MockMsgStream_GetLatestMsgID_Call struct {
 }
 
 // GetLatestMsgID is a helper method to define mock.On call
-//  - channel string
+//   - channel string
 func (_e *MockMsgStream_Expecter) GetLatestMsgID(channel interface{}) *MockMsgStream_GetLatestMsgID_Call {
 	return &MockMsgStream_GetLatestMsgID_Call{Call: _e.mock.On("GetLatestMsgID", channel)}
 }
@@ -423,7 +423,7 @@ type MockMsgStream_Produce_Call struct {
 }
 
 // Produce is a helper method to define mock.On call
-//  - _a0 *MsgPack
+//   - _a0 *MsgPack
 func (_e *MockMsgStream_Expecter) Produce(_a0 interface{}) *MockMsgStream_Produce_Call {
 	return &MockMsgStream_Produce_Call{Call: _e.mock.On("Produce", _a0)}
 }
@@ -465,9 +465,9 @@ type MockMsgStream_Seek_Call struct {
 }
 
 // Seek is a helper method to define mock.On call
-//  - ctx context.Context
-//  - msgPositions []*msgpb.MsgPosition
-//  - includeCurrentMsg bool
+//   - ctx context.Context
+//   - msgPositions []*msgpb.MsgPosition
+//   - includeCurrentMsg bool
 func (_e *MockMsgStream_Expecter) Seek(ctx interface{}, msgPositions interface{}, includeCurrentMsg interface{}) *MockMsgStream_Seek_Call {
 	return &MockMsgStream_Seek_Call{Call: _e.mock.On("Seek", ctx, msgPositions, includeCurrentMsg)}
 }
@@ -500,7 +500,7 @@ type MockMsgStream_SetRepackFunc_Call struct {
 }
 
 // SetRepackFunc is a helper method to define mock.On call
-//  - repackFunc RepackFunc
+//   - repackFunc RepackFunc
 func (_e *MockMsgStream_Expecter) SetRepackFunc(repackFunc interface{}) *MockMsgStream_SetRepackFunc_Call {
 	return &MockMsgStream_SetRepackFunc_Call{Call: _e.mock.On("SetRepackFunc", repackFunc)}
 }
