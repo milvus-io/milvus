@@ -71,7 +71,7 @@ type PinnableCache[K comparable, V any, M Measure[K, V]] interface {
 	Capacity() uint64
 	// Size returns the size of the cache.
 	Size() uint64
-	// Remove removes the key-value pair from the cache and returns the removed key-value pair.
+	// Remove removes the key-value pair from the cache.
 	// If a key is pinned, Remove will return false.
 	// If a key is not found, Remove will do nothing and return true.
 	Remove(k K) bool
