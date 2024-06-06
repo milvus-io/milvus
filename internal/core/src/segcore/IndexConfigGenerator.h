@@ -44,7 +44,8 @@ class VecIndexConfig {
     VecIndexConfig(const int64_t max_index_row_count,
                    const FieldIndexMeta& index_meta_,
                    const SegcoreConfig& config,
-                   const SegmentType& segment_type);
+                   const SegmentType& segment_type,
+                   const bool is_sparse);
 
     int64_t
     GetBuildThreshold() const noexcept;
@@ -71,6 +72,8 @@ class VecIndexConfig {
     knowhere::IndexType index_type_;
 
     knowhere::MetricType metric_type_;
+
+    bool is_sparse_;
 
     knowhere::Json build_params_;
 
