@@ -177,9 +177,21 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
-			// override params by autoindex
-			for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
-				indexParamsMap[k] = v
+			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
+				// override float vector index params by autoindex
+				for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
+					indexParamsMap[k] = v
+				}
+			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
+				// override sparse float vector index params by autoindex
+				for k, v := range Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap() {
+					indexParamsMap[k] = v
+				}
+			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
+				// override binary vector index params by autoindex
+				for k, v := range Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap() {
+					indexParamsMap[k] = v
+				}
 			}
 
 			if metricTypeExist {
