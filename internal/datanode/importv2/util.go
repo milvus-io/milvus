@@ -99,12 +99,16 @@ func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache
 	if !ok {
 		return nil, merr.WrapErrSegmentNotFound(segmentID, "import failed")
 	}
+	var deltaLogs []*datapb.FieldBinlog
+	if len(deltaLog.GetBinlogs()) > 0 {
+		deltaLogs = []*datapb.FieldBinlog{deltaLog}
+	}
 	return &datapb.ImportSegmentInfo{
 		SegmentID:    segmentID,
 		ImportedRows: segment.FlushedRows(),
 		Binlogs:      lo.Values(insertBinlogs),
 		Statslogs:    lo.Values(statsBinlog),
-		Deltalogs:    []*datapb.FieldBinlog{deltaLog},
+		Deltalogs:    deltaLogs,
 	}, nil
 }
 

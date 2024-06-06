@@ -269,6 +269,14 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 	})
 	log.Info("Show segments", zap.Any("segments", segments))
 	s.Equal(1, len(segments))
+	segment := segments[0]
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.True(len(segment.GetBinlogs()) > 0)
+	s.NoError(CheckLogID(segment.GetBinlogs()))
+	s.True(len(segment.GetDeltalogs()) == 0)
+	s.NoError(CheckLogID(segment.GetDeltalogs()))
+	s.True(len(segment.GetStatslogs()) > 0)
+	s.NoError(CheckLogID(segment.GetStatslogs()))
 
 	// l0 import
 	files = []*internalpb.ImportFile{
@@ -303,9 +311,13 @@ func (s *BulkInsertSuite) TestBinlogImport() {
 		return segment.GetCollectionID() == newCollectionID && segment.GetLevel() == datapb.SegmentLevel_L0
 	})
 	s.Equal(1, len(l0Segments))
-	s.Equal(commonpb.SegmentState_Flushed, l0Segments[0].GetState())
-	s.Equal(common.AllPartitionsID, l0Segments[0].GetPartitionID())
-	// s.True(len(l0Segments[0].GetDeltalogs()) > 0)
+	segment = l0Segments[0]
+	s.Equal(commonpb.SegmentState_Flushed, segment.GetState())
+	s.Equal(common.AllPartitionsID, segment.GetPartitionID())
+	s.True(len(segment.GetBinlogs()) == 0)
+	s.True(len(segment.GetDeltalogs()) > 0)
+	s.NoError(CheckLogID(segment.GetDeltalogs()))
+	s.True(len(segment.GetStatslogs()) == 0)
 
 	// load
 	loadStatus, err := c.Proxy.LoadCollection(ctx, &milvuspb.LoadCollectionRequest{
