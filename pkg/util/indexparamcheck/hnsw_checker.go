@@ -32,9 +32,8 @@ func (c hnswChecker) CheckTrain(params map[string]string) error {
 }
 
 func (c hnswChecker) CheckValidDataType(dType schemapb.DataType) error {
-	// TODO(SPARSE) we'll add sparse vector support in HNSW later in cardinal
-	if !(typeutil.IsDenseFloatVectorType(dType) || typeutil.IsBinaryVectorType(dType)) {
-		return fmt.Errorf("HNSW only support float vector or bin data type")
+	if !typeutil.IsVectorType(dType) {
+		return fmt.Errorf("can't create hnsw in not vector type")
 	}
 	return nil
 }
