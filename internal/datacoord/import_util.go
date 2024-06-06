@@ -367,6 +367,9 @@ func getImportingProgress(jobID int64, imeta ImportMeta, meta *meta) (float32, i
 
 func GetJobProgress(jobID int64, imeta ImportMeta, meta *meta) (int64, internalpb.ImportJobState, int64, int64, string) {
 	job := imeta.GetJob(jobID)
+	if job == nil {
+		return 0, internalpb.ImportJobState_Failed, 0, 0, fmt.Sprintf("import job does not exist, jobID=%d", jobID)
+	}
 	switch job.GetState() {
 	case internalpb.ImportJobState_Pending:
 		progress := getPendingProgress(jobID, imeta)
