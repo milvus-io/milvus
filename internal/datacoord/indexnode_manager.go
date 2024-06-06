@@ -24,7 +24,6 @@ import (
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
-	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/types"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -32,6 +31,16 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/lock"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 )
+
+type WorkerManager interface {
+	AddNode(nodeID UniqueID, address string) error
+	RemoveNode(nodeID UniqueID)
+	StoppingNode(nodeID UniqueID)
+	PickClient() (UniqueID, types.IndexNodeClient)
+	ClientSupportDisk() bool
+	GetAllClients() map[UniqueID]types.IndexNodeClient
+	GetClientByID(nodeID UniqueID) (types.IndexNodeClient, bool)
+}
 
 // IndexNodeManager is used to manage the client of IndexNode.
 type IndexNodeManager struct {
@@ -98,59 +107,55 @@ func (nm *IndexNodeManager) AddNode(nodeID UniqueID, address string) error {
 	return nil
 }
 
-// PeekClient peeks the client with the least load.
-func (nm *IndexNodeManager) PeekClient(meta *model.SegmentIndex) (UniqueID, types.IndexNodeClient) {
-	allClients := nm.GetAllClients()
-	if len(allClients) == 0 {
-		log.Error("there is no IndexNode online")
-		return -1, nil
-	}
+func (nm *IndexNodeManager) PickClient() (UniqueID, types.IndexNodeClient) {
+	nm.lock.Lock()
+	defer nm.lock.Unlock()
 
 	// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
 	ctx, cancel := context.WithCancel(nm.ctx)
 	var (
-		peekNodeID = UniqueID(0)
-		nodeMutex  = lock.Mutex{}
+		pickNodeID = UniqueID(0)
+		nodeMutex  = sync.Mutex{}
 		wg         = sync.WaitGroup{}
 	)
 
-	for nodeID, client := range allClients {
-		nodeID := nodeID
-		client := client
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			resp, err := client.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
-			if err != nil {
-				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
-				return
-			}
-			if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
-				log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
-					zap.String("reason", resp.GetStatus().GetReason()))
-				return
-			}
-			if resp.GetTaskSlots() > 0 {
-				nodeMutex.Lock()
-				defer nodeMutex.Unlock()
-				log.Info("peek client success", zap.Int64("nodeID", nodeID))
-				if peekNodeID == 0 {
-					peekNodeID = nodeID
+	for nodeID, client := range nm.nodeClients {
+		if _, ok := nm.stoppingNodes[nodeID]; !ok {
+			nodeID := nodeID
+			client := client
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				resp, err := client.GetJobStats(ctx, &indexpb.GetJobStatsRequest{})
+				if err != nil {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID), zap.Error(err))
+					return
 				}
-				cancel()
-				// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
-				return
-			}
-		}()
+				if resp.GetStatus().GetErrorCode() != commonpb.ErrorCode_Success {
+					log.Warn("get IndexNode slots failed", zap.Int64("nodeID", nodeID),
+						zap.String("reason", resp.GetStatus().GetReason()))
+					return
+				}
+				if resp.GetTaskSlots() > 0 {
+					nodeMutex.Lock()
+					defer nodeMutex.Unlock()
+					if pickNodeID == 0 {
+						pickNodeID = nodeID
+					}
+					cancel()
+					// Note: In order to quickly end other goroutines, an error is returned when the client is successfully selected
+					return
+				}
+			}()
+		}
 	}
 	wg.Wait()
 	cancel()
-	if peekNodeID != 0 {
-		log.Info("peek client success", zap.Int64("nodeID", peekNodeID))
-		return peekNodeID, allClients[peekNodeID]
+	if pickNodeID != 0 {
+		log.Info("pick indexNode success", zap.Int64("nodeID", pickNodeID))
+		return pickNodeID, nm.nodeClients[pickNodeID]
 	}
 
-	log.RatedDebug(5, "peek client fail")
 	return 0, nil
 }
 

@@ -1047,6 +1047,40 @@ func TestGetPrimaryFieldSchema(t *testing.T) {
 	assert.True(t, hasPartitionKey2)
 }
 
+func TestGetClusterKeyFieldSchema(t *testing.T) {
+	int64Field := &schemapb.FieldSchema{
+		FieldID:  1,
+		Name:     "int64Field",
+		DataType: schemapb.DataType_Int64,
+	}
+
+	clusterKeyfloatField := &schemapb.FieldSchema{
+		FieldID:         2,
+		Name:            "floatField",
+		DataType:        schemapb.DataType_Float,
+		IsClusteringKey: true,
+	}
+
+	unClusterKeyfloatField := &schemapb.FieldSchema{
+		FieldID:         2,
+		Name:            "floatField",
+		DataType:        schemapb.DataType_Float,
+		IsClusteringKey: false,
+	}
+
+	schema := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{int64Field, clusterKeyfloatField},
+	}
+	schema2 := &schemapb.CollectionSchema{
+		Fields: []*schemapb.FieldSchema{int64Field, unClusterKeyfloatField},
+	}
+
+	hasClusterKey1 := HasClusterKey(schema)
+	assert.True(t, hasClusterKey1)
+	hasClusterKey2 := HasClusterKey(schema2)
+	assert.False(t, hasClusterKey2)
+}
+
 func TestGetPK(t *testing.T) {
 	type args struct {
 		data *schemapb.IDs

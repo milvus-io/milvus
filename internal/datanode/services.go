@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -220,10 +221,10 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
 	var task compaction.Compactor
-	binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
+	binlogIO := io.NewBinlogIO(node.chunkManager)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
-		task = newLevelZeroCompactionTask(
+		task = compaction.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
 			node.allocator,
@@ -311,7 +312,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	for _, segID := range missingSegments {
 		segID := segID
-		future := node.pool.Submit(func() (any, error) {
+		future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 			newSeg := req.GetSegmentInfos()[segID]
 			var val *metacache.BloomFilterSet
 			var err error
@@ -320,7 +321,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 				log.Warn("failed to DecompressBinLog", zap.Error(err))
 				return val, err
 			}
-			pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+			pks, err := util.LoadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
 			if err != nil {
 				log.Warn("failed to load segment stats log", zap.Error(err))
 				return val, err
