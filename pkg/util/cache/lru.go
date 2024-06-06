@@ -20,6 +20,9 @@ type PinnableEvictor[K comparable] interface {
 	Pin(k K)
 	// Unpin removes the pin from the key in the cache.
 	Unpin(k K)
+	// Remove removes the key from the cache.
+	// If the key is pinned, Remove will return false.
+	Remove(k K) bool
 }
 
 // Measure is an interface for measuring the size of a key-value pair.
@@ -67,13 +70,10 @@ type PinnableCache[K comparable, V any, M Measure[K, V]] interface {
 	Capacity() uint64
 	// Size returns the size of the cache.
 	Size() uint64
-}
-
-type PinnableCacheBuilder[K comparable, V any, E PinnableEvictor[K], M Measure[K, V]] interface {
-	WithCapacity(capacity uint64) PinnableCacheBuilder[K, V, E, M]
-	WithEvictor(evictor E) PinnableCacheBuilder[K, V, E, M]
-	WithMeasure(measure M) PinnableCacheBuilder[K, V, E, M]
-	Build() PinnableCache[K, V, M]
+	// Remove removes the key-value pair from the cache and returns the removed key-value pair.
+	// If a key is pinned, Remove will return false.
+	// If a key is not found, Remove will do nothing and return true.
+	Remove(k K) bool
 }
 
 type refItem[K comparable] struct {
@@ -117,6 +117,21 @@ func (e *LRUEvictor[K]) Unpin(k K) {
 	if v, ok := e.emap[k]; ok {
 		v.Value.(*refItem[K]).ref--
 	}
+}
+
+func (e *LRUEvictor[K]) Remove(k K) bool {
+	if v, ok := e.emap[k]; ok {
+		if v.Value.(*refItem[K]).ref > 0 {
+			return false
+		}
+		e.list.Remove(v)
+		delete(e.emap, k)
+	}
+	return true
+}
+
+func NewLRUEvictor[K comparable]() *LRUEvictor[K] {
+	return &LRUEvictor[K]{list: list.New(), emap: make(map[K]*list.Element)}
 }
 
 type CacheImpl[K comparable, V any, E PinnableEvictor[K], M Measure[K, V]] struct {
@@ -187,6 +202,15 @@ func (c *CacheImpl[K, V, E, M]) Size() uint64 {
 	return c.measure.get()
 }
 
-type SegmentCache[C PinnableCache[int64, any, *defaultMeasure[int64, any]]] struct{}
+func (c *CacheImpl[K, V, E, M]) Remove(k K) bool {
+	return c.evictor.Remove(k)
+}
 
-type LRUSegmentCache = SegmentCache[*CacheImpl[int64, any, *LRUEvictor[int64], *defaultMeasure[int64, any]]]
+func NewCacheImpl[K comparable, V any, E PinnableEvictor[K], M Measure[K, V]](capacity uint64, evictor E, measure M) *CacheImpl[K, V, E, M] {
+	return &CacheImpl[K, V, E, M]{capacity: capacity, items: make(map[K]V), evictor: evictor, measure: measure}
+}
+
+// type SegmentCache[C PinnableCache[int64, any, *defaultMeasure[int64, any]]] struct {
+// }
+
+// type LRUSegmentCache = SegmentCache[*CacheImpl[int64, any, *LRUEvictor[int64], *defaultMeasure[int64, any]]]
