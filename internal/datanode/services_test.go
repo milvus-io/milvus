@@ -529,3 +529,28 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s.False(merr.Ok(status))
 	})
 }
+
+func (s *DataNodeServicesSuite) TestDropCompactionPlan() {
+	s.Run("node not healthy", func() {
+		s.SetupTest()
+		s.node.UpdateStateCode(commonpb.StateCode_Abnormal)
+
+		ctx := context.Background()
+		status, err := s.node.DropCompactionPlan(ctx, nil)
+		s.NoError(err)
+		s.False(merr.Ok(status))
+		s.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
+	})
+
+	s.Run("normal case", func() {
+		s.SetupTest()
+		ctx := context.Background()
+		req := &datapb.DropCompactionPlanRequest{
+			PlanID: 1,
+		}
+
+		status, err := s.node.DropCompactionPlan(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(status))
+	})
+}

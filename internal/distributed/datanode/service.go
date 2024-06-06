@@ -406,3 +406,7 @@ func (s *Server) DropImport(ctx context.Context, req *datapb.DropImportRequest) 
 func (s *Server) QuerySlot(ctx context.Context, req *datapb.QuerySlotRequest) (*datapb.QuerySlotResponse, error) {
 	return s.datanode.QuerySlot(ctx, req)
 }
+
+func (s *Server) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
+	return s.datanode.DropCompactionPlan(ctx, req)
+}
