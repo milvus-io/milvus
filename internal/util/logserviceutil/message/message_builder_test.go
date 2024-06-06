@@ -1,8 +1,10 @@
 package message_test
 
 import (
+	"fmt"
 	"testing"
 
+	"github.com/golang/protobuf/proto"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/milvus-io/milvus/internal/mocks/util/logserviceutil/mock_message"
@@ -26,10 +28,26 @@ func TestMessage(t *testing.T) {
 	mutableMessage.WithTimeTick(123)
 	v, ok = mutableMessage.Properties().Get("_tt")
 	assert.True(t, ok)
-	assert.Equal(t, "123", v)
+	tt, n := proto.DecodeVarint([]byte(v))
+	assert.Equal(t, uint64(123), tt)
+	assert.Equal(t, len([]byte(v)), n)
+
+	lcMsgID := mock_message.NewMockMessageID(t)
+	lcMsgID.EXPECT().Marshal().Return([]byte("lcMsgID"))
+	mutableMessage.WithLastConfirmed(lcMsgID)
+	v, ok = mutableMessage.Properties().Get("_lc")
+	assert.True(t, ok)
+	assert.Equal(t, v, "lcMsgID")
 
 	msgID := mock_message.NewMockMessageID(t)
 	msgID.EXPECT().EQ(msgID).Return(true)
+	msgID.EXPECT().WALName().Return("testMsgID")
+	message.RegisterMessageIDUnmsarshaler("testMsgID", func(data []byte) (message.MessageID, error) {
+		if string(data) == "lcMsgID" {
+			return msgID, nil
+		}
+		panic(fmt.Sprintf("unexpected data: %s", data))
+	})
 
 	b = message.NewBuilder()
 	immutableMessage := b.WithMessageID(msgID).
@@ -37,8 +55,9 @@ func TestMessage(t *testing.T) {
 		WithProperties(map[string]string{
 			"key": "value",
 			"_t":  "1",
-			"_tt": "456",
+			"_tt": string(proto.EncodeVarint(456)),
 			"_v":  "1",
+			"_lc": "lcMsgID",
 		}).
 		BuildImmutable()
 
@@ -49,9 +68,10 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, "value", v)
 	assert.True(t, ok)
 	assert.Equal(t, message.MessageTypeTimeTick, immutableMessage.MessageType())
-	assert.Equal(t, 27, immutableMessage.EstimateSize())
+	assert.Equal(t, 36, immutableMessage.EstimateSize())
 	assert.Equal(t, message.Version(1), immutableMessage.Version())
 	assert.Equal(t, uint64(456), immutableMessage.TimeTick())
+	assert.NotNil(t, immutableMessage.LastConfirmedMessageID())
 
 	b = message.NewBuilder()
 	immutableMessage = b.WithMessageID(msgID).
@@ -71,6 +91,9 @@ func TestMessage(t *testing.T) {
 	assert.Equal(t, message.Version(0), immutableMessage.Version())
 	assert.Panics(t, func() {
 		immutableMessage.TimeTick()
+	})
+	assert.Panics(t, func() {
+		immutableMessage.LastConfirmedMessageID()
 	})
 
 	assert.Panics(t, func() {

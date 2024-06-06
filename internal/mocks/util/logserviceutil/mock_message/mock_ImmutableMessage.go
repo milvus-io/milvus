@@ -61,6 +61,49 @@ func (_c *MockImmutableMessage_EstimateSize_Call) RunAndReturn(run func() int) *
 	return _c
 }
 
+// LastConfirmedMessageID provides a mock function with given fields:
+func (_m *MockImmutableMessage) LastConfirmedMessageID() message.MessageID {
+	ret := _m.Called()
+
+	var r0 message.MessageID
+	if rf, ok := ret.Get(0).(func() message.MessageID); ok {
+		r0 = rf()
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.MessageID)
+		}
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_LastConfirmedMessageID_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'LastConfirmedMessageID'
+type MockImmutableMessage_LastConfirmedMessageID_Call struct {
+	*mock.Call
+}
+
+// LastConfirmedMessageID is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) LastConfirmedMessageID() *MockImmutableMessage_LastConfirmedMessageID_Call {
+	return &MockImmutableMessage_LastConfirmedMessageID_Call{Call: _e.mock.On("LastConfirmedMessageID")}
+}
+
+func (_c *MockImmutableMessage_LastConfirmedMessageID_Call) Run(run func()) *MockImmutableMessage_LastConfirmedMessageID_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_LastConfirmedMessageID_Call) Return(_a0 message.MessageID) *MockImmutableMessage_LastConfirmedMessageID_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_LastConfirmedMessageID_Call) RunAndReturn(run func() message.MessageID) *MockImmutableMessage_LastConfirmedMessageID_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MessageID provides a mock function with given fields:
 func (_m *MockImmutableMessage) MessageID() message.MessageID {
 	ret := _m.Called()
@@ -309,6 +352,47 @@ func (_c *MockImmutableMessage_Version_Call) Return(_a0 message.Version) *MockIm
 }
 
 func (_c *MockImmutableMessage_Version_Call) RunAndReturn(run func() message.Version) *MockImmutableMessage_Version_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// WALName provides a mock function with given fields:
+func (_m *MockImmutableMessage) WALName() string {
+	ret := _m.Called()
+
+	var r0 string
+	if rf, ok := ret.Get(0).(func() string); ok {
+		r0 = rf()
+	} else {
+		r0 = ret.Get(0).(string)
+	}
+
+	return r0
+}
+
+// MockImmutableMessage_WALName_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'WALName'
+type MockImmutableMessage_WALName_Call struct {
+	*mock.Call
+}
+
+// WALName is a helper method to define mock.On call
+func (_e *MockImmutableMessage_Expecter) WALName() *MockImmutableMessage_WALName_Call {
+	return &MockImmutableMessage_WALName_Call{Call: _e.mock.On("WALName")}
+}
+
+func (_c *MockImmutableMessage_WALName_Call) Run(run func()) *MockImmutableMessage_WALName_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockImmutableMessage_WALName_Call) Return(_a0 string) *MockImmutableMessage_WALName_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockImmutableMessage_WALName_Call) RunAndReturn(run func() string) *MockImmutableMessage_WALName_Call {
 	_c.Call.Return(run)
 	return _c
 }

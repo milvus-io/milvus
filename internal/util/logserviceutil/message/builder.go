@@ -29,12 +29,14 @@ func (b *Builder) WithMessageType(t MessageType) *Builder {
 }
 
 // WithProperty creates a new builder with message property.
+// A key started with '_' is reserved for log system, should never used at user of client.
 func (b *Builder) WithProperty(key string, val string) *Builder {
 	b.properties.Set(key, val)
 	return b
 }
 
 // WithProperties creates a new builder with message properties.
+// A key started with '_' is reserved for log system, should never used at user of client.
 func (b *Builder) WithProperties(kvs map[string]string) *Builder {
 	for key, val := range kvs {
 		b.properties.Set(key, val)

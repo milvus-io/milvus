@@ -23,6 +23,12 @@ type BasicMessage interface {
 type MutableMessage interface {
 	BasicMessage
 
+	// WithLastConfirmed sets the last confirmed message id of current message.
+	// !!! preserved for log system internal usage, don't call it outside of log system.
+	WithLastConfirmed(id MessageID) MutableMessage
+
+	// WithTimeTick sets the time tick of current message.
+	// !!! preserved for log system internal usage, don't call it outside of log system.
 	WithTimeTick(tt uint64) MutableMessage
 
 	// Properties returns the message properties.
@@ -35,12 +41,22 @@ type MutableMessage interface {
 type ImmutableMessage interface {
 	BasicMessage
 
+	// WALName returns the name of message related wal.
+	WALName() string
+
 	// TimeTick returns the time tick of current message.
 	// Available only when the message's version greater than 0.
 	// Otherwise, it will panic.
 	TimeTick() uint64
 
-	// MessageID returns the message id.
+	// LastConfirmedMessageID returns the last confirmed message id of current message.
+	// last confirmed message is always a timetick message.
+	// Read from this message id will guarantee the time tick greater than this message is consumed.
+	// Available only when the message's version greater than 0.
+	// Otherwise, it will panic.
+	LastConfirmedMessageID() MessageID
+
+	// MessageID returns the message id of current message.
 	MessageID() MessageID
 
 	// Properties returns the message read only properties.

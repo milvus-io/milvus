@@ -29,6 +29,9 @@ func UnmarshalMessageID(name string, b []byte) (MessageID, error) {
 
 // MessageID is the interface for message id.
 type MessageID interface {
+	// WALName returns the name of message id related wal.
+	WALName() string
+
 	// LT less than.
 	LT(MessageID) bool
 

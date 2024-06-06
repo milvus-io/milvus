@@ -2,9 +2,10 @@ package message
 
 const (
 	// preserved properties
-	messageVersion  = "_v" // message version for compatibility.
-	messageTypeKey  = "_t"
-	messageTimeTick = "_tt"
+	messageVersion       = "_v"  // message version for compatibility.
+	messageTypeKey       = "_t"  // message type key.
+	messageTimeTick      = "_tt" // message time tick.
+	messageLastConfirmed = "_lc" // message last confirmed message id.
 )
 
 var (
