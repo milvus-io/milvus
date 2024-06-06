@@ -1,4 +1,4 @@
-package datanode
+package io
 
 import (
 	"sync"
@@ -10,10 +10,11 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
-func Test_getOrCreateIOPool(t *testing.T) {
-	ioConcurrency := Params.DataNodeCfg.IOConcurrency.GetValue()
-	paramtable.Get().Save(Params.DataNodeCfg.IOConcurrency.Key, "64")
-	defer func() { Params.Save(Params.DataNodeCfg.IOConcurrency.Key, ioConcurrency) }()
+func TestGetOrCreateIOPool(t *testing.T) {
+	paramtable.Init()
+	ioConcurrency := paramtable.Get().DataNodeCfg.IOConcurrency.GetValue()
+	paramtable.Get().Save(paramtable.Get().DataNodeCfg.IOConcurrency.Key, "64")
+	defer func() { paramtable.Get().Save(paramtable.Get().DataNodeCfg.IOConcurrency.Key, ioConcurrency) }()
 	nP := 10
 	nTask := 10
 	wg := sync.WaitGroup{}
@@ -21,7 +22,7 @@ func Test_getOrCreateIOPool(t *testing.T) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			p := getOrCreateIOPool()
+			p := GetOrCreateIOPool()
 			futures := make([]*conc.Future[any], 0, nTask)
 			for j := 0; j < nTask; j++ {
 				future := p.Submit(func() (interface{}, error) {
