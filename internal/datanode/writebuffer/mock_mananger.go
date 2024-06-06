@@ -105,6 +105,40 @@ func (_c *MockBufferManager_DropChannel_Call) RunAndReturn(run func(string)) *Mo
 	return _c
 }
 
+// DropPartitions provides a mock function with given fields: channel, partitionIDs
+func (_m *MockBufferManager) DropPartitions(channel string, partitionIDs []int64) {
+	_m.Called(channel, partitionIDs)
+}
+
+// MockBufferManager_DropPartitions_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropPartitions'
+type MockBufferManager_DropPartitions_Call struct {
+	*mock.Call
+}
+
+// DropPartitions is a helper method to define mock.On call
+//   - channel string
+//   - partitionIDs []int64
+func (_e *MockBufferManager_Expecter) DropPartitions(channel interface{}, partitionIDs interface{}) *MockBufferManager_DropPartitions_Call {
+	return &MockBufferManager_DropPartitions_Call{Call: _e.mock.On("DropPartitions", channel, partitionIDs)}
+}
+
+func (_c *MockBufferManager_DropPartitions_Call) Run(run func(channel string, partitionIDs []int64)) *MockBufferManager_DropPartitions_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(string), args[1].([]int64))
+	})
+	return _c
+}
+
+func (_c *MockBufferManager_DropPartitions_Call) Return() *MockBufferManager_DropPartitions_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockBufferManager_DropPartitions_Call) RunAndReturn(run func(string, []int64)) *MockBufferManager_DropPartitions_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // FlushChannel provides a mock function with given fields: ctx, channel, flushTs
 func (_m *MockBufferManager) FlushChannel(ctx context.Context, channel string, flushTs uint64) error {
 	ret := _m.Called(ctx, channel, flushTs)
