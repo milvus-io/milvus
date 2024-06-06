@@ -1,6 +1,8 @@
 module github.com/milvus-io/milvus/tests/go_client
 
-go 1.20
+go 1.21
+
+toolchain go1.21.10
 
 require (
 	github.com/milvus-io/milvus/client/v2 v2.0.0-20240521081339-017fd7bc25de

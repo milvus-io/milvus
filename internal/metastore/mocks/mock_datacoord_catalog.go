@@ -6,6 +6,7 @@ import (
 	context "context"
 
 	datapb "github.com/milvus-io/milvus/internal/proto/datapb"
+	indexpb "github.com/milvus-io/milvus/internal/proto/indexpb"
 
 	metastore "github.com/milvus-io/milvus/internal/metastore"
 
@@ -341,6 +342,49 @@ func (_c *DataCoordCatalog_CreateSegmentIndex_Call) Return(_a0 error) *DataCoord
 }
 
 func (_c *DataCoordCatalog_CreateSegmentIndex_Call) RunAndReturn(run func(context.Context, *model.SegmentIndex) error) *DataCoordCatalog_CreateSegmentIndex_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// DropAnalyzeTask provides a mock function with given fields: ctx, taskID
+func (_m *DataCoordCatalog) DropAnalyzeTask(ctx context.Context, taskID int64) error {
+	ret := _m.Called(ctx, taskID)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, int64) error); ok {
+		r0 = rf(ctx, taskID)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_DropAnalyzeTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'DropAnalyzeTask'
+type DataCoordCatalog_DropAnalyzeTask_Call struct {
+	*mock.Call
+}
+
+// DropAnalyzeTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - taskID int64
+func (_e *DataCoordCatalog_Expecter) DropAnalyzeTask(ctx interface{}, taskID interface{}) *DataCoordCatalog_DropAnalyzeTask_Call {
+	return &DataCoordCatalog_DropAnalyzeTask_Call{Call: _e.mock.On("DropAnalyzeTask", ctx, taskID)}
+}
+
+func (_c *DataCoordCatalog_DropAnalyzeTask_Call) Run(run func(ctx context.Context, taskID int64)) *DataCoordCatalog_DropAnalyzeTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(int64))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropAnalyzeTask_Call) Return(_a0 error) *DataCoordCatalog_DropAnalyzeTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_DropAnalyzeTask_Call) RunAndReturn(run func(context.Context, int64) error) *DataCoordCatalog_DropAnalyzeTask_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -773,6 +817,60 @@ func (_c *DataCoordCatalog_GcConfirm_Call) Return(_a0 bool) *DataCoordCatalog_Gc
 }
 
 func (_c *DataCoordCatalog_GcConfirm_Call) RunAndReturn(run func(context.Context, int64, int64) bool) *DataCoordCatalog_GcConfirm_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// ListAnalyzeTasks provides a mock function with given fields: ctx
+func (_m *DataCoordCatalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
+	ret := _m.Called(ctx)
+
+	var r0 []*indexpb.AnalyzeTask
+	var r1 error
+	if rf, ok := ret.Get(0).(func(context.Context) ([]*indexpb.AnalyzeTask, error)); ok {
+		return rf(ctx)
+	}
+	if rf, ok := ret.Get(0).(func(context.Context) []*indexpb.AnalyzeTask); ok {
+		r0 = rf(ctx)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).([]*indexpb.AnalyzeTask)
+		}
+	}
+
+	if rf, ok := ret.Get(1).(func(context.Context) error); ok {
+		r1 = rf(ctx)
+	} else {
+		r1 = ret.Error(1)
+	}
+
+	return r0, r1
+}
+
+// DataCoordCatalog_ListAnalyzeTasks_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'ListAnalyzeTasks'
+type DataCoordCatalog_ListAnalyzeTasks_Call struct {
+	*mock.Call
+}
+
+// ListAnalyzeTasks is a helper method to define mock.On call
+//   - ctx context.Context
+func (_e *DataCoordCatalog_Expecter) ListAnalyzeTasks(ctx interface{}) *DataCoordCatalog_ListAnalyzeTasks_Call {
+	return &DataCoordCatalog_ListAnalyzeTasks_Call{Call: _e.mock.On("ListAnalyzeTasks", ctx)}
+}
+
+func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) Run(run func(ctx context.Context)) *DataCoordCatalog_ListAnalyzeTasks_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) Return(_a0 []*indexpb.AnalyzeTask, _a1 error) *DataCoordCatalog_ListAnalyzeTasks_Call {
+	_c.Call.Return(_a0, _a1)
+	return _c
+}
+
+func (_c *DataCoordCatalog_ListAnalyzeTasks_Call) RunAndReturn(run func(context.Context) ([]*indexpb.AnalyzeTask, error)) *DataCoordCatalog_ListAnalyzeTasks_Call {
 	_c.Call.Return(run)
 	return _c
 }
@@ -1288,6 +1386,49 @@ func (_c *DataCoordCatalog_MarkChannelDeleted_Call) Return(_a0 error) *DataCoord
 }
 
 func (_c *DataCoordCatalog_MarkChannelDeleted_Call) RunAndReturn(run func(context.Context, string) error) *DataCoordCatalog_MarkChannelDeleted_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// SaveAnalyzeTask provides a mock function with given fields: ctx, task
+func (_m *DataCoordCatalog) SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error {
+	ret := _m.Called(ctx, task)
+
+	var r0 error
+	if rf, ok := ret.Get(0).(func(context.Context, *indexpb.AnalyzeTask) error); ok {
+		r0 = rf(ctx, task)
+	} else {
+		r0 = ret.Error(0)
+	}
+
+	return r0
+}
+
+// DataCoordCatalog_SaveAnalyzeTask_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'SaveAnalyzeTask'
+type DataCoordCatalog_SaveAnalyzeTask_Call struct {
+	*mock.Call
+}
+
+// SaveAnalyzeTask is a helper method to define mock.On call
+//   - ctx context.Context
+//   - task *indexpb.AnalyzeTask
+func (_e *DataCoordCatalog_Expecter) SaveAnalyzeTask(ctx interface{}, task interface{}) *DataCoordCatalog_SaveAnalyzeTask_Call {
+	return &DataCoordCatalog_SaveAnalyzeTask_Call{Call: _e.mock.On("SaveAnalyzeTask", ctx, task)}
+}
+
+func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) Run(run func(ctx context.Context, task *indexpb.AnalyzeTask)) *DataCoordCatalog_SaveAnalyzeTask_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(context.Context), args[1].(*indexpb.AnalyzeTask))
+	})
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) Return(_a0 error) *DataCoordCatalog_SaveAnalyzeTask_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *DataCoordCatalog_SaveAnalyzeTask_Call) RunAndReturn(run func(context.Context, *indexpb.AnalyzeTask) error) *DataCoordCatalog_SaveAnalyzeTask_Call {
 	_c.Call.Return(run)
 	return _c
 }

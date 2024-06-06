@@ -57,10 +57,15 @@ type CompactionMeta interface {
 	SetSegmentCompacting(segmentID int64, compacting bool)
 	CheckAndSetSegmentsCompacting(segmentIDs []int64) (bool, bool)
 	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
+
 	SaveCompactionTask(task *datapb.CompactionTask) error
 	DropCompactionTask(task *datapb.CompactionTask) error
 	GetCompactionTasks() map[int64][]*datapb.CompactionTask
 	GetCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask
+
+	GetIndexMeta() *indexMeta
+	GetAnalyzeMeta() *analyzeMeta
+	GetCompactionTaskMeta() *compactionTaskMeta
 }
 
 var _ CompactionMeta = (*meta)(nil)
@@ -75,7 +80,20 @@ type meta struct {
 	chunkManager storage.ChunkManager
 
 	indexMeta          *indexMeta
+	analyzeMeta        *analyzeMeta
 	compactionTaskMeta *compactionTaskMeta
+}
+
+func (m *meta) GetIndexMeta() *indexMeta {
+	return m.indexMeta
+}
+
+func (m *meta) GetAnalyzeMeta() *analyzeMeta {
+	return m.analyzeMeta
+}
+
+func (m *meta) GetCompactionTaskMeta() *compactionTaskMeta {
+	return m.compactionTaskMeta
 }
 
 type channelCPs struct {
@@ -110,7 +128,12 @@ type collectionInfo struct {
 
 // NewMeta creates meta from provided `kv.TxnKV`
 func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManager storage.ChunkManager) (*meta, error) {
-	indexMeta, err := newIndexMeta(ctx, catalog)
+	im, err := newIndexMeta(ctx, catalog)
+	if err != nil {
+		return nil, err
+	}
+
+	am, err := newAnalyzeMeta(ctx, catalog)
 	if err != nil {
 		return nil, err
 	}
@@ -119,14 +142,14 @@ func newMeta(ctx context.Context, catalog metastore.DataCoordCatalog, chunkManag
 	if err != nil {
 		return nil, err
 	}
-
 	mt := &meta{
 		ctx:                ctx,
 		catalog:            catalog,
 		collections:        make(map[UniqueID]*collectionInfo),
 		segments:           NewSegmentsInfo(),
 		channelCPs:         newChannelCps(),
-		indexMeta:          indexMeta,
+		indexMeta:          im,
+		analyzeMeta:        am,
 		chunkManager:       chunkManager,
 		compactionTaskMeta: ctm,
 	}
