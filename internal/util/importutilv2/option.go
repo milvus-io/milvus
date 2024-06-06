@@ -79,8 +79,8 @@ func IsBackup(options Options) bool {
 }
 
 func IsL0Import(options Options) bool {
-	isBackup, err := funcutil.GetAttrByKeyFromRepeatedKV(L0Import, options)
-	if err != nil || strings.ToLower(isBackup) != "true" {
+	isL0Import, err := funcutil.GetAttrByKeyFromRepeatedKV(L0Import, options)
+	if err != nil || strings.ToLower(isL0Import) != "true" {
 		return false
 	}
 	return true

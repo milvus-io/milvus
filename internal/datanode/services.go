@@ -480,7 +480,7 @@ func (node *DataNode) QueryPreImport(ctx context.Context, req *datapb.QueryPreIm
 	status := merr.Success()
 	task := node.importTaskMgr.Get(req.GetTaskID())
 	if task == nil {
-		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID()))
+		status = merr.Status(importv2.WrapTaskNotFoundError(req.GetTaskID()))
 	}
 	log.RatedInfo(10, "datanode query preimport", zap.String("state", task.GetState().String()),
 		zap.String("reason", task.GetReason()))
@@ -516,7 +516,7 @@ func (node *DataNode) QueryImport(ctx context.Context, req *datapb.QueryImportRe
 	// query import
 	task := node.importTaskMgr.Get(req.GetTaskID())
 	if task == nil {
-		status = merr.Status(importv2.WrapNoTaskError(req.GetTaskID()))
+		status = merr.Status(importv2.WrapTaskNotFoundError(req.GetTaskID()))
 	}
 	log.RatedInfo(10, "datanode query import", zap.String("state", task.GetState().String()),
 		zap.String("reason", task.GetReason()))

@@ -39,7 +39,7 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func WrapNoTaskError(taskID int64) error {
+func WrapTaskNotFoundError(taskID int64) error {
 	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find import task with id %d", taskID))
 }
 
