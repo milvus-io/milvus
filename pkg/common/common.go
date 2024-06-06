@@ -106,6 +106,7 @@ const (
 	SearchParamKey  = "search_param"
 	SegmentNumKey   = "segment_num"
 	WithFilterKey   = "with_filter"
+	DataTypeKey     = "data_type"
 	WithOptimizeKey = "with_optimize"
 	CollectionKey   = "collection"
 

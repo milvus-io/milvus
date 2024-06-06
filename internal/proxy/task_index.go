@@ -177,9 +177,21 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
 
-			// override params by autoindex
-			for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
-				indexParamsMap[k] = v
+			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
+				// override float vector index params by autoindex
+				for k, v := range Params.AutoIndexConfig.IndexParams.GetAsJSONMap() {
+					indexParamsMap[k] = v
+				}
+			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
+				// override sparse float vector index params by autoindex
+				for k, v := range Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap() {
+					indexParamsMap[k] = v
+				}
+			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
+				// override binary vector index params by autoindex
+				for k, v := range Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap() {
+					indexParamsMap[k] = v
+				}
 			}
 
 			if metricTypeExist {
@@ -187,9 +199,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 				indexParamsMap[common.MetricTypeKey] = metricType
 			}
 		} else { // behavior change after 2.2.9, adapt autoindex logic here.
-			autoIndexConfig := Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
-
-			useAutoIndex := func() {
+			useAutoIndex := func(autoIndexConfig map[string]string) {
 				fields := make([]zap.Field, 0, len(autoIndexConfig))
 				for k, v := range autoIndexConfig {
 					indexParamsMap[k] = v
@@ -198,13 +208,13 @@ func (cit *createIndexTask) parseIndexParams() error {
 				log.Ctx(cit.ctx).Info("AutoIndex triggered", fields...)
 			}
 
-			handle := func(numberParams int) error {
+			handle := func(numberParams int, autoIndexConfig map[string]string) error {
 				// empty case.
 				if len(indexParamsMap) == numberParams {
 					// though we already know there must be metric type, how to make this safer to avoid crash?
 					metricType := autoIndexConfig[common.MetricTypeKey]
 					cit.newExtraParams = wrapUserIndexParams(metricType)
-					useAutoIndex()
+					useAutoIndex(autoIndexConfig)
 					return nil
 				}
 
@@ -221,7 +231,7 @@ func (cit *createIndexTask) parseIndexParams() error {
 
 					// only metric type is passed.
 					cit.newExtraParams = wrapUserIndexParams(metricType)
-					useAutoIndex()
+					useAutoIndex(autoIndexConfig)
 					// make the users' metric type first class citizen.
 					indexParamsMap[common.MetricTypeKey] = metricType
 				}
@@ -229,12 +239,23 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return nil
 			}
 
+			var config map[string]string
+			if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
+				// override float vector index params by autoindex
+				config = Params.AutoIndexConfig.IndexParams.GetAsJSONMap()
+			} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
+				// override sparse float vector index params by autoindex
+				config = Params.AutoIndexConfig.SparseIndexParams.GetAsJSONMap()
+			} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
+				// override binary vector index params by autoindex
+				config = Params.AutoIndexConfig.BinaryIndexParams.GetAsJSONMap()
+			}
 			if !exist {
-				if err := handle(0); err != nil {
+				if err := handle(0, config); err != nil {
 					return err
 				}
 			} else if specifyIndexType == AutoIndexName {
-				if err := handle(1); err != nil {
+				if err := handle(1, config); err != nil {
 					return err
 				}
 			}
@@ -250,10 +271,21 @@ func (cit *createIndexTask) parseIndexParams() error {
 				return err
 			}
 		}
-		if indexType == indexparamcheck.IndexSparseInverted || indexType == indexparamcheck.IndexSparseWand {
-			metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
-			if !metricTypeExist || metricType != metric.IP {
-				return fmt.Errorf("only IP is the supported metric type for sparse index")
+		metricType, metricTypeExist := indexParamsMap[common.MetricTypeKey]
+		if !metricTypeExist {
+			return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "metric type not set for vector index")
+		}
+		if typeutil.IsDenseFloatVectorType(cit.fieldSchema.DataType) {
+			if !funcutil.SliceContain(indexparamcheck.FloatVectorMetrics, metricType) {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "float vector index does not support metric type: "+metricType)
+			}
+		} else if typeutil.IsSparseFloatVectorType(cit.fieldSchema.DataType) {
+			if metricType != metric.IP {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "only IP is the supported metric type for sparse index")
+			}
+		} else if typeutil.IsBinaryVectorType(cit.fieldSchema.DataType) {
+			if !funcutil.SliceContain(indexparamcheck.BinaryVectorMetrics, metricType) {
+				return merr.WrapErrParameterInvalid("valid index params", "invalid index params", "binary vector index does not support metric type: "+metricType)
 			}
 		}
 	}

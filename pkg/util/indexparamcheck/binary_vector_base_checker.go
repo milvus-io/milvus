@@ -34,7 +34,7 @@ func (c binaryVectorBaseChecker) CheckValidDataType(dType schemapb.DataType) err
 	return nil
 }
 
-func (c binaryVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string) {
+func (c binaryVectorBaseChecker) SetDefaultMetricTypeIfNotExist(params map[string]string, dType schemapb.DataType) {
 	setDefaultIfNotExist(params, common.MetricTypeKey, BinaryVectorDefaultMetricType)
 }
 
