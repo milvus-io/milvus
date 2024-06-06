@@ -115,7 +115,7 @@ func (sss *SyncSegmentsScheduler) SyncSegments(collectionID, partitionID int64, 
 	log := log.With(zap.Int64("collectionID", collectionID), zap.Int64("partitionID", partitionID),
 		zap.String("channelName", channelName), zap.Int64("nodeID", nodeID))
 	segments := sss.meta.SelectSegments(WithChannel(channelName), SegmentFilterFunc(func(info *SegmentInfo) bool {
-		return info.GetPartitionID() == partitionID && isSegmentHealthy(info)
+		return info.GetPartitionID() == partitionID && isSegmentHealthy(info) && info.GetLevel() != datapb.SegmentLevel_L0
 	}))
 	req := &datapb.SyncSegmentsRequest{
 		ChannelName:  channelName,
