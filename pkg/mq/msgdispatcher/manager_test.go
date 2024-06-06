@@ -31,6 +31,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream/mqwrapper"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -97,7 +98,9 @@ func TestManager(t *testing.T) {
 		assert.NoError(t, err)
 		assert.Equal(t, 3, c.Num())
 
-		CheckPeriod = 10 * time.Millisecond
+		checkIntervalK := paramtable.Get().MQCfg.MergeCheckInterval.Key
+		paramtable.Get().Save(checkIntervalK, "0.01")
+		defer paramtable.Get().Reset(checkIntervalK)
 		go c.Run()
 		assert.Eventually(t, func() bool {
 			return c.Num() == 1 // expected merged
@@ -342,11 +345,17 @@ func (suite *SimulationSuite) TestSplit() {
 		splitNum    = 3
 	)
 	suite.vchannels = make(map[string]*vchannelHelper, vchannelNum)
-	MaxTolerantLag = 500 * time.Millisecond
-	DefaultTargetChanSize = 65536
+	maxTolerantLagK := paramtable.Get().MQCfg.MaxTolerantLag.Key
+	paramtable.Get().Save(maxTolerantLagK, "0.5")
+	defer paramtable.Get().Reset(maxTolerantLagK)
+
+	targetBufSizeK := paramtable.Get().MQCfg.TargetBufSize.Key
+	defer paramtable.Get().Reset(targetBufSizeK)
+
 	for i := 0; i < vchannelNum; i++ {
+		paramtable.Get().Save(targetBufSizeK, "65536")
 		if i >= vchannelNum-splitNum {
-			DefaultTargetChanSize = 10
+			paramtable.Get().Save(targetBufSizeK, "10")
 		}
 		vchannel := fmt.Sprintf("%s_vchannelv%d", suite.pchannel, i)
 		_, err := suite.manager.Add(context.Background(), vchannel, nil, mqwrapper.SubscriptionPositionEarliest)
