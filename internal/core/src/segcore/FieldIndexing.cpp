@@ -32,10 +32,12 @@ VectorFieldIndexing::VectorFieldIndexing(const FieldMeta& field_meta,
     : FieldIndexing(field_meta, segcore_config),
       built_(false),
       sync_with_index_(false),
-      config_(std::make_unique<VecIndexConfig>(segment_max_row_count,
-                                               field_index_meta,
-                                               segcore_config,
-                                               SegmentType::Growing)) {
+      config_(std::make_unique<VecIndexConfig>(
+          segment_max_row_count,
+          field_index_meta,
+          segcore_config,
+          SegmentType::Growing,
+          IsSparseFloatVectorDataType(field_meta.get_data_type()))) {
     recreate_index();
 }
 
