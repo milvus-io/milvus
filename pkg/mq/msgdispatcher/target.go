@@ -20,12 +20,8 @@ import (
 	"fmt"
 	"sync"
 	"time"
-)
 
-// TODO: dyh, move to config
-var (
-	MaxTolerantLag        = 3 * time.Second
-	DefaultTargetChanSize = 1024
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
 type target struct {
@@ -41,7 +37,7 @@ type target struct {
 func newTarget(vchannel string, pos *Pos) *target {
 	t := &target{
 		vchannel: vchannel,
-		ch:       make(chan *MsgPack, DefaultTargetChanSize),
+		ch:       make(chan *MsgPack, paramtable.Get().MQCfg.TargetBufSize.GetAsInt()),
 		pos:      pos,
 	}
 	t.closed = false
@@ -63,9 +59,10 @@ func (t *target) send(pack *MsgPack) error {
 	if t.closed {
 		return nil
 	}
+	maxTolerantLag := paramtable.Get().MQCfg.MaxTolerantLag.GetAsDuration(time.Second)
 	select {
-	case <-time.After(MaxTolerantLag):
-		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s", t.vchannel, MaxTolerantLag)
+	case <-time.After(maxTolerantLag):
+		return fmt.Errorf("send target timeout, vchannel=%s, timeout=%s", t.vchannel, maxTolerantLag)
 	case t.ch <- pack:
 		return nil
 	}
