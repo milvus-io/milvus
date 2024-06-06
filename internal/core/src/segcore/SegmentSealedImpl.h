@@ -42,7 +42,8 @@ class SegmentSealedImpl : public SegmentSealed {
     explicit SegmentSealedImpl(SchemaPtr schema,
                                IndexMetaPtr index_meta,
                                const SegcoreConfig& segcore_config,
-                               int64_t segment_id);
+                               int64_t segment_id,
+                               bool TEST_skip_index_for_retrieve = false);
     ~SegmentSealedImpl() override;
     void
     LoadIndex(const LoadIndexInfo& info) override;
@@ -312,6 +313,10 @@ class SegmentSealedImpl : public SegmentSealed {
         vec_binlog_config_;
 
     SegmentStats stats_{};
+
+    // for sparse vector unit test only! Once a type of sparse index that
+    // doesn't has raw data is added, this should be removed.
+    bool TEST_skip_index_for_retrieve_ = false;
 };
 
 inline SegmentSealedUPtr
@@ -319,9 +324,13 @@ CreateSealedSegment(
     SchemaPtr schema,
     IndexMetaPtr index_meta = nullptr,
     int64_t segment_id = -1,
-    const SegcoreConfig& segcore_config = SegcoreConfig::default_config()) {
-    return std::make_unique<SegmentSealedImpl>(
-        schema, index_meta, segcore_config, segment_id);
+    const SegcoreConfig& segcore_config = SegcoreConfig::default_config(),
+    bool TEST_skip_index_for_retrieve = false) {
+    return std::make_unique<SegmentSealedImpl>(schema,
+                                               index_meta,
+                                               segcore_config,
+                                               segment_id,
+                                               TEST_skip_index_for_retrieve);
 }
 
 }  // namespace milvus::segcore

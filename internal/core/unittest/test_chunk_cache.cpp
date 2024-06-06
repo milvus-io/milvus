@@ -59,7 +59,7 @@ TEST(ChunkCacheTest, Read) {
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();
     auto data = dataset.get_col<float>(fake_id);
-    auto data_slices = std::vector<const uint8_t*>{(uint8_t*)data.data()};
+    auto data_slices = std::vector<void*>{data.data()};
     auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
     auto slice_names = std::vector<std::string>{file_name};
     PutFieldData(lcm.get(),
@@ -121,7 +121,7 @@ TEST(ChunkCacheTest, TestMultithreads) {
     auto lcm = milvus::storage::LocalChunkManagerSingleton::GetInstance()
                    .GetChunkManager();
     auto data = dataset.get_col<float>(fake_id);
-    auto data_slices = std::vector<const uint8_t*>{(uint8_t*)data.data()};
+    auto data_slices = std::vector<void*>{data.data()};
     auto slice_sizes = std::vector<int64_t>{static_cast<int64_t>(N)};
     auto slice_names = std::vector<std::string>{file_name};
     PutFieldData(lcm.get(),

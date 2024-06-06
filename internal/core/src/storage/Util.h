@@ -110,7 +110,7 @@ EncodeAndUploadIndexSlice2(std::shared_ptr<milvus_storage::Space> space,
                            std::string object_key);
 std::pair<std::string, size_t>
 EncodeAndUploadFieldSlice(ChunkManager* chunk_manager,
-                          uint8_t* buf,
+                          void* buf,
                           int64_t element_count,
                           FieldDataMeta field_data_meta,
                           const FieldMeta& field_meta,
