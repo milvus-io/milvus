@@ -92,13 +92,15 @@ func (c *compactionExecutor) start(ctx context.Context) {
 			if err != nil {
 				return
 			}
-			go c.executeTask(task)
+			go func() {
+				defer c.taskSem.Release(1)
+				c.executeTask(task)
+			}()
 		}
 	}
 }
 
 func (c *compactionExecutor) executeTask(task compaction.Compactor) {
-	defer c.taskSem.Release(1)
 	log := log.With(
 		zap.Int64("planID", task.GetPlanID()),
 		zap.Int64("Collection", task.GetCollection()),
