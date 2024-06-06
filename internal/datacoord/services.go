@@ -1701,6 +1701,10 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		return resp, nil
 	}
 	job := s.importMeta.GetJob(jobID)
+	if job == nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		return resp, nil
+	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason
