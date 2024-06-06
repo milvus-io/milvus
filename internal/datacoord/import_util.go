@@ -276,11 +276,23 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
+		log.Warn("global disk quota exceeded", zap.Int64("jobID", job.GetJobID()),
+			zap.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			zap.Int64("totalUsage", totalUsage),
+			zap.Int64("requestedTotal", requestedTotal),
+			zap.Int64("requestSize", requestSize),
+			zap.Float64("totalDiskQuota", totalDiskQuota))
 		return 0, err
 	}
 	collectionDiskQuota := Params.QuotaConfig.DiskQuotaPerCollection.GetAsFloat()
 	colID := job.GetCollectionID()
 	if float64(collectionsUsage[colID]+requestedCollections[colID]+requestSize) > collectionDiskQuota {
+		log.Warn("collection disk quota exceeded", zap.Int64("jobID", job.GetJobID()),
+			zap.Bool("enabled", Params.QuotaConfig.DiskProtectionEnabled.GetAsBool()),
+			zap.Int64("collectionsUsage", collectionsUsage[colID]),
+			zap.Int64("requestedCollection", requestedCollections[colID]),
+			zap.Int64("requestSize", requestSize),
+			zap.Float64("collectionDiskQuota", collectionDiskQuota))
 		return 0, err
 	}
 	return requestSize, nil

@@ -126,20 +126,17 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 			Timestamp: 1000,
 		}
 
-		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(0, nil).Once()
-
 		checkpoint := s.wb.GetCheckpoint()
 		s.EqualValues(1000, checkpoint.GetTimestamp())
 	})
 
-	s.Run("use_sync_mgr_cp", func() {
+	s.Run("use_syncing_segment_cp", func() {
 		s.wb.checkpoint = &msgpb.MsgPosition{
 			Timestamp: 1000,
 		}
 
-		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(1, &msgpb.MsgPosition{
-			Timestamp: 500,
-		}).Once()
+		s.wb.syncCheckpoint.Add(1, &msgpb.MsgPosition{Timestamp: 500}, "syncing segments")
+		defer s.wb.syncCheckpoint.Remove(1, 500)
 
 		checkpoint := s.wb.GetCheckpoint()
 		s.EqualValues(500, checkpoint.GetTimestamp())
@@ -150,7 +147,8 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 			Timestamp: 1000,
 		}
 
-		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(0, nil).Once()
+		s.wb.syncCheckpoint.Add(1, &msgpb.MsgPosition{Timestamp: 500}, "syncing segments")
+		defer s.wb.syncCheckpoint.Remove(1, 500)
 
 		buf1, err := newSegmentBuffer(2, s.collSchema)
 		s.Require().NoError(err)
@@ -189,9 +187,8 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 			Timestamp: 1000,
 		}
 
-		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(1, &msgpb.MsgPosition{
-			Timestamp: 300,
-		}).Once()
+		s.wb.syncCheckpoint.Add(1, &msgpb.MsgPosition{Timestamp: 300}, "syncing segments")
+		defer s.wb.syncCheckpoint.Remove(1, 300)
 
 		buf1, err := newSegmentBuffer(2, s.collSchema)
 		s.Require().NoError(err)
@@ -230,9 +227,8 @@ func (s *WriteBufferSuite) TestGetCheckpoint() {
 			Timestamp: 1000,
 		}
 
-		s.syncMgr.EXPECT().GetEarliestPosition(s.channelName).Return(1, &msgpb.MsgPosition{
-			Timestamp: 800,
-		}).Once()
+		s.wb.syncCheckpoint.Add(1, &msgpb.MsgPosition{Timestamp: 800}, "syncing segments")
+		defer s.wb.syncCheckpoint.Remove(1, 800)
 
 		buf1, err := newSegmentBuffer(2, s.collSchema)
 		s.Require().NoError(err)
@@ -357,7 +353,7 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		s.metacache.EXPECT().GetSegmentByID(int64(2)).Return(segment, true)
 		s.metacache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return()
 		serializer.EXPECT().EncodeBuffer(mock.Anything, mock.Anything).Return(syncmgr.NewSyncTask(), nil)
-		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
+		s.syncMgr.EXPECT().SyncData(mock.Anything, mock.Anything, mock.Anything).Return(conc.Go[struct{}](func() (struct{}, error) {
 			return struct{}{}, nil
 		}))
 		defer func() {
@@ -367,6 +363,21 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 		}()
 		wb.EvictBuffer(GetOldestBufferPolicy(1))
 	})
+}
+
+func (s *WriteBufferSuite) TestDropPartitions() {
+	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		},
+	})
+	s.Require().NoError(err)
+
+	segIDs := []int64{1, 2, 3}
+	s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(segIDs).Once()
+	s.metacache.EXPECT().UpdateSegments(mock.AnythingOfType("metacache.SegmentAction"), metacache.WithSegmentIDs(segIDs...)).Return().Once()
+
+	wb.dropPartitions([]int64{100, 101})
 }
 
 func TestWriteBufferBase(t *testing.T) {

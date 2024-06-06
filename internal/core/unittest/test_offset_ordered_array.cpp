@@ -130,10 +130,10 @@ TYPED_TEST_P(TypedOffsetOrderedArrayTest, find_first) {
         none.reset();
         auto result_pair = this->map_.find_first(num / 2, none, true);
         ASSERT_EQ(0, result_pair.first.size());
-        ASSERT_TRUE(result_pair.second);
+        ASSERT_FALSE(result_pair.second);
         result_pair = this->map_.find_first(NoLimit, none, true);
         ASSERT_EQ(0, result_pair.first.size());
-        ASSERT_TRUE(result_pair.second);
+        ASSERT_FALSE(result_pair.second);
     }
 }
 

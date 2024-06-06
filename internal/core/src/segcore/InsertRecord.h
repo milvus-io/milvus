@@ -212,7 +212,8 @@ class OffsetOrderedArray : public OffsetMap {
             PanicInfo(Unsupported,
                       "OffsetOrderedArray could not insert after seal");
         }
-        array_.push_back(std::make_pair(std::get<T>(pk), offset));
+        array_.push_back(
+            std::make_pair(std::get<T>(pk), static_cast<int32_t>(offset)));
     }
 
     void
@@ -258,6 +259,7 @@ class OffsetOrderedArray : public OffsetMap {
         if (!false_filtered_out) {
             cnt = size - bitset.count();
         }
+        auto more_hit_than_limit = cnt > limit;
         limit = std::min(limit, cnt);
         std::vector<int64_t> seg_offsets;
         seg_offsets.reserve(limit);
@@ -274,7 +276,7 @@ class OffsetOrderedArray : public OffsetMap {
                 hit_num++;
             }
         }
-        return {seg_offsets, it != array_.end()};
+        return {seg_offsets, more_hit_than_limit && it != array_.end()};
     }
 
     void
@@ -285,13 +287,13 @@ class OffsetOrderedArray : public OffsetMap {
 
  private:
     bool is_sealed = false;
-    std::vector<std::pair<T, int64_t>> array_;
+    std::vector<std::pair<T, int32_t>> array_;
 };
 
 template <bool is_sealed = false>
 struct InsertRecord {
     InsertRecord(const Schema& schema, int64_t size_per_chunk)
-        : row_ids_(size_per_chunk), timestamps_(size_per_chunk) {
+        : timestamps_(size_per_chunk) {
         std::optional<FieldId> pk_field_id = schema.get_primary_field_id();
 
         for (auto& field : schema) {
@@ -590,10 +592,8 @@ struct InsertRecord {
     void
     clear() {
         timestamps_.clear();
-        row_ids_.clear();
         reserved = 0;
         ack_responder_.clear();
-        timestamp_index_ = TimestampIndex();
         pk2offset_->clear();
         fields_data_.clear();
     }
@@ -605,14 +605,10 @@ struct InsertRecord {
 
  public:
     ConcurrentVector<Timestamp> timestamps_;
-    ConcurrentVector<idx_t> row_ids_;
 
     // used for preInsert of growing segment
     std::atomic<int64_t> reserved = 0;
     AckResponder ack_responder_;
-
-    // used for timestamps index of sealed segment
-    TimestampIndex timestamp_index_;
 
     // pks to row offset
     std::unique_ptr<OffsetMap> pk2offset_;

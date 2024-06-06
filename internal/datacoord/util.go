@@ -26,6 +26,7 @@ import (
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -195,6 +196,10 @@ func isFlatIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
 }
 
+func isOptionalScalarFieldSupported(indexType string) bool {
+	return indexType == indexparamcheck.IndexHNSW
+}
+
 func isDiskANNIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexDISKANN
 }
@@ -236,4 +241,35 @@ func calculateL0SegmentSize(fields []*datapb.FieldBinlog) float64 {
 		}
 	}
 	return float64(size)
+}
+
+func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMergeInfo {
+	/*
+		segments := task.GetPlan().GetSegmentBinlogs()
+		var sources []int64
+		for _, s := range segments {
+			sources = append(sources, s.GetSegmentID())
+		}
+	*/
+	var target int64 = -1
+	if len(task.GetResultSegments()) > 0 {
+		target = task.GetResultSegments()[0]
+	}
+	return &milvuspb.CompactionMergeInfo{
+		Sources: task.GetInputSegments(),
+		Target:  target,
+	}
+}
+
+func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
+	binlogIDs := make([]int64, 0)
+	for _, fieldBinLog := range segment.GetBinlogs() {
+		if fieldBinLog.GetFieldID() == fieldID {
+			for _, binLog := range fieldBinLog.GetBinlogs() {
+				binlogIDs = append(binlogIDs, binLog.GetLogID())
+			}
+			break
+		}
+	}
+	return binlogIDs
 }

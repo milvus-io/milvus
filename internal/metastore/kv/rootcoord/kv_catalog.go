@@ -224,7 +224,7 @@ func (kc *Catalog) loadCollection(ctx context.Context, dbID int64, collectionID 
 		if err != nil {
 			return nil, err
 		}
-		fixDefaultDBIDConsistency(info)
+		kc.fixDefaultDBIDConsistency(ctx, info, ts)
 		return info, nil
 	}
 	return kc.loadCollectionFromDb(ctx, dbID, collectionID, ts)
@@ -640,7 +640,7 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 			log.Warn("unmarshal collection info failed", zap.Error(err))
 			continue
 		}
-		fixDefaultDBIDConsistency(&collMeta)
+		kc.fixDefaultDBIDConsistency(ctx, &collMeta, ts)
 		collection, err := kc.appendPartitionAndFieldsInfo(ctx, &collMeta, ts)
 		if err != nil {
 			return nil, err
@@ -649,6 +649,22 @@ func (kc *Catalog) ListCollections(ctx context.Context, dbID int64, ts typeutil.
 	}
 
 	return colls, nil
+}
+
+// fixDefaultDBIDConsistency fix dbID consistency for collectionInfo.
+// We have two versions of default databaseID (0 at legacy path, 1 at new path), we should keep consistent view when user use default database.
+// all collections in default database should be marked with dbID 1.
+// this method also update dbid in meta store when dbid is 0
+// see also: https://github.com/milvus-io/milvus/issues/33608
+func (kv *Catalog) fixDefaultDBIDConsistency(_ context.Context, collMeta *pb.CollectionInfo, ts typeutil.Timestamp) {
+	if collMeta.DbId == util.NonDBID {
+		coll := model.UnmarshalCollectionModel(collMeta)
+		cloned := coll.Clone()
+		cloned.DBID = util.DefaultDBID
+		kv.alterModifyCollection(coll, cloned, ts)
+
+		collMeta.DbId = util.DefaultDBID
+	}
 }
 
 func (kc *Catalog) listAliasesBefore210(ctx context.Context, ts typeutil.Timestamp) ([]*model.Alias, error) {
@@ -1203,13 +1219,4 @@ func isDefaultDB(dbID int64) bool {
 		return true
 	}
 	return false
-}
-
-// fixDefaultDBIDConsistency fix dbID consistency for collectionInfo.
-// We have two versions of default databaseID (0 at legacy path, 1 at new path), we should keep consistent view when user use default database.
-// all collections in default database should be marked with dbID 1.
-func fixDefaultDBIDConsistency(coll *pb.CollectionInfo) {
-	if isDefaultDB(coll.DbId) {
-		coll.DbId = util.DefaultDBID
-	}
 }

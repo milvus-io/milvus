@@ -63,18 +63,12 @@ func CompressCompactionBinlogs(binlogs []*datapb.CompactionSegment) error {
 	return nil
 }
 
-func CompressBinLogs(s *datapb.SegmentInfo) error {
-	err := CompressFieldBinlogs(s.GetBinlogs())
-	if err != nil {
-		return err
-	}
-	err = CompressFieldBinlogs(s.GetDeltalogs())
-	if err != nil {
-		return err
-	}
-	err = CompressFieldBinlogs(s.GetStatslogs())
-	if err != nil {
-		return err
+func CompressBinLogs(binlogs ...[]*datapb.FieldBinlog) error {
+	for _, l := range binlogs {
+		err := CompressFieldBinlogs(l)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

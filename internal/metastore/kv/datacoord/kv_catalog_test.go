@@ -418,6 +418,44 @@ func Test_AlterSegments(t *testing.T) {
 		assert.Equal(t, int64(100), segmentXL.GetNumOfRows())
 		assert.Equal(t, int64(5), adjustedSeg.GetNumOfRows())
 	})
+
+	t.Run("invalid log id", func(t *testing.T) {
+		metakv := mocks.NewMetaKv(t)
+		catalog := NewCatalog(metakv, rootPath, "")
+
+		segment := &datapb.SegmentInfo{
+			ID:           segmentID,
+			CollectionID: collectionID,
+			PartitionID:  partitionID,
+			NumOfRows:    100,
+			State:        commonpb.SegmentState_Flushed,
+		}
+
+		invalidLogWithZeroLogID := []*datapb.FieldBinlog{{
+			FieldID: 1,
+			Binlogs: []*datapb.Binlog{
+				{
+					LogID:   0,
+					LogPath: "mock_log_path",
+				},
+			},
+		}}
+
+		segment.Statslogs = invalidLogWithZeroLogID
+		err := catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment}, metastore.BinlogsIncrement{Segment: segment})
+		assert.Error(t, err)
+		t.Logf("%v", err)
+
+		segment.Deltalogs = invalidLogWithZeroLogID
+		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment}, metastore.BinlogsIncrement{Segment: segment})
+		assert.Error(t, err)
+		t.Logf("%v", err)
+
+		segment.Binlogs = invalidLogWithZeroLogID
+		err = catalog.AlterSegments(context.TODO(), []*datapb.SegmentInfo{segment}, metastore.BinlogsIncrement{Segment: segment})
+		assert.Error(t, err)
+		t.Logf("%v", err)
+	})
 }
 
 func Test_DropSegment(t *testing.T) {

@@ -244,6 +244,7 @@ func (s *SyncTaskSuite) TestRunNormal() {
 	})
 
 	s.Run("with_delta_data", func() {
+		s.metacache.EXPECT().RemoveSegments(mock.Anything, mock.Anything).Return(nil).Once()
 		task := s.getSuiteSyncTask()
 		task.WithTimeRange(50, 100)
 		task.WithMetaWriter(BrokerMetaWriter(s.broker, 1))

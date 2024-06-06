@@ -54,7 +54,7 @@ func (watcher *EtcdMetaWatcher) ShowSessions() ([]*sessionutil.SessionRaw, error
 
 func (watcher *EtcdMetaWatcher) ShowSegments() ([]*datapb.SegmentInfo, error) {
 	metaBasePath := path.Join(watcher.rootPath, "/meta/datacoord-meta/s/") + "/"
-	return listSegments(watcher.etcdCli, metaBasePath, func(s *datapb.SegmentInfo) bool {
+	return listSegments(watcher.etcdCli, watcher.rootPath, metaBasePath, func(s *datapb.SegmentInfo) bool {
 		return true
 	})
 }
@@ -88,7 +88,7 @@ func listSessionsByPrefix(cli *clientv3.Client, prefix string) ([]*sessionutil.S
 	return sessions, nil
 }
 
-func listSegments(cli *clientv3.Client, prefix string, filter func(*datapb.SegmentInfo) bool) ([]*datapb.SegmentInfo, error) {
+func listSegments(cli *clientv3.Client, rootPath string, prefix string, filter func(*datapb.SegmentInfo) bool) ([]*datapb.SegmentInfo, error) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
 	defer cancel()
 	resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
@@ -110,7 +110,55 @@ func listSegments(cli *clientv3.Client, prefix string, filter func(*datapb.Segme
 	sort.Slice(segments, func(i, j int) bool {
 		return segments[i].GetID() < segments[j].GetID()
 	})
+
+	for _, segment := range segments {
+		segment.Binlogs, segment.Deltalogs, segment.Statslogs, err = getSegmentBinlogs(cli, rootPath, segment)
+		if err != nil {
+			return nil, err
+		}
+	}
+
 	return segments, nil
+}
+
+func getSegmentBinlogs(cli *clientv3.Client, rootPath string, segment *datapb.SegmentInfo) ([]*datapb.FieldBinlog, []*datapb.FieldBinlog, []*datapb.FieldBinlog, error) {
+	fn := func(prefix string) ([]*datapb.FieldBinlog, error) {
+		ctx, cancel := context.WithTimeout(context.Background(), time.Second*3)
+		defer cancel()
+		resp, err := cli.Get(ctx, prefix, clientv3.WithPrefix())
+		if err != nil {
+			return nil, err
+		}
+		fieldBinlogs := make([]*datapb.FieldBinlog, 0, len(resp.Kvs))
+		for _, kv := range resp.Kvs {
+			info := &datapb.FieldBinlog{}
+			err = proto.Unmarshal(kv.Value, info)
+			if err != nil {
+				return nil, err
+			}
+			fieldBinlogs = append(fieldBinlogs, info)
+		}
+		return fieldBinlogs, nil
+	}
+	prefix := path.Join(rootPath, "/meta/datacoord-meta", fmt.Sprintf("binlog/%d/%d/%d", segment.CollectionID, segment.PartitionID, segment.ID))
+	binlogs, err := fn(prefix)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	prefix = path.Join(rootPath, "/meta/datacoord-meta", fmt.Sprintf("deltalog/%d/%d/%d", segment.CollectionID, segment.PartitionID, segment.ID))
+	deltalogs, err := fn(prefix)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	prefix = path.Join(rootPath, "/meta/datacoord-meta", fmt.Sprintf("statslog/%d/%d/%d", segment.CollectionID, segment.PartitionID, segment.ID))
+	statslogs, err := fn(prefix)
+	if err != nil {
+		return nil, nil, nil, err
+	}
+
+	return binlogs, deltalogs, statslogs, nil
 }
 
 func listReplicas(cli *clientv3.Client, prefix string) ([]*querypb.Replica, error) {

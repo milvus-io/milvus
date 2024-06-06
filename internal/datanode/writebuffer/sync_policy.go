@@ -39,6 +39,14 @@ func wrapSelectSegmentFuncPolicy(fn SelectSegmentFunc, reason string) SelectSegm
 	}
 }
 
+func GetDroppedSegmentPolicy(meta metacache.MetaCache) SyncPolicy {
+	return wrapSelectSegmentFuncPolicy(
+		func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {
+			ids := meta.GetSegmentIDsBy(metacache.WithSegmentState(commonpb.SegmentState_Dropped))
+			return ids
+		}, "segment dropped")
+}
+
 func GetFullBufferPolicy() SyncPolicy {
 	return wrapSelectSegmentFuncPolicy(
 		func(buffers []*segmentBuffer, _ typeutil.Timestamp) []int64 {

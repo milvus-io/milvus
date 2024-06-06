@@ -198,7 +198,7 @@ func TestBinlog_Compress(t *testing.T) {
 	assert.NoError(t, err)
 
 	compressedSegmentInfo := proto.Clone(segmentInfo).(*datapb.SegmentInfo)
-	err = CompressBinLogs(compressedSegmentInfo)
+	err = CompressBinLogs(compressedSegmentInfo.GetBinlogs(), compressedSegmentInfo.GetDeltalogs(), compressedSegmentInfo.GetStatslogs())
 	assert.NoError(t, err)
 
 	valCompressed, err := proto.Marshal(compressedSegmentInfo)
@@ -233,7 +233,7 @@ func TestBinlog_Compress(t *testing.T) {
 	segmentInfo1 := &datapb.SegmentInfo{
 		Binlogs: fieldBinLogs,
 	}
-	err = CompressBinLogs(segmentInfo1)
+	err = CompressBinLogs(segmentInfo1.GetBinlogs(), segmentInfo1.GetDeltalogs(), segmentInfo1.GetStatslogs())
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 	fakeDeltalogs := make([]*datapb.Binlog, 1)
@@ -249,7 +249,7 @@ func TestBinlog_Compress(t *testing.T) {
 	segmentInfo2 := &datapb.SegmentInfo{
 		Deltalogs: fieldDeltaLogs,
 	}
-	err = CompressBinLogs(segmentInfo2)
+	err = CompressBinLogs(segmentInfo2.GetBinlogs(), segmentInfo2.GetDeltalogs(), segmentInfo2.GetStatslogs())
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 	fakeStatslogs := make([]*datapb.Binlog, 1)
@@ -265,7 +265,7 @@ func TestBinlog_Compress(t *testing.T) {
 	segmentInfo3 := &datapb.SegmentInfo{
 		Statslogs: fieldDeltaLogs,
 	}
-	err = CompressBinLogs(segmentInfo3)
+	err = CompressBinLogs(segmentInfo3.GetBinlogs(), segmentInfo3.GetDeltalogs(), segmentInfo3.GetStatslogs())
 	assert.ErrorIs(t, err, merr.ErrParameterInvalid)
 
 	// test decompress error invalid Type

@@ -23,12 +23,17 @@ const (
 	LowPriority    = NormalPriority + 10
 )
 
+type ConfigManager interface {
+	EvictCacheValueByFormat(keys ...string)
+}
+
 type Source interface {
 	GetConfigurations() (map[string]string, error)
 	GetConfigurationByKey(string) (string, error)
 	GetPriority() int
 	GetSourceName() string
 	SetEventHandler(eh EventHandler)
+	SetManager(m ConfigManager)
 	UpdateOptions(opt Options)
 	Close()
 }

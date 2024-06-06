@@ -104,6 +104,10 @@ func (wNode *writeNode) Operate(in []Msg) []Msg {
 		wNode.wbManager.DropChannel(wNode.channelName)
 	}
 
+	if len(fgMsg.dropPartitions) > 0 {
+		wNode.wbManager.DropPartitions(wNode.channelName, fgMsg.dropPartitions)
+	}
+
 	// send delete msg to DeleteNode
 	return []Msg{&res}
 }

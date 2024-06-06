@@ -60,6 +60,7 @@ enum ErrorCode {
     UnistdError = 2030,
     MetricTypeNotMatch = 2031,
     DimNotMatch = 2032,
+    ClusterSkip = 2033,
     KnowhereError = 2100,
 
 };

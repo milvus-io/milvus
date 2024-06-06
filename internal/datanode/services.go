@@ -32,6 +32,7 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/importv2"
 	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/metastore/kv/binlog"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
@@ -219,10 +220,10 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 	taskCtx := tracer.Propagate(ctx, node.ctx)
 
 	var task compaction.Compactor
-	binlogIO := io.NewBinlogIO(node.chunkManager, getOrCreateIOPool())
+	binlogIO := io.NewBinlogIO(node.chunkManager)
 	switch req.GetType() {
 	case datapb.CompactionType_Level0DeleteCompaction:
-		task = newLevelZeroCompactionTask(
+		task = compaction.NewLevelZeroCompactionTask(
 			taskCtx,
 			binlogIO,
 			node.allocator,
@@ -254,7 +255,14 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 			Status: merr.Status(err),
 		}, nil
 	}
-	results := node.compactionExecutor.getAllCompactionResults()
+
+	results := make([]*datapb.CompactionPlanResult, 0)
+	if req.GetPlanID() != 0 {
+		result := node.compactionExecutor.getCompactionResult(req.GetPlanID())
+		results = append(results, result)
+	} else {
+		results = node.compactionExecutor.getAllCompactionResults()
+	}
 	return &datapb.CompactionStateResponse{
 		Status:  merr.Success(),
 		Results: results,
@@ -303,7 +311,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	for _, segID := range missingSegments {
 		segID := segID
-		future := node.pool.Submit(func() (any, error) {
+		future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 			newSeg := req.GetSegmentInfos()[segID]
 			var val *metacache.BloomFilterSet
 			var err error
@@ -312,7 +320,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 				log.Warn("failed to DecompressBinLog", zap.Error(err))
 				return val, err
 			}
-			pks, err := loadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
+			pks, err := util.LoadStats(ctx, node.chunkManager, ds.metacache.Schema(), newSeg.GetSegmentId(), []*datapb.FieldBinlog{newSeg.GetPkStatsLog()})
 			if err != nil {
 				log.Warn("failed to load segment stats log", zap.Error(err))
 				return val, err
@@ -534,4 +542,14 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 		Status:   merr.Success(),
 		NumSlots: Params.DataNodeCfg.SlotCap.GetAsInt64() - int64(node.compactionExecutor.executing.Len()),
 	}, nil
+}
+
+func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
+	if err := merr.CheckHealthy(node.GetStateCode()); err != nil {
+		return merr.Status(err), nil
+	}
+
+	node.compactionExecutor.removeTask(req.GetPlanID())
+	log.Ctx(ctx).Info("DropCompactionPlans success", zap.Int64("planID", req.GetPlanID()))
+	return merr.Success(), nil
 }

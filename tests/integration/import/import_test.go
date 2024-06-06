@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/milvuspb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
+	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	proto "github.com/milvus-io/milvus/internal/util/protobr"
@@ -158,6 +159,21 @@ func (s *BulkInsertSuite) run() {
 	segments, err := c.MetaWatcher.ShowSegments()
 	s.NoError(err)
 	s.NotEmpty(segments)
+	checkLogID := func(fieldBinlogs []*datapb.FieldBinlog) {
+		for _, fieldBinlog := range fieldBinlogs {
+			for _, l := range fieldBinlog.GetBinlogs() {
+				s.NotEqual(int64(0), l.GetLogID())
+			}
+		}
+	}
+	for _, segment := range segments {
+		s.True(len(segment.GetBinlogs()) > 0)
+		checkLogID(segment.GetBinlogs())
+		s.True(len(segment.GetDeltalogs()) == 0)
+		checkLogID(segment.GetDeltalogs())
+		s.True(len(segment.GetStatslogs()) > 0)
+		checkLogID(segment.GetStatslogs())
+	}
 
 	// create index
 	createIndexStatus, err := c.Proxy.CreateIndex(ctx, &milvuspb.CreateIndexRequest{

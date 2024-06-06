@@ -13,13 +13,11 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
-	"github.com/milvus-io/milvus/internal/datanode/broker"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/bloomfilter"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
@@ -46,6 +44,8 @@ type WriteBuffer interface {
 	GetFlushTimestamp() uint64
 	// SealSegments is the method to perform `Sync` operation with provided options.
 	SealSegments(ctx context.Context, segmentIDs []int64) error
+	// DropPartitions mark segments as Dropped of the partition
+	DropPartitions(partitionIDs []int64)
 	// GetCheckpoint returns current channel checkpoint.
 	// If there are any non-empty segment buffer, returns the earliest buffer start position.
 	// Otherwise, returns latest buffered checkpoint.
@@ -56,6 +56,48 @@ type WriteBuffer interface {
 	EvictBuffer(policies ...SyncPolicy)
 	// Close is the method to close and sink current buffer data.
 	Close(drop bool)
+}
+
+type checkpointCandidate struct {
+	segmentID int64
+	position  *msgpb.MsgPosition
+	source    string
+}
+
+type checkpointCandidates struct {
+	candidates map[string]*checkpointCandidate
+	mu         sync.RWMutex
+}
+
+func newCheckpointCandiates() *checkpointCandidates {
+	return &checkpointCandidates{
+		candidates: make(map[string]*checkpointCandidate),
+	}
+}
+
+func (c *checkpointCandidates) Remove(segmentID int64, timestamp uint64) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	delete(c.candidates, fmt.Sprintf("%d-%d", segmentID, timestamp))
+}
+
+func (c *checkpointCandidates) Add(segmentID int64, position *msgpb.MsgPosition, source string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.candidates[fmt.Sprintf("%d-%d", segmentID, position.GetTimestamp())] = &checkpointCandidate{segmentID, position, source}
+}
+
+func (c *checkpointCandidates) GetEarliestWithDefault(def *checkpointCandidate) *checkpointCandidate {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	var result *checkpointCandidate = def
+	for _, candidate := range c.candidates {
+		if result == nil || candidate.position.GetTimestamp() < result.position.GetTimestamp() {
+			result = candidate
+		}
+	}
+	return result
 }
 
 func NewWriteBuffer(channel string, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, syncMgr syncmgr.SyncManager, opts ...WriteBufferOption) (WriteBuffer, error) {
@@ -83,15 +125,18 @@ type writeBufferBase struct {
 
 	metaWriter       syncmgr.MetaWriter
 	collSchema       *schemapb.CollectionSchema
+	helper           *typeutil.SchemaHelper
+	pkField          *schemapb.FieldSchema
 	estSizePerRecord int
 	metaCache        metacache.MetaCache
-	syncMgr          syncmgr.SyncManager
-	broker           broker.Broker
-	serializer       syncmgr.Serializer
 
 	buffers map[int64]*segmentBuffer // segmentID => segmentBuffer
 
 	syncPolicies   []SyncPolicy
+	syncCheckpoint *checkpointCandidates
+	syncMgr        syncmgr.SyncManager
+	serializer     syncmgr.Serializer
+
 	checkpoint     *msgpb.MsgPosition
 	flushTimestamp *atomic.Uint64
 
@@ -130,17 +175,28 @@ func newWriteBufferBase(channel string, metacache metacache.MetaCache, storageV2
 	if err != nil {
 		return nil, err
 	}
+	helper, err := typeutil.CreateSchemaHelper(schema)
+	if err != nil {
+		return nil, err
+	}
+	pkField, err := helper.GetPrimaryKeyField()
+	if err != nil {
+		return nil, err
+	}
 
 	wb := &writeBufferBase{
 		channelName:      channel,
 		collectionID:     metacache.Collection(),
 		collSchema:       schema,
+		helper:           helper,
+		pkField:          pkField,
 		estSizePerRecord: estSize,
 		syncMgr:          syncMgr,
 		metaWriter:       option.metaWriter,
 		buffers:          make(map[int64]*segmentBuffer),
 		metaCache:        metacache,
 		serializer:       serializer,
+		syncCheckpoint:   newCheckpointCandiates(),
 		syncPolicies:     option.syncPolicies,
 		flushTimestamp:   flushTs,
 		storagev2Cache:   storageV2Cache,
@@ -166,6 +222,13 @@ func (wb *writeBufferBase) SealSegments(ctx context.Context, segmentIDs []int64)
 	defer wb.mut.RUnlock()
 
 	return wb.sealSegments(ctx, segmentIDs)
+}
+
+func (wb *writeBufferBase) DropPartitions(partitionIDs []int64) {
+	wb.mut.RLock()
+	defer wb.mut.RUnlock()
+
+	wb.dropPartitions(partitionIDs)
 }
 
 func (wb *writeBufferBase) SetFlushTimestamp(flushTs uint64) {
@@ -212,59 +275,28 @@ func (wb *writeBufferBase) GetCheckpoint() *msgpb.MsgPosition {
 	wb.mut.RLock()
 	defer wb.mut.RUnlock()
 
-	// syncCandidate from sync manager
-	syncSegmentID, syncCandidate := wb.syncMgr.GetEarliestPosition(wb.channelName)
-
-	type checkpointCandidate struct {
-		segmentID int64
-		position  *msgpb.MsgPosition
-	}
-	var bufferCandidate *checkpointCandidate
-
 	candidates := lo.MapToSlice(wb.buffers, func(_ int64, buf *segmentBuffer) *checkpointCandidate {
-		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition()}
+		return &checkpointCandidate{buf.segmentID, buf.EarliestPosition(), "segment buffer"}
 	})
 	candidates = lo.Filter(candidates, func(candidate *checkpointCandidate, _ int) bool {
 		return candidate.position != nil
 	})
 
-	if len(candidates) > 0 {
-		bufferCandidate = lo.MinBy(candidates, func(a, b *checkpointCandidate) bool {
-			return a.position.GetTimestamp() < b.position.GetTimestamp()
-		})
-	}
+	checkpoint := wb.syncCheckpoint.GetEarliestWithDefault(lo.MinBy(candidates, func(a, b *checkpointCandidate) bool {
+		return a.position.GetTimestamp() < b.position.GetTimestamp()
+	}))
 
-	var checkpoint *msgpb.MsgPosition
-	var segmentID int64
-	var cpSource string
-	switch {
-	case bufferCandidate == nil && syncCandidate == nil:
+	if checkpoint == nil {
 		// all buffer are empty
-		log.RatedDebug(60, "checkpoint from latest consumed msg")
+		log.RatedDebug(60, "checkpoint from latest consumed msg", zap.Uint64("cpTimestamp", wb.checkpoint.GetTimestamp()))
 		return wb.checkpoint
-	case bufferCandidate == nil && syncCandidate != nil:
-		checkpoint = syncCandidate
-		segmentID = syncSegmentID
-		cpSource = "syncManager"
-	case syncCandidate == nil && bufferCandidate != nil:
-		checkpoint = bufferCandidate.position
-		segmentID = bufferCandidate.segmentID
-		cpSource = "segmentBuffer"
-	case syncCandidate.GetTimestamp() >= bufferCandidate.position.GetTimestamp():
-		checkpoint = bufferCandidate.position
-		segmentID = bufferCandidate.segmentID
-		cpSource = "segmentBuffer"
-	case syncCandidate.GetTimestamp() < bufferCandidate.position.GetTimestamp():
-		checkpoint = syncCandidate
-		segmentID = syncSegmentID
-		cpSource = "syncManager"
 	}
 
 	log.RatedDebug(20, "checkpoint evaluated",
-		zap.String("cpSource", cpSource),
-		zap.Int64("segmentID", segmentID),
-		zap.Uint64("cpTimestamp", checkpoint.GetTimestamp()))
-	return checkpoint
+		zap.String("cpSource", checkpoint.source),
+		zap.Int64("segmentID", checkpoint.segmentID),
+		zap.Uint64("cpTimestamp", checkpoint.position.GetTimestamp()))
+	return checkpoint.position
 }
 
 func (wb *writeBufferBase) triggerSync() (segmentIDs []int64) {
@@ -305,6 +337,14 @@ func (wb *writeBufferBase) sealSegments(_ context.Context, segmentIDs []int64) e
 	return nil
 }
 
+func (wb *writeBufferBase) dropPartitions(partitionIDs []int64) {
+	// mark segment dropped if partition was dropped
+	segIDs := wb.metaCache.GetSegmentIDsBy(metacache.WithPartitionIDs(partitionIDs))
+	wb.metaCache.UpdateSegments(metacache.UpdateState(commonpb.SegmentState_Dropped),
+		metacache.WithSegmentIDs(segIDs...),
+	)
+}
+
 func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64) []*conc.Future[struct{}] {
 	log := log.Ctx(ctx)
 	result := make([]*conc.Future[struct{}], 0, len(segmentIDs))
@@ -319,7 +359,16 @@ func (wb *writeBufferBase) syncSegments(ctx context.Context, segmentIDs []int64)
 			}
 		}
 
-		result = append(result, wb.syncMgr.SyncData(ctx, syncTask))
+		result = append(result, wb.syncMgr.SyncData(ctx, syncTask, func(err error) error {
+			if err != nil {
+				return err
+			}
+
+			if syncTask.StartPosition() != nil {
+				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
+			}
+			return nil
+		}))
 	}
 	return result
 }
@@ -378,49 +427,21 @@ type inData struct {
 	tsField     []*storage.Int64FieldData
 	rowNum      int64
 
-	batchBF *storage.PkStatistics
-}
-
-func (id *inData) generatePkStats() {
-	id.batchBF = &storage.PkStatistics{
-		PkFilter: bloomfilter.NewBloomFilterWithType(
-			uint(id.rowNum),
-			paramtable.Get().CommonCfg.MaxBloomFalsePositive.GetAsFloat(),
-			paramtable.Get().CommonCfg.BloomFilterType.GetValue()),
-	}
-
-	for _, ids := range id.pkField {
-		id.batchBF.UpdatePKRange(ids)
-	}
+	intPKTs map[int64]int64
+	strPKTs map[string]int64
 }
 
 func (id *inData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
-	if !id.batchBF.PkExist(pk) {
-		return false
+	var ok bool
+	var minTs int64
+	switch pk.Type() {
+	case schemapb.DataType_Int64:
+		minTs, ok = id.intPKTs[pk.GetValue().(int64)]
+	case schemapb.DataType_VarChar:
+		minTs, ok = id.strPKTs[pk.GetValue().(string)]
 	}
 
-	for batchIdx, timestamps := range id.tsField {
-		ids := id.pkField[batchIdx]
-		var primaryKey storage.PrimaryKey
-		switch pk.Type() {
-		case schemapb.DataType_Int64:
-			primaryKey = storage.NewInt64PrimaryKey(0)
-		case schemapb.DataType_VarChar:
-			primaryKey = storage.NewVarCharPrimaryKey("")
-		}
-		for idx := 0; idx < timestamps.RowNum(); idx++ {
-			timestamp := timestamps.GetRow(idx).(int64)
-			if int64(ts) <= timestamp {
-				continue
-			}
-			primaryKey.SetValue(ids.GetRow(idx))
-
-			if pk.EQ(primaryKey) {
-				return true
-			}
-		}
-	}
-	return false
+	return ok && ts > uint64(minTs)
 }
 
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
@@ -437,6 +458,13 @@ func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*
 			data:        make([]*storage.InsertData, 0, len(msgs)),
 			pkField:     make([]storage.FieldData, 0, len(msgs)),
 		}
+		switch wb.pkField.GetDataType() {
+		case schemapb.DataType_Int64:
+			inData.intPKTs = make(map[int64]int64)
+		case schemapb.DataType_VarChar:
+			inData.strPKTs = make(map[string]int64)
+		}
+
 		for _, msg := range msgs {
 			data, err := storage.InsertMsgToInsertData(msg, wb.collSchema)
 			if err != nil {
@@ -460,12 +488,32 @@ func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*
 				return nil, merr.WrapErrServiceInternal("timestamp column row num not match")
 			}
 
+			timestamps := tsFieldData.GetRows().([]int64)
+
+			switch wb.pkField.GetDataType() {
+			case schemapb.DataType_Int64:
+				pks := pkFieldData.GetRows().([]int64)
+				for idx, pk := range pks {
+					ts, ok := inData.intPKTs[pk]
+					if !ok || timestamps[idx] < ts {
+						inData.intPKTs[pk] = timestamps[idx]
+					}
+				}
+			case schemapb.DataType_VarChar:
+				pks := pkFieldData.GetRows().([]string)
+				for idx, pk := range pks {
+					ts, ok := inData.strPKTs[pk]
+					if !ok || timestamps[idx] < ts {
+						inData.strPKTs[pk] = timestamps[idx]
+					}
+				}
+			}
+
 			inData.data = append(inData.data, data)
 			inData.pkField = append(inData.pkField, pkFieldData)
 			inData.tsField = append(inData.tsField, tsFieldData)
 			inData.rowNum += int64(data.GetRowNum())
 		}
-		inData.generatePkStats()
 		result = append(result, inData)
 	}
 
@@ -525,6 +573,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 		tsFrom, tsTo = timeRange.timestampMin, timeRange.timestampMax
 	}
 
+	if startPos != nil {
+		wb.syncCheckpoint.Add(segmentID, startPos, "syncing task")
+	}
+
 	actions := []metacache.SegmentAction{}
 	if insert != nil {
 		batchSize = int64(insert.GetRowNum())
@@ -553,6 +605,10 @@ func (wb *writeBufferBase) getSyncTask(ctx context.Context, segmentID int64) (sy
 	if segmentInfo.State() == commonpb.SegmentState_Flushing ||
 		segmentInfo.Level() == datapb.SegmentLevel_L0 { // Level zero segment will always be sync as flushed
 		pack.WithFlush()
+	}
+
+	if segmentInfo.State() == commonpb.SegmentState_Dropped {
+		pack.WithDrop()
 	}
 
 	metrics.DataNodeFlowGraphBufferDataSize.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), fmt.Sprint(wb.collectionID)).Sub(totalMemSize)
@@ -589,7 +645,15 @@ func (wb *writeBufferBase) Close(drop bool) {
 			t.WithDrop()
 		}
 
-		f := wb.syncMgr.SyncData(context.Background(), syncTask)
+		f := wb.syncMgr.SyncData(context.Background(), syncTask, func(err error) error {
+			if err != nil {
+				return err
+			}
+			if syncTask.StartPosition() != nil {
+				wb.syncCheckpoint.Remove(syncTask.SegmentID(), syncTask.StartPosition().GetTimestamp())
+			}
+			return nil
+		})
 		futures = append(futures, f)
 	}
 

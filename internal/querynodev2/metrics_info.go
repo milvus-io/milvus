@@ -103,10 +103,11 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	}
 
 	minTsafeChannel, minTsafe := node.tSafeManager.Min()
-
 	collections := node.manager.Collection.List()
-
 	nodeID := fmt.Sprint(node.GetNodeID())
+
+	metrics.QueryNodeNumEntities.Reset()
+	metrics.QueryNodeEntitiesSize.Reset()
 
 	var totalGrowingSize int64
 	growingSegments := node.manager.Segment.GetBy(segments.WithType(segments.SegmentTypeGrowing))
@@ -125,6 +126,7 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 	growingGroupByPartition := lo.GroupBy(growingSegments, func(seg segments.Segment) int64 {
 		return seg.Partition()
 	})
+
 	for _, segs := range growingGroupByPartition {
 		numEntities := lo.SumBy(segs, func(seg segments.Segment) int64 {
 			return seg.RowNum()
@@ -136,7 +138,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			fmt.Sprint(segment.Collection()),
 			fmt.Sprint(segment.Partition()),
 			segments.SegmentTypeGrowing.String(),
-			fmt.Sprint(len(segment.Indexes())),
 		).Set(float64(numEntities))
 	}
 
@@ -166,7 +167,6 @@ func getQuotaMetrics(node *QueryNode) (*metricsinfo.QueryNodeQuotaMetrics, error
 			fmt.Sprint(segment.Collection()),
 			fmt.Sprint(segment.Partition()),
 			segments.SegmentTypeSealed.String(),
-			fmt.Sprint(len(segment.Indexes())),
 		).Set(float64(numEntities))
 	}
 
