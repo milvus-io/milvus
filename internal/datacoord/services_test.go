@@ -1698,7 +1698,7 @@ func TestImportV2(t *testing.T) {
 		assert.NoError(t, err)
 		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
 
-		// normal case
+		// job does not exist
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().ListImportJobs().Return(nil, nil)
 		catalog.EXPECT().ListPreImportTasks().Return(nil, nil)
@@ -1706,6 +1706,13 @@ func TestImportV2(t *testing.T) {
 		catalog.EXPECT().SaveImportJob(mock.Anything).Return(nil)
 		s.importMeta, err = NewImportMeta(catalog)
 		assert.NoError(t, err)
+		resp, err = s.GetImportProgress(ctx, &internalpb.GetImportProgressRequest{
+			JobID: "-1",
+		})
+		assert.NoError(t, err)
+		assert.True(t, errors.Is(merr.Error(resp.GetStatus()), merr.ErrImportFailed))
+
+		// normal case
 		var job ImportJob = &importJob{
 			ImportJob: &datapb.ImportJob{
 				JobID:  0,
