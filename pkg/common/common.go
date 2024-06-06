@@ -93,6 +93,11 @@ const (
 
 	// PartitionStatsPath storage path const for partition stats files
 	PartitionStatsPath = `part_stats`
+
+	// AnalyzeStatsPath storage path const for analyze.
+	AnalyzeStatsPath = `analyze_stats`
+	OffsetMapping    = `offset_mapping`
+	Centroids        = "centroids"
 )
 
 // Search, Index parameter keys

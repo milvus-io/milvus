@@ -199,6 +199,10 @@ func isFlatIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexFaissIDMap || indexType == indexparamcheck.IndexFaissBinIDMap
 }
 
+func isOptionalScalarFieldSupported(indexType string) bool {
+	return indexType == indexparamcheck.IndexHNSW
+}
+
 func isDiskANNIndex(indexType string) bool {
 	return indexType == indexparamcheck.IndexDISKANN
 }
@@ -260,6 +264,7 @@ func getCompactionMergeInfo(task *datapb.CompactionTask) *milvuspb.CompactionMer
 	}
 }
 
+<<<<<<< HEAD
 func CheckCheckPointsHealth(meta *meta) error {
 	for channel, cp := range meta.GetChannelCheckpoints() {
 		ts, _ := tsoutil.ParseTS(cp.Timestamp)
@@ -290,4 +295,17 @@ func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
 		}
 	}
 	return nil
+}
+
+func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
+	binlogIDs := make([]int64, 0)
+	for _, fieldBinLog := range segment.GetBinlogs() {
+		if fieldBinLog.GetFieldID() == fieldID {
+			for _, binLog := range fieldBinLog.GetBinlogs() {
+				binlogIDs = append(binlogIDs, binLog.GetLogID())
+			}
+			break
+		}
+	}
+	return binlogIDs
 }
