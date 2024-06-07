@@ -547,6 +547,7 @@ func TestImportUtil_GetImportProgress(t *testing.T) {
 	progress, state, _, _, reason = GetJobProgress(-1, imeta, meta)
 	assert.Equal(t, int64(0), progress)
 	assert.Equal(t, internalpb.ImportJobState_Failed, state)
+	assert.NotEqual(t, "", reason)
 
 	// pending state
 	err = imeta.UpdateJob(job.GetJobID(), UpdateJobState(internalpb.ImportJobState_Pending))
