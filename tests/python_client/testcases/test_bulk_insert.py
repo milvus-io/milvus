@@ -1534,16 +1534,6 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         dim = 12
         entities = 200
-        files = prepare_bulk_insert_json_files(
-            minio_endpoint=self.minio_endpoint,
-            bucket_name=self.bucket_name,
-            is_row_based=is_row_based,
-            rows=entities,
-            dim=dim,
-            auto_id=auto_id,
-            data_fields=default_multi_fields,
-            force=True,
-        )
         self._connect()
         c_name = cf.gen_unique_str("bulk_partition_key")
         fields = [
@@ -1556,6 +1546,17 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64)
         ]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        files = prepare_bulk_insert_new_json_files(
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            is_row_based=is_row_based,
+            rows=entities,
+            dim=dim,
+            auto_id=auto_id,
+            data_fields=default_multi_fields,
+            force=True,
+            schema=schema
+        )
         self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
         assert len(self.collection_wrap.partitions) == 10
 
