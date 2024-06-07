@@ -272,7 +272,7 @@ test_array_string() {
 
     auto inverted_index = build_inverted_index(vec_of_array);
     for (const auto& [term, posting_list] : inverted_index) {
-        auto hits = w.term_query(term).to_set();
+        auto hits = to_set(w.term_query(term));
         assert(posting_list == hits);
     }
 }
