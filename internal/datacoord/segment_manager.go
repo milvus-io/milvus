@@ -75,7 +75,7 @@ type Manager interface {
 
 	// AllocSegment allocates rows and record the allocation.
 	AllocSegment(ctx context.Context, collectionID, partitionID UniqueID, channelName string, requestRows int64) ([]*Allocation, error)
-	AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string) (*SegmentInfo, error)
+	AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID, partitionID UniqueID, channelName string, level datapb.SegmentLevel) (*SegmentInfo, error)
 	// DropSegment drops the segment from manager.
 	DropSegment(ctx context.Context, segmentID UniqueID)
 	// FlushImportSegments set importing segment state to Flushed.
@@ -349,7 +349,7 @@ func (s *SegmentManager) genExpireTs(ctx context.Context) (Timestamp, error) {
 }
 
 func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, collectionID UniqueID,
-	partitionID UniqueID, channelName string,
+	partitionID UniqueID, channelName string, level datapb.SegmentLevel,
 ) (*SegmentInfo, error) {
 	log := log.Ctx(ctx)
 	ctx, sp := otel.Tracer(typeutil.DataCoordRole).Start(ctx, "open-Segment")
@@ -377,7 +377,7 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 		NumOfRows:      0,
 		State:          commonpb.SegmentState_Importing,
 		MaxRowNum:      0,
-		Level:          datapb.SegmentLevel_L1,
+		Level:          level,
 		LastExpireTime: math.MaxUint64,
 		StartPosition:  position,
 		DmlPosition:    position,
@@ -393,9 +393,10 @@ func (s *SegmentManager) AllocImportSegment(ctx context.Context, taskID int64, c
 	s.segments = append(s.segments, id)
 	log.Info("add import segment done",
 		zap.Int64("taskID", taskID),
-		zap.Int64("CollectionID", segmentInfo.CollectionID),
-		zap.Int64("SegmentID", segmentInfo.ID),
-		zap.String("Channel", segmentInfo.InsertChannel))
+		zap.Int64("collectionID", segmentInfo.CollectionID),
+		zap.Int64("segmentID", segmentInfo.ID),
+		zap.String("channel", segmentInfo.InsertChannel),
+		zap.String("level", level.String()))
 
 	return segment, nil
 }

@@ -403,6 +403,7 @@ func (node *QueryNode) LoadSegments(ctx context.Context, req *querypb.LoadSegmen
 		zap.Int64("partitionID", segment.GetPartitionID()),
 		zap.String("shard", segment.GetInsertChannel()),
 		zap.Int64("segmentID", segment.GetSegmentID()),
+		zap.String("level", segment.GetLevel().String()),
 		zap.Int64("currentNodeID", node.GetNodeID()),
 	)
 

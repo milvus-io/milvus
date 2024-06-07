@@ -6077,6 +6077,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 	}
 
 	isBackup := importutilv2.IsBackup(req.GetOptions())
+	isL0Import := importutilv2.IsL0Import(req.GetOptions())
 	hasPartitionKey := typeutil.HasPartitionKey(schema.CollectionSchema)
 
 	var partitionIDs []int64
@@ -6092,6 +6093,31 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 			return resp, nil
 		}
 		partitionIDs = []UniqueID{partitionID}
+	} else if isL0Import {
+		if req.GetPartitionName() == "" {
+			partitionIDs = []UniqueID{common.AllPartitionsID}
+		} else {
+			partitionID, err := globalMetaCache.GetPartitionID(ctx, req.GetDbName(), req.GetCollectionName(), req.PartitionName)
+			if err != nil {
+				resp.Status = merr.Status(err)
+				return resp, nil
+			}
+			partitionIDs = []UniqueID{partitionID}
+		}
+		// Currently, querynodes first load L0 segments and then load L1 segments.
+		// Therefore, to ensure the deletes from L0 import take effect,
+		// the collection needs to be in an unloaded state,
+		// and then all L0 and L1 segments should be loaded at once.
+		// We will remove this restriction after querynode supported to load L0 segments dynamically.
+		loaded, err := isCollectionLoaded(ctx, node.queryCoord, collectionID)
+		if err != nil {
+			resp.Status = merr.Status(err)
+			return resp, nil
+		}
+		if loaded {
+			resp.Status = merr.Status(merr.WrapErrImportFailed("for l0 import, collection cannot be loaded, please release it first"))
+			return resp, nil
+		}
 	} else {
 		if hasPartitionKey {
 			if req.GetPartitionName() != "" {
@@ -6133,7 +6159,7 @@ func (node *Proxy) ImportV2(ctx context.Context, req *internalpb.ImportRequest) 
 			Params.DataCoordCfg.MaxFilesPerImportReq.GetAsInt(), len(req.Files))))
 		return resp, nil
 	}
-	if !isBackup {
+	if !isBackup && !isL0Import {
 		// check file type
 		for _, file := range req.GetFiles() {
 			_, err = importutilv2.GetFileType(file)
