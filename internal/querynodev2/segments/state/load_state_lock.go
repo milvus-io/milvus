@@ -174,6 +174,16 @@ func (ls *LoadStateLock) StartReleaseAll() (g LoadStateLockGuard) {
 	}
 }
 
+// blockUntilDataLoadedOrReleased blocks until the segment is loaded or released.
+func (ls *LoadStateLock) BlockUntilDataLoadedOrReleased() {
+	ls.cv.L.Lock()
+	defer ls.cv.L.Unlock()
+
+	for ls.state != LoadStateDataLoaded && ls.state != LoadStateReleased {
+		ls.cv.Wait()
+	}
+}
+
 // waitUntilCanReleaseData waits until segment is release data able.
 func (ls *LoadStateLock) waitUntilCanReleaseData() {
 	state := ls.state
