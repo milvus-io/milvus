@@ -503,6 +503,7 @@ class VariableColumn : public ColumnBase {
 
         // Not need indices_ after
         indices_.clear();
+        std::vector<uint64_t>().swap(indices_);
     }
 
  protected:
