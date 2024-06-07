@@ -68,7 +68,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     }
     return CreateStringIndexMarisa(file_manager_context);
 #else
-    throw SegcoreError(Unsupported, "unsupported platform");
+    PanicInfo(Unsupported, "unsupported platform");
 #endif
 }
 
@@ -106,7 +106,7 @@ IndexFactory::CreatePrimitiveScalarIndex<std::string>(
     }
     return CreateStringIndexMarisa(file_manager_context, space);
 #else
-    throw SegcoreError(Unsupported, "unsupported platform");
+    PanicInfo(Unsupported, "unsupported platform");
 #endif
 }
 
@@ -169,7 +169,7 @@ IndexFactory::CreatePrimitiveScalarIndex(
             return CreatePrimitiveScalarIndex<std::string>(
                 index_type, file_manager_context);
         default:
-            throw SegcoreError(
+            PanicInfo(
                 DataTypeInvalid,
                 fmt::format("invalid data type to build index: {}", data_type));
     }
@@ -261,7 +261,7 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build disk index: {}",
                                 data_type));
@@ -286,7 +286,7 @@ IndexFactory::CreateVectorIndex(
                     index_type, metric_type, version, file_manager_context);
             }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build mem index: {}",
                                 data_type));
@@ -347,7 +347,7 @@ IndexFactory::CreateVectorIndex(
                     file_manager_context);
             }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build disk index: {}",
                                 data_type));
@@ -372,7 +372,7 @@ IndexFactory::CreateVectorIndex(
                     create_index_info, file_manager_context, space);
             }
             default:
-                throw SegcoreError(
+                PanicInfo(
                     DataTypeInvalid,
                     fmt::format("invalid data type to build mem index: {}",
                                 data_type));
