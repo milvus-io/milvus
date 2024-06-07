@@ -2745,7 +2745,7 @@ user-task-polling:
 	p.EnableSyncPartitionStats = ParamItem{
 		Key:          "queryNode.enableSyncPartitionStats",
 		Version:      "2.4.4",
-		DefaultValue: "false",
+		DefaultValue: "true",
 		Doc:          "enable sync partitionStats",
 		Export:       true,
 	}

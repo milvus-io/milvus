@@ -127,22 +127,24 @@ func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica 
 			partStatsToUpdate[partID] = psVersionInTarget
 		}
 	}
+	if len(partStatsToUpdate) > 0 {
+		action := task.NewLeaderUpdatePartStatsAction(leaderView.ID, nodeID, task.ActionTypeUpdate, leaderView.Channel, partStatsToUpdate)
 
-	action := task.NewLeaderUpdatePartStatsAction(leaderView.ID, nodeID, task.ActionTypeUpdate, leaderView.Channel, partStatsToUpdate)
+		t := task.NewLeaderPartStatsTask(
+			ctx,
+			c.ID(),
+			leaderView.CollectionID,
+			replica,
+			leaderView.ID,
+			action,
+		)
 
-	t := task.NewLeaderPartStatsTask(
-		ctx,
-		c.ID(),
-		leaderView.CollectionID,
-		replica,
-		leaderView.ID,
-		action,
-	)
+		// leader task shouldn't replace executing segment task
+		t.SetPriority(task.TaskPriorityLow)
+		t.SetReason("sync partition stats versions")
+		ret = append(ret, t)
+	}
 
-	// leader task shouldn't replace executing segment task
-	t.SetPriority(task.TaskPriorityLow)
-	t.SetReason("sync partition stats versions")
-	ret = append(ret, t)
 	return ret
 }
 
