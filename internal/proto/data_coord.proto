@@ -129,6 +129,8 @@ service DataNode {
   rpc DropImport(DropImportRequest) returns(common.Status) {}
 
   rpc QuerySlot(QuerySlotRequest) returns(QuerySlotResponse) {}
+
+  rpc DropCompactionPlan(DropCompactionPlanRequest) returns(common.Status) {}
 }
 
 message FlushRequest {
@@ -891,4 +893,8 @@ message CompactionTask{
   msg.MsgPosition pos = 17;
   int64 nodeID = 18;
   schema.CollectionSchema schema = 19;
+}
+
+message DropCompactionPlanRequest {
+  int64 planID = 1;
 }

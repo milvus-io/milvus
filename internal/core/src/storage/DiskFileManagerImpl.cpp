@@ -442,6 +442,7 @@ SortByPath(std::vector<std::string>& paths) {
                          std::stol(b.substr(b.find_last_of("/") + 1));
               });
 }
+
 template <typename DataType>
 std::string
 DiskFileManagerImpl::CacheRawDataToDisk(std::vector<std::string> remote_files) {
@@ -837,6 +838,9 @@ template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
     std::vector<std::string> remote_files);
 template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<bin1>(
+    std::vector<std::string> remote_files);
+template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<float>(
     std::shared_ptr<milvus_storage::Space> space);
 template std::string
@@ -844,6 +848,9 @@ DiskFileManagerImpl::CacheRawDataToDisk<float16>(
     std::shared_ptr<milvus_storage::Space> space);
 template std::string
 DiskFileManagerImpl::CacheRawDataToDisk<bfloat16>(
+    std::shared_ptr<milvus_storage::Space> space);
+template std::string
+DiskFileManagerImpl::CacheRawDataToDisk<bin1>(
     std::shared_ptr<milvus_storage::Space> space);
 
 }  // namespace milvus::storage

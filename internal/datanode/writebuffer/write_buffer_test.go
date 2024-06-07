@@ -365,6 +365,21 @@ func (s *WriteBufferSuite) TestEvictBuffer() {
 	})
 }
 
+func (s *WriteBufferSuite) TestDropPartitions() {
+	wb, err := newWriteBufferBase(s.channelName, s.metacache, s.storageCache, s.syncMgr, &writeBufferOption{
+		pkStatsFactory: func(vchannel *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		},
+	})
+	s.Require().NoError(err)
+
+	segIDs := []int64{1, 2, 3}
+	s.metacache.EXPECT().GetSegmentIDsBy(mock.Anything).Return(segIDs).Once()
+	s.metacache.EXPECT().UpdateSegments(mock.AnythingOfType("metacache.SegmentAction"), metacache.WithSegmentIDs(segIDs...)).Return().Once()
+
+	wb.dropPartitions([]int64{100, 101})
+}
+
 func TestWriteBufferBase(t *testing.T) {
 	suite.Run(t, new(WriteBufferSuite))
 }

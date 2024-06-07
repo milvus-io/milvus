@@ -169,6 +169,9 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 			if binlog.GetLogID() == 0 {
 				return fmt.Errorf("invalid log id, binlog:%v", binlog)
 			}
+			if binlog.GetLogPath() != "" {
+				return fmt.Errorf("fieldBinlog no need to store logpath, binlog:%v", binlog)
+			}
 		}
 		return nil
 	}
@@ -324,4 +327,8 @@ func buildImportTaskKey(taskID int64) string {
 
 func buildPreImportTaskKey(taskID int64) string {
 	return fmt.Sprintf("%s/%d", PreImportTaskPrefix, taskID)
+}
+
+func buildAnalyzeTaskKey(taskID int64) string {
+	return fmt.Sprintf("%s/%d", AnalyzeTaskPrefix, taskID)
 }

@@ -620,7 +620,7 @@ func (gc *garbageCollector) recycleUnusedIndexFiles(ctx context.Context) {
 		}
 		logger = logger.With(zap.Int64("buildID", buildID))
 		logger.Info("garbageCollector will recycle index files")
-		canRecycle, segIdx := gc.meta.indexMeta.CleanSegmentIndex(buildID)
+		canRecycle, segIdx := gc.meta.indexMeta.CheckCleanSegmentIndex(buildID)
 		if !canRecycle {
 			// Even if the index is marked as deleted, the index file will not be recycled, wait for the next gc,
 			// and delete all index files about the buildID at one time.

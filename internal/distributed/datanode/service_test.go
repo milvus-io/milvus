@@ -181,6 +181,10 @@ func (m *MockDataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReque
 	return &datapb.QuerySlotResponse{}, m.err
 }
 
+func (m *MockDataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCompactionPlanRequest) (*commonpb.Status, error) {
+	return m.status, m.err
+}
+
 // /////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
 func Test_NewServer(t *testing.T) {
 	paramtable.Init()
@@ -313,6 +317,15 @@ func Test_NewServer(t *testing.T) {
 			status: &commonpb.Status{},
 		}
 		resp, err := server.CheckChannelOperationProgress(ctx, nil)
+		assert.NoError(t, err)
+		assert.NotNil(t, resp)
+	})
+
+	t.Run("DropCompactionPlans", func(t *testing.T) {
+		server.datanode = &MockDataNode{
+			status: &commonpb.Status{},
+		}
+		resp, err := server.DropCompactionPlan(ctx, nil)
 		assert.NoError(t, err)
 		assert.NotNil(t, resp)
 	})

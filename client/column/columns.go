@@ -281,12 +281,12 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		data := x.Float16Vector
 		dim := int(vectors.GetDim())
 		if end < 0 {
-			end = len(data) / dim
+			end = len(data) / dim / 2
 		}
 		vector := make([][]byte, 0, end-begin)
 		for i := begin; i < end; i++ {
-			v := make([]byte, dim)
-			copy(v, data[i*dim:(i+1)*dim])
+			v := make([]byte, dim*2)
+			copy(v, data[i*dim*2:(i+1)*dim*2])
 			vector = append(vector, v)
 		}
 		return NewColumnFloat16Vector(fd.GetFieldName(), dim, vector), nil
@@ -300,12 +300,12 @@ func FieldDataColumn(fd *schemapb.FieldData, begin, end int) (Column, error) {
 		data := x.Bfloat16Vector
 		dim := int(vectors.GetDim())
 		if end < 0 {
-			end = len(data) / dim
+			end = len(data) / dim / 2
 		}
 		vector := make([][]byte, 0, end-begin) // shall not have remanunt
 		for i := begin; i < end; i++ {
 			v := make([]byte, dim)
-			copy(v, data[i*dim:(i+1)*dim])
+			copy(v, data[i*dim*2:(i+1)*dim*2])
 			vector = append(vector, v)
 		}
 		return NewColumnBFloat16Vector(fd.GetFieldName(), dim, vector), nil

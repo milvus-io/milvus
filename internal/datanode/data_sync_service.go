@@ -19,18 +19,16 @@ package datanode
 import (
 	"context"
 	"fmt"
-	"path"
 	"sync"
-	"time"
 
-	"go.opentelemetry.io/otel"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/datanode/allocator"
 	"github.com/milvus-io/milvus/internal/datanode/broker"
+	"github.com/milvus-io/milvus/internal/datanode/io"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
+	"github.com/milvus-io/milvus/internal/datanode/util"
 	"github.com/milvus-io/milvus/internal/datanode/writebuffer"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/querycoordv2/params"
@@ -158,13 +156,13 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 			)
 			segment := item
 
-			future := getOrCreateIOPool().Submit(func() (any, error) {
+			future := io.GetOrCreateStatsPool().Submit(func() (any, error) {
 				var stats []*storage.PkStatistics
 				var err error
 				if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
-					stats, err = loadStatsV2(storageV2Cache, segment, info.GetSchema())
+					stats, err = util.LoadStatsV2(storageV2Cache, segment, info.GetSchema())
 				} else {
-					stats, err = loadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
+					stats, err = util.LoadStats(initCtx, chunkManager, info.GetSchema(), segment.GetID(), segment.GetStatslogs())
 				}
 				if err != nil {
 					return nil, err
@@ -197,142 +195,6 @@ func initMetaCache(initCtx context.Context, storageV2Cache *metacache.StorageV2C
 	})
 
 	return metacache, nil
-}
-
-func loadStatsV2(storageCache *metacache.StorageV2Cache, segment *datapb.SegmentInfo, schema *schemapb.CollectionSchema) ([]*storage.PkStatistics, error) {
-	space, err := storageCache.GetOrCreateSpace(segment.ID, syncmgr.SpaceCreatorFunc(segment.ID, schema, storageCache.ArrowSchema()))
-	if err != nil {
-		return nil, err
-	}
-
-	getResult := func(stats []*storage.PrimaryKeyStats) []*storage.PkStatistics {
-		result := make([]*storage.PkStatistics, 0, len(stats))
-		for _, stat := range stats {
-			pkStat := &storage.PkStatistics{
-				PkFilter: stat.BF,
-				MinPK:    stat.MinPk,
-				MaxPK:    stat.MaxPk,
-			}
-			result = append(result, pkStat)
-		}
-		return result
-	}
-
-	blobs := space.StatisticsBlobs()
-	deserBlobs := make([]*Blob, 0)
-	for _, b := range blobs {
-		if b.Name == storage.CompoundStatsType.LogIdx() {
-			blobData := make([]byte, b.Size)
-			_, err = space.ReadBlob(b.Name, blobData)
-			if err != nil {
-				return nil, err
-			}
-			stats, err := storage.DeserializeStatsList(&Blob{Value: blobData})
-			if err != nil {
-				return nil, err
-			}
-			return getResult(stats), nil
-		}
-	}
-
-	for _, b := range blobs {
-		blobData := make([]byte, b.Size)
-		_, err = space.ReadBlob(b.Name, blobData)
-		if err != nil {
-			return nil, err
-		}
-		deserBlobs = append(deserBlobs, &Blob{Value: blobData})
-	}
-	stats, err := storage.DeserializeStats(deserBlobs)
-	if err != nil {
-		return nil, err
-	}
-	return getResult(stats), nil
-}
-
-func loadStats(ctx context.Context, chunkManager storage.ChunkManager, schema *schemapb.CollectionSchema, segmentID int64, statsBinlogs []*datapb.FieldBinlog) ([]*storage.PkStatistics, error) {
-	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "loadStats")
-	defer span.End()
-
-	startTs := time.Now()
-	log := log.Ctx(ctx).With(zap.Int64("segmentID", segmentID))
-	log.Info("begin to init pk bloom filter", zap.Int("statsBinLogsLen", len(statsBinlogs)))
-
-	pkField, err := typeutil.GetPrimaryFieldSchema(schema)
-	if err != nil {
-		return nil, err
-	}
-
-	// filter stats binlog files which is pk field stats log
-	bloomFilterFiles := []string{}
-	logType := storage.DefaultStatsType
-
-	for _, binlog := range statsBinlogs {
-		if binlog.FieldID != pkField.GetFieldID() {
-			continue
-		}
-	Loop:
-		for _, log := range binlog.GetBinlogs() {
-			_, logidx := path.Split(log.GetLogPath())
-			// if special status log exist
-			// only load one file
-			switch logidx {
-			case storage.CompoundStatsType.LogIdx():
-				bloomFilterFiles = []string{log.GetLogPath()}
-				logType = storage.CompoundStatsType
-				break Loop
-			default:
-				bloomFilterFiles = append(bloomFilterFiles, log.GetLogPath())
-			}
-		}
-	}
-
-	// no stats log to parse, initialize a new BF
-	if len(bloomFilterFiles) == 0 {
-		log.Warn("no stats files to load")
-		return nil, nil
-	}
-
-	// read historical PK filter
-	values, err := chunkManager.MultiRead(ctx, bloomFilterFiles)
-	if err != nil {
-		log.Warn("failed to load bloom filter files", zap.Error(err))
-		return nil, err
-	}
-	blobs := make([]*Blob, 0)
-	for i := 0; i < len(values); i++ {
-		blobs = append(blobs, &Blob{Value: values[i]})
-	}
-
-	var stats []*storage.PrimaryKeyStats
-	if logType == storage.CompoundStatsType {
-		stats, err = storage.DeserializeStatsList(blobs[0])
-		if err != nil {
-			log.Warn("failed to deserialize stats list", zap.Error(err))
-			return nil, err
-		}
-	} else {
-		stats, err = storage.DeserializeStats(blobs)
-		if err != nil {
-			log.Warn("failed to deserialize stats", zap.Error(err))
-			return nil, err
-		}
-	}
-
-	var size uint
-	result := make([]*storage.PkStatistics, 0, len(stats))
-	for _, stat := range stats {
-		pkStat := &storage.PkStatistics{
-			PkFilter: stat.BF,
-			MinPK:    stat.MinPk,
-			MaxPK:    stat.MaxPk,
-		}
-		size += stat.BF.Cap()
-		result = append(result, pkStat)
-	}
-
-	log.Info("Successfully load pk stats", zap.Any("time", time.Since(startTs)), zap.Uint("size", size))
-	return result, nil
 }
 
 func getServiceWithChannel(initCtx context.Context, node *DataNode, info *datapb.ChannelWatchInfo, metacache metacache.MetaCache, storageV2Cache *metacache.StorageV2Cache, unflushed, flushed []*datapb.SegmentInfo) (*dataSyncService, error) {

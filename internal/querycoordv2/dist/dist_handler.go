@@ -58,6 +58,8 @@ func (dh *distHandler) start(ctx context.Context) {
 	log.Info("start dist handler")
 	ticker := time.NewTicker(Params.QueryCoordCfg.DistPullInterval.GetAsDuration(time.Millisecond))
 	defer ticker.Stop()
+	checkExecutedFlagTicker := time.NewTicker(Params.QueryCoordCfg.CheckExecutedFlagInterval.GetAsDuration(time.Millisecond))
+	defer checkExecutedFlagTicker.Stop()
 	failures := 0
 	for {
 		select {
@@ -67,25 +69,39 @@ func (dh *distHandler) start(ctx context.Context) {
 		case <-dh.c:
 			log.Info("close dist handler")
 			return
-		case <-ticker.C:
-			resp, err := dh.getDistribution(ctx)
-			if err != nil {
-				node := dh.nodeManager.Get(dh.nodeID)
-				fields := []zap.Field{zap.Int("times", failures)}
-				if node != nil {
-					fields = append(fields, zap.Time("lastHeartbeat", node.LastHeartbeat()))
+		case <-checkExecutedFlagTicker.C:
+			executedFlagChan := dh.scheduler.GetExecutedFlag(dh.nodeID)
+			if executedFlagChan != nil {
+				select {
+				case <-executedFlagChan:
+					dh.pullDist(ctx, &failures, false)
+				default:
 				}
-				fields = append(fields, zap.Error(err))
-				log.RatedWarn(30.0, "failed to get data distribution", fields...)
-			} else {
-				failures = 0
-				dh.handleDistResp(resp)
 			}
+		case <-ticker.C:
+			dh.pullDist(ctx, &failures, true)
 		}
 	}
 }
 
-func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse) {
+func (dh *distHandler) pullDist(ctx context.Context, failures *int, dispatchTask bool) {
+	resp, err := dh.getDistribution(ctx)
+	if err != nil {
+		node := dh.nodeManager.Get(dh.nodeID)
+		*failures = *failures + 1
+		fields := []zap.Field{zap.Int("times", *failures)}
+		if node != nil {
+			fields = append(fields, zap.Time("lastHeartbeat", node.LastHeartbeat()))
+		}
+		fields = append(fields, zap.Error(err))
+		log.RatedWarn(30.0, "failed to get data distribution", fields...)
+	} else {
+		*failures = 0
+		dh.handleDistResp(resp, dispatchTask)
+	}
+}
+
+func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse, dispatchTask bool) {
 	node := dh.nodeManager.Get(resp.GetNodeID())
 	if node == nil {
 		return
@@ -113,7 +129,9 @@ func (dh *distHandler) handleDistResp(resp *querypb.GetDataDistributionResponse)
 		dh.updateLeaderView(resp)
 	}
 
-	dh.scheduler.Dispatch(dh.nodeID)
+	if dispatchTask {
+		dh.scheduler.Dispatch(dh.nodeID)
+	}
 }
 
 func (dh *distHandler) updateSegmentsDistribution(resp *querypb.GetDataDistributionResponse) {

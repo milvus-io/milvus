@@ -130,6 +130,11 @@ class FileManagerImpl : public knowhere::FileManager {
         return index_meta_;
     }
 
+    virtual ChunkManagerPtr
+    GetChunkManager() const {
+        return rcm_;
+    }
+
     virtual std::string
     GetRemoteIndexObjectPrefix() const {
         return rcm_->GetRootPath() + "/" + std::string(INDEX_ROOT_PATH) + "/" +

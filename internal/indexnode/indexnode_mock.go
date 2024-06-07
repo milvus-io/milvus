@@ -18,7 +18,9 @@ package indexnode
 
 import (
 	"context"
+	"fmt"
 
+	"github.com/cockroachdb/errors"
 	clientv3 "go.etcd.io/etcd/client/v3"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -52,6 +54,9 @@ type Mock struct {
 	CallQueryJobs   func(ctx context.Context, in *indexpb.QueryJobsRequest) (*indexpb.QueryJobsResponse, error)
 	CallDropJobs    func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error)
 	CallGetJobStats func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error)
+	CallCreateJobV2 func(ctx context.Context, req *indexpb.CreateJobV2Request) (*commonpb.Status, error)
+	CallQueryJobV2  func(ctx context.Context, req *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error)
+	CallDropJobV2   func(ctx context.Context, req *indexpb.DropJobsV2Request) (*commonpb.Status, error)
 
 	CallGetMetrics         func(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error)
 	CallShowConfigurations func(ctx context.Context, req *internalpb.ShowConfigurationsRequest) (*internalpb.ShowConfigurationsResponse, error)
@@ -112,6 +117,62 @@ func NewIndexNodeMock() *Mock {
 			}, nil
 		},
 		CallDropJobs: func(ctx context.Context, in *indexpb.DropJobsRequest) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		},
+		CallCreateJobV2: func(ctx context.Context, req *indexpb.CreateJobV2Request) (*commonpb.Status, error) {
+			return merr.Success(), nil
+		},
+		CallQueryJobV2: func(ctx context.Context, req *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error) {
+			switch req.GetJobType() {
+			case indexpb.JobType_JobTypeIndexJob:
+				results := make([]*indexpb.IndexTaskInfo, 0)
+				for _, buildID := range req.GetTaskIDs() {
+					results = append(results, &indexpb.IndexTaskInfo{
+						BuildID:             buildID,
+						State:               commonpb.IndexState_Finished,
+						IndexFileKeys:       []string{},
+						SerializedSize:      1024,
+						FailReason:          "",
+						CurrentIndexVersion: 1,
+						IndexStoreVersion:   1,
+					})
+				}
+				return &indexpb.QueryJobsV2Response{
+					Status:    merr.Success(),
+					ClusterID: req.GetClusterID(),
+					Result: &indexpb.QueryJobsV2Response_IndexJobResults{
+						IndexJobResults: &indexpb.IndexJobResults{
+							Results: results,
+						},
+					},
+				}, nil
+			case indexpb.JobType_JobTypeAnalyzeJob:
+				results := make([]*indexpb.AnalyzeResult, 0)
+				for _, taskID := range req.GetTaskIDs() {
+					results = append(results, &indexpb.AnalyzeResult{
+						TaskID:        taskID,
+						State:         indexpb.JobState_JobStateFinished,
+						CentroidsFile: fmt.Sprintf("%d/stats_file", taskID),
+						FailReason:    "",
+					})
+				}
+				return &indexpb.QueryJobsV2Response{
+					Status:    merr.Success(),
+					ClusterID: req.GetClusterID(),
+					Result: &indexpb.QueryJobsV2Response_AnalyzeJobResults{
+						AnalyzeJobResults: &indexpb.AnalyzeResults{
+							Results: results,
+						},
+					},
+				}, nil
+			default:
+				return &indexpb.QueryJobsV2Response{
+					Status:    merr.Status(errors.New("unknown job type")),
+					ClusterID: req.GetClusterID(),
+				}, nil
+			}
+		},
+		CallDropJobV2: func(ctx context.Context, req *indexpb.DropJobsV2Request) (*commonpb.Status, error) {
 			return merr.Success(), nil
 		},
 		CallGetJobStats: func(ctx context.Context, in *indexpb.GetJobStatsRequest) (*indexpb.GetJobStatsResponse, error) {
@@ -199,6 +260,18 @@ func (m *Mock) GetJobStats(ctx context.Context, req *indexpb.GetJobStatsRequest)
 
 func (m *Mock) GetMetrics(ctx context.Context, req *milvuspb.GetMetricsRequest) (*milvuspb.GetMetricsResponse, error) {
 	return m.CallGetMetrics(ctx, req)
+}
+
+func (m *Mock) CreateJobV2(ctx context.Context, req *indexpb.CreateJobV2Request) (*commonpb.Status, error) {
+	return m.CallCreateJobV2(ctx, req)
+}
+
+func (m *Mock) QueryJobsV2(ctx context.Context, req *indexpb.QueryJobsV2Request) (*indexpb.QueryJobsV2Response, error) {
+	return m.CallQueryJobV2(ctx, req)
+}
+
+func (m *Mock) DropJobsV2(ctx context.Context, req *indexpb.DropJobsV2Request) (*commonpb.Status, error) {
+	return m.CallDropJobV2(ctx, req)
 }
 
 // ShowConfigurations returns the configurations of Mock indexNode matching req.Pattern

@@ -834,3 +834,41 @@ func (kc *Catalog) DropCompactionTask(ctx context.Context, task *datapb.Compacti
 	key := buildCompactionTaskPath(task)
 	return kc.MetaKv.Remove(key)
 }
+
+func (kc *Catalog) ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error) {
+	tasks := make([]*indexpb.AnalyzeTask, 0)
+
+	_, values, err := kc.MetaKv.LoadWithPrefix(AnalyzeTaskPrefix)
+	if err != nil {
+		return nil, err
+	}
+	for _, value := range values {
+		task := &indexpb.AnalyzeTask{}
+		err = proto.Unmarshal([]byte(value), task)
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, nil
+}
+
+func (kc *Catalog) SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error {
+	key := buildAnalyzeTaskKey(task.TaskID)
+
+	value, err := proto.Marshal(task)
+	if err != nil {
+		return err
+	}
+
+	err = kc.MetaKv.Save(key, string(value))
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (kc *Catalog) DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error {
+	key := buildAnalyzeTaskKey(taskID)
+	return kc.MetaKv.Remove(key)
+}

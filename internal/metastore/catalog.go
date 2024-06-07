@@ -7,6 +7,7 @@ import (
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/metastore/model"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
+	"github.com/milvus-io/milvus/internal/proto/indexpb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
@@ -152,6 +153,10 @@ type DataCoordCatalog interface {
 	ListCompactionTask(ctx context.Context) ([]*datapb.CompactionTask, error)
 	SaveCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
 	DropCompactionTask(ctx context.Context, task *datapb.CompactionTask) error
+
+	ListAnalyzeTasks(ctx context.Context) ([]*indexpb.AnalyzeTask, error)
+	SaveAnalyzeTask(ctx context.Context, task *indexpb.AnalyzeTask) error
+	DropAnalyzeTask(ctx context.Context, taskID typeutil.UniqueID) error
 }
 
 type QueryCoordCatalog interface {

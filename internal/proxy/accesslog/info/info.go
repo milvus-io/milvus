@@ -26,25 +26,26 @@ type getMetricFunc func(i AccessInfo) string
 
 // supported metrics
 var MetricFuncMap = map[string]getMetricFunc{
-	"$method_name":     getMethodName,
-	"$method_status":   getMethodStatus,
-	"$trace_id":        getTraceID,
-	"$user_addr":       getAddr,
-	"$user_name":       getUserName,
-	"$response_size":   getResponseSize,
-	"$error_code":      getErrorCode,
-	"$error_msg":       getErrorMsg,
-	"$database_name":   getDbName,
-	"$collection_name": getCollectionName,
-	"$partition_name":  getPartitionName,
-	"$time_cost":       getTimeCost,
-	"$time_now":        getTimeNow,
-	"$time_start":      getTimeStart,
-	"$time_end":        getTimeEnd,
-	"$method_expr":     getExpr,
-	"$output_fields":   getOutputFields,
-	"$sdk_version":     getSdkVersion,
-	"$cluster_prefix":  getClusterPrefix,
+	"$method_name":       getMethodName,
+	"$method_status":     getMethodStatus,
+	"$trace_id":          getTraceID,
+	"$user_addr":         getAddr,
+	"$user_name":         getUserName,
+	"$response_size":     getResponseSize,
+	"$error_code":        getErrorCode,
+	"$error_msg":         getErrorMsg,
+	"$database_name":     getDbName,
+	"$collection_name":   getCollectionName,
+	"$partition_name":    getPartitionName,
+	"$time_cost":         getTimeCost,
+	"$time_now":          getTimeNow,
+	"$time_start":        getTimeStart,
+	"$time_end":          getTimeEnd,
+	"$method_expr":       getExpr,
+	"$output_fields":     getOutputFields,
+	"$sdk_version":       getSdkVersion,
+	"$cluster_prefix":    getClusterPrefix,
+	"$consistency_level": getConsistencyLevel,
 }
 
 type AccessInfo interface {
@@ -66,6 +67,7 @@ type AccessInfo interface {
 	Expression() string
 	OutputFields() string
 	SdkVersion() string
+	ConsistencyLevel() string
 }
 
 func Get(i AccessInfo, keys ...string) []any {
@@ -151,6 +153,10 @@ func getSdkVersion(i AccessInfo) string {
 
 func getOutputFields(i AccessInfo) string {
 	return i.OutputFields()
+}
+
+func getConsistencyLevel(i AccessInfo) string {
+	return i.ConsistencyLevel()
 }
 
 func getClusterPrefix(i AccessInfo) string {

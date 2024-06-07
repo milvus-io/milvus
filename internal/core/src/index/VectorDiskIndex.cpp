@@ -513,5 +513,6 @@ VectorDiskAnnIndex<T>::update_load_json(const Config& config) {
 template class VectorDiskAnnIndex<float>;
 template class VectorDiskAnnIndex<float16>;
 template class VectorDiskAnnIndex<bfloat16>;
+template class VectorDiskAnnIndex<bin1>;
 
 }  // namespace milvus::index

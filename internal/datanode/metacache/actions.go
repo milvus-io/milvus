@@ -102,6 +102,13 @@ func WithPartitionID(partitionID int64) SegmentFilter {
 	})
 }
 
+func WithPartitionIDs(partitionIDs []int64) SegmentFilter {
+	return SegmentFilterFunc(func(info *SegmentInfo) bool {
+		idSet := typeutil.NewSet(partitionIDs...)
+		return idSet.Contain(info.partitionID)
+	})
+}
+
 func WithStartPosNotRecorded() SegmentFilter {
 	return SegmentFilterFunc(func(info *SegmentInfo) bool {
 		return !info.startPosRecorded
