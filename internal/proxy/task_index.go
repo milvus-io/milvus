@@ -51,6 +51,7 @@ const (
 
 	AutoIndexName = "AUTOINDEX"
 	DimKey        = common.DimKey
+	IsSparseKey   = common.IsSparseKey
 )
 
 type createIndexTask struct {
@@ -350,10 +351,15 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 		return fmt.Errorf("invalid index type: %s", indexType)
 	}
 
-	if !typeutil.IsSparseFloatVectorType(field.DataType) {
+	isSparse := typeutil.IsSparseFloatVectorType(field.DataType)
+
+	if !isSparse {
 		if err := fillDimension(field, indexParams); err != nil {
 			return err
 		}
+	} else {
+		// used only for checker, should be deleted after checking
+		indexParams[IsSparseKey] = "true"
 	}
 
 	if err := checker.CheckValidDataType(field.GetDataType()); err != nil {
@@ -364,6 +370,10 @@ func checkTrain(field *schemapb.FieldSchema, indexParams map[string]string) erro
 	if err := checker.CheckTrain(indexParams); err != nil {
 		log.Info("create index with invalid parameters", zap.Error(err))
 		return err
+	}
+
+	if isSparse {
+		delete(indexParams, IsSparseKey)
 	}
 
 	return nil
