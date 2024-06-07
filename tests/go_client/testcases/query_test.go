@@ -27,7 +27,7 @@ func TestQueryDefault(t *testing.T) {
 
 	// flush -> index -> load
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query
@@ -47,7 +47,7 @@ func TestQueryVarcharPkDefault(t *testing.T) {
 	_, insertRes := prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 
 	// flush -> index -> load
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query
@@ -69,7 +69,7 @@ func TestQueryNotExistName(t *testing.T) {
 
 	// create -> index -> load
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query with not existed partition
@@ -110,7 +110,7 @@ func TestQueryPartition(t *testing.T) {
 
 	// flush -> index -> load
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	expr := fmt.Sprintf("%s >= %d", common.DefaultInt64FieldName, 0)
@@ -175,7 +175,7 @@ func TestQueryOutputFields(t *testing.T) {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(enableDynamic))
 		prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
 		prepare.FlushData(ctx, t, mc, schema.CollectionName)
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		expr := fmt.Sprintf("%s < %d", common.DefaultInt64FieldName, 10)
@@ -245,7 +245,7 @@ func TestQueryOutputAllFieldsColumn(t *testing.T) {
 	// create collection
 	for _, isDynamic := range [2]bool{true, false} {
 		prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(isDynamic))
-		prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+		prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 		prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 		// insert
@@ -309,7 +309,7 @@ func TestQueryOutputAllFieldsRows(t *testing.T) {
 	require.Equal(t, int64(common.DefaultNb), ids.InsertCount)
 
 	prepare.FlushData(ctx, t, mc, schema.CollectionName)
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query output all fields -> output all fields, includes vector and $meta field
@@ -329,7 +329,7 @@ func TestQueryOutputBinaryAndVarchar(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.VarcharBinary), hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// insert
@@ -366,7 +366,7 @@ func TestQueryOutputSparse(t *testing.T) {
 	mc := createDefaultMilvusClient(ctx, t)
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VarcharSparseVec), hp.TNewFieldsOption(), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// insert
@@ -401,7 +401,7 @@ func TestQueryArrayDifferentLenBetweenRows(t *testing.T) {
 
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecAllScalar),
 		hp.TNewFieldsOption().TWithMaxCapacity(common.TestCapacity*2), hp.TNewSchemaOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// insert 2 batch with array capacity 100 and 200
@@ -449,7 +449,7 @@ func TestQueryJsonDynamicExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query with different expr and count
@@ -482,7 +482,7 @@ func TestQueryInvalidExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64VecJSON),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, 100), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	for _, _invalidExpr := range common.InvalidExpressions {
@@ -499,7 +499,7 @@ func TestQueryCountJsonDynamicExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// query with different expr and count
@@ -571,7 +571,7 @@ func TestQueryArrayFieldExpr(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.AllFields),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(true))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// create collection
@@ -618,7 +618,7 @@ func TestQueryOutputInvalidOutputFieldCount(t *testing.T) {
 	prepare, schema := hp.CollPrepare.CreateCollection(ctx, t, mc, hp.NewCreateCollectionParams(hp.Int64Vec),
 		hp.TNewFieldsOption(), hp.TNewSchemaOption().TWithEnableDynamicField(false))
 	prepare.InsertData(ctx, t, mc, hp.NewInsertParams(schema, common.DefaultNb), hp.TNewDataOption())
-	prepare.CreateIndex(ctx, t, mc, hp.NewIndexParams(schema))
+	prepare.CreateIndex(ctx, t, mc, hp.TNewIndexParams(schema))
 	prepare.Load(ctx, t, mc, hp.NewLoadParams(schema.CollectionName))
 
 	// invalid expr
