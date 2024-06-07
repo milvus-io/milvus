@@ -25,8 +25,6 @@
 
 using namespace milvus;
 
-// TODO: I would suggest that our all indexes use this test to simulate the real production environment.
-
 namespace milvus::test {
 auto
 gen_field_meta(int64_t collection_id = 1,
