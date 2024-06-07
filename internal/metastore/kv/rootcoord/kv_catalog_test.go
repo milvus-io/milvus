@@ -167,7 +167,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		assert.NoError(t, err)
 		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
-		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, ts).Return(nil)
+		kv.On("MultiSaveAndRemoveWithPrefix", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
 
 		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
@@ -246,7 +246,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
 			Return([]string{"key"}, []string{string(fm)}, nil)
-		kv.On("MultiSaveAndRemove", mock.Anything, mock.Anything, ts).Return(nil)
+		kv.On("MultiSaveAndRemoveWithPrefix", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
 
 		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
@@ -301,7 +301,7 @@ func TestCatalog_loadCollection(t *testing.T) {
 		assert.NoError(t, err)
 		kv := mocks.NewSnapShotKV(t)
 		kv.EXPECT().Load(mock.Anything, mock.Anything).Return(string(value), nil)
-		kv.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		kv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 		kc := Catalog{Snapshot: kv}
 		got, err := kc.loadCollection(ctx, util.NonDBID, 1, 0)
 		assert.NoError(t, err)
@@ -378,7 +378,7 @@ func TestCatalog_GetCollectionByID(t *testing.T) {
 		require.NoError(t, err)
 		return string(collByte), nil
 	}).Once()
-	ss.EXPECT().MultiSaveAndRemove(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+	ss.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	coll, err = c.GetCollectionByID(ctx, 0, 10000, 1)
 	assert.NoError(t, err)
