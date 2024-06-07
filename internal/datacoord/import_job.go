@@ -20,11 +20,13 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
+	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 )
 
@@ -46,8 +48,11 @@ func UpdateJobState(state internalpb.ImportJobState) UpdateJobAction {
 			job.(*importJob).ImportJob.RequestedDiskSize = 0
 			// set cleanup ts
 			dur := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
-			cleanupTs := tsoutil.ComposeTSByTime(time.Now().Add(dur), 0)
+			cleanupTime := time.Now().Add(dur)
+			cleanupTs := tsoutil.ComposeTSByTime(cleanupTime, 0)
 			job.(*importJob).ImportJob.CleanupTs = cleanupTs
+			log.Info("set import job cleanup ts", zap.Int64("jobID", job.GetJobID()),
+				zap.Time("cleanupTime", cleanupTime), zap.Uint64("cleanupTs", cleanupTs))
 		}
 	}
 }

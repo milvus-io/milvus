@@ -359,9 +359,9 @@ func (c *importChecker) checkGC(job ImportJob) {
 		job.GetState() != internalpb.ImportJobState_Failed {
 		return
 	}
-	GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 	cleanupTime := tsoutil.PhysicalTime(job.GetCleanupTs())
-	if time.Since(cleanupTime) >= GCRetention {
+	if time.Now().After(cleanupTime) {
+		GCRetention := Params.DataCoordCfg.ImportTaskRetention.GetAsDuration(time.Second)
 		log.Info("job has reached the GC retention", zap.Int64("jobID", job.GetJobID()),
 			zap.Time("cleanupTime", cleanupTime), zap.Duration("GCRetention", GCRetention))
 		tasks := c.imeta.GetTaskBy(WithJob(job.GetJobID()))
