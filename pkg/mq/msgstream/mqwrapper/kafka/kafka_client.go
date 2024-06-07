@@ -49,10 +49,6 @@ func NewKafkaClientInstance(address string) *kafkaClient {
 }
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
-	log.Info("init kafka Config ", zap.String("commonConfig", fmt.Sprintf("+%v", config)),
-		zap.String("extraConsumerConfig", fmt.Sprintf("+%v", extraConsumerConfig)),
-		zap.String("extraProducerConfig", fmt.Sprintf("+%v", extraProducerConfig)),
-	)
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }
 
