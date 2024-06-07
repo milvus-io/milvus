@@ -44,7 +44,7 @@ func (c *run) execute(args []string, flags *flag.FlagSet) {
 		panic(err)
 	}
 	defer removePidFile(lock)
-	roles.Run()
+	roles.Run(serverType)
 }
 
 func (c *run) printBanner(w io.Writer) {

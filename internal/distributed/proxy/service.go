@@ -160,7 +160,7 @@ func (s *Server) registerHTTPServer() {
 	apiv1 := metricsGinHandler.Group(apiPathPrefix)
 	httpserver.NewHandlers(s.proxy).RegisterRoutesTo(apiv1)
 	management.Register(&management.Handler{
-		Path:        "/",
+		Path:        management.RootPath,
 		HandlerFunc: nil,
 		Handler:     metricsGinHandler.Handler(),
 	})

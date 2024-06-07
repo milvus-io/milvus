@@ -29,6 +29,7 @@ import (
 	"google.golang.org/grpc"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
+	management "github.com/milvus-io/milvus/internal/http"
 	"github.com/milvus-io/milvus/internal/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/querypb"
@@ -66,7 +67,7 @@ func (s *ProxyManagementSuite) TestPauseDataCoordGC() {
 			return &commonpb.Status{}, nil
 		})
 
-		req, err := http.NewRequest(http.MethodGet, mgrRouteGcPause+"?pause_seconds=60", nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcPause+"?pause_seconds=60", nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -82,7 +83,7 @@ func (s *ProxyManagementSuite) TestPauseDataCoordGC() {
 			return &commonpb.Status{}, errors.New("mock")
 		})
 
-		req, err := http.NewRequest(http.MethodGet, mgrRouteGcPause+"?pause_seconds=60", nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcPause+"?pause_seconds=60", nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -101,7 +102,7 @@ func (s *ProxyManagementSuite) TestPauseDataCoordGC() {
 			}, nil
 		})
 
-		req, err := http.NewRequest(http.MethodGet, mgrRouteGcPause+"?pause_seconds=60", nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcPause+"?pause_seconds=60", nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -120,7 +121,7 @@ func (s *ProxyManagementSuite) TestResumeDatacoordGC() {
 			return &commonpb.Status{}, nil
 		})
 
-		req, err := http.NewRequest(http.MethodGet, mgrRouteGcResume, nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -136,7 +137,7 @@ func (s *ProxyManagementSuite) TestResumeDatacoordGC() {
 			return &commonpb.Status{}, errors.New("mock")
 		})
 
-		req, err := http.NewRequest(http.MethodGet, mgrRouteGcResume, nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -155,7 +156,7 @@ func (s *ProxyManagementSuite) TestResumeDatacoordGC() {
 			}, nil
 		})
 
-		req, err := http.NewRequest(http.MethodGet, mgrRouteGcResume, nil)
+		req, err := http.NewRequest(http.MethodGet, management.RouteGcResume, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -181,7 +182,7 @@ func (s *ProxyManagementSuite) TestListQueryNode() {
 			},
 		}, nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrListQueryNode, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteListQueryNode, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -195,7 +196,7 @@ func (s *ProxyManagementSuite) TestListQueryNode() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().ListQueryNode(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err := http.NewRequest(http.MethodPost, mgrListQueryNode, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteListQueryNode, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -211,7 +212,7 @@ func (s *ProxyManagementSuite) TestListQueryNode() {
 			Status: merr.Status(merr.ErrServiceNotReady),
 		}, nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrListQueryNode, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteListQueryNode, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -232,7 +233,7 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 			SealedSegmentIDs: []int64{1, 2, 3},
 		}, nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrGetQueryNodeDistribution, strings.NewReader("node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteGetQueryNodeDistribution, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -247,14 +248,14 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 		defer s.TearDownTest()
 
 		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, mgrGetQueryNodeDistribution, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteGetQueryNodeDistribution, nil)
 		s.Require().NoError(err)
 		recorder := httptest.NewRecorder()
 		s.proxy.GetQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
 
 		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, mgrGetQueryNodeDistribution, strings.NewReader(""))
+		req, err = http.NewRequest(http.MethodPost, management.RouteGetQueryNodeDistribution, strings.NewReader(""))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -263,7 +264,7 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 
 		// test rpc return error
 		s.querycoord.EXPECT().GetQueryNodeDistribution(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, mgrGetQueryNodeDistribution, strings.NewReader("node_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteGetQueryNodeDistribution, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -276,7 +277,7 @@ func (s *ProxyManagementSuite) TestGetQueryNodeDistribution() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().GetQueryNodeDistribution(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err := http.NewRequest(http.MethodPost, mgrGetQueryNodeDistribution, strings.NewReader("node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteGetQueryNodeDistribution, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -292,7 +293,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryCoordBalance() {
 
 		s.querycoord.EXPECT().SuspendBalance(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrSuspendQueryCoordBalance, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteSuspendQueryCoordBalance, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -306,7 +307,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryCoordBalance() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().SuspendBalance(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err := http.NewRequest(http.MethodPost, mgrSuspendQueryCoordBalance, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteSuspendQueryCoordBalance, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -319,7 +320,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryCoordBalance() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().SuspendBalance(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, mgrSuspendQueryCoordBalance, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteSuspendQueryCoordBalance, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -335,7 +336,7 @@ func (s *ProxyManagementSuite) TestResumeQueryCoordBalance() {
 
 		s.querycoord.EXPECT().ResumeBalance(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrResumeQueryCoordBalance, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteResumeQueryCoordBalance, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -349,7 +350,7 @@ func (s *ProxyManagementSuite) TestResumeQueryCoordBalance() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().ResumeBalance(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err := http.NewRequest(http.MethodPost, mgrResumeQueryCoordBalance, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteResumeQueryCoordBalance, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -362,7 +363,7 @@ func (s *ProxyManagementSuite) TestResumeQueryCoordBalance() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().ResumeBalance(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, mgrResumeQueryCoordBalance, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteResumeQueryCoordBalance, nil)
 		s.Require().NoError(err)
 
 		recorder := httptest.NewRecorder()
@@ -378,7 +379,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryNode() {
 
 		s.querycoord.EXPECT().SuspendNode(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrSuspendQueryNode, strings.NewReader("node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteSuspendQueryNode, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -393,14 +394,14 @@ func (s *ProxyManagementSuite) TestSuspendQueryNode() {
 		defer s.TearDownTest()
 
 		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, mgrSuspendQueryNode, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteSuspendQueryNode, nil)
 		s.Require().NoError(err)
 		recorder := httptest.NewRecorder()
 		s.proxy.SuspendQueryNode(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
 
 		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, mgrSuspendQueryNode, strings.NewReader(""))
+		req, err = http.NewRequest(http.MethodPost, management.RouteSuspendQueryNode, strings.NewReader(""))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -409,7 +410,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryNode() {
 
 		// test rpc return error
 		s.querycoord.EXPECT().SuspendNode(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, mgrSuspendQueryNode, strings.NewReader("node_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteSuspendQueryNode, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -422,7 +423,7 @@ func (s *ProxyManagementSuite) TestSuspendQueryNode() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().SuspendNode(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, mgrSuspendQueryNode, strings.NewReader("node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteSuspendQueryNode, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -438,7 +439,7 @@ func (s *ProxyManagementSuite) TestResumeQueryNode() {
 
 		s.querycoord.EXPECT().ResumeNode(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrResumeQueryNode, strings.NewReader("node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteResumeQueryNode, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 
@@ -453,14 +454,14 @@ func (s *ProxyManagementSuite) TestResumeQueryNode() {
 		defer s.TearDownTest()
 
 		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, mgrResumeQueryNode, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteResumeQueryNode, nil)
 		s.Require().NoError(err)
 		recorder := httptest.NewRecorder()
 		s.proxy.ResumeQueryNode(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
 
 		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, mgrResumeQueryNode, strings.NewReader(""))
+		req, err = http.NewRequest(http.MethodPost, management.RouteResumeQueryNode, strings.NewReader(""))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -469,7 +470,7 @@ func (s *ProxyManagementSuite) TestResumeQueryNode() {
 
 		// test rpc return error
 		s.querycoord.EXPECT().ResumeNode(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, mgrResumeQueryNode, strings.NewReader("node_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteResumeQueryNode, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -482,7 +483,7 @@ func (s *ProxyManagementSuite) TestResumeQueryNode() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().ResumeNode(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err := http.NewRequest(http.MethodPost, mgrResumeQueryNode, strings.NewReader("node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteResumeQueryNode, strings.NewReader("node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -498,7 +499,7 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 
 		s.querycoord.EXPECT().TransferSegment(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrTransferSegment, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1&copy_mode=false"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteTransferSegment, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1&copy_mode=false"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -507,7 +508,7 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
 
 		// test use default param
-		req, err = http.NewRequest(http.MethodPost, mgrTransferSegment, strings.NewReader("source_node_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteTransferSegment, strings.NewReader("source_node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -521,14 +522,14 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 		defer s.TearDownTest()
 
 		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, mgrTransferSegment, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteTransferSegment, nil)
 		s.Require().NoError(err)
 		recorder := httptest.NewRecorder()
 		s.proxy.TransferSegment(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
 
 		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, mgrTransferSegment, strings.NewReader(""))
+		req, err = http.NewRequest(http.MethodPost, management.RouteTransferSegment, strings.NewReader(""))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -537,7 +538,7 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 
 		// test rpc return error
 		s.querycoord.EXPECT().TransferSegment(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, mgrTransferSegment, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteTransferSegment, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -550,7 +551,7 @@ func (s *ProxyManagementSuite) TestTransferSegment() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().TransferSegment(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, mgrTransferSegment, strings.NewReader("source_node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteTransferSegment, strings.NewReader("source_node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -566,7 +567,7 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 
 		s.querycoord.EXPECT().TransferChannel(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrTransferChannel, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1&copy_mode=false"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1&copy_mode=false"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -575,7 +576,7 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 		s.Equal(`{"msg": "OK"}`, recorder.Body.String())
 
 		// test use default param
-		req, err = http.NewRequest(http.MethodPost, mgrTransferChannel, strings.NewReader("source_node_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -589,14 +590,14 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 		defer s.TearDownTest()
 
 		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, mgrTransferChannel, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteTransferChannel, nil)
 		s.Require().NoError(err)
 		recorder := httptest.NewRecorder()
 		s.proxy.TransferChannel(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
 
 		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, mgrTransferChannel, strings.NewReader(""))
+		req, err = http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader(""))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -605,7 +606,7 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 
 		// test rpc return error
 		s.querycoord.EXPECT().TransferChannel(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, mgrTransferChannel, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1&target_node_id=1&segment_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -618,7 +619,7 @@ func (s *ProxyManagementSuite) TestTransferChannel() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().TransferChannel(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, mgrTransferChannel, strings.NewReader("source_node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteTransferChannel, strings.NewReader("source_node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -634,7 +635,7 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 
 		s.querycoord.EXPECT().CheckQueryNodeDistribution(mock.Anything, mock.Anything).Return(merr.Success(), nil)
 
-		req, err := http.NewRequest(http.MethodPost, mgrCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
@@ -648,14 +649,14 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 		defer s.TearDownTest()
 
 		// test invalid request body
-		req, err := http.NewRequest(http.MethodPost, mgrCheckQueryNodeDistribution, nil)
+		req, err := http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, nil)
 		s.Require().NoError(err)
 		recorder := httptest.NewRecorder()
 		s.proxy.CheckQueryNodeDistribution(recorder, req)
 		s.Equal(http.StatusBadRequest, recorder.Code)
 
 		// test miss requested param
-		req, err = http.NewRequest(http.MethodPost, mgrCheckQueryNodeDistribution, strings.NewReader(""))
+		req, err = http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader(""))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -664,7 +665,7 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 
 		// test rpc return error
 		s.querycoord.EXPECT().CheckQueryNodeDistribution(mock.Anything, mock.Anything).Return(nil, errors.New("mocked error"))
-		req, err = http.NewRequest(http.MethodPost, mgrCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
+		req, err = http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder = httptest.NewRecorder()
@@ -677,7 +678,7 @@ func (s *ProxyManagementSuite) TestCheckQueryNodeDistribution() {
 		defer s.TearDownTest()
 
 		s.querycoord.EXPECT().CheckQueryNodeDistribution(mock.Anything, mock.Anything).Return(merr.Status(merr.ErrServiceNotReady), nil)
-		req, err := http.NewRequest(http.MethodPost, mgrCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
+		req, err := http.NewRequest(http.MethodPost, management.RouteCheckQueryNodeDistribution, strings.NewReader("source_node_id=1&target_node_id=1"))
 		s.Require().NoError(err)
 		req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 		recorder := httptest.NewRecorder()
