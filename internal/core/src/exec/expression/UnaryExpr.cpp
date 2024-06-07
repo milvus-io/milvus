@@ -54,13 +54,10 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<
                     return ExecArrayEqualForIndex<int64_t>(
                         expr_->op_type_ == proto::plan::NotEqual);
                 }
-                case DataType::FLOAT: {
-                    return ExecArrayEqualForIndex<float>(expr_->op_type_ ==
-                                                         proto::plan::NotEqual);
-                }
+                case DataType::FLOAT:
                 case DataType::DOUBLE: {
-                    return ExecArrayEqualForIndex<double>(
-                        expr_->op_type_ == proto::plan::NotEqual);
+                    // not accurate on floating point number, rollback to bruteforce.
+                    return ExecRangeVisitorImplArray<proto::plan::Array>();
                 }
                 case DataType::VARCHAR: {
                     if (segment_->type() == SegmentType::Growing) {
@@ -330,7 +327,7 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
                 [](Index* index_ptr,
                    const IndexInnerType& val,
                    const std::function<void(size_t /* offset */)>& callback) {
-                    index_ptr->InV3(1, &val, callback);
+                    index_ptr->InApplyCallback(1, &val, callback);
                 };
 
             // run in-filter.

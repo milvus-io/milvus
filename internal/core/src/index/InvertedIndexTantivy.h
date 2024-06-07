@@ -112,14 +112,16 @@ class InvertedIndexTantivy : public ScalarIndex<T> {
     In(size_t n, const T* values) override;
 
     const TargetBitmap
-    InV2(size_t n,
-         const T* values,
-         const std::function<bool(size_t /* offset */)>& filter) override;
+    InApplyFilter(
+        size_t n,
+        const T* values,
+        const std::function<bool(size_t /* offset */)>& filter) override;
 
     void
-    InV3(size_t n,
-         const T* values,
-         const std::function<void(size_t /* offset */)>& callback) override;
+    InApplyCallback(
+        size_t n,
+        const T* values,
+        const std::function<void(size_t /* offset */)>& callback) override;
 
     const TargetBitmap
     NotIn(size_t n, const T* values) override;

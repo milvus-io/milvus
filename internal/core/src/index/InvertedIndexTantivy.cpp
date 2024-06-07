@@ -236,9 +236,8 @@ InvertedIndexTantivy<T>::In(size_t n, const T* values) {
 
 template <typename T>
 const TargetBitmap
-InvertedIndexTantivy<T>::InV2(size_t n,
-                              const T* values,
-                              const std::function<bool(size_t)>& filter) {
+InvertedIndexTantivy<T>::InApplyFilter(
+    size_t n, const T* values, const std::function<bool(size_t)>& filter) {
     TargetBitmap bitset(Count());
     for (size_t i = 0; i < n; ++i) {
         auto array = wrapper_->term_query(values[i]);
@@ -249,9 +248,8 @@ InvertedIndexTantivy<T>::InV2(size_t n,
 
 template <typename T>
 void
-InvertedIndexTantivy<T>::InV3(size_t n,
-                              const T* values,
-                              const std::function<void(size_t)>& callback) {
+InvertedIndexTantivy<T>::InApplyCallback(
+    size_t n, const T* values, const std::function<void(size_t)>& callback) {
     for (size_t i = 0; i < n; ++i) {
         auto array = wrapper_->term_query(values[i]);
         apply_hits_with_callback(array, callback);
@@ -354,6 +352,9 @@ void
 InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
                                           const void* values,
                                           const Config& config) {
+    if constexpr (std::is_same_v<bool, T>) {
+        schema_.set_data_type(proto::schema::DataType::Bool);
+    }
     if constexpr (std::is_same_v<int8_t, T>) {
         schema_.set_data_type(proto::schema::DataType::Int8);
     }
@@ -384,7 +385,15 @@ InvertedIndexTantivy<T>::BuildWithRawData(size_t n,
     std::string field = "test_inverted_index";
     wrapper_ = std::make_shared<TantivyIndexWrapper>(
         field.c_str(), d_type_, path_.c_str());
-    wrapper_->add_data<T>(static_cast<const T*>(values), n);
+    if (config.find("is_array") != config.end()) {
+        // only used in ut.
+        auto arr = static_cast<const boost::container::vector<T>*>(values);
+        for (size_t i = 0; i < n; i++) {
+            wrapper_->template add_multi_data(arr[i].data(), arr[i].size());
+        }
+    } else {
+        wrapper_->add_data<T>(static_cast<const T*>(values), n);
+    }
     finish();
 }
 

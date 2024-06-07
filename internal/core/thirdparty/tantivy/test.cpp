@@ -200,6 +200,12 @@ test_32717() {
     }
 }
 
+std::set<uint32_t>
+to_set(const RustArrayWrapper& w) {
+    std::set<uint32_t> s(w.array_.array, w.array_.array + w.array_.len);
+    return s;
+}
+
 template <typename T>
 std::map<T, std::set<uint32_t>>
 build_inverted_index(const std::vector<std::vector<T>>& vec_of_array) {
@@ -236,7 +242,7 @@ test_array_int() {
 
     auto inverted_index = build_inverted_index(vec_of_array);
     for (const auto& [term, posting_list] : inverted_index) {
-        auto hits = w.term_query(term).to_set();
+        auto hits = to_set(w.term_query(term));
         assert(posting_list == hits);
     }
 }

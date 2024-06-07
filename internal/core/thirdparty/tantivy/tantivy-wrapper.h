@@ -51,15 +51,6 @@ struct RustArrayWrapper {
         std::cout << ss.str() << std::endl;
     }
 
-    std::set<uint32_t>
-    to_set() {
-        std::set<uint32_t> s;
-        for (int i = 0; i < array_.len; i++) {
-            s.insert(array_.array[i]);
-        }
-        return s;
-    }
-
     RustArray array_;
 
  private:
