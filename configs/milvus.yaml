@@ -115,7 +115,7 @@ mq:
   # Default value: "default"
   # Valid values: [default, pulsar, kafka, rocksmq, natsmq]
   type: default
-  enablePursuitMode: true # Default value: "true"
+  enablePursuitMode: false # Speed up msgstream consumer so that msgstream can pack msgpack in larger tt range. Set to true if there're many tt msg to pursuit. Default value: "false"
   pursuitLag: 10 # time tick lag threshold to enter pursuit mode, in seconds
   pursuitBufferSize: 8388608 # pursuit mode buffer size in bytes
   mqBufSize: 16 # MQ client consumer buffer length

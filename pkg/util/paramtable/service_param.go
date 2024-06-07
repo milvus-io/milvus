@@ -492,8 +492,8 @@ Valid values: [default, pulsar, kafka, rocksmq, natsmq]`,
 	p.EnablePursuitMode = ParamItem{
 		Key:          "mq.enablePursuitMode",
 		Version:      "2.3.0",
-		DefaultValue: "true",
-		Doc:          `Default value: "true"`,
+		DefaultValue: "false",
+		Doc:          `Speed up msgstream consumer so that msgstream can pack msgpack in larger tt range. Set to true if there're many tt msg to pursuit. Default value: "false"`,
 		Export:       true,
 	}
 	p.EnablePursuitMode.Init(base.mgr)
