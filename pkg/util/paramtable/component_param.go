@@ -2168,11 +2168,9 @@ type queryNodeConfig struct {
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
 	EnableSegmentPrune                      ParamItem `refreshable:"false"`
-	// todo temporary work around must fix
-	EnableSyncPartitionStats  ParamItem `refreshable:"false"`
-	DefaultSegmentFilterRatio ParamItem `refreshable:"false"`
-	UseStreamComputing        ParamItem `refreshable:"false"`
-	QueryStreamBatchSize      ParamItem `refreshable:"false"`
+	DefaultSegmentFilterRatio               ParamItem `refreshable:"false"`
+	UseStreamComputing                      ParamItem `refreshable:"false"`
+	QueryStreamBatchSize                    ParamItem `refreshable:"false"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2741,16 +2739,6 @@ user-task-polling:
 		Export:       true,
 	}
 	p.EnableSegmentPrune.Init(base.mgr)
-
-	p.EnableSyncPartitionStats = ParamItem{
-		Key:          "queryNode.enableSyncPartitionStats",
-		Version:      "2.4.4",
-		DefaultValue: "false",
-		Doc:          "enable sync partitionStats",
-		Export:       true,
-	}
-	p.EnableSyncPartitionStats.Init(base.mgr)
-
 	p.DefaultSegmentFilterRatio = ParamItem{
 		Key:          "queryNode.defaultSegmentFilterRatio",
 		Version:      "2.4.0",

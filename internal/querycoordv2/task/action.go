@@ -17,6 +17,8 @@
 package task
 
 import (
+	"reflect"
+
 	"github.com/samber/lo"
 	"go.uber.org/atomic"
 
@@ -225,6 +227,8 @@ func (action *LeaderAction) IsFinished(distMgr *meta.DistributionManager) bool {
 		return action.rpcReturned.Load() && dist != nil && dist.NodeID == action.Node()
 	case ActionTypeReduce:
 		return action.rpcReturned.Load() && (dist == nil || dist.NodeID != action.Node())
+	case ActionTypeUpdate:
+		return action.rpcReturned.Load() && (dist != nil && reflect.DeepEqual(action.partStatsVersions, view.PartitionStatsVersions))
 	}
 	return false
 }
