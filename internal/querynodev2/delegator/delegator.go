@@ -131,15 +131,22 @@ type shardDelegator struct {
 	// in order to make add/remove growing be atomic, need lock before modify these meta info
 	growingSegmentLock sync.RWMutex
 	partitionStatsMut  sync.RWMutex
+
+	defaultLogger *log.MLogger
 }
 
 // getLogger returns the zap logger with pre-defined shard attributes.
 func (sd *shardDelegator) getLogger(ctx context.Context) *log.MLogger {
-	return log.Ctx(ctx).With(
-		zap.Int64("collectionID", sd.collectionID),
-		zap.String("channel", sd.vchannelName),
-		zap.Int64("replicaID", sd.replicaID),
-	)
+	if ctx != nil {
+		if ctxLogger, ok := ctx.Value(log.CtxLogKey).(*log.MLogger); ok {
+			return ctxLogger.With(
+				zap.Int64("collectionID", sd.collectionID),
+				zap.String("channel", sd.vchannelName),
+				zap.Int64("replicaID", sd.replicaID),
+			)
+		}
+	}
+	return sd.defaultLogger
 }
 
 // Serviceable returns whether delegator is serviceable now.
@@ -885,6 +892,7 @@ func NewShardDelegator(ctx context.Context, collectionID UniqueID, replicaID Uni
 		chunkManager:     chunkManager,
 		partitionStats:   make(map[UniqueID]*storage.PartitionStatsSnapshot),
 		excludedSegments: excludedSegments,
+		defaultLogger:    log,
 	}
 	m := sync.Mutex{}
 	sd.tsCond = sync.NewCond(&m)
