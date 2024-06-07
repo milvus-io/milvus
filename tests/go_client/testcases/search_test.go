@@ -21,7 +21,7 @@ func TestSearch(t *testing.T) {
 	log.Info("schema", zap.Any("schema", schema))
 
 	insertParams := hp.NewInsertParams(schema, common.DefaultNb)
-	hp.CollPrepare.InsertData(ctx, t, mc, insertParams, hp.TNewColumnOption())
+	hp.CollPrepare.InsertData(ctx, t, mc, insertParams, hp.TNewDataOption())
 
 	// flush -> index -> load
 	hp.CollPrepare.FlushData(ctx, t, mc, schema.CollectionName)

@@ -17,7 +17,7 @@ import (
 )
 
 var addr = flag.String("addr", "localhost:19530", "server host and port")
-var defaultCfg = clientv2.ClientConfig{Address: *addr}
+var defaultCfg clientv2.ClientConfig
 
 // teardown
 func teardown() {
@@ -65,6 +65,7 @@ func createDefaultMilvusClient(ctx context.Context, t *testing.T) *base.MilvusCl
 func TestMain(m *testing.M) {
 	flag.Parse()
 	log.Info("Parser Milvus address", zap.String("address", *addr))
+	defaultCfg = clientv2.ClientConfig{Address: *addr}
 	code := m.Run()
 	if code != 0 {
 		log.Error("Tests failed and exited", zap.Int("code", code))

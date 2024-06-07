@@ -30,6 +30,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
+	"github.com/milvus-io/milvus/internal/util/importutilv2"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -96,7 +97,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 				FileStats:    group,
 			},
 		}
-		segments, err := AssignSegments(task, manager)
+		segments, err := AssignSegments(job, task, manager)
 		if err != nil {
 			return nil, err
 		}
@@ -106,7 +107,7 @@ func NewImportTasks(fileGroups [][]*datapb.ImportFileStats,
 	return tasks, nil
 }
 
-func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
+func AssignSegments(job ImportJob, task ImportTask, manager Manager) ([]int64, error) {
 	// merge hashed sizes
 	hashedDataSize := make(map[string]map[int64]int64) // vchannel->(partitionID->size)
 	for _, fileStats := range task.GetFileStats() {
@@ -120,7 +121,16 @@ func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
 		}
 	}
 
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
+
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt64() * 1024 * 1024
+	if isL0Import {
+		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt64()
+	}
+	segmentLevel := datapb.SegmentLevel_L1
+	if isL0Import {
+		segmentLevel = datapb.SegmentLevel_L0
+	}
 
 	// alloc new segments
 	segments := make([]int64, 0)
@@ -128,7 +138,7 @@ func AssignSegments(task ImportTask, manager Manager) ([]int64, error) {
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		for size > 0 {
-			segmentInfo, err := manager.AllocImportSegment(ctx, task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel)
+			segmentInfo, err := manager.AllocImportSegment(ctx, task.GetTaskID(), task.GetCollectionID(), partitionID, vchannel, segmentLevel)
 			if err != nil {
 				return err
 			}
@@ -215,7 +225,12 @@ func RegroupImportFiles(job ImportJob, files []*datapb.ImportFileStats) [][]*dat
 		return nil
 	}
 
+	isL0Import := importutilv2.IsL0Import(job.GetOptions())
 	segmentMaxSize := paramtable.Get().DataCoordCfg.SegmentMaxSize.GetAsInt() * 1024 * 1024
+	if isL0Import {
+		segmentMaxSize = paramtable.Get().DataNodeCfg.FlushDeleteBufferBytes.GetAsInt()
+	}
+
 	threshold := paramtable.Get().DataCoordCfg.MaxSizeInMBPerImportTask.GetAsInt() * 1024 * 1024
 	maxSizePerFileGroup := segmentMaxSize * len(job.GetPartitionIDs()) * len(job.GetVchannels())
 	if maxSizePerFileGroup > threshold {

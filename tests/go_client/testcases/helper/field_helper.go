@@ -242,7 +242,7 @@ func (cf FieldsAllFields) GenFields(option GenFieldsOption) []*entity.Field {
 		pkField,
 	}
 	// scalar fields and array fields
-	for _, fieldType := range GetAllScaleFieldType() {
+	for _, fieldType := range GetAllScalarFieldType() {
 		if fieldType == entity.FieldTypeInt64 {
 			continue
 		} else if fieldType == entity.FieldTypeArray {

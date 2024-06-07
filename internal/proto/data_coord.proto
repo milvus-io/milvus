@@ -775,6 +775,7 @@ message ImportSegmentInfo {
   int64 imported_rows = 2;
   repeated FieldBinlog binlogs = 3;
   repeated FieldBinlog statslogs = 4;
+  repeated FieldBinlog deltalogs = 5;
 }
 
 message QueryImportResponse {

@@ -39,14 +39,13 @@ func TestIDColumns(t *testing.T) {
 	)
 
 	t.Run("nil id", func(t *testing.T) {
-		col, err := IDColumns(intPKCol, nil, 0, -1)
-		assert.NoError(t, err)
-		assert.EqualValues(t, 0, col.Len())
-		col, err = IDColumns(strPKCol, nil, 0, -1)
-		assert.NoError(t, err)
-		assert.EqualValues(t, 0, col.Len())
+		_, err := IDColumns(intPKCol, nil, 0, -1)
+		assert.Error(t, err)
+		_, err = IDColumns(strPKCol, nil, 0, -1)
+		assert.Error(t, err)
+
 		idField := &schemapb.IDs{}
-		col, err = IDColumns(intPKCol, idField, 0, -1)
+		col, err := IDColumns(intPKCol, idField, 0, -1)
 		assert.NoError(t, err)
 		assert.EqualValues(t, 0, col.Len())
 		col, err = IDColumns(strPKCol, idField, 0, -1)
