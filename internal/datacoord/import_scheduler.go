@@ -304,13 +304,13 @@ func (s *importScheduler) processInProgressImport(task ImportTask) {
 	if resp.GetState() == datapb.ImportTaskStateV2_Completed {
 		for _, info := range resp.GetImportSegmentsInfo() {
 			// try to parse path and fill logID
-			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetStatslogs())
+			err = binlog.CompressBinLogs(info.GetBinlogs(), info.GetDeltalogs(), info.GetStatslogs())
 			if err != nil {
-				log.Warn("fail to CompressFieldBinlogs for import binlogs",
+				log.Warn("fail to CompressBinLogs for import binlogs",
 					WrapTaskLog(task, zap.Int64("segmentID", info.GetSegmentID()), zap.Error(err))...)
 				return
 			}
-			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), nil)
+			op1 := UpdateBinlogsOperator(info.GetSegmentID(), info.GetBinlogs(), info.GetStatslogs(), info.GetDeltalogs())
 			op2 := UpdateStatusOperator(info.GetSegmentID(), commonpb.SegmentState_Flushed)
 			err = s.meta.UpdateSegmentsInfo(op1, op2)
 			if err != nil {
