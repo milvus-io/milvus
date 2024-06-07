@@ -32,6 +32,8 @@ func TestFutureWithSuccessCase(t *testing.T) {
 		loopCnt:  10,
 		caseNo:   100,
 	})
+	defer future.Release()
+
 	start := time.Now()
 	future.BlockUntilReady() // test block until ready too.
 	result, err := future.BlockAndLeakyGet()
@@ -58,6 +60,8 @@ func TestFutureWithCaseNoInterrupt(t *testing.T) {
 		loopCnt:  10,
 		caseNo:   caseNoNoInterrupt,
 	})
+	defer future.Release()
+
 	start := time.Now()
 	future.BlockUntilReady() // test block until ready too.
 	result, err := future.BlockAndLeakyGet()
@@ -77,6 +81,8 @@ func TestFutureWithCaseNoInterrupt(t *testing.T) {
 		loopCnt:  20,
 		caseNo:   caseNoNoInterrupt,
 	})
+	defer future.Release()
+
 	result, err = future.BlockAndLeakyGet()
 	// the future is timeout by the context after 200ms, but the underlying task doesn't handle the cancel, the future will return after 2s.
 	assert.Greater(t, time.Since(start).Seconds(), 2.0)
@@ -94,6 +100,8 @@ func TestFutures(t *testing.T) {
 		loopCnt:  10,
 		caseNo:   caseNoThrowStdException,
 	})
+	defer future.Release()
+
 	start := time.Now()
 	future.BlockUntilReady() // test block until ready too.
 	result, err := future.BlockAndLeakyGet()
@@ -109,6 +117,7 @@ func TestFutures(t *testing.T) {
 		loopCnt:  10,
 		caseNo:   caseNoThrowFollyException,
 	})
+	defer future.Release()
 	start = time.Now()
 	future.BlockUntilReady() // test block until ready too.
 	result, err = future.BlockAndLeakyGet()
@@ -125,6 +134,7 @@ func TestFutures(t *testing.T) {
 		loopCnt:  10,
 		caseNo:   caseNoThrowSegcoreException,
 	})
+	defer future.Release()
 	start = time.Now()
 	future.BlockUntilReady() // test block until ready too.
 	result, err = future.BlockAndLeakyGet()
@@ -143,6 +153,7 @@ func TestFutures(t *testing.T) {
 		loopCnt:  20,
 		caseNo:   100,
 	})
+	defer future.Release()
 	// canceled before the future(2s) is ready.
 	go func() {
 		time.Sleep(200 * time.Millisecond)
@@ -165,6 +176,7 @@ func TestFutures(t *testing.T) {
 		loopCnt:  20,
 		caseNo:   100,
 	})
+	defer future.Release()
 	start = time.Now()
 	result, err = future.BlockAndLeakyGet()
 	// the future is timeout by the context after 200ms, so the future should be done in 1s but not 2s.
@@ -195,6 +207,7 @@ func TestConcurrent(t *testing.T) {
 				loopCnt:  10,
 				caseNo:   100,
 			})
+			defer future.Release()
 			result, err := future.BlockAndLeakyGet()
 			assert.NoError(t, err)
 			assert.Equal(t, 100, getCInt(result))
@@ -210,6 +223,7 @@ func TestConcurrent(t *testing.T) {
 				loopCnt:  10,
 				caseNo:   caseNoThrowStdException,
 			})
+			defer future.Release()
 			result, err := future.BlockAndLeakyGet()
 			assert.Error(t, err)
 			assert.Nil(t, result)
@@ -225,6 +239,7 @@ func TestConcurrent(t *testing.T) {
 				loopCnt:  20,
 				caseNo:   100,
 			})
+			defer future.Release()
 			result, err := future.BlockAndLeakyGet()
 			assert.Error(t, err)
 			assert.ErrorIs(t, err, merr.ErrSegcoreFollyCancel)
@@ -242,6 +257,7 @@ func TestConcurrent(t *testing.T) {
 				loopCnt:  10,
 				caseNo:   caseNoNoInterrupt,
 			})
+			defer future.Release()
 			result, err := future.BlockAndLeakyGet()
 			assert.NoError(t, err)
 			assert.Equal(t, 0, getCInt(result))

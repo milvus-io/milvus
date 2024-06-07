@@ -20,7 +20,6 @@ import "C"
 
 import (
 	"context"
-	"runtime"
 	"sync"
 	"unsafe"
 
@@ -62,6 +61,11 @@ type Future interface {
 	//   Caller will get other error if the underlying cgo function throws, otherwise caller will get result.
 	//   Caller should free the result after used (defined by caller), otherwise the memory of result is leaked.
 	BlockAndLeakyGet() (unsafe.Pointer, error)
+
+	// Release the resource of the future.
+	// !!! Release is not concurrent safe with other methods.
+	// It should be called only once after all method of future is returned.
+	Release()
 }
 
 type (
@@ -93,12 +97,6 @@ func Async(ctx context.Context, f CGOAsyncFunction, opts ...Opt) Future {
 		opts:         options,
 		state:        newFutureState(),
 	}
-
-	runtime.SetFinalizer(future, func(future *futureImpl) {
-		getCGOCaller().call("future_destroy", func() {
-			C.future_destroy(future.future)
-		})
-	})
 
 	// register the future to do timeout notification.
 	futureManager.Register(future)
@@ -144,9 +142,19 @@ func (f *futureImpl) BlockAndLeakyGet() (unsafe.Pointer, error) {
 	return ptr, err
 }
 
+func (f *futureImpl) Release() {
+	// block until ready to release the future.
+	f.blockUntilReady()
+	// release the future.
+	getCGOCaller().call("future_destroy", func() {
+		C.future_destroy(f.future)
+	})
+}
+
 func (f *futureImpl) cancel(err error) {
 	if !f.state.checkUnready() {
 		// only unready future can be canceled.
+		// a ready future' cancel make no sense.
 		return
 	}
 
