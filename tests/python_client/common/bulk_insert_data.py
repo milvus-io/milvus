@@ -491,10 +491,17 @@ def gen_sparse_vectors(rows, sparse_format="dok"):
     return vectors
 
 
-def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128, array_length=None, sparse_format="dok"):
+def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128, array_length=None, sparse_format="dok", **kwargs):
     if array_length is None:
         array_length = random.randint(0, 10)
-
+    schema = kwargs.get("schema", None)
+    schema = schema.to_dict() if schema is not None else None
+    if schema is not None:
+        fields = schema.get("fields", [])
+        for field in fields:
+            if data_field == field["name"] and "params" in field:
+                dim = field["params"].get("dim", dim)
+                array_length = field["params"].get("max_length", array_length)
     data = []
     if rows > 0:
         if "vec" in data_field:
@@ -618,10 +625,19 @@ def gen_json_files(is_row_based, rows, dim, auto_id, str_pk,
 
 
 def gen_dict_data_by_data_field(data_fields, rows, start=0, float_vector=True, dim=128, array_length=None, enable_dynamic_field=False, **kwargs):
+    schema = kwargs.get("schema", None)
+    schema = schema.to_dict() if schema is not None else None
     data = []
     for r in range(rows):
         d = {}
         for data_field in data_fields:
+            if schema is not None:
+                fields = schema.get("fields", [])
+                for field in fields:
+                    if data_field == field["name"] and "params" in field:
+                        dim = field["params"].get("dim", dim)
+                        array_length = field["params"].get("max_length", array_length)
+
             if "vec" in data_field:
                 if "float" in data_field:
                     float_vector = True
@@ -718,19 +734,24 @@ def gen_new_json_files(float_vector, rows, dim, data_fields, file_nums=1, array_
 def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_nums=1, err_type="", force=False, enable_dynamic_field=False, include_meta=True, **kwargs):
     # gen numpy files
     schema = kwargs.get("schema", None)
+    schema = schema.to_dict() if schema is not None else None
     u_id = f"numpy-{uuid.uuid4()}"
     data_source_new = f"{data_source}/{u_id}"
     schema_file = f"{data_source_new}/schema.json"
     Path(schema_file).parent.mkdir(parents=True, exist_ok=True)
     if schema is not None:
-        data = schema.to_dict()
         with open(schema_file, "w") as f:
-            json.dump(data, f)
+            json.dump(schema, f)
     files = []
     start_uid = 0
     if file_nums == 1:
         # gen the numpy file without subfolders if only one set of files
         for data_field in data_fields:
+            if schema is not None:
+                fields = schema.get("fields", [])
+                for field in fields:
+                    if data_field == field["name"] and "params" in field:
+                        dim = field["params"].get("dim", dim)
             if "vec" in data_field:
                 vector_type = "float32"
                 if "float" in data_field:
@@ -745,6 +766,7 @@ def gen_npy_files(float_vector, rows, dim, data_fields, file_size=None, file_num
                 if "fp16" in data_field:
                     float_vector = True
                     vector_type = "fp16"
+
                 file_name = gen_vectors_in_numpy_file(dir=data_source_new, data_field=data_field, float_vector=float_vector,
                                                       vector_type=vector_type, rows=rows, dim=dim, force=force)
             elif data_field == DataField.string_field:  # string field for numpy not supported yet at 2022-10-17
@@ -830,7 +852,7 @@ def gen_parquet_files(float_vector, rows, dim, data_fields, file_size=None, row_
         all_field_data = {}
         for data_field in data_fields:
             data = gen_data_by_data_field(data_field=data_field, rows=rows, start=0,
-                                          float_vector=float_vector, dim=dim, array_length=array_length, sparse_format=sparse_format)
+                                          float_vector=float_vector, dim=dim, array_length=array_length, sparse_format=sparse_format, **kwargs)
             all_field_data[data_field] = data
         if enable_dynamic_field and include_meta:
             all_field_data["$meta"] = gen_dynamic_field_data_in_parquet_file(rows=rows, start=0)
