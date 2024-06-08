@@ -1538,7 +1538,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         c_name = cf.gen_unique_str("bulk_partition_key")
         fields = [
             cf.gen_int64_field(name=df.pk_field, is_primary=True),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_int64_field(name=df.int_field, is_partition_key=(par_key_field == df.int_field)),
             cf.gen_string_field(name=df.string_field, is_partition_key=(par_key_field == df.string_field)),
             cf.gen_bool_field(name=df.bool_field),
@@ -1582,7 +1582,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify imported data is available for search
         index_params = ct.default_index
         self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
+            field_name=df.float_vec_field, index_params=index_params
         )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
@@ -1596,7 +1596,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         search_params = ct.default_search_params
         res, _ = self.collection_wrap.search(
             search_data,
-            df.vec_field,
+            df.float_vec_field,
             param=search_params,
             limit=topk,
             check_task=CheckTasks.check_search_results,
