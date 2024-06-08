@@ -18,6 +18,7 @@ package importv2
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"time"
 
@@ -30,15 +31,16 @@ import (
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/datanode/syncmgr"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
-	"github.com/milvus-io/milvus/internal/proto/internalpb"
 	"github.com/milvus-io/milvus/internal/storage"
-	"github.com/milvus-io/milvus/internal/util/importutilv2"
+	"github.com/milvus-io/milvus/internal/util/importutilv2/binlog"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
+	"github.com/milvus-io/milvus/pkg/util/merr"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-type ImportTask struct {
+type L0ImportTask struct {
 	*datapb.ImportTaskV2
 	ctx          context.Context
 	cancel       context.CancelFunc
@@ -51,18 +53,13 @@ type ImportTask struct {
 	metaCaches map[string]metacache.MetaCache
 }
 
-func NewImportTask(req *datapb.ImportRequest,
+func NewL0ImportTask(req *datapb.ImportRequest,
 	manager TaskManager,
 	syncMgr syncmgr.SyncManager,
 	cm storage.ChunkManager,
 ) Task {
 	ctx, cancel := context.WithCancel(context.Background())
-	// During binlog import, even if the primary key's autoID is set to true,
-	// the primary key from the binlog should be used instead of being reassigned.
-	if importutilv2.IsBackup(req.GetOptions()) {
-		UnsetAutoID(req.GetSchema())
-	}
-	task := &ImportTask{
+	task := &L0ImportTask{
 		ImportTaskV2: &datapb.ImportTaskV2{
 			JobID:        req.GetJobID(),
 			TaskID:       req.GetTaskID(),
@@ -81,33 +78,33 @@ func NewImportTask(req *datapb.ImportRequest,
 	return task
 }
 
-func (t *ImportTask) GetType() TaskType {
-	return ImportTaskType
+func (t *L0ImportTask) GetType() TaskType {
+	return L0ImportTaskType
 }
 
-func (t *ImportTask) GetPartitionIDs() []int64 {
+func (t *L0ImportTask) GetPartitionIDs() []int64 {
 	return t.req.GetPartitionIDs()
 }
 
-func (t *ImportTask) GetVchannels() []string {
+func (t *L0ImportTask) GetVchannels() []string {
 	return t.req.GetVchannels()
 }
 
-func (t *ImportTask) GetSchema() *schemapb.CollectionSchema {
+func (t *L0ImportTask) GetSchema() *schemapb.CollectionSchema {
 	return t.req.GetSchema()
 }
 
-func (t *ImportTask) Cancel() {
+func (t *L0ImportTask) Cancel() {
 	t.cancel()
 }
 
-func (t *ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
+func (t *L0ImportTask) GetSegmentsInfo() []*datapb.ImportSegmentInfo {
 	return lo.Values(t.segmentsInfo)
 }
 
-func (t *ImportTask) Clone() Task {
+func (t *L0ImportTask) Clone() Task {
 	ctx, cancel := context.WithCancel(t.ctx)
-	return &ImportTask{
+	return &L0ImportTask{
 		ImportTaskV2: proto.Clone(t.ImportTaskV2).(*datapb.ImportTaskV2),
 		ctx:          ctx,
 		cancel:       cancel,
@@ -117,49 +114,54 @@ func (t *ImportTask) Clone() Task {
 	}
 }
 
-func (t *ImportTask) Execute() []*conc.Future[any] {
+func (t *L0ImportTask) Execute() []*conc.Future[any] {
 	bufferSize := paramtable.Get().DataNodeCfg.ReadBufferSizeInMB.GetAsInt() * 1024 * 1024
-	log.Info("start to import", WrapLogFields(t,
+	log.Info("start to import l0", WrapLogFields(t,
 		zap.Int("bufferSize", bufferSize),
 		zap.Any("schema", t.GetSchema()))...)
 	t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_InProgress))
 
-	req := t.req
+	fn := func() (err error) {
+		defer func() {
+			if err != nil {
+				log.Warn("l0 import task execute failed", WrapLogFields(t, zap.Error(err))...)
+				t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
+			}
+		}()
 
-	fn := func(file *internalpb.ImportFile) error {
-		reader, err := importutilv2.NewReader(t.ctx, t.cm, t.GetSchema(), file, t.req.GetOptions(), bufferSize)
-		if err != nil {
-			log.Warn("new reader failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
-			return err
+		if len(t.req.GetFiles()) != 1 {
+			err = merr.WrapErrImportFailed(
+				fmt.Sprintf("there should be one prefix for l0 import, but got %v", t.req.GetFiles()))
+			return
 		}
-		defer reader.Close()
+		pkField, err := typeutil.GetPrimaryFieldSchema(t.GetSchema())
+		if err != nil {
+			return
+		}
+		reader, err := binlog.NewL0Reader(t.ctx, t.cm, pkField, t.req.GetFiles()[0], bufferSize)
+		if err != nil {
+			return
+		}
 		start := time.Now()
-		err = t.importFile(reader, t)
+		err = t.importL0(reader, t)
 		if err != nil {
-			log.Warn("do import failed", WrapLogFields(t, zap.String("file", file.String()), zap.Error(err))...)
-			t.manager.Update(t.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed), UpdateReason(err.Error()))
-			return err
+			return
 		}
-		log.Info("import file done", WrapLogFields(t, zap.Strings("files", file.GetPaths()),
+		log.Info("l0 import done", WrapLogFields(t,
+			zap.Strings("l0 prefix", t.req.GetFiles()[0].GetPaths()),
 			zap.Duration("dur", time.Since(start)))...)
 		return nil
 	}
 
-	futures := make([]*conc.Future[any], 0, len(req.GetFiles()))
-	for _, file := range req.GetFiles() {
-		file := file
-		f := GetExecPool().Submit(func() (any, error) {
-			err := fn(file)
-			return err, err
-		})
-		futures = append(futures, f)
-	}
-	return futures
+	f := GetExecPool().Submit(func() (any, error) {
+		err := fn()
+		return err, err
+	})
+	return []*conc.Future[any]{f}
 }
 
-func (t *ImportTask) importFile(reader importutilv2.Reader, task Task) error {
-	iTask := task.(*ImportTask)
+func (t *L0ImportTask) importL0(reader binlog.L0Reader, task Task) error {
+	iTask := task.(*L0ImportTask)
 	syncFutures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
 	for {
@@ -170,15 +172,11 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, task Task) error {
 			}
 			return err
 		}
-		err = AppendSystemFieldsData(iTask, data)
+		delData, err := HashDeleteData(iTask, data)
 		if err != nil {
 			return err
 		}
-		hashedData, err := HashData(iTask, data)
-		if err != nil {
-			return err
-		}
-		fs, sts, err := t.sync(iTask, hashedData)
+		fs, sts, err := t.syncDelete(iTask, delData)
 		if err != nil {
 			return err
 		}
@@ -195,32 +193,30 @@ func (t *ImportTask) importFile(reader importutilv2.Reader, task Task) error {
 			return err
 		}
 		t.manager.Update(task.GetTaskID(), UpdateSegmentInfo(segmentInfo))
-		log.Info("sync import data done", WrapLogFields(task, zap.Any("segmentInfo", segmentInfo))...)
+		log.Info("sync l0 data done", WrapLogFields(task, zap.Any("segmentInfo", segmentInfo))...)
 	}
 	return nil
 }
 
-func (t *ImportTask) sync(task *ImportTask, hashedData HashedData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
-	log.Info("start to sync import data", WrapLogFields(task)...)
+func (t *L0ImportTask) syncDelete(task *L0ImportTask, delData []*storage.DeleteData) ([]*conc.Future[struct{}], []syncmgr.Task, error) {
+	log.Info("start to sync l0 delete data", WrapLogFields(task)...)
 	futures := make([]*conc.Future[struct{}], 0)
 	syncTasks := make([]syncmgr.Task, 0)
-	for channelIdx, datas := range hashedData {
+	for channelIdx, data := range delData {
 		channel := task.GetVchannels()[channelIdx]
-		for partitionIdx, data := range datas {
-			if data.GetRowNum() == 0 {
-				continue
-			}
-			partitionID := task.GetPartitionIDs()[partitionIdx]
-			segmentID := PickSegment(task.req.GetRequestSegments(), channel, partitionID)
-			syncTask, err := NewSyncTask(task.ctx, task.metaCaches, task.req.GetTs(),
-				segmentID, partitionID, task.GetCollectionID(), channel, data, nil)
-			if err != nil {
-				return nil, nil, err
-			}
-			future := t.syncMgr.SyncData(task.ctx, syncTask)
-			futures = append(futures, future)
-			syncTasks = append(syncTasks, syncTask)
+		if data.RowCount == 0 {
+			continue
 		}
+		partitionID := task.GetPartitionIDs()[0]
+		segmentID := PickSegment(task.req.GetRequestSegments(), channel, partitionID)
+		syncTask, err := NewSyncTask(task.ctx, task.metaCaches, task.req.GetTs(),
+			segmentID, partitionID, task.GetCollectionID(), channel, nil, data)
+		if err != nil {
+			return nil, nil, err
+		}
+		future := t.syncMgr.SyncData(task.ctx, syncTask)
+		futures = append(futures, future)
+		syncTasks = append(syncTasks, syncTask)
 	}
 	return futures, syncTasks, nil
 }

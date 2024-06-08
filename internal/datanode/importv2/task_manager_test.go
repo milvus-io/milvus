@@ -76,3 +76,73 @@ func TestImportManager(t *testing.T) {
 	tasks = manager.GetBy()
 	assert.Equal(t, 1, len(tasks))
 }
+
+func TestImportManager_L0(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+
+	t.Run("l0 preimport", func(t *testing.T) {
+		manager := NewTaskManager()
+		task := &L0PreImportTask{
+			PreImportTask: &datapb.PreImportTask{
+				JobID:        1,
+				TaskID:       2,
+				CollectionID: 3,
+				NodeID:       7,
+				State:        datapb.ImportTaskStateV2_Pending,
+				FileStats: []*datapb.ImportFileStats{{
+					TotalRows: 50,
+				}},
+			},
+			ctx:    ctx,
+			cancel: cancel,
+		}
+		manager.Add(task)
+		res := manager.Get(task.GetTaskID())
+		assert.Equal(t, task, res)
+
+		reason := "mock reason"
+		manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed),
+			UpdateReason(reason), UpdateFileStat(0, &datapb.ImportFileStats{
+				TotalRows: 100,
+			}))
+
+		res = manager.Get(task.GetTaskID())
+		assert.Equal(t, datapb.ImportTaskStateV2_Failed, res.GetState())
+		assert.Equal(t, reason, res.GetReason())
+		assert.Equal(t, int64(100), res.(*L0PreImportTask).GetFileStats()[0].GetTotalRows())
+	})
+
+	t.Run("l0 import", func(t *testing.T) {
+		manager := NewTaskManager()
+		task := &L0ImportTask{
+			ImportTaskV2: &datapb.ImportTaskV2{
+				JobID:        1,
+				TaskID:       2,
+				CollectionID: 3,
+				SegmentIDs:   []int64{5, 6},
+				NodeID:       7,
+				State:        datapb.ImportTaskStateV2_Pending,
+			},
+			segmentsInfo: map[int64]*datapb.ImportSegmentInfo{
+				10: {ImportedRows: 50},
+			},
+			ctx:    ctx,
+			cancel: cancel,
+		}
+		manager.Add(task)
+		res := manager.Get(task.GetTaskID())
+		assert.Equal(t, task, res)
+
+		reason := "mock reason"
+		manager.Update(task.GetTaskID(), UpdateState(datapb.ImportTaskStateV2_Failed),
+			UpdateReason(reason), UpdateSegmentInfo(&datapb.ImportSegmentInfo{
+				SegmentID:    10,
+				ImportedRows: 100,
+			}))
+
+		res = manager.Get(task.GetTaskID())
+		assert.Equal(t, datapb.ImportTaskStateV2_Failed, res.GetState())
+		assert.Equal(t, reason, res.GetReason())
+		assert.Equal(t, int64(100), res.(*L0ImportTask).GetSegmentsInfo()[0].GetImportedRows())
+	})
+}

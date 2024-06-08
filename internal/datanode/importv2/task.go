@@ -28,13 +28,17 @@ import (
 type TaskType int
 
 const (
-	PreImportTaskType TaskType = 0
-	ImportTaskType    TaskType = 1
+	PreImportTaskType   TaskType = 0
+	ImportTaskType      TaskType = 1
+	L0PreImportTaskType TaskType = 2
+	L0ImportTaskType    TaskType = 3
 )
 
 var ImportTaskTypeName = map[TaskType]string{
 	0: "PreImportTask",
 	1: "ImportTask",
+	2: "L0PreImportTaskType",
+	3: "L0ImportTaskType",
 }
 
 func (t TaskType) String() string {
@@ -69,6 +73,10 @@ func UpdateState(state datapb.ImportTaskStateV2) UpdateAction {
 			t.(*PreImportTask).PreImportTask.State = state
 		case ImportTaskType:
 			t.(*ImportTask).ImportTaskV2.State = state
+		case L0PreImportTaskType:
+			t.(*L0PreImportTask).PreImportTask.State = state
+		case L0ImportTaskType:
+			t.(*L0ImportTask).ImportTaskV2.State = state
 		}
 	}
 }
@@ -80,17 +88,28 @@ func UpdateReason(reason string) UpdateAction {
 			t.(*PreImportTask).PreImportTask.Reason = reason
 		case ImportTaskType:
 			t.(*ImportTask).ImportTaskV2.Reason = reason
+		case L0PreImportTaskType:
+			t.(*L0PreImportTask).PreImportTask.Reason = reason
+		case L0ImportTaskType:
+			t.(*L0ImportTask).ImportTaskV2.Reason = reason
 		}
 	}
 }
 
 func UpdateFileStat(idx int, fileStat *datapb.ImportFileStats) UpdateAction {
 	return func(task Task) {
-		if it, ok := task.(*PreImportTask); ok {
-			it.PreImportTask.FileStats[idx].FileSize = fileStat.GetFileSize()
-			it.PreImportTask.FileStats[idx].TotalRows = fileStat.GetTotalRows()
-			it.PreImportTask.FileStats[idx].TotalMemorySize = fileStat.GetTotalMemorySize()
-			it.PreImportTask.FileStats[idx].HashedStats = fileStat.GetHashedStats()
+		var t *datapb.PreImportTask
+		switch it := task.(type) {
+		case *PreImportTask:
+			t = it.PreImportTask
+		case *L0PreImportTask:
+			t = it.PreImportTask
+		}
+		if t != nil {
+			t.FileStats[idx].FileSize = fileStat.GetFileSize()
+			t.FileStats[idx].TotalRows = fileStat.GetTotalRows()
+			t.FileStats[idx].TotalMemorySize = fileStat.GetTotalMemorySize()
+			t.FileStats[idx].HashedStats = fileStat.GetHashedStats()
 		}
 	}
 }
@@ -110,15 +129,23 @@ func UpdateSegmentInfo(info *datapb.ImportSegmentInfo) UpdateAction {
 		return current
 	}
 	return func(task Task) {
-		if it, ok := task.(*ImportTask); ok {
+		var segmentsInfo map[int64]*datapb.ImportSegmentInfo
+		switch it := task.(type) {
+		case *ImportTask:
+			segmentsInfo = it.segmentsInfo
+		case *L0ImportTask:
+			segmentsInfo = it.segmentsInfo
+		}
+		if segmentsInfo != nil {
 			segment := info.GetSegmentID()
-			if _, ok = it.segmentsInfo[segment]; ok {
-				it.segmentsInfo[segment].ImportedRows = info.GetImportedRows()
-				it.segmentsInfo[segment].Binlogs = mergeFn(it.segmentsInfo[segment].Binlogs, info.GetBinlogs())
-				it.segmentsInfo[segment].Statslogs = mergeFn(it.segmentsInfo[segment].Statslogs, info.GetStatslogs())
+			if _, ok := segmentsInfo[segment]; ok {
+				segmentsInfo[segment].ImportedRows = info.GetImportedRows()
+				segmentsInfo[segment].Binlogs = mergeFn(segmentsInfo[segment].Binlogs, info.GetBinlogs())
+				segmentsInfo[segment].Statslogs = mergeFn(segmentsInfo[segment].Statslogs, info.GetStatslogs())
+				segmentsInfo[segment].Deltalogs = mergeFn(segmentsInfo[segment].Deltalogs, info.GetDeltalogs())
 				return
 			}
-			it.segmentsInfo[segment] = info
+			segmentsInfo[segment] = info
 		}
 	}
 }
