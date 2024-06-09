@@ -69,6 +69,7 @@ set(MILVUS_TEST_FILES
         test_array_inverted_index.cpp
         test_chunk_vector.cpp
         test_mmap_chunk_manager.cpp
+        test_futures.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

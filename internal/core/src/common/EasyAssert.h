@@ -66,6 +66,9 @@ enum ErrorCode {
     MmapError = 2036,
     KnowhereError = 2100,
 
+    // timeout or cancel related.
+    FollyOtherException = 2200,
+    FollyCancel = 2201
 };
 namespace impl {
 void
@@ -90,7 +93,7 @@ class SegcoreError : public std::runtime_error {
     }
 
     ErrorCode
-    get_error_code() {
+    get_error_code() const {
         return error_code_;
     }
 
@@ -114,9 +117,9 @@ FailureCStatus(int code, const std::string& msg) {
 }
 
 inline CStatus
-FailureCStatus(std::exception* ex) {
-    if (dynamic_cast<SegcoreError*>(ex) != nullptr) {
-        auto segcore_error = dynamic_cast<SegcoreError*>(ex);
+FailureCStatus(const std::exception* ex) {
+    if (dynamic_cast<const SegcoreError*>(ex) != nullptr) {
+        auto segcore_error = dynamic_cast<const SegcoreError*>(ex);
         return CStatus{static_cast<int>(segcore_error->get_error_code()),
                        strdup(ex->what())};
     }
