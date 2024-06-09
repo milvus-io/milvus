@@ -22,13 +22,13 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
-	"golang.org/x/sync/semaphore"
 )
 
 const (
