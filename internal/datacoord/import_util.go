@@ -428,7 +428,7 @@ func GetTaskProgresses(jobID int64, imeta ImportMeta, meta *meta) []*internalpb.
 		}
 		for _, fileStat := range task.GetFileStats() {
 			progresses = append(progresses, &internalpb.ImportTaskProgress{
-				FileName:     fileStat.GetImportFile().String(),
+				FileName:     fmt.Sprintf("%v", fileStat.GetImportFile().GetPaths()),
 				FileSize:     fileStat.GetFileSize(),
 				Reason:       task.GetReason(),
 				Progress:     progress,
