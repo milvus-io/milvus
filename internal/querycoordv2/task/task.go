@@ -417,8 +417,7 @@ type LeaderTask struct {
 	leaderID  int64
 }
 
-func NewLeaderTask(ctx context.Context,
-	timeout time.Duration,
+func NewLeaderSegmentTask(ctx context.Context,
 	source Source,
 	collectionID typeutil.UniqueID,
 	replica *meta.Replica,
@@ -426,12 +425,27 @@ func NewLeaderTask(ctx context.Context,
 	action *LeaderAction,
 ) *LeaderTask {
 	segmentID := action.SegmentID()
-	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderTask-%s-%d", action.Type().String(), segmentID))
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderSegmentTask-%s-%d", action.Type().String(), segmentID))
 	base.actions = []Action{action}
 	return &LeaderTask{
 		baseTask:  base,
 		segmentID: segmentID,
 		leaderID:  leaderID,
+	}
+}
+
+func NewLeaderPartStatsTask(ctx context.Context,
+	source Source,
+	collectionID typeutil.UniqueID,
+	replica *meta.Replica,
+	leaderID int64,
+	action *LeaderAction,
+) *LeaderTask {
+	base := newBaseTask(ctx, source, collectionID, replica, action.Shard(), fmt.Sprintf("LeaderPartitionStatsTask-%s", action.Type().String()))
+	base.actions = []Action{action}
+	return &LeaderTask{
+		baseTask: base,
+		leaderID: leaderID,
 	}
 }
 

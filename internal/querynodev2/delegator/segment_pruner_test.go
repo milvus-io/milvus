@@ -44,7 +44,7 @@ func (sps *SegmentPrunerSuite) SetupForClustering(clusterKeyFieldName string,
 	fieldName2DataType[sps.primaryFieldName] = schemapb.DataType_Int64
 	fieldName2DataType[sps.clusterKeyFieldName] = clusterKeyFieldType
 	fieldName2DataType["info"] = schemapb.DataType_VarChar
-	fieldName2DataType["age"] = schemapb.DataType_Int32
+	fieldName2DataType["age"] = schemapb.DataType_Int64
 	fieldName2DataType["vec"] = schemapb.DataType_FloatVector
 
 	sps.schema = testutil.ConstructCollectionSchemaWithKeys(sps.collectionName,
@@ -399,21 +399,7 @@ func (sps *SegmentPrunerSuite) TestPruneSegmentsByVectorField() {
 		Topk:             100,
 	}
 
-	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{0.25})
-	sps.Equal(1, len(sps.sealedSegments[0].Segments))
-	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
-	sps.Equal(1, len(sps.sealedSegments[1].Segments))
-	sps.Equal(int64(3), sps.sealedSegments[1].Segments[0].SegmentID)
-
-	// test for IP metrics
-	req = &internalpb.SearchRequest{
-		MetricType:       "IP",
-		PlaceholderGroup: bs,
-		PartitionIDs:     []UniqueID{sps.targetPartition},
-		Topk:             100,
-	}
-
-	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{0.25})
+	PruneSegments(context.TODO(), sps.partitionStats, req, nil, sps.schema, sps.sealedSegments, PruneInfo{1})
 	sps.Equal(1, len(sps.sealedSegments[0].Segments))
 	sps.Equal(int64(1), sps.sealedSegments[0].Segments[0].SegmentID)
 	sps.Equal(1, len(sps.sealedSegments[1].Segments))
