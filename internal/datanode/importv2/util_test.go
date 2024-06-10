@@ -152,7 +152,7 @@ func Test_PickSegment(t *testing.T) {
 	importedSize := map[int64]int{}
 
 	totalSize := 8 * 1024 * 1024 * 1024
-	batchSize := 16 * 1024 * 1024
+	batchSize := 1 * 1024 * 1024
 
 	for totalSize > 0 {
 		picked := PickSegment(task.req.GetRequestSegments(), vchannel, partitionID)
