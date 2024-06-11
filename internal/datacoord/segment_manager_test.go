@@ -255,7 +255,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
 
-		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.NoError(t, err)
 		segment2 := meta.GetSegment(segment.GetID())
 		assert.NotNil(t, segment2)
@@ -269,7 +269,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.Error(t, err)
 	})
 
@@ -281,7 +281,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.Error(t, err)
 	})
 
@@ -295,7 +295,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(mockErr)
 		meta.catalog = catalog
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.Error(t, err)
 	})
 }

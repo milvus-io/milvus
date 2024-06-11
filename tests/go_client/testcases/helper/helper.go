@@ -47,7 +47,7 @@ func GetAllVectorFieldType() []entity.FieldType {
 	}
 }
 
-func GetAllScaleFieldType() []entity.FieldType {
+func GetAllScalarFieldType() []entity.FieldType {
 	return []entity.FieldType{
 		entity.FieldTypeBool,
 		entity.FieldTypeInt8,
@@ -63,7 +63,7 @@ func GetAllScaleFieldType() []entity.FieldType {
 }
 
 func GetAllFieldsType() []entity.FieldType {
-	allFieldType := GetAllScaleFieldType()
+	allFieldType := GetAllScalarFieldType()
 	allFieldType = append(allFieldType, entity.FieldTypeBinaryVector,
 		entity.FieldTypeFloatVector,
 		entity.FieldTypeFloat16Vector,
@@ -128,7 +128,7 @@ func (chainTask *CollectionPrepare) CreateCollection(ctx context.Context, t *tes
 }
 
 func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T, mc *base.MilvusClient,
-	ip *InsertParams, option *GenColumnOption) (*CollectionPrepare, clientv2.InsertResult) {
+	ip *InsertParams, option *GenDataOption) (*CollectionPrepare, clientv2.InsertResult) {
 	if nil == ip.Schema || ip.Schema.CollectionName == "" {
 		log.Fatal("[InsertData] Nil Schema is not expected")
 	}

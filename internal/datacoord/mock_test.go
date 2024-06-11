@@ -613,16 +613,6 @@ type mockCompactionTrigger struct {
 	methods map[string]interface{}
 }
 
-// triggerCompaction trigger a compaction if any compaction condition satisfy.
-func (t *mockCompactionTrigger) triggerCompaction() error {
-	if f, ok := t.methods["triggerCompaction"]; ok {
-		if ff, ok := f.(func() error); ok {
-			return ff()
-		}
-	}
-	panic("not implemented")
-}
-
 // triggerSingleCompaction trigerr a compaction bundled with collection-partiiton-channel-segment
 func (t *mockCompactionTrigger) triggerSingleCompaction(collectionID, partitionID, segmentID int64, channel string, blockToSendSignal bool) error {
 	if f, ok := t.methods["triggerSingleCompaction"]; ok {

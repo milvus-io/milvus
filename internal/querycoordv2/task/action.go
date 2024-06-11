@@ -173,7 +173,8 @@ type LeaderAction struct {
 	segmentID typeutil.UniqueID
 	version   typeutil.UniqueID // segment load ts, 0 means not set
 
-	rpcReturned atomic.Bool
+	partStatsVersions map[int64]int64
+	rpcReturned       atomic.Bool
 }
 
 func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, segmentID typeutil.UniqueID, version typeutil.UniqueID) *LeaderAction {
@@ -183,6 +184,16 @@ func NewLeaderAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard
 		leaderID:  leaderID,
 		segmentID: segmentID,
 		version:   version,
+	}
+	action.rpcReturned.Store(false)
+	return action
+}
+
+func NewLeaderUpdatePartStatsAction(leaderID, workerID typeutil.UniqueID, typ ActionType, shard string, partStatsVersions map[int64]int64) *LeaderAction {
+	action := &LeaderAction{
+		BaseAction:        NewBaseAction(workerID, typ, shard),
+		leaderID:          leaderID,
+		partStatsVersions: partStatsVersions,
 	}
 	action.rpcReturned.Store(false)
 	return action

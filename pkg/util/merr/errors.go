@@ -157,9 +157,11 @@ var (
 	ErrInvalidStreamObj     = newMilvusError("invalid stream object", 1903, false)
 
 	// Segcore related
-	ErrSegcore                = newMilvusError("segcore error", 2000, false)
-	ErrSegcoreUnsupported     = newMilvusError("segcore unsupported error", 2001, false)
-	ErrSegcorePretendFinished = newMilvusError("segcore pretend finished", 2002, false)
+	ErrSegcore                    = newMilvusError("segcore error", 2000, false)
+	ErrSegcoreUnsupported         = newMilvusError("segcore unsupported error", 2001, false)
+	ErrSegcorePretendFinished     = newMilvusError("segcore pretend finished", 2002, false)
+	ErrSegcoreFollyOtherException = newMilvusError("segcore folly other exception", 2200, false) // throw from segcore.
+	ErrSegcoreFollyCancel         = newMilvusError("segcore Future was canceled", 2201, false)   // throw from segcore.
 
 	// Do NOT export this,
 	// never allow programmer using this, keep only for converting unknown error to milvusError
@@ -181,6 +183,8 @@ var (
 	ErrClusteringCompactionNotSupportVector       = newMilvusError("vector field clustering compaction is not supported", 2306, false)
 	ErrClusteringCompactionSubmitTaskFail         = newMilvusError("fail to submit task", 2307, true)
 	ErrClusteringCompactionMetaError              = newMilvusError("fail to update meta in clustering compaction", 2308, true)
+	ErrClusteringCompactionGetCollectionFail      = newMilvusError("fail to get collection in compaction", 2309, true)
+	ErrCompactionResultNotFound                   = newMilvusError("compaction result not found", 2310, false)
 
 	// General
 	ErrOperationNotSupported = newMilvusError("unsupported operation", 3000, false)

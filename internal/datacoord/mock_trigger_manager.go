@@ -75,6 +75,70 @@ func (_c *MockTriggerManager_ManualTrigger_Call) RunAndReturn(run func(context.C
 	return _c
 }
 
+// Start provides a mock function with given fields:
+func (_m *MockTriggerManager) Start() {
+	_m.Called()
+}
+
+// MockTriggerManager_Start_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Start'
+type MockTriggerManager_Start_Call struct {
+	*mock.Call
+}
+
+// Start is a helper method to define mock.On call
+func (_e *MockTriggerManager_Expecter) Start() *MockTriggerManager_Start_Call {
+	return &MockTriggerManager_Start_Call{Call: _e.mock.On("Start")}
+}
+
+func (_c *MockTriggerManager_Start_Call) Run(run func()) *MockTriggerManager_Start_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTriggerManager_Start_Call) Return() *MockTriggerManager_Start_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTriggerManager_Start_Call) RunAndReturn(run func()) *MockTriggerManager_Start_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
+// Stop provides a mock function with given fields:
+func (_m *MockTriggerManager) Stop() {
+	_m.Called()
+}
+
+// MockTriggerManager_Stop_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Stop'
+type MockTriggerManager_Stop_Call struct {
+	*mock.Call
+}
+
+// Stop is a helper method to define mock.On call
+func (_e *MockTriggerManager_Expecter) Stop() *MockTriggerManager_Stop_Call {
+	return &MockTriggerManager_Stop_Call{Call: _e.mock.On("Stop")}
+}
+
+func (_c *MockTriggerManager_Stop_Call) Run(run func()) *MockTriggerManager_Stop_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run()
+	})
+	return _c
+}
+
+func (_c *MockTriggerManager_Stop_Call) Return() *MockTriggerManager_Stop_Call {
+	_c.Call.Return()
+	return _c
+}
+
+func (_c *MockTriggerManager_Stop_Call) RunAndReturn(run func()) *MockTriggerManager_Stop_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // NewMockTriggerManager creates a new instance of MockTriggerManager. It also registers a testing interface on the mock and a cleanup function to assert the mocks expectations.
 // The first argument is typically a *testing.T value.
 func NewMockTriggerManager(t interface {

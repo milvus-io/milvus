@@ -43,15 +43,32 @@ func getBasicConfig(address string) kafka.ConfigMap {
 	}
 }
 
+func ConfigtoString(config kafka.ConfigMap) string {
+	configString := "["
+	for key := range config {
+		if key == "sasl.password" || key == "sasl.username" {
+			configString += key + ":" + "*** "
+		} else {
+			value, _ := config.Get(key, nil)
+			configString += key + ":" + fmt.Sprintf("%v ", value)
+		}
+	}
+	if len(configString) > 1 {
+		configString = configString[:len(configString)-1]
+	}
+	configString += "]"
+	return configString
+}
+
 func NewKafkaClientInstance(address string) *kafkaClient {
 	config := getBasicConfig(address)
 	return NewKafkaClientInstanceWithConfigMap(config, kafka.ConfigMap{}, kafka.ConfigMap{})
 }
 
 func NewKafkaClientInstanceWithConfigMap(config kafka.ConfigMap, extraConsumerConfig kafka.ConfigMap, extraProducerConfig kafka.ConfigMap) *kafkaClient {
-	log.Info("init kafka Config ", zap.String("commonConfig", fmt.Sprintf("+%v", config)),
-		zap.String("extraConsumerConfig", fmt.Sprintf("+%v", extraConsumerConfig)),
-		zap.String("extraProducerConfig", fmt.Sprintf("+%v", extraProducerConfig)),
+	log.Info("init kafka Config ", zap.String("commonConfig", ConfigtoString(config)),
+		zap.String("extraConsumerConfig", ConfigtoString(extraConsumerConfig)),
+		zap.String("extraProducerConfig", ConfigtoString(extraProducerConfig)),
 	)
 	return &kafkaClient{basicConfig: config, consumerConfig: extraConsumerConfig, producerConfig: extraProducerConfig}
 }

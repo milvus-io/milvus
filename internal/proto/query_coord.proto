@@ -609,6 +609,7 @@ message LeaderView {
     map<int64, msg.MsgPosition> growing_segments = 5;
     int64 TargetVersion = 6;
     int64 num_of_growing_rows = 7;
+    map<int64, int64> partition_stats_versions = 8;
 }
 
 message SegmentDist {
@@ -679,6 +680,7 @@ enum SyncType {
     Set = 1;
     Amend = 2;
     UpdateVersion = 3;
+    UpdatePartitionStats = 4;
 }
 
 message SyncAction {
@@ -693,6 +695,7 @@ message SyncAction {
     int64 TargetVersion = 9;
     repeated int64 droppedInTarget = 10;
     msg.MsgPosition checkpoint = 11;
+    map<int64, int64> partition_stats_versions = 12;
 }
 
 message SyncDistributionRequest {
