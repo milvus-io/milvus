@@ -470,17 +470,19 @@ TEST_P(ExprTest, TestBinaryRangeJSON) {
             auto ans = final[i];
 
             if (testcase.nested_path[0] == "int") {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<int64_t>(pointer)
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<int64_t>(pointer)
+                        .value();
                 auto ref = check(val);
                 ASSERT_EQ(ans, ref)
                     << val << testcase.lower_inclusive << testcase.lower
                     << testcase.upper_inclusive << testcase.upper;
             } else {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<double>(pointer)
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<double>(pointer)
+                        .value();
                 auto ref = check(val);
                 ASSERT_EQ(ans, ref)
                     << val << testcase.lower_inclusive << testcase.lower
@@ -542,7 +544,7 @@ TEST_P(ExprTest, TestExistsJson) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto val = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto val = milvus::JsonView(simdjson::padded_string(json_col[i]))
                            .exist(pointer);
             auto ref = check(val);
             ASSERT_EQ(ans, ref);
@@ -683,14 +685,14 @@ TEST_P(ExprTest, TestUnaryRangeJson) {
                 auto ans = final[i];
                 if (testcase.nested_path[0] == "int") {
                     auto val =
-                        milvus::Json(simdjson::padded_string(json_col[i]))
+                        milvus::JsonView(simdjson::padded_string(json_col[i]))
                             .template at<int64_t>(pointer)
                             .value();
                     auto ref = f(val);
                     ASSERT_EQ(ans, ref);
                 } else {
                     auto val =
-                        milvus::Json(simdjson::padded_string(json_col[i]))
+                        milvus::JsonView(simdjson::padded_string(json_col[i]))
                             .template at<double>(pointer)
                             .value();
                     auto ref = f(val);
@@ -812,7 +814,7 @@ TEST_P(ExprTest, TestTermJson) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto val = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto val = milvus::JsonView(simdjson::padded_string(json_col[i]))
                            .template at<int64_t>(pointer)
                            .value();
             auto ref = check(val);
@@ -3325,8 +3327,8 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
     using namespace milvus::query;
     using namespace milvus::segcore;
 
-    std::vector<
-        std::tuple<std::string, std::function<bool(const milvus::Json& json)>>>
+    std::vector<std::tuple<std::string,
+                           std::function<bool(const milvus::JsonView& json)>>>
         testcases = {
             // Add test cases for BinaryArithOpEvalRangeExpr EQ of various data types
             {R"(binary_arith_op_eval_range_expr: <
@@ -3344,7 +3346,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val + 1) == 2;
@@ -3364,7 +3366,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val - 1) == 2;
@@ -3384,7 +3386,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val * 2) == 4;
@@ -3404,7 +3406,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val / 2) == 4;
@@ -3422,7 +3424,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                   op: Equal
                   value:<int64_val:4>
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val % 2) == 4;
@@ -3437,7 +3439,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                   op: Equal
                   value:<int64_val:4>
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"array"});
                  int array_length = 0;
                  auto doc = json.doc();
@@ -3463,7 +3465,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val + 1) != 2;
@@ -3483,7 +3485,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val - 1) != 2;
@@ -3503,7 +3505,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val * 2) != 4;
@@ -3523,7 +3525,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val / 2) != 4;
@@ -3543,7 +3545,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val % 2) != 4;
@@ -3560,7 +3562,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"array"});
                  int array_length = 0;
                  auto doc = json.doc();
@@ -3587,7 +3589,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val + 1) > 2;
@@ -3607,7 +3609,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val - 1) > 2;
@@ -3627,7 +3629,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val * 2) > 4;
@@ -3647,7 +3649,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val / 2) > 4;
@@ -3667,7 +3669,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val % 2) > 4;
@@ -3684,7 +3686,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"array"});
                  int array_length = 0;
                  auto doc = json.doc();
@@ -3711,7 +3713,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val + 1) >= 2;
@@ -3731,7 +3733,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val - 1) >= 2;
@@ -3751,7 +3753,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val * 2) >= 4;
@@ -3771,7 +3773,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val / 2) >= 4;
@@ -3791,7 +3793,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val % 2) >= 4;
@@ -3808,7 +3810,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"array"});
                  int array_length = 0;
                  auto doc = json.doc();
@@ -3835,7 +3837,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val + 1) < 2;
@@ -3855,7 +3857,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val - 1) < 2;
@@ -3875,7 +3877,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val * 2) < 4;
@@ -3895,7 +3897,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val / 2) < 4;
@@ -3915,7 +3917,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val % 2) < 4;
@@ -3932,7 +3934,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"array"});
                  int array_length = 0;
                  auto doc = json.doc();
@@ -3959,7 +3961,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val + 1) <= 2;
@@ -3979,7 +3981,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 2
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val - 1) <= 2;
@@ -3999,7 +4001,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val * 2) <= 4;
@@ -4019,7 +4021,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val / 2) <= 4;
@@ -4039,7 +4041,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"int"});
                  auto val = json.template at<int64_t>(pointer).value();
                  return (val % 2) <= 4;
@@ -4056,7 +4058,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
                     int64_val: 4
                   >
              >)",
-             [](const milvus::Json& json) {
+             [](const milvus::JsonView& json) {
                  auto pointer = milvus::Json::pointer({"array"});
                  int array_length = 0;
                  auto doc = json.doc();
@@ -4125,8 +4127,8 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSON) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto ref =
-                ref_func(milvus::Json(simdjson::padded_string(json_col[i])));
+            auto ref = ref_func(
+                milvus::JsonView(simdjson::padded_string(json_col[i])));
             ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << json_col[i];
         }
     }
@@ -4203,7 +4205,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloat) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
-            auto val = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto val = milvus::JsonView(simdjson::padded_string(json_col[i]))
                            .template at<double>(pointer)
                            .value();
             auto ref = check(val);
@@ -4245,7 +4247,7 @@ TEST_P(ExprTest, TestBinaryArithOpEvalRangeJSONFloat) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
 
-            auto json = milvus::Json(simdjson::padded_string(json_col[i]));
+            auto json = milvus::JsonView(simdjson::padded_string(json_col[i]));
             int64_t array_length = 0;
             auto doc = json.doc();
             auto array = doc.at_pointer(pointer).get_array();
@@ -4949,27 +4951,31 @@ TEST_P(ExprTest, TestUnaryRangeWithJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (dtype == DataType::BOOL) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<bool>("/bool")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<bool>("/bool")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<int64_t>("/int")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<int64_t>("/int")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::DOUBLE) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<double>("/double")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<double>("/double")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::STRING) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<std::string_view>("/string")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<std::string_view>("/string")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else {
@@ -5126,27 +5132,31 @@ TEST_P(ExprTest, TestTermWithJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (dtype == DataType::BOOL) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<bool>("/bool")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<bool>("/bool")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<int64_t>("/int")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<int64_t>("/int")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::DOUBLE) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<double>("/double")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<double>("/double")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::STRING) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .template at<std::string_view>("/string")
-                               .value();
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .template at<std::string_view>("/string")
+                        .value();
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else {
@@ -5277,28 +5287,33 @@ TEST_P(ExprTest, TestExistsWithJSON) {
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
             if (dtype == DataType::BOOL) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .exist("/bool");
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .exist("/bool");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::INT64) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .exist("/int");
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .exist("/int");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::DOUBLE) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .exist("/double");
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .exist("/double");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::STRING) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .exist("/string");
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .exist("/string");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else if (dtype == DataType::VARCHAR) {
-                auto val = milvus::Json(simdjson::padded_string(json_col[i]))
-                               .exist("/varchar");
+                auto val =
+                    milvus::JsonView(simdjson::padded_string(json_col[i]))
+                        .exist("/varchar");
                 auto ref = ref_func(val);
                 ASSERT_EQ(ans, ref) << clause << "@" << i << "!!" << val;
             } else {
@@ -5376,7 +5391,7 @@ TEST_P(ExprTest, TestTermInFieldJson) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<bool> res;
             for (const auto& element : array) {
@@ -5424,7 +5439,7 @@ TEST_P(ExprTest, TestTermInFieldJson) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<double> res;
             for (const auto& element : array) {
@@ -5472,7 +5487,7 @@ TEST_P(ExprTest, TestTermInFieldJson) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<int64_t> res;
             for (const auto& element : array) {
@@ -5520,7 +5535,7 @@ TEST_P(ExprTest, TestTermInFieldJson) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<std::string_view> res;
             for (const auto& element : array) {
@@ -5735,7 +5750,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<bool> res;
             for (const auto& element : array) {
@@ -5784,7 +5799,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<double> res;
             for (const auto& element : array) {
@@ -5833,7 +5848,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<int64_t> res;
             for (const auto& element : array) {
@@ -5882,7 +5897,7 @@ TEST_P(ExprTest, TestJsonContainsAny) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<std::string_view> res;
             for (const auto& element : array) {
@@ -5960,7 +5975,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<bool> res;
             for (const auto& element : array) {
@@ -6016,7 +6031,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<double> res;
             for (const auto& element : array) {
@@ -6072,7 +6087,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<int64_t> res;
             for (const auto& element : array) {
@@ -6126,7 +6141,7 @@ TEST_P(ExprTest, TestJsonContainsAll) {
 
         for (int i = 0; i < N * num_iters; ++i) {
             auto ans = final[i];
-            auto array = milvus::Json(simdjson::padded_string(json_col[i]))
+            auto array = milvus::JsonView(simdjson::padded_string(json_col[i]))
                              .array_at(pointer);
             std::vector<std::string_view> res;
             for (const auto& element : array) {

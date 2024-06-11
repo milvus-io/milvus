@@ -62,24 +62,56 @@ PhyBinaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto value_type = expr_->lower_val_.val_case();
-            switch (value_type) {
-                case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForJson<int64_t>();
-                    break;
+            if (segment_->type() == SegmentType::Growing) {
+                switch (value_type) {
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        result = ExecRangeVisitorImplForJson<int64_t,
+                                                             milvus::Json>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kFloatVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<double, milvus::Json>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kStringVal: {
+                        result = ExecRangeVisitorImplForJson<std::string,
+                                                             milvus::Json>();
+                        break;
+                    }
+                    default: {
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format(
+                                      "unsupported value type {} in expression",
+                                      value_type));
+                    }
                 }
-                case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForJson<double>();
-                    break;
-                }
-                case proto::plan::GenericValue::ValCase::kStringVal: {
-                    result = ExecRangeVisitorImplForJson<std::string>();
-                    break;
-                }
-                default: {
-                    PanicInfo(
-                        DataTypeInvalid,
-                        fmt::format("unsupported value type {} in expression",
-                                    value_type));
+            } else {
+                switch (value_type) {
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        result =
+                            ExecRangeVisitorImplForJson<int64_t,
+                                                        milvus::JsonView>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kFloatVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<double,
+                                                        milvus::JsonView>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kStringVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<std::string,
+                                                        milvus::JsonView>();
+                        break;
+                    }
+                    default: {
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format(
+                                      "unsupported value type {} in expression",
+                                      value_type));
+                    }
                 }
             }
             break;
@@ -285,7 +317,7 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForData() {
     return res_vec;
 }
 
-template <typename ValueType>
+template <typename ValueType, typename T>
 VectorPtr
 PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
@@ -306,26 +338,26 @@ PhyBinaryRangeFilterExpr::ExecRangeVisitorImplForJson() {
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
     auto execute_sub_batch = [lower_inclusive, upper_inclusive, pointer](
-                                 const milvus::Json* data,
+                                 const T* data,
                                  const int size,
                                  TargetBitmapView res,
                                  ValueType val1,
                                  ValueType val2) {
         if (lower_inclusive && upper_inclusive) {
-            BinaryRangeElementFuncForJson<ValueType, true, true> func;
+            BinaryRangeElementFuncForJson<ValueType, T, true, true> func;
             func(val1, val2, pointer, data, size, res);
         } else if (lower_inclusive && !upper_inclusive) {
-            BinaryRangeElementFuncForJson<ValueType, true, false> func;
+            BinaryRangeElementFuncForJson<ValueType, T, true, false> func;
             func(val1, val2, pointer, data, size, res);
         } else if (!lower_inclusive && upper_inclusive) {
-            BinaryRangeElementFuncForJson<ValueType, false, true> func;
+            BinaryRangeElementFuncForJson<ValueType, T, false, true> func;
             func(val1, val2, pointer, data, size, res);
         } else {
-            BinaryRangeElementFuncForJson<ValueType, false, false> func;
+            BinaryRangeElementFuncForJson<ValueType, T, false, false> func;
             func(val1, val2, pointer, data, size, res);
         }
     };
-    int64_t processed_size = ProcessDataChunks<milvus::Json>(
+    int64_t processed_size = ProcessDataChunks<T>(
         execute_sub_batch, std::nullptr_t{}, res, val1, val2);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

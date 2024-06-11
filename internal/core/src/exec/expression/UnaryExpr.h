@@ -302,7 +302,7 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplForData();
 
-    template <typename ExprValueType>
+    template <typename ExprValueType, typename T>
     VectorPtr
     ExecRangeVisitorImplJson();
 

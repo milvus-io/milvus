@@ -61,25 +61,57 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto val_type = expr_->val_.val_case();
-            switch (val_type) {
-                case proto::plan::GenericValue::ValCase::kBoolVal:
-                    result = ExecRangeVisitorImplJson<bool>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kInt64Val:
-                    result = ExecRangeVisitorImplJson<int64_t>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kFloatVal:
-                    result = ExecRangeVisitorImplJson<double>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kStringVal:
-                    result = ExecRangeVisitorImplJson<std::string>();
-                    break;
-                case proto::plan::GenericValue::ValCase::kArrayVal:
-                    result = ExecRangeVisitorImplJson<proto::plan::Array>();
-                    break;
-                default:
-                    PanicInfo(
-                        DataTypeInvalid, "unknown data type: {}", val_type);
+            if (segment_->type() == SegmentType::Growing) {
+                switch (val_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        result = ExecRangeVisitorImplJson<bool, milvus::Json>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        result =
+                            ExecRangeVisitorImplJson<int64_t, milvus::Json>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        result =
+                            ExecRangeVisitorImplJson<double, milvus::Json>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        result = ExecRangeVisitorImplJson<std::string,
+                                                          milvus::Json>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kArrayVal:
+                        result = ExecRangeVisitorImplJson<proto::plan::Array,
+                                                          milvus::Json>();
+                        break;
+                    default:
+                        PanicInfo(
+                            DataTypeInvalid, "unknown data type: {}", val_type);
+                }
+            } else {
+                switch (val_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal:
+                        result =
+                            ExecRangeVisitorImplJson<bool, milvus::JsonView>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kInt64Val:
+                        result = ExecRangeVisitorImplJson<int64_t,
+                                                          milvus::JsonView>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kFloatVal:
+                        result = ExecRangeVisitorImplJson<double,
+                                                          milvus::JsonView>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kStringVal:
+                        result = ExecRangeVisitorImplJson<std::string,
+                                                          milvus::JsonView>();
+                        break;
+                    case proto::plan::GenericValue::ValCase::kArrayVal:
+                        result = ExecRangeVisitorImplJson<proto::plan::Array,
+                                                          milvus::JsonView>();
+                        break;
+                    default:
+                        PanicInfo(
+                            DataTypeInvalid, "unknown data type: {}", val_type);
+                }
             }
             break;
         }
@@ -196,7 +228,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
     return res_vec;
 }
 
-template <typename ExprValueType>
+template <typename ExprValueType, typename T>
 VectorPtr
 PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
     using GetType =
@@ -245,7 +277,7 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
         res[i] = (cmp);                                        \
     } while (false)
 
-    auto execute_sub_batch = [op_type, pointer](const milvus::Json* data,
+    auto execute_sub_batch = [op_type, pointer](const T* data,
                                                 const int size,
                                                 TargetBitmapView res,
                                                 ExprValueType val) {
@@ -354,8 +386,8 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplJson() {
                                 op_type));
         }
     };
-    int64_t processed_size = ProcessDataChunks<milvus::Json>(
-        execute_sub_batch, std::nullptr_t{}, res, val);
+    int64_t processed_size =
+        ProcessDataChunks<T>(execute_sub_batch, std::nullptr_t{}, res, val);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

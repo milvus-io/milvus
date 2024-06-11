@@ -102,11 +102,11 @@ class PhyTermFilterExpr : public SegmentExpr {
     VectorPtr
     ExecVisitorImplTemplateJson();
 
-    template <typename ValueType>
+    template <typename ValueType, typename T>
     VectorPtr
     ExecTermJsonVariableInField();
 
-    template <typename ValueType>
+    template <typename ValueType, typename T>
     VectorPtr
     ExecTermJsonFieldInVariable();
 

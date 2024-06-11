@@ -52,24 +52,56 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
         }
         case DataType::JSON: {
             auto value_type = expr_->value_.val_case();
-            switch (value_type) {
-                case proto::plan::GenericValue::ValCase::kBoolVal: {
-                    result = ExecRangeVisitorImplForJson<bool>();
-                    break;
+            if (segment_->type() == SegmentType::Growing) {
+                switch (value_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<bool, milvus::Json>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        result = ExecRangeVisitorImplForJson<int64_t,
+                                                             milvus::Json>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kFloatVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<double, milvus::Json>();
+                        break;
+                    }
+                    default: {
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format(
+                                      "unsupported value type {} in expression",
+                                      value_type));
+                    }
                 }
-                case proto::plan::GenericValue::ValCase::kInt64Val: {
-                    result = ExecRangeVisitorImplForJson<int64_t>();
-                    break;
-                }
-                case proto::plan::GenericValue::ValCase::kFloatVal: {
-                    result = ExecRangeVisitorImplForJson<double>();
-                    break;
-                }
-                default: {
-                    PanicInfo(
-                        DataTypeInvalid,
-                        fmt::format("unsupported value type {} in expression",
-                                    value_type));
+            } else {
+                switch (value_type) {
+                    case proto::plan::GenericValue::ValCase::kBoolVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<bool,
+                                                        milvus::JsonView>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kInt64Val: {
+                        result =
+                            ExecRangeVisitorImplForJson<int64_t,
+                                                        milvus::JsonView>();
+                        break;
+                    }
+                    case proto::plan::GenericValue::ValCase::kFloatVal: {
+                        result =
+                            ExecRangeVisitorImplForJson<double,
+                                                        milvus::JsonView>();
+                        break;
+                    }
+                    default: {
+                        PanicInfo(DataTypeInvalid,
+                                  fmt::format(
+                                      "unsupported value type {} in expression",
+                                      value_type));
+                    }
                 }
             }
             break;
@@ -101,7 +133,7 @@ PhyBinaryArithOpEvalRangeExpr::Eval(EvalCtx& context, VectorPtr& result) {
     }
 }
 
-template <typename ValueType>
+template <typename ValueType, typename T>
 VectorPtr
 PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
@@ -158,7 +190,7 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
         }                                                          \
     } while (false)
 
-    auto execute_sub_batch = [op_type, arith_type](const milvus::Json* data,
+    auto execute_sub_batch = [op_type, arith_type](const T* data,
                                                    const int size,
                                                    TargetBitmapView res,
                                                    ValueType val,
@@ -466,12 +498,12 @@ PhyBinaryArithOpEvalRangeExpr::ExecRangeVisitorImplForJson() {
                           op_type);
         }
     };
-    int64_t processed_size = ProcessDataChunks<milvus::Json>(execute_sub_batch,
-                                                             std::nullptr_t{},
-                                                             res,
-                                                             value,
-                                                             right_operand,
-                                                             pointer);
+    int64_t processed_size = ProcessDataChunks<T>(execute_sub_batch,
+                                                  std::nullptr_t{},
+                                                  res,
+                                                  value,
+                                                  right_operand,
+                                                  pointer);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
                "expect batch size {}",

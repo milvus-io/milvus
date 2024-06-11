@@ -422,7 +422,11 @@ template <typename T>
 class VariableColumn : public ColumnBase {
  public:
     using ViewType =
-        std::conditional_t<std::is_same_v<T, std::string>, std::string_view, T>;
+        std::conditional_t<std::is_same_v<T, std::string>,
+                           std::string_view,
+                           std::conditional_t<std::is_same_v<T, milvus::Json>,
+                                              milvus::JsonView,
+                                              T>>;
 
     // memory mode ctor
     VariableColumn(size_t cap, const FieldMeta& field_meta)
@@ -459,6 +463,7 @@ class VariableColumn : public ColumnBase {
 
     std::string_view
     RawAt(const int i) const {
+        Assert(i >= 0 && i < views_.size());
         return std::string_view(views_[i]);
     }
 

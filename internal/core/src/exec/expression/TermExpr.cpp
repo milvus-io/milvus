@@ -216,10 +216,18 @@ PhyTermFilterExpr::ExecPkTermImpl() {
 template <typename ValueType>
 VectorPtr
 PhyTermFilterExpr::ExecVisitorImplTemplateJson() {
-    if (expr_->is_in_field_) {
-        return ExecTermJsonVariableInField<ValueType>();
+    if (segment_->type() == SegmentType::Growing) {
+        if (expr_->is_in_field_) {
+            return ExecTermJsonVariableInField<ValueType, milvus::Json>();
+        } else {
+            return ExecTermJsonFieldInVariable<ValueType, milvus::Json>();
+        }
     } else {
-        return ExecTermJsonFieldInVariable<ValueType>();
+        if (expr_->is_in_field_) {
+            return ExecTermJsonVariableInField<ValueType, milvus::JsonView>();
+        } else {
+            return ExecTermJsonFieldInVariable<ValueType, milvus::JsonView>();
+        }
     }
 }
 
@@ -340,7 +348,7 @@ PhyTermFilterExpr::ExecTermArrayFieldInVariable() {
     return res_vec;
 }
 
-template <typename ValueType>
+template <typename ValueType, typename T>
 VectorPtr
 PhyTermFilterExpr::ExecTermJsonVariableInField() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
@@ -360,7 +368,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
     ValueType val = GetValueFromProto<ValueType>(expr_->vals_[0]);
     auto pointer = milvus::Json::pointer(expr_->column_.nested_path_);
 
-    auto execute_sub_batch = [](const Json* data,
+    auto execute_sub_batch = [](const T* data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string pointer,
@@ -385,7 +393,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
             res[i] = executor(i);
         }
     };
-    int64_t processed_size = ProcessDataChunks<milvus::Json>(
+    int64_t processed_size = ProcessDataChunks<T>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, val);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "
@@ -395,7 +403,7 @@ PhyTermFilterExpr::ExecTermJsonVariableInField() {
     return res_vec;
 }
 
-template <typename ValueType>
+template <typename ValueType, typename T>
 VectorPtr
 PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
     using GetType = std::conditional_t<std::is_same_v<ValueType, std::string>,
@@ -423,7 +431,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
         return res_vec;
     }
 
-    auto execute_sub_batch = [](const Json* data,
+    auto execute_sub_batch = [](const T* data,
                                 const int size,
                                 TargetBitmapView res,
                                 const std::string pointer,
@@ -450,7 +458,7 @@ PhyTermFilterExpr::ExecTermJsonFieldInVariable() {
             res[i] = executor(i);
         }
     };
-    int64_t processed_size = ProcessDataChunks<milvus::Json>(
+    int64_t processed_size = ProcessDataChunks<T>(
         execute_sub_batch, std::nullptr_t{}, res, pointer, term_set);
     AssertInfo(processed_size == real_batch_size,
                "internal error: expr processed rows {} not equal "

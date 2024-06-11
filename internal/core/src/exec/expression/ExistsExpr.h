@@ -56,6 +56,7 @@ class PhyExistsFilterExpr : public SegmentExpr {
     Eval(EvalCtx& context, VectorPtr& result) override;
 
  private:
+    template <typename T>
     VectorPtr
     EvalJsonExistsForDataSegment();
 
