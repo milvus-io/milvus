@@ -11,3 +11,18 @@ packages:
       ImmutableMessage:
       MutableMessage:
       RProperties:
+  github.com/milvus-io/milvus/internal/lognode/server/wal:
+    interfaces:
+      OpenerBuilder:
+      Opener:
+      Scanner:
+      WAL:
+  github.com/milvus-io/milvus/internal/lognode/server/wal/walimpls:
+    interfaces:
+      OpenerBuilderImpls:
+      OpenerImpls:
+      ScannerImpls:
+      WALImpls:
+      Interceptor:
+      InterceptorWithReady:
+      InterceptorBuilder:

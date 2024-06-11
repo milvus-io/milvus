@@ -1,11 +1,17 @@
 package message
 
 import (
+	"github.com/cockroachdb/errors"
+
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-// messageIDUnmarshaler is the map for message id unmarshaler.
-var messageIDUnmarshaler typeutil.ConcurrentMap[string, MessageIDUnmarshaler]
+var (
+	// messageIDUnmarshaler is the map for message id unmarshaler.
+	messageIDUnmarshaler typeutil.ConcurrentMap[string, MessageIDUnmarshaler]
+
+	ErrInvalidMessageID = errors.New("invalid message id")
+)
 
 // RegisterMessageIDUnmsarshaler register the message id unmarshaler.
 func RegisterMessageIDUnmsarshaler(name string, unmarshaler MessageIDUnmarshaler) {
