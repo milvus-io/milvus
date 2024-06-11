@@ -103,8 +103,8 @@ class GrowingTest
  public:
     void
     SetUp() override {
-        auto index_type = std::get<0>(GetParam());
-        auto metric_type = std::get<1>(GetParam());
+        index_type = std::get<0>(GetParam());
+        metric_type = std::get<1>(GetParam());
         if (index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT ||
             index_type == knowhere::IndexEnum::INDEX_FAISS_IVFFLAT_CC) {
             data_type = DataType::VECTOR_FLOAT;
