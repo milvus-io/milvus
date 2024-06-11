@@ -913,18 +913,30 @@ func (dl *DeleteLog) UnmarshalJSON(data []byte) error {
 // DeleteData saves each entity delete message represented as <primarykey,timestamp> map.
 // timestamp represents the time when this instance was deleted
 type DeleteData struct {
-	Pks      []PrimaryKey // primary keys
-	Tss      []Timestamp  // timestamps
-	RowCount int64
-	memSize  int64
+	Pks        []PrimaryKey // primary keys
+	Tss        []Timestamp  // timestamps
+	Serialized []string
+	RowCount   int64
+	memSize    int64
 }
 
 func NewDeleteData(pks []PrimaryKey, tss []Timestamp) *DeleteData {
 	return &DeleteData{
-		Pks:      pks,
-		Tss:      tss,
-		RowCount: int64(len(pks)),
-		memSize:  lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8),
+		Pks:        pks,
+		Tss:        tss,
+		RowCount:   int64(len(pks)),
+		Serialized: make([]string, 0),
+		memSize:    lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8),
+	}
+}
+
+func NewEmptyDeleteData() *DeleteData {
+	return &DeleteData{
+		Pks:        make([]PrimaryKey, 0),
+		Tss:        make([]Timestamp, 0),
+		RowCount:   0,
+		Serialized: make([]string, 0),
+		memSize:    0,
 	}
 }
 
@@ -944,9 +956,19 @@ func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
 	data.memSize += lo.SumBy(pks, func(pk PrimaryKey) int64 { return pk.Size() }) + int64(len(tss)*8)
 }
 
+// Append append 1 pk&ts pair to DeleteData
+func (data *DeleteData) AppendWithSerialized(pk PrimaryKey, ts Timestamp, serialized string) {
+	data.Pks = append(data.Pks, pk)
+	data.Tss = append(data.Tss, ts)
+	data.Serialized = append(data.Serialized, serialized)
+	data.RowCount++
+	data.memSize += pk.Size() + int64(8) + int64(len(serialized))
+}
+
 func (data *DeleteData) Merge(other *DeleteData) {
 	data.Pks = append(data.Pks, other.Pks...)
 	data.Tss = append(data.Tss, other.Tss...)
+	data.Serialized = append(data.Serialized, other.Serialized...)
 	data.RowCount += other.RowCount
 	data.memSize += other.Size()
 
@@ -954,6 +976,7 @@ func (data *DeleteData) Merge(other *DeleteData) {
 	other.Tss = nil
 	other.RowCount = 0
 	other.memSize = 0
+	other.Serialized = nil
 }
 
 func (data *DeleteData) Size() int64 {
@@ -966,6 +989,73 @@ type DeleteCodec struct{}
 // NewDeleteCodec returns a DeleteCodec
 func NewDeleteCodec() *DeleteCodec {
 	return &DeleteCodec{}
+}
+
+type DeleteSerializedWriter struct {
+	writer  *DeleteBinlogWriter
+	eWriter *deleteEventWriter
+
+	startTs Timestamp
+	endTs   Timestamp
+	size    int
+}
+
+func NewDeleteSerializedWriter(collectionID, partitionID, segmentID UniqueID) *DeleteSerializedWriter {
+	return &DeleteSerializedWriter{
+		writer:  NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID),
+		startTs: math.MaxUint64,
+		endTs:   0,
+	}
+}
+
+func (w *DeleteSerializedWriter) Write(row string) error {
+	if w.eWriter == nil {
+		eWriter, err := w.writer.NextDeleteEventWriter()
+		if err != nil {
+			w.writer.Close()
+			return err
+		}
+		w.eWriter = eWriter
+	}
+
+	err := w.eWriter.AddOneStringToPayload(row)
+	if err != nil {
+		w.Close()
+		return err
+	}
+
+	w.size += binary.Size(row)
+	return nil
+}
+
+func (w *DeleteSerializedWriter) Close() {
+	if w.eWriter != nil {
+		w.eWriter.Close()
+	}
+	w.writer.Close()
+}
+
+// Finish returns serialized bytes of delete data
+func (w *DeleteSerializedWriter) Finish(startTs, endTs Timestamp) ([]byte, error) {
+	w.eWriter.SetEventTimestamp(startTs, endTs)
+	w.writer.SetEventTimeStamp(startTs, endTs)
+	defer w.Close()
+
+	// https://github.com/milvus-io/milvus/issues/9620
+	// It's a little complicated to count the memory size of a map.
+	// See: https://stackoverflow.com/questions/31847549/computing-the-memory-footprint-or-byte-length-of-a-map
+	// Since the implementation of golang map may differ from version, so we'd better not to use this magic method.
+	w.writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", w.size))
+
+	if err := w.writer.Finish(); err != nil {
+		return nil, err
+	}
+
+	buffer, err := w.writer.GetBuffer()
+	if err != nil {
+		return nil, err
+	}
+	return buffer, nil
 }
 
 // Serialize transfer delete data to blob. .
@@ -1031,90 +1121,115 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	return blob, nil
 }
 
+func (deleteCodec *DeleteCodec) deserializeBlob(blob *Blob, withSerialized bool) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
+	binlogReader, err := NewBinlogReader(blob.Value)
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	defer binlogReader.Close()
+
+	partitionID, segmentID = binlogReader.PartitionID, binlogReader.SegmentID
+	eventReader, err := binlogReader.NextEventReader()
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	defer eventReader.Close()
+
+	rr, err := eventReader.GetArrowRecordReader()
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	defer rr.Release()
+
+	var p fastjson.Parser
+	deleteLog := &DeleteLog{}
+	data = NewEmptyDeleteData()
+	for rr.Next() {
+		rec := rr.Record()
+		defer rec.Release()
+		column := rec.Column(0)
+		for i := 0; i < column.Len(); i++ {
+			strVal := column.ValueStr(i)
+			v, err := p.Parse(strVal)
+			if err != nil {
+				// compatible with versions that only support int64 type primary keys
+				// compatible with fmt.Sprintf("%d,%d", pk, ts)
+				// compatible error info (unmarshal err invalid character ',' after top-level value)
+				splits := strings.Split(strVal, ",")
+				if len(splits) != 2 {
+					return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("the format of delta log is incorrect, %v can not be split", strVal)
+				}
+				pk, err := strconv.ParseInt(splits[0], 10, 64)
+				if err != nil {
+					return InvalidUniqueID, InvalidUniqueID, nil, err
+				}
+				deleteLog.Pk = &Int64PrimaryKey{
+					Value: pk,
+				}
+				deleteLog.PkType = int64(schemapb.DataType_Int64)
+				deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
+				if err != nil {
+					return InvalidUniqueID, InvalidUniqueID, nil, err
+				}
+			} else {
+				deleteLog.Ts = v.GetUint64("ts")
+				deleteLog.PkType = v.GetInt64("pkType")
+				switch deleteLog.PkType {
+				case int64(schemapb.DataType_Int64):
+					deleteLog.Pk = &Int64PrimaryKey{Value: v.GetInt64("pk")}
+				case int64(schemapb.DataType_VarChar):
+					deleteLog.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes("pk"))}
+				}
+			}
+
+			if withSerialized {
+				data.AppendWithSerialized(deleteLog.Pk, deleteLog.Ts, strVal)
+			} else {
+				data.Append(deleteLog.Pk, deleteLog.Ts)
+			}
+		}
+	}
+	return partitionID, segmentID, data, nil
+}
+
+const (
+	WithSerialized    = true
+	WithoutSerialized = false
+)
+
+func (deleteCodec *DeleteCodec) DeserializeWithSerialized(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
+	if len(blobs) == 0 {
+		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
+	}
+	data = NewEmptyDeleteData()
+	var partialRes *DeleteData
+	for _, blob := range blobs {
+		partitionID, segmentID, partialRes, err = deleteCodec.deserializeBlob(blob, WithSerialized)
+		if err != nil {
+			return InvalidUniqueID, InvalidUniqueID, nil, err
+		}
+		data.Merge(partialRes)
+	}
+	return partitionID, segmentID, data, nil
+}
+
 // Deserialize deserializes the deltalog blobs into DeleteData
 func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
 	if len(blobs) == 0 {
 		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
 	}
 
-	var pid, sid UniqueID
-	result := &DeleteData{}
-
-	deserializeBlob := func(blob *Blob) error {
-		binlogReader, err := NewBinlogReader(blob.Value)
-		if err != nil {
-			return err
-		}
-		defer binlogReader.Close()
-
-		pid, sid = binlogReader.PartitionID, binlogReader.SegmentID
-		eventReader, err := binlogReader.NextEventReader()
-		if err != nil {
-			return err
-		}
-		defer eventReader.Close()
-
-		rr, err := eventReader.GetArrowRecordReader()
-		if err != nil {
-			return err
-		}
-		defer rr.Release()
-
-		var p fastjson.Parser
-		deleteLog := &DeleteLog{}
-
-		for rr.Next() {
-			rec := rr.Record()
-			defer rec.Release()
-			column := rec.Column(0)
-			for i := 0; i < column.Len(); i++ {
-				strVal := column.ValueStr(i)
-
-				v, err := p.Parse(strVal)
-				if err != nil {
-					// compatible with versions that only support int64 type primary keys
-					// compatible with fmt.Sprintf("%d,%d", pk, ts)
-					// compatible error info (unmarshal err invalid character ',' after top-level value)
-					splits := strings.Split(strVal, ",")
-					if len(splits) != 2 {
-						return fmt.Errorf("the format of delta log is incorrect, %v can not be split", strVal)
-					}
-					pk, err := strconv.ParseInt(splits[0], 10, 64)
-					if err != nil {
-						return err
-					}
-					deleteLog.Pk = &Int64PrimaryKey{
-						Value: pk,
-					}
-					deleteLog.PkType = int64(schemapb.DataType_Int64)
-					deleteLog.Ts, err = strconv.ParseUint(splits[1], 10, 64)
-					if err != nil {
-						return err
-					}
-				} else {
-					deleteLog.Ts = v.GetUint64("ts")
-					deleteLog.PkType = v.GetInt64("pkType")
-					switch deleteLog.PkType {
-					case int64(schemapb.DataType_Int64):
-						deleteLog.Pk = &Int64PrimaryKey{Value: v.GetInt64("pk")}
-					case int64(schemapb.DataType_VarChar):
-						deleteLog.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes("pk"))}
-					}
-				}
-
-				result.Append(deleteLog.Pk, deleteLog.Ts)
-			}
-		}
-		return nil
-	}
-
+	data = NewEmptyDeleteData()
+	var partialRes *DeleteData
 	for _, blob := range blobs {
-		if err := deserializeBlob(blob); err != nil {
+		partitionID, segmentID, partialRes, err = deleteCodec.deserializeBlob(blob, WithoutSerialized)
+		if err != nil {
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
+		data.Merge(partialRes)
 	}
 
-	return pid, sid, result, nil
+	return
 }
 
 // DataDefinitionCodec serializes and deserializes the data definition

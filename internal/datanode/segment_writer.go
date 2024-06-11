@@ -10,23 +10,27 @@ import (
 
 func NewSegmentDeltaWriter(segmentID, partitionID, collectionID int64) *SegmentDeltaWriter {
 	return &SegmentDeltaWriter{
-		deleteData:   &storage.DeleteData{},
 		segmentID:    segmentID,
 		partitionID:  partitionID,
 		collectionID: collectionID,
 		tsFrom:       math.MaxUint64,
 		tsTo:         0,
+
+		writer: storage.NewDeleteSerializedWriter(collectionID, partitionID, segmentID),
 	}
 }
 
 type SegmentDeltaWriter struct {
-	deleteData   *storage.DeleteData
 	segmentID    int64
 	partitionID  int64
 	collectionID int64
 
-	tsFrom typeutil.Timestamp
-	tsTo   typeutil.Timestamp
+	writer *storage.DeleteSerializedWriter
+
+	rowCount int
+	memSize  int64
+	tsFrom   typeutil.Timestamp
+	tsTo     typeutil.Timestamp
 }
 
 func (w *SegmentDeltaWriter) GetCollectionID() int64 {
@@ -42,7 +46,11 @@ func (w *SegmentDeltaWriter) GetSegmentID() int64 {
 }
 
 func (w *SegmentDeltaWriter) GetRowNum() int64 {
-	return w.deleteData.RowCount
+	return int64(w.rowCount)
+}
+
+func (w *SegmentDeltaWriter) GetMemorySize() int64 {
+	return w.memSize
 }
 
 func (w *SegmentDeltaWriter) GetTimeRange() *writebuffer.TimeRange {
@@ -58,24 +66,18 @@ func (w *SegmentDeltaWriter) updateRange(ts typeutil.Timestamp) {
 	}
 }
 
-func (w *SegmentDeltaWriter) Write(pk storage.PrimaryKey, ts typeutil.Timestamp) {
-	w.deleteData.Append(pk, ts)
+func (w *SegmentDeltaWriter) WriteSerialized(serializedRow string, pk storage.PrimaryKey, ts typeutil.Timestamp) error {
 	w.updateRange(ts)
+	w.memSize += pk.Size() + int64(8)
+	w.rowCount += 1
+	return w.writer.Write(serializedRow)
 }
 
-func (w *SegmentDeltaWriter) WriteBatch(pks []storage.PrimaryKey, tss []typeutil.Timestamp) {
-	w.deleteData.AppendBatch(pks, tss)
-
-	for _, ts := range tss {
-		w.updateRange(ts)
-	}
-}
-
-func (w *SegmentDeltaWriter) Finish() (*storage.Blob, *writebuffer.TimeRange, error) {
-	blob, err := storage.NewDeleteCodec().Serialize(w.collectionID, w.partitionID, w.segmentID, w.deleteData)
+// Finish returns serialized bytes and timestamp range of delete data
+func (w *SegmentDeltaWriter) Finish() ([]byte, *writebuffer.TimeRange, error) {
+	blob, err := w.writer.Finish(w.tsFrom, w.tsTo)
 	if err != nil {
 		return nil, nil, err
 	}
-
 	return blob, w.GetTimeRange(), nil
 }
