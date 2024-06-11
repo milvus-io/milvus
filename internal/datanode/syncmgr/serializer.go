@@ -19,6 +19,8 @@ package syncmgr
 import (
 	"context"
 
+	"github.com/samber/lo"
+
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
 	"github.com/milvus-io/milvus/internal/datanode/metacache"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -56,7 +58,9 @@ type SyncPack struct {
 }
 
 func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
-	p.insertData = insertData
+	p.insertData = lo.Filter(insertData, func(inData *storage.InsertData, _ int) bool {
+		return inData != nil
+	})
 	return p
 }
 
