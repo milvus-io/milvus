@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"github.com/stretchr/testify/suite"
 	"go.uber.org/zap"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
@@ -1021,4 +1022,57 @@ func TestAddFieldDataToPayload(t *testing.T) {
 		},
 	})
 	assert.Error(t, err)
+}
+
+type DeleteSerializedWriterSuite struct {
+	suite.Suite
+}
+
+func TestDeleteSerializedWriterSuite(t *testing.T) {
+	suite.Run(t, new(DeleteSerializedWriterSuite))
+}
+
+func (s *DeleteSerializedWriterSuite) TestWrite() {
+	count := 10000
+	s.Run("int64 pk", func() {
+		pks := make([]PrimaryKey, count)
+		tss := make([]uint64, count)
+		for i := 0; i < count; i++ {
+			pks[i] = NewInt64PrimaryKey(int64(i))
+			tss[i] = 19530000000 + uint64(i)
+		}
+
+		deleteData := NewDeleteData(pks, tss)
+		s.Equal(len(deleteData.Pks), count)
+		s.Equal(len(deleteData.Tss), count)
+		s.Equal(len(deleteData.Serialized), 0)
+		blob, err := NewDeleteCodec().Serialize(1, 10, 100, deleteData)
+		s.NoError(err)
+
+		pid, sid, data, err := NewDeleteCodec().DeserializeWithSerialized([]*Blob{blob})
+		s.NoError(err)
+		s.EqualValues(pid, 10)
+		s.EqualValues(sid, 100)
+		s.Equal(len(data.Pks), count)
+		s.Equal(len(data.Tss), count)
+		s.Equal(len(data.Serialized), count)
+
+		writer := NewDeleteSerializedWriter(1, 10, 100)
+		for _, row := range data.Serialized {
+			err := writer.Write(row)
+			s.NoError(err)
+		}
+
+		blobV, err := writer.Finish(1, 2)
+		s.NoError(err)
+
+		gotPid, gotSid, gotData, err := NewDeleteCodec().Deserialize([]*Blob{{Value: blobV}})
+		s.NoError(err)
+		s.EqualValues(gotPid, 10)
+		s.EqualValues(gotSid, 100)
+		s.Equal(len(gotData.Pks), count)
+		s.Equal(len(gotData.Tss), count)
+		s.Equal(len(gotData.Serialized), 0)
+		s.Equal(gotData, deleteData)
+	})
 }

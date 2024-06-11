@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math"
 	"sync"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -201,11 +202,11 @@ func (t *LevelZeroCompactionTask) serializeUpload(ctx context.Context, segmentWr
 
 		blobKey, _ := binlog.BuildLogPath(storage.DeleteBinlog, writer.collectionID, writer.partitionID, writer.segmentID, -1, logID)
 
-		allBlobs[blobKey] = blob.GetValue()
+		allBlobs[blobKey] = blob
 		deltalog := &datapb.Binlog{
 			EntriesNum:    writer.GetRowNum(),
-			LogSize:       int64(len(blob.GetValue())),
-			MemorySize:    blob.GetMemorySize(),
+			LogSize:       int64(len(blob)),
+			MemorySize:    writer.GetMemorySize(),
 			LogPath:       blobKey,
 			LogID:         logID,
 			TimestampFrom: tr.GetMinTimestamp(),
@@ -235,7 +236,7 @@ func (t *LevelZeroCompactionTask) splitDelta(
 	ctx context.Context,
 	allDelta *storage.DeleteData,
 	segmentBfs map[int64]*metacache.BloomFilterSet,
-) map[int64]*SegmentDeltaWriter {
+) (map[int64]*SegmentDeltaWriter, error) {
 	traceCtx, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
 
@@ -247,10 +248,15 @@ func (t *LevelZeroCompactionTask) splitDelta(
 
 	retMap := t.applyBFInParallel(traceCtx, allDelta, io.GetBFApplyPool(), segmentBfs)
 
+	var err error
 	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
 	retMap.Range(func(key int, value *BatchApplyRet) bool {
 		startIdx := value.StartIdx
 		pk2SegmentIDs := value.Segment2Hits
+
+		pks := allDelta.Pks
+		tss := allDelta.Tss
+		serialized := allDelta.Serialized
 
 		for segmentID, hits := range pk2SegmentIDs {
 			for i, hit := range hits {
@@ -261,13 +267,20 @@ func (t *LevelZeroCompactionTask) splitDelta(
 						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), segment.GetCollectionID())
 						targetSegBuffer[segmentID] = writer
 					}
-					writer.Write(allDelta.Pks[startIdx+i], allDelta.Tss[startIdx+i])
+					err = writer.WriteSerialized(serialized[startIdx+i], pks[startIdx+i], tss[startIdx+i])
+					if err != nil {
+						return false
+					}
 				}
 			}
 		}
 		return true
 	})
-	return targetSegBuffer
+	if err != nil {
+		return nil, err
+	}
+
+	return targetSegBuffer, nil
 }
 
 type BatchApplyRet = struct {
@@ -338,18 +351,25 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 	}
 
 	for i := 0; i < batch; i++ {
+		batchStart := time.Now()
 		left, right := i*batchSize, (i+1)*batchSize
 		if right >= len(targetSegments) {
 			right = len(targetSegments)
 		}
 		batchSegments := targetSegments[left:right]
+
 		segmentBFs, err := t.loadBF(ctx, batchSegments)
 		if err != nil {
 			log.Warn("L0 compaction loadBF fail", zap.Error(err))
 			return nil, err
 		}
 
-		batchSegWriter := t.splitDelta(ctx, allDelta, segmentBFs)
+		batchSegWriter, err := t.splitDelta(ctx, allDelta, segmentBFs)
+		if err != nil {
+			log.Warn("L0 compaction splitDelta fail", zap.Error(err))
+			return nil, err
+		}
+
 		batchResults, err := t.serializeUpload(ctx, batchSegWriter)
 		if err != nil {
 			log.Warn("L0 compaction serialize upload fail", zap.Error(err))
@@ -358,8 +378,10 @@ func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, ta
 
 		log.Info("L0 compaction finished one batch",
 			zap.Int("batch no.", i),
+			zap.Int("batch segment count", len(batchResults)),
 			zap.Int("total deltaRowCount", int(allDelta.RowCount)),
-			zap.Int("batch segment count", len(batchResults)))
+			zap.Duration("batch elapse", time.Since(batchStart)),
+		)
 		results = append(results, batchResults...)
 	}
 
@@ -379,7 +401,7 @@ func (t *LevelZeroCompactionTask) loadDelta(ctx context.Context, deltaLogs []str
 	for _, blob := range blobBytes {
 		blobs = append(blobs, &storage.Blob{Value: blob})
 	}
-	_, _, dData, err := storage.NewDeleteCodec().Deserialize(blobs)
+	_, _, dData, err := storage.NewDeleteCodec().DeserializeWithSerialized(blobs)
 	if err != nil {
 		return nil, err
 	}

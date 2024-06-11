@@ -707,6 +707,73 @@ func NewDeleteCodec() *DeleteCodec {
 	return &DeleteCodec{}
 }
 
+type DeleteSerializedWriter struct {
+	writer  *DeleteBinlogWriter
+	eWriter *deleteEventWriter
+
+	startTs Timestamp
+	endTs   Timestamp
+	size    int
+}
+
+func NewDeleteSerializedWriter(collectionID, partitionID, segmentID UniqueID) *DeleteSerializedWriter {
+	return &DeleteSerializedWriter{
+		writer:  NewDeleteBinlogWriter(schemapb.DataType_String, collectionID, partitionID, segmentID),
+		startTs: math.MaxUint64,
+		endTs:   0,
+	}
+}
+
+func (w *DeleteSerializedWriter) Write(row string) error {
+	if w.eWriter == nil {
+		eWriter, err := w.writer.NextDeleteEventWriter()
+		if err != nil {
+			w.writer.Close()
+			return err
+		}
+		w.eWriter = eWriter
+	}
+
+	err := w.eWriter.AddOneStringToPayload(row, true)
+	if err != nil {
+		w.Close()
+		return err
+	}
+
+	w.size += binary.Size(row)
+	return nil
+}
+
+func (w *DeleteSerializedWriter) Close() {
+	if w.eWriter != nil {
+		w.eWriter.Close()
+	}
+	w.writer.Close()
+}
+
+// Finish returns serialized bytes of delete data
+func (w *DeleteSerializedWriter) Finish(startTs, endTs Timestamp) ([]byte, error) {
+	w.eWriter.SetEventTimestamp(startTs, endTs)
+	w.writer.SetEventTimeStamp(startTs, endTs)
+	defer w.Close()
+
+	// https://github.com/milvus-io/milvus/issues/9620
+	// It's a little complicated to count the memory size of a map.
+	// See: https://stackoverflow.com/questions/31847549/computing-the-memory-footprint-or-byte-length-of-a-map
+	// Since the implementation of golang map may differ from version, so we'd better not to use this magic method.
+	w.writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", w.size))
+
+	if err := w.writer.Finish(); err != nil {
+		return nil, err
+	}
+
+	buffer, err := w.writer.GetBuffer()
+	if err != nil {
+		return nil, err
+	}
+	return buffer, nil
+}
+
 // Serialize transfer delete data to blob. .
 // For each delete message, it will save "pk,ts" string to binlog.
 func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID UniqueID, segmentID UniqueID, data *DeleteData) (*Blob, error) {
@@ -770,60 +837,88 @@ func (deleteCodec *DeleteCodec) Serialize(collectionID UniqueID, partitionID Uni
 	return blob, nil
 }
 
+func (deleteCodec *DeleteCodec) deserializeBlob(blob *Blob, withSerialized bool) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
+	binlogReader, err := NewBinlogReader(blob.Value)
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	defer binlogReader.Close()
+
+	partitionID, segmentID = binlogReader.PartitionID, binlogReader.SegmentID
+	eventReader, err := binlogReader.NextEventReader()
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	defer eventReader.Close()
+
+	rr, err := eventReader.GetArrowRecordReader()
+	if err != nil {
+		return InvalidUniqueID, InvalidUniqueID, nil, err
+	}
+	defer rr.Release()
+
+	deleteLog := &DeleteLog{}
+	data = NewEmptyDeleteData()
+	for rr.Next() {
+		rec := rr.Record()
+		defer rec.Release()
+		column := rec.Column(0)
+		for i := 0; i < column.Len(); i++ {
+			strVal := column.ValueStr(i)
+
+			err := deleteLog.Parse(strVal)
+			if err != nil {
+				return InvalidUniqueID, InvalidUniqueID, nil, err
+			}
+
+			if withSerialized {
+				data.AppendWithSerialized(deleteLog.Pk, deleteLog.Ts, strVal)
+			} else {
+				data.Append(deleteLog.Pk, deleteLog.Ts)
+			}
+		}
+	}
+	return partitionID, segmentID, data, nil
+}
+
+const (
+	WithSerialized    = true
+	WithoutSerialized = false
+)
+
+func (deleteCodec *DeleteCodec) DeserializeWithSerialized(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
+	if len(blobs) == 0 {
+		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
+	}
+	data = NewEmptyDeleteData()
+	var partialRes *DeleteData
+	for _, blob := range blobs {
+		partitionID, segmentID, partialRes, err = deleteCodec.deserializeBlob(blob, WithSerialized)
+		if err != nil {
+			return InvalidUniqueID, InvalidUniqueID, nil, err
+		}
+		data.Merge(partialRes)
+	}
+	return partitionID, segmentID, data, nil
+}
+
 // Deserialize deserializes the deltalog blobs into DeleteData
 func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID, segmentID UniqueID, data *DeleteData, err error) {
 	if len(blobs) == 0 {
 		return InvalidUniqueID, InvalidUniqueID, nil, fmt.Errorf("blobs is empty")
 	}
 
-	var pid, sid UniqueID
-	result := &DeleteData{}
-
-	deserializeBlob := func(blob *Blob) error {
-		binlogReader, err := NewBinlogReader(blob.Value)
-		if err != nil {
-			return err
-		}
-		defer binlogReader.Close()
-
-		pid, sid = binlogReader.PartitionID, binlogReader.SegmentID
-		eventReader, err := binlogReader.NextEventReader()
-		if err != nil {
-			return err
-		}
-		defer eventReader.Close()
-
-		rr, err := eventReader.GetArrowRecordReader()
-		if err != nil {
-			return err
-		}
-		defer rr.Release()
-		deleteLog := &DeleteLog{}
-
-		for rr.Next() {
-			rec := rr.Record()
-			defer rec.Release()
-			column := rec.Column(0)
-			for i := 0; i < column.Len(); i++ {
-				strVal := column.ValueStr(i)
-
-				err := deleteLog.Parse(strVal)
-				if err != nil {
-					return err
-				}
-				result.Append(deleteLog.Pk, deleteLog.Ts)
-			}
-		}
-		return nil
-	}
-
+	data = NewEmptyDeleteData()
+	var partialRes *DeleteData
 	for _, blob := range blobs {
-		if err := deserializeBlob(blob); err != nil {
+		partitionID, segmentID, partialRes, err = deleteCodec.deserializeBlob(blob, WithoutSerialized)
+		if err != nil {
 			return InvalidUniqueID, InvalidUniqueID, nil, err
 		}
+		data.Merge(partialRes)
 	}
 
-	return pid, sid, result, nil
+	return
 }
 
 // DataDefinitionCodec serializes and deserializes the data definition

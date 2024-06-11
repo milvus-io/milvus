@@ -68,15 +68,18 @@ func (s *LevelZeroCompactionTaskSuite) SetupTest() {
 		3: 20002,
 	}
 
-	s.dData = storage.NewDeleteData([]storage.PrimaryKey{}, []typeutil.Timestamp{})
+	dData := storage.NewEmptyDeleteData()
 	for pk, ts := range pk2ts {
-		s.dData.Append(storage.NewInt64PrimaryKey(pk), ts)
+		dData.Append(storage.NewInt64PrimaryKey(pk), ts)
 	}
 
-	dataCodec := storage.NewDeleteCodec()
-	blob, err := dataCodec.Serialize(0, 0, 0, s.dData)
+	blob, err := storage.NewDeleteCodec().Serialize(0, 0, 0, dData)
 	s.Require().NoError(err)
 	s.dBlob = blob.GetValue()
+
+	_, _, serializedData, err := storage.NewDeleteCodec().DeserializeWithSerialized([]*storage.Blob{{Value: s.dBlob}})
+	s.Require().NoError(err)
+	s.dData = serializedData
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestProcessLoadDeltaFail() {
@@ -423,7 +426,10 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.task.allocator = mockAlloc
 
 		writer := NewSegmentDeltaWriter(100, 10, 1)
-		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
+
+		for i := range s.dData.Pks {
+			writer.WriteSerialized(s.dData.Serialized[i], s.dData.Pks[i], s.dData.Tss[i])
+		}
 		writers := map[int64]*SegmentDeltaWriter{100: writer}
 
 		result, err := s.task.serializeUpload(ctx, writers)
@@ -436,7 +442,9 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 		s.task.plan = plan
 		s.mockBinlogIO.EXPECT().Upload(mock.Anything, mock.Anything).Return(errors.New("mock upload failed"))
 		writer := NewSegmentDeltaWriter(100, 10, 1)
-		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
+		for i := range s.dData.Pks {
+			writer.WriteSerialized(s.dData.Serialized[i], s.dData.Pks[i], s.dData.Tss[i])
+		}
 		writers := map[int64]*SegmentDeltaWriter{100: writer}
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 
@@ -452,7 +460,9 @@ func (s *LevelZeroCompactionTaskSuite) TestSerializeUpload() {
 
 		s.mockAlloc.EXPECT().AllocOne().Return(19530, nil)
 		writer := NewSegmentDeltaWriter(100, 10, 1)
-		writer.WriteBatch(s.dData.Pks, s.dData.Tss)
+		for i := range s.dData.Pks {
+			writer.WriteSerialized(s.dData.Serialized[i], s.dData.Pks[i], s.dData.Tss[i])
+		}
 		writers := map[int64]*SegmentDeltaWriter{100: writer}
 
 		results, err := s.task.serializeUpload(ctx, writers)
@@ -480,7 +490,8 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 		101: bfs2,
 		102: bfs3,
 	}
-	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, segmentBFs)
+	deltaWriters, err := s.task.splitDelta(context.TODO(), s.dData, segmentBFs)
+	s.NoError(err)
 
 	s.NotEmpty(deltaWriters)
 	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
@@ -488,9 +499,14 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 	s.EqualValues(1, deltaWriters[101].GetRowNum())
 	s.EqualValues(1, deltaWriters[102].GetRowNum())
 
-	s.ElementsMatch([]storage.PrimaryKey{storage.NewInt64PrimaryKey(1), storage.NewInt64PrimaryKey(3)}, deltaWriters[100].deleteData.Pks)
-	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[101].deleteData.Pks[0])
-	s.Equal(storage.NewInt64PrimaryKey(3), deltaWriters[102].deleteData.Pks[0])
+	for segID, writer := range deltaWriters {
+		gotBytes, _, err := writer.Finish()
+		s.NoError(err)
+
+		_, _, gotData, err := storage.NewDeleteCodec().Deserialize([]*storage.Blob{{Value: gotBytes}})
+		s.NoError(err)
+		s.ElementsMatch(expectedSegPK[segID], lo.Map(gotData.Pks, func(pk storage.PrimaryKey, _ int) int64 { return pk.(*storage.Int64PrimaryKey).Value }))
+	}
 }
 
 func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
