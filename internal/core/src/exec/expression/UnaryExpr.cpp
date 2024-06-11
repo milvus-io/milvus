@@ -20,6 +20,66 @@
 namespace milvus {
 namespace exec {
 
+template <typename T>
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex() {
+    return ExecRangeVisitorImplArray<T>();
+}
+
+template <>
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArrayForIndex<
+    proto::plan::Array>() {
+    switch (expr_->op_type_) {
+        case proto::plan::Equal:
+        case proto::plan::NotEqual: {
+            switch (expr_->column_.element_type_) {
+                case DataType::BOOL: {
+                    return ExecArrayEqualForIndex<bool>(expr_->op_type_ ==
+                                                        proto::plan::NotEqual);
+                }
+                case DataType::INT8: {
+                    return ExecArrayEqualForIndex<int8_t>(
+                        expr_->op_type_ == proto::plan::NotEqual);
+                }
+                case DataType::INT16: {
+                    return ExecArrayEqualForIndex<int16_t>(
+                        expr_->op_type_ == proto::plan::NotEqual);
+                }
+                case DataType::INT32: {
+                    return ExecArrayEqualForIndex<int32_t>(
+                        expr_->op_type_ == proto::plan::NotEqual);
+                }
+                case DataType::INT64: {
+                    return ExecArrayEqualForIndex<int64_t>(
+                        expr_->op_type_ == proto::plan::NotEqual);
+                }
+                case DataType::FLOAT:
+                case DataType::DOUBLE: {
+                    // not accurate on floating point number, rollback to bruteforce.
+                    return ExecRangeVisitorImplArray<proto::plan::Array>();
+                }
+                case DataType::VARCHAR: {
+                    if (segment_->type() == SegmentType::Growing) {
+                        return ExecArrayEqualForIndex<std::string>(
+                            expr_->op_type_ == proto::plan::NotEqual);
+                    } else {
+                        return ExecArrayEqualForIndex<std::string_view>(
+                            expr_->op_type_ == proto::plan::NotEqual);
+                    }
+                }
+                default:
+                    PanicInfo(DataTypeInvalid,
+                              "unsupported element type when execute array "
+                              "equal for index: {}",
+                              expr_->column_.element_type_);
+            }
+        }
+        default:
+            return ExecRangeVisitorImplArray<proto::plan::Array>();
+    }
+}
+
 void
 PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
     switch (expr_->column_.data_type_) {
@@ -99,7 +159,13 @@ PhyUnaryRangeFilterExpr::Eval(EvalCtx& context, VectorPtr& result) {
                     result = ExecRangeVisitorImplArray<std::string>();
                     break;
                 case proto::plan::GenericValue::ValCase::kArrayVal:
-                    result = ExecRangeVisitorImplArray<proto::plan::Array>();
+                    if (is_index_mode_) {
+                        result = ExecRangeVisitorImplArrayForIndex<
+                            proto::plan::Array>();
+                    } else {
+                        result =
+                            ExecRangeVisitorImplArray<proto::plan::Array>();
+                    }
                     break;
                 default:
                     PanicInfo(
@@ -194,6 +260,104 @@ PhyUnaryRangeFilterExpr::ExecRangeVisitorImplArray() {
                processed_size,
                real_batch_size);
     return res_vec;
+}
+
+template <typename T>
+VectorPtr
+PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
+    typedef std::
+        conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+            IndexInnerType;
+    using Index = index::ScalarIndex<IndexInnerType>;
+    auto real_batch_size = GetNextBatchSize();
+    if (real_batch_size == 0) {
+        return nullptr;
+    }
+
+    // get all elements.
+    auto val = GetValueFromProto<proto::plan::Array>(expr_->val_);
+    if (val.array_size() == 0) {
+        // rollback to bruteforce. no candidates will be filtered out via index.
+        return ExecRangeVisitorImplArray<proto::plan::Array>();
+    }
+
+    // cache the result to suit the framework.
+    auto batch_res =
+        ProcessIndexChunks<IndexInnerType>([this, &val, reverse](Index* _) {
+            boost::container::vector<IndexInnerType> elems;
+            for (auto const& element : val.array()) {
+                auto e = GetValueFromProto<IndexInnerType>(element);
+                if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
+                    elems.push_back(e);
+                }
+            }
+
+            // filtering by index, get candidates.
+            auto size_per_chunk = segment_->size_per_chunk();
+            auto retrieve = [ size_per_chunk, this ](int64_t offset) -> auto {
+                auto chunk_idx = offset / size_per_chunk;
+                auto chunk_offset = offset % size_per_chunk;
+                const auto& chunk =
+                    segment_->template chunk_data<milvus::ArrayView>(field_id_,
+                                                                     chunk_idx);
+                return chunk.data() + chunk_offset;
+            };
+
+            // compare the array via the raw data.
+            auto filter = [&retrieve, &val, reverse](size_t offset) -> bool {
+                auto data_ptr = retrieve(offset);
+                return data_ptr->is_same_array(val) ^ reverse;
+            };
+
+            // collect all candidates.
+            std::unordered_set<size_t> candidates;
+            std::unordered_set<size_t> tmp_candidates;
+            auto first_callback = [&candidates](size_t offset) -> void {
+                candidates.insert(offset);
+            };
+            auto callback = [&candidates,
+                             &tmp_candidates](size_t offset) -> void {
+                if (candidates.find(offset) != candidates.end()) {
+                    tmp_candidates.insert(offset);
+                }
+            };
+            auto execute_sub_batch =
+                [](Index* index_ptr,
+                   const IndexInnerType& val,
+                   const std::function<void(size_t /* offset */)>& callback) {
+                    index_ptr->InApplyCallback(1, &val, callback);
+                };
+
+            // run in-filter.
+            for (size_t idx = 0; idx < elems.size(); idx++) {
+                if (idx == 0) {
+                    ProcessIndexChunksV2<IndexInnerType>(
+                        execute_sub_batch, elems[idx], first_callback);
+                } else {
+                    ProcessIndexChunksV2<IndexInnerType>(
+                        execute_sub_batch, elems[idx], callback);
+                    candidates = std::move(tmp_candidates);
+                }
+                // the size of candidates is small enough.
+                if (candidates.size() * 100 < active_count_) {
+                    break;
+                }
+            }
+            TargetBitmap res(active_count_);
+            // run post-filter. The filter will only be executed once in the framework.
+            for (const auto& candidate : candidates) {
+                res[candidate] = filter(candidate);
+            }
+            return res;
+        });
+    AssertInfo(batch_res.size() == real_batch_size,
+               "internal error: expr processed rows {} not equal "
+               "expect batch size {}",
+               batch_res.size(),
+               real_batch_size);
+
+    // return the result.
+    return std::make_shared<ColumnVector>(std::move(batch_res));
 }
 
 template <typename ExprValueType>

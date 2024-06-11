@@ -35,11 +35,10 @@ var _ Checker = (*LeaderChecker)(nil)
 // LeaderChecker perform segment index check.
 type LeaderChecker struct {
 	*checkerActivation
-	meta                     *meta.Meta
-	dist                     *meta.DistributionManager
-	target                   *meta.TargetManager
-	nodeMgr                  *session.NodeManager
-	enableSyncPartitionStats bool
+	meta    *meta.Meta
+	dist    *meta.DistributionManager
+	target  *meta.TargetManager
+	nodeMgr *session.NodeManager
 }
 
 func NewLeaderChecker(
@@ -47,15 +46,13 @@ func NewLeaderChecker(
 	dist *meta.DistributionManager,
 	target *meta.TargetManager,
 	nodeMgr *session.NodeManager,
-	enableSyncPartitionStats bool,
 ) *LeaderChecker {
 	return &LeaderChecker{
-		checkerActivation:        newCheckerActivation(),
-		meta:                     meta,
-		dist:                     dist,
-		target:                   target,
-		nodeMgr:                  nodeMgr,
-		enableSyncPartitionStats: enableSyncPartitionStats,
+		checkerActivation: newCheckerActivation(),
+		meta:              meta,
+		dist:              dist,
+		target:            target,
+		nodeMgr:           nodeMgr,
 	}
 }
 
@@ -100,9 +97,7 @@ func (c *LeaderChecker) Check(ctx context.Context) []task.Task {
 					dist := c.dist.SegmentDistManager.GetByFilter(meta.WithChannel(leaderView.Channel), meta.WithReplica(replica))
 					tasks = append(tasks, c.findNeedLoadedSegments(ctx, replica, leaderView, dist)...)
 					tasks = append(tasks, c.findNeedRemovedSegments(ctx, replica, leaderView, dist)...)
-					if c.enableSyncPartitionStats {
-						tasks = append(tasks, c.findNeedSyncPartitionStats(ctx, replica, leaderView, node)...)
-					}
+					tasks = append(tasks, c.findNeedSyncPartitionStats(ctx, replica, leaderView, node)...)
 				}
 			}
 		}
@@ -127,22 +122,24 @@ func (c *LeaderChecker) findNeedSyncPartitionStats(ctx context.Context, replica 
 			partStatsToUpdate[partID] = psVersionInTarget
 		}
 	}
+	if len(partStatsToUpdate) > 0 {
+		action := task.NewLeaderUpdatePartStatsAction(leaderView.ID, nodeID, task.ActionTypeUpdate, leaderView.Channel, partStatsToUpdate)
 
-	action := task.NewLeaderUpdatePartStatsAction(leaderView.ID, nodeID, task.ActionTypeUpdate, leaderView.Channel, partStatsToUpdate)
+		t := task.NewLeaderPartStatsTask(
+			ctx,
+			c.ID(),
+			leaderView.CollectionID,
+			replica,
+			leaderView.ID,
+			action,
+		)
 
-	t := task.NewLeaderPartStatsTask(
-		ctx,
-		c.ID(),
-		leaderView.CollectionID,
-		replica,
-		leaderView.ID,
-		action,
-	)
+		// leader task shouldn't replace executing segment task
+		t.SetPriority(task.TaskPriorityLow)
+		t.SetReason("sync partition stats versions")
+		ret = append(ret, t)
+	}
 
-	// leader task shouldn't replace executing segment task
-	t.SetPriority(task.TaskPriorityLow)
-	t.SetReason("sync partition stats versions")
-	ret = append(ret, t)
 	return ret
 }
 
