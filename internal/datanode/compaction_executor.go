@@ -22,6 +22,7 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
@@ -30,7 +31,8 @@ import (
 )
 
 const (
-	maxTaskNum = 1024
+	maxTaskQueueNum    = 1024
+	maxParallelTaskNum = 10
 )
 
 type compactionExecutor struct {
@@ -38,6 +40,7 @@ type compactionExecutor struct {
 	completedCompactor *typeutil.ConcurrentMap[int64, compaction.Compactor]         // planID to compactor
 	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionPlanResult] // planID to CompactionPlanResult
 	taskCh             chan compaction.Compactor
+	taskSem            *semaphore.Weighted
 	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
 
 	// To prevent concurrency of release channel and compaction get results
@@ -50,7 +53,8 @@ func newCompactionExecutor() *compactionExecutor {
 		executing:          typeutil.NewConcurrentMap[int64, compaction.Compactor](),
 		completedCompactor: typeutil.NewConcurrentMap[int64, compaction.Compactor](),
 		completed:          typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult](),
-		taskCh:             make(chan compaction.Compactor, maxTaskNum),
+		taskCh:             make(chan compaction.Compactor, maxTaskQueueNum),
+		taskSem:            semaphore.NewWeighted(maxParallelTaskNum),
 		dropped:            typeutil.NewConcurrentSet[string](),
 	}
 }
@@ -77,18 +81,20 @@ func (c *compactionExecutor) removeTask(planID UniqueID) {
 	}
 }
 
-// These two func are bounded for waitGroup
-func (c *compactionExecutor) executeWithState(task compaction.Compactor) {
-	go c.executeTask(task)
-}
-
 func (c *compactionExecutor) start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case task := <-c.taskCh:
-			c.executeWithState(task)
+			err := c.taskSem.Acquire(ctx, 1)
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.taskSem.Release(1)
+				c.executeTask(task)
+			}()
 		}
 	}
 }

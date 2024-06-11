@@ -76,7 +76,7 @@ func TestCompactionExecutor(t *testing.T) {
 							signal <- struct{}{}
 							return &datapb.CompactionPlanResult{PlanID: 1}, nil
 						}).Once()
-					ex.executeWithState(mockC)
+					go ex.executeTask(mockC)
 					<-signal
 				} else {
 					mockC.EXPECT().Compact().RunAndReturn(
@@ -84,7 +84,7 @@ func TestCompactionExecutor(t *testing.T) {
 							signal <- struct{}{}
 							return nil, errors.New("mock error")
 						}).Once()
-					ex.executeWithState(mockC)
+					go ex.executeTask(mockC)
 					<-signal
 				}
 			})
