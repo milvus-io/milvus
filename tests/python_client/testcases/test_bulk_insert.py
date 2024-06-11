@@ -1537,7 +1537,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         self._connect()
         c_name = cf.gen_unique_str("bulk_partition_key")
         fields = [
-            cf.gen_int64_field(name=df.pk_field, is_primary=True),
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_int64_field(name=df.int_field, is_partition_key=(par_key_field == df.int_field)),
             cf.gen_string_field(name=df.string_field, is_partition_key=(par_key_field == df.string_field)),
@@ -1545,6 +1545,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_float_field(name=df.float_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64)
         ]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
         files = prepare_bulk_insert_new_json_files(
             minio_endpoint=self.minio_endpoint,
@@ -1553,7 +1554,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             rows=entities,
             dim=dim,
             auto_id=auto_id,
-            data_fields=default_multi_fields,
+            data_fields=data_fields,
             force=True,
             schema=schema
         )
@@ -1617,14 +1618,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
 
         # verify error when trying to bulk insert into a specific partition
-        # TODO: enable the error msg assert after issue #25586 fixed
         err_msg = "not allow to set partition name for collection with partition key"
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
             partition_name=self.collection_wrap.partitions[0].name,
             files=files,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 99, "err_msg": err_msg},
+            check_items={"err_code": 2100, "err_msg": err_msg},
         )
 
     @pytest.mark.tags(CaseLabel.L3)
