@@ -253,8 +253,8 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 			JobID:  job.GetJobID(),
 			TaskID: 1,
 			FileStats: []*datapb.ImportFileStats{
-				{TotalMemorySize: 1000 * 1024 * 1024},
-				{TotalMemorySize: 2000 * 1024 * 1024},
+				{TotalMemorySize: 50 * 1024 * 1024},
+				{TotalMemorySize: 50 * 1024 * 1024},
 			},
 		},
 	}
@@ -268,26 +268,30 @@ func TestImportUtil_CheckDiskQuota(t *testing.T) {
 
 	segment := &SegmentInfo{
 		SegmentInfo: &datapb.SegmentInfo{ID: 5, CollectionID: 100, State: commonpb.SegmentState_Flushed},
-		size:        *atomic.NewInt64(3000 * 1024 * 1024),
+		size:        *atomic.NewInt64(25 * 1024 * 1024),
 	}
 	err = meta.AddSegment(context.Background(), segment)
 	assert.NoError(t, err)
 
 	Params.Save(Params.QuotaConfig.DiskProtectionEnabled.Key, "true")
-	Params.Save(Params.QuotaConfig.DiskQuota.Key, "10000")
-	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "10000")
+	Params.Save(Params.QuotaConfig.DiskQuota.Key, "100")
+	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "100")
+	Params.Save(Params.DataCoordCfg.ImportCompressionRatio.Key, "4")
 	defer Params.Reset(Params.QuotaConfig.DiskQuota.Key)
 	defer Params.Reset(Params.QuotaConfig.DiskQuotaPerCollection.Key)
+	defer Params.Reset(Params.DataCoordCfg.ImportCompressionRatio.Key)
+
+	compressionRatio := Params.DataCoordCfg.ImportCompressionRatio.GetAsFloat()
 	requestSize, err := CheckDiskQuota(job, meta, imeta)
 	assert.NoError(t, err)
-	assert.Equal(t, int64(3000*1024*1024), requestSize)
+	assert.Equal(t, int64(100*1024*1024/compressionRatio), requestSize)
 
-	Params.Save(Params.QuotaConfig.DiskQuota.Key, "5000")
+	Params.Save(Params.QuotaConfig.DiskQuota.Key, "30")
 	_, err = CheckDiskQuota(job, meta, imeta)
 	assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 
-	Params.Save(Params.QuotaConfig.DiskQuota.Key, "10000")
-	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "5000")
+	Params.Save(Params.QuotaConfig.DiskQuota.Key, "100")
+	Params.Save(Params.QuotaConfig.DiskQuotaPerCollection.Key, "30")
 	_, err = CheckDiskQuota(job, meta, imeta)
 	assert.True(t, errors.Is(err, merr.ErrServiceQuotaExceeded))
 }
