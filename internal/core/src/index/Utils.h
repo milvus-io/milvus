@@ -91,6 +91,20 @@ SetValueToConfig(Config& cfg, const std::string& key, const T value) {
     cfg[key] = value;
 }
 
+template <typename T>
+inline void
+CheckMetricTypeSupport(const MetricType& metric_type) {
+    if constexpr (std::is_same_v<T, bin1>) {
+        AssertInfo(
+            IsBinaryVectorMetricType(metric_type),
+            "binary vector does not float vector metric type: " + metric_type);
+    } else {
+        AssertInfo(
+            IsFloatVectorMetricType(metric_type),
+            "float vector does not binary vector metric type: " + metric_type);
+    }
+}
+
 int64_t
 GetDimFromConfig(const Config& config);
 
