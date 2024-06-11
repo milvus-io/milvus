@@ -75,7 +75,7 @@ func (suite *LeaderCheckerTestSuite) SetupTest() {
 
 	distManager := meta.NewDistributionManager()
 	targetManager := meta.NewTargetManager(suite.broker, suite.meta)
-	suite.checker = NewLeaderChecker(suite.meta, distManager, targetManager, suite.nodeMgr, false)
+	suite.checker = NewLeaderChecker(suite.meta, distManager, targetManager, suite.nodeMgr)
 }
 
 func (suite *LeaderCheckerTestSuite) TearDownTest() {
@@ -476,10 +476,6 @@ func (suite *LeaderCheckerTestSuite) TestIgnoreSyncRemovedSegments() {
 
 func (suite *LeaderCheckerTestSuite) TestUpdatePartitionStats() {
 	testChannel := "test-insert-channel"
-	suite.checker.enableSyncPartitionStats = true
-	defer func() {
-		suite.checker.enableSyncPartitionStats = false
-	}()
 	leaderID := int64(2)
 	observer := suite.checker
 	observer.meta.CollectionManager.PutCollection(utils.CreateTestCollection(1, 1))

@@ -71,7 +71,7 @@ func NewCheckerController(
 		utils.IndexChecker:   NewIndexChecker(meta, dist, broker, nodeMgr),
 		// todo temporary work around must fix
 		// utils.LeaderChecker:  NewLeaderChecker(meta, dist, targetMgr, nodeMgr, true),
-		utils.LeaderChecker: NewLeaderChecker(meta, dist, targetMgr, nodeMgr, Params.QueryNodeCfg.EnableSyncPartitionStats.GetAsBool()),
+		utils.LeaderChecker: NewLeaderChecker(meta, dist, targetMgr, nodeMgr),
 	}
 
 	manualCheckChs := map[utils.CheckerType]chan struct{}{
