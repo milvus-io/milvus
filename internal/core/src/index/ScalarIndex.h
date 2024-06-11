@@ -51,6 +51,20 @@ class ScalarIndex : public IndexBase {
     In(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
+    InApplyFilter(size_t n,
+                  const T* values,
+                  const std::function<bool(size_t /* offset */)>& filter) {
+        PanicInfo(ErrorCode::Unsupported, "InApplyFilter is not implemented");
+    }
+
+    virtual void
+    InApplyCallback(size_t n,
+                    const T* values,
+                    const std::function<void(size_t /* offset */)>& callback) {
+        PanicInfo(ErrorCode::Unsupported, "InApplyCallback is not implemented");
+    }
+
+    virtual const TargetBitmap
     NotIn(size_t n, const T* values) = 0;
 
     virtual const TargetBitmap
