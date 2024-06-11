@@ -22,6 +22,8 @@ using SearchResult = milvus::SearchResult;
 CStatus
 ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchPlan c_plan,
+                               ReduceSearchResultsAndFillData(CTraceContext c_trace,
+                               CSearchResultDataBlobs* cSearchResultDataBlobs,
                                CSearchResult* c_search_results,
                                int64_t num_segments,
                                int64_t* slice_nqs,
@@ -31,13 +33,20 @@ ReduceSearchResultsAndFillData(CSearchResultDataBlobs* cSearchResultDataBlobs,
         // get SearchResult and SearchPlan
         auto plan = static_cast<milvus::query::Plan*>(c_plan);
         AssertInfo(num_segments > 0, "num_segments must be greater than 0");
+         auto trace_ctx = milvus::tracer::TraceContext{
+            c_trace.traceID, c_trace.spanID, c_trace.traceFlags};
+        milvus::tracer::AutoSpan span(
+            "ReduceSearchResultsAndFillData", &trace_ctx, true);
         std::vector<SearchResult*> search_results(num_segments);
         for (int i = 0; i < num_segments; ++i) {
             search_results[i] = static_cast<SearchResult*>(c_search_results[i]);
         }
-
-        auto reduce_helper = milvus::segcore::ReduceHelper(
-            search_results, plan, slice_nqs, slice_topKs, num_slices);
+auto reduce_helper = milvus::segcore::ReduceHelper(search_results,
+                                                           plan,
+                                                           slice_nqs,
+                                                           slice_topKs,
+                                                           num_slices,
+                                                           &trace_ctx);
         reduce_helper.Reduce();
         reduce_helper.Marshal();
 
@@ -55,6 +64,7 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
                         int32_t blob_index) {
     try {
         auto search_result_data_blobs =
+        
             reinterpret_cast<milvus::segcore::SearchResultDataBlobs*>(
                 cSearchResultDataBlobs);
         AssertInfo(blob_index < search_result_data_blobs->blobs.size(),
@@ -65,6 +75,8 @@ GetSearchResultDataBlob(CProto* searchResultDataBlob,
             search_result_data_blobs->blobs[blob_index].size();
         return milvus::SuccessCStatus();
     } catch (std::exception& e) {
+        ReduceSearchResultsAndFillData(CTraceContext c_trace,
+                               CSearchResultDataBlobs* cSearchResultDataBlobs,
         searchResultDataBlob->proto_blob = nullptr;
         searchResultDataBlob->proto_size = 0;
         return milvus::FailureCStatus(&e);
