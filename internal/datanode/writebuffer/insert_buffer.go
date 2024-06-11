@@ -166,7 +166,7 @@ func (ib *InsertBuffer) Yield() *storage.InsertData {
 
 	// avoid copy when there is only one buffer
 	if len(ib.buffers) == 1 {
-		return ib.currentBuffer().buffer
+		return ib.buffers[0].buffer
 	}
 	// no error assumed, buffer created before
 	result, _ := storage.NewInsertDataWithCap(ib.collSchema, int(ib.rows))
