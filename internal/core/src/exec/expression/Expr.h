@@ -280,6 +280,22 @@ class SegmentExpr : public Expr {
         return result;
     }
 
+    template <typename T, typename FUNC, typename... ValTypes>
+    void
+    ProcessIndexChunksV2(FUNC func, ValTypes... values) {
+        typedef std::
+            conditional_t<std::is_same_v<T, std::string_view>, std::string, T>
+                IndexInnerType;
+        using Index = index::ScalarIndex<IndexInnerType>;
+
+        for (size_t i = current_index_chunk_; i < num_index_chunk_; i++) {
+            const Index& index =
+                segment_->chunk_scalar_index<IndexInnerType>(field_id_, i);
+            auto* index_ptr = const_cast<Index*>(&index);
+            func(index_ptr, values...);
+        }
+    }
+
     template <typename T>
     bool
     CanUseIndex(OpType op) const {
