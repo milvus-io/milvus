@@ -1,15 +1,19 @@
 # WAL
 
 `wal` package is the basic defination of wal interface of milvus streamingnode.
+`wal` use `github.com/milvus-io/milvus/pkg/streaming/walimpls` to implement the final wal service.
 
 ## Project arrangement
 
-- `/`: only define exposed interfaces.
-- `/walimpls/`: define the underlying message system interfaces need to be implemented.
-- `/registry/`: A static lifetime registry to regsiter new implementation for inverting dependency.
-- `/adaptor/`: adaptors to implement `wal` interface from `walimpls` interface
-- `/helper/`: A utility used to help developer to implement `walimpls` conveniently.
-- `/utility/`: A utility code for common logic or data structure.
+- `wal`
+    - `/`: only define exposed interfaces.
+    - `/adaptor/`: adaptors to implement `wal` interface from `walimpls` interface
+    - `/utility/`: A utility code for common logic or data structure.
+- `github.com/milvus-io/milvus/pkg/streaming/walimpls`
+    - `/`: define the underlying message system interfaces need to be implemented.
+    - `/registry/`: A static lifetime registry to regsiter new implementation for inverting dependency.
+    - `/helper/`: A utility used to help developer to implement `walimpls` conveniently.
+    - `/impls/`: A official implemented walimpls sets.
 
 ## Lifetime Of Interfaces
 
@@ -20,7 +24,7 @@
 
 ## Add New Implemetation Of WAL
 
-developper who want to add a new implementation of `wal` should implements the `walimpls` package interfaces. following interfaces is required:
+developper who want to add a new implementation of `wal` should implements the `github.com/milvus-io/milvus/pkg/streaming/walimpls` package interfaces. following interfaces is required:
 
 - `walimpls.OpenerBuilderImpls`
 - `walimpls.OpenerImpls`
@@ -28,9 +32,11 @@ developper who want to add a new implementation of `wal` should implements the `
 - `walimpls.WALImpls`
 
 `OpenerBuilderImpls` create `OpenerImpls`; `OpenerImpls` creates `WALImpls`; `WALImpls` create `ScannerImpls`. 
-Then register the implmentation of `walimpls.OpenerBuilderImpls` into `registry` package.
+Then register the implmentation of `walimpls.OpenerBuilderImpls` into `github.com/milvus-io/milvus/pkg/streaming/walimpls/registry` package.
 
 ```
+import "github.com/milvus-io/milvus/pkg/streaming/walimpls/registry"
+
 var _ OpenerBuilderImpls = b{};
 registry.RegisterBuilder(b{})
 ```
@@ -40,8 +46,10 @@ All things have been done.
 ## Use WAL
 
 ```
+import "github.com/milvus-io/milvus/internal/streamingnode/server/wal/registry"
+
 name := "your builder name"
-var yourCh *streamingpb.PChannelInfo
+var yourCh *options.PChannelInfo
 
 opener, err := registry.MustGetBuilder(name).Build()
 if err != nil {
