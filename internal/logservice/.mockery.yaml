@@ -1,0 +1,13 @@
+quiet: False
+with-expecter: True
+filename: "mock_{{.InterfaceName}}.go"
+dir: "internal/mocks/{{trimPrefix .PackagePath \"github.com/milvus-io/milvus/internal\" | dir }}/mock_{{.PackageName}}"
+mockname: "Mock{{.InterfaceName}}"
+outpkg: "mock_{{.PackageName}}"
+packages:
+  github.com/milvus-io/milvus/internal/util/logserviceutil/message:
+    interfaces:
+      MessageID:
+      ImmutableMessage:
+      MutableMessage:
+      RProperties:
