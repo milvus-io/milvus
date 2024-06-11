@@ -167,6 +167,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 		assert.NoError(t, err)
 		kv.On("LoadWithPrefix", CollectionMetaPrefix, ts).
 			Return([]string{"key"}, []string{string(bColl)}, nil)
+		kv.On("MultiSaveAndRemoveWithPrefix", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
 
 		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
@@ -245,6 +246,7 @@ func TestCatalog_ListCollections(t *testing.T) {
 				return strings.HasPrefix(prefix, FieldMetaPrefix)
 			}), ts).
 			Return([]string{"key"}, []string{string(fm)}, nil)
+		kv.On("MultiSaveAndRemoveWithPrefix", mock.Anything, mock.Anything, ts).Return(nil)
 		kc := Catalog{Snapshot: kv}
 
 		ret, err := kc.ListCollections(ctx, util.NonDBID, ts)
@@ -259,37 +261,49 @@ func TestCatalog_ListCollections(t *testing.T) {
 func TestCatalog_loadCollection(t *testing.T) {
 	t.Run("load failed", func(t *testing.T) {
 		ctx := context.Background()
-		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadFunc = func(key string, ts typeutil.Timestamp) (string, error) {
-			return "", errors.New("mock")
-		}
-		kc := Catalog{Snapshot: snapshot}
+		kv := mocks.NewSnapShotKV(t)
+		kv.EXPECT().Load(mock.Anything, mock.Anything).Return("", errors.New("mock"))
+		kc := Catalog{Snapshot: kv}
 		_, err := kc.loadCollection(ctx, testDb, 1, 0)
 		assert.Error(t, err)
 	})
 
 	t.Run("load, not collection info", func(t *testing.T) {
 		ctx := context.Background()
-		snapshot := kv.NewMockSnapshotKV()
-		snapshot.LoadFunc = func(key string, ts typeutil.Timestamp) (string, error) {
-			return "not in pb format", nil
-		}
-		kc := Catalog{Snapshot: snapshot}
+		kv := mocks.NewSnapShotKV(t)
+		kv.EXPECT().Load(mock.Anything, mock.Anything).Return("not in pb format", nil)
+		kc := Catalog{Snapshot: kv}
 		_, err := kc.loadCollection(ctx, testDb, 1, 0)
 		assert.Error(t, err)
 	})
 
 	t.Run("load, normal collection info", func(t *testing.T) {
 		ctx := context.Background()
-		snapshot := kv.NewMockSnapshotKV()
-		coll := &pb.CollectionInfo{ID: 1}
+		coll := &pb.CollectionInfo{ID: 1, DbId: util.DefaultDBID}
 		value, err := proto.Marshal(coll)
 		assert.NoError(t, err)
-		snapshot.LoadFunc = func(key string, ts typeutil.Timestamp) (string, error) {
-			return string(value), nil
+		kv := mocks.NewSnapShotKV(t)
+		kv.EXPECT().Load(mock.Anything, mock.Anything).Return(string(value), nil)
+		kc := Catalog{Snapshot: kv}
+		got, err := kc.loadCollection(ctx, util.DefaultDBID, 1, 0)
+		assert.NoError(t, err)
+		assert.Equal(t, got.GetID(), coll.GetID())
+	})
+
+	t.Run("load, nonDBID collection info", func(t *testing.T) {
+		ctx := context.Background()
+		coll := &pb.CollectionInfo{
+			ID:     1,
+			DbId:   util.NonDBID,
+			Schema: &schemapb.CollectionSchema{},
 		}
-		kc := Catalog{Snapshot: snapshot}
-		got, err := kc.loadCollection(ctx, 0, 1, 0)
+		value, err := proto.Marshal(coll)
+		assert.NoError(t, err)
+		kv := mocks.NewSnapShotKV(t)
+		kv.EXPECT().Load(mock.Anything, mock.Anything).Return(string(value), nil)
+		kv.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil)
+		kc := Catalog{Snapshot: kv}
+		got, err := kc.loadCollection(ctx, util.NonDBID, 1, 0)
 		assert.NoError(t, err)
 		assert.Equal(t, got.GetID(), coll.GetID())
 	})
@@ -344,37 +358,27 @@ func TestCatalog_GetCollectionByID(t *testing.T) {
 	ss := mocks.NewSnapShotKV(t)
 	c := Catalog{Snapshot: ss}
 
-	ss.EXPECT().Load(mock.Anything, mock.Anything).Call.Return(
-		func(key string, ts typeutil.Timestamp) string {
-			if ts > 1000 {
-				collByte, err := proto.Marshal(&pb.CollectionInfo{
-					ID: 1,
-					Schema: &schemapb.CollectionSchema{
-						Fields: []*schemapb.FieldSchema{
-							{},
-						},
-					},
-					PartitionIDs:               []int64{1, 2, 3},
-					PartitionNames:             []string{"1", "2", "3"},
-					PartitionCreatedTimestamps: []uint64{1, 2, 3},
-				})
-				require.NoError(t, err)
-				return string(collByte)
-			}
-			return ""
-		},
-		func(key string, ts typeutil.Timestamp) error {
-			if ts > 1000 {
-				return nil
-			}
-
-			return errors.New("load error")
-		},
-	)
-
+	ss.EXPECT().Load(mock.Anything, mock.Anything).Return("", errors.New("load error")).Twice()
 	coll, err := c.GetCollectionByID(ctx, 0, 1, 1)
 	assert.Error(t, err)
 	assert.Nil(t, coll)
+
+	ss.EXPECT().Load(mock.Anything, mock.Anything).RunAndReturn(func(key string, ts uint64) (string, error) {
+		collByte, err := proto.Marshal(&pb.CollectionInfo{
+			ID: 1,
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{},
+				},
+			},
+			PartitionIDs:               []int64{1, 2, 3},
+			PartitionNames:             []string{"1", "2", "3"},
+			PartitionCreatedTimestamps: []uint64{1, 2, 3},
+		})
+		require.NoError(t, err)
+		return string(collByte), nil
+	}).Once()
+	ss.EXPECT().MultiSaveAndRemoveWithPrefix(mock.Anything, mock.Anything, mock.Anything).Return(nil)
 
 	coll, err = c.GetCollectionByID(ctx, 0, 10000, 1)
 	assert.NoError(t, err)
@@ -397,7 +401,9 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 	t.Run("partition version after 210", func(t *testing.T) {
 		ctx := context.Background()
 
-		coll := &pb.CollectionInfo{}
+		coll := &pb.CollectionInfo{
+			DbId: util.DefaultDBID,
+		}
 		value, err := proto.Marshal(coll)
 		assert.NoError(t, err)
 
@@ -425,7 +431,7 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 		ctx := context.Background()
 
 		partID := typeutil.UniqueID(1)
-		coll := &pb.CollectionInfo{PartitionIDs: []int64{partID}}
+		coll := &pb.CollectionInfo{DbId: util.DefaultDBID, PartitionIDs: []int64{partID}}
 		value, err := proto.Marshal(coll)
 		assert.NoError(t, err)
 
@@ -444,7 +450,7 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 		ctx := context.Background()
 
 		partition := "partition"
-		coll := &pb.CollectionInfo{PartitionNames: []string{partition}}
+		coll := &pb.CollectionInfo{DbId: util.DefaultDBID, PartitionNames: []string{partition}}
 		value, err := proto.Marshal(coll)
 		assert.NoError(t, err)
 
@@ -463,6 +469,7 @@ func TestCatalog_CreatePartitionV2(t *testing.T) {
 		ctx := context.Background()
 
 		coll := &pb.CollectionInfo{
+			DbId:                       util.DefaultDBID,
 			PartitionNames:             []string{"partition"},
 			PartitionIDs:               []int64{111},
 			PartitionCreatedTimestamps: []uint64{111111},
@@ -698,7 +705,7 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 	t.Run("partition version after 210", func(t *testing.T) {
 		ctx := context.Background()
 
-		coll := &pb.CollectionInfo{}
+		coll := &pb.CollectionInfo{DbId: util.DefaultDBID}
 		value, err := proto.Marshal(coll)
 		assert.NoError(t, err)
 
@@ -726,6 +733,7 @@ func TestCatalog_DropPartitionV2(t *testing.T) {
 		ctx := context.Background()
 
 		coll := &pb.CollectionInfo{
+			DbId:                       util.DefaultDBID,
 			PartitionIDs:               []int64{101, 102},
 			PartitionNames:             []string{"partition1", "partition2"},
 			PartitionCreatedTimestamps: []uint64{101, 102},
