@@ -2882,6 +2882,7 @@ type dataCoordConfig struct {
 	ImportCheckIntervalLow   ParamItem `refreshable:"true"`
 	MaxFilesPerImportReq     ParamItem `refreshable:"true"`
 	WaitForIndex             ParamItem `refreshable:"true"`
+	ImportCompressionRatio   ParamItem `refreshable:"true"`
 
 	GracefulStopTimeout ParamItem `refreshable:"true"`
 }
@@ -3624,6 +3625,18 @@ During compaction, the size of segment # of rows is able to exceed segment max #
 		Export:       true,
 	}
 	p.WaitForIndex.Init(base.mgr)
+
+	p.ImportCompressionRatio = ParamItem{
+		Key:     "dataCoord.import.compressionRatio",
+		Version: "2.4.5",
+		Doc: "The compression ratio (uncompressed size/compressed size) of binlogs, " +
+			"which is used to estimate the disk usage and disk quota for imported data. " +
+			"This value should typically be set slightly higher than the actual compression ratio.",
+		DefaultValue: "4",
+		PanicIfEmpty: false,
+		Export:       true,
+	}
+	p.ImportCompressionRatio.Init(base.mgr)
 
 	p.GracefulStopTimeout = ParamItem{
 		Key:          "dataCoord.gracefulStopTimeout",

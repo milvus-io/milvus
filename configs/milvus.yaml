@@ -503,6 +503,7 @@ dataCoord:
     checkIntervalLow: 120 # The interval for checking import, measured in seconds, is set to a low frequency for the import checker.
     maxImportFileNumPerReq: 1024 # The maximum number of files allowed per single import request.
     waitForIndex: true # Indicates whether the import operation waits for the completion of index building.
+    compressionRatio: 4.0 # The compression ratio (uncompressed size/compressed size) of binlogs, which is used to estimate the disk usage and disk quota for imported data. This value should typically be set slightly higher than the actual compression ratio.
   gracefulStopTimeout: 5 # seconds. force stop node without graceful stop
   ip:  # if not specified, use the first unicastable address
   port: 13333

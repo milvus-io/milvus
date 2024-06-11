@@ -285,9 +285,11 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 	for _, task := range tasks {
 		files = append(files, task.GetFileStats()...)
 	}
-	requestSize := lo.SumBy(files, func(file *datapb.ImportFileStats) int64 {
+	compressionRatio := Params.DataCoordCfg.ImportCompressionRatio.GetAsFloat()
+	memorySize := lo.SumBy(files, func(file *datapb.ImportFileStats) int64 {
 		return file.GetTotalMemorySize()
 	})
+	requestSize := int64(float64(memorySize) / compressionRatio)
 
 	totalDiskQuota := Params.QuotaConfig.DiskQuota.GetAsFloat()
 	if float64(totalUsage+requestedTotal+requestSize) > totalDiskQuota {
@@ -296,6 +298,8 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 			zap.Int64("totalUsage", totalUsage),
 			zap.Int64("requestedTotal", requestedTotal),
 			zap.Int64("requestSize", requestSize),
+			zap.Int64("memorySize", memorySize),
+			zap.Float64("compressionRatio", compressionRatio),
 			zap.Float64("totalDiskQuota", totalDiskQuota))
 		return 0, err
 	}
@@ -307,6 +311,8 @@ func CheckDiskQuota(job ImportJob, meta *meta, imeta ImportMeta) (int64, error) 
 			zap.Int64("collectionsUsage", collectionsUsage[colID]),
 			zap.Int64("requestedCollection", requestedCollections[colID]),
 			zap.Int64("requestSize", requestSize),
+			zap.Int64("memorySize", memorySize),
+			zap.Float64("compressionRatio", compressionRatio),
 			zap.Float64("collectionDiskQuota", collectionDiskQuota))
 		return 0, err
 	}
