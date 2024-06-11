@@ -6,6 +6,7 @@ import (
 	"sync"
 
 	"github.com/cockroachdb/errors"
+	"github.com/panjf2000/ants/v2"
 )
 
 /**
@@ -130,15 +131,27 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 
 	distArray := make([]float32, leftNum*rightNum)
 
-	// Multi-threads to calculate distance. TODO: avoid too many go routines
+	// Multi-threads to calculate distance.
 	var waitGroup sync.WaitGroup
-	CalcWorker := func(index int64) {
-		CalcFFBatch(dim, left, index, right, metricUpper, &distArray)
+	calcWorker := func(index interface{}) {
+		i := index.(int64)
+		CalcFFBatch(dim, left, i, right, metricUpper, &distArray)
 		waitGroup.Done()
 	}
+	// avoid too many goroutines by ants pool
+	poolSize := int(leftNum / 3)
+	pool, err := ants.NewPoolWithFunc(poolSize, calcWorker)
+	if err != nil {
+		return nil, err
+	}
+	defer pool.Release()
+
 	for i := int64(0); i < leftNum; i++ {
 		waitGroup.Add(1)
-		go CalcWorker(i)
+		err = pool.Invoke(i)
+		if err != nil {
+			return nil, err
+		}
 	}
 	waitGroup.Wait()
 
