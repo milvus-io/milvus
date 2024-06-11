@@ -64,19 +64,6 @@ pipeline {
                                     }
                                 }
 
-                                withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]){
-                                    sh "docker login -u '${DOCKER_USERNAME}' -p '${DOCKER_PASSWORD}'"
-                                    sh """
-                                        export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
-                                        export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
-                                        export MILVUS_IMAGE_TAG="${imageTag}-amd64"
-                                        export DOCKER_BUILDKIT=1
-                                        build/build_image.sh
-                                        docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
-                                        docker logout
-                                    """
-                                }
-
 
                                 withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                     sh "docker login ${env.HARBOR_REPO} -u '${CI_REGISTRY_USERNAME}' -p '${CI_REGISTRY_PASSWORD}'"
@@ -84,8 +71,21 @@ pipeline {
                                         export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
                                         export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
                                         export MILVUS_IMAGE_TAG="${imageTag}-amd64"
+                                        export DOCKER_BUILDKIT=1
+                                        build/build_image.sh
                                         docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                         docker push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
+                                        docker logout
+                                    """
+                                }
+
+                                withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]){
+                                    sh "docker login -u '${DOCKER_USERNAME}' -p '${DOCKER_PASSWORD}'"
+                                    sh """
+                                        export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
+                                        export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
+                                        export MILVUS_IMAGE_TAG="${imageTag}-amd64"
+                                        docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                         docker logout
                                     """
                                 }
@@ -116,19 +116,6 @@ pipeline {
                                 }
                             }
 
-                            withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]){
-                                sh "docker login -u '${DOCKER_USERNAME}' -p '${DOCKER_PASSWORD}'"
-                                sh """
-                                    export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
-                                    export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
-                                    export MILVUS_IMAGE_TAG="${imageTag}-arm64"
-                                    export DOCKER_BUILDKIT=1
-                                    BUILD_ARGS="--build-arg TARGETARCH=arm64" build/build_image.sh
-                                    docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
-                                    docker logout
-                                """
-                            }
-
 
                             withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
                                 sh "docker login ${env.HARBOR_REPO} -u '${CI_REGISTRY_USERNAME}' -p '${CI_REGISTRY_PASSWORD}'"
@@ -136,8 +123,21 @@ pipeline {
                                     export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
                                     export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
                                     export MILVUS_IMAGE_TAG="${imageTag}-arm64"
+                                    export DOCKER_BUILDKIT=1
+                                    BUILD_ARGS="--build-arg TARGETARCH=arm64" build/build_image.sh
                                     docker tag \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                     docker push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
+                                    docker logout
+                                """
+                            }
+
+                            withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]){
+                                sh "docker login -u '${DOCKER_USERNAME}' -p '${DOCKER_PASSWORD}'"
+                                sh """
+                                    export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
+                                    export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
+                                    export MILVUS_IMAGE_TAG="${imageTag}-arm64"
+                                    docker push \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                                     docker logout
                                     docker rmi \${MILVUS_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} -f
                                     docker rmi \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} -f
@@ -176,6 +176,26 @@ pipeline {
                         }
                     }
 
+                    withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
+                        sh """
+                        docker login ${env.HARBOR_REPO} -u '${CI_REGISTRY_USERNAME}' -p '${CI_REGISTRY_PASSWORD}'
+
+                        export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
+                        export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
+
+                        export ARM_MILVUS_IMAGE_TAG="${imageTag}-arm64"
+                        export AMD_MILVUS_IMAGE_TAG="${imageTag}-amd64"
+                        export MILVUS_IMAGE_TAG="${imageTag}"
+
+
+                        docker manifest create \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${AMD_MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${ARM_MILVUS_IMAGE_TAG}
+                        docker manifest annotate \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${AMD_MILVUS_IMAGE_TAG} --os linux --arch amd64
+                        docker manifest annotate \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${ARM_MILVUS_IMAGE_TAG} --os linux --arch arm64
+
+                        docker manifest push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
+                        """
+                    }
+
                     withCredentials([usernamePassword(credentialsId: "${env.DOCKER_CREDENTIALS_ID}", usernameVariable: 'DOCKER_USERNAME', passwordVariable: 'DOCKER_PASSWORD')]) {
                         sh 'docker login -u ${DOCKER_USERNAME} -p ${DOCKER_PASSWORD}'
                         sh """
@@ -201,26 +221,6 @@ pipeline {
                             docker manifest push \${MILVUS_IMAGE_REPO}:${env.BRANCH_NAME}-latest
 
                             docker logout
-                        """
-                    }
-
-                    withCredentials([usernamePassword(credentialsId: "${env.CI_DOCKER_CREDENTIAL_ID}", usernameVariable: 'CI_REGISTRY_USERNAME', passwordVariable: 'CI_REGISTRY_PASSWORD')]){
-                        sh """
-                        docker login ${env.HARBOR_REPO} -u '${CI_REGISTRY_USERNAME}' -p '${CI_REGISTRY_PASSWORD}'
-
-                        export MILVUS_IMAGE_REPO="${env.TARGET_REPO}/milvus"
-                        export MILVUS_HARBOR_IMAGE_REPO="${env.HARBOR_REPO}/milvus/milvus"
-
-                        export ARM_MILVUS_IMAGE_TAG="${imageTag}-arm64"
-                        export AMD_MILVUS_IMAGE_TAG="${imageTag}-amd64"
-                        export MILVUS_IMAGE_TAG="${imageTag}"
-
-
-                        docker manifest create \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${AMD_MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${ARM_MILVUS_IMAGE_TAG}
-                        docker manifest annotate \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${AMD_MILVUS_IMAGE_TAG} --os linux --arch amd64
-                        docker manifest annotate \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG} \${MILVUS_HARBOR_IMAGE_REPO}:\${ARM_MILVUS_IMAGE_TAG} --os linux --arch arm64
-
-                        docker manifest push \${MILVUS_HARBOR_IMAGE_REPO}:\${MILVUS_IMAGE_TAG}
                         """
                     }
 
