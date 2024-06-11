@@ -155,8 +155,10 @@ func (s *storageV2Serializer) serializeInsertData(pack *SyncPack) (array.RecordR
 	builder := array.NewRecordBuilder(memory.DefaultAllocator, s.arrowSchema)
 	defer builder.Release()
 
-	if err := iTypeutil.BuildRecord(builder, pack.insertData, s.schema.GetFields()); err != nil {
-		return nil, err
+	for _, chunk := range pack.insertData {
+		if err := iTypeutil.BuildRecord(builder, chunk, s.schema.GetFields()); err != nil {
+			return nil, err
+		}
 	}
 
 	rec := builder.NewRecord()

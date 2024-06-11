@@ -176,7 +176,7 @@ func (s *SyncTaskSuiteV2) getSuiteSyncTask() *SyncTaskV2 {
 			Timestamp:   1000,
 			ChannelName: s.channelName,
 		})
-	pack.WithInsertData(s.getInsertBuffer()).WithBatchSize(10)
+	pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchSize(10)
 	pack.WithDeleteData(s.getDeleteBuffer())
 
 	storageCache, err := metacache.NewStorageV2Cache(s.schema)

@@ -3649,7 +3649,6 @@ type dataNodeConfig struct {
 	FlowGraphSkipModeColdTime ParamItem `refreshable:"true"`
 
 	// segment
-	InsertBufferChunkSize  ParamItem `refreshable:"true"`
 	FlushInsertBufferSize  ParamItem `refreshable:"true"`
 	FlushDeleteBufferBytes ParamItem `refreshable:"true"`
 	BinLogMaxSize          ParamItem `refreshable:"true"`
@@ -3770,15 +3769,6 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.MaxParallelSyncMgrTasks.Init(base.mgr)
-
-	p.InsertBufferChunkSize = ParamItem{
-		Key:          "dataNode.segment.InsertChunkSize",
-		Version:      "2.4.4",
-		DefaultValue: "1048576", // 1MB
-		Doc:          "insert buffer chunk size allocate for current buffer",
-		Export:       false,
-	}
-	p.InsertBufferChunkSize.Init(base.mgr)
 
 	p.FlushInsertBufferSize = ParamItem{
 		Key:          "dataNode.segment.insertBufSize",

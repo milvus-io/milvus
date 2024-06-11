@@ -37,7 +37,7 @@ type SyncPack struct {
 	metacache  metacache.MetaCache
 	metawriter MetaWriter
 	// data
-	insertData *storage.InsertData
+	insertData []*storage.InsertData
 	deltaData  *storage.DeleteData
 	// statistics
 	tsFrom        typeutil.Timestamp
@@ -55,7 +55,7 @@ type SyncPack struct {
 	level        datapb.SegmentLevel
 }
 
-func (p *SyncPack) WithInsertData(insertData *storage.InsertData) *SyncPack {
+func (p *SyncPack) WithInsertData(insertData []*storage.InsertData) *SyncPack {
 	p.insertData = insertData
 	return p
 }

@@ -74,17 +74,7 @@ type InsertBuffer struct {
 	BufferBase
 	collSchema *schemapb.CollectionSchema
 
-	estRow    int64
-	chunkSize int64
-	// buffer *storage.InsertData
-	buffers []*InsertBufferChunk
-}
-
-// InsertBufferChunk resembles pre-allocated insert data and statistic.
-type InsertBufferChunk struct {
-	BufferBase
-
-	buffer *storage.InsertData
+	buffers []*storage.InsertData
 }
 
 func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
@@ -99,14 +89,7 @@ func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 	}
 
 	sizeLimit := paramtable.Get().DataNodeCfg.FlushInsertBufferSize.GetAsInt64()
-	chunkSize := paramtable.Get().DataNodeCfg.InsertBufferChunkSize.GetAsInt64()
-	// use size Limit when chunkSize not valid
-	if chunkSize <= 0 || chunkSize > sizeLimit {
-		log.Warn("invalidate chunk size, use insert buffer size", zap.Int64("chunkSize", chunkSize), zap.Int64("insertBufferSize", sizeLimit))
-		chunkSize = sizeLimit
-	}
 
-	estRow := chunkSize / int64(estSize)
 	ib := &InsertBuffer{
 		BufferBase: BufferBase{
 			rowLimit:      noLimit,
@@ -115,64 +98,20 @@ func NewInsertBuffer(sch *schemapb.CollectionSchema) (*InsertBuffer, error) {
 			TimestampTo:   0,
 		},
 		collSchema: sch,
-		estRow:     estRow,
-		chunkSize:  chunkSize,
-		buffers:    make([]*InsertBufferChunk, 0, sizeLimit/chunkSize),
-	}
-	err = ib.nextBatch()
-	if err != nil {
-		return nil, err
 	}
 
 	return ib, nil
 }
 
-func (ib *InsertBuffer) nextBatch() error {
-	buffer, err := storage.NewInsertDataWithCap(ib.collSchema, int(ib.estRow))
-	if err != nil {
-		return err
-	}
-	ib.buffers = append(ib.buffers, &InsertBufferChunk{
-		BufferBase: BufferBase{
-			rowLimit:      ib.estRow,
-			sizeLimit:     ib.chunkSize,
-			TimestampFrom: math.MaxUint64,
-			TimestampTo:   0,
-		},
-		buffer: buffer,
-	})
-	return nil
-}
-
-func (ib *InsertBuffer) currentBuffer() *InsertBufferChunk {
-	idx := len(ib.buffers) - 1
-	if idx < 0 || ib.buffers[idx].IsFull() {
-		ib.nextBatch()
-		idx++
-	}
-	return ib.buffers[idx]
-}
-
 func (ib *InsertBuffer) buffer(inData *storage.InsertData, tr TimeRange, startPos, endPos *msgpb.MsgPosition) {
-	buffer := ib.currentBuffer()
-	storage.MergeInsertData(buffer.buffer, inData)
-	buffer.UpdateStatistics(int64(inData.GetRowNum()), int64(inData.GetMemorySize()), tr, startPos, endPos)
+	// buffer := ib.currentBuffer()
+	// storage.MergeInsertData(buffer.buffer, inData)
+	ib.buffers = append(ib.buffers, inData)
+	ib.UpdateStatistics(int64(inData.GetRowNum()), int64(inData.GetMemorySize()), tr, startPos, endPos)
 }
 
-func (ib *InsertBuffer) Yield() *storage.InsertData {
-	if ib.IsEmpty() {
-		return nil
-	}
-
-	// avoid copy when there is only one buffer
-	if len(ib.buffers) == 1 {
-		return ib.buffers[0].buffer
-	}
-	// no error assumed, buffer created before
-	result, _ := storage.NewInsertDataWithCap(ib.collSchema, int(ib.rows))
-	for _, chunk := range ib.buffers {
-		storage.MergeInsertData(result, chunk.buffer)
-	}
+func (ib *InsertBuffer) Yield() []*storage.InsertData {
+	result := ib.buffers
 	// set buffer nil to so that fragmented buffer could get GCed
 	ib.buffers = nil
 	return result
