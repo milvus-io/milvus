@@ -134,6 +134,7 @@ func (h *ServerHandler) GetQueryVChanPositions(channel RWChannel, partitionIDs .
 			zap.String("channel", channel.GetName()),
 			zap.Int("numOfSegments", len(segments)),
 			zap.Int("indexed segment", len(indexedSegments)),
+			zap.Int64("currentPartitionStatsVersion", currentPartitionStatsVersion),
 		)
 		unIndexedIDs := make(typeutil.UniqueSet)
 
