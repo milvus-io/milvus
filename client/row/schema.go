@@ -99,7 +99,14 @@ func ParseSchema(r interface{}) (*entity.Schema, error) {
 		case reflect.Float64:
 			field.DataType = entity.FieldTypeDouble
 		case reflect.String:
-			field.DataType = entity.FieldTypeString
+			field.DataType = entity.FieldTypeVarChar
+			if maxLengthVal, has := tagSettings[MilvusMaxLength]; has {
+				maxLength, err := strconv.ParseInt(maxLengthVal, 10, 64)
+				if err != nil {
+					return nil, fmt.Errorf("max length value %s is not valued", maxLengthVal)
+				}
+				field.WithMaxLength(maxLength)
+			}
 		case reflect.Array:
 			arrayLen := ft.Len()
 			elemType := ft.Elem()

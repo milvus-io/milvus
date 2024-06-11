@@ -53,6 +53,9 @@ const (
 	// MilvusAutoID struct tag const for auto id indicator
 	MilvusAutoID = `AUTO_ID`
 
+	// MilvusMaxLength struct tag const for max length
+	MilvusMaxLength = `MAX_LENGTH`
+
 	// DimMax dimension max value
 	DimMax = 65535
 )
@@ -116,7 +119,7 @@ func AnyToColumns(rows []interface{}, schemas ...*entity.Schema) ([]column.Colum
 			nameColumns[field.Name] = col
 		case entity.FieldTypeString, entity.FieldTypeVarChar:
 			data := make([]string, 0, rowsLen)
-			col := column.NewColumnString(field.Name, data)
+			col := column.NewColumnVarChar(field.Name, data)
 			nameColumns[field.Name] = col
 		case entity.FieldTypeJSON:
 			data := make([][]byte, 0, rowsLen)
