@@ -284,14 +284,12 @@ PhyUnaryRangeFilterExpr::ExecArrayEqualForIndex(bool reverse) {
     // cache the result to suit the framework.
     auto batch_res =
         ProcessIndexChunks<IndexInnerType>([this, &val, reverse](Index* _) {
-            std::unordered_set<IndexInnerType> elements;
             boost::container::vector<IndexInnerType> elems;
             for (auto const& element : val.array()) {
                 auto e = GetValueFromProto<IndexInnerType>(element);
-                if (elements.find(e) == elements.end()) {
+                if (std::find(elems.begin(), elems.end(), e) == elems.end()) {
                     elems.push_back(e);
                 }
-                elements.insert(e);
             }
 
             // filtering by index, get candidates.
