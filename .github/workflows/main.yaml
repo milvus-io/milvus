@@ -261,22 +261,15 @@ jobs:
           ls -lah
 
       - name: Upload coverage to Codecov
-        if: "github.repository == 'milvus-io/milvus'"
-        uses: codecov/codecov-action@v4
-        id: upload_cov
+        if: ${{ github.repository == 'milvus-io/milvus' }}
+        uses: Wandalen/wretry.action@v3.5.0
         with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
-          name: ubuntu-20.04-unittests
-          fail_ci_if_error: true
-          disable_safe_directory: true
-      - name: Retry Upload coverage to Codecov
-        if: "${{ failure() }} && github.repository == 'milvus-io/milvus'"
-        uses: codecov/codecov-action@v4
-        id: retry_upload_cov
-        with:
-          token: ${{ secrets.CODECOV_TOKEN }}
-          files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
-          name: ubuntu-20.04-unittests
-          fail_ci_if_error: true
-          disable_safe_directory: true
+          action: codecov/codecov-action@v4
+          with: |
+            token: ${{ secrets.CODECOV_TOKEN }}
+            files: ./go_coverage.txt,./lcov_output.info,./it_coverage.txt
+            name: ubuntu-20.04-unittests
+            fail_ci_if_error: true
+            disable_safe_directory: true
+          attempt_limit: 10
+          attempt_delay: 30000
