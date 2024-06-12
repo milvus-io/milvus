@@ -14,7 +14,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
-package datanode
+package compaction
 
 import (
 	"context"
@@ -24,18 +24,17 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 )
 
 func TestCompactionExecutor(t *testing.T) {
 	t.Run("Test execute", func(t *testing.T) {
 		planID := int64(1)
-		mockC := compaction.NewMockCompactor(t)
+		mockC := NewMockCompactor(t)
 		mockC.EXPECT().GetPlanID().Return(planID).Once()
 		mockC.EXPECT().GetChannelName().Return("ch1").Once()
-		executor := newCompactionExecutor()
-		executor.execute(mockC)
+		executor := NewExecutor()
+		executor.Execute(mockC)
 
 		assert.EqualValues(t, 1, len(executor.taskCh))
 		assert.EqualValues(t, 1, executor.executing.Len())
@@ -44,11 +43,11 @@ func TestCompactionExecutor(t *testing.T) {
 		executor.stopTask(planID)
 	})
 
-	t.Run("Test start", func(t *testing.T) {
-		ex := newCompactionExecutor()
+	t.Run("Test Start", func(t *testing.T) {
+		ex := NewExecutor()
 		ctx, cancel := context.WithCancel(context.TODO())
 		cancel()
-		go ex.start(ctx)
+		go ex.Start(ctx)
 	})
 
 	t.Run("Test executeTask", func(t *testing.T) {
@@ -61,10 +60,10 @@ func TestCompactionExecutor(t *testing.T) {
 			{false, "compact return error"},
 		}
 
-		ex := newCompactionExecutor()
+		ex := NewExecutor()
 		for _, test := range tests {
 			t.Run(test.description, func(t *testing.T) {
-				mockC := compaction.NewMockCompactor(t)
+				mockC := NewMockCompactor(t)
 				mockC.EXPECT().GetPlanID().Return(int64(1))
 				mockC.EXPECT().GetCollection().Return(int64(1))
 				mockC.EXPECT().GetChannelName().Return("ch1")
@@ -100,8 +99,8 @@ func TestCompactionExecutor(t *testing.T) {
 			{expected: true, channel: "ch1", desc: "no in dropped"},
 			{expected: false, channel: "ch2", desc: "in dropped"},
 		}
-		ex := newCompactionExecutor()
-		ex.discardByDroppedChannel("ch2")
+		ex := NewExecutor()
+		ex.DiscardByDroppedChannel("ch2")
 		for _, test := range tests {
 			t.Run(test.desc, func(t *testing.T) {
 				assert.Equal(t, test.expected, ex.isValidChannel(test.channel))
@@ -110,26 +109,26 @@ func TestCompactionExecutor(t *testing.T) {
 	})
 
 	t.Run("test stop vchannel tasks", func(t *testing.T) {
-		ex := newCompactionExecutor()
-		mc := compaction.NewMockCompactor(t)
+		ex := NewExecutor()
+		mc := NewMockCompactor(t)
 		mc.EXPECT().GetPlanID().Return(int64(1))
 		mc.EXPECT().GetChannelName().Return("mock")
 		mc.EXPECT().Compact().Return(&datapb.CompactionPlanResult{PlanID: 1}, nil).Maybe()
 		mc.EXPECT().Stop().Return().Once()
 
-		ex.execute(mc)
+		ex.Execute(mc)
 
 		require.True(t, ex.executing.Contain(int64(1)))
 
-		ex.discardByDroppedChannel("mock")
+		ex.DiscardByDroppedChannel("mock")
 		assert.True(t, ex.dropped.Contain("mock"))
 		assert.False(t, ex.executing.Contain(int64(1)))
 	})
 
-	t.Run("test getAllCompactionResults", func(t *testing.T) {
-		ex := newCompactionExecutor()
+	t.Run("test GetAllCompactionResults", func(t *testing.T) {
+		ex := NewExecutor()
 
-		mockC := compaction.NewMockCompactor(t)
+		mockC := NewMockCompactor(t)
 		ex.executing.Insert(int64(1), mockC)
 
 		ex.completedCompactor.Insert(int64(2), mockC)
@@ -150,7 +149,7 @@ func TestCompactionExecutor(t *testing.T) {
 		require.Equal(t, 2, ex.completedCompactor.Len())
 		require.Equal(t, 1, ex.executing.Len())
 
-		result := ex.getAllCompactionResults()
+		result := ex.GetResults(0)
 		assert.Equal(t, 3, len(result))
 
 		for _, res := range result {

@@ -250,7 +250,7 @@ func (node *DataNode) Compaction(ctx context.Context, req *datapb.CompactionPlan
 		return merr.Status(merr.WrapErrParameterInvalidMsg("Unknown compaction type: %v", req.GetType().String())), nil
 	}
 
-	node.compactionExecutor.execute(task)
+	node.compactionExecutor.Execute(task)
 	return merr.Success(), nil
 }
 
@@ -264,13 +264,7 @@ func (node *DataNode) GetCompactionState(ctx context.Context, req *datapb.Compac
 		}, nil
 	}
 
-	results := make([]*datapb.CompactionPlanResult, 0)
-	if req.GetPlanID() != 0 {
-		result := node.compactionExecutor.getCompactionResult(req.GetPlanID())
-		results = append(results, result)
-	} else {
-		results = node.compactionExecutor.getAllCompactionResults()
-	}
+	results := node.compactionExecutor.GetResults(req.GetPlanID())
 	return &datapb.CompactionStateResponse{
 		Status:  merr.Success(),
 		Results: results,
@@ -301,7 +295,7 @@ func (node *DataNode) SyncSegments(ctx context.Context, req *datapb.SyncSegments
 
 	ds, ok := node.flowgraphManager.GetFlowgraphService(req.GetChannelName())
 	if !ok {
-		node.compactionExecutor.discardPlan(req.GetChannelName())
+		node.compactionExecutor.DiscardPlan(req.GetChannelName())
 		err := merr.WrapErrChannelNotFound(req.GetChannelName())
 		log.Warn("failed to get flow graph service", zap.Error(err))
 		return merr.Status(err), nil
@@ -562,7 +556,7 @@ func (node *DataNode) QuerySlot(ctx context.Context, req *datapb.QuerySlotReques
 
 	return &datapb.QuerySlotResponse{
 		Status:   merr.Success(),
-		NumSlots: Params.DataNodeCfg.SlotCap.GetAsInt64() - int64(node.compactionExecutor.executing.Len()),
+		NumSlots: node.compactionExecutor.Slots(),
 	}, nil
 }
 
@@ -571,7 +565,7 @@ func (node *DataNode) DropCompactionPlan(ctx context.Context, req *datapb.DropCo
 		return merr.Status(err), nil
 	}
 
-	node.compactionExecutor.removeTask(req.GetPlanID())
+	node.compactionExecutor.RemoveTask(req.GetPlanID())
 	log.Ctx(ctx).Info("DropCompactionPlans success", zap.Int64("planID", req.GetPlanID()))
 	return merr.Success(), nil
 }
