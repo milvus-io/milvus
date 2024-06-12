@@ -18,7 +18,6 @@ package datacoord
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -48,7 +47,7 @@ import (
 
 var paginationSize = 2000
 
-var errNil = errors.New("proto: Marshal called with nil")
+var errNil = fmt.Errorf("proto: Marshal called with nil")
 
 type Catalog struct {
 	MetaKv               kv.MetaKv
