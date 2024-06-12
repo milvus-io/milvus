@@ -226,8 +226,9 @@ struct GeneratedData {
         PanicInfo(FieldIDInvalid, "field id not find");
     }
 
- private:
     GeneratedData() = default;
+
+ private:
     friend GeneratedData
     DataGen(SchemaPtr schema,
             int64_t N,
