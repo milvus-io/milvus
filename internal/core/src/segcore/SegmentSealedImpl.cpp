@@ -1593,7 +1593,8 @@ SegmentSealedImpl::generate_interim_index(const FieldId field_id) {
             new VecIndexConfig(row_count,
                                field_index_meta,
                                segcore_config_,
-                               SegmentType::Sealed));
+                               SegmentType::Sealed,
+                               is_sparse));
         if (row_count < field_binlog_config->GetBuildThreshold()) {
             return false;
         }
