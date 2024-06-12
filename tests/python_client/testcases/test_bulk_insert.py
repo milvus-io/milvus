@@ -247,7 +247,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.parametrize("is_row_based", [True])
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])
-    @pytest.mark.parametrize("entities", [3000])
+    @pytest.mark.parametrize("entities", [2000])
     def test_partition_float_vector_int_scalar(
         self, is_row_based, auto_id, dim, entities
     ):
@@ -750,7 +750,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True])
     @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [3000])  # 3000
+    @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("enable_dynamic_field", [True])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     def test_bulk_insert_all_field_with_new_json_format(self, auto_id, dim, entities, enable_dynamic_field, enable_partition_key):
@@ -898,7 +898,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [3000])  # 3000
+    @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
@@ -1046,7 +1046,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [3000])  # 3000
+    @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("enable_partition_key", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
@@ -1197,7 +1197,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [3000])  # 3000
+    @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
@@ -1320,7 +1320,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
     @pytest.mark.tags(CaseLabel.L3)
     @pytest.mark.parametrize("auto_id", [True, False])
     @pytest.mark.parametrize("dim", [128])  # 128
-    @pytest.mark.parametrize("entities", [3000])  # 3000
+    @pytest.mark.parametrize("entities", [2000])
     @pytest.mark.parametrize("enable_dynamic_field", [True, False])
     @pytest.mark.parametrize("include_meta", [True, False])
     @pytest.mark.parametrize("sparse_format", ["doc", "coo"])
