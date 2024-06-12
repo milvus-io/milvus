@@ -297,16 +297,16 @@ type segmentManager struct {
 	// releaseCallback is the callback function when a segment is released.
 	releaseCallback func(s Segment)
 
-	growingOnReleasingSegments map[typeutil.UniqueID]int
-	sealedOnReleasingSegments  map[typeutil.UniqueID]int
+	growingOnReleasingSegments typeutil.UniqueSet
+	sealedOnReleasingSegments  typeutil.UniqueSet
 }
 
 func NewSegmentManager() *segmentManager {
 	return &segmentManager{
 		growingSegments:            make(map[int64]Segment),
 		sealedSegments:             make(map[int64]Segment),
-		growingOnReleasingSegments: make(map[int64]int),
-		sealedOnReleasingSegments:  make(map[int64]int),
+		growingOnReleasingSegments: typeutil.NewUniqueSet(),
+		sealedOnReleasingSegments:  typeutil.NewUniqueSet(),
 	}
 }
 
@@ -387,13 +387,13 @@ func (mgr *segmentManager) Exist(segmentID typeutil.UniqueID, typ SegmentType) b
 	case SegmentTypeGrowing:
 		if _, ok := mgr.growingSegments[segmentID]; ok {
 			return true
-		} else if cnt, ok := mgr.growingOnReleasingSegments[segmentID]; ok && cnt > 0 {
+		} else if mgr.growingOnReleasingSegments.Contain(segmentID) {
 			return true
 		}
 	case SegmentTypeSealed:
 		if _, ok := mgr.sealedSegments[segmentID]; ok {
 			return true
-		} else if cnt, ok := mgr.sealedOnReleasingSegments[segmentID]; ok && cnt > 0 {
+		} else if mgr.sealedOnReleasingSegments.Contain(segmentID) {
 			return true
 		}
 	}
@@ -682,7 +682,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.growingSegments[segmentID]
 		if ok {
 			delete(mgr.growingSegments, segmentID)
-			mgr.growingOnReleasingSegments[segmentID] += 1
+			mgr.growingOnReleasingSegments.Insert(segmentID)
 			return s
 		}
 
@@ -690,7 +690,7 @@ func (mgr *segmentManager) removeSegmentWithType(typ SegmentType, segmentID type
 		s, ok := mgr.sealedSegments[segmentID]
 		if ok {
 			delete(mgr.sealedSegments, segmentID)
-			mgr.sealedOnReleasingSegments[segmentID] += 1
+			mgr.sealedOnReleasingSegments.Insert(segmentID)
 			return s
 		}
 	default:
@@ -732,13 +732,13 @@ func (mgr *segmentManager) Clear(ctx context.Context) {
 	mgr.mu.Lock()
 
 	for id := range mgr.growingSegments {
-		mgr.growingOnReleasingSegments[id] += 1
+		mgr.growingOnReleasingSegments.Insert(id)
 	}
 	growingWaitForRelease := mgr.growingSegments
 	mgr.growingSegments = make(map[int64]Segment)
 
 	for id := range mgr.sealedSegments {
-		mgr.sealedOnReleasingSegments[id] += 1
+		mgr.sealedOnReleasingSegments.Insert(id)
 	}
 	sealedWaitForRelease := mgr.sealedSegments
 	mgr.sealedSegments = make(map[int64]Segment)
@@ -795,14 +795,8 @@ func (mgr *segmentManager) release(ctx context.Context, segment Segment) {
 
 	switch segment.Type() {
 	case SegmentTypeGrowing:
-		mgr.growingOnReleasingSegments[segment.ID()] -= 1
-		if mgr.growingOnReleasingSegments[segment.ID()] == 0 {
-			delete(mgr.growingOnReleasingSegments, segment.ID())
-		}
+		mgr.growingOnReleasingSegments.Remove(segment.ID())
 	case SegmentTypeSealed:
-		mgr.sealedOnReleasingSegments[segment.ID()] -= 1
-		if mgr.sealedOnReleasingSegments[segment.ID()] == 0 {
-			delete(mgr.sealedOnReleasingSegments, segment.ID())
-		}
+		mgr.sealedOnReleasingSegments.Remove(segment.ID())
 	}
 }
