@@ -82,7 +82,7 @@ func (s *storageV2Serializer) EncodeBuffer(ctx context.Context, pack *SyncPack) 
 	}
 
 	task.space = space
-	if pack.insertData != nil {
+	if len(pack.insertData) > 0 {
 		insertReader, err := s.serializeInsertData(pack)
 		if err != nil {
 			log.Warn("failed to serialize insert data with storagev2", zap.Error(err))
