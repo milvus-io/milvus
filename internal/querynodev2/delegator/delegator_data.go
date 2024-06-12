@@ -199,34 +199,37 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		Data: cacheItems,
 	})
 
+	start := time.Now()
+	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool())
 	// segment => delete data
 	delRecords := make(map[int64]DeleteData)
-	for _, data := range deleteData {
-		pks := data.PrimaryKeys
-		batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-		for idx := 0; idx < len(pks); idx += batchSize {
-			endIdx := idx + batchSize
-			if endIdx > len(pks) {
-				endIdx = len(pks)
-			}
+	retMap.Range(func(key int, value *BatchApplyRet) bool {
+		startIdx := value.StartIdx
+		segmentID2Hits := value.Segment2Hits
 
-			pk2SegmentIDs := sd.pkOracle.BatchGet(pks[idx:endIdx], pkoracle.WithPartitionID(data.PartitionID))
-			for i, segmentIDs := range pk2SegmentIDs {
-				for _, segmentID := range segmentIDs {
+		pks := deleteData[value.DeleteDataIdx].PrimaryKeys
+		tss := deleteData[value.DeleteDataIdx].Timestamps
+
+		for segmentID, hits := range segmentID2Hits {
+			for i, hit := range hits {
+				if hit {
 					delRecord := delRecords[segmentID]
-					delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pks[idx+i])
-					delRecord.Timestamps = append(delRecord.Timestamps, data.Timestamps[idx+i])
+					delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pks[startIdx+i])
+					delRecord.Timestamps = append(delRecord.Timestamps, tss[startIdx+i])
 					delRecord.RowCount++
 					delRecords[segmentID] = delRecord
 				}
 			}
 		}
-	}
+		return true
+	})
+	bfCost := time.Since(start)
 
 	offlineSegments := typeutil.NewConcurrentSet[int64]()
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
 
+	start = time.Now()
 	eg, ctx := errgroup.WithContext(context.Background())
 	for _, entry := range sealed {
 		entry := entry
@@ -260,9 +263,9 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 			return nil
 		})
 	}
-
 	// not error return in apply delete
 	_ = eg.Wait()
+	forwardDeleteCost := time.Since(start)
 
 	sd.distribution.Unpin(version)
 	offlineSegIDs := offlineSegments.Collect()
@@ -271,8 +274,49 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Milliseconds()))
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+}
+
+type BatchApplyRet = struct {
+	DeleteDataIdx int
+	StartIdx      int
+	Segment2Hits  map[int64][]bool
+}
+
+func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *conc.Pool[any]) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+	retIdx := 0
+	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+
+	var futures []*conc.Future[any]
+	for didx, data := range deleteDatas {
+		pks := data.PrimaryKeys
+		for idx := 0; idx < len(pks); idx += batchSize {
+			startIdx := idx
+			endIdx := startIdx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
+			}
+
+			retIdx += 1
+			tmpRetIdx := retIdx
+			deleteDataId := didx
+			future := pool.Submit(func() (any, error) {
+				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(data.PartitionID))
+				retMap.Insert(tmpRetIdx, &BatchApplyRet{
+					DeleteDataIdx: deleteDataId,
+					StartIdx:      startIdx,
+					Segment2Hits:  ret,
+				})
+				return nil, nil
+			})
+			futures = append(futures, future)
+		}
+	}
+	conc.AwaitAll(futures...)
+	return retMap
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.

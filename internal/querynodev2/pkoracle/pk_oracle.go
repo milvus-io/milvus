@@ -28,7 +28,7 @@ import (
 type PkOracle interface {
 	// GetCandidates returns segment candidates of which pk might belongs to.
 	Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]int64, error)
-	BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) [][]int64
+	BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) map[int64][]bool
 	// RegisterCandidate adds candidate into pkOracle.
 	Register(candidate Candidate, workerID int64) error
 	// RemoveCandidate removes candidate
@@ -64,8 +64,8 @@ func (pko *pkOracle) Get(pk storage.PrimaryKey, filters ...CandidateFilter) ([]i
 	return result, nil
 }
 
-func (pko *pkOracle) BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) [][]int64 {
-	result := make([][]int64, len(pks))
+func (pko *pkOracle) BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilter) map[int64][]bool {
+	result := make(map[int64][]bool)
 
 	lc := storage.NewBatchLocationsCache(pks)
 	pko.candidates.Range(func(key string, candidate candidateWithWorker) bool {
@@ -76,11 +76,7 @@ func (pko *pkOracle) BatchGet(pks []storage.PrimaryKey, filters ...CandidateFilt
 		}
 
 		hits := candidate.BatchPkExist(lc)
-		for i, hit := range hits {
-			if hit {
-				result[i] = append(result[i], candidate.ID())
-			}
-		}
+		result[candidate.ID()] = hits
 		return true
 	})
 
