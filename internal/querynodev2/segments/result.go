@@ -42,7 +42,7 @@ var _ typeutil.ResultWithID = &internalpb.RetrieveResults{}
 
 var _ typeutil.ResultWithID = &segcorepb.RetrieveResults{}
 
-func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, nq int64, topk int64, metricType string) (*internalpb.SearchResults, error) {
+func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResults, info *ReduceInfo) (*internalpb.SearchResults, error) {
 	results = lo.Filter(results, func(result *internalpb.SearchResults, _ int) bool {
 		return result != nil && result.GetSlicedBlob() != nil
 	})
@@ -60,8 +60,8 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 			channelsMvcc[ch] = ts
 		}
 		// shouldn't let new SearchResults.MetricType to be empty, though the req.MetricType is empty
-		if metricType == "" {
-			metricType = r.MetricType
+		if info.metricType == "" {
+			info.metricType = r.MetricType
 		}
 	}
 	log := log.Ctx(ctx)
@@ -80,12 +80,13 @@ func ReduceSearchResults(ctx context.Context, results []*internalpb.SearchResult
 			zap.Int64("topk", sData.TopK))
 	}
 
-	reducedResultData, err := ReduceSearchResultData(ctx, searchResultData, nq, topk)
+	searchReduce := InitSearchReducer(info)
+	reducedResultData, err := searchReduce.ReduceSearchResultData(ctx, searchResultData, info)
 	if err != nil {
 		log.Warn("shard leader reduce errors", zap.Error(err))
 		return nil, err
 	}
-	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, nq, topk, metricType)
+	searchResults, err := EncodeSearchResultData(ctx, reducedResultData, info.nq, info.topK, info.metricType)
 	if err != nil {
 		log.Warn("shard leader encode search result errors", zap.Error(err))
 		return nil, err
@@ -205,101 +206,6 @@ func MergeToAdvancedResults(ctx context.Context, results []*internalpb.SearchRes
 	}
 	searchResults.CostAggregation.TotalRelatedDataSize = relatedDataSize
 	return searchResults, nil
-}
-
-func ReduceSearchResultData(ctx context.Context, searchResultData []*schemapb.SearchResultData, nq int64, topk int64) (*schemapb.SearchResultData, error) {
-	ctx, sp := otel.Tracer(typeutil.QueryNodeRole).Start(ctx, "ReduceSearchResultData")
-	defer sp.End()
-	log := log.Ctx(ctx)
-
-	if len(searchResultData) == 0 {
-		return &schemapb.SearchResultData{
-			NumQueries: nq,
-			TopK:       topk,
-			FieldsData: make([]*schemapb.FieldData, 0),
-			Scores:     make([]float32, 0),
-			Ids:        &schemapb.IDs{},
-			Topks:      make([]int64, 0),
-		}, nil
-	}
-	ret := &schemapb.SearchResultData{
-		NumQueries: nq,
-		TopK:       topk,
-		FieldsData: make([]*schemapb.FieldData, len(searchResultData[0].FieldsData)),
-		Scores:     make([]float32, 0),
-		Ids:        &schemapb.IDs{},
-		Topks:      make([]int64, 0),
-	}
-
-	resultOffsets := make([][]int64, len(searchResultData))
-	for i := 0; i < len(searchResultData); i++ {
-		resultOffsets[i] = make([]int64, len(searchResultData[i].Topks))
-		for j := int64(1); j < nq; j++ {
-			resultOffsets[i][j] = resultOffsets[i][j-1] + searchResultData[i].Topks[j-1]
-		}
-		ret.AllSearchCount += searchResultData[i].GetAllSearchCount()
-	}
-
-	var skipDupCnt int64
-	var retSize int64
-	maxOutputSize := paramtable.Get().QuotaConfig.MaxOutputSize.GetAsInt64()
-	for i := int64(0); i < nq; i++ {
-		offsets := make([]int64, len(searchResultData))
-
-		idSet := make(map[interface{}]struct{})
-		groupByValueSet := make(map[interface{}]struct{})
-		var j int64
-		for j = 0; j < topk; {
-			sel := SelectSearchResultData(searchResultData, resultOffsets, offsets, i)
-			if sel == -1 {
-				break
-			}
-			idx := resultOffsets[sel][i] + offsets[sel]
-
-			id := typeutil.GetPK(searchResultData[sel].GetIds(), idx)
-			groupByVal := typeutil.GetData(searchResultData[sel].GetGroupByFieldValue(), int(idx))
-			score := searchResultData[sel].Scores[idx]
-
-			// remove duplicates
-			if _, ok := idSet[id]; !ok {
-				groupByValExist := false
-				if groupByVal != nil {
-					_, groupByValExist = groupByValueSet[groupByVal]
-				}
-				if !groupByValExist {
-					retSize += typeutil.AppendFieldData(ret.FieldsData, searchResultData[sel].FieldsData, idx)
-					typeutil.AppendPKs(ret.Ids, id)
-					ret.Scores = append(ret.Scores, score)
-					if groupByVal != nil {
-						groupByValueSet[groupByVal] = struct{}{}
-						if err := typeutil.AppendGroupByValue(ret, groupByVal, searchResultData[sel].GetGroupByFieldValue().GetType()); err != nil {
-							log.Error("Failed to append groupByValues", zap.Error(err))
-							return ret, err
-						}
-					}
-					idSet[id] = struct{}{}
-					j++
-				}
-			} else {
-				// skip entity with same id
-				skipDupCnt++
-			}
-			offsets[sel]++
-		}
-
-		// if realTopK != -1 && realTopK != j {
-		// 	log.Warn("Proxy Reduce Search Result", zap.Error(errors.New("the length (topk) between all result of query is different")))
-		// 	// return nil, errors.New("the length (topk) between all result of query is different")
-		// }
-		ret.Topks = append(ret.Topks, j)
-
-		// limit search result to avoid oom
-		if retSize > maxOutputSize {
-			return nil, fmt.Errorf("search results exceed the maxOutputSize Limit %d", maxOutputSize)
-		}
-	}
-	log.Debug("skip duplicated search result", zap.Int64("count", skipDupCnt))
-	return ret, nil
 }
 
 func SelectSearchResultData(dataArray []*schemapb.SearchResultData, resultOffsets [][]int64, offsets []int64, qi int64) int {
