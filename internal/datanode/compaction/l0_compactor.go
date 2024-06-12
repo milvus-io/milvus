@@ -242,11 +242,18 @@ func (t *LevelZeroCompactionTask) splitDelta(
 	})
 
 	// spilt all delete data to segments
+
+	retMap := t.applyBFInParallel(allDelta, io.GetBFApplyPool(), segmentBfs)
+
 	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
-	split := func(pks []storage.PrimaryKey, pkTss []uint64) {
-		lc := storage.NewBatchLocationsCache(pks)
-		for segmentID, bf := range segmentBfs {
-			hits := bf.BatchPkExist(lc)
+	retMap.Range(func(key int, value *BatchApplyRet) bool {
+		startIdx := value.StartIdx
+		pk2SegmentIDs := value.Segment2Hits
+
+		pks := allDelta[value.DeleteDataIdx].Pks
+		tss := allDelta[value.DeleteDataIdx].Tss
+
+		for segmentID, hits := range pk2SegmentIDs {
 			for i, hit := range hits {
 				if hit {
 					writer, ok := targetSegBuffer[segmentID]
@@ -255,27 +262,65 @@ func (t *LevelZeroCompactionTask) splitDelta(
 						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), segment.GetCollectionID())
 						targetSegBuffer[segmentID] = writer
 					}
-					writer.Write(pks[i], pkTss[i])
+					writer.Write(pks[startIdx+i], tss[startIdx+i])
 				}
 			}
 		}
+		return true
+	})
+
+	return targetSegBuffer
+}
+
+type BatchApplyRet = struct {
+	DeleteDataIdx int
+	StartIdx      int
+	Segment2Hits  map[int64][]bool
+}
+
+func (t *LevelZeroCompactionTask) applyBFInParallel(deleteDatas []*storage.DeleteData, pool *conc.Pool[any], segmentBfs map[int64]*metacache.BloomFilterSet) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+
+	batchPredict := func(pks []storage.PrimaryKey) map[int64][]bool {
+		segment2Hits := make(map[int64][]bool, 0)
+		lc := storage.NewBatchLocationsCache(pks)
+		for segmentID, bf := range segmentBfs {
+			hits := bf.BatchPkExist(lc)
+			segment2Hits[segmentID] = hits
+		}
+		return segment2Hits
 	}
 
-	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
-	// spilt all delete data to segments
-	for _, deleteBuffer := range allDelta {
-		pks := deleteBuffer.Pks
-		pkTss := deleteBuffer.Tss
+	retIdx := 0
+	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
+	var futures []*conc.Future[any]
+	for didx, data := range deleteDatas {
+		pks := data.Pks
 		for idx := 0; idx < len(pks); idx += batchSize {
-			endIdx := idx + batchSize
+			startIdx := idx
+			endIdx := startIdx + batchSize
 			if endIdx > len(pks) {
 				endIdx = len(pks)
 			}
-			split(pks[idx:endIdx], pkTss[idx:endIdx])
+
+			retIdx += 1
+			tmpRetIndex := retIdx
+			deleteDataId := didx
+			future := pool.Submit(func() (any, error) {
+				ret := batchPredict(pks[startIdx:endIdx])
+				retMap.Insert(tmpRetIndex, &BatchApplyRet{
+					DeleteDataIdx: deleteDataId,
+					StartIdx:      startIdx,
+					Segment2Hits:  ret,
+				})
+				return nil, nil
+			})
+			futures = append(futures, future)
 		}
 	}
+	conc.AwaitAll(futures...)
 
-	return targetSegBuffer
+	return retMap
 }
 
 func (t *LevelZeroCompactionTask) process(ctx context.Context, batchSize int, targetSegments []*datapb.CompactionSegmentBinlogs, deltaLogs ...[]string) ([]*datapb.CompactionSegment, error) {

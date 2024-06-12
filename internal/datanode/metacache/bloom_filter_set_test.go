@@ -99,6 +99,12 @@ func (s *BloomFilterSetSuite) TestBatchPkExist() {
 		for _, hit := range hits {
 			s.True(hit, "pk shall return exist after batch update")
 		}
+
+		hits = make([]bool, lc.Size())
+		bfs.BatchPkExistWithHits(lc, hits)
+		for _, hit := range hits {
+			s.True(hit, "pk shall return exist after batch update")
+		}
 	}
 }
 

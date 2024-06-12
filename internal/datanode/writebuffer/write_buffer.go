@@ -444,6 +444,32 @@ func (id *inData) pkExists(pk storage.PrimaryKey, ts uint64) bool {
 	return ok && ts > uint64(minTs)
 }
 
+func (id *inData) batchPkExists(pks []storage.PrimaryKey, tss []uint64, hits []bool) []bool {
+	if len(pks) == 0 {
+		return nil
+	}
+
+	pkType := pks[0].Type()
+	switch pkType {
+	case schemapb.DataType_Int64:
+		for i := range pks {
+			if !hits[i] {
+				minTs, ok := id.intPKTs[pks[i].GetValue().(int64)]
+				hits[i] = ok && tss[i] > uint64(minTs)
+			}
+		}
+	case schemapb.DataType_VarChar:
+		for i := range pks {
+			if !hits[i] {
+				minTs, ok := id.strPKTs[pks[i].GetValue().(string)]
+				hits[i] = ok && tss[i] > uint64(minTs)
+			}
+		}
+	}
+
+	return hits
+}
+
 // prepareInsert transfers InsertMsg into organized InsertData grouped by segmentID
 // also returns primary key field data
 func (wb *writeBufferBase) prepareInsert(insertMsgs []*msgstream.InsertMsg) ([]*inData, error) {
