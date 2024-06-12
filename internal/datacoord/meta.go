@@ -1803,6 +1803,9 @@ func updateSegStateAndPrepareMetrics(segToUpdate *SegmentInfo, targetState commo
 		zap.Int64("# of rows", segToUpdate.GetNumOfRows()))
 	metricMutation.append(segToUpdate.GetState(), targetState, segToUpdate.GetLevel(), segToUpdate.GetNumOfRows())
 	segToUpdate.State = targetState
+	if targetState == commonpb.SegmentState_Dropped {
+		segToUpdate.DroppedAt = uint64(time.Now().UnixNano())
+	}
 }
 
 func (m *meta) ListCollections() []int64 {
