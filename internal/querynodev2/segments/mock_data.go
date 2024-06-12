@@ -29,7 +29,6 @@ import (
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
 	"google.golang.org/protobuf/encoding/prototext"
-	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -43,6 +42,7 @@ import (
 	"github.com/milvus-io/milvus/internal/proto/segcorepb"
 	storage "github.com/milvus-io/milvus/internal/storage"
 	"github.com/milvus-io/milvus/internal/util/indexcgowrapper"
+	proto "github.com/milvus-io/milvus/internal/util/protobr"
 	"github.com/milvus-io/milvus/pkg/common"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/mq/msgstream"
