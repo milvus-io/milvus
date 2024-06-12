@@ -1098,7 +1098,7 @@ func (deleteCodec *DeleteCodec) Deserialize(blobs []*Blob) (partitionID UniqueID
 					case int64(schemapb.DataType_Int64):
 						deleteLog.Pk = &Int64PrimaryKey{Value: v.GetInt64("pk")}
 					case int64(schemapb.DataType_VarChar):
-						deleteLog.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes(string(v.GetStringBytes("pk"))))}
+						deleteLog.Pk = &VarCharPrimaryKey{Value: string(v.GetStringBytes("pk"))}
 					}
 				}
 
