@@ -261,7 +261,7 @@ func ReadBinaryData(pcr *FieldReader, count int64) (any, error) {
 		case arrow.LIST:
 			listReader := chunk.(*array.List)
 			if !isVectorAligned(listReader.Offsets(), pcr.dim, dataType) {
-				return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
+				return nil, merr.WrapErrImportFailed(fmt.Sprintf("%s's dimension not aligned", dataType.String()))
 			}
 			uint8Reader, ok := listReader.ListValues().(*array.Uint8)
 			if !ok {
@@ -392,7 +392,7 @@ func ReadIntegerOrFloatArrayData[T constraints.Integer | constraints.Float](pcr 
 		offsets := listReader.Offsets()
 		dataType := pcr.field.GetDataType()
 		if typeutil.IsVectorType(dataType) && !isVectorAligned(offsets, pcr.dim, dataType) {
-			return nil, merr.WrapErrImportFailed("%s not aligned", dataType.String())
+			return nil, merr.WrapErrImportFailed(fmt.Sprintf("%s's dimension not aligned", dataType.String()))
 		}
 		valueReader := listReader.ListValues()
 		switch valueReader.DataType().ID() {
