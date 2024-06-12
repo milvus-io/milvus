@@ -139,8 +139,8 @@ func CalcFloatDistance(dim int64, left, right []float32, metric string) ([]float
 		waitGroup.Done()
 	}
 	// avoid too many goroutines by ants pool
-	poolSize := int(leftNum / 3)
-	pool, err := ants.NewPoolWithFunc(poolSize, calcWorker)
+	poolSize := runtime.NumCPU()
+	pool, err := conc.NewPoolWithFunc(poolSize, calcWorker)
 	if err != nil {
 		return nil, err
 	}
