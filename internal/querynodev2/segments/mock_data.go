@@ -27,8 +27,9 @@ import (
 	"strconv"
 
 	"github.com/cockroachdb/errors"
-	"github.com/golang/protobuf/proto"
 	"go.uber.org/zap"
+	"google.golang.org/protobuf/encoding/prototext"
+	"google.golang.org/protobuf/proto"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus-proto/go-api/v2/msgpb"
@@ -869,7 +870,7 @@ func genSearchRequest(nq int64, indexType string, collection *Collection) (*inte
 		return nil, err2
 	}
 	var planpb planpb.PlanNode
-	err = proto.UnmarshalText(planStr, &planpb)
+	err = prototext.Unmarshal([]byte(planStr), &planpb)
 	if err != nil {
 		return nil, err
 	}
