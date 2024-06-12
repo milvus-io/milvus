@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path"
 	"strconv"
@@ -46,6 +47,8 @@ import (
 )
 
 var paginationSize = 2000
+
+var errNil = errors.New("proto: Marshal called with nil")
 
 type Catalog struct {
 	MetaKv               kv.MetaKv
@@ -686,6 +689,9 @@ func (kc *Catalog) DropSegmentIndex(ctx context.Context, collID, partID, segID, 
 }
 
 func (kc *Catalog) SaveImportJob(job *datapb.ImportJob) error {
+	if job == nil {
+		return errNil
+	}
 	key := buildImportJobKey(job.GetJobID())
 	value, err := proto.Marshal(job)
 	if err != nil {
@@ -717,6 +723,9 @@ func (kc *Catalog) DropImportJob(jobID int64) error {
 }
 
 func (kc *Catalog) SavePreImportTask(task *datapb.PreImportTask) error {
+	if task == nil {
+		return errNil
+	}
 	key := buildPreImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
 	if err != nil {
@@ -750,6 +759,9 @@ func (kc *Catalog) DropPreImportTask(taskID int64) error {
 }
 
 func (kc *Catalog) SaveImportTask(task *datapb.ImportTaskV2) error {
+	if task == nil {
+		return errNil
+	}
 	key := buildImportTaskKey(task.GetTaskID())
 	value, err := proto.Marshal(task)
 	if err != nil {
