@@ -357,7 +357,7 @@ func (t *l0CompactionTask) SetNodeID(id UniqueID) error {
 }
 
 func (t *l0CompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
+	return t.meta.GetCompactionTaskMeta().SaveCompactionTask(task)
 }
 
 func (t *l0CompactionTask) SaveTaskMeta() error {

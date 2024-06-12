@@ -103,7 +103,7 @@ func (t *mixCompactionTask) processExecuting() bool {
 }
 
 func (t *mixCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
+	return t.meta.GetCompactionTaskMeta().SaveCompactionTask(task)
 }
 
 func (t *mixCompactionTask) SaveTaskMeta() error {

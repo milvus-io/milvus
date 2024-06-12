@@ -92,7 +92,7 @@ type compactionPlanHandler struct {
 }
 
 func (c *compactionPlanHandler) getCompactionInfo(triggerID int64) *compactionInfo {
-	tasks := c.meta.GetCompactionTasksByTriggerID(triggerID)
+	tasks := c.meta.GetCompactionTaskMeta().GetCompactionTasksByTriggerID(triggerID)
 	return summaryCompactionState(tasks)
 }
 
@@ -358,14 +358,14 @@ func (c *compactionPlanHandler) Clean() {
 
 func (c *compactionPlanHandler) cleanCompactionTaskMeta() {
 	// gc clustering compaction tasks
-	triggers := c.meta.GetCompactionTasks()
+	triggers := c.meta.GetCompactionTaskMeta().GetCompactionTasks()
 	for _, tasks := range triggers {
 		for _, task := range tasks {
 			if task.State == datapb.CompactionTaskState_completed || task.State == datapb.CompactionTaskState_cleaned {
 				duration := time.Since(time.Unix(task.StartTime, 0)).Seconds()
 				if duration > float64(Params.DataCoordCfg.CompactionDropToleranceInSeconds.GetAsDuration(time.Second)) {
 					// try best to delete meta
-					err := c.meta.DropCompactionTask(task)
+					err := c.meta.GetCompactionTaskMeta().DropCompactionTask(task)
 					if err != nil {
 						log.Warn("fail to drop task", zap.Int64("taskPlanID", task.PlanID), zap.Error(err))
 					}

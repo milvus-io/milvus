@@ -61,11 +61,6 @@ type CompactionMeta interface {
 	CompleteCompactionMutation(plan *datapb.CompactionPlan, result *datapb.CompactionPlanResult) ([]*SegmentInfo, *segMetricMutation, error)
 	CleanPartitionStatsInfo(info *datapb.PartitionStatsInfo) error
 
-	SaveCompactionTask(task *datapb.CompactionTask) error
-	DropCompactionTask(task *datapb.CompactionTask) error
-	GetCompactionTasks() map[int64][]*datapb.CompactionTask
-	GetCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask
-
 	GetIndexMeta() *indexMeta
 	GetAnalyzeMeta() *analyzeMeta
 	GetPartitionStatsMeta() *partitionStatsMeta
@@ -1810,22 +1805,6 @@ func (m *meta) ListCollections() []int64 {
 	defer m.RUnlock()
 
 	return lo.Keys(m.collections)
-}
-
-func (m *meta) DropCompactionTask(task *datapb.CompactionTask) error {
-	return m.compactionTaskMeta.DropCompactionTask(task)
-}
-
-func (m *meta) SaveCompactionTask(task *datapb.CompactionTask) error {
-	return m.compactionTaskMeta.SaveCompactionTask(task)
-}
-
-func (m *meta) GetCompactionTasks() map[int64][]*datapb.CompactionTask {
-	return m.compactionTaskMeta.GetCompactionTasks()
-}
-
-func (m *meta) GetCompactionTasksByTriggerID(triggerID int64) []*datapb.CompactionTask {
-	return m.compactionTaskMeta.GetCompactionTasksByTriggerID(triggerID)
 }
 
 func (m *meta) CleanPartitionStatsInfo(info *datapb.PartitionStatsInfo) error {

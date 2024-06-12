@@ -477,7 +477,7 @@ func (t *clusteringCompactionTask) checkTimeout() bool {
 }
 
 func (t *clusteringCompactionTask) saveTaskMeta(task *datapb.CompactionTask) error {
-	return t.meta.SaveCompactionTask(task)
+	return t.meta.GetCompactionTaskMeta().SaveCompactionTask(task)
 }
 
 func (t *clusteringCompactionTask) SaveTaskMeta() error {
