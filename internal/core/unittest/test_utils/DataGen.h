@@ -226,8 +226,9 @@ struct GeneratedData {
         PanicInfo(FieldIDInvalid, "field id not find");
     }
 
- private:
     GeneratedData() = default;
+
+ private:
     friend GeneratedData
     DataGen(SchemaPtr schema,
             int64_t N,
@@ -491,8 +492,30 @@ inline GeneratedData DataGen(SchemaPtr schema,
                         }
                         break;
                     }
-                    case DataType::INT8:
-                    case DataType::INT16:
+                    case DataType::INT8: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_int_data()->add_data(
+                                    static_cast<int8_t>(random()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
+                    case DataType::INT16: {
+                        for (int i = 0; i < N / repeat_count; i++) {
+                            milvus::proto::schema::ScalarField field_data;
+
+                            for (int j = 0; j < array_len; j++) {
+                                field_data.mutable_int_data()->add_data(
+                                    static_cast<int16_t>(random()));
+                            }
+                            data[i] = field_data;
+                        }
+                        break;
+                    }
                     case DataType::INT32: {
                         for (int i = 0; i < N / repeat_count; i++) {
                             milvus::proto::schema::ScalarField field_data;

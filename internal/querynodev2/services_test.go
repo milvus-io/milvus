@@ -20,6 +20,8 @@ import (
 	"encoding/json"
 	"io"
 	"math/rand"
+	"path"
+	"strconv"
 	"sync"
 	"testing"
 	"time"
@@ -1898,6 +1900,61 @@ func (suite *ServiceSuite) TestSyncDistribution_Normal() {
 	suite.NoError(err)
 	suite.Equal(commonpb.ErrorCode_Success, status.GetErrorCode())
 	suite.True(versionMatch)
+}
+
+func (suite *ServiceSuite) TestSyncDistribution_UpdatePartitionStats() {
+	ctx := context.Background()
+	// prepare
+	// watch dmchannel and load some segments
+	suite.TestWatchDmChannelsInt64()
+
+	// write partitionStats file
+	partitionID := suite.partitionIDs[0]
+	newVersion := int64(100)
+	idPath := metautil.JoinIDPath(suite.collectionID, partitionID)
+	idPath = path.Join(idPath, suite.vchannel)
+	statsFilePath := path.Join(suite.node.chunkManager.RootPath(), common.PartitionStatsPath, idPath, strconv.FormatInt(newVersion, 10))
+	segStats := make(map[typeutil.UniqueID]storage.SegmentStats)
+	partitionStats := &storage.PartitionStatsSnapshot{
+		SegmentStats: segStats,
+	}
+	statsData, err := storage.SerializePartitionStatsSnapshot(partitionStats)
+	suite.NoError(err)
+	suite.node.chunkManager.Write(context.Background(), statsFilePath, statsData)
+	defer suite.node.chunkManager.Remove(context.Background(), statsFilePath)
+
+	// sync part stats
+	req := &querypb.SyncDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID:    rand.Int63(),
+			TargetID: suite.node.session.ServerID,
+		},
+		CollectionID: suite.collectionID,
+		Channel:      suite.vchannel,
+	}
+
+	partVersionsMap := make(map[int64]int64)
+	partVersionsMap[partitionID] = newVersion
+	updatePartStatsAction := &querypb.SyncAction{
+		Type:                   querypb.SyncType_UpdatePartitionStats,
+		PartitionStatsVersions: partVersionsMap,
+	}
+	req.Actions = []*querypb.SyncAction{updatePartStatsAction}
+	status, err := suite.node.SyncDistribution(ctx, req)
+	suite.NoError(err)
+	suite.Equal(commonpb.ErrorCode_Success, status.ErrorCode)
+
+	getReq := &querypb.GetDataDistributionRequest{
+		Base: &commonpb.MsgBase{
+			MsgID: rand.Int63(),
+		},
+	}
+	distribution, err := suite.node.GetDataDistribution(ctx, getReq)
+	suite.NoError(err)
+	suite.Equal(1, len(distribution.LeaderViews))
+	leaderView := distribution.LeaderViews[0]
+	latestPartStats := leaderView.GetPartitionStatsVersions()
+	suite.Equal(latestPartStats[partitionID], newVersion)
 }
 
 func (suite *ServiceSuite) TestSyncDistribution_ReleaseResultCheck() {

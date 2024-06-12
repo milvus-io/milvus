@@ -713,6 +713,7 @@ func (s *Server) GetRecoveryInfo(ctx context.Context, req *datapb.GetRecoveryInf
 			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
 			zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 			zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
+			zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
 		)
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
@@ -837,6 +838,7 @@ func (s *Server) GetRecoveryInfoV2(ctx context.Context, req *datapb.GetRecoveryI
 			zap.Int("# of flushed segments", len(channelInfo.GetFlushedSegmentIds())),
 			zap.Int("# of dropped segments", len(channelInfo.GetDroppedSegmentIds())),
 			zap.Int("# of indexed segments", len(channelInfo.GetIndexedSegmentIds())),
+			zap.Int("# of l0 segments", len(channelInfo.GetLevelZeroSegmentIds())),
 		)
 		flushedIDs.Insert(channelInfo.GetFlushedSegmentIds()...)
 	}
@@ -1087,23 +1089,27 @@ func (s *Server) ManualCompaction(ctx context.Context, req *milvuspb.ManualCompa
 
 	var id int64
 	var err error
-	id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+	if req.MajorCompaction {
+		id, err = s.compactionTriggerManager.ManualTrigger(ctx, req.CollectionID, req.GetMajorCompaction())
+	} else {
+		id, err = s.compactionTrigger.triggerManualCompaction(req.CollectionID)
+	}
 	if err != nil {
 		log.Error("failed to trigger manual compaction", zap.Error(err))
 		resp.Status = merr.Status(err)
 		return resp, nil
 	}
 
-	planCnt := s.compactionHandler.getCompactionTasksNumBySignalID(id)
-	if planCnt == 0 {
+	taskCnt := s.compactionHandler.getCompactionTasksNumBySignalID(id)
+	if taskCnt == 0 {
 		resp.CompactionID = -1
 		resp.CompactionPlanCount = 0
 	} else {
 		resp.CompactionID = id
-		resp.CompactionPlanCount = int32(planCnt)
+		resp.CompactionPlanCount = int32(taskCnt)
 	}
 
-	log.Info("success to trigger manual compaction", zap.Int64("compactionID", id))
+	log.Info("success to trigger manual compaction", zap.Bool("isMajor", req.GetMajorCompaction()), zap.Int64("compactionID", id), zap.Int("taskNum", taskCnt))
 	return resp, nil
 }
 
@@ -1137,6 +1143,7 @@ func (s *Server) GetCompactionState(ctx context.Context, req *milvuspb.GetCompac
 	resp.FailedPlanNo = int64(info.failedCnt)
 	log.Info("success to get compaction state", zap.Any("state", info.state), zap.Int("executing", info.executingCnt),
 		zap.Int("completed", info.completedCnt), zap.Int("failed", info.failedCnt), zap.Int("timeout", info.timeoutCnt))
+
 	return resp, nil
 }
 
@@ -1701,6 +1708,10 @@ func (s *Server) GetImportProgress(ctx context.Context, in *internalpb.GetImport
 		return resp, nil
 	}
 	job := s.importMeta.GetJob(jobID)
+	if job == nil {
+		resp.Status = merr.Status(merr.WrapErrImportFailed(fmt.Sprintf("import job does not exist, jobID=%d", jobID)))
+		return resp, nil
+	}
 	progress, state, importedRows, totalRows, reason := GetJobProgress(jobID, s.importMeta, s.meta)
 	resp.State = state
 	resp.Reason = reason

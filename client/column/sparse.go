@@ -82,7 +82,7 @@ func (c *ColumnSparseFloatVector) FieldData() *schemapb.FieldData {
 		for idx := 0; idx < vector.Len(); idx++ {
 			pos, value, _ := vector.Get(idx)
 			binary.LittleEndian.PutUint32(row[idx*8:], pos)
-			binary.LittleEndian.PutUint32(row[pos*8+4:], math.Float32bits(value))
+			binary.LittleEndian.PutUint32(row[idx*8+4:], math.Float32bits(value))
 		}
 		data = append(data, row)
 		if vector.Dim() > dim {

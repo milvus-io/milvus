@@ -1493,7 +1493,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             )
             task_ids.append(task_id)
         success, states = self.utility_wrap.wait_for_bulk_insert_tasks_completed(
-            task_ids=[task_id], timeout=300
+            task_ids=task_ids, timeout=300
         )
         log.info(f"bulk insert state:{success}")
 
@@ -1534,28 +1534,30 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         """
         dim = 12
         entities = 200
-        files = prepare_bulk_insert_json_files(
-            minio_endpoint=self.minio_endpoint,
-            bucket_name=self.bucket_name,
-            is_row_based=is_row_based,
-            rows=entities,
-            dim=dim,
-            auto_id=auto_id,
-            data_fields=default_multi_fields,
-            force=True,
-        )
         self._connect()
         c_name = cf.gen_unique_str("bulk_partition_key")
         fields = [
-            cf.gen_int64_field(name=df.pk_field, is_primary=True),
-            cf.gen_float_vec_field(name=df.vec_field, dim=dim),
+            cf.gen_int64_field(name=df.pk_field, is_primary=True, auto_id=auto_id),
+            cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
             cf.gen_int64_field(name=df.int_field, is_partition_key=(par_key_field == df.int_field)),
             cf.gen_string_field(name=df.string_field, is_partition_key=(par_key_field == df.string_field)),
             cf.gen_bool_field(name=df.bool_field),
             cf.gen_float_field(name=df.float_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64)
         ]
+        data_fields = [f.name for f in fields if not f.to_dict().get("auto_id", False)]
         schema = cf.gen_collection_schema(fields=fields, auto_id=auto_id)
+        files = prepare_bulk_insert_new_json_files(
+            minio_endpoint=self.minio_endpoint,
+            bucket_name=self.bucket_name,
+            is_row_based=is_row_based,
+            rows=entities,
+            dim=dim,
+            auto_id=auto_id,
+            data_fields=data_fields,
+            force=True,
+            schema=schema
+        )
         self.collection_wrap.init_collection(c_name, schema=schema, num_partitions=10)
         assert len(self.collection_wrap.partitions) == 10
 
@@ -1581,7 +1583,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         # verify imported data is available for search
         index_params = ct.default_index
         self.collection_wrap.create_index(
-            field_name=df.vec_field, index_params=index_params
+            field_name=df.float_vec_field, index_params=index_params
         )
         self.collection_wrap.load()
         log.info(f"wait for load finished and be ready for search")
@@ -1595,7 +1597,7 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         search_params = ct.default_search_params
         res, _ = self.collection_wrap.search(
             search_data,
-            df.vec_field,
+            df.float_vec_field,
             param=search_params,
             limit=topk,
             check_task=CheckTasks.check_search_results,
@@ -1616,14 +1618,13 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
         assert num_entities == entities
 
         # verify error when trying to bulk insert into a specific partition
-        # TODO: enable the error msg assert after issue #25586 fixed
         err_msg = "not allow to set partition name for collection with partition key"
         task_id, _ = self.utility_wrap.do_bulk_insert(
             collection_name=c_name,
             partition_name=self.collection_wrap.partitions[0].name,
             files=files,
             check_task=CheckTasks.err_res,
-            check_items={"err_code": 99, "err_msg": err_msg},
+            check_items={"err_code": 2100, "err_msg": err_msg},
         )
 
     @pytest.mark.tags(CaseLabel.L3)

@@ -471,6 +471,7 @@ func (suite *TaskSuite) TestLoadSegmentTask() {
 
 	// Process tasks
 	suite.dispatchAndWait(targetNode)
+	suite.assertExecutedFlagChan(targetNode)
 	suite.AssertTaskNum(segmentsNum, 0, 0, segmentsNum)
 
 	// Process tasks done
@@ -1252,7 +1253,6 @@ func (suite *TaskSuite) TestChannelTaskReplace() {
 
 func (suite *TaskSuite) TestLeaderTaskSet() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -1304,9 +1304,8 @@ func (suite *TaskSuite) TestLeaderTaskSet() {
 			InsertChannel: channel.ChannelName,
 			PartitionID:   1,
 		})
-		task := NewLeaderTask(
+		task := NewLeaderSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,
@@ -1392,7 +1391,7 @@ func (suite *TaskSuite) TestCreateTaskBehavior() {
 	suite.Nil(segmentTask)
 
 	leaderAction := NewLeaderAction(1, 2, ActionTypeGrow, "fake-channel1", 100, 0)
-	leaderTask := NewLeaderTask(context.TODO(), 5*time.Second, WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
+	leaderTask := NewLeaderSegmentTask(context.TODO(), WrapIDSource(0), 0, meta.NilReplica, 1, leaderAction)
 	suite.NotNil(leaderTask)
 }
 
@@ -1536,9 +1535,19 @@ func (suite *TaskSuite) dispatchAndWait(node int64) {
 	suite.FailNow("executor hangs in executing tasks", "count=%d keys=%+v", count, keys)
 }
 
+func (suite *TaskSuite) assertExecutedFlagChan(targetNode int64) {
+	flagChan := suite.scheduler.GetExecutedFlag(targetNode)
+	if flagChan != nil {
+		select {
+		case <-flagChan:
+		default:
+			suite.FailNow("task not executed")
+		}
+	}
+}
+
 func (suite *TaskSuite) TestLeaderTaskRemove() {
 	ctx := context.Background()
-	timeout := 10 * time.Second
 	targetNode := int64(3)
 	partition := int64(100)
 	channel := &datapb.VchannelInfo{
@@ -1568,9 +1577,8 @@ func (suite *TaskSuite) TestLeaderTaskRemove() {
 			},
 		})
 		view.Segments[segment] = &querypb.SegmentDist{NodeID: targetNode, Version: 0}
-		task := NewLeaderTask(
+		task := NewLeaderSegmentTask(
 			ctx,
-			timeout,
 			WrapIDSource(0),
 			suite.collection,
 			suite.replica,

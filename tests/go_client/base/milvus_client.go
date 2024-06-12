@@ -197,7 +197,9 @@ func (mc *MilvusClient) DropIndex(ctx context.Context, option clientv2.DropIndex
 // Insert insert data
 func (mc *MilvusClient) Insert(ctx context.Context, option clientv2.InsertOption, callOptions ...grpc.CallOption) (clientv2.InsertResult, error) {
 	insertRes, err := mc.mClient.Insert(ctx, option, callOptions...)
-	log.Info("Insert", zap.Any("result", insertRes))
+	if err == nil{
+		log.Info("Insert", zap.Any("result", insertRes))
+	}
 	return insertRes, err
 }
 

@@ -39,21 +39,27 @@ import (
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
-func WrapNoTaskError(taskID int64, taskType TaskType) error {
-	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find %s with id %d", taskType.String(), taskID))
+func WrapTaskNotFoundError(taskID int64) error {
+	return merr.WrapErrImportFailed(fmt.Sprintf("cannot find import task with id %d", taskID))
 }
 
-func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID int64, vchannel string, insertData *storage.InsertData) (syncmgr.Task, error) {
+func NewSyncTask(ctx context.Context,
+	metaCaches map[string]metacache.MetaCache,
+	ts uint64,
+	segmentID, partitionID, collectionID int64, vchannel string,
+	insertData *storage.InsertData,
+	deleteData *storage.DeleteData,
+) (syncmgr.Task, error) {
 	if params.Params.CommonCfg.EnableStorageV2.GetAsBool() {
 		return nil, merr.WrapErrImportFailed("storage v2 is not supported") // TODO: dyh, resolve storage v2
 	}
 
-	metaCache := task.metaCaches[vchannel]
+	metaCache := metaCaches[vchannel]
 	if _, ok := metaCache.GetSegmentByID(segmentID); !ok {
 		metaCache.AddSegment(&datapb.SegmentInfo{
 			ID:            segmentID,
 			State:         commonpb.SegmentState_Importing,
-			CollectionID:  task.GetCollectionID(),
+			CollectionID:  collectionID,
 			PartitionID:   partitionID,
 			InsertChannel: vchannel,
 		}, func(info *datapb.SegmentInfo) *metacache.BloomFilterSet {
@@ -74,34 +80,40 @@ func NewSyncTask(ctx context.Context, task *ImportTask, segmentID, partitionID i
 
 	syncPack := &syncmgr.SyncPack{}
 	syncPack.WithInsertData(insertData).
-		WithCollectionID(task.GetCollectionID()).
+		WithDeleteData(deleteData).
+		WithCollectionID(collectionID).
 		WithPartitionID(partitionID).
 		WithChannelName(vchannel).
 		WithSegmentID(segmentID).
-		WithTimeRange(task.req.GetTs(), task.req.GetTs()).
+		WithTimeRange(ts, ts).
 		WithBatchSize(int64(insertData.GetRowNum()))
 
 	return serializer.EncodeBuffer(ctx, syncPack)
 }
 
-func NewImportSegmentInfo(syncTask syncmgr.Task, task *ImportTask) (*datapb.ImportSegmentInfo, error) {
+func NewImportSegmentInfo(syncTask syncmgr.Task, metaCaches map[string]metacache.MetaCache) (*datapb.ImportSegmentInfo, error) {
 	segmentID := syncTask.SegmentID()
-	insertBinlogs, statsBinlog, _ := syncTask.(*syncmgr.SyncTask).Binlogs()
-	metaCache := task.metaCaches[syncTask.ChannelName()]
+	insertBinlogs, statsBinlog, deltaLog := syncTask.(*syncmgr.SyncTask).Binlogs()
+	metaCache := metaCaches[syncTask.ChannelName()]
 	segment, ok := metaCache.GetSegmentByID(segmentID)
 	if !ok {
 		return nil, merr.WrapErrSegmentNotFound(segmentID, "import failed")
+	}
+	var deltaLogs []*datapb.FieldBinlog
+	if len(deltaLog.GetBinlogs()) > 0 {
+		deltaLogs = []*datapb.FieldBinlog{deltaLog}
 	}
 	return &datapb.ImportSegmentInfo{
 		SegmentID:    segmentID,
 		ImportedRows: segment.FlushedRows(),
 		Binlogs:      lo.Values(insertBinlogs),
 		Statslogs:    lo.Values(statsBinlog),
+		Deltalogs:    deltaLogs,
 	}, nil
 }
 
-func PickSegment(task *ImportTask, vchannel string, partitionID int64) int64 {
-	candidates := lo.Filter(task.req.GetRequestSegments(), func(info *datapb.ImportRequestSegment, _ int) bool {
+func PickSegment(segments []*datapb.ImportRequestSegment, vchannel string, partitionID int64) int64 {
+	candidates := lo.Filter(segments, func(info *datapb.ImportRequestSegment, _ int) bool {
 		return info.GetVchannel() == vchannel && info.GetPartitionID() == partitionID
 	})
 
@@ -162,13 +174,17 @@ func AppendSystemFieldsData(task *ImportTask, data *storage.InsertData) error {
 			data.Data[pkField.GetFieldID()] = &storage.StringFieldData{Data: strIDs}
 		}
 	}
-	data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
-	tss := make([]int64, rowNum)
-	ts := int64(task.req.GetTs())
-	for i := 0; i < rowNum; i++ {
-		tss[i] = ts
+	if _, ok := data.Data[common.RowIDField]; !ok { // for binlog import, keep original rowID and ts
+		data.Data[common.RowIDField] = &storage.Int64FieldData{Data: ids}
 	}
-	data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
+	if _, ok := data.Data[common.TimeStampField]; !ok {
+		tss := make([]int64, rowNum)
+		ts := int64(task.req.GetTs())
+		for i := 0; i < rowNum; i++ {
+			tss[i] = ts
+		}
+		data.Data[common.TimeStampField] = &storage.Int64FieldData{Data: tss}
+	}
 	return nil
 }
 
@@ -211,4 +227,23 @@ func UnsetAutoID(schema *schemapb.CollectionSchema) {
 			return
 		}
 	}
+}
+
+func NewMetaCache(req *datapb.ImportRequest) map[string]metacache.MetaCache {
+	metaCaches := make(map[string]metacache.MetaCache)
+	schema := typeutil.AppendSystemFields(req.GetSchema())
+	for _, channel := range req.GetVchannels() {
+		info := &datapb.ChannelWatchInfo{
+			Vchan: &datapb.VchannelInfo{
+				CollectionID: req.GetCollectionID(),
+				ChannelName:  channel,
+			},
+			Schema: schema,
+		}
+		metaCache := metacache.NewMetaCache(info, func(segment *datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		metaCaches[channel] = metaCache
+	}
+	return metaCaches
 }

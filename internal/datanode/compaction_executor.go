@@ -22,8 +22,8 @@ import (
 
 	"github.com/samber/lo"
 	"go.uber.org/zap"
+	"golang.org/x/sync/semaphore"
 
-	"github.com/milvus-io/milvus-proto/go-api/v2/commonpb"
 	"github.com/milvus-io/milvus/internal/datanode/compaction"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/log"
@@ -31,7 +31,8 @@ import (
 )
 
 const (
-	maxTaskNum = 1024
+	maxTaskQueueNum    = 1024
+	maxParallelTaskNum = 10
 )
 
 type compactionExecutor struct {
@@ -39,6 +40,7 @@ type compactionExecutor struct {
 	completedCompactor *typeutil.ConcurrentMap[int64, compaction.Compactor]         // planID to compactor
 	completed          *typeutil.ConcurrentMap[int64, *datapb.CompactionPlanResult] // planID to CompactionPlanResult
 	taskCh             chan compaction.Compactor
+	taskSem            *semaphore.Weighted
 	dropped            *typeutil.ConcurrentSet[string] // vchannel dropped
 
 	// To prevent concurrency of release channel and compaction get results
@@ -51,7 +53,8 @@ func newCompactionExecutor() *compactionExecutor {
 		executing:          typeutil.NewConcurrentMap[int64, compaction.Compactor](),
 		completedCompactor: typeutil.NewConcurrentMap[int64, compaction.Compactor](),
 		completed:          typeutil.NewConcurrentMap[int64, *datapb.CompactionPlanResult](),
-		taskCh:             make(chan compaction.Compactor, maxTaskNum),
+		taskCh:             make(chan compaction.Compactor, maxTaskQueueNum),
+		taskSem:            semaphore.NewWeighted(maxParallelTaskNum),
 		dropped:            typeutil.NewConcurrentSet[string](),
 	}
 }
@@ -78,18 +81,20 @@ func (c *compactionExecutor) removeTask(planID UniqueID) {
 	}
 }
 
-// These two func are bounded for waitGroup
-func (c *compactionExecutor) executeWithState(task compaction.Compactor) {
-	go c.executeTask(task)
-}
-
 func (c *compactionExecutor) start(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case task := <-c.taskCh:
-			c.executeWithState(task)
+			err := c.taskSem.Acquire(ctx, 1)
+			if err != nil {
+				return
+			}
+			go func() {
+				defer c.taskSem.Release(1)
+				c.executeTask(task)
+			}()
 		}
 	}
 }
@@ -165,14 +170,17 @@ func (c *compactionExecutor) getCompactionResult(planID int64) *datapb.Compactio
 	_, ok := c.executing.Get(planID)
 	if ok {
 		result := &datapb.CompactionPlanResult{
-			State:  commonpb.CompactionState_Executing,
+			State:  datapb.CompactionTaskState_executing,
 			PlanID: planID,
 		}
 		return result
 	}
 	result, ok2 := c.completed.Get(planID)
 	if !ok2 {
-		return &datapb.CompactionPlanResult{}
+		return &datapb.CompactionPlanResult{
+			PlanID: planID,
+			State:  datapb.CompactionTaskState_failed,
+		}
 	}
 	return result
 }
@@ -190,7 +198,7 @@ func (c *compactionExecutor) getAllCompactionResults() []*datapb.CompactionPlanR
 	c.executing.Range(func(planID int64, task compaction.Compactor) bool {
 		executing = append(executing, planID)
 		results = append(results, &datapb.CompactionPlanResult{
-			State:  commonpb.CompactionState_Executing,
+			State:  datapb.CompactionTaskState_executing,
 			PlanID: planID,
 		})
 		return true

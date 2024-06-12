@@ -169,6 +169,9 @@ func buildBinlogKvs(collectionID, partitionID, segmentID typeutil.UniqueID, binl
 			if binlog.GetLogID() == 0 {
 				return fmt.Errorf("invalid log id, binlog:%v", binlog)
 			}
+			if binlog.GetLogPath() != "" {
+				return fmt.Errorf("fieldBinlog no need to store logpath, binlog:%v", binlog)
+			}
 		}
 		return nil
 	}
@@ -256,6 +259,24 @@ func buildCompactionTaskKV(task *datapb.CompactionTask) (string, string, error) 
 
 func buildCompactionTaskPath(task *datapb.CompactionTask) string {
 	return fmt.Sprintf("%s/%s/%d/%d", CompactionTaskPrefix, task.GetType(), task.TriggerID, task.PlanID)
+}
+
+func buildPartitionStatsInfoKv(info *datapb.PartitionStatsInfo) (string, string, error) {
+	valueBytes, err := proto.Marshal(info)
+	if err != nil {
+		return "", "", fmt.Errorf("failed to marshal collection clustering compaction info: %d, err: %w", info.CollectionID, err)
+	}
+	key := buildPartitionStatsInfoPath(info)
+	return key, string(valueBytes), nil
+}
+
+// buildPartitionStatsInfoPath
+func buildPartitionStatsInfoPath(info *datapb.PartitionStatsInfo) string {
+	return fmt.Sprintf("%s/%d/%d/%s/%d", PartitionStatsInfoPrefix, info.CollectionID, info.PartitionID, info.VChannel, info.Version)
+}
+
+func buildCurrentPartitionStatsVersionPath(collID, partID int64, channel string) string {
+	return fmt.Sprintf("%s/%d/%d/%s", PartitionStatsCurrentVersionPrefix, collID, partID, channel)
 }
 
 // buildSegmentPath common logic mapping segment info to corresponding key in kv store

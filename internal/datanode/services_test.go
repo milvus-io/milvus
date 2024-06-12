@@ -168,7 +168,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 
 		s.node.compactionExecutor.completed.Insert(int64(1), &datapb.CompactionPlanResult{
 			PlanID: 1,
-			State:  commonpb.CompactionState_Completed,
+			State:  datapb.CompactionTaskState_completed,
 			Segments: []*datapb.CompactionSegment{
 				{SegmentID: 10},
 			},
@@ -177,7 +177,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		s.node.compactionExecutor.completed.Insert(int64(4), &datapb.CompactionPlanResult{
 			PlanID: 4,
 			Type:   datapb.CompactionType_Level0DeleteCompaction,
-			State:  commonpb.CompactionState_Completed,
+			State:  datapb.CompactionTaskState_completed,
 		})
 
 		stat, err := s.node.GetCompactionState(s.ctx, nil)
@@ -187,7 +187,7 @@ func (s *DataNodeServicesSuite) TestGetCompactionState() {
 		var mu sync.RWMutex
 		cnt := 0
 		for _, v := range stat.GetResults() {
-			if v.GetState() == commonpb.CompactionState_Completed {
+			if v.GetState() == datapb.CompactionTaskState_completed {
 				mu.Lock()
 				cnt++
 				mu.Unlock()
@@ -243,6 +243,25 @@ func (s *DataNodeServicesSuite) TestCompaction() {
 		resp, err := node.Compaction(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(resp))
+	})
+
+	s.Run("compact_clustering", func() {
+		node := s.node
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+
+		req := &datapb.CompactionPlan{
+			PlanID:  1000,
+			Channel: dmChannelName,
+			SegmentBinlogs: []*datapb.CompactionSegmentBinlogs{
+				{SegmentID: 102, Level: datapb.SegmentLevel_L0},
+				{SegmentID: 103, Level: datapb.SegmentLevel_L1},
+			},
+			Type: datapb.CompactionType_ClusteringCompaction,
+		}
+
+		_, err := node.Compaction(ctx, req)
+		s.NoError(err)
 	})
 }
 

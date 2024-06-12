@@ -310,6 +310,14 @@ class PhyUnaryRangeFilterExpr : public SegmentExpr {
     VectorPtr
     ExecRangeVisitorImplArray();
 
+    template <typename T>
+    VectorPtr
+    ExecRangeVisitorImplArrayForIndex();
+
+    template <typename T>
+    VectorPtr
+    ExecArrayEqualForIndex(bool reverse);
+
     // Check overflow and cache result for performace
     template <typename T>
     ColumnVectorPtr

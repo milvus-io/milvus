@@ -2,6 +2,7 @@ package helper
 
 import (
 	"bytes"
+	"encoding/json"
 	"strconv"
 
 	"github.com/milvus-io/milvus/client/v2/column"
@@ -43,54 +44,69 @@ func (opt *InsertParams) TWithIsRows(isRows bool) *InsertParams {
 }
 
 // GenColumnDataOption -- create column data --
-type GenColumnOption struct {
-	dim         int64
-	maxLen      int64
-	start       int
-	fieldName   string
-	elementType entity.FieldType
+type GenDataOption struct {
+	dim          int
+	maxLen       int
+	sparseMaxLen int
+	maxCapacity  int
+	start        int
+	fieldName    string
+	elementType  entity.FieldType
 }
 
-func (opt *GenColumnOption) TWithDim(dim int64) *GenColumnOption {
+func (opt *GenDataOption) TWithDim(dim int) *GenDataOption {
 	opt.dim = dim
 	return opt
 }
 
-func (opt *GenColumnOption) TWithMaxLen(maxLen int64) *GenColumnOption {
+func (opt *GenDataOption) TWithMaxLen(maxLen int) *GenDataOption {
 	opt.maxLen = maxLen
 	return opt
 }
 
-func (opt *GenColumnOption) TWithStart(start int) *GenColumnOption {
+func (opt *GenDataOption) TWithSparseMaxLen(sparseMaxLen int) *GenDataOption {
+	opt.sparseMaxLen = sparseMaxLen
+	return opt
+}
+
+func (opt *GenDataOption) TWithMaxCapacity(maxCap int) *GenDataOption {
+	opt.maxCapacity = maxCap
+	return opt
+}
+
+func (opt *GenDataOption) TWithStart(start int) *GenDataOption {
 	opt.start = start
 	return opt
 }
 
-func (opt *GenColumnOption) TWithFieldName(fieldName string) *GenColumnOption {
+func (opt *GenDataOption) TWithFieldName(fieldName string) *GenDataOption {
 	opt.fieldName = fieldName
 	return opt
 }
 
-func (opt *GenColumnOption) TWithElementType(eleType entity.FieldType) *GenColumnOption {
+func (opt *GenDataOption) TWithElementType(eleType entity.FieldType) *GenDataOption {
 	opt.elementType = eleType
 	return opt
 }
 
-func TNewColumnOption() *GenColumnOption {
-	return &GenColumnOption{
-		dim:    common.DefaultDim,
-		maxLen: common.TestMaxLen,
-		start:  0,
+func TNewDataOption() *GenDataOption {
+	return &GenDataOption{
+		dim:          common.DefaultDim,
+		maxLen:       common.TestMaxLen,
+		sparseMaxLen: common.TestMaxLen,
+		maxCapacity:  common.TestCapacity,
+		start:        0,
+		elementType:  entity.FieldTypeNone,
 	}
 }
 
-func GenArrayColumnData(nb int, eleType entity.FieldType, option GenColumnOption) column.Column {
+func GenArrayColumnData(nb int, eleType entity.FieldType, option GenDataOption) column.Column {
 	start := option.start
 	fieldName := option.fieldName
 	if option.fieldName == "" {
 		fieldName = GetFieldNameByElementType(eleType)
 	}
-	capacity := int(option.maxLen)
+	capacity := option.maxCapacity
 	switch eleType {
 	case entity.FieldTypeBool:
 		boolValues := make([][]bool, 0, nb)
@@ -180,10 +196,63 @@ func GenArrayColumnData(nb int, eleType entity.FieldType, option GenColumnOption
 	}
 }
 
+type JSONStruct struct {
+	Number int32  `json:"number,omitempty" milvus:"name:number"`
+	String string `json:"string,omitempty" milvus:"name:string"`
+	*BoolStruct
+	List []int64 `json:"list,omitempty" milvus:"name:list"`
+}
+
+// GenDefaultJSONData gen default column with data
+func GenDefaultJSONData(nb int, option GenDataOption) [][]byte {
+	jsonValues := make([][]byte, 0, nb)
+	start := option.start
+	var m interface{}
+	for i := start; i < start+nb; i++ {
+		// kv value
+		_bool := &BoolStruct{
+			Bool: i%2 == 0,
+		}
+		if i < (start+nb)/2 {
+			if i%2 == 0 {
+				m = JSONStruct{
+					String:     strconv.Itoa(i),
+					BoolStruct: _bool,
+				}
+			} else {
+				m = JSONStruct{
+					Number:     int32(i),
+					String:     strconv.Itoa(i),
+					BoolStruct: _bool,
+					List:       []int64{int64(i), int64(i + 1)},
+				}
+			}
+		} else {
+			// int, float, string, list
+			switch i % 4 {
+			case 0:
+				m = i
+			case 1:
+				m = float32(i)
+			case 2:
+				m = strconv.Itoa(i)
+			case 3:
+				m = []int64{int64(i), int64(i + 1)}
+			}
+		}
+		bs, err := json.Marshal(&m)
+		if err != nil {
+			log.Fatal("Marshal json field failed", zap.Error(err))
+		}
+		jsonValues = append(jsonValues, bs)
+	}
+	return jsonValues
+}
+
 // GenColumnData GenColumnDataOption
-func GenColumnData(nb int, fieldType entity.FieldType, option GenColumnOption) column.Column {
-	dim := int(option.dim)
-	maxLen := int(option.maxLen)
+func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) column.Column {
+	dim := option.dim
+	sparseMaxLen := option.sparseMaxLen
 	start := option.start
 	fieldName := option.fieldName
 	if option.fieldName == "" {
@@ -248,14 +317,16 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenColumnOption) c
 
 	case entity.FieldTypeArray:
 		return GenArrayColumnData(nb, option.elementType, option)
-
+	case entity.FieldTypeJSON:
+		jsonValues := GenDefaultJSONData(nb, option)
+		return column.NewColumnJSONBytes(fieldName, jsonValues)
 	case entity.FieldTypeFloatVector:
 		vecFloatValues := make([][]float32, 0, nb)
 		for i := start; i < start+nb; i++ {
 			vec := common.GenFloatVector(dim)
 			vecFloatValues = append(vecFloatValues, vec)
 		}
-		return column.NewColumnFloatVector(fieldName, int(option.dim), vecFloatValues)
+		return column.NewColumnFloatVector(fieldName, option.dim, vecFloatValues)
 	case entity.FieldTypeBinaryVector:
 		binaryVectors := make([][]byte, 0, nb)
 		for i := 0; i < nb; i++ {
@@ -280,7 +351,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenColumnOption) c
 	case entity.FieldTypeSparseVector:
 		vectors := make([]entity.SparseEmbedding, 0, nb)
 		for i := start; i < start+nb; i++ {
-			vec := common.GenSparseVector(maxLen)
+			vec := common.GenSparseVector(sparseMaxLen)
 			vectors = append(vectors, vec)
 		}
 		return column.NewColumnSparseVectors(fieldName, vectors)
@@ -299,26 +370,26 @@ func GenDynamicFieldData(start int, nb int) []column.Column {
 	numberValues := make([]int32, 0, nb)
 	stringValues := make([]string, 0, nb)
 	boolValues := make([]bool, 0, nb)
-	//listValues := make([][]byte, 0, Nb)
-	//m := make(map[string]interface{})
+	listValues := make([][]byte, 0, nb)
+	m := make(map[string]interface{})
 	for i := start; i < start+nb; i++ {
 		numberValues = append(numberValues, int32(i))
 		stringValues = append(stringValues, strconv.Itoa(i))
 		boolValues = append(boolValues, i%3 == 0)
-		//m["list"] = ListStruct{
-		//	List: []int64{int64(i), int64(i + 1)},
-		//}
-		//bs, err := json.Marshal(m)
-		//if err != nil {
-		//	log.Fatalf("Marshal json field failed: %s", err)
-		//}
-		//listValues = append(listValues, bs)
+		m["list"] = ListStruct{
+			List: []int64{int64(i), int64(i + 1)},
+		}
+		bs, err := json.Marshal(m)
+		if err != nil {
+			log.Fatal("Marshal json field failed:", zap.Error(err))
+		}
+		listValues = append(listValues, bs)
 	}
 	data := []column.Column{
 		column.NewColumnInt32(common.DefaultDynamicNumberField, numberValues),
 		column.NewColumnString(common.DefaultDynamicStringField, stringValues),
 		column.NewColumnBool(common.DefaultDynamicBoolField, boolValues),
-		//entity.NewColumnJSONBytes(DefaultDynamicListField, listValues),
+		column.NewColumnJSONBytes(common.DefaultDynamicListField, listValues),
 	}
 	return data
 }

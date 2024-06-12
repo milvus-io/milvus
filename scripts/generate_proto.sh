@@ -69,6 +69,7 @@ query_coord.proto \
 plan.proto \
 segcore.proto \
 clustering.proto \
+log.proto \
 || { echo 'generate go proto failed'; exit 1; }
 
 ${protoc_opt} --proto_path=$ROOT_DIR/cmd/tools/migration/legacy/ \

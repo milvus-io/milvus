@@ -67,6 +67,8 @@ set(MILVUS_TEST_FILES
         test_group_by.cpp
         test_regex_query_util.cpp
         test_regex_query.cpp
+        test_futures.cpp
+        test_array_inverted_index.cpp
         )
 
 if ( INDEX_ENGINE STREQUAL "cardinal" )

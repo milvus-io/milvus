@@ -252,16 +252,6 @@ func (t *createCollectionTask) validateClusteringKey() error {
 				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
 					fmt.Sprintf("there are more than one clustering key, field name = %s, %s", t.schema.Fields[idx].Name, field.Name))
 			}
-
-			if field.GetIsPrimaryKey() {
-				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
-					fmt.Sprintf("the clustering key field must not be primary key field, field name = %s", field.Name))
-			}
-
-			if field.GetIsPartitionKey() {
-				return merr.WrapErrCollectionIllegalSchema(t.CollectionName,
-					fmt.Sprintf("the clustering key field must not be partition key field, field name = %s", field.Name))
-			}
 			idx = i
 		}
 	}

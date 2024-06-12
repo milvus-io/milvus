@@ -80,6 +80,7 @@ func (opt *searchOption) prepareSearchRequest(annRequest *annRequest) *milvuspb.
 		Dsl:              opt.expr,
 		DslType:          commonpb.DslType_BoolExprV1,
 		ConsistencyLevel: commonpb.ConsistencyLevel(opt.consistencyLevel),
+		OutputFields:     opt.outputFields,
 	}
 	if annRequest != nil {
 		// nq

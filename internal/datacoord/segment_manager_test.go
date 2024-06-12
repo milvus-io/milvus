@@ -35,7 +35,6 @@ import (
 	"github.com/milvus-io/milvus/internal/metastore/mocks"
 	"github.com/milvus-io/milvus/internal/proto/datapb"
 	"github.com/milvus-io/milvus/pkg/util/etcd"
-	"github.com/milvus-io/milvus/pkg/util/metautil"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 )
 
@@ -256,7 +255,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
 
-		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		segment, err := sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.NoError(t, err)
 		segment2 := meta.GetSegment(segment.GetID())
 		assert.NotNil(t, segment2)
@@ -270,7 +269,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.Error(t, err)
 	})
 
@@ -282,7 +281,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		assert.NoError(t, err)
 		sm, err := newSegmentManager(meta, alloc)
 		assert.NoError(t, err)
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.Error(t, err)
 	})
 
@@ -296,7 +295,7 @@ func TestSegmentManager_AllocImportSegment(t *testing.T) {
 		catalog := mocks.NewDataCoordCatalog(t)
 		catalog.EXPECT().AddSegment(mock.Anything, mock.Anything).Return(mockErr)
 		meta.catalog = catalog
-		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1")
+		_, err = sm.AllocImportSegment(ctx, 0, 1, 1, "ch1", datapb.SegmentLevel_L1)
 		assert.Error(t, err)
 	})
 }
@@ -649,7 +648,6 @@ func TestTryToSealSegment(t *testing.T) {
 							{
 								EntriesNum: 10,
 								LogID:      3,
-								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 2, 3),
 							},
 						},
 					},
@@ -674,12 +672,10 @@ func TestTryToSealSegment(t *testing.T) {
 							{
 								EntriesNum: 10,
 								LogID:      1,
-								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 1, 3),
 							},
 							{
 								EntriesNum: 20,
 								LogID:      2,
-								LogPath:    metautil.BuildInsertLogPath("", 1, 1, seg.ID, 1, 2),
 							},
 						},
 					},
