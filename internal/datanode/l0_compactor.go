@@ -242,34 +242,45 @@ func (t *levelZeroCompactionTask) splitDelta(
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
 
+	allSeg := lo.Associate(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) (int64, *datapb.CompactionSegmentBinlogs) {
+		return segment.GetSegmentID(), segment
+	})
+
 	// segments shall be safe to read outside
 	segments := t.metacache.GetSegmentsBy(metacache.WithSegmentIDs(targetSegIDs...))
-	split := func(pk storage.PrimaryKey) []int64 {
-		lc := storage.NewLocationsCache(pk)
-		return lo.FilterMap(segments, func(segment *metacache.SegmentInfo, _ int) (int64, bool) {
-			return segment.SegmentID(), segment.GetBloomFilterSet().PkExists(lc)
-		})
-	}
-
-	targetSeg := lo.Associate(segments, func(info *metacache.SegmentInfo) (int64, *metacache.SegmentInfo) {
-		return info.SegmentID(), info
-	})
 
 	// spilt all delete data to segments
 	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
-	for _, delta := range allDelta {
-		for i, pk := range delta.Pks {
-			predicted := split(pk)
-
-			for _, gotSeg := range predicted {
-				writer, ok := targetSegBuffer[gotSeg]
-				if !ok {
-					segment := targetSeg[gotSeg]
-					writer = NewSegmentDeltaWriter(gotSeg, segment.PartitionID(), t.getCollection())
-					targetSegBuffer[gotSeg] = writer
+	split := func(pks []storage.PrimaryKey, pkTss []uint64) {
+		lc := storage.NewBatchLocationsCache(pks)
+		for _, s := range segments {
+			segmentID := s.SegmentID()
+			hits := s.GetBloomFilterSet().BatchPkExist(lc)
+			for i, hit := range hits {
+				if hit {
+					writer, ok := targetSegBuffer[segmentID]
+					if !ok {
+						segment := allSeg[segmentID]
+						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), t.getCollection())
+						targetSegBuffer[segmentID] = writer
+					}
+					writer.Write(pks[i], pkTss[i])
 				}
-				writer.Write(pk, delta.Tss[i])
 			}
+		}
+	}
+
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+	// spilt all delete data to segments
+	for _, deleteBuffer := range allDelta {
+		pks := deleteBuffer.Pks
+		pkTss := deleteBuffer.Tss
+		for idx := 0; idx < len(pks); idx += batchSize {
+			endIdx := idx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
+			}
+			split(pks[idx:endIdx], pkTss[idx:endIdx])
 		}
 	}
 

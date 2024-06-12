@@ -99,10 +99,6 @@ func (s *DelegatorSuite) SetupTest() {
 			ms.EXPECT().Indexes().Return(nil)
 			ms.EXPECT().RowNum().Return(info.GetNumOfRows())
 			ms.EXPECT().Delete(mock.Anything, mock.Anything, mock.Anything).Return(nil)
-			ms.EXPECT().GetHashFuncNum().Return(1)
-			ms.EXPECT().TestLocations(mock.Anything, mock.Anything).RunAndReturn(func(pk storage.PrimaryKey, locs []uint64) bool {
-				return pk.EQ(storage.NewInt64PrimaryKey(10))
-			})
 			return ms
 		})
 	}, nil)
