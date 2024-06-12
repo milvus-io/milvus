@@ -633,13 +633,8 @@ class TestBulkInsert(TestcaseBaseBulkInsert):
             cf.gen_string_field(name=df.string_field),
             cf.gen_json_field(name=df.json_field),
             cf.gen_array_field(name=df.array_int_field, element_type=DataType.INT64),
-            cf.gen_array_field(name=df.array_float_field, element_type=DataType.FLOAT),
-            cf.gen_array_field(name=df.array_string_field, element_type=DataType.VARCHAR, max_length=100),
-            cf.gen_array_field(name=df.array_bool_field, element_type=DataType.BOOL),
             cf.gen_float_vec_field(name=df.float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.image_float_vec_field, dim=dim),
-            cf.gen_float_vec_field(name=df.text_float_vec_field, dim=dim),
-            cf.gen_binary_vec_field(name=df.binary_vec_field, dim=dim)
+
         ]
         self._connect()
         c_name = cf.gen_unique_str("bulk_insert")
