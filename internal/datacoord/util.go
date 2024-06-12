@@ -18,6 +18,7 @@ package datacoord
 
 import (
 	"context"
+	"fmt"
 	"strconv"
 	"strings"
 	"time"
@@ -33,6 +34,8 @@ import (
 	"github.com/milvus-io/milvus/pkg/metrics"
 	"github.com/milvus-io/milvus/pkg/util/indexparamcheck"
 	"github.com/milvus-io/milvus/pkg/util/merr"
+	"github.com/milvus-io/milvus/pkg/util/paramtable"
+	"github.com/milvus-io/milvus/pkg/util/tsoutil"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
 )
 
@@ -272,4 +275,36 @@ func getBinLogIDs(segment *SegmentInfo, fieldID int64) []int64 {
 		}
 	}
 	return binlogIDs
+}
+
+func CheckCheckPointsHealth(meta *meta) error {
+	for channel, cp := range meta.GetChannelCheckpoints() {
+		ts, _ := tsoutil.ParseTS(cp.Timestamp)
+		lag := time.Since(ts)
+		if lag > paramtable.Get().DataCoordCfg.ChannelCheckpointMaxLag.GetAsDuration(time.Second) {
+			return merr.WrapErrChannelCPExceededMaxLag(channel, fmt.Sprintf("checkpoint lag: %f(min)", lag.Minutes()))
+		}
+	}
+	return nil
+}
+
+func CheckAllChannelsWatched(meta *meta, channelManager ChannelManager) error {
+	collIDs := meta.ListCollections()
+	for _, collID := range collIDs {
+		collInfo := meta.GetCollection(collID)
+		if collInfo == nil {
+			log.Warn("collection info is nil, skip it", zap.Int64("collectionID", collID))
+			continue
+		}
+
+		for _, channelName := range collInfo.VChannelNames {
+			_, err := channelManager.FindWatcher(channelName)
+			if err != nil {
+				log.Warn("find watcher for channel failed", zap.Int64("collectionID", collID),
+					zap.String("channelName", channelName), zap.Error(err))
+				return err
+			}
+		}
+	}
+	return nil
 }

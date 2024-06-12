@@ -21,7 +21,7 @@ import (
 	"github.com/tecbot/gorocksdb"
 	"go.uber.org/zap"
 
-	"github.com/milvus-io/milvus/pkg/kv/rocksdb"
+	rocksdbkv "github.com/milvus-io/milvus/pkg/kv/rocksdb"
 	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
 	"github.com/milvus-io/milvus/pkg/util/typeutil"
