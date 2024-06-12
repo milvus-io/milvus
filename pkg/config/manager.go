@@ -18,6 +18,7 @@ package config
 import (
 	"fmt"
 	"strings"
+	"sync"
 
 	"github.com/cockroachdb/errors"
 	"go.uber.org/zap"
@@ -84,7 +85,10 @@ type Manager struct {
 	keySourceMap  *typeutil.ConcurrentMap[string, string] // store the key to config source, example: key is A.B.C and source is file which means the A.B.C's value is from file
 	overlays      *typeutil.ConcurrentMap[string, string] // store the highest priority configs which modified at runtime
 	forbiddenKeys *typeutil.ConcurrentSet[string]
-	configCache   *typeutil.ConcurrentMap[string, interface{}]
+
+	cacheMutex  sync.RWMutex
+	configCache map[string]any
+	// configCache *typeutil.ConcurrentMap[string, interface{}]
 }
 
 func NewManager() *Manager {
@@ -94,36 +98,50 @@ func NewManager() *Manager {
 		keySourceMap:  typeutil.NewConcurrentMap[string, string](),
 		overlays:      typeutil.NewConcurrentMap[string, string](),
 		forbiddenKeys: typeutil.NewConcurrentSet[string](),
-		configCache:   typeutil.NewConcurrentMap[string, interface{}](),
+		configCache:   make(map[string]any),
 	}
 	resetConfigCacheFunc := NewHandler("reset.config.cache", func(event *Event) {
 		keyToRemove := strings.NewReplacer("/", ".").Replace(event.Key)
-		manager.configCache.Remove(keyToRemove)
+		manager.EvictCachedValue(keyToRemove)
 	})
 	manager.Dispatcher.RegisterForKeyPrefix("", resetConfigCacheFunc)
 	return manager
 }
 
 func (m *Manager) GetCachedValue(key string) (interface{}, bool) {
-	return m.configCache.Get(key)
+	m.cacheMutex.RLock()
+	defer m.cacheMutex.RUnlock()
+	value, ok := m.configCache[key]
+	return value, ok
 }
 
-func (m *Manager) SetCachedValue(key string, value interface{}) {
-	m.configCache.Insert(key, value)
+func (m *Manager) CASCachedValue(key string, origin string, value interface{}) bool {
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+	current, err := m.GetConfig(key)
+	if err != nil {
+		return false
+	}
+	if current != origin {
+		return false
+	}
+	m.configCache[key] = value
+	return true
 }
 
 func (m *Manager) EvictCachedValue(key string) {
-	m.configCache.Remove(key)
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+	delete(m.configCache, key)
 }
 
 func (m *Manager) EvictCacheValueByFormat(keys ...string) {
-	set := typeutil.NewSet(keys...)
-	m.configCache.Range(func(key string, value interface{}) bool {
-		if set.Contain(formatKey(key)) {
-			m.configCache.Remove(key)
-		}
-		return true
-	})
+	m.cacheMutex.Lock()
+	defer m.cacheMutex.Unlock()
+
+	for _, key := range keys {
+		delete(m.configCache, key)
+	}
 }
 
 func (m *Manager) GetConfig(key string) (string, error) {
