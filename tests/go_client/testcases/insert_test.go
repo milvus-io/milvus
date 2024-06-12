@@ -116,7 +116,7 @@ func TestInsertAllFieldsData(t *testing.T) {
 			insertOpt.WithColumns(_column)
 		}
 		if dynamic {
-			insertOpt.WithColumns(hp.GenDynamicFieldData(0, common.DefaultNb)...)
+			insertOpt.WithColumns(hp.GenDynamicColumnData(0, common.DefaultNb)...)
 		}
 		insertRes, errInsert := mc.Insert(ctx, insertOpt)
 		common.CheckErr(t, errInsert, true)

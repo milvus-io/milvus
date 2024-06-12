@@ -135,10 +135,19 @@ func (chainTask *CollectionPrepare) InsertData(ctx context.Context, t *testing.T
 	fields := ip.Schema.Fields
 	insertOpt := clientv2.NewColumnBasedInsertOption(ip.Schema.CollectionName)
 	for _, field := range fields {
-		column := GenColumnData(ip.Nb, field.DataType, *option)
-		insertOpt.WithColumns(column)
+		if field.IsDynamic {
+			insertOpt.WithColumns(GenDynamicColumnData(option.start, ip.Nb)...)
+		} else {
+			if field.DataType == entity.FieldTypeArray{
+				option.TWithElementType(field.ElementType)
+			}
+			column := GenColumnData(ip.Nb, field.DataType, *option)
+			insertOpt.WithColumns(column)
+		}
 	}
-
+	if ip.PartitionName != "" {
+		insertOpt.WithPartition(ip.PartitionName)
+	}
 	insertRes, err := mc.Insert(ctx, insertOpt)
 	common.CheckErr(t, err, true)
 	return chainTask, insertRes

@@ -16,7 +16,6 @@ import (
 type InsertParams struct {
 	Schema        *entity.Schema
 	PartitionName string
-	Start         int
 	Nb            int
 	IsRows        bool
 }
@@ -30,11 +29,6 @@ func NewInsertParams(schema *entity.Schema, nb int) *InsertParams {
 
 func (opt *InsertParams) TWithPartitionName(partitionName string) *InsertParams {
 	opt.PartitionName = partitionName
-	return opt
-}
-
-func (opt *InsertParams) TWithStart(start int) *InsertParams {
-	opt.Start = start
 	return opt
 }
 
@@ -256,7 +250,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 	start := option.start
 	fieldName := option.fieldName
 	if option.fieldName == "" {
-		fieldName = GetFieldNameByFieldType(fieldType, option.elementType)
+		fieldName = GetFieldNameByFieldType(fieldType, TWithElementType(option.elementType))
 	}
 	switch fieldType {
 	case entity.FieldTypeInt64:
@@ -317,9 +311,11 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 
 	case entity.FieldTypeArray:
 		return GenArrayColumnData(nb, option.elementType, option)
+
 	case entity.FieldTypeJSON:
 		jsonValues := GenDefaultJSONData(nb, option)
 		return column.NewColumnJSONBytes(fieldName, jsonValues)
+
 	case entity.FieldTypeFloatVector:
 		vecFloatValues := make([][]float32, 0, nb)
 		for i := start; i < start+nb; i++ {
@@ -327,6 +323,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			vecFloatValues = append(vecFloatValues, vec)
 		}
 		return column.NewColumnFloatVector(fieldName, option.dim, vecFloatValues)
+
 	case entity.FieldTypeBinaryVector:
 		binaryVectors := make([][]byte, 0, nb)
 		for i := 0; i < nb; i++ {
@@ -341,6 +338,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			fp16Vectors = append(fp16Vectors, vec)
 		}
 		return column.NewColumnFloat16Vector(fieldName, dim, fp16Vectors)
+
 	case entity.FieldTypeBFloat16Vector:
 		bf16Vectors := make([][]byte, 0, nb)
 		for i := start; i < start+nb; i++ {
@@ -348,6 +346,7 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			bf16Vectors = append(bf16Vectors, vec)
 		}
 		return column.NewColumnBFloat16Vector(fieldName, dim, bf16Vectors)
+
 	case entity.FieldTypeSparseVector:
 		vectors := make([]entity.SparseEmbedding, 0, nb)
 		for i := start; i < start+nb; i++ {
@@ -355,13 +354,14 @@ func GenColumnData(nb int, fieldType entity.FieldType, option GenDataOption) col
 			vectors = append(vectors, vec)
 		}
 		return column.NewColumnSparseVectors(fieldName, vectors)
+
 	default:
 		log.Fatal("GenColumnData failed", zap.Any("FieldType", fieldType))
 		return nil
 	}
 }
 
-func GenDynamicFieldData(start int, nb int) []column.Column {
+func GenDynamicColumnData(start int, nb int) []column.Column {
 	type ListStruct struct {
 		List []int64 `json:"list" milvus:"name:list"`
 	}

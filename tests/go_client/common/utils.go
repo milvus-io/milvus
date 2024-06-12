@@ -121,3 +121,35 @@ func GenSparseVector(maxLen int) entity.SparseEmbedding {
 	}
 	return vector
 }
+
+// InvalidExprStruct invalid expr
+type InvalidExprStruct struct {
+	Expr   string
+	ErrNil bool
+	ErrMsg string
+}
+
+var InvalidExpressions = []InvalidExprStruct{
+	{Expr: "id in [0]", ErrNil: true, ErrMsg: "fieldName(id) not found"},                                          // not exist field but no error
+	{Expr: "int64 in not [0]", ErrNil: false, ErrMsg: "cannot parse expression"},                                  // wrong term expr keyword
+	{Expr: "int64 > 10 AND int64 < 100", ErrNil: false, ErrMsg: "cannot parse expression"},                        // AND isn't supported
+	{Expr: "int64 < 10 OR int64 > 100", ErrNil: false, ErrMsg: "cannot parse expression"},                         // OR isn't supported
+	{Expr: "int64 < floatVec", ErrNil: false, ErrMsg: "not supported"},                                            // unsupported compare field
+	{Expr: "floatVec in [0]", ErrNil: false, ErrMsg: "cannot be casted to FloatVector"},                           // value and field type mismatch
+	{Expr: fmt.Sprintf("%s == 1", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},                                // hist empty
+	{Expr: fmt.Sprintf("%s like 'a%%' ", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},                         // hist empty
+	{Expr: fmt.Sprintf("%s like `a%%` ", DefaultJSONFieldName), ErrNil: false, ErrMsg: "cannot parse expression"}, // ``
+	{Expr: fmt.Sprintf("%s > 1", DefaultDynamicFieldName), ErrNil: true, ErrMsg: ""},                              // hits empty
+	{Expr: fmt.Sprintf("%s[\"dynamicList\"] == [2, 3]", DefaultDynamicFieldName), ErrNil: true, ErrMsg: ""},
+	{Expr: fmt.Sprintf("%s['a'] == [2, 3]", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},      // json field not exist
+	{Expr: fmt.Sprintf("%s['number'] == [2, 3]", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""}, // field exist but type not match
+	{Expr: fmt.Sprintf("%s[0] == [2, 3]", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},        // field exist but type not match
+	{Expr: fmt.Sprintf("json_contains (%s['number'], 2)", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},
+	{Expr: fmt.Sprintf("json_contains (%s['list'], [2])", DefaultJSONFieldName), ErrNil: true, ErrMsg: ""},
+	{Expr: fmt.Sprintf("json_contains_all (%s['list'], 2)", DefaultJSONFieldName), ErrNil: false, ErrMsg: "contains_all operation element must be an array"},
+	{Expr: fmt.Sprintf("JSON_CONTAINS_ANY (%s['list'], 2)", DefaultJSONFieldName), ErrNil: false, ErrMsg: "contains_any operation element must be an array"},
+	{Expr: fmt.Sprintf("json_contains_aby (%s['list'], 2)", DefaultJSONFieldName), ErrNil: false, ErrMsg: "invalid expression: json_contains_aby"},
+	{Expr: fmt.Sprintf("json_contains_aby (%s['list'], 2)", DefaultJSONFieldName), ErrNil: false, ErrMsg: "invalid expression: json_contains_aby"},
+	{Expr: fmt.Sprintf("%s[-1] > %d", DefaultInt8ArrayField, TestCapacity), ErrNil: false, ErrMsg: "cannot parse expression"}, //  array[-1] >
+	{Expr: fmt.Sprintf(fmt.Sprintf("%s[-1] > 1", DefaultJSONFieldName)), ErrNil: false, ErrMsg: "invalid expression"},         //  json[-1] >
+}
