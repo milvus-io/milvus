@@ -237,6 +237,13 @@ func (s *DelegatorDataSuite) TestProcessDelete() {
 			ms.EXPECT().MayPkExist(mock.Anything).Call.Return(func(pk storage.PrimaryKey) bool {
 				return pk.EQ(storage.NewInt64PrimaryKey(10))
 			})
+			ms.EXPECT().BatchPkExist(mock.Anything).RunAndReturn(func(lc *storage.BatchLocationsCache) []bool {
+				hits := make([]bool, lc.Size())
+				for i, pk := range lc.PKs() {
+					hits[i] = pk.EQ(storage.NewInt64PrimaryKey(10))
+				}
+				return hits
+			})
 			return ms
 		})
 	}, nil)

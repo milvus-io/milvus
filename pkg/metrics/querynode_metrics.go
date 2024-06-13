@@ -59,6 +59,30 @@ var (
 			msgTypeLabelName,
 		})
 
+	QueryNodeApplyBFCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "apply_bf_latency",
+			Help:      "apply bf cost in ms",
+			Buckets:   buckets,
+		}, []string{
+			functionLabelName,
+			nodeIDLabelName,
+		})
+
+	QueryNodeForwardDeleteCost = prometheus.NewHistogramVec(
+		prometheus.HistogramOpts{
+			Namespace: milvusNamespace,
+			Subsystem: typeutil.QueryNodeRole,
+			Name:      "forward_delete_latency",
+			Help:      "forward delete cost in ms",
+			Buckets:   buckets,
+		}, []string{
+			functionLabelName,
+			nodeIDLabelName,
+		})
+
 	QueryNodeWaitProcessingMsgCount = prometheus.NewGaugeVec(
 		prometheus.GaugeOpts{
 			Namespace: milvusNamespace,
@@ -510,6 +534,8 @@ func RegisterQueryNode(registry *prometheus.Registry) {
 	registry.MustRegister(StoppingBalanceNodeNum)
 	registry.MustRegister(StoppingBalanceChannelNum)
 	registry.MustRegister(StoppingBalanceSegmentNum)
+	registry.MustRegister(QueryNodeApplyBFCost)
+	registry.MustRegister(QueryNodeForwardDeleteCost)
 }
 
 func CleanupQueryNodeCollectionMetrics(nodeID int64, collectionID int64) {

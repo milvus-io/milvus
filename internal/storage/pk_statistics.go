@@ -21,6 +21,7 @@ import (
 
 	"github.com/bits-and-blooms/bloom/v3"
 	"github.com/cockroachdb/errors"
+	"github.com/samber/lo"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
 	"github.com/milvus-io/milvus/pkg/common"
@@ -106,4 +107,112 @@ func (st *PkStatistics) PkExist(pk PrimaryKey) bool {
 	}
 	// no idea, just make it as false positive
 	return true
+}
+
+// Locations returns a list of hash locations representing a data item.
+func Locations(pk PrimaryKey, k uint) []uint64 {
+	switch pk.Type() {
+	case schemapb.DataType_Int64:
+		buf := make([]byte, 8)
+		int64Pk := pk.(*Int64PrimaryKey)
+		common.Endian.PutUint64(buf, uint64(int64Pk.Value))
+		return bloom.Locations(buf, k)
+	case schemapb.DataType_VarChar:
+		varCharPk := pk.(*VarCharPrimaryKey)
+		return bloom.Locations([]byte(varCharPk.Value), k)
+	default:
+		// TODO::
+	}
+	return nil
+}
+
+func (st *PkStatistics) TestLocationCache(lc *LocationsCache) bool {
+	// empty pkStatics
+	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
+		return false
+	}
+
+	// check bf first, TestLocation just do some bitset compute, cost is cheaper
+	if !st.PkFilter.TestLocations(lc.Locations(st.PkFilter.K())) {
+		return false
+	}
+
+	// check pk range after
+	return st.MinPK.LE(lc.pk) && st.MaxPK.GE(lc.pk)
+}
+
+func (st *PkStatistics) BatchPkExist(lc *BatchLocationsCache, hits []bool) []bool {
+	// empty pkStatics
+	if st.MinPK == nil || st.MaxPK == nil || st.PkFilter == nil {
+		return hits
+	}
+
+	// check bf first, TestLocation just do some bitset compute, cost is cheaper
+	locations := lc.Locations(st.PkFilter.K())
+	pks := lc.PKs()
+	for i := range pks {
+		// todo: a bit ugly, hits[i]'s value will depends on multi bf in single segment,
+		// hits array will be removed after we merge bf in segment
+		if !hits[i] {
+			hits[i] = st.PkFilter.TestLocations(locations[i]) && st.MinPK.LE(pks[i]) && st.MaxPK.GE(pks[i])
+		}
+	}
+
+	return hits
+}
+
+// LocationsCache is a helper struct caching pk bloom filter locations.
+// Note that this helper is not concurrent safe and shall be used in same goroutine.
+type LocationsCache struct {
+	pk        PrimaryKey
+	locations []uint64
+}
+
+func (lc *LocationsCache) GetPk() PrimaryKey {
+	return lc.pk
+}
+
+func (lc *LocationsCache) Locations(k uint) []uint64 {
+	if int(k) > len(lc.locations) {
+		lc.locations = Locations(lc.pk, k)
+	}
+	return lc.locations[:k]
+}
+
+func NewLocationsCache(pk PrimaryKey) *LocationsCache {
+	return &LocationsCache{
+		pk: pk,
+	}
+}
+
+type BatchLocationsCache struct {
+	pks []PrimaryKey
+	k   uint
+
+	locations [][]uint64
+}
+
+func (lc *BatchLocationsCache) PKs() []PrimaryKey {
+	return lc.pks
+}
+
+func (lc *BatchLocationsCache) Size() int {
+	return len(lc.pks)
+}
+
+func (lc *BatchLocationsCache) Locations(k uint) [][]uint64 {
+	if k > lc.k {
+		lc.k = k
+		lc.locations = lo.Map(lc.pks, func(pk PrimaryKey, _ int) []uint64 {
+			return Locations(pk, lc.k)
+		})
+	}
+
+	return lc.locations
+}
+
+func NewBatchLocationsCache(pks []PrimaryKey) *BatchLocationsCache {
+	return &BatchLocationsCache{
+		pks: pks,
+	}
 }

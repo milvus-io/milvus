@@ -17,12 +17,16 @@
 package segments
 
 import (
+	"context"
 	"math"
 	"runtime"
 	"sync"
 
 	"go.uber.org/atomic"
+	"go.uber.org/zap"
 
+	"github.com/milvus-io/milvus/pkg/config"
+	"github.com/milvus-io/milvus/pkg/log"
 	"github.com/milvus-io/milvus/pkg/util/conc"
 	"github.com/milvus-io/milvus/pkg/util/hardware"
 	"github.com/milvus-io/milvus/pkg/util/paramtable"
@@ -33,12 +37,14 @@ var (
 	// and other operations (insert/delete/statistics/etc.)
 	// since in concurrent situation, there operation may block each other in high payload
 
-	sqp      atomic.Pointer[conc.Pool[any]]
-	sqOnce   sync.Once
-	dp       atomic.Pointer[conc.Pool[any]]
-	dynOnce  sync.Once
-	loadPool atomic.Pointer[conc.Pool[any]]
-	loadOnce sync.Once
+	sqp         atomic.Pointer[conc.Pool[any]]
+	sqOnce      sync.Once
+	dp          atomic.Pointer[conc.Pool[any]]
+	dynOnce     sync.Once
+	loadPool    atomic.Pointer[conc.Pool[any]]
+	loadOnce    sync.Once
+	bfPool      atomic.Pointer[conc.Pool[any]]
+	bfApplyOnce sync.Once
 )
 
 // initSQPool initialize
@@ -82,6 +88,19 @@ func initLoadPool() {
 	})
 }
 
+func initBFApplyPool() {
+	bfApplyOnce.Do(func() {
+		pt := paramtable.Get()
+		poolSize := hardware.GetCPUNum() * pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsInt()
+		pool := conc.NewPool[any](
+			poolSize,
+		)
+
+		bfPool.Store(pool)
+		pt.Watch(pt.QueryNodeCfg.BloomFilterApplyParallelFactor.Key, config.NewHandler("qn.bfapply.parallel", ResizeBFApplyPool))
+	})
+}
+
 // GetSQPool returns the singleton pool instance for search/query operations.
 func GetSQPool() *conc.Pool[any] {
 	initSQPool()
@@ -97,4 +116,37 @@ func GetDynamicPool() *conc.Pool[any] {
 func GetLoadPool() *conc.Pool[any] {
 	initLoadPool()
 	return loadPool.Load()
+}
+
+func GetBFApplyPool() *conc.Pool[any] {
+	initBFApplyPool()
+	return bfPool.Load()
+}
+
+func ResizeBFApplyPool(evt *config.Event) {
+	if evt.HasUpdated {
+		pt := paramtable.Get()
+		newSize := hardware.GetCPUNum() * pt.QueryNodeCfg.BloomFilterApplyParallelFactor.GetAsInt()
+		resizePool(GetBFApplyPool(), newSize, "BFApplyPool")
+	}
+}
+
+func resizePool(pool *conc.Pool[any], newSize int, tag string) {
+	log := log.Ctx(context.Background()).
+		With(
+			zap.String("poolTag", tag),
+			zap.Int("newSize", newSize),
+		)
+
+	if newSize <= 0 {
+		log.Warn("cannot set pool size to non-positive value")
+		return
+	}
+
+	err := pool.Resize(newSize)
+	if err != nil {
+		log.Warn("failed to resize pool", zap.Error(err))
+		return
+	}
+	log.Info("pool resize successfully")
 }

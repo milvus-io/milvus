@@ -28,9 +28,17 @@ type candidateKey struct {
 }
 
 // MayPkExist checks whether primary key could exists in this candidate.
-func (k candidateKey) MayPkExist(pk storage.PrimaryKey) bool {
+func (k candidateKey) MayPkExist(pk *storage.LocationsCache) bool {
 	// always return true to prevent miuse
 	return true
+}
+
+func (k candidateKey) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	ret := make([]bool, 0)
+	for i := 0; i < lc.Size(); i++ {
+		ret = append(ret, true)
+	}
+	return ret
 }
 
 // ID implements Candidate.

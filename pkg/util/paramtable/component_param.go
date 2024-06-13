@@ -233,8 +233,9 @@ type commonConfig struct {
 	TTMsgEnabled ParamItem `refreshable:"true"`
 	TraceLogMode ParamItem `refreshable:"true"`
 
-	BloomFilterSize       ParamItem `refreshable:"true"`
-	MaxBloomFalsePositive ParamItem `refreshable:"true"`
+	BloomFilterSize           ParamItem `refreshable:"true"`
+	MaxBloomFalsePositive     ParamItem `refreshable:"true"`
+	BloomFilterApplyBatchSize ParamItem `refreshable:"true"`
 }
 
 func (p *commonConfig) init(base *BaseTable) {
@@ -682,6 +683,14 @@ like the old password verification when updating the credential`,
 		Doc:          "max false positive rate for bloom filter",
 	}
 	p.MaxBloomFalsePositive.Init(base.mgr)
+	p.BloomFilterApplyBatchSize = ParamItem{
+		Key:          "common.bloomFilterApplyBatchSize",
+		Version:      "2.3.18",
+		DefaultValue: "1000",
+		Doc:          "batch size when to apply pk to bloom filter",
+		Export:       true,
+	}
+	p.BloomFilterApplyBatchSize.Init(base.mgr)
 }
 
 type traceConfig struct {
@@ -1883,6 +1892,7 @@ type queryNodeConfig struct {
 	EnableWorkerSQCostMetrics ParamItem `refreshable:"true"`
 
 	MemoryIndexLoadPredictMemoryUsageFactor ParamItem `refreshable:"true"`
+	BloomFilterApplyParallelFactor          ParamItem `refreshable:"true"`
 }
 
 func (p *queryNodeConfig) init(base *BaseTable) {
@@ -2314,6 +2324,14 @@ Max read concurrency must greater than or equal to 1, and less than or equal to 
 		Doc:          "memory usage prediction factor for memory index loaded",
 	}
 	p.MemoryIndexLoadPredictMemoryUsageFactor.Init(base.mgr)
+	p.BloomFilterApplyParallelFactor = ParamItem{
+		Key:          "queryNode.bloomFilterApplyBatchSize",
+		Version:      "2.3.18",
+		DefaultValue: "4",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		Export:       true,
+	}
+	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////
@@ -2846,8 +2864,9 @@ type dataNodeConfig struct {
 	MaxChannelCheckpointsPerRPC          ParamItem `refreshable:"true"`
 	ChannelCheckpointUpdateTickInSeconds ParamItem `refreshable:"true"`
 
-	GracefulStopTimeout   ParamItem `refreshable:"true"`
-	FlushMgrCleanInterval ParamItem `refreshable:"true"`
+	GracefulStopTimeout            ParamItem `refreshable:"true"`
+	FlushMgrCleanInterval          ParamItem `refreshable:"true"`
+	BloomFilterApplyParallelFactor ParamItem `refreshable:"true"`
 }
 
 func (p *dataNodeConfig) init(base *BaseTable) {
@@ -3114,6 +3133,14 @@ func (p *dataNodeConfig) init(base *BaseTable) {
 		Export:       true,
 	}
 	p.FlushMgrCleanInterval.Init(base.mgr)
+	p.BloomFilterApplyParallelFactor = ParamItem{
+		Key:          "datanode.bloomFilterApplyBatchSize",
+		Version:      "2.3.18",
+		DefaultValue: "4",
+		Doc:          "parallel factor when to apply pk to bloom filter, default to 4*CPU_CORE_NUM",
+		Export:       true,
+	}
+	p.BloomFilterApplyParallelFactor.Init(base.mgr)
 }
 
 // /////////////////////////////////////////////////////////////////////////////

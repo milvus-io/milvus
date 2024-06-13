@@ -21,6 +21,7 @@ import (
 	"fmt"
 	"math/rand"
 	"runtime"
+	"time"
 
 	"github.com/cockroachdb/errors"
 	"github.com/samber/lo"
@@ -174,29 +175,37 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		Data: cacheItems,
 	})
 
+	start := time.Now()
+	retMap := sd.applyBFInParallel(deleteData, segments.GetBFApplyPool())
 	// segment => delete data
 	delRecords := make(map[int64]DeleteData)
-	for _, data := range deleteData {
-		for i, pk := range data.PrimaryKeys {
-			segmentIDs, err := sd.pkOracle.Get(pk, pkoracle.WithPartitionID(data.PartitionID))
-			if err != nil {
-				log.Warn("failed to get delete candidates for pk", zap.Any("pk", pk.GetValue()))
-				continue
-			}
-			for _, segmentID := range segmentIDs {
-				delRecord := delRecords[segmentID]
-				delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pk)
-				delRecord.Timestamps = append(delRecord.Timestamps, data.Timestamps[i])
-				delRecord.RowCount++
-				delRecords[segmentID] = delRecord
+	retMap.Range(func(key int, value *BatchApplyRet) bool {
+		startIdx := value.StartIdx
+		segmentID2Hits := value.Segment2Hits
+
+		pks := deleteData[value.DeleteDataIdx].PrimaryKeys
+		tss := deleteData[value.DeleteDataIdx].Timestamps
+
+		for segmentID, hits := range segmentID2Hits {
+			for i, hit := range hits {
+				if hit {
+					delRecord := delRecords[segmentID]
+					delRecord.PrimaryKeys = append(delRecord.PrimaryKeys, pks[startIdx+i])
+					delRecord.Timestamps = append(delRecord.Timestamps, tss[startIdx+i])
+					delRecord.RowCount++
+					delRecords[segmentID] = delRecord
+				}
 			}
 		}
-	}
+		return true
+	})
+	bfCost := time.Since(start)
 
 	offlineSegments := typeutil.NewConcurrentSet[int64]()
 
 	sealed, growing, version := sd.distribution.PinOnlineSegments()
 
+	start = time.Now()
 	eg, ctx := errgroup.WithContext(context.Background())
 	for _, entry := range sealed {
 		entry := entry
@@ -230,9 +239,9 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 			return nil
 		})
 	}
-
 	// not error return in apply delete
 	_ = eg.Wait()
+	forwardDeleteCost := time.Since(start)
 
 	sd.distribution.Unpin(version)
 	offlineSegIDs := offlineSegments.Collect()
@@ -241,8 +250,49 @@ func (sd *shardDelegator) ProcessDelete(deleteData []*DeleteData, ts uint64) {
 		sd.markSegmentOffline(offlineSegIDs...)
 	}
 
-	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).
-		Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeProcessCost.WithLabelValues(fmt.Sprint(paramtable.GetNodeID()), metrics.DeleteLabel).Observe(float64(tr.ElapseSpan().Milliseconds()))
+	metrics.QueryNodeApplyBFCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(bfCost.Milliseconds()))
+	metrics.QueryNodeForwardDeleteCost.WithLabelValues("ProcessDelete", fmt.Sprint(paramtable.GetNodeID())).Observe(float64(forwardDeleteCost.Milliseconds()))
+}
+
+type BatchApplyRet = struct {
+	DeleteDataIdx int
+	StartIdx      int
+	Segment2Hits  map[int64][]bool
+}
+
+func (sd *shardDelegator) applyBFInParallel(deleteDatas []*DeleteData, pool *conc.Pool[any]) *typeutil.ConcurrentMap[int, *BatchApplyRet] {
+	retIdx := 0
+	retMap := typeutil.NewConcurrentMap[int, *BatchApplyRet]()
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+
+	var futures []*conc.Future[any]
+	for didx, data := range deleteDatas {
+		pks := data.PrimaryKeys
+		for idx := 0; idx < len(pks); idx += batchSize {
+			startIdx := idx
+			endIdx := startIdx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
+			}
+
+			retIdx += 1
+			tmpRetIdx := retIdx
+			deleteDataId := didx
+			future := pool.Submit(func() (any, error) {
+				ret := sd.pkOracle.BatchGet(pks[startIdx:endIdx], pkoracle.WithPartitionID(data.PartitionID))
+				retMap.Insert(tmpRetIdx, &BatchApplyRet{
+					DeleteDataIdx: deleteDataId,
+					StartIdx:      startIdx,
+					Segment2Hits:  ret,
+				})
+				return nil, nil
+			})
+			futures = append(futures, future)
+		}
+	}
+	conc.AwaitAll(futures...)
+	return retMap
 }
 
 // applyDelete handles delete record and apply them to corresponding workers.
@@ -496,7 +546,8 @@ func (sd *shardDelegator) loadStreamDelete(ctx context.Context,
 					continue
 				}
 				for i, pk := range record.DeleteData.Pks {
-					if candidate.MayPkExist(pk) {
+					lc := storage.NewLocationsCache(pk)
+					if candidate.MayPkExist(lc) {
 						deleteData.Pks = append(deleteData.Pks, pk)
 						deleteData.Tss = append(deleteData.Tss, record.DeleteData.Tss[i])
 						deleteData.RowCount++
@@ -596,7 +647,8 @@ func (sd *shardDelegator) readDeleteFromMsgstream(ctx context.Context, position 
 					}
 
 					for idx, pk := range storage.ParseIDs2PrimaryKeys(dmsg.GetPrimaryKeys()) {
-						if candidate.MayPkExist(pk) {
+						lc := storage.NewLocationsCache(pk)
+						if candidate.MayPkExist(lc) {
 							result.Pks = append(result.Pks, pk)
 							result.Tss = append(result.Tss, dmsg.Timestamps[idx])
 						}
