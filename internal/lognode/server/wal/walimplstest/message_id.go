@@ -1,27 +1,23 @@
 //go:build test
 // +build test
 
-package message
+package walimplstest
 
 import (
 	"strconv"
+
+	"github.com/milvus-io/milvus/internal/util/logserviceutil/message"
 )
 
-var _ MessageID = testMessageID(0)
-
-const testWALName = "test"
-
-func init() {
-	RegisterMessageIDUnmsarshaler(testWALName, UnmarshalTestMessageID)
-}
+var _ message.MessageID = testMessageID(0)
 
 // NewTestMessageID create a new test message id.
-func NewTestMessageID(id int64) MessageID {
+func NewTestMessageID(id int64) message.MessageID {
 	return testMessageID(id)
 }
 
 // UnmarshalTestMessageID unmarshal the message id.
-func UnmarshalTestMessageID(data []byte) (MessageID, error) {
+func UnmarshalTestMessageID(data []byte) (message.MessageID, error) {
 	id, err := unmarshalTestMessageID(data)
 	if err != nil {
 		return nil, err
@@ -43,21 +39,21 @@ type testMessageID int64
 
 // WALName returns the name of message id related wal.
 func (id testMessageID) WALName() string {
-	return testWALName
+	return walName
 }
 
 // LT less than.
-func (id testMessageID) LT(other MessageID) bool {
+func (id testMessageID) LT(other message.MessageID) bool {
 	return id < other.(testMessageID)
 }
 
 // LTE less than or equal to.
-func (id testMessageID) LTE(other MessageID) bool {
+func (id testMessageID) LTE(other message.MessageID) bool {
 	return id <= other.(testMessageID)
 }
 
 // EQ Equal to.
-func (id testMessageID) EQ(other MessageID) bool {
+func (id testMessageID) EQ(other message.MessageID) bool {
 	return id == other.(testMessageID)
 }
 

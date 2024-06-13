@@ -49,6 +49,14 @@ func (m *messageImpl) WithLastConfirmed(id MessageID) MutableMessage {
 	return m
 }
 
+// IntoImmutableMessage converts current message to immutable message.
+func (m *messageImpl) IntoImmutableMessage(id MessageID) ImmutableMessage {
+	return &immutableMessageImpl{
+		messageImpl: *m,
+		id:          id,
+	}
+}
+
 type immutableMessageImpl struct {
 	messageImpl
 	id MessageID

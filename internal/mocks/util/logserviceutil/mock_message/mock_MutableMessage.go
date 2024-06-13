@@ -61,6 +61,50 @@ func (_c *MockMutableMessage_EstimateSize_Call) RunAndReturn(run func() int) *Mo
 	return _c
 }
 
+// IntoImmutableMessage provides a mock function with given fields: msgID
+func (_m *MockMutableMessage) IntoImmutableMessage(msgID message.MessageID) message.ImmutableMessage {
+	ret := _m.Called(msgID)
+
+	var r0 message.ImmutableMessage
+	if rf, ok := ret.Get(0).(func(message.MessageID) message.ImmutableMessage); ok {
+		r0 = rf(msgID)
+	} else {
+		if ret.Get(0) != nil {
+			r0 = ret.Get(0).(message.ImmutableMessage)
+		}
+	}
+
+	return r0
+}
+
+// MockMutableMessage_IntoImmutableMessage_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'IntoImmutableMessage'
+type MockMutableMessage_IntoImmutableMessage_Call struct {
+	*mock.Call
+}
+
+// IntoImmutableMessage is a helper method to define mock.On call
+//   - msgID message.MessageID
+func (_e *MockMutableMessage_Expecter) IntoImmutableMessage(msgID interface{}) *MockMutableMessage_IntoImmutableMessage_Call {
+	return &MockMutableMessage_IntoImmutableMessage_Call{Call: _e.mock.On("IntoImmutableMessage", msgID)}
+}
+
+func (_c *MockMutableMessage_IntoImmutableMessage_Call) Run(run func(msgID message.MessageID)) *MockMutableMessage_IntoImmutableMessage_Call {
+	_c.Call.Run(func(args mock.Arguments) {
+		run(args[0].(message.MessageID))
+	})
+	return _c
+}
+
+func (_c *MockMutableMessage_IntoImmutableMessage_Call) Return(_a0 message.ImmutableMessage) *MockMutableMessage_IntoImmutableMessage_Call {
+	_c.Call.Return(_a0)
+	return _c
+}
+
+func (_c *MockMutableMessage_IntoImmutableMessage_Call) RunAndReturn(run func(message.MessageID) message.ImmutableMessage) *MockMutableMessage_IntoImmutableMessage_Call {
+	_c.Call.Return(run)
+	return _c
+}
+
 // MessageType provides a mock function with given fields:
 func (_m *MockMutableMessage) MessageType() message.MessageType {
 	ret := _m.Called()

@@ -33,6 +33,9 @@ type MutableMessage interface {
 
 	// Properties returns the message properties.
 	Properties() Properties
+
+	// IntoImmutableMessage converts the mutable message to immutable message.
+	IntoImmutableMessage(msgID MessageID) ImmutableMessage
 }
 
 // ImmutableMessage is the read-only message interface.

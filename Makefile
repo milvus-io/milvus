@@ -516,9 +516,6 @@ generate-mockery-log:
 
 generate-mockery: generate-mockery-types generate-mockery-kv generate-mockery-rootcoord generate-mockery-proxy generate-mockery-querycoord generate-mockery-querynode generate-mockery-datacoord generate-mockery-pkg generate-mockery-log
 
-generate-mockery-lognode: getdeps
-	$(INSTALL_PATH)/mockery --config $(PWD)/internal/lognode/.mockery.yaml
-
 generate-yaml: milvus-tools
 	@echo "Updating milvus config yaml"
 	@$(PWD)/bin/tools/config gen-yaml && mv milvus.yaml configs/milvus.yaml
