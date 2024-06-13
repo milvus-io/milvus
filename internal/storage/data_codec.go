@@ -248,25 +248,10 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 		var dim int64
 		if typeutil.IsVectorType(field.DataType) {
 			switch field.DataType {
-			case schemapb.DataType_FloatVector:
-				dim, err = typeutil.GetDim(field)
-				if err != nil {
-					return nil, err
-				}
-				eventWriter, err = writer.NextInsertEventWriter(int(dim))
-			case schemapb.DataType_BinaryVector:
-				dim, err = typeutil.GetDim(field)
-				if err != nil {
-					return nil, err
-				}
-				eventWriter, err = writer.NextInsertEventWriter(int(dim))
-			case schemapb.DataType_Float16Vector:
-				dim, err = typeutil.GetDim(field)
-				if err != nil {
-					return nil, err
-				}
-				eventWriter, err = writer.NextInsertEventWriter(int(dim))
-			case schemapb.DataType_BFloat16Vector:
+			case schemapb.DataType_FloatVector,
+				schemapb.DataType_BinaryVector,
+				schemapb.DataType_Float16Vector,
+				schemapb.DataType_BFloat16Vector:
 				dim, err = typeutil.GetDim(field)
 				if err != nil {
 					return nil, err
@@ -293,136 +278,12 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 			blockMemorySize := singleData.GetMemorySize()
 			memorySize += int64(blockMemorySize)
-
-			switch field.DataType {
-			case schemapb.DataType_Bool:
-				err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Int8:
-				err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Int16:
-				err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Int32:
-				err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Int64:
-				err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Float:
-				err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Double:
-				err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_String, schemapb.DataType_VarChar:
-				for _, singleString := range singleData.(*StringFieldData).Data {
-					err = eventWriter.AddOneStringToPayload(singleString)
-					if err != nil {
-						eventWriter.Close()
-						writer.Close()
-						return nil, err
-					}
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Array:
-				for _, singleArray := range singleData.(*ArrayFieldData).Data {
-					err = eventWriter.AddOneArrayToPayload(singleArray)
-					if err != nil {
-						eventWriter.Close()
-						writer.Close()
-						return nil, err
-					}
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_JSON:
-				for _, singleJSON := range singleData.(*JSONFieldData).Data {
-					err = eventWriter.AddOneJSONToPayload(singleJSON)
-					if err != nil {
-						eventWriter.Close()
-						writer.Close()
-						return nil, err
-					}
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_BinaryVector:
-				err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_FloatVector:
-				err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_Float16Vector:
-				err = eventWriter.AddFloat16VectorToPayload(singleData.(*Float16VectorFieldData).Data, singleData.(*Float16VectorFieldData).Dim)
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_BFloat16Vector:
-				err = eventWriter.AddBFloat16VectorToPayload(singleData.(*BFloat16VectorFieldData).Data, singleData.(*BFloat16VectorFieldData).Dim)
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			case schemapb.DataType_SparseFloatVector:
-				err = eventWriter.AddSparseFloatVectorToPayload(singleData.(*SparseFloatVectorFieldData))
-				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
-				}
-				writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
-			default:
-				return nil, fmt.Errorf("undefined data type %d", field.DataType)
-			}
-			if err != nil {
+			if err = AddFieldDataToPayload(eventWriter, field.DataType, singleData); err != nil {
+				eventWriter.Close()
+				writer.Close()
 				return nil, err
 			}
+			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", blockMemorySize))
 			writer.SetEventTimeStamp(startTs, endTs)
 		}
 
@@ -451,6 +312,81 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 	}
 
 	return blobs, nil
+}
+
+func AddFieldDataToPayload(eventWriter *insertEventWriter, dataType schemapb.DataType, singleData FieldData) error {
+	var err error
+	switch dataType {
+	case schemapb.DataType_Bool:
+		if err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data); err != nil {
+			return err
+		}
+	case schemapb.DataType_Int8:
+		if err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data); err != nil {
+			return err
+		}
+	case schemapb.DataType_Int16:
+		if err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data); err != nil {
+			return err
+		}
+	case schemapb.DataType_Int32:
+		if err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data); err != nil {
+			return err
+		}
+	case schemapb.DataType_Int64:
+		if err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data); err != nil {
+			return err
+		}
+	case schemapb.DataType_Float:
+		if err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data); err != nil {
+			return err
+		}
+	case schemapb.DataType_Double:
+		if err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data); err != nil {
+			return err
+		}
+	case schemapb.DataType_String, schemapb.DataType_VarChar:
+		for _, singleString := range singleData.(*StringFieldData).Data {
+			if err = eventWriter.AddOneStringToPayload(singleString); err != nil {
+				return err
+			}
+		}
+	case schemapb.DataType_Array:
+		for _, singleArray := range singleData.(*ArrayFieldData).Data {
+			if err = eventWriter.AddOneArrayToPayload(singleArray); err != nil {
+				return err
+			}
+		}
+	case schemapb.DataType_JSON:
+		for _, singleJSON := range singleData.(*JSONFieldData).Data {
+			if err = eventWriter.AddOneJSONToPayload(singleJSON); err != nil {
+				return err
+			}
+		}
+	case schemapb.DataType_BinaryVector:
+		if err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim); err != nil {
+			return err
+		}
+	case schemapb.DataType_FloatVector:
+		if err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim); err != nil {
+			return err
+		}
+	case schemapb.DataType_Float16Vector:
+		if err = eventWriter.AddFloat16VectorToPayload(singleData.(*Float16VectorFieldData).Data, singleData.(*Float16VectorFieldData).Dim); err != nil {
+			return err
+		}
+	case schemapb.DataType_BFloat16Vector:
+		if err = eventWriter.AddBFloat16VectorToPayload(singleData.(*BFloat16VectorFieldData).Data, singleData.(*BFloat16VectorFieldData).Dim); err != nil {
+			return err
+		}
+	case schemapb.DataType_SparseFloatVector:
+		if err = eventWriter.AddSparseFloatVectorToPayload(singleData.(*SparseFloatVectorFieldData)); err != nil {
+			return err
+		}
+	default:
+		return fmt.Errorf("undefined data type %d", dataType)
+	}
+	return nil
 }
 
 func (insertCodec *InsertCodec) DeserializeAll(blobs []*Blob) (
@@ -844,31 +780,6 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 
 	return collectionID, partitionID, segmentID, nil
 }
-
-// func deserializeEntity[T any, U any](
-// 	eventReader *EventReader,
-// 	binlogReader *BinlogReader,
-// 	insertData *InsertData,
-// 	getPayloadFunc func() (U, error),
-// 	fillDataFunc func() FieldData,
-// ) error {
-// 	fieldID := binlogReader.FieldID
-// 	stringPayload, err := getPayloadFunc()
-// 	if err != nil {
-// 		eventReader.Close()
-// 		binlogReader.Close()
-// 		return err
-// 	}
-//
-// 	if insertData.Data[fieldID] == nil {
-// 		insertData.Data[fieldID] = fillDataFunc()
-// 	}
-// 	stringFieldData := insertData.Data[fieldID].(*T)
-//
-// 	stringFieldData.Data = append(stringFieldData.Data, stringPayload...)
-// 	totalLength += len(stringPayload)
-// 	insertData.Data[fieldID] = stringFieldData
-// }
 
 // Deserialize transfer blob back to insert data.
 // From schema, it get all fields.

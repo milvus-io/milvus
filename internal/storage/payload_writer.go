@@ -243,7 +243,7 @@ func (w *NativePayloadWriter) AddInt16ToPayload(data []int16) error {
 	}
 
 	if len(data) == 0 {
-		return errors.New("can't add empty msgs into int64 payload")
+		return errors.New("can't add empty msgs into int16 payload")
 	}
 
 	builder, ok := w.builder.(*array.Int16Builder)
