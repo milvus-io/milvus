@@ -525,7 +525,7 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		s.ErrorIs(merr.Error(status), merr.ErrServiceNotReady)
 	})
 
-	s.Run("normal case", func() {
+	s.Run("dataSyncService not exist", func() {
 		s.SetupTest()
 		ctx := context.Background()
 		req := &datapb.SyncSegmentsRequest{
@@ -533,12 +533,15 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 			PartitionId:  2,
 			CollectionId: 1,
 			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
-				3: {
-					SegmentId:  3,
-					PkStatsLog: nil,
-					State:      commonpb.SegmentState_Dropped,
-					Level:      2,
-					NumOfRows:  1024,
+				102: {
+					SegmentId: 102,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushed,
+					Level:     2,
+					NumOfRows: 1024,
 				},
 			},
 		}
@@ -546,6 +549,127 @@ func (s *DataNodeServicesSuite) TestSyncSegments() {
 		status, err := s.node.SyncSegments(ctx, req)
 		s.NoError(err)
 		s.False(merr.Ok(status))
+	})
+
+	s.Run("normal case", func() {
+		s.SetupTest()
+		cache := metacache.NewMetaCache(&datapb.ChannelWatchInfo{
+			Schema: &schemapb.CollectionSchema{
+				Fields: []*schemapb.FieldSchema{
+					{
+						FieldID:      100,
+						Name:         "pk",
+						IsPrimaryKey: true,
+						Description:  "",
+						DataType:     schemapb.DataType_Int64,
+					},
+				},
+			},
+			Vchan: &datapb.VchannelInfo{},
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            100,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Growing,
+			Level:         datapb.SegmentLevel_L0,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            101,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L1,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            102,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		cache.AddSegment(&datapb.SegmentInfo{
+			ID:            103,
+			CollectionID:  1,
+			PartitionID:   2,
+			InsertChannel: "111",
+			NumOfRows:     0,
+			State:         commonpb.SegmentState_Flushed,
+			Level:         datapb.SegmentLevel_L0,
+		}, func(*datapb.SegmentInfo) *metacache.BloomFilterSet {
+			return metacache.NewBloomFilterSet()
+		})
+		mockFlowgraphManager := NewMockFlowgraphManager(s.T())
+		mockFlowgraphManager.EXPECT().GetFlowgraphService(mock.Anything).Return(&dataSyncService{
+			metacache: cache,
+		}, true)
+		s.node.flowgraphManager = mockFlowgraphManager
+		ctx := context.Background()
+		req := &datapb.SyncSegmentsRequest{
+			ChannelName:  "channel1",
+			PartitionId:  2,
+			CollectionId: 1,
+			SegmentInfos: map[int64]*datapb.SyncSegmentInfo{
+				103: {
+					SegmentId: 103,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushed,
+					Level:     datapb.SegmentLevel_L0,
+					NumOfRows: 1024,
+				},
+				104: {
+					SegmentId: 104,
+					PkStatsLog: &datapb.FieldBinlog{
+						FieldID: 100,
+						Binlogs: nil,
+					},
+					State:     commonpb.SegmentState_Flushed,
+					Level:     datapb.SegmentLevel_L1,
+					NumOfRows: 1024,
+				},
+			},
+		}
+
+		status, err := s.node.SyncSegments(ctx, req)
+		s.NoError(err)
+		s.True(merr.Ok(status))
+
+		info, exist := cache.GetSegmentByID(100)
+		s.True(exist)
+		s.NotNil(info)
+
+		info, exist = cache.GetSegmentByID(101)
+		s.False(exist)
+		s.Nil(info)
+
+		info, exist = cache.GetSegmentByID(102)
+		s.False(exist)
+		s.Nil(info)
+
+		info, exist = cache.GetSegmentByID(103)
+		s.True(exist)
+		s.NotNil(info)
+
+		info, exist = cache.GetSegmentByID(104)
+		s.True(exist)
+		s.NotNil(info)
 	})
 }
 
