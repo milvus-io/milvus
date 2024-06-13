@@ -253,8 +253,6 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 		// encode fields
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
-		defer writer.Close()
-
 		var eventWriter *insertEventWriter
 		var err error
 		if typeutil.IsVectorType(field.DataType) {
@@ -279,7 +277,6 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			writer.Close()
 			return nil, err
 		}
-		defer eventWriter.Close()
 
 		eventWriter.SetEventTimestamp(startTs, endTs)
 		switch field.DataType {
