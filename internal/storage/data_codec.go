@@ -945,8 +945,8 @@ func (data *DeleteData) AppendBatch(pks []PrimaryKey, tss []Timestamp) {
 }
 
 func (data *DeleteData) Merge(other *DeleteData) {
-	data.Pks = append(other.Pks, other.Pks...)
-	data.Tss = append(other.Tss, other.Tss...)
+	data.Pks = append(data.Pks, other.Pks...)
+	data.Tss = append(data.Tss, other.Tss...)
 	data.RowCount += other.RowCount
 	data.memSize += other.Size()
 
