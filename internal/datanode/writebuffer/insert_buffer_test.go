@@ -168,9 +168,12 @@ func (s *InsertBufferSuite) TestYield() {
 	result = insertBuffer.Yield()
 	s.NotNil(result)
 
-	pkField, ok := result.Data[common.StartOfUserFieldID]
-	s.Require().True(ok)
-	pkData := lo.RepeatBy(pkField.RowNum(), func(idx int) int64 { return pkField.GetRow(idx).(int64) })
+	var pkData []int64
+	for _, chunk := range result {
+		pkField, ok := chunk.Data[common.StartOfUserFieldID]
+		s.Require().True(ok)
+		pkData = append(pkData, lo.RepeatBy(pkField.RowNum(), func(idx int) int64 { return pkField.GetRow(idx).(int64) })...)
+	}
 	s.ElementsMatch(pks, pkData)
 }
 
@@ -230,20 +233,6 @@ func (s *InsertBufferConstructSuite) TestCreateFailure() {
 			tag: "empty_schema",
 			schema: &schemapb.CollectionSchema{
 				Fields: []*schemapb.FieldSchema{},
-			},
-		},
-		{
-			tag: "missing_type_param",
-			schema: &schemapb.CollectionSchema{
-				Name: "test_collection",
-				Fields: []*schemapb.FieldSchema{
-					{
-						FieldID: 100, Name: "pk", DataType: schemapb.DataType_Int64, IsPrimaryKey: true,
-					},
-					{
-						FieldID: 101, Name: "vector", DataType: schemapb.DataType_FloatVector,
-					},
-				},
 			},
 		},
 	}
