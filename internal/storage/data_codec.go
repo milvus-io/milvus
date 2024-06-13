@@ -392,6 +392,11 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Float16VectorFieldData).GetMemorySize()))
 		case schemapb.DataType_BFloat16Vector:
 			err = eventWriter.AddBFloat16VectorToPayload(singleData.(*BFloat16VectorFieldData).Data, singleData.(*BFloat16VectorFieldData).Dim)
+			if err != nil {
+				eventWriter.Close()
+				writer.Close()
+				return nil, err
+			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BFloat16VectorFieldData).GetMemorySize()))
 		case schemapb.DataType_SparseFloatVector:
 			err = eventWriter.AddSparseFloatVectorToPayload(singleData.(*SparseFloatVectorFieldData))
