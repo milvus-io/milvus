@@ -253,6 +253,8 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 
 		// encode fields
 		writer = NewInsertBinlogWriter(field.DataType, insertCodec.Schema.ID, partitionID, segmentID, field.FieldID)
+		defer writer.Close()
+
 		var eventWriter *insertEventWriter
 		var err error
 		if typeutil.IsVectorType(field.DataType) {
@@ -277,72 +279,57 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			writer.Close()
 			return nil, err
 		}
+		defer eventWriter.Close()
 
 		eventWriter.SetEventTimestamp(startTs, endTs)
 		switch field.DataType {
 		case schemapb.DataType_Bool:
 			err = eventWriter.AddBoolToPayload(singleData.(*BoolFieldData).Data)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BoolFieldData).GetMemorySize()))
 		case schemapb.DataType_Int8:
 			err = eventWriter.AddInt8ToPayload(singleData.(*Int8FieldData).Data)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int8FieldData).GetMemorySize()))
 		case schemapb.DataType_Int16:
 			err = eventWriter.AddInt16ToPayload(singleData.(*Int16FieldData).Data)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int16FieldData).GetMemorySize()))
 		case schemapb.DataType_Int32:
 			err = eventWriter.AddInt32ToPayload(singleData.(*Int32FieldData).Data)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int32FieldData).GetMemorySize()))
 		case schemapb.DataType_Int64:
 			err = eventWriter.AddInt64ToPayload(singleData.(*Int64FieldData).Data)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Int64FieldData).GetMemorySize()))
 		case schemapb.DataType_Float:
 			err = eventWriter.AddFloatToPayload(singleData.(*FloatFieldData).Data)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatFieldData).GetMemorySize()))
 		case schemapb.DataType_Double:
 			err = eventWriter.AddDoubleToPayload(singleData.(*DoubleFieldData).Data)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*DoubleFieldData).GetMemorySize()))
 		case schemapb.DataType_String, schemapb.DataType_VarChar:
 			for _, singleString := range singleData.(*StringFieldData).Data {
 				err = eventWriter.AddOneStringToPayload(singleString)
 				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
+					return handleWriterError(eventWriter, writer, err)
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*StringFieldData).GetMemorySize()))
@@ -350,9 +337,7 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			for _, singleArray := range singleData.(*ArrayFieldData).Data {
 				err = eventWriter.AddOneArrayToPayload(singleArray)
 				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
+					return handleWriterError(eventWriter, writer, err)
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*ArrayFieldData).GetMemorySize()))
@@ -360,50 +345,38 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			for _, singleJSON := range singleData.(*JSONFieldData).Data {
 				err = eventWriter.AddOneJSONToPayload(singleJSON)
 				if err != nil {
-					eventWriter.Close()
-					writer.Close()
-					return nil, err
+					return handleWriterError(eventWriter, writer, err)
 				}
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*JSONFieldData).GetMemorySize()))
 		case schemapb.DataType_BinaryVector:
 			err = eventWriter.AddBinaryVectorToPayload(singleData.(*BinaryVectorFieldData).Data, singleData.(*BinaryVectorFieldData).Dim)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BinaryVectorFieldData).GetMemorySize()))
 		case schemapb.DataType_FloatVector:
 			err = eventWriter.AddFloatVectorToPayload(singleData.(*FloatVectorFieldData).Data, singleData.(*FloatVectorFieldData).Dim)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*FloatVectorFieldData).GetMemorySize()))
 		case schemapb.DataType_Float16Vector:
 			err = eventWriter.AddFloat16VectorToPayload(singleData.(*Float16VectorFieldData).Data, singleData.(*Float16VectorFieldData).Dim)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*Float16VectorFieldData).GetMemorySize()))
 		case schemapb.DataType_BFloat16Vector:
 			err = eventWriter.AddBFloat16VectorToPayload(singleData.(*BFloat16VectorFieldData).Data, singleData.(*BFloat16VectorFieldData).Dim)
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*BFloat16VectorFieldData).GetMemorySize()))
 		case schemapb.DataType_SparseFloatVector:
 			err = eventWriter.AddSparseFloatVectorToPayload(singleData.(*SparseFloatVectorFieldData))
 			if err != nil {
-				eventWriter.Close()
-				writer.Close()
-				return nil, err
+				return handleWriterError(eventWriter, writer, err)
 			}
 			writer.AddExtra(originalSizeKey, fmt.Sprintf("%v", singleData.(*SparseFloatVectorFieldData).GetMemorySize()))
 		default:
@@ -434,8 +407,6 @@ func (insertCodec *InsertCodec) Serialize(partitionID UniqueID, segmentID Unique
 			RowNum:     rowNum,
 			MemorySize: int64(singleData.GetMemorySize()),
 		})
-		eventWriter.Close()
-		writer.Close()
 	}
 
 	return blobs, nil
@@ -497,9 +468,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Bool:
 				singleData, err := eventReader.GetBoolFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -516,9 +485,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Int8:
 				singleData, err := eventReader.GetInt8FromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -535,9 +502,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Int16:
 				singleData, err := eventReader.GetInt16FromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -554,9 +519,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Int32:
 				singleData, err := eventReader.GetInt32FromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -573,9 +536,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Int64:
 				singleData, err := eventReader.GetInt64FromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -592,9 +553,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Float:
 				singleData, err := eventReader.GetFloatFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -611,9 +570,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Double:
 				singleData, err := eventReader.GetDoubleFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -630,9 +587,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_String, schemapb.DataType_VarChar:
 				stringPayload, err := eventReader.GetStringFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -650,9 +605,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_Array:
 				arrayPayload, err := eventReader.GetArrayFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -669,9 +622,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_JSON:
 				jsonPayload, err := eventReader.GetJSONFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -689,9 +640,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				var singleData []byte
 				singleData, dim, err = eventReader.GetBinaryVectorFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -704,9 +653,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				binaryVectorFieldData.Data = append(binaryVectorFieldData.Data, singleData...)
 				length, err := eventReader.GetPayloadLengthFromReader()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 				totalLength += length
 				binaryVectorFieldData.Dim = dim
@@ -716,9 +663,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				var singleData []byte
 				singleData, dim, err = eventReader.GetFloat16VectorFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -731,9 +676,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				float16VectorFieldData.Data = append(float16VectorFieldData.Data, singleData...)
 				length, err := eventReader.GetPayloadLengthFromReader()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 				totalLength += length
 				float16VectorFieldData.Dim = dim
@@ -743,9 +686,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				var singleData []byte
 				singleData, dim, err = eventReader.GetBFloat16VectorFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -758,9 +699,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				bfloat16VectorFieldData.Data = append(bfloat16VectorFieldData.Data, singleData...)
 				length, err := eventReader.GetPayloadLengthFromReader()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 				totalLength += length
 				bfloat16VectorFieldData.Dim = dim
@@ -770,9 +709,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				var singleData []float32
 				singleData, dim, err = eventReader.GetFloatVectorFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 
 				if insertData.Data[fieldID] == nil {
@@ -785,9 +722,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 				floatVectorFieldData.Data = append(floatVectorFieldData.Data, singleData...)
 				length, err := eventReader.GetPayloadLengthFromReader()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 				totalLength += length
 				floatVectorFieldData.Dim = dim
@@ -796,9 +731,7 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 			case schemapb.DataType_SparseFloatVector:
 				sparseData, _, err := eventReader.GetSparseFloatVectorFromPayload()
 				if err != nil {
-					eventReader.Close()
-					binlogReader.Close()
-					return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
+					return handleReaderError(eventReader, binlogReader, err)
 				}
 				if insertData.Data[fieldID] == nil {
 					insertData.Data[fieldID] = &SparseFloatVectorFieldData{}
@@ -1307,4 +1240,29 @@ func (dataDefinitionCodec *DataDefinitionCodec) Deserialize(blobs []*Blob) (ts [
 	}
 
 	return resultTs, requestsStrings, nil
+}
+
+func handleWriterError(eventWriter *insertEventWriter, writer *InsertBinlogWriter, err error) ([]*Blob, error) {
+	if eventWriter != nil {
+		eventWriter.Close()
+	}
+	if writer != nil {
+		writer.Close()
+	}
+	return nil, err
+}
+
+func handleReaderError(eventReader *EventReader, binlogReader *BinlogReader, err error) (
+	UniqueID,
+	UniqueID,
+	UniqueID,
+	error,
+) {
+	if eventReader != nil {
+		eventReader.Close()
+	}
+	if binlogReader != nil {
+		binlogReader.Close()
+	}
+	return InvalidUniqueID, InvalidUniqueID, InvalidUniqueID, err
 }
