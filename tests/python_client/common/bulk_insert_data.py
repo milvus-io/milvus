@@ -501,7 +501,6 @@ def gen_data_by_data_field(data_field, rows, start=0, float_vector=True, dim=128
         for field in fields:
             if data_field == field["name"] and "params" in field:
                 dim = field["params"].get("dim", dim)
-                array_length = field["params"].get("max_length", array_length)
     data = []
     if rows > 0:
         if "vec" in data_field:
