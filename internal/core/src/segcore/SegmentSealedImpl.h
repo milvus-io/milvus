@@ -149,6 +149,9 @@ class SegmentSealedImpl : public SegmentSealed {
                    const int64_t* seg_offsets,
                    int64_t count) const override;
 
+    bool
+    is_mmap_field(FieldId id) const override;
+
     void
     ClearData();
 
@@ -156,6 +159,15 @@ class SegmentSealedImpl : public SegmentSealed {
     // blob and row_count
     SpanBase
     chunk_data_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    std::vector<std::string_view>
+    chunk_view_impl(FieldId field_id, int64_t chunk_id) const override;
+
+    BufferView
+    get_chunk_buffer(FieldId field_id,
+                     int64_t chunk_id,
+                     int64_t start_offset,
+                     int64_t length) const override;
 
     const index::IndexBase*
     chunk_index_impl(FieldId field_id, int64_t chunk_id) const override;
@@ -307,6 +319,7 @@ class SegmentSealedImpl : public SegmentSealed {
     SchemaPtr schema_;
     int64_t id_;
     std::unordered_map<FieldId, std::shared_ptr<ColumnBase>> fields_;
+    std::unordered_set<FieldId> mmap_fields_;
 
     // only useful in binlog
     IndexMetaPtr col_index_meta_;

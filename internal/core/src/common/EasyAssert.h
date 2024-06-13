@@ -64,6 +64,7 @@ enum ErrorCode {
     MemAllocateFailed = 2034,
     MemAllocateSizeNotMatch = 2035,
     MmapError = 2036,
+    OutOfRange = 2037,
     KnowhereError = 2100,
 
     // timeout or cancel related.

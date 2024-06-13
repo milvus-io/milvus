@@ -33,47 +33,72 @@
 
 namespace milvus {
 
-inline size_t
+#define THROW_FILE_WRITE_ERROR                                           \
+    PanicInfo(ErrorCode::FileWriteFailed,                                \
+              fmt::format("write data to file {} failed, error code {}", \
+                          file.Path(),                                   \
+                          strerror(errno)));
+
+inline void
 WriteFieldData(File& file,
                DataType data_type,
                const FieldDataPtr& data,
+               uint64_t& total_written,
+               std::vector<uint64_t>& indices,
                std::vector<std::vector<uint64_t>>& element_indices) {
-    size_t total_written{0};
     if (IsVariableDataType(data_type)) {
         switch (data_type) {
             case DataType::VARCHAR:
             case DataType::STRING: {
+                // write as: |size|data|size|data......
                 for (auto i = 0; i < data->get_num_rows(); ++i) {
+                    indices.push_back(total_written);
                     auto str =
                         static_cast<const std::string*>(data->RawValue(i));
-                    ssize_t written = file.Write(str->data(), str->size());
-                    if (written < str->size()) {
-                        break;
+                    ssize_t written_data_size =
+                        file.WriteInt<uint32_t>(uint32_t(str->size()));
+                    if (written_data_size != sizeof(uint32_t)) {
+                        THROW_FILE_WRITE_ERROR
                     }
-                    total_written += written;
+                    total_written += written_data_size;
+                    auto written_data = file.Write(str->data(), str->size());
+                    if (written_data < str->size()) {
+                        THROW_FILE_WRITE_ERROR
+                    }
+                    total_written += written_data;
                 }
                 break;
             }
             case DataType::JSON: {
+                // write as: |size|data|size|data......
                 for (ssize_t i = 0; i < data->get_num_rows(); ++i) {
+                    indices.push_back(total_written);
                     auto padded_string =
                         static_cast<const Json*>(data->RawValue(i))->data();
-                    ssize_t written =
-                        file.Write(padded_string.data(), padded_string.size());
-                    if (written < padded_string.size()) {
-                        break;
+                    ssize_t written_data_size =
+                        file.WriteInt<uint32_t>(uint32_t(padded_string.size()));
+                    if (written_data_size != sizeof(uint32_t)) {
+                        THROW_FILE_WRITE_ERROR
                     }
-                    total_written += written;
+                    total_written += written_data_size;
+                    ssize_t written_data =
+                        file.Write(padded_string.data(), padded_string.size());
+                    if (written_data < padded_string.size()) {
+                        THROW_FILE_WRITE_ERROR
+                    }
+                    total_written += written_data;
                 }
                 break;
             }
             case DataType::ARRAY: {
+                // write as: |data|data|data|data|data......
                 for (size_t i = 0; i < data->get_num_rows(); ++i) {
+                    indices.push_back(total_written);
                     auto array = static_cast<const Array*>(data->RawValue(i));
                     ssize_t written =
                         file.Write(array->data(), array->byte_size());
                     if (written < array->byte_size()) {
-                        break;
+                        THROW_FILE_WRITE_ERROR
                     }
                     element_indices.emplace_back(array->get_offsets());
                     total_written += written;
@@ -93,9 +118,15 @@ WriteFieldData(File& file,
                           GetDataTypeName(data_type));
         }
     } else {
-        total_written += file.Write(data->Data(), data->Size());
+        // write as: data|data|data|data|data|data......
+        size_t written = file.Write(data->Data(), data->Size());
+        if (written < data->Size()) {
+            THROW_FILE_WRITE_ERROR
+        }
+        for (auto i = 0; i < data->get_num_rows(); i++) {
+            indices.emplace_back(total_written);
+            total_written += data->Size(i);
+        }
     }
-
-    return total_written;
 }
 }  // namespace milvus
