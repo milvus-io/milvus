@@ -296,5 +296,6 @@ func (s *CoordSwitchSuite) TestCoordSwitch() {
 }
 
 func TestCoordSwitch(t *testing.T) {
+	t.Skip("https://github.com/milvus-io/milvus/issues/33823")
 	suite.Run(t, new(CoordSwitchSuite))
 }
