@@ -108,6 +108,8 @@ func TestComponentParam(t *testing.T) {
 
 		params.Save("common.preCreatedTopic.timeticker", "timeticker")
 		assert.Equal(t, []string{"timeticker"}, Params.TimeTicker.GetAsStrings())
+
+		assert.Equal(t, uint(1000), params.CommonCfg.BloomFilterApplyBatchSize.GetAsUint())
 	})
 
 	t.Run("test rootCoordConfig", func(t *testing.T) {

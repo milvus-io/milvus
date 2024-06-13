@@ -33,6 +33,14 @@ func (k candidateKey) MayPkExist(lc *storage.LocationsCache) bool {
 	return true
 }
 
+func (k candidateKey) BatchPkExist(lc *storage.BatchLocationsCache) []bool {
+	ret := make([]bool, 0)
+	for i := 0; i < lc.Size(); i++ {
+		ret = append(ret, true)
+	}
+	return ret
+}
+
 // ID implements Candidate.
 func (k candidateKey) ID() int64 {
 	return k.segmentID

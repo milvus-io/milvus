@@ -19,6 +19,7 @@ package metacache
 import (
 	"testing"
 
+	"github.com/samber/lo"
 	"github.com/stretchr/testify/suite"
 
 	"github.com/milvus-io/milvus-proto/go-api/v2/schemapb"
@@ -67,6 +68,37 @@ func (s *BloomFilterSetSuite) TestWriteRead() {
 
 	for _, id := range ids {
 		s.True(s.bfs.PkExists(storage.NewLocationsCache(storage.NewInt64PrimaryKey(id))), "pk shall return exist after update")
+	}
+
+	lc := storage.NewBatchLocationsCache(lo.Map(ids, func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+	hits := s.bfs.BatchPkExist(lc)
+	for _, hit := range hits {
+		s.True(hit, "pk shall return exist after batch update")
+	}
+}
+
+func (s *BloomFilterSetSuite) TestBatchPkExist() {
+	capacity := 100000
+	ids := make([]int64, 0)
+	for id := 0; id < capacity; id++ {
+		ids = append(ids, int64(id))
+	}
+
+	bfs := NewBloomFilterSetWithBatchSize(uint(capacity))
+	err := bfs.UpdatePKRange(s.GetFieldData(ids))
+	s.NoError(err)
+
+	batchSize := 1000
+	for i := 0; i < capacity; i += batchSize {
+		endIdx := i + batchSize
+		if endIdx > capacity {
+			endIdx = capacity
+		}
+		lc := storage.NewBatchLocationsCache(lo.Map(ids[i:endIdx], func(id int64, _ int) storage.PrimaryKey { return storage.NewInt64PrimaryKey(id) }))
+		hits := bfs.BatchPkExist(lc)
+		for _, hit := range hits {
+			s.True(hit, "pk shall return exist after batch update")
+		}
 	}
 }
 
