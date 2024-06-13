@@ -281,7 +281,7 @@ func TestCreateCollectionDynamicSchema(t *testing.T) {
 	columnOption := *hp.TNewDataOption()
 	varcharColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, columnOption)
 	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, columnOption)
-	dynamicData := hp.GenDynamicFieldData(0, common.DefaultNb)
+	dynamicData := hp.GenDynamicColumnData(0, common.DefaultNb)
 	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
 	common.CheckErr(t, err, true)
 }
@@ -313,7 +313,7 @@ func TestCreateCollectionDynamic(t *testing.T) {
 	columnOption := *hp.TNewDataOption()
 	varcharColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeVarChar, columnOption)
 	vecColumn := hp.GenColumnData(common.DefaultNb, entity.FieldTypeFloatVector, columnOption)
-	dynamicData := hp.GenDynamicFieldData(0, common.DefaultNb)
+	dynamicData := hp.GenDynamicColumnData(0, common.DefaultNb)
 	_, err = mc.Insert(ctx, clientv2.NewColumnBasedInsertOption(schema.CollectionName, varcharColumn, vecColumn).WithColumns(dynamicData...))
 	common.CheckErr(t, err, false, "field dynamicNumber does not exist")
 }
