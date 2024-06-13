@@ -160,7 +160,7 @@ func (s *StorageV1SerializerSuite) getBfs() *metacache.BloomFilterSet {
 		Name:         "ID",
 		IsPrimaryKey: true,
 		DataType:     schemapb.DataType_Int64,
-	})
+	}, 16)
 	s.Require().NoError(err)
 
 	ids := []int64{1, 2, 3, 4, 5, 6, 7}
@@ -200,7 +200,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 	s.Run("with_empty_data", func() {
 		pack := s.getBasicPack()
 		pack.WithTimeRange(50, 100)
-		pack.WithInsertData(s.getEmptyInsertBuffer()).WithBatchSize(0)
+		pack.WithInsertData([]*storage.InsertData{s.getEmptyInsertBuffer()}).WithBatchSize(0)
 
 		_, err := s.serializer.EncodeBuffer(ctx, pack)
 		s.Error(err)
@@ -209,7 +209,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 	s.Run("with_normal_data", func() {
 		pack := s.getBasicPack()
 		pack.WithTimeRange(50, 100)
-		pack.WithInsertData(s.getInsertBuffer()).WithBatchSize(10)
+		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchSize(10)
 
 		s.mockCache.EXPECT().UpdateSegments(mock.Anything, mock.Anything).Return().Once()
 
@@ -243,7 +243,7 @@ func (s *StorageV1SerializerSuite) TestSerializeInsert() {
 	s.Run("with_flush", func() {
 		pack := s.getBasicPack()
 		pack.WithTimeRange(50, 100)
-		pack.WithInsertData(s.getInsertBuffer()).WithBatchSize(10)
+		pack.WithInsertData([]*storage.InsertData{s.getInsertBuffer()}).WithBatchSize(10)
 		pack.WithFlush()
 
 		bfs := s.getBfs()

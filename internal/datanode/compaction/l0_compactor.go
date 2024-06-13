@@ -237,36 +237,41 @@ func (t *LevelZeroCompactionTask) splitDelta(
 	_, span := otel.Tracer(typeutil.DataNodeRole).Start(ctx, "L0Compact splitDelta")
 	defer span.End()
 
-	split := func(pk storage.PrimaryKey) []int64 {
-		lc := storage.NewLocationsCache(pk)
-		predicts := make([]int64, 0, len(segmentBfs))
-		for segmentID, bf := range segmentBfs {
-			if bf.PkExists(lc) {
-				predicts = append(predicts, segmentID)
-			}
-		}
-		return predicts
-	}
-
 	allSeg := lo.Associate(t.plan.GetSegmentBinlogs(), func(segment *datapb.CompactionSegmentBinlogs) (int64, *datapb.CompactionSegmentBinlogs) {
 		return segment.GetSegmentID(), segment
 	})
 
 	// spilt all delete data to segments
 	targetSegBuffer := make(map[int64]*SegmentDeltaWriter)
-	for _, delta := range allDelta {
-		for i, pk := range delta.Pks {
-			predicted := split(pk)
-
-			for _, gotSeg := range predicted {
-				writer, ok := targetSegBuffer[gotSeg]
-				if !ok {
-					segment := allSeg[gotSeg]
-					writer = NewSegmentDeltaWriter(gotSeg, segment.GetPartitionID(), segment.GetCollectionID())
-					targetSegBuffer[gotSeg] = writer
+	split := func(pks []storage.PrimaryKey, pkTss []uint64) {
+		lc := storage.NewBatchLocationsCache(pks)
+		for segmentID, bf := range segmentBfs {
+			hits := bf.BatchPkExist(lc)
+			for i, hit := range hits {
+				if hit {
+					writer, ok := targetSegBuffer[segmentID]
+					if !ok {
+						segment := allSeg[segmentID]
+						writer = NewSegmentDeltaWriter(segmentID, segment.GetPartitionID(), segment.GetCollectionID())
+						targetSegBuffer[segmentID] = writer
+					}
+					writer.Write(pks[i], pkTss[i])
 				}
-				writer.Write(pk, delta.Tss[i])
 			}
+		}
+	}
+
+	batchSize := paramtable.Get().CommonCfg.BloomFilterApplyBatchSize.GetAsInt()
+	// spilt all delete data to segments
+	for _, deleteBuffer := range allDelta {
+		pks := deleteBuffer.Pks
+		pkTss := deleteBuffer.Tss
+		for idx := 0; idx < len(pks); idx += batchSize {
+			endIdx := idx + batchSize
+			if endIdx > len(pks) {
+				endIdx = len(pks)
+			}
+			split(pks[idx:endIdx], pkTss[idx:endIdx])
 		}
 	}
 

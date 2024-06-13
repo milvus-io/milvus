@@ -158,7 +158,7 @@ func Test_hnswChecker_CheckValidDataType(t *testing.T) {
 		},
 		{
 			dType:    schemapb.DataType_BinaryVector,
-			errIsNil: false,
+			errIsNil: true,
 		},
 	}
 
