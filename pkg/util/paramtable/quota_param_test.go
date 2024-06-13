@@ -41,8 +41,8 @@ func TestQuotaParam(t *testing.T) {
 	t.Run("test functional params", func(t *testing.T) {
 		assert.Equal(t, false, qc.IndexLimitEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.MaxIndexRate.GetAsFloat())
-		assert.False(t, qc.FlushLimitEnabled.GetAsBool())
-		assert.Equal(t, defaultMax, qc.MaxFlushRatePerCollection.GetAsFloat())
+		assert.True(t, qc.FlushLimitEnabled.GetAsBool())
+		assert.Equal(t, 0.1, qc.MaxFlushRatePerCollection.GetAsFloat())
 		assert.Equal(t, defaultMax, qc.MaxFlushRate.GetAsFloat())
 		assert.Equal(t, false, qc.CompactionLimitEnabled.GetAsBool())
 		assert.Equal(t, defaultMax, qc.MaxCompactionRate.GetAsFloat())
