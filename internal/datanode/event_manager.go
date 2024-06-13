@@ -215,6 +215,7 @@ func (node *DataNode) handleDeleteEvent(vChanName string) {
 	node.tryToReleaseFlowgraph(vChanName)
 }
 
+// event represents a single event with specified channel and version.
 type event struct {
 	eventType int
 	vChanName string
@@ -222,6 +223,7 @@ type event struct {
 	info      *datapb.ChannelWatchInfo
 }
 
+// channelEventManager is used to handle events from channel watched event.
 type channelEventManager struct {
 	sync.Once
 	wg                sync.WaitGroup
@@ -232,6 +234,7 @@ type channelEventManager struct {
 	retryInterval     time.Duration
 }
 
+// These are valid types of an event.
 const (
 	putEventType    = 1
 	deleteEventType = 2
