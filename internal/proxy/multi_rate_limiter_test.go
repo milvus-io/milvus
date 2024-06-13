@@ -277,7 +277,16 @@ func TestRateLimiter(t *testing.T) {
 				Rt: internalpb.RateType(rt), R: 0,
 			})
 		}
+
+		// rate limited case
 		err := limiter.setRates(&proxypb.CollectionRate{
+			Collection: 1,
+			Rates:      zeroRates,
+		})
+		assert.NoError(t, err)
+		assert.Error(t, limiter.getQuotaExceededError(internalpb.RateType_DMLInsert))
+
+		err = limiter.setRates(&proxypb.CollectionRate{
 			Collection: 1,
 			Rates:      zeroRates,
 			States: []milvuspb.QuotaState{
