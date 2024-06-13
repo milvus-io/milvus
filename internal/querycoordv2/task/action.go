@@ -117,8 +117,15 @@ func (action *SegmentAction) IsFinished(distMgr *meta.DistributionManager) bool 
 		}
 
 		// segment found in leader view
+		existInLeader := false
 		views := distMgr.LeaderViewManager.GetByFilter(meta.WithSegment2LeaderView(action.segmentID, false))
-		if len(views) == 0 {
+		for _, view := range views {
+			if view.Segments[action.segmentID] != nil && view.Segments[action.segmentID].GetNodeID() == action.Node() {
+				existInLeader = true
+				break
+			}
+		}
+		if !existInLeader {
 			return false
 		}
 
