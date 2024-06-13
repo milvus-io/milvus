@@ -849,31 +849,6 @@ func (insertCodec *InsertCodec) DeserializeInto(fieldBinlogs []*Blob, rowNum int
 	return collectionID, partitionID, segmentID, nil
 }
 
-// func deserializeEntity[T any, U any](
-// 	eventReader *EventReader,
-// 	binlogReader *BinlogReader,
-// 	insertData *InsertData,
-// 	getPayloadFunc func() (U, error),
-// 	fillDataFunc func() FieldData,
-// ) error {
-// 	fieldID := binlogReader.FieldID
-// 	stringPayload, err := getPayloadFunc()
-// 	if err != nil {
-// 		eventReader.Close()
-// 		binlogReader.Close()
-// 		return err
-// 	}
-//
-// 	if insertData.Data[fieldID] == nil {
-// 		insertData.Data[fieldID] = fillDataFunc()
-// 	}
-// 	stringFieldData := insertData.Data[fieldID].(*T)
-//
-// 	stringFieldData.Data = append(stringFieldData.Data, stringPayload...)
-// 	totalLength += len(stringPayload)
-// 	insertData.Data[fieldID] = stringFieldData
-// }
-
 // Deserialize transfer blob back to insert data.
 // From schema, it get all fields.
 // For each field, it will create a binlog reader, and read all event to the buffer.
