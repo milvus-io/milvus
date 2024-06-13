@@ -745,7 +745,7 @@ func (s *CompactionPlanHandlerSuite) TestUpdateCompaction() {
 	s.NoError(err)
 
 	task := handler.plans[1]
-	s.Equal(timeout, task.state)
+	s.Equal(executing, task.state)
 
 	task = handler.plans[2]
 	s.Equal(executing, task.state)

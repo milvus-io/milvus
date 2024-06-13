@@ -574,13 +574,13 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 				}
 
 			case commonpb.CompactionState_Executing:
+				// If it's still executing, DC will continue to wait, donot set tasks to be timeout here
 				if c.isTimeout(ts, task.plan.GetStartTime(), task.plan.GetTimeoutInSeconds()) {
 					log.Warn("compaction timeout",
 						zap.Int32("timeout in seconds", task.plan.GetTimeoutInSeconds()),
 						zap.Uint64("startTime", task.plan.GetStartTime()),
 						zap.Uint64("now", ts),
 					)
-					c.plans[planID] = c.plans[planID].shadowClone(setState(timeout), endSpan())
 				}
 			}
 		} else {
@@ -592,8 +592,7 @@ func (c *compactionPlanHandler) updateCompaction(ts Timestamp) error {
 		}
 	}
 
-	// Timeout tasks will be timeout and failed in DataNode
-	// need to wait for DataNode reporting failure and clean the status.
+	// Notify failed tasks is marked to be timeout, and needs to clean status here
 	for _, task := range timeoutTasks {
 		log := log.With(
 			zap.Int64("planID", task.plan.PlanID),
