@@ -480,7 +480,7 @@ func (s *LevelZeroCompactionTaskSuite) TestSplitDelta() {
 		101: bfs2,
 		102: bfs3,
 	}
-	deltaWriters := s.task.splitDelta(context.TODO(), []*storage.DeleteData{s.dData}, segmentBFs)
+	deltaWriters := s.task.splitDelta(context.TODO(), s.dData, segmentBFs)
 
 	s.NotEmpty(deltaWriters)
 	s.ElementsMatch(predicted, lo.Keys(deltaWriters))
@@ -523,16 +523,16 @@ func (s *LevelZeroCompactionTaskSuite) TestLoadDelta() {
 	}
 
 	for _, test := range tests {
-		dDatas, err := s.task.loadDelta(ctx, test.paths)
+		dData, err := s.task.loadDelta(ctx, test.paths)
 
 		if test.expectError {
 			s.Error(err)
 		} else {
 			s.NoError(err)
-			s.NotEmpty(dDatas)
-			s.EqualValues(1, len(dDatas))
-			s.ElementsMatch(s.dData.Pks, dDatas[0].Pks)
-			s.Equal(s.dData.RowCount, dDatas[0].RowCount)
+			s.NotEmpty(dData)
+			s.NotNil(dData)
+			s.ElementsMatch(s.dData.Pks, dData.Pks)
+			s.Equal(s.dData.RowCount, dData.RowCount)
 		}
 	}
 }
