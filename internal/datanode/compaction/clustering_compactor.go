@@ -100,7 +100,7 @@ type ClusterBuffer struct {
 	writer       *SegmentWriter
 	bufferRowNum atomic.Int64
 
-	lastWrittenMemorySize uint64
+	lastWrittenMemorySize atomic.Uint64
 
 	flushedRowNum  int64
 	flushedBinlogs map[typeutil.UniqueID]*datapb.FieldBinlog
@@ -409,8 +409,7 @@ func (t *clusteringCompactionTask) mapping(ctx context.Context,
 func (t *clusteringCompactionTask) getWrittenMemoryBufferSize() int64 {
 	var totalBufferSize int64 = 0
 	for _, buffer := range t.clusterBuffers {
-		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()-buffer.lastWrittenMemorySize)
-		buffer.lastWrittenMemorySize = buffer.writer.WrittenMemorySize()
+		totalBufferSize = totalBufferSize + int64(buffer.writer.WrittenMemorySize()-buffer.lastWrittenMemorySize.Load())
 	}
 	return totalBufferSize
 }
@@ -766,9 +765,9 @@ func (t *clusteringCompactionTask) spill(ctx context.Context, buffer *ClusterBuf
 
 	// clean buffer
 	buffer.bufferRowNum.Store(0)
+	buffer.lastWrittenMemorySize.Store(buffer.writer.WrittenMemorySize())
 
 	t.spillCount.Inc()
-	log.Info("finish spill binlogs", zap.Int64("spillCount", t.spillCount.Load()))
 	if buffer.flushedRowNum > t.plan.GetMaxSegmentRows() {
 		if err := t.packBufferToSegment(ctx, buffer); err != nil {
 			return err
