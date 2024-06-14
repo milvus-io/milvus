@@ -798,7 +798,13 @@ class TestGetCollectionLoadState(TestBase):
         client.collection_describe(collection_name=name)
         rsp = client.collection_load_state(collection_name=name)
         assert rsp['code'] == 0
-        assert rsp['data']['loadState'] in ["LoadStateNotLoad", "LoadStateLoading"]
+        t0 = time.time()
+        while time.time() - t0 < 10:
+            rsp = client.collection_load_state(collection_name=name)
+            if rsp['data']['loadState'] != "LoadStateNotLoad":
+                break
+            time.sleep(1)
+        assert rsp['data']['loadState'] in ["LoadStateLoading", "LoadStateLoaded"]
         # insert data
         nb = 3000
         data = get_data_by_payload(payload, nb)
